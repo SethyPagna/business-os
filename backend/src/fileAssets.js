@@ -465,7 +465,7 @@ function listAssetRows(search = '', mediaType = 'all', { limit = 24, offset = 0 
     offset: Math.max(0, Number(offset || 0) || 0),
   }
   return getDb().prepare(`
-    SELECT *
+    SELECT *, COUNT(*) OVER() AS total_count
     FROM file_assets
     WHERE public_path LIKE '/uploads/%'
     AND (
@@ -769,6 +769,7 @@ function collectUsagesByPublicPath(publicPaths = []) {
     .filter(Boolean))]
   const usageMap = new Map(uniquePaths.map((publicPath) => [publicPath, []]))
   if (!uniquePaths.length) return usageMap
+  const requestedPaths = new Set(uniquePaths)
 
   const addUsage = (publicPath, usage) => {
     const key = String(publicPath || '').trim()
@@ -782,11 +783,12 @@ function collectUsagesByPublicPath(publicPaths = []) {
   db.prepare(`
     SELECT key, value
     FROM settings
-    WHERE value IS NOT NULL AND trim(value) != ''
+    WHERE value IS NOT NULL AND trim(value) != '' AND value LIKE '%/uploads/%'
   `).all().forEach((row) => {
-    const value = String(row?.value || '')
-    uniquePaths.forEach((publicPath) => {
-      if (value === publicPath || value.includes(publicPath)) {
+    const referenced = new Set()
+    collectUploadPathsFromValue(row?.value, referenced)
+    referenced.forEach((publicPath) => {
+      if (requestedPaths.has(publicPath)) {
         addUsage(publicPath, { type: 'settings', label: row.key })
       }
     })
@@ -820,11 +822,12 @@ function collectUsagesByPublicPath(publicPaths = []) {
   db.prepare(`
     SELECT id, screenshots_json
     FROM customer_share_submissions
-    WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != ''
+    WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != '' AND screenshots_json LIKE '%/uploads/%'
   `).all().forEach((row) => {
-    const screenshots = String(row?.screenshots_json || '')
-    uniquePaths.forEach((publicPath) => {
-      if (screenshots.includes(publicPath)) {
+    const referenced = new Set()
+    collectUploadPathsFromValue(row?.screenshots_json, referenced)
+    referenced.forEach((publicPath) => {
+      if (requestedPaths.has(publicPath)) {
         addUsage(publicPath, { type: 'submission', label: `Submission #${row.id}` })
       }
     })
@@ -845,12 +848,13 @@ function resolveBrowserPublicPath(publicPath = '') {
 }
 
 function serializeAssetRow(row = {}, usageMap = null) {
+  const { total_count, ...assetRow } = row || {}
   const usages = usageMap instanceof Map
-    ? (usageMap.get(String(row.public_path || '').trim()) || [])
-    : collectUsage(row.public_path)
+    ? (usageMap.get(String(assetRow.public_path || '').trim()) || [])
+    : collectUsage(assetRow.public_path)
   return {
-    ...row,
-    browser_public_path: resolveBrowserPublicPath(row.public_path),
+    ...assetRow,
+    browser_public_path: resolveBrowserPublicPath(assetRow.public_path),
     usageCount: usages.length,
     usages,
     canDelete: usages.length === 0,
@@ -1040,8 +1044,11 @@ async function listFileAssets({ search = '', mediaType = 'all', page = 1, pageSi
       requestUploadStorageReconcile().catch(() => {})
     })
   }
-  const items = serializeAssetRows(listAssetRows(search, mediaType, { limit: pageSize, offset }))
-  const total = countAssetRows(search, mediaType)
+  const rows = listAssetRows(search, mediaType, { limit: pageSize, offset })
+  const items = serializeAssetRows(rows)
+  const total = rows.length
+    ? Math.max(0, Number(rows[0]?.total_count || items.length || 0))
+    : countAssetRows(search, mediaType)
   return {
     items,
     total,
