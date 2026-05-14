@@ -34,6 +34,8 @@ import {
   settleLoaderMap,
 } from '../../utils/loaders.mjs'
 
+const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
+
 function reuseSetWhenUnchanged(current, nextValues = []) {
   const next = new Set(nextValues)
   if (next.size !== current.size) return next
@@ -532,6 +534,23 @@ export default function Inventory() {
     }
     load(loadedOnceRef.current)
   }, [isActive, load])
+  useEffect(() => {
+    if (!isActive || typeof window === 'undefined') return
+    const raw = window.sessionStorage.getItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+    if (!raw) return
+    try {
+      const nextFocus = JSON.parse(raw)
+      if (nextFocus?.section === 'products') setInventorySection('products')
+      if (nextFocus?.tab === 'products') setTab('products')
+      if (typeof nextFocus?.stockFilter === 'string' && nextFocus.stockFilter) {
+        setStockFilter(nextFocus.stockFilter)
+      }
+    } catch {
+      // Ignore malformed handoff payloads and keep the current view state.
+    } finally {
+      window.sessionStorage.removeItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+    }
+  }, [isActive])
   useEffect(() => {
     if (!isActive) return
     loadInventoryReasons()
