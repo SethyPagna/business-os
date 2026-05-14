@@ -1,6 +1,11 @@
 import { Fragment } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
+const deferredMobileCardStyle = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: '128px',
+}
+
 function ReturnsDesktopSkeletonRows() {
   return Array.from({ length: 4 }).map((_, index) => (
     <tr key={`returns-desktop-skeleton-${index}`} className="animate-pulse">
@@ -242,10 +247,15 @@ export default function ReturnsListSurface({
                       </label>
                     </div>
                   ) : null}
-                  {group.items.map((ret) => {
+                  {group.items.map((ret, index) => {
                     const retScope = normalizeScope(ret.return_scope)
                     return (
-                      <div key={ret.id} className="card cursor-pointer p-3" onClick={() => setDetailRet(ret)}>
+                      <div
+                        key={ret.id}
+                        className="card cursor-pointer p-3"
+                        style={index >= 8 ? deferredMobileCardStyle : undefined}
+                        onClick={() => setDetailRet(ret)}
+                      >
                         <div className="mb-2 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
                           <input
                             type="checkbox"
