@@ -58,6 +58,7 @@ const EMPTY_DASHBOARD_ANALYTICS = {
   topCustomers: [],
   hourlyDist: [],
 }
+const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 
 function getDashboardFilterStorageKey(user) {
   const userKey = user?.id || user?.username || user?.email || 'guest'
@@ -248,6 +249,18 @@ export default function Dashboard() {
     analyticsLoadingRef.current = value
     setALoading(value)
   }, [])
+
+  const openInventoryOverview = useCallback((stockState = 'all') => {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(DASHBOARD_INVENTORY_FOCUS_KEY, JSON.stringify({
+        section: 'products',
+        tab: 'products',
+        stockFilter: stockState,
+      }))
+    }
+    setProductDetail(null)
+    navigateTo('inventory')
+  }, [navigateTo])
 
   const loadSummary = useCallback(async ({
     label = 'Dashboard summary',
@@ -1134,12 +1147,12 @@ export default function Dashboard() {
 
       {/* Range selector */}
       <div className="card p-3 sm:p-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t('period_label')||'Range'}:</span>
-            <div className="flex gap-1 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300 sm:text-base">{t('period_label')||'Range'}:</span>
+            <div className="flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
               {RANGE_PRESETS.map(p => (
                 <button key={p.id} onClick={() => setRangeId(p.id)}
-                className={`whitespace-nowrap rounded-xl px-3 py-1.5 text-sm font-semibold transition-colors ${rangeId===p.id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
+                className={`min-h-10 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold transition-colors sm:text-[15px] ${rangeId===p.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
                 {p.label}
               </button>
             ))}
@@ -1151,17 +1164,17 @@ export default function Dashboard() {
                 name="dashboard_custom_start_date"
                 aria-label="Dashboard custom start date"
                 type="date"
-                className="input w-full text-xs py-1.5 sm:w-36"
+                className="input min-h-10 w-full py-2 text-sm sm:w-36"
                 value={customStart}
                 onChange={e => setCustomStart(e.target.value)}
               />
-              <span className="text-gray-400 text-xs">to</span>
+              <span className="text-gray-400 text-xs sm:text-sm">to</span>
               <input
                 id="dashboard-custom-end-date"
                 name="dashboard_custom_end_date"
                 aria-label="Dashboard custom end date"
                 type="date"
-                className="input w-full text-xs py-1.5 sm:w-36"
+                className="input min-h-10 w-full py-2 text-sm sm:w-36"
                 value={customEnd}
                 onChange={e => setCustomEnd(e.target.value)}
               />
@@ -1169,7 +1182,7 @@ export default function Dashboard() {
                 id="dashboard-granularity"
                 name="dashboard_granularity"
                 aria-label="Dashboard period granularity"
-                className="input w-full text-xs py-1.5 sm:w-28"
+                className="input min-h-10 w-full py-2 text-sm sm:w-28"
                 value={granularity}
                 onChange={e => setGranularity(e.target.value)}
               >
@@ -1179,7 +1192,7 @@ export default function Dashboard() {
               </select>
             </div>
           )}
-          <span className="text-xs text-gray-400 sm:ml-auto">{rangeLabel}</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300 sm:ml-auto sm:text-sm">{rangeLabel}</span>
         </div>
       </div>
 
@@ -1228,7 +1241,7 @@ export default function Dashboard() {
             <div className="flex gap-1 flex-wrap">
               {[['revenue', t('revenue')],['profit', t('profit_vs_cogs')],['volume', t('transactions')]].map(([id,lbl]) => (
                 <button key={id} onClick={() => setActiveChart(id)}
-                  className={`rounded-xl px-3 py-1.5 text-sm font-semibold ${activeChart===id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                  className={`min-h-10 rounded-xl px-4 py-2 text-sm font-semibold sm:text-[15px] ${activeChart===id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
                   {lbl}
                 </button>
               ))}
@@ -1342,7 +1355,7 @@ export default function Dashboard() {
             <div className="flex gap-1">
               {[['revenue',`$ ${t('revenue')}`],['qty',t('quantity')]].map(([m,lbl]) => (
                 <button key={m} onClick={() => setTopMode(m)}
-                  className={`rounded-lg px-3 py-1 text-sm font-semibold ${topMode===m ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                  className={`min-h-10 rounded-lg px-4 py-2 text-sm font-semibold sm:text-[15px] ${topMode===m ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
                   {lbl}
                 </button>
               ))}
@@ -1457,7 +1470,7 @@ export default function Dashboard() {
         <div className="card p-3 sm:p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
               {translateOr('tap_to_view', 'Tap to view')}
             </span>
           </div>
@@ -1490,13 +1503,13 @@ export default function Dashboard() {
                           title={`${String(h.hour).padStart(2,'0')}:00 - ${h.count} ${t('sale')}(s), ${fmtUSD(h.revenue_usd)}`}
                           aria-label={`${translateOr('best_hour', 'Best hour')} ${formatDashboardHourLabel(h.hour)}`}
                           className="rounded-sm transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700"
-                          style={{ height:36, background:`rgba(37,99,235,${op.toFixed(2)})` }}
+                          style={{ height:40, background:`rgba(37,99,235,${op.toFixed(2)})` }}
                           onClick={() => openHourDetail(h, sortedBusy.findIndex((item) => item.hour === h.hour) + 1 || null)}
                         />
                       )
                     })}
                   </div>
-                  <div className="mt-1 flex text-[10px] font-medium text-gray-400" style={{ position:'relative', height:18 }}>
+                  <div className="mt-1 flex text-[11px] font-medium text-gray-400" style={{ position:'relative', height:18 }}>
                     {[0,6,12,18,23].map(h => (
                       <span key={h} style={{ position:'absolute', left:`${(h/23)*100}%`, transform:'translateX(-50%)' }}>{formatDashboardHourLabel(h).replace(' ', '')}</span>
                     ))}
@@ -1566,8 +1579,13 @@ export default function Dashboard() {
             </div>
           )}
           {lowStockPreviewTruncated ? (
-            <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              {translateOr('showing_preview', 'Showing preview')} {lowStockPreviewLabel}
+            <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700">
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+                <span>{translateOr('showing_preview', 'Showing preview')} {lowStockPreviewLabel}</span>
+                <button type="button" className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-700" onClick={() => openInventoryOverview('low')}>
+                  {translateOr('review_in_inventory', 'Review in inventory')}
+                </button>
+              </div>
             </div>
           ) : null}
         </div>
@@ -1606,8 +1624,13 @@ export default function Dashboard() {
             </div>
           )}
           {outOfStockPreviewTruncated ? (
-            <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              {translateOr('showing_preview', 'Showing preview')} {outOfStockPreviewLabel}
+            <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700">
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+                <span>{translateOr('showing_preview', 'Showing preview')} {outOfStockPreviewLabel}</span>
+                <button type="button" className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-700" onClick={() => openInventoryOverview('out')}>
+                  {translateOr('review_in_inventory', 'Review in inventory')}
+                </button>
+              </div>
             </div>
           ) : null}
         </div>
@@ -1809,11 +1832,10 @@ export default function Dashboard() {
                     type="button"
                     className="btn-secondary w-full"
                     onClick={() => {
-                      setProductDetail(null)
-                      navigateTo('inventory')
+                      openInventoryOverview(productDetail.insightType === 'out_of_stock' ? 'out' : productDetail.insightType === 'low_stock' ? 'low' : 'all')
                     }}
                   >
-                    {translateOr('open_inventory_page', 'Open inventory page')}
+                    {translateOr('open_inventory_page', 'Open inventory')}
                   </button>
                 </>
               ) : (
