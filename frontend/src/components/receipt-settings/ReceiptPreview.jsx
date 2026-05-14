@@ -5,6 +5,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
 export default function ReceiptPreview({ tpl, settings }) {
   const [ReceiptComp, setReceiptComp] = useState(null)
@@ -70,7 +71,7 @@ export default function ReceiptPreview({ tpl, settings }) {
     ],
   }
 
-  const previewSettings = { ...settings, receipt_template: JSON.stringify(tpl) }
+  const previewSettings = buildAppliedReceiptConfig({ settings, template: tpl }).settings
   const previewKey = `${tpl.receipt_language || 'en'}-preview`
 
   if (loadError) {
