@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Download, Printer, Ruler, Scaling, TestTube2 } from 'lucide-react'
 import { downloadReceiptPdf, getPrintSettings, openReceiptPdf, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
 
@@ -43,20 +43,50 @@ function buildSafePreviewSource(previewNode, printSettings, T) {
   }
 }
 
-export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
+export default function PrintSettings({ t: tProp, previewTargetRef = null, settings = {}, saveSettings: saveAppSettings = null }) {
   const T = (key, fallback) => (tProp && tProp(key)) || fallback
   const [ps, setPs] = useState(() => {
     try {
-      return getPrintSettings()
+      return getPrintSettings(settings)
     } catch (_) {
       return { ...PRINT_DEFAULTS }
     }
   })
+  const saveTimerRef = useRef(null)
+
+  useEffect(() => {
+    try {
+      setPs(getPrintSettings(settings))
+    } catch (_) {
+      setPs({ ...PRINT_DEFAULTS })
+    }
+  }, [settings?.receipt_print_settings])
+
+  useEffect(() => () => {
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+  }, [])
+
+  const persistPrintSettings = (next) => {
+    if (typeof saveAppSettings !== 'function') return
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = window.setTimeout(() => {
+      void saveAppSettings(
+        { receipt_print_settings: JSON.stringify(next) },
+        {
+          silentToast: true,
+          refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
+          reason: 'receipt-print-settings-saved',
+          source: 'receipt-settings:print',
+        },
+      )
+    }, 350)
+  }
 
   const setValue = (key, value) => {
     setPs((prev) => {
       const next = { ...prev, [key]: value }
       try { savePrintSettings(next) } catch (_) {}
+      persistPrintSettings(next)
       return next
     })
   }
@@ -65,6 +95,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
     const next = { ...ps, marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
     setPs(next)
     try { savePrintSettings(next) } catch (_) {}
+    persistPrintSettings(next)
   }
 
   const paperSizes = [
@@ -172,6 +203,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
                 await openReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
+                  printSettings: ps,
                   previewFallback: true,
                   previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
                 })
@@ -192,6 +224,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
                 await downloadReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
+                  printSettings: ps,
                   previewFallback: true,
                   previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
                 })
