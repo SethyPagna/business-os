@@ -73,6 +73,8 @@ export default function ReturnsListSurface({
   tr,
   visibleIds,
 }) {
+  let desktopRenderedRowCount = 0
+
   return (
     <>
       <div className="card hidden overflow-hidden sm:block">
@@ -158,7 +160,9 @@ export default function ReturnsListSurface({
                             </td>
                           </tr>
                         ) : null}
-                        {group.items.map((ret, index) => {
+                        {group.items.map((ret) => {
+                          const desktopRowIndex = desktopRenderedRowCount
+                          desktopRenderedRowCount += 1
                           const retScope = normalizeScope(ret.return_scope)
                           const typeLabel = retScope === SUPPLIER_SCOPE
                             ? (ret.supplier_settlement || tr('settlement_refund', 'refund'))
@@ -167,7 +171,7 @@ export default function ReturnsListSurface({
                             <tr
                               key={ret.id}
                               className="table-row cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-900/10"
-                              style={index >= 12 ? deferredDesktopRowStyle : undefined}
+                              style={desktopRowIndex >= 12 ? deferredDesktopRowStyle : undefined}
                               onClick={() => setDetailRet(ret)}
                             >
                               <td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}>
