@@ -326,7 +326,7 @@ services:
     image: cloudflare/cloudflared:latest
     profiles: ["runtime", "cloudflare-runtime"]
     restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "--loglevel", "warn", "run", "--token-file", "/run/secrets/cloudflare.token", "--url", "http://app:4000"]
+    command: ["tunnel", "--no-autoupdate", "--protocol", "http2", "--loglevel", "warn", "run", "--token-file", "/run/secrets/cloudflare.token", "--url", "http://127.0.0.1:4000"]
     network_mode: "service:app"
     volumes:
       - type: bind
