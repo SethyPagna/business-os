@@ -1,5 +1,5 @@
-﻿
-import { useState, useEffect, useRef, useCallback } from 'react'
+
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Eye, Globe, LayoutList, Palette, Printer, Save, Truck, Type } from 'lucide-react'
 import ErrorBoundary from './ErrorBoundary'
 import { useApp } from '../../AppContext'
@@ -10,6 +10,7 @@ import AllFieldsPanel    from './AllFieldsPanel'
 import ReceiptPreview    from './ReceiptPreview'
 import PrintSettings     from './PrintSettings'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
 // ----- Shared primitives (defined locally to avoid circular imports) ----------
 function Section({ title, children }) {
@@ -44,6 +45,7 @@ export default function ReceiptSettings() {
   const t = (typeof app?.t === 'function') ? app.t : (k => k)
   const settings = app?.settings || {}
   const loadSettings = app?.loadSettings || (async () => ({}))
+  const saveSettings = app?.saveSettings || (async () => ({ success: false, error: new Error('Settings save unavailable') }))
   const notify = app?.notify || (() => {})
   const fmtUSD = app?.fmtUSD || (n => String(n))
   const fmtKHR = app?.fmtKHR || (n => String(n))
@@ -99,17 +101,27 @@ export default function ReceiptSettings() {
     if (!options.silent && aliveRef.current) setSaving(true)
 
     try {
-      await withLoaderTimeout(
-        () => window.api.saveSettings({ receipt_template: serializeReceiptTemplate(tpl) }),
+      const result = await withLoaderTimeout(
+        () => saveSettings(
+          { receipt_template: serializeReceiptTemplate(tpl) },
+          {
+            silentToast: !options.showToast,
+            refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
+            reason: 'receipt-template-saved',
+            source: options.showToast ? 'receipt-settings:manual-save' : 'receipt-settings:auto-save',
+          },
+        ),
         'Receipt settings save',
       )
+      if (result?.conflict) {
+        throw new Error(t('settings_conflict') || 'Settings changed on another device. Reload and try again.')
+      }
       persistedTemplateRef.current = serializeReceiptTemplate(tpl)
 
       if (options.showToast) {
         try {
           await withLoaderTimeout(() => loadSettingsRef.current(), 'Receipt settings refresh')
         } catch (_) {}
-        notify((t('receipt_settings') || 'Receipt settings') + ' ' + (t('success') || 'saved'))
       } else {
         Promise.resolve(loadSettingsRef.current()).catch(() => {})
       }
@@ -129,9 +141,9 @@ export default function ReceiptSettings() {
         }, 0)
       }
     }
-  }, [notify, t, tpl])
+  }, [notify, saveSettings, t, tpl])
 
-  // ?? Auto-save (debounced 900 ms, completely silent) ????????????????????????
+  // ?€?€ Auto-save (debounced 900 ms, completely silent) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   // KEY FIX: The `isMountedRef` guard prevents this effect from firing on the
   // initial render when `tpl` is still DEFAULT_TEMPLATE. Without the guard the
   // auto-save would POST DEFAULT_TEMPLATE to the server ~900 ms after opening
@@ -159,7 +171,7 @@ export default function ReceiptSettings() {
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [persistTemplate]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ?? Manual save with user feedback ????????????????????????????????????????
+  // ?€?€ Manual save with user feedback ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   // Calls window.api.saveSettings directly (not AppContext.saveSettings) to avoid
   // the double-notification bug: AppContext.saveSettings calls notify() internally,
   // and the old code called notify() again after it returned, producing two toasts.
@@ -177,12 +189,13 @@ export default function ReceiptSettings() {
     { id: 'footer', label: t('receipt_footer_tab') || 'Footer', icon: Type },
     { id: 'print', label: t('receipt_print') || 'Print', icon: Printer },
   ]
+  const appliedReceiptConfig = useMemo(() => buildAppliedReceiptConfig({ settings, template: tpl }), [settings, tpl])
 
   return (
     <ErrorBoundary>
     <div className="flex min-h-0 flex-1 flex-col bg-gray-50 dark:bg-zinc-950 lg:flex-row">
 
-      {/* ?? Editor panel ?? */}
+      {/* ?€?€ Editor panel ?€?€ */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-gray-50 dark:bg-zinc-950">
         <div className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50/95 px-4 pb-3 pt-4 backdrop-blur dark:border-gray-800 dark:bg-zinc-950/95 sm:px-6 sm:pt-6">
           <h1 className="flex min-w-0 flex-1 items-center gap-2 truncate text-lg font-bold text-gray-900 dark:text-white sm:text-2xl">
@@ -352,12 +365,12 @@ export default function ReceiptSettings() {
             </>
           )}
 
-          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={previewTargetRef} />}
+          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={previewTargetRef} settings={settings} saveSettings={saveSettings} />}
 
         </div>
       </div>
 
-      {/* ?? Live Preview (desktop sidebar) ?? */}
+      {/* ?€?€ Live Preview (desktop sidebar) ?€?€ */}
       <div className="hidden min-h-0 w-96 flex-shrink-0 flex-col border-l border-gray-200 bg-gray-100 dark:border-gray-800 dark:bg-zinc-900 lg:flex">
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 bg-gray-100 p-4 dark:border-gray-800 dark:bg-zinc-900">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white">
@@ -374,7 +387,7 @@ export default function ReceiptSettings() {
           </div>
         </div>
         <div ref={previewTargetRef} className="flex-1 overflow-auto min-h-0 p-4">
-          <ReceiptPreview tpl={tpl} settings={settings} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+          <ReceiptPreview tpl={appliedReceiptConfig.template} settings={appliedReceiptConfig.settings} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
         </div>
       </div>
 
@@ -399,7 +412,7 @@ export default function ReceiptSettings() {
               </div>
             </div>
             <div ref={previewTargetRef} className="flex-1 overflow-auto min-h-0 p-4">
-              <ReceiptPreview tpl={tpl} settings={settings} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+              <ReceiptPreview tpl={appliedReceiptConfig.template} settings={appliedReceiptConfig.settings} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
             </div>
           </div>
         </div>
