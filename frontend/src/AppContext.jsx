@@ -11,6 +11,8 @@ import { isWSConnected, reconnectWS } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
 import { normalizePriceValue } from './utils/pricing.js'
 import { withLoaderTimeout } from './utils/loaders.mjs'
+import { refreshAppData } from './utils/appRefresh.js'
+import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
 
 /**
  * Global application context.
@@ -1243,7 +1245,8 @@ export function AppProvider({ children, publicMode = false }) {
   }, [])
 
   // ?? Settings save ?????????????????????????????????????????????????????????
-  const saveSettings = useCallback(async (newSettings) => {
+  const saveSettings = useCallback(async (newSettings, options = {}) => {
+    const normalizedOptions = normalizeSettingsWriteOptions(options)
     try {
       const nextSettings = newSettings || {}
       const serverUpdates = {}
@@ -1254,10 +1257,17 @@ export function AppProvider({ children, publicMode = false }) {
       })
 
       if (Object.keys(serverUpdates).length) {
-        await window.api.saveSettings(serverUpdates)
+        const serverResult = await window.api.saveSettings(serverUpdates, normalizedOptions)
+        if (serverResult?.conflict) return serverResult
       }
       if (Object.keys(deviceUpdates).length) {
         applyDeviceSettings(deviceUpdates)
+        if (normalizedOptions.refreshChannels.length) {
+          refreshAppData(normalizedOptions.refreshChannels, {
+            reason: normalizedOptions.reason || 'settings-saved',
+            source: normalizedOptions.source || 'settings:save',
+          })
+        }
       }
       const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
       if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
@@ -1287,7 +1297,7 @@ export function AppProvider({ children, publicMode = false }) {
       if (Object.keys(serverUpdates).length) {
         setSettings((prev) => ({ ...prev, ...serverUpdates }))
       }
-      notify(t('settings_saved'))
+      if (!normalizedOptions.silentToast) notify(t('settings_saved'))
       return { success: true }
     } catch (error) {
       if (error?.conflict || error?.code === 'write_conflict' || error?.code === 'settings_conflict') {
@@ -1301,7 +1311,9 @@ export function AppProvider({ children, publicMode = false }) {
           attempted: error?.attempted || newSettings || {},
         }
       }
-      notify(error?.message || 'Failed to save settings', 'error')
+      if (!normalizedOptions.silentToast) {
+        notify(error?.message || 'Failed to save settings', 'error')
+      }
       return { success: false, error }
     }
   }, [applyDeviceSettings, notify, t, user]) // eslint-disable-line
