@@ -9,12 +9,46 @@ const SETTINGS_CHANNEL_RULES = [
     channels: ['settings', 'products', 'inventory', 'pos'],
   },
   {
-    keys: ['receipt_template'],
-    channels: ['settings', 'sales', 'pos'],
+    keys: ['receipt_template', 'receipt_print_settings'],
+    channels: ['settings', 'sales', 'pos', 'dashboard'],
   },
   {
     keys: ['pos_payment_methods'],
-    channels: ['settings', 'sales', 'pos'],
+    channels: ['settings', 'sales', 'pos', 'dashboard'],
+  },
+  {
+    keys: [
+      'business_name',
+      'business_phone',
+      'business_email',
+      'business_address',
+      'tax_id',
+      'customer_portal_logo_image',
+      'ui_app_favicon_image',
+      'currency_usd_symbol',
+      'currency_khr_symbol',
+      'display_currency',
+      'exchange_rate',
+    ],
+    channels: ['settings', 'sales', 'pos', 'dashboard', 'catalog'],
+  },
+  {
+    keys: [
+      'notifications_inventory_enabled',
+      'notifications_expiry_enabled',
+      'notifications_sales_enabled',
+      'notifications_loyalty_enabled',
+      'notifications_portal_enabled',
+      'notifications_system_enabled',
+      'notifications_expiry_days',
+      'notifications_loyalty_threshold',
+      'notifications_realert_minutes',
+    ],
+    channels: ['settings', 'dashboard', 'users'],
+  },
+  {
+    keys: ['login_session_duration'],
+    channels: ['settings', 'users'],
   },
 ]
 
