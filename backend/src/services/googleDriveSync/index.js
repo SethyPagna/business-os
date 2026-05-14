@@ -861,6 +861,22 @@ function isInvalidUploadRequest(error) {
   return /invalid upload request/i.test(String(error?.message || ''))
 }
 
+function isDriveNotFoundError(error) {
+  return /not found|file not found|404/i.test(String(error?.message || ''))
+}
+
+function isDriveWriteAccessError(error) {
+  const message = String(error?.message || '')
+  return /may not have granted the app .* write access to all of the children of file/i.test(message)
+    || /insufficient permissions/i.test(message)
+    || /does not have sufficient permissions/i.test(message)
+    || /cannot edit this file/i.test(message)
+}
+
+function canRecoverDriveItemWrite(error) {
+  return isDriveNotFoundError(error) || isDriveWriteAccessError(error)
+}
+
 async function putResumableChunk(sessionUrl, file, start, end, signal = null) {
   const size = end - start + 1
   const response = await fetch(sessionUrl, {
@@ -987,7 +1003,7 @@ async function removeDriveFile(config, remoteFileId) {
     })
     return true
   } catch (error) {
-    if (/not found|404/i.test(String(error?.message || ''))) return false
+    if (canRecoverDriveItemWrite(error)) return false
     throw error
   }
 }
@@ -1126,19 +1142,30 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
           remote = await updateDriveFile(config, existing.remote_file_id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
           updated += 1
         } catch (error) {
-          const message = String(error?.message || '')
-          if (!/not found|file not found|404/i.test(message)) throw error
-          if (reusable?.id) {
-            remote = await updateDriveFile(config, reusable.id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
-            updated += 1
+          if (!canRecoverDriveItemWrite(error)) throw error
+          if (reusable?.id && trim(reusable.id) !== trim(existing.remote_file_id)) {
+            try {
+              remote = await updateDriveFile(config, reusable.id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
+              updated += 1
+            } catch (reusableError) {
+              if (!canRecoverDriveItemWrite(reusableError)) throw reusableError
+              remote = await uploadDriveFile(config, parentRemoteId, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
+              uploaded += 1
+            }
           } else {
             remote = await uploadDriveFile(config, parentRemoteId, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
             uploaded += 1
           }
         }
       } else if (reusable?.id) {
-        remote = await updateDriveFile(config, reusable.id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
-        updated += 1
+        try {
+          remote = await updateDriveFile(config, reusable.id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
+          updated += 1
+        } catch (error) {
+          if (!canRecoverDriveItemWrite(error)) throw error
+          remote = await uploadDriveFile(config, parentRemoteId, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
+          uploaded += 1
+        }
       } else {
         remote = await uploadDriveFile(config, parentRemoteId, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
         uploaded += 1
