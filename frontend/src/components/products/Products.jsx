@@ -279,13 +279,12 @@ export default function Products() {
         }
         const result = await settleLoaderMap({
           products: () => window.api.searchProducts(productQuery),
-          filters: () => window.api.getProductFilters({}),
         })
         const productPayload = result.values.products || {}
         const prods = Array.isArray(productPayload?.items)
           ? productPayload.items
           : (Array.isArray(productPayload) ? productPayload : [])
-        const filters = result.values.filters || productPayload?.filters || {}
+        const searchFilters = productPayload?.filters || {}
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
@@ -295,11 +294,18 @@ export default function Products() {
         }
         if (Array.isArray(prods)) setProducts(prods)
         setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
-        setProductFilterMeta({
-          brands: Array.isArray(filters?.brands) ? filters.brands : [],
-          categories: Array.isArray(filters?.categories) ? filters.categories : [],
-          suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
-          initials: aggregateInitialOptions(filters?.initials || productPayload?.initials || []),
+        setProductFilterMeta((previous) => {
+          const hasPreviousMeta = Array.isArray(previous?.brands) && previous.brands.length
+            || Array.isArray(previous?.categories) && previous.categories.length
+            || Array.isArray(previous?.suppliers) && previous.suppliers.length
+            || Array.isArray(previous?.initials) && previous.initials.length
+          if (hasPreviousMeta) return previous
+          return {
+            brands: Array.isArray(searchFilters?.brands) ? searchFilters.brands : [],
+            categories: Array.isArray(searchFilters?.categories) ? searchFilters.categories : [],
+            suppliers: Array.isArray(searchFilters?.suppliers) ? searchFilters.suppliers : [],
+            initials: aggregateInitialOptions(searchFilters?.initials || productPayload?.initials || []),
+          }
         })
 
         if (!result.hasAnySuccess) {
@@ -331,6 +337,16 @@ export default function Products() {
             }
           }).catch(() => {})
         }
+
+        void window.api.getProductFilters({}).then((filters) => {
+          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+          setProductFilterMeta({
+            brands: Array.isArray(filters?.brands) ? filters.brands : [],
+            categories: Array.isArray(filters?.categories) ? filters.categories : [],
+            suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
+            initials: aggregateInitialOptions(filters?.initials || []),
+          })
+        }).catch(() => {})
 
         if (result.hasErrors && !silent) {
           notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
