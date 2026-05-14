@@ -6,6 +6,11 @@ const deferredMobileCardStyle = {
   containIntrinsicSize: '128px',
 }
 
+const deferredDesktopRowStyle = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: '56px',
+}
+
 function ReturnsDesktopSkeletonRows() {
   return Array.from({ length: 4 }).map((_, index) => (
     <tr key={`returns-desktop-skeleton-${index}`} className="animate-pulse">
@@ -153,13 +158,18 @@ export default function ReturnsListSurface({
                             </td>
                           </tr>
                         ) : null}
-                        {group.items.map((ret) => {
+                        {group.items.map((ret, index) => {
                           const retScope = normalizeScope(ret.return_scope)
                           const typeLabel = retScope === SUPPLIER_SCOPE
                             ? (ret.supplier_settlement || tr('settlement_refund', 'refund'))
                             : (ret.return_type || tr('manual_return', 'manual'))
                           return (
-                            <tr key={ret.id} className="table-row cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-900/10" onClick={() => setDetailRet(ret)}>
+                            <tr
+                              key={ret.id}
+                              className="table-row cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-900/10"
+                              style={index >= 12 ? deferredDesktopRowStyle : undefined}
+                              onClick={() => setDetailRet(ret)}
+                            >
                               <td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}>
                                 <input
                                   type="checkbox"
