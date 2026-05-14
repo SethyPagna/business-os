@@ -34,6 +34,11 @@ import { decodeTextBuffer } from '../utils/csvImport.js'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
 import { refreshAppData } from '../utils/appRefresh.js'
 import {
+  CATEGORY_REFRESH_CHANNELS,
+  getSettingsRefreshChannels,
+  UNIT_REFRESH_CHANNELS,
+} from '../utils/settingsRefresh.js'
+import {
   LIVE_SERVER_SENSITIVE_MIRROR_TABLES,
   NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
   NOTIFICATION_SUMMARY_MISSING_TTL_MS,
@@ -726,11 +731,16 @@ export async function getSettings(options = {}) {
 }
 let settingsSaveQueue = Promise.resolve()
 
-export async function saveSettings(updates) {
+export async function saveSettings(updates, options = {}) {
   const runSave = async () => {
     const attempted = Object.fromEntries(
       Object.entries(updates || {}).filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
     )
+    const refreshChannels = getSettingsRefreshChannels(attempted, options?.refreshChannels)
+    const refreshDetail = {
+      reason: String(options?.reason || 'settings-saved').trim() || 'settings-saved',
+      source: String(options?.source || 'settings:save').trim() || 'settings:save',
+    }
     let payload = await withSettingsExpectedUpdatedAt(updates)
     try {
       const result = await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true)
@@ -738,10 +748,7 @@ export async function saveSettings(updates) {
         await localSaveSettingsMeta(result.updatedAt).catch(() => {})
       }
       await localSaveSettings(updates).catch(() => {})
-      refreshAppData(['settings'], {
-        reason: 'settings-saved',
-        source: 'settings:save',
-      })
+      refreshAppData(refreshChannels, refreshDetail)
       return result
     } catch (error) {
       const attemptedSettings = error?.attempted || attempted
@@ -762,10 +769,7 @@ export async function saveSettings(updates) {
             await localSaveSettingsMeta(retryResult.updatedAt).catch(() => {})
           }
           await localSaveSettings(attemptedSettings).catch(() => {})
-          refreshAppData(['settings'], {
-            reason: 'settings-saved',
-            source: 'settings:save',
-          })
+          refreshAppData(refreshChannels, refreshDetail)
           return retryResult
         } catch (retryError) {
           error = retryError
@@ -791,17 +795,17 @@ export async function saveSettings(updates) {
 export const getCategories  = ()       => routeMirrored('categories:get',    () => apiFetch('GET', '/api/categories'),              () => dexieDb.categories.orderBy('name').toArray(), mirrorTable('categories'))
 export const createCategory = async (d) => {
   const result = await route('categories:create', () => apiFetch('POST', '/api/categories', d), null, true)
-  refreshAppData(['categories'], { reason: 'category-saved', source: 'categories:create' })
+  refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:create' })
   return result
 }
 export const updateCategory = async (id, d) => {
   const result = await route('categories:update', async () => apiFetch('PUT', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, d)), null, true)
-  refreshAppData(['categories'], { reason: 'category-saved', source: 'categories:update' })
+  refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:update' })
   return result
 }
 export const deleteCategory = async (id, payload) => {
   const result = await route('categories:delete', async () => apiFetch('DELETE', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, payload)), null, true)
-  refreshAppData(['categories'], { reason: 'category-deleted', source: 'categories:delete' })
+  refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-deleted', source: 'categories:delete' })
   return result
 }
 
@@ -809,17 +813,17 @@ export const deleteCategory = async (id, payload) => {
 export const getUnits   = ()  => routeMirrored('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray(), mirrorTable('units'))
 export const createUnit = async (d) => {
   const result = await route('units:create', () => apiFetch('POST', '/api/units', d), null, true)
-  refreshAppData(['units'], { reason: 'unit-saved', source: 'units:create' })
+  refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:create' })
   return result
 }
 export const updateUnit = async (id, d) => {
   const result = await route('units:update', async () => apiFetch('PATCH', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, d)), null, true)
-  refreshAppData(['units'], { reason: 'unit-saved', source: 'units:update' })
+  refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:update' })
   return result
 }
 export const deleteUnit = async (id, payload) => {
   const result = await route('units:delete', async () => apiFetch('DELETE', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, payload)), null, true)
-  refreshAppData(['units'], { reason: 'unit-deleted', source: 'units:delete' })
+  refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-deleted', source: 'units:delete' })
   return result
 }
 
