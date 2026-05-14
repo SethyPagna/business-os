@@ -48,6 +48,7 @@ export default function CatalogPreviewSurface({
     if (key === activeTab) return
     setActiveTab(key)
     if (!publicView || typeof window === 'undefined') return
+    if (window.innerWidth >= 640 && publicPortalNavPinned) return
     window.requestAnimationFrame(() => {
       const target = publicPortalNavRef?.current || previewSectionRef?.current
       if (!target) return
