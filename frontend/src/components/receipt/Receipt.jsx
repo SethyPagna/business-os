@@ -4,6 +4,7 @@ import { useApp } from '../../AppContext'
 import { downloadReceiptImage, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { getStatusLabel } from '../sales/StatusBadge'
+import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
 function stripEmoji(text) {
   if (typeof text !== 'string') return text
@@ -131,7 +132,10 @@ function Row({ label, value, subValue, bold = false, tone = '' }) {
 export default function Receipt({ sale, settings, onClose, _previewMode }) {
   const { fmtUSD, fmtKHR, khrSymbol, t } = useApp()
   const printRef = useRef(null)
-  const tpl = parseReceiptTemplate(settings?.receipt_template)
+  const appliedConfig = useMemo(() => buildAppliedReceiptConfig({ settings }), [settings])
+  const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
+  const appliedSettings = appliedConfig.settings
+  const appliedPrintSettings = appliedConfig.printSettings
   const [lang, setLang] = useState(tpl.receipt_language || 'en')
   const [pdfBusy, setPdfBusy] = useState('')
 
@@ -145,7 +149,7 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
   const createdAt = sale.created_at
   const parsedDate = createdAt ? new Date(String(createdAt).includes('T') ? createdAt : `${createdAt}Z`) : new Date()
   const dateStr = Number.isNaN(parsedDate.getTime()) ? String(createdAt || '') : parsedDate.toLocaleString()
-  const exchangeRate = sale.exchange_rate || parseFloat(settings?.exchange_rate || '4100') || 4100
+  const exchangeRate = sale.exchange_rate || parseFloat(appliedSettings.exchange_rate || '4100') || 4100
   const subtotalUsd = sale.subtotal_usd || sale.subtotal || 0
   const discountUsd = sale.discount_usd || sale.discount || 0
   const discountKhr = sale.discount_khr || discountUsd * exchangeRate
@@ -343,15 +347,18 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
         await downloadReceiptImage(printRef.current, {
           title: receiptTitle,
           fileName: receiptTitle,
+          printSettings: appliedPrintSettings,
         })
       } else if (mode === 'print') {
         await printReceipt(printRef.current, {
           title: receiptTitle,
+          printSettings: appliedPrintSettings,
         })
       } else {
         await openReceiptPdf(printRef.current, {
           title: receiptTitle,
           fileName: receiptTitle,
+          printSettings: appliedPrintSettings,
           previewFallback: true,
           previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
         })
