@@ -45,15 +45,16 @@ export default function CatalogPreviewSurface({
   allPublicTranslateOptions,
 }) {
   const handlePortalTabClick = (key) => {
+    if (key === activeTab) return
     setActiveTab(key)
     if (!publicView || typeof window === 'undefined') return
-    window.setTimeout(() => {
+    window.requestAnimationFrame(() => {
       const target = publicPortalNavRef?.current || previewSectionRef?.current
       if (!target) return
       const rect = target.getBoundingClientRect()
       const top = Math.max(0, window.scrollY + rect.top - (window.innerWidth >= 640 ? 12 : 4))
-      window.scrollTo({ top, behavior: 'smooth' })
-    }, 0)
+      window.scrollTo({ top, behavior: 'auto' })
+    })
   }
 
   const pinnedNavStyle = publicView && publicPortalNavPinned ? {
