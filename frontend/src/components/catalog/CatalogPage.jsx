@@ -1087,24 +1087,36 @@ export default function CatalogPage({ publicView = false }) {
   }, [previewConfig])
   useEffect(() => {
     if (!publicView || !portalConfigReady) return undefined
-    const warmPublicTabChunks = () => {
+    const warmPublicProductsPanel = () => {
       void loadCatalogProductsSection()
+      setPublicProductsPanelPrimed(true)
+    }
+    const warmPublicSecondaryTabs = () => {
       void loadCatalogSecondaryTabs()
+      setPublicSecondaryTabsPrimed(true)
     }
     if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      const idleId = window.requestIdleCallback(() => {
-        warmPublicTabChunks()
-        setPublicProductsPanelPrimed(true)
-        setPublicSecondaryTabsPrimed(true)
+      const productsIdleId = window.requestIdleCallback(() => {
+        warmPublicProductsPanel()
+      }, { timeout: 400 })
+      const secondaryIdleId = window.requestIdleCallback(() => {
+        warmPublicSecondaryTabs()
       }, { timeout: 1200 })
-      return () => window.cancelIdleCallback?.(idleId)
+      return () => {
+        window.cancelIdleCallback?.(productsIdleId)
+        window.cancelIdleCallback?.(secondaryIdleId)
+      }
     }
-    const timerId = window.setTimeout(() => {
-      warmPublicTabChunks()
-      setPublicProductsPanelPrimed(true)
-      setPublicSecondaryTabsPrimed(true)
+    const productsTimerId = window.setTimeout(() => {
+      warmPublicProductsPanel()
+    }, 120)
+    const secondaryTimerId = window.setTimeout(() => {
+      warmPublicSecondaryTabs()
     }, 180)
-    return () => window.clearTimeout(timerId)
+    return () => {
+      window.clearTimeout(productsTimerId)
+      window.clearTimeout(secondaryTimerId)
+    }
   }, [portalConfigReady, publicView])
   const recommendedProductIds = useMemo(
     () => normalizeRecommendedProductIds(
