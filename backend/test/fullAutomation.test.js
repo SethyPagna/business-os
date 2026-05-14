@@ -84,5 +84,7 @@ runTest('scaled runtime profile includes the cloudflare connector', () => {
   const compose = read('ops/docker/compose.scale.yml')
   assert.match(compose, /cloudflared:\s+image:\s+cloudflare\/cloudflared:latest/s)
   assert.match(compose, /profiles:\s*\["runtime",\s*"cloudflare-runtime"\]/)
+  assert.match(compose, /--protocol",\s*"http2"/)
   assert.match(compose, /--token-file",\s*"\/run\/secrets\/cloudflare\.token"/)
+  assert.match(compose, /--url",\s*"http:\/\/127\.0\.0\.1:4000"/)
 })
