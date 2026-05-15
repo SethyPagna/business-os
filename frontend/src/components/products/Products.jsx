@@ -909,23 +909,6 @@ export default function Products() {
     [products],
   )
 
-  const allProductSections = useMemo(
-    () => buildProductGroupSections(filtered, {
-      productsById,
-      sortDirection: productSortDirection,
-    }),
-    [filtered, productSortDirection, productsById],
-  )
-
-  const allVisibleProducts = useMemo(
-    () => allProductSections.flatMap((section) => section.items),
-    [allProductSections],
-  )
-
-  useEffect(() => {
-    setProductPage(1)
-  }, [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, initialFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
-
   const productSections = useMemo(
     () => buildProductGroupSections(filtered, {
       productsById,
@@ -934,9 +917,18 @@ export default function Products() {
     [filtered, productSortDirection, productsById],
   )
 
-  const visibleProducts = useMemo(
+  const allVisibleProducts = useMemo(
     () => productSections.flatMap((section) => section.items),
     [productSections],
+  )
+
+  useEffect(() => {
+    setProductPage(1)
+  }, [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, initialFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
+
+  const visibleProducts = useMemo(
+    () => allVisibleProducts,
+    [allVisibleProducts],
   )
 
   const visibleIds = useMemo(
