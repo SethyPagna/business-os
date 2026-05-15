@@ -82,6 +82,7 @@ const { buildIntegrationDoctor } = require('../../services/integrationDoctor')
 const { deleteAllStoredUploads, requestUploadStorageReconcile } = require('../../fileAssets')
 
 const router = express.Router()
+const BACKUP_VERSION_LIST_ROUTE_TIMEOUT_MS = 500
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
 
 function q(name) {
@@ -853,7 +854,12 @@ router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', '
 
 async function sendBackupVersions(req, res) {
   try {
-    ok(res, { items: await listBackupVersions({ limit: req.query?.limit || 50 }) })
+    ok(res, {
+      items: await listBackupVersions({
+        limit: req.query?.limit || 50,
+        timeoutMs: BACKUP_VERSION_LIST_ROUTE_TIMEOUT_MS,
+      }),
+    })
   } catch (error) {
     err(res, error?.message || 'Failed to list backup versions')
   }
