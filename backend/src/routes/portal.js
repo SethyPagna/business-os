@@ -15,7 +15,7 @@ const { generatePortalAiResponse, getPortalAiUsageStatus } = require('../service
 const { checkRateLimit } = require('../security')
 const { getDefaultOrganization, getPortalPublicPath } = require('../organizationContext')
 const { assertSafeOutboundUrl, isSafeExternalImageReference } = require('../netSecurity')
-const { sanitizeMediaList, sanitizeSettingsSnapshot } = require('../settingsSnapshot')
+const { sanitizeMediaList, sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
 const { getOrSetJson } = require('../runtimeCache')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 
@@ -133,16 +133,16 @@ function normalizeProductIdList(value) {
 }
 
 /** Load global settings table into key/value map for fast lookup. */
-function loadSettingsMap() {
+async function loadSettingsMap() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const map = {}
   rows.forEach((row) => { map[row.key] = row.value })
-  return sanitizeSettingsSnapshot(map)
+  return sanitizeSettingsSnapshotAsync(map)
 }
 
 /** Build full portal configuration object from persisted settings. */
-function buildPortalConfig() {
-  const settings = loadSettingsMap()
+async function buildPortalConfig() {
+  const settings = await loadSettingsMap()
   const organization = getDefaultOrganization()
   const defaultPublicPath = getPortalPublicPath(organization || { slug: 'leangcosmetics' })
   const exchangeRate = toNumber(settings.exchange_rate, 4100)
@@ -434,7 +434,7 @@ function summarizePoints(sales, returns, submissions, config) {
 }
 
 /** Return customer-facing product payload including branch stock and image gallery. */
-function getPortalProducts(config = buildPortalConfig()) {
+function getPortalProducts(config = {}) {
   const signals = getPortalProductSignals(config)
   const products = db.prepare(`
     SELECT
@@ -919,8 +919,8 @@ router.get('/catalog/products/search', asyncRoute(async (req, res) => {
   res.json(getPortalCatalogProductPage(config, req.query))
 }))
 
-router.get('/ai/status', (_req, res) => {
-  const config = buildPortalConfig()
+router.get('/ai/status', asyncRoute(async (_req, res) => {
+  const config = await buildPortalConfig()
   const usage = getPortalAiUsageStatus(config, config.aiProviderId)
   res.json({
     success: true,
@@ -929,7 +929,7 @@ router.get('/ai/status', (_req, res) => {
     disclaimer: config.aiDisclaimer,
     usage,
   })
-})
+}))
 
 router.post('/ai/chat', async (req, res) => {
   try {
@@ -1007,7 +1007,7 @@ router.post('/ai/chat', async (req, res) => {
   }
 })
 
-router.get('/membership/:membershipNumber', (req, res) => {
+router.get('/membership/:membershipNumber', asyncRoute(async (req, res) => {
   try {
     if (!applyPortalRateLimit(req, res, { name: 'portal:membership_lookup', max: 45, windowMs: 60 * 1000 })) return
     const membershipNumber = String(req.params.membershipNumber || '').trim()
@@ -1125,7 +1125,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
       screenshots: tryParse(entry.screenshots_json, []),
     })).map(({ screenshots_json, ...entry }) => entry)
 
-    const config = buildPortalConfig()
+    const config = await buildPortalConfig()
     const points = summarizePoints(sales, returns, submissions, config)
 
     const totals = {
@@ -1168,12 +1168,12 @@ router.get('/membership/:membershipNumber', (req, res) => {
     console.error('Portal membership lookup failed', error)
     res.status(500).json({ error: 'Membership lookup failed' })
   }
-})
+}))
 
 router.post('/submissions', async (req, res) => {
   try {
     if (!applyPortalRateLimit(req, res, { name: 'portal:submissions', max: 12, windowMs: 15 * 60 * 1000 })) return
-    const config = buildPortalConfig()
+    const config = await buildPortalConfig()
     if (!config.submissionEnabled) {
       return res.status(403).json({ error: 'Customer submissions are currently disabled' })
     }
