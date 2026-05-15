@@ -208,6 +208,32 @@ export function getRouteManifest(name) {
 export const ADMIN_ROUTES = ROUTE_MANIFEST.filter((route) => route.scope === 'admin' && route.browserAudit !== false)
 export const PUBLIC_ROUTES = ROUTE_MANIFEST.filter((route) => route.scope === 'public' && route.browserAudit !== false)
 
+export function resolveAuditRoutes(routeNames = []) {
+  const normalized = [...new Set(
+    (Array.isArray(routeNames) ? routeNames : [])
+      .flatMap((value) => String(value || '').split(','))
+      .map((value) => value.trim())
+      .filter(Boolean),
+  )]
+  if (!normalized.length) {
+    return {
+      adminRoutes: ADMIN_ROUTES,
+      publicRoutes: PUBLIC_ROUTES,
+      unknownRoutes: [],
+    }
+  }
+  const requested = new Set(normalized)
+  const adminRoutes = ADMIN_ROUTES.filter((route) => requested.has(route.name))
+  const publicRoutes = PUBLIC_ROUTES.filter((route) => requested.has(route.name))
+  const known = new Set([...adminRoutes, ...publicRoutes].map((route) => route.name))
+  const unknownRoutes = normalized.filter((name) => !known.has(name))
+  return {
+    adminRoutes,
+    publicRoutes,
+    unknownRoutes,
+  }
+}
+
 export const FULL_AUDIT_ROUTES = ROUTE_MANIFEST.map((route) => ({
   name: route.name,
   path: route.path,
