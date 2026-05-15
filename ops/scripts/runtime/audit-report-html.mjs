@@ -278,3 +278,82 @@ export async function writeFullAuditHtmlReport({
 </html>`
   await fs.writeFile(path.join(reportDir, outputFile), html, 'utf8')
 }
+
+export async function writeBrowserActionHtmlReport({
+  reportDir,
+  summary,
+  outputFile = 'summary.html',
+}) {
+  const routeRows = (summary?.routes || []).map((route) => `
+    <tr>
+      <td>${escapeHtml(route.profile)}</td>
+      <td>${escapeHtml(route.route)}</td>
+      <td>${escapeHtml(route.path)}</td>
+      <td>${escapeHtml(formatMs(route.navMs))}</td>
+      <td>${escapeHtml(formatMs(route.readyMs))}</td>
+      <td>${escapeHtml(route.navOk)}</td>
+      <td>${escapeHtml(formatCount(route.passedInteractions))}/${escapeHtml(formatCount(route.totalInteractions))}</td>
+      <td>${escapeHtml(formatCount(route.consoleIssues))}</td>
+      <td>${route.screenshot ? `<a href="${escapeHtml(toRelativeLink(reportDir, route.screenshot))}">screenshot</a>` : ''}</td>
+      <td><pre>${escapeHtml((route.notes || []).join('\n'))}</pre></td>
+    </tr>
+  `).join('')
+
+  const actionRows = (summary?.actions || []).map((action) => `
+    <tr>
+      <td>${escapeHtml(action.profile)}</td>
+      <td>${escapeHtml(action.route)}</td>
+      <td>${escapeHtml(action.name)}</td>
+      <td>${escapeHtml(action.kind)}</td>
+      <td>${escapeHtml(action.ok)}</td>
+      <td>${escapeHtml(formatMs(action.ms))}</td>
+      <td>${escapeHtml(formatMs(action.settleMs))}</td>
+      <td>${escapeHtml(action.proof || '')}</td>
+      <td>${escapeHtml(action.error || action.reason || '')}</td>
+    </tr>
+  `).join('')
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Browser Action Smoke</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; background: #f8fafc; }
+    h1, h2 { margin-bottom: 8px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 16px 0 24px; }
+    .card { background: white; border: 1px solid #dbe2ea; border-radius: 10px; padding: 12px; }
+    table { width: 100%; border-collapse: collapse; background: white; margin: 16px 0 24px; }
+    th, td { border: 1px solid #dbe2ea; padding: 8px; vertical-align: top; font-size: 12px; }
+    th { background: #eff6ff; text-align: left; }
+    pre { white-space: pre-wrap; margin: 0; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>Browser Action Smoke</h1>
+  <p>Manifest-driven authenticated browser verification for navigation and primary route actions.</p>
+  ${renderSummaryCards(summary)}
+  <h2>Route Results</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Profile</th><th>Route</th><th>Path</th><th>Nav</th><th>Ready</th><th>Nav OK</th><th>Interactions</th><th>Console Issues</th><th>Artifact</th><th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>${routeRows}</tbody>
+  </table>
+  <h2>Action Results</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Profile</th><th>Route</th><th>Name</th><th>Kind</th><th>OK</th><th>Response</th><th>Settle</th><th>Proof</th><th>Error</th>
+      </tr>
+    </thead>
+    <tbody>${actionRows}</tbody>
+  </table>
+  <h2>Findings</h2>
+  ${renderFindings(summary?.findings)}
+</body>
+</html>`
+  await fs.writeFile(path.join(reportDir, outputFile), html, 'utf8')
+}

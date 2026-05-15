@@ -3,7 +3,8 @@
   "version": "6.0.0",
   "private": true,
   "scripts": {
-    "deep-live-audit": "node scripts/runtime/deep-live-audit.mjs --profile exhaustive"
+    "deep-live-audit": "node scripts/runtime/deep-live-audit.mjs --profile exhaustive",
+    "browser-action-smoke": "node scripts/runtime/browser-action-smoke.mjs --profile exhaustive"
   },
   "devDependencies": {
     "playwright": "^1.59.1"
