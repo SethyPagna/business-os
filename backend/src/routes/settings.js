@@ -4,7 +4,7 @@ const { db }  = require('../database')
 const { ok, err, broadcast, logOp } = require('../helpers')
 const { authToken, requirePermission } = require('../middleware')
 const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl')
-const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
+const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
 const { requestUploadStorageReconcile } = require('../fileAssets')
 
 const router = express.Router()
@@ -53,11 +53,11 @@ function settingsHasUpdatedAt() {
   }
 }
 
-function getSettingsSnapshot() {
+async function getSettingsSnapshot() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const obj  = {}
   rows.forEach(r => { obj[r.key] = r.value })
-  return sanitizeSettingsSnapshot(obj)
+  return sanitizeSettingsSnapshotAsync(obj)
 }
 
 function getSettingsUpdatedAt() {
@@ -72,9 +72,9 @@ function getSettingsUpdatedAt() {
 }
 
 // GET /api/settings
-router.get('/', authToken, (req, res) => {
+router.get('/', authToken, async (req, res) => {
   res.json({
-    ...getSettingsSnapshot(),
+    ...(await getSettingsSnapshot()),
     updatedAt: getSettingsUpdatedAt(),
   })
 })
@@ -87,7 +87,7 @@ router.get('/meta', authToken, (req, res) => {
 })
 
 // POST /api/settings
-router.post('/', authToken, requirePermission('settings'), (req, res) => {
+router.post('/', authToken, requirePermission('settings'), async (req, res) => {
   const t0      = Date.now()
   const updates = req.body || {}
   const attempted = Object.fromEntries(
@@ -131,7 +131,7 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
     if (error instanceof WriteConflictError) {
       return sendSettingsConflict(res, error, {
         code: SETTINGS_CONFLICT_CODE,
-        currentSettings: getSettingsSnapshot(),
+        currentSettings: await getSettingsSnapshot(),
         attempted,
       })
     }
