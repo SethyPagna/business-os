@@ -157,6 +157,10 @@ async function waitForRouteReady(page, route) {
   return Math.round(performance.now() - started)
 }
 
+function getActiveRouteRoot(page) {
+  return page.locator('[data-bos-active-page="true"]').first()
+}
+
 async function dismissTransientUi(page) {
   await page.keyboard.press('Escape').catch(() => {})
   await page.waitForTimeout(120)
@@ -276,6 +280,18 @@ async function openMobileMoreDrawer(page) {
 }
 
 async function navigateViaUi(page, route, profileName) {
+  const rootPath = `${BASE_URL}/?__bos_browser_action=${Date.now()}`
+  if (route.name === 'dashboard') {
+    const started = performance.now()
+    await page.goto(rootPath, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    const readyMs = await waitForRouteReady(page, route)
+    return {
+      ok: true,
+      ms: Math.round(performance.now() - started),
+      readyMs,
+      reason: '',
+    }
+  }
   if (route.scope === 'public') {
     const started = performance.now()
     await page.goto(`${BASE_URL}${route.path}?__bos_browser_action=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -287,6 +303,8 @@ async function navigateViaUi(page, route, profileName) {
       reason: '',
     }
   }
+  await page.goto(rootPath, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await waitForRouteReady(page, { name: 'dashboard', ready: ['Dashboard'] }).catch(() => {})
   await dismissTransientUi(page)
   const started = performance.now()
   let button = null
@@ -431,7 +449,11 @@ async function clickNamedButton(page, route, action) {
   const label = typeof action === 'string' ? action : action?.label
   const expect = typeof action === 'object' ? action?.expect : ''
   const name = `${route.name}:button:${label}`
-  const button = await clickVisibleButton(page, label)
+  const routeRoot = getActiveRouteRoot(page)
+  let button = await findButtonInLocator(routeRoot, label)
+  if (!(await button.count().catch(() => 0))) {
+    button = await clickVisibleButton(page, label)
+  }
   if (!(await button.count().catch(() => 0))) {
     return { name, kind: 'button', ok: false, ms: 0, reason: 'Button not found' }
   }
@@ -477,7 +499,11 @@ async function clickNamedButton(page, route, action) {
 async function clickTestIdButton(page, route, action) {
   await dismissTransientUi(page)
   const name = `${route.name}:testid:${action.testId}`
-  const button = page.locator(`[data-testid="${action.testId}"]`).first()
+  const routeRoot = getActiveRouteRoot(page)
+  let button = routeRoot.locator(`[data-testid="${action.testId}"]`).first()
+  if (!(await button.count().catch(() => 0))) {
+    button = page.locator(`[data-testid="${action.testId}"]`).first()
+  }
   if (!(await button.count().catch(() => 0)) || !(await button.isVisible().catch(() => false))) {
     return { name, kind: 'testid', ok: false, ms: 0, reason: 'Button not found' }
   }
@@ -522,6 +548,7 @@ async function clickTestIdButton(page, route, action) {
 
 async function performSearchInteraction(page, route) {
   const started = performance.now()
+  const routeRoot = getActiveRouteRoot(page)
   async function findSearchInput() {
     const candidates = [
       'input[type="search"]',
@@ -530,7 +557,10 @@ async function performSearchInteraction(page, route) {
       'input[placeholder*="search" i]',
     ]
     for (const selector of candidates) {
-      const input = page.locator(selector).first()
+      let input = routeRoot.locator(selector).first()
+      if (!(await input.count().catch(() => 0))) {
+        input = page.locator(selector).first()
+      }
       if (!(await input.count().catch(() => 0))) continue
       if (!(await input.isVisible().catch(() => false))) continue
       return input
@@ -540,7 +570,10 @@ async function performSearchInteraction(page, route) {
 
   let input = await findSearchInput()
   if (!input) {
-    const searchButton = await clickVisibleButton(page, 'Search')
+    let searchButton = await findButtonInLocator(routeRoot, 'Search')
+    if (!(await searchButton.count().catch(() => 0))) {
+      searchButton = await clickVisibleButton(page, 'Search')
+    }
     if (await searchButton.count().catch(() => 0)) {
       await clickWithFallback(searchButton, ACTION_TIMEOUT_MS).catch(() => {})
       await page.waitForTimeout(150)
