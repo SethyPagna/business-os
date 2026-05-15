@@ -40,7 +40,7 @@ export const ROUTE_MANIFEST = [
     scope: 'admin',
     path: '/pos',
     navLabel: 'Point of Sale',
-    ready: ['Point of Sale', 'POS', 'Cart'],
+    ready: ['Filters', 'AND', 'OR'],
     criticalApis: ['/api/products/search?page=1&pageSize=10&include=branch_stock,images,batches,family'],
     interactions: {
       search: true,
