@@ -18,6 +18,28 @@ let remoteBackupVersionCache = {
   at: 0,
   objects: [],
 }
+let backupVersionListCache = {
+  at: 0,
+  limit: 0,
+  versions: [],
+}
+
+function readCachedBackupVersions(limit) {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)))
+  const cacheFresh = backupVersionListCache.at
+    && (Date.now() - backupVersionListCache.at) < BACKUP_REMOTE_LIST_CACHE_MS
+  if (!cacheFresh) return null
+  if (!Array.isArray(backupVersionListCache.versions) || backupVersionListCache.versions.length < safeLimit) return null
+  return backupVersionListCache.versions.slice(0, safeLimit)
+}
+
+function writeCachedBackupVersions(limit, versions) {
+  backupVersionListCache = {
+    at: Date.now(),
+    limit: Math.max(1, Math.min(100, Number(limit || 50))),
+    versions: Array.isArray(versions) ? versions.map((entry) => ({ ...entry })) : [],
+  }
+}
 
 function getDb() {
   return require('../database').db
@@ -747,6 +769,8 @@ function listLocalBackupVersions({ limit = 50 } = {}) {
 
 async function listBackupVersions({ limit = 50, timeoutMs = 8000 } = {}) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)))
+  const cached = readCachedBackupVersions(safeLimit)
+  if (cached) return cached
   const versions = new Map()
   for (const local of listLocalBackupVersions({ limit: safeLimit })) {
     versions.set(local.packageId, local)
@@ -769,9 +793,11 @@ async function listBackupVersions({ limit = 50, timeoutMs = 8000 } = {}) {
     }
   } catch (error) {
     console.warn(`[Backup] R2 backup version listing unavailable: ${error?.message || error}`)
-    return Array.from(versions.values())
+    const localOnlyVersions = Array.from(versions.values())
       .sort((a, b) => String(b.packageId).localeCompare(String(a.packageId)))
       .slice(0, safeLimit)
+    writeCachedBackupVersions(safeLimit, localOnlyVersions)
+    return localOnlyVersions
   }
   objects.forEach((object) => {
     const match = String(object.key || '').match(/^backups\/([^/]+)\//)
@@ -784,9 +810,11 @@ async function listBackupVersions({ limit = 50, timeoutMs = 8000 } = {}) {
     current.updatedAt = object.lastModified || current.updatedAt
     versions.set(packageId, current)
   })
-  return Array.from(versions.values())
+  const finalVersions = Array.from(versions.values())
     .sort((a, b) => String(b.packageId).localeCompare(String(a.packageId)))
     .slice(0, safeLimit)
+  writeCachedBackupVersions(safeLimit, finalVersions)
+  return finalVersions
 }
 
 module.exports = {
