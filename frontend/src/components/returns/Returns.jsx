@@ -59,6 +59,11 @@ function exportReturnRows(rows = [], tr) {
   }))
 }
 
+function getInitialReturnPageSize() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 50
+  return window.matchMedia('(min-width: 1024px)').matches ? 32 : 50
+}
+
 export default function Returns() {
   const { t, fmtUSD, fmtKHR, notify } = useApp()
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -92,7 +97,7 @@ export default function Returns() {
   const [returnGroupMode, setReturnGroupMode] = useState('time')
   const [returnSortDirection, setReturnSortDirection] = useState('desc')
   const [returnPage, setReturnPage] = useState(1)
-  const [returnPageSize, setReturnPageSize] = useState(50)
+  const [returnPageSize, setReturnPageSize] = useState(() => getInitialReturnPageSize())
   const [collapsedReturnSections, setCollapsedReturnSections] = useState(() => new Set())
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
