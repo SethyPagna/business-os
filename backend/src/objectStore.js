@@ -112,7 +112,9 @@ async function cloudflareR2ApiRequest(method, key = '', options = {}) {
     }
     if (!response.ok) {
       const message = await response.text().catch(() => '')
-      throw new Error(`Cloudflare R2 API ${method} ${normalizeObjectKey(key) || 'objects'} failed (${response.status}): ${message.slice(0, 240)}`)
+      const error = new Error(`Cloudflare R2 API ${method} ${normalizeObjectKey(key) || 'objects'} failed (${response.status}): ${message.slice(0, 240)}`)
+      error.status = response.status
+      throw error
     }
     return response
   } finally {
@@ -128,6 +130,16 @@ function shouldFallbackToR2Api(error) {
     || status === 403
     || status === 404
     || /Unauthorized|Forbidden|UnknownError|bucket .*not reachable|Credential access key/i.test(message)
+}
+
+function isMissingObjectError(error) {
+  const status = Number(error?.$metadata?.httpStatusCode || error?.statusCode || error?.status || 0)
+  const code = String(error?.Code || error?.code || error?.name || '').trim()
+  const message = String(error?.message || '').trim()
+  return status === 404
+    || code === 'NotFound'
+    || code === 'NoSuchKey'
+    || /NotFound|NoSuchKey|does not exist|failed \(404\)/i.test(message)
 }
 
 function getS3Client() {
@@ -248,6 +260,39 @@ async function getObjectStream(key) {
     body: result.Body,
     contentType: result.ContentType || 'application/octet-stream',
     contentLength: result.ContentLength || null,
+  }
+}
+
+async function objectExists(key) {
+  if (!isObjectStorageEnabled()) return false
+  const normalizedKey = normalizeObjectKey(key)
+  if (!normalizedKey) return false
+  if (canUseCloudflareR2Api()) {
+    try {
+      await cloudflareR2ApiRequest('HEAD', normalizedKey, { timeoutMs: 8000 })
+      return true
+    } catch (error) {
+      if (isMissingObjectError(error)) return false
+      throw error
+    }
+  }
+  const { HeadObjectCommand } = require('@aws-sdk/client-s3')
+  try {
+    await sendWithTimeout(new HeadObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: normalizedKey,
+    }), { timeoutMs: 8000 })
+    return true
+  } catch (error) {
+    if (isMissingObjectError(error)) return false
+    if (!shouldFallbackToR2Api(error)) throw error
+    try {
+      await cloudflareR2ApiRequest('HEAD', normalizedKey, { timeoutMs: 8000 })
+      return true
+    } catch (fallbackError) {
+      if (isMissingObjectError(fallbackError)) return false
+      throw fallbackError
+    }
   }
 }
 
@@ -383,6 +428,7 @@ module.exports = {
   getObjectStorageDriver,
   getObjectStream,
   isObjectStorageEnabled,
+  objectExists,
   isMinioEnabled,
   isR2Enabled,
   listObjects,
