@@ -232,6 +232,7 @@ export default function Products() {
   const [collapsedProductSections, setCollapsedProductSections] = useState(() => new Set())
   const [collapsedProductGroups, setCollapsedProductGroups] = useState(() => new Set())
   const [initialDesktopRevealReady, setInitialDesktopRevealReady] = useState(false)
+  const [isProductFilterMenuOpen, setIsProductFilterMenuOpen] = useState(false)
   const loadedOnceRef = useRef(false)
   const auxOptionsLoadedRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -1557,7 +1558,9 @@ export default function Products() {
     }
   }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
 
-  const productFilterSections = useMemo(() => ([
+  const productFilterSections = useMemo(() => {
+    if (!isProductFilterMenuOpen) return []
+    return [
     {
       id: 'sort',
       label: t('sort') || 'Sort',
@@ -1667,7 +1670,8 @@ export default function Products() {
         })),
       ],
     } : null,
-  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t, tr])
+  ].filter(Boolean)
+  }, [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, isProductFilterMenuOpen, productSortDirection, stockFilter, supplierFilter, suppliers, t, tr])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
@@ -1927,6 +1931,7 @@ export default function Products() {
             activeCount={activeFilters}
             sections={productFilterSections}
             onClear={clearAllFilters}
+            onOpenChange={setIsProductFilterMenuOpen}
             compact
           />
         </div>
