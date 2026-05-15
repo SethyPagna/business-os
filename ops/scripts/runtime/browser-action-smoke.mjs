@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { chromium } from 'playwright'
-import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles } from './audit-manifest.mjs'
+import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles, resolveAuditRoutes } from './audit-manifest.mjs'
 import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from './audit-auth.mjs'
 import { writeBrowserActionHtmlReport } from './audit-report-html.mjs'
 
@@ -19,7 +19,6 @@ const REPORT_DIR = process.env.BOS_BROWSER_ACTION_REPORT_DIR
   : path.join(ROOT_DIR, 'ops/runtime/reports', `browser-action-smoke-${TIMESTAMP}`)
 const SCREENSHOT_DIR = path.join(REPORT_DIR, 'screenshots')
 const PROFILES = getAuditProfiles(PROFILE)
-const ROUTES = [...ADMIN_ROUTES, ...PUBLIC_ROUTES]
 const ROUTE_READY_TIMEOUT_MS = 15_000
 const ACTION_TIMEOUT_MS = 2_500
 const SETTLE_WAIT_MS = 200
@@ -45,6 +44,22 @@ function readArg(name) {
   if (index >= 0) return process.argv[index + 1] || ''
   const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`))
   return prefixed ? prefixed.slice(name.length + 1) : ''
+}
+
+function readArgs(name) {
+  const values = []
+  for (let index = 0; index < process.argv.length; index += 1) {
+    const arg = process.argv[index]
+    if (arg === name) {
+      values.push(process.argv[index + 1] || '')
+      index += 1
+      continue
+    }
+    if (arg.startsWith(`${name}=`)) {
+      values.push(arg.slice(name.length + 1))
+    }
+  }
+  return values
 }
 
 function safeName(value) {
@@ -356,7 +371,8 @@ async function navigateViaUi(page, route, profileName) {
     const pathOk = expectedPath === '/' ? fallback.pathname === '/' : fallback.pathname.startsWith(expectedPath)
     const pageOk = expectedPage ? fallback.activePage === expectedPage : true
     const textOk = fallback.activeText.length >= 24 && !/\bLoading\.\.\./i.test(fallback.activeText)
-    if (pathOk && pageOk && textOk) {
+    const routeOk = route.scope === 'admin' ? (pageOk && textOk) : (pathOk && pageOk && textOk)
+    if (routeOk) {
       return {
         ok: true,
         ms: navMs,
@@ -371,14 +387,25 @@ async function navigateViaUi(page, route, profileName) {
       reason: error?.message || String(error),
     }
   }
-  const pathname = new URL(page.url()).pathname
+  const verification = await page.evaluate(() => {
+    const active = document.querySelector('[data-bos-active-page="true"]')
+    return {
+      pathname: window.location.pathname,
+      activePage: active?.getAttribute('data-bos-page-slot') || '',
+      activeText: (active?.innerText || '').trim(),
+    }
+  }).catch(() => ({ pathname: '', activePage: '', activeText: '' }))
+  const pathname = verification.pathname || new URL(page.url()).pathname
   const expectedPath = route.path || '/'
   const pathOk = expectedPath === '/' ? pathname === '/' : pathname.startsWith(expectedPath)
+  const expectedPage = route.name === 'public_catalog' ? '' : route.name
+  const pageOk = expectedPage ? verification.activePage === expectedPage : true
+  const routeOk = route.scope === 'admin' ? pageOk : pathOk
   return {
-    ok: pathOk,
+    ok: routeOk,
     ms: navMs,
     readyMs,
-    reason: pathOk ? '' : `Unexpected pathname ${pathname}`,
+    reason: routeOk ? '' : `Unexpected route state ${pathname} :: ${verification.activePage}`,
   }
 }
 
@@ -649,10 +676,15 @@ async function bootstrapProfile(profile) {
 }
 
 async function runProfile(profile) {
+  const routeSelection = resolveAuditRoutes(readArgs('--route'))
+  if (routeSelection.unknownRoutes.length) {
+    throw new Error(`Unknown browser action route(s): ${routeSelection.unknownRoutes.join(', ')}`)
+  }
+  const routes = [...routeSelection.adminRoutes, ...routeSelection.publicRoutes]
   const { browser, context, page } = await bootstrapProfile(profile)
   const consoleEntries = await attachConsoleCapture(page)
   try {
-    for (const route of ROUTES) {
+    for (const route of routes) {
       if (!route.navLabel) continue
       const nav = await navigateViaUi(page, route, profile.name)
       const screenshot = await saveScreenshot(page, `${profile.name}-${route.name}`)
