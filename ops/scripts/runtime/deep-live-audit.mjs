@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { spawn } from 'node:child_process'
 import { chromium } from 'playwright'
-import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles } from './audit-manifest.mjs'
+import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles, resolveAuditRoutes } from './audit-manifest.mjs'
 import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from './audit-auth.mjs'
 import { writeDeepAuditHtmlReport } from './audit-report-html.mjs'
 
@@ -73,6 +73,22 @@ function readArg(name) {
   if (index >= 0) return process.argv[index + 1] || ''
   const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`))
   return prefixed ? prefixed.slice(name.length + 1) : ''
+}
+
+function readArgs(name) {
+  const values = []
+  for (let index = 0; index < process.argv.length; index += 1) {
+    const arg = process.argv[index]
+    if (arg === name) {
+      values.push(process.argv[index + 1] || '')
+      index += 1
+      continue
+    }
+    if (arg.startsWith(`${name}=`)) {
+      values.push(arg.slice(name.length + 1))
+    }
+  }
+  return values
 }
 
 function safeName(value) {
@@ -1151,6 +1167,12 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
 }
 
 async function auditBrowserProfile(profile) {
+  const routeSelection = resolveAuditRoutes(readArgs('--route'))
+  if (routeSelection.unknownRoutes.length) {
+    throw new Error(`Unknown audit route(s): ${routeSelection.unknownRoutes.join(', ')}`)
+  }
+  const adminRoutes = routeSelection.adminRoutes
+  const publicRoutes = routeSelection.publicRoutes
   const { browser, createContext } = await createBrowserHarness(profile)
   const profileResult = {
     routes: [],
@@ -1170,7 +1192,7 @@ async function auditBrowserProfile(profile) {
     await hydratePlaywrightPage(bootstrapPage, { ...bootstrapAuthState, baseUrl: BASE_URL })
     await bootstrapPage.goto(`${BASE_URL}/?__bos_deep_login=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await ensureAuditLogin(bootstrapPage, bootstrapAuthState)
-    await waitForRouteReady(bootstrapPage, ADMIN_ROUTES[0])
+    await waitForRouteReady(bootstrapPage, adminRoutes[0] || ADMIN_ROUTES[0])
     await saveScreenshot(bootstrapPage, `${profile.name}-login-complete`)
     await bootstrapPage.close().catch(() => {})
     await bootstrapContext.close().catch(() => {})
@@ -1196,10 +1218,10 @@ async function auditBrowserProfile(profile) {
         }
       }
     }
-    for (const route of ADMIN_ROUTES) {
+    for (const route of adminRoutes) {
       profileResult.routes.push(await runIsolatedRoute(route, true))
     }
-    for (const route of PUBLIC_ROUTES) {
+    for (const route of publicRoutes) {
       profileResult.routes.push(await runIsolatedRoute(route, false))
     }
   } finally {
