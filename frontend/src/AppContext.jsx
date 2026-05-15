@@ -8,6 +8,7 @@ import './web-api.js'
 import { cacheClearAll, FRONTEND_BUILD_INFO, isCloudflareAccessRedirectResponse, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.js'
 import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
 import { isWSConnected, reconnectWS } from './api/websocket.js'
+import { APP_NAVIGATION_EVENT, getAdminPathForPage } from './app/appShellUtils.mjs'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
 import { parsePermissionMap } from './utils/permissions.js'
 import { normalizePriceValue } from './utils/pricing.js'
@@ -1351,7 +1352,20 @@ export function AppProvider({ children, publicMode = false }) {
   }, [user, hasPermission])
 
   const navigateTo = useCallback((pageId) => {
-    if (canAccessPage(pageId)) setPage(pageId)
+    if (!canAccessPage(pageId)) return
+    setPage(pageId)
+    if (typeof window === 'undefined') return
+    const nextPath = getAdminPathForPage(pageId)
+    const currentUrl = new URL(window.location.href)
+    if (currentUrl.pathname !== nextPath) {
+      window.history.pushState(window.history.state, '', `${nextPath}${currentUrl.search}${currentUrl.hash}`)
+    }
+    window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
+      detail: {
+        page: pageId,
+        path: nextPath,
+      },
+    }))
   }, [canAccessPage])
 
   // ?? Currency ??????????????????????????????????????????????????????????????
@@ -1496,4 +1510,3 @@ export const useT = (keys = []) => {
     return map
   }, [tfn, keys.join('|')])
 }
-
