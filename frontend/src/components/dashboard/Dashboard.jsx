@@ -506,7 +506,7 @@ export default function Dashboard() {
     })
   }, [fmtUSD, translateOr])
 
-  const periodKpis = [
+  const periodKpis = useMemo(() => ([
       {
         id: 'products',
         label: translateOr('products', 'Products'),
@@ -616,7 +616,53 @@ export default function Dashboard() {
         { label: translateOr('formula', 'Formula'), value: returnsFormulaText },
       ],
     },
-  ]
+  ]), [
+    aCost,
+    aDelivery,
+    aDiscounts,
+    aGrossSales,
+    aItemsRet,
+    aMemberDiscounts,
+    aPrevRevenue,
+    aPrevTxCount,
+    aProfit,
+    aRefundUsd,
+    aReturns,
+    aRevenue,
+    aStockValue,
+    aStoreDiscounts,
+    aSupplierLossUsd,
+    aSupplierReturns,
+    aTax,
+    aTxCount,
+    avgOrderFormulaText,
+    cogsFormulaText,
+    collectedExampleText,
+    collectedFormulaText,
+    fmtUSD,
+    grossShortLabel,
+    itemsShortLabel,
+    lowShortLabel,
+    lowStockCount,
+    marginShortLabel,
+    matchStockShortLabel,
+    memberShortLabel,
+    outOfStockCount,
+    outShortLabel,
+    profitFormulaText,
+    refundShortLabel,
+    returnsFormulaText,
+    revenueExampleText,
+    revenueFormulaText,
+    saleShortLabel,
+    stockValueFormulaText,
+    storeDiscountFormulaText,
+    summary?.expiring_count,
+    summary?.expiring_products?.length,
+    summary?.in_stock_count,
+    summary?.product_count,
+    translateOr,
+  ])
 
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
