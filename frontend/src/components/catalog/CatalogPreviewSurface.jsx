@@ -53,6 +53,13 @@ export default function CatalogPreviewSurface({
       const target = publicPortalNavRef?.current || previewSectionRef?.current
       if (!target) return
       const rect = target.getBoundingClientRect()
+      const mobileViewport = window.innerWidth < 640
+      if (mobileViewport) {
+        const topPadding = 4
+        const bottomPadding = Math.min(96, Math.round(window.innerHeight * 0.18))
+        const alreadyInView = rect.top >= topPadding && rect.bottom <= window.innerHeight - bottomPadding
+        if (alreadyInView) return
+      }
       const top = Math.max(0, window.scrollY + rect.top - (window.innerWidth >= 640 ? 12 : 4))
       window.scrollTo({ top, behavior: 'auto' })
     })
