@@ -33,6 +33,7 @@ import FilterPanel from './FilterPanel'
 import PaginationControls from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
+  buildPosFilterMeta,
   buildProductsById,
   buildVariantChildrenByParentId,
   buildVisibleProductCards,
@@ -50,7 +51,6 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
-import { aggregateInitialOptions } from '../../utils/initials.mjs'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
@@ -252,11 +252,13 @@ export default function POS() {
 
   const searchRef = useRef()
   const catalogRequestRef = useRef(0)
+  const productFilterRequestRef = useRef(0)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const membershipRequestRef = useRef(0)
   const savingCustomerRef = useRef(false)
   const savingDeliveryRef = useRef(false)
+  const globalProductFilterMetaLoadedRef = useRef(false)
   const checkoutInFlightRef = useRef(false)
   const taxRate   = parseFloat(settings.tax_rate || '0') / 100
   const redeemPointsStep = Math.max(1, parseInt(settings.customer_portal_redeem_points || '100', 10) || 100)
@@ -310,12 +312,11 @@ export default function POS() {
         sort: 'name_asc',
         include: 'branch_stock,images,family',
       }
-      const [productPayload, cats, brs, filterPayload] = await withLoaderTimeout(
+      const [productPayload, cats, brs] = await withLoaderTimeout(
         () => Promise.all([
           window.api.searchProducts(productQuery),
           window.api.getCategories(),
           window.api.getBranches(),
-          window.api.getProductFilters({}),
         ]),
         label,
       )
@@ -325,12 +326,11 @@ export default function POS() {
         : (Array.isArray(productPayload) ? productPayload : [])
       applyCatalogData(prods, cats, brs)
       setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
-      const filters = filterPayload || productPayload?.filters || {}
-      setProductFilterMeta({
-        brands: Array.isArray(filters?.brands) ? filters.brands : [],
-        suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
-        initials: aggregateInitialOptions(filters?.initials || productPayload?.initials || []),
-      })
+      setProductFilterMeta((current) => (
+        globalProductFilterMetaLoadedRef.current
+          ? current
+          : buildPosFilterMeta(productPayload?.filters || {}, productPayload?.initials || [])
+      ))
       return { prods, cats, brs }
     } catch (error) {
       if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
@@ -342,6 +342,22 @@ export default function POS() {
       }
     }
   }, [applyCatalogData, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, hasProductDiscoveryQuery, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
+
+  const loadGlobalProductFilterMeta = useCallback(async (label = 'POS product filters') => {
+    if (globalProductFilterMetaLoadedRef.current) return null
+    const requestId = beginTrackedRequest(productFilterRequestRef)
+    try {
+      const filters = await withLoaderTimeout(() => window.api.getProductFilters({}), label)
+      if (!isTrackedRequestCurrent(productFilterRequestRef, requestId)) return null
+      setProductFilterMeta(buildPosFilterMeta(filters || {}))
+      globalProductFilterMetaLoadedRef.current = true
+      return filters
+    } catch (error) {
+      if (!isTrackedRequestCurrent(productFilterRequestRef, requestId)) return null
+      console.error('[POS] product filter load failed:', error.message)
+      return null
+    }
+  }, [])
 
   const loadCustomers = useCallback(async (label = 'POS customers') => {
     const requestId = beginTrackedRequest(customerRequestRef)
@@ -408,6 +424,7 @@ export default function POS() {
   useEffect(() => {
     if (!isActive) {
       invalidateTrackedRequest(catalogRequestRef)
+      invalidateTrackedRequest(productFilterRequestRef)
       invalidateTrackedRequest(customerRequestRef)
       invalidateTrackedRequest(deliveryRequestRef)
       invalidateTrackedRequest(membershipRequestRef)
@@ -427,12 +444,21 @@ export default function POS() {
     ])
   }, [isActive, loadCustomers, loadDeliveryContacts])
 
+  useEffect(() => {
+    if (!isActive || !filterOpen || globalProductFilterMetaLoadedRef.current) return
+    void loadGlobalProductFilterMeta()
+  }, [filterOpen, isActive, loadGlobalProductFilterMeta])
+
   // ?�?� Sync-push: reload when another device changes data ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   useEffect(() => {
     if (!isActive || !syncChannel) return
     const { channel } = syncChannel
     if (channel === 'products' || channel === 'branches' || channel === 'categories') {
+      globalProductFilterMetaLoadedRef.current = false
       void loadCatalogData('POS sync catalog')
+      if (filterOpen) {
+        void loadGlobalProductFilterMeta('POS sync product filters')
+      }
     }
     if (channel === 'customers') {
       void loadCustomers('POS sync customers')
@@ -440,10 +466,11 @@ export default function POS() {
     if (channel === 'deliveryContacts') {
       void loadDeliveryContacts('POS sync delivery contacts')
     }
-  }, [isActive, loadCatalogData, loadCustomers, loadDeliveryContacts, syncChannel])
+  }, [filterOpen, isActive, loadCatalogData, loadCustomers, loadDeliveryContacts, loadGlobalProductFilterMeta, syncChannel])
 
   useEffect(() => () => {
     invalidateTrackedRequest(catalogRequestRef)
+    invalidateTrackedRequest(productFilterRequestRef)
     invalidateTrackedRequest(customerRequestRef)
     invalidateTrackedRequest(deliveryRequestRef)
     invalidateTrackedRequest(membershipRequestRef)
@@ -672,7 +699,7 @@ export default function POS() {
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
   }, [productFilterMeta.brands, settings?.product_brand_options])
   const initialOptions = useMemo(
-    () => aggregateInitialOptions(productFilterMeta.initials || []),
+    () => productFilterMeta.initials || [],
     [productFilterMeta.initials],
   )
 
