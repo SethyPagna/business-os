@@ -71,13 +71,17 @@ runTest('product updates only re-check uniqueness when identifier fields actuall
   assert.match(source, /if \(nameChanged \|\| skuChanged \|\| barcodeChanged\) \{[\s\S]*checkName: nameChanged,[\s\S]*checkSku: skuChanged,[\s\S]*checkBarcode: barcodeChanged,/m, 'product updates should only validate the identifier fields that were actually edited')
 })
 
-runTest('upload path sanitization keeps canonical R2-backed media references intact', () => {
+runTest('upload path sanitization verifies object-storage references before serving them', () => {
   const snapshotSource = readSource('src/settingsSnapshot.js')
+  const cleanupSource = readSource('src/uploadReferenceCleanup.js')
   const assetSource = readSource('src/fileAssets.js')
 
-  assert.match(snapshotSource, /const \{ isObjectStorageEnabled \} = require\('\.\/objectStore'\)/, 'settings snapshot sanitization should know when object storage is enabled')
-  assert.match(snapshotSource, /if \(isObjectStorageEnabled\(\)\) return normalized/, 'upload sanitization should keep canonical upload paths when R2/object storage is enabled')
+  assert.match(snapshotSource, /const \{ isObjectStorageEnabled, objectExists \} = require\('\.\/objectStore'\)/, 'settings snapshot sanitization should know when object storage is enabled and how to verify object existence')
+  assert.match(snapshotSource, /async function sanitizeMediaPathAsync/, 'settings snapshot sanitization should expose an async object-storage-aware path check')
+  assert.match(snapshotSource, /await objectExists\(toUploadObjectKey\(normalized\)\)/, 'object-storage media paths should be verified before they are returned')
   assert.match(snapshotSource, /const \[cleanPath\] = raw\.split\(\/\[\?#\]\/, 1\)/, 'upload sanitization should strip cache-busting query strings from persisted upload paths')
+  assert.match(cleanupSource, /async function repairMissingUploadReferencesAsync/, 'upload reference cleanup should support async object-storage-aware repairs')
+  assert.match(assetSource, /await repairMissingUploadReferencesAsync\(getDb\(\)\)/, 'file asset warmup and reconcile paths should await async upload reference repair')
   assert.match(assetSource, /function ensureReferencedAssetsRegistered\(\)/, 'file assets should rebuild missing library rows from persisted references')
   assert.match(assetSource, /source: 'reference_backfill'/, 'recovered file assets should be marked as reference backfills')
 })
