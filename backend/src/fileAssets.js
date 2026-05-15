@@ -52,6 +52,9 @@ let lastUploadStorageReconcileAt = 0
 let fileAssetListingWarmPromise = null
 let lastFileAssetListingWarmAt = 0
 const FILE_ASSET_LISTING_WARM_TTL_MS = 15 * 60 * 1000
+const FILE_USAGE_REFERENCE_CACHE_TTL_MS = 15 * 1000
+let cachedSettingsUsageReferences = { builtAt: 0, usageMap: null }
+let cachedSubmissionUsageReferences = { builtAt: 0, usageMap: null }
 
 function getDb() {
   return require('./database').db
@@ -734,6 +737,8 @@ async function prewarmFileAssetListing() {
   if (isObjectStorageEnabled()) {
     await requestUploadStorageReconcile()
   }
+  getCachedSettingsUsageReferences({ force: true })
+  getCachedSubmissionUsageReferences({ force: true })
   serializeAssetRows(listAssetRows('', 'all', { limit: 24, offset: 0 }))
   countAssetRows('', 'all')
 }
@@ -763,7 +768,78 @@ function buildInClausePlaceholders(values = []) {
   return values.map(() => '?').join(', ')
 }
 
-function collectUsagesByPublicPath(publicPaths = []) {
+function buildUploadReferenceUsageMap(rows = [], {
+  valueSelector,
+  buildUsage,
+} = {}) {
+  const usageMap = new Map()
+  const safeRows = Array.isArray(rows) ? rows : []
+  safeRows.forEach((row) => {
+    const referenced = new Set()
+    collectUploadPathsFromValue(valueSelector ? valueSelector(row) : '', referenced)
+    if (!referenced.size) return
+    const usage = buildUsage ? buildUsage(row) : null
+    if (!usage) return
+    referenced.forEach((publicPath) => {
+      const key = String(publicPath || '').trim()
+      if (!key) return
+      if (!usageMap.has(key)) usageMap.set(key, [])
+      usageMap.get(key).push(usage)
+    })
+  })
+  return usageMap
+}
+
+function getCachedSettingsUsageReferences({ force = false } = {}) {
+  const now = Date.now()
+  if (!force && cachedSettingsUsageReferences.usageMap && (now - cachedSettingsUsageReferences.builtAt) < FILE_USAGE_REFERENCE_CACHE_TTL_MS) {
+    return cachedSettingsUsageReferences.usageMap
+  }
+  const rows = getDb().prepare(`
+    SELECT key, value
+    FROM settings
+    WHERE value IS NOT NULL AND trim(value) != '' AND value LIKE '%/uploads/%'
+  `).all()
+  cachedSettingsUsageReferences = {
+    builtAt: now,
+    usageMap: buildUploadReferenceUsageMap(rows, {
+      valueSelector: (row) => row?.value,
+      buildUsage: (row) => ({ type: 'settings', label: row?.key }),
+    }),
+  }
+  return cachedSettingsUsageReferences.usageMap
+}
+
+function getCachedSubmissionUsageReferences({ force = false } = {}) {
+  const now = Date.now()
+  if (!force && cachedSubmissionUsageReferences.usageMap && (now - cachedSubmissionUsageReferences.builtAt) < FILE_USAGE_REFERENCE_CACHE_TTL_MS) {
+    return cachedSubmissionUsageReferences.usageMap
+  }
+  const rows = getDb().prepare(`
+    SELECT id, screenshots_json
+    FROM customer_share_submissions
+    WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != '' AND screenshots_json LIKE '%/uploads/%'
+  `).all()
+  cachedSubmissionUsageReferences = {
+    builtAt: now,
+    usageMap: buildUploadReferenceUsageMap(rows, {
+      valueSelector: (row) => row?.screenshots_json,
+      buildUsage: (row) => ({ type: 'submission', label: `Submission #${row?.id}` }),
+    }),
+  }
+  return cachedSubmissionUsageReferences.usageMap
+}
+
+function mergeUsageReferences(targetMap, requestedPaths, sourceMap) {
+  if (!(targetMap instanceof Map) || !(requestedPaths instanceof Set) || !(sourceMap instanceof Map)) return
+  requestedPaths.forEach((publicPath) => {
+    const matches = sourceMap.get(publicPath)
+    if (!matches?.length || !targetMap.has(publicPath)) return
+    targetMap.get(publicPath).push(...matches)
+  })
+}
+
+function collectUsagesByPublicPath(publicPaths = [], { useCache = true } = {}) {
   const uniquePaths = [...new Set((Array.isArray(publicPaths) ? publicPaths : [])
     .map((value) => String(value || '').trim())
     .filter(Boolean))]
@@ -780,19 +856,38 @@ function collectUsagesByPublicPath(publicPaths = []) {
   const db = getDb()
   const placeholders = buildInClausePlaceholders(uniquePaths)
 
-  db.prepare(`
-    SELECT key, value
-    FROM settings
-    WHERE value IS NOT NULL AND trim(value) != '' AND value LIKE '%/uploads/%'
-  `).all().forEach((row) => {
-    const referenced = new Set()
-    collectUploadPathsFromValue(row?.value, referenced)
-    referenced.forEach((publicPath) => {
-      if (requestedPaths.has(publicPath)) {
-        addUsage(publicPath, { type: 'settings', label: row.key })
-      }
+  if (useCache) {
+    mergeUsageReferences(usageMap, requestedPaths, getCachedSettingsUsageReferences())
+    mergeUsageReferences(usageMap, requestedPaths, getCachedSubmissionUsageReferences())
+  } else {
+    db.prepare(`
+      SELECT key, value
+      FROM settings
+      WHERE value IS NOT NULL AND trim(value) != '' AND value LIKE '%/uploads/%'
+    `).all().forEach((row) => {
+      const referenced = new Set()
+      collectUploadPathsFromValue(row?.value, referenced)
+      referenced.forEach((publicPath) => {
+        if (requestedPaths.has(publicPath)) {
+          addUsage(publicPath, { type: 'settings', label: row.key })
+        }
+      })
     })
-  })
+
+    db.prepare(`
+      SELECT id, screenshots_json
+      FROM customer_share_submissions
+      WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != '' AND screenshots_json LIKE '%/uploads/%'
+    `).all().forEach((row) => {
+      const referenced = new Set()
+      collectUploadPathsFromValue(row?.screenshots_json, referenced)
+      referenced.forEach((publicPath) => {
+        if (requestedPaths.has(publicPath)) {
+          addUsage(publicPath, { type: 'submission', label: `Submission #${row.id}` })
+        }
+      })
+    })
+  }
 
   db.prepare(`
     SELECT id, name, image_path
@@ -819,25 +914,11 @@ function collectUsagesByPublicPath(publicPaths = []) {
     addUsage(row.avatar_path, { type: 'user_avatar', label: row.name || row.username || `User #${row.id}` })
   })
 
-  db.prepare(`
-    SELECT id, screenshots_json
-    FROM customer_share_submissions
-    WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != '' AND screenshots_json LIKE '%/uploads/%'
-  `).all().forEach((row) => {
-    const referenced = new Set()
-    collectUploadPathsFromValue(row?.screenshots_json, referenced)
-    referenced.forEach((publicPath) => {
-      if (requestedPaths.has(publicPath)) {
-        addUsage(publicPath, { type: 'submission', label: `Submission #${row.id}` })
-      }
-    })
-  })
-
   return usageMap
 }
 
-function collectUsage(publicPath) {
-  return collectUsagesByPublicPath([publicPath]).get(String(publicPath || '').trim()) || []
+function collectUsage(publicPath, options = {}) {
+  return collectUsagesByPublicPath([publicPath], options).get(String(publicPath || '').trim()) || []
 }
 
 function resolveBrowserPublicPath(publicPath = '') {
@@ -847,11 +928,11 @@ function resolveBrowserPublicPath(publicPath = '') {
   return base ? `${base}${normalized}` : normalized
 }
 
-function serializeAssetRow(row = {}, usageMap = null) {
+function serializeAssetRow(row = {}, usageMap = null, options = {}) {
   const { total_count, ...assetRow } = row || {}
   const usages = usageMap instanceof Map
     ? (usageMap.get(String(assetRow.public_path || '').trim()) || [])
-    : collectUsage(assetRow.public_path)
+    : collectUsage(assetRow.public_path, options)
   return {
     ...assetRow,
     browser_public_path: resolveBrowserPublicPath(assetRow.public_path),
@@ -861,10 +942,10 @@ function serializeAssetRow(row = {}, usageMap = null) {
   }
 }
 
-function serializeAssetRows(rows = []) {
+function serializeAssetRows(rows = [], options = {}) {
   const safeRows = Array.isArray(rows) ? rows : []
-  const usageMap = collectUsagesByPublicPath(safeRows.map((row) => row?.public_path))
-  return safeRows.map((row) => serializeAssetRow(row, usageMap))
+  const usageMap = collectUsagesByPublicPath(safeRows.map((row) => row?.public_path), options)
+  return safeRows.map((row) => serializeAssetRow(row, usageMap, options))
 }
 
 async function registerStoredAsset({
@@ -1060,7 +1141,7 @@ async function listFileAssets({ search = '', mediaType = 'all', page = 1, pageSi
 
 function getFileAssetById(id) {
   const row = getDb().prepare('SELECT * FROM file_assets WHERE id = ? LIMIT 1').get(id)
-  return row ? serializeAssetRow(row) : null
+  return row ? serializeAssetRow(row, null, { useCache: false }) : null
 }
 
 async function deleteFileAsset(id) {
@@ -1078,8 +1159,14 @@ async function deleteFileAsset(id) {
 
 module.exports = {
   MAX_IMAGE_ASSET_BYTES,
+  __resetFileUsageReferenceCaches: () => {
+    cachedSettingsUsageReferences = { builtAt: 0, usageMap: null }
+    cachedSubmissionUsageReferences = { builtAt: 0, usageMap: null }
+  },
+  buildUploadReferenceUsageMap,
   buildVideoOptimizationArgs,
   buildUniqueStoredName,
+  collectUsagesByPublicPath,
   compressBufferForAsset,
   getFileAssetById,
   getFileAssetByPublicPath,
