@@ -60,7 +60,7 @@ const {
   getOrganizationContextForUser,
   ensureOrganizationFilesystemLayout,
 } = require('../organizationContext')
-const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
+const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
 const { classifyRequestAccess } = require('../accessControl')
 const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL, R2_PUBLIC_BASE_URL } = require('../config')
 const { buildRuntimeDescriptor } = require('../runtimeState')
@@ -363,13 +363,13 @@ function getUserById(userId) {
   return db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
 }
 
-function getSettingsSnapshot() {
+async function getSettingsSnapshot() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const settings = {}
   rows.forEach((row) => {
     settings[row.key] = row.value
   })
-  return sanitizeSettingsSnapshot(settings)
+  return sanitizeSettingsSnapshotAsync(settings)
 }
 
 function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
@@ -404,7 +404,7 @@ function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
   }
 }
 
-function buildAuthenticatedBootstrap(req, userId) {
+async function buildAuthenticatedBootstrap(req, userId) {
   const actor = getUserById(userId)
   if (!actor) return null
 
@@ -424,7 +424,7 @@ function buildAuthenticatedBootstrap(req, userId) {
 
   return {
     user,
-    settings: getSettingsSnapshot(),
+    settings: await getSettingsSnapshot(),
     organizationCreationEnabled: false,
     organization,
     group,
@@ -490,10 +490,10 @@ router.get('/verification-capabilities', (_req, res) => {
   })
 })
 
-router.get('/bootstrap', authToken, (req, res) => {
+router.get('/bootstrap', authToken, async (req, res) => {
   const actorId = Number(req.user?.id || 0)
   if (!actorId) return err(res, 'Please sign in again to continue.', 401)
-  const payload = buildAuthenticatedBootstrap(req, actorId)
+  const payload = await buildAuthenticatedBootstrap(req, actorId)
   if (!payload) return err(res, 'Unable to build session bootstrap.', 404)
   return ok(res, payload)
 })
