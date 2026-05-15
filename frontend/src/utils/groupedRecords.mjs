@@ -111,18 +111,19 @@ export function buildTimeActionSections(items = [], {
   sortDirection = 'desc',
 } = {}) {
   const sections = new Map()
-  const getSortTime = (item) => {
-    const parsed = toDate(getDate(item))
-    return parsed?.getTime?.() || 0
-  }
+  const itemMeta = new Map()
   const normalizedSortDirection = sortDirection === 'asc' ? 'asc' : 'desc'
   const compareItemsByTime = (left, right) => {
+    const leftMeta = itemMeta.get(left) || {}
+    const rightMeta = itemMeta.get(right) || {}
+    const leftTime = Number(leftMeta.sortTime || 0)
+    const rightTime = Number(rightMeta.sortTime || 0)
     const timeDelta = normalizedSortDirection === 'asc'
-      ? getSortTime(left) - getSortTime(right)
-      : getSortTime(right) - getSortTime(left)
+      ? leftTime - rightTime
+      : rightTime - leftTime
     if (timeDelta !== 0) return timeDelta
-    const leftId = Number(getItemId(left) || 0)
-    const rightId = Number(getItemId(right) || 0)
+    const leftId = Number((leftMeta.itemId ?? getItemId(left)) || 0)
+    const rightId = Number((rightMeta.itemId ?? getItemId(right)) || 0)
     return normalizedSortDirection === 'asc'
       ? leftId - rightId
       : rightId - leftId
@@ -131,9 +132,12 @@ export function buildTimeActionSections(items = [], {
 
   for (const item of Array.isArray(items) ? items : []) {
     const dateValue = getDate(item)
-    if (!matchesYearMonthFilters(dateValue, { year, month })) continue
-
     const parts = getTimeParts(dateValue)
+    if (year !== 'all' && parts.yearLabel !== String(year)) continue
+    if (month !== 'all' && String(parts.month || '') !== String(month)) continue
+    const itemId = getItemId(item)
+    const itemSortTime = parts.date?.getTime?.() || 0
+    if (item && typeof item === 'object') itemMeta.set(item, { itemId, sortTime: itemSortTime })
     const normalizedTimeMode = timeMode === 'day' ? 'day' : (timeMode === 'year' ? 'year' : 'month')
     const sectionId = normalizedTimeMode === 'year'
       ? parts.yearLabel
@@ -151,15 +155,15 @@ export function buildTimeActionSections(items = [], {
     const currentSection = sections.get(sectionId) || {
       id: sectionId,
       label: sectionLabel,
-      sortTime: parts.date?.getTime?.() || 0,
+      sortTime: itemSortTime,
       ids: [],
       groups: new Map(),
     }
 
-    currentSection.ids.push(getItemId(item))
+    currentSection.ids.push(itemId)
     currentSection.items = currentSection.items || []
     currentSection.items.push(item)
-    currentSection.sortTime = Math.max(currentSection.sortTime, parts.date?.getTime?.() || 0)
+    currentSection.sortTime = Math.max(currentSection.sortTime, itemSortTime)
 
     if (normalizedGroupMode === 'time+action') {
       const currentGroup = currentSection.groups.get(actionKey) || {
@@ -171,9 +175,9 @@ export function buildTimeActionSections(items = [], {
         sortTime: 0,
       }
 
-      currentGroup.ids.push(getItemId(item))
+      currentGroup.ids.push(itemId)
       currentGroup.items.push(item)
-      currentGroup.sortTime = Math.max(currentGroup.sortTime, parts.date?.getTime?.() || 0)
+      currentGroup.sortTime = Math.max(currentGroup.sortTime, itemSortTime)
       currentSection.groups.set(actionKey, currentGroup)
     }
     sections.set(sectionId, currentSection)
