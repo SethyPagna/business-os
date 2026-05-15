@@ -9,7 +9,7 @@ const { UPLOADS_PATH, PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, R2_PUBLIC_BASE_URL
 const { deleteObject, deleteObjects, getObjectStream, isObjectStorageEnabled, listObjects, putObject } = require('./objectStore')
 const { loadSharp } = require('./optionalSharp')
 const { validateUploadedBuffer } = require('./uploadSecurity')
-const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
+const { repairMissingUploadReferencesAsync } = require('./uploadReferenceCleanup')
 const { isUploadPublicPath, normalizeUploadPublicPath } = require('./settingsSnapshot')
 
 const sharp = loadSharp()
@@ -663,7 +663,7 @@ async function reconcileUploadStorage({ force = false } = {}) {
 
   uploadStorageReconcilePromise = (async () => {
     pruneInvalidReferenceBackfillAssets()
-    repairMissingUploadReferences(getDb())
+    await repairMissingUploadReferencesAsync(getDb())
     ensureReferencedAssetsRegistered()
 
     const trackedPublicPaths = collectTrackedUploadPublicPaths()
@@ -722,7 +722,7 @@ async function ensureFileAssetListingWarm({ force = false } = {}) {
   }
   fileAssetListingWarmPromise = (async () => {
     pruneInvalidReferenceBackfillAssets()
-    repairMissingUploadReferences(getDb())
+    await repairMissingUploadReferencesAsync(getDb())
     ensureReferencedAssetsRegistered()
     await backfillUploadAssets()
     lastFileAssetListingWarmAt = Date.now()
