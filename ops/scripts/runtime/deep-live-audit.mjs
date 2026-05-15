@@ -844,7 +844,9 @@ async function runRouteInteractions(page, route) {
   if (route?.interactions?.search) {
     interactions.push(await performSearchInteraction(page, route.name))
   }
-  for (const label of route?.interactions?.primaryButtons || []) {
+  for (const action of route?.interactions?.primaryButtons || []) {
+    const label = typeof action === 'string' ? action : action?.label
+    if (!label) continue
     interactions.push(await clickNamedButton(page, label, route.name))
   }
   for (const action of route?.interactions?.testIdButtons || []) {
