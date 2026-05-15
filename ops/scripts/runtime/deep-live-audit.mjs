@@ -1287,6 +1287,7 @@ async function captureDockerStateAndLogs() {
       try { return JSON.parse(line) } catch { return { raw: line } }
     })
 
+  const dockerLogScanSince = process.env.BOS_DOCKER_LOG_SCAN_SINCE || summary.audit.startedAt
   const logs = await runCommand('docker', [
     'compose',
     '--env-file',
@@ -1295,7 +1296,7 @@ async function captureDockerStateAndLogs() {
     path.join(ROOT_DIR, 'ops/docker/compose.release.yml'),
     'logs',
     '--since',
-    '30m',
+    dockerLogScanSince,
     'app',
     'import-worker',
     'media-worker',
@@ -1306,7 +1307,7 @@ async function captureDockerStateAndLogs() {
     .filter((line) => !/NOTICE:.*last_error.*already exists/i.test(line))
     .filter((line) => /MaxListenersExceededWarning|non-retryable streaming|PageErrorBoundary|ChunkReloadStall|ReferenceError|methods is not defined|Unhandled|uncaught|\bERROR\b|Bad Gateway|502|524/i.test(line))
   summary.docker.logScan = {
-    scannedSince: '30m',
+    scannedSince: dockerLogScanSince,
     issueCount: badLines.length,
     issues: badLines.slice(0, 50),
   }
