@@ -88,3 +88,13 @@ runTest('scaled runtime profile includes the cloudflare connector', () => {
   assert.match(compose, /--token-file",\s*"\/run\/secrets\/cloudflare\.token"/)
   assert.match(compose, /--url",\s*"http:\/\/127\.0\.0\.1:4000"/)
 })
+
+runTest('scaled runtime app and workers self-heal backend dependencies', () => {
+  const compose = read('ops/docker/compose.scale.yml')
+  assert.match(compose, /node_modules\/bcryptjs\/package\.json/)
+  assert.match(compose, /node_modules\/pg-native\/package\.json/)
+  assert.match(compose, /node_modules\/libpq\/build\/Release\/addon\.node/)
+  assert.match(compose, /npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start/)
+  assert.match(compose, /npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run worker:import/)
+  assert.match(compose, /npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run worker:media/)
+})
