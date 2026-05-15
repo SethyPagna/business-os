@@ -1,5 +1,6 @@
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
 import { buildProductGroups } from '../../utils/productGrouping.mjs'
+import { aggregateInitialOptions } from '../../utils/initials.mjs'
 
 export function buildProductsById(products = []) {
   return new Map((Array.isArray(products) ? products : []).map((product) => [Number(product?.id), product]))
@@ -35,6 +36,14 @@ export function buildVisibleProductCards(filteredProducts = [], productsById = n
       __groupChoices: group.hasMultipleItems ? group.items : [],
     }
   }).filter(Boolean)
+}
+
+export function buildPosFilterMeta(filters = {}, fallbackInitials = []) {
+  return {
+    brands: Array.isArray(filters?.brands) ? filters.brands : [],
+    suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
+    initials: aggregateInitialOptions(filters?.initials || fallbackInitials || []),
+  }
 }
 
 export function getVariantChoices(product, variantChildrenByParentId = new Map()) {
