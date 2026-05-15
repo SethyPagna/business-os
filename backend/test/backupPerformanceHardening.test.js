@@ -97,6 +97,11 @@ runTest('drive sync snapshot work avoids synchronous copies and double hashing',
 runTest('backup version listing reads enough objects for recent package pages and can reuse local packages', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
   const objectStoreSource = fs.readFileSync(path.join(__dirname, '../src/objectStore.js'), 'utf8')
+  assert.match(source, /backupVersionListCache/)
+  assert.match(source, /function\s+readCachedBackupVersions\(/)
+  assert.match(source, /function\s+writeCachedBackupVersions\(/)
+  assert.match(source, /const\s+cached\s*=\s*readCachedBackupVersions\(safeLimit\)/)
+  assert.match(source, /if\s*\(cached\)\s*return\s+cached/)
   assert.match(source, /function\s+findReusableLocalBackupPackage\(/)
   assert.match(source, /function\s+listLocalBackupVersions\(/)
   assert.match(source, /catch\s*\(error\)\s*{\s*console\.warn\(`\[Backup\] R2 backup version listing unavailable:/)
