@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  buildPosFilterMeta,
   buildProductsById,
   buildVariantChildrenByParentId,
   buildVisibleProductCards,
@@ -76,6 +77,24 @@ await runTest('group cards still include parent and siblings when only one child
 
   assert.equal(visible.length, 1)
   assert.deepEqual(getVariantChoices(visible[0]).map((item) => item.id), [40, 42, 41])
+})
+
+await runTest('pos filter meta normalizes lists and preserves fallback initials', () => {
+  const meta = buildPosFilterMeta(
+    {
+      brands: ['Glow', null, 'Matte'],
+      suppliers: ['North', '', 'South'],
+      initials: [{ key: 'g', label: 'G', count: 2 }],
+    },
+    [{ key: 'f', label: 'F', count: 3 }],
+  )
+
+  assert.deepEqual(meta.brands, ['Glow', null, 'Matte'])
+  assert.deepEqual(meta.suppliers, ['North', '', 'South'])
+  assert.deepEqual(meta.initials, [{ key: 'g', label: 'g', count: 2, type: 'other' }])
+
+  const fallbackOnly = buildPosFilterMeta({}, [{ key: 'f', label: 'F', count: 3 }])
+  assert.deepEqual(fallbackOnly.initials, [{ key: 'f', label: 'f', count: 3, type: 'other' }])
 })
 
 await runTest('cart line identity includes product, mode, and branch so modes do not merge', () => {
