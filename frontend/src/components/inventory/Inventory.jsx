@@ -196,6 +196,8 @@ export default function Inventory() {
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
+  const [inventoryBrandPickerOpen, setInventoryBrandPickerOpen] = useState(false)
+  const [inventoryMovementUserPickerOpen, setInventoryMovementUserPickerOpen] = useState(false)
   const [userOptions, setUserOptions] = useState([])
   const [movementStartDate, setMovementStartDate] = useState('')
   const [movementEndDate, setMovementEndDate] = useState('')
@@ -1656,14 +1658,24 @@ export default function Inventory() {
     () => [...primaryStats, ...financeStats],
     [financeStats, primaryStats],
   )
-  const inventoryBrands = (Array.isArray(inventoryProductFilters.brands) && inventoryProductFilters.brands.length
+  const inventoryBrands = useMemo(() => ((Array.isArray(inventoryProductFilters.brands) && inventoryProductFilters.brands.length
     ? inventoryProductFilters.brands
     : [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))]
-  ).sort((a, b) => a.localeCompare(b))
+  ).sort((a, b) => a.localeCompare(b))), [inventoryProductFilters.brands, summary])
   const inventoryInitialOptions = useMemo(
     () => aggregateInitialOptions(Array.isArray(inventoryInitials) ? inventoryInitials : []),
     [inventoryInitials],
   )
+  const selectedMovementUserLabel = useMemo(() => (
+    movementUserFilter === 'all'
+      ? (t('all_users') || 'All users')
+      : (userOptions.find((option) => String(option?.id || '') === String(movementUserFilter))?.name
+        || userOptions.find((option) => String(option?.id || '') === String(movementUserFilter))?.username
+        || `User ${movementUserFilter}`)
+  ), [movementUserFilter, t, userOptions])
+  const selectedInventoryBrandLabel = brandFilter === 'all'
+    ? (t('all_brands') || 'All brands')
+    : brandFilter
   const selectedMovementGroups = visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id))
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const movementDateRangeLabel = useMemo(() => {
@@ -2317,18 +2329,67 @@ export default function Inventory() {
         isAdmin ? {
           id: 'movement-user',
           label: t('user') || 'User',
-          options: [
-            { id: 'all', label: t('all_users') || 'All users', active: movementUserFilter === 'all', onClick: () => setMovementUserFilter('all') },
-            ...userOptions.map((option) => {
-              const id = String(option?.id || '')
-              return {
-                id: `user-${id}`,
-                label: option?.name || option?.username || `User ${id}`,
-                active: movementUserFilter === id,
-                onClick: () => setMovementUserFilter(movementUserFilter === id ? 'all' : id),
-              }
-            }).filter((option) => option.id !== 'user-'),
-          ],
+          render: ({ closeMenu }) => (
+            inventoryMovementUserPickerOpen ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
+                    onClick={() => setInventoryMovementUserPickerOpen(false)}
+                  >
+                    {t('back') || 'Back'}
+                  </button>
+                  {movementUserFilter !== 'all' ? (
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+                      onClick={() => {
+                        setMovementUserFilter('all')
+                        closeMenu()
+                      }}
+                    >
+                      {t('clear') || 'Clear'}
+                    </button>
+                  ) : null}
+                </div>
+                <label className="block">
+                  <span className="sr-only">{t('user') || 'User'}</span>
+                  <select
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+                    value={movementUserFilter}
+                    onChange={(event) => {
+                      setMovementUserFilter(event.target.value || 'all')
+                      closeMenu()
+                    }}
+                    aria-label={t('user') || 'User'}
+                  >
+                    <option value="all">{t('all_users') || 'All users'}</option>
+                    {userOptions
+                      .map((option) => {
+                        const id = String(option?.id || '')
+                        if (!id) return null
+                        return (
+                          <option key={`user-${id}`} value={id}>
+                            {option?.name || option?.username || `User ${id}`}
+                          </option>
+                        )
+                      })
+                      .filter(Boolean)}
+                  </select>
+                </label>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
+                onClick={() => setInventoryMovementUserPickerOpen(true)}
+              >
+                <span className="truncate">{selectedMovementUserLabel}</span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
+              </button>
+            )
+          ),
         } : null,
         {
           id: 'movement-year',
@@ -2458,23 +2519,57 @@ export default function Inventory() {
         id: 'brand',
         label: t('brand') || 'Brand',
         render: ({ closeMenu }) => (
-          <label className="block">
-            <span className="sr-only">{t('brand') || 'Brand'}</span>
-            <select
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-              value={brandFilter}
-              onChange={(event) => {
-                setBrandFilter(event.target.value || 'all')
-                closeMenu()
-              }}
-              aria-label={t('brand') || 'Brand'}
+          inventoryBrandPickerOpen ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
+                  onClick={() => setInventoryBrandPickerOpen(false)}
+                >
+                  {t('back') || 'Back'}
+                </button>
+                {brandFilter !== 'all' ? (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+                    onClick={() => {
+                      setBrandFilter('all')
+                      closeMenu()
+                    }}
+                  >
+                    {t('clear') || 'Clear'}
+                  </button>
+                ) : null}
+              </div>
+              <label className="block">
+                <span className="sr-only">{t('brand') || 'Brand'}</span>
+                <select
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+                  value={brandFilter}
+                  onChange={(event) => {
+                    setBrandFilter(event.target.value || 'all')
+                    closeMenu()
+                  }}
+                  aria-label={t('brand') || 'Brand'}
+                >
+                  <option value="all">{t('all_brands') || 'All brands'}</option>
+                  {inventoryBrands.map((brand) => (
+                    <option key={`brand-${brand}`} value={brand}>{brand}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
+              onClick={() => setInventoryBrandPickerOpen(true)}
             >
-              <option value="all">{t('all_brands') || 'All brands'}</option>
-              {inventoryBrands.map((brand) => (
-                <option key={`brand-${brand}`} value={brand}>{brand}</option>
-              ))}
-            </select>
-          </label>
+              <span className="truncate">{selectedInventoryBrandLabel}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
+            </button>
+          )
         ),
       } : null,
     ].filter(Boolean)
@@ -2484,6 +2579,8 @@ export default function Inventory() {
     brandFilter,
     groupFilter,
     inventoryBrands,
+    inventoryBrandPickerOpen,
+    inventoryMovementUserPickerOpen,
     movFilter,
     movementGroupMode,
     movementMonthFilter,
@@ -2492,6 +2589,8 @@ export default function Inventory() {
     movementYearFilter,
     movementYears,
     isAdmin,
+    selectedInventoryBrandLabel,
+    selectedMovementUserLabel,
     stockFilter,
     t,
     tab,
@@ -2539,6 +2638,8 @@ export default function Inventory() {
     setMovementMonthFilter('all')
     setMovementGroupMode('time')
     setMovementSortDirection('desc')
+    setInventoryBrandPickerOpen(false)
+    setInventoryMovementUserPickerOpen(false)
   }, [])
 
   const isMovementScopeFullySelected = useCallback(
@@ -2808,6 +2909,11 @@ export default function Inventory() {
             activeCount={activeInventoryFilterCount}
             sections={inventoryFilterSections}
             onClear={clearInventoryFilters}
+            onOpenChange={(open) => {
+              if (open) return
+              setInventoryBrandPickerOpen(false)
+              setInventoryMovementUserPickerOpen(false)
+            }}
             compact
           />
         </div>
