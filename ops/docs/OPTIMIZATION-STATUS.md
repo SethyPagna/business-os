@@ -12,27 +12,28 @@ Last updated: 2026-05-16
 
 ## Current Baseline
 
-Latest restored runtime health:
+Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest restored frontend hash: `d42ed61d1530abc6`
+- latest verified frontend hash: `58e55b21e28ff1c5`
 
-Latest restored reports:
+Latest verified reports:
 
 - deep audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T06-03-16-094Z\summary.html`
-- latest clean full-app audit before the rejected public-catalog candidate:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T05-05-27-132Z\summary.html`
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T06-28-32-137Z\summary.html`
+- route-scoped products audit:
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T06-25-03-015Z\summary.html`
+- full-app audit:
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T06-26-05-216Z\summary.html`
 
-Current honest pockets are still somewhat ambient after the restore reruns:
+Current honest pockets:
 
-- `desktop/backup` document-time wobble
-- `mobile/public_catalog` document-time wobble
+- no repeatable app-side hard findings on the latest warm exhaustive rerun
+- remaining noise has been ambient route drift rather than a stable hotspot
 
-Recent stable repeatable route-level target before the rejected mobile catalog
-experiment:
+Recent route-level win:
 
-- `mobile/public_catalog:section-tabs`
+- `products`
 
 ## Current Working Rules
 
@@ -44,6 +45,7 @@ experiment:
 
 ## Recently Accepted Wins
 
+- Products no longer schedules an orphaned desktop reveal state update after load.
 - Returns filter sections now build only when the menu opens.
 - Import tracker settled job lists now reuse a short-lived cache.
 - Inventory filter selectors now open behind summary rows.
@@ -62,9 +64,7 @@ experiment:
 
 ## Next Best Moves
 
-1. Reconfirm whether the current public-catalog mobile pocket is truly
-   repeatable after the restore drift settles.
-2. If it is not repeatable, shift to the next stable shared seam instead of
-   forcing a catalog fix.
+1. Reconfirm the next repeatable shared hotspot before touching code again.
+2. Favor helper-level or dead-state cleanup over route-specific guesswork.
 3. Keep trimming hidden work and repeated derived-data assembly before broader
    refactors.

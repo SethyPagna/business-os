@@ -8,6 +8,12 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Products orphaned reveal-state cleanup
+  - route: `products`
+  - result: kept
+  - note: removed an unused post-load desktop reveal state/effect that no longer
+    affected the list surface but still forced an extra rerender
+
 - Returns lazy filter sections
   - route: `returns`
   - result: kept
