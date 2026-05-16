@@ -1,158 +1,91 @@
-# Business OS Whole-App Optimization Master Plan
+# Business OS Optimization Master Plan
 
-This document is the canonical working plan for the live audit, optimization,
-correctness, and migration program. It folds the original whole-app live audit
-program together with the later workflow-hardening, receipt/settings
-correctness, and frontend-first TypeScript migration tracks.
+Last updated: 2026-05-16
 
-The goal is not generic "cleanup". The goal is measured, session-by-session
-improvement of:
+This document is the source of truth for the whole-app live audit and
+optimization program. It exists so progress is trackable in-repo instead of
+only in chat.
 
-- route readiness
-- interaction reliability
-- hidden-work/resource efficiency
-- runtime stability
-- cross-surface correctness
-- maintainable migration paths
+## Program Goals
 
-## Program Rules
+- Keep the app fast, stable, and verifiably correct under real authenticated
+  usage.
+- Optimize hidden work, render churn, request waterfalls, and repeated
+  computation before reaching for broad UI rewrites.
+- Preserve business behavior for sales, returns, inventory, files, backups,
+  imports, permissions, and public catalog flows while we improve performance.
+- Prefer boring, measurable improvements over clever changes that disturb the
+  rest of the app.
 
-1. Measure first, keep only real wins.
-2. Validate in live runtime conditions, not just local code paths.
-3. Prefer smaller commits and descriptive branches.
-4. Validated work may use branches, but must also land on `main`.
-5. Do not disturb unrelated dirty workspace edits.
-6. Favor hidden-work reduction, data-flow tightening, and shared helper
-   improvements over cosmetic UI churn.
-7. The user is currently happy with inventory and the overall product UI shape,
-   so optimize behavior and efficiency without reshaping those surfaces unless a
-   measured bug requires it.
+## Session Rules
 
-## Standing Session Workflow
+Every implementation session should follow this loop:
 
-This is the default execution loop for optimization sessions.
+1. Reconfirm the current baseline on the affected route or shared flow.
+2. Make one narrow change at a clear file or helper seam.
+3. Run local gates first:
+   - frontend `test:utils` when frontend code changes
+   - frontend build when frontend code changes
+   - backend `test:utils` when backend code changes
+   - focused unit or utility tests for the changed area
+4. Force-recreate the runtime:
+   - `app`
+   - `import-worker`
+   - `media-worker`
+5. Run live verification:
+   - `ops/scripts/runtime/live-smoke.mjs`
+   - route-scoped deep audit on the affected route
+   - route-scoped browser action smoke when the route has clicks, tabs, filters,
+     or write-entry actions
+6. Run warm whole-app verification:
+   - exhaustive deep audit
+   - full app audit when the change can affect API flows, runtime health, or
+     cross-route behavior
+7. Keep the change only if the route win survives the warm whole-app view.
 
-1. Start from a clean verification worktree based on `origin/main` whenever the
-   main workspace is dirty.
-2. Identify the next route, interaction, or backend hotspot from the latest
-   clean report.
-3. Make the narrowest change that can reasonably improve the measured hotspot.
-4. Run local gates first:
-   - focused tests where available
-   - `frontend: npm.cmd run test:utils` when frontend changes
-   - `frontend: npm.cmd run build` when frontend changes
-   - `backend: npm.cmd run test:utils` when backend changes
-5. Recreate the runtime when code changes affect the running app or workers.
-6. Re-check health and verify app/worker bind mounts before trusting smoke.
-7. Run live verification:
-   - `live-smoke`
-   - route-scoped deep audit on the touched route first
-   - route-scoped browser action smoke when buttons/menus/search/flows changed
-   - warm exhaustive deep audit
-   - warm full-app audit
-8. Keep the change only if:
-   - the target route or backend path improves or remains safely healthy
-   - the warm whole-app picture stays calm
-   - there are no meaningful behavior regressions
-9. Push the validated commit to a descriptive branch and to `main`.
-10. Update `OPTIMIZATION-STATUS.md` and `OPTIMIZATION-SESSION-LOG.md`.
+## Acceptance Gates
 
-## Verification Gates
+- No dead navigation, dead buttons, or broken write-entry flows on audited
+  routes.
+- No indefinite loading states.
+- No first-party console or page errors relevant to the changed flow.
+- No visible out-of-bounds or clipped UI in desktop/mobile screenshots.
+- No route-local win that causes broader route churn on warm reruns.
 
-Every implementation session should end with the strongest applicable subset of
-the following:
+## Phase Status Model
 
-- focused unit/integration tests
-- `frontend: npm.cmd run test:utils`
-- `frontend: npm.cmd run build`
-- `backend: npm.cmd run test:utils` when backend changed
-- runtime health check
-- runtime recreate when needed
-- authenticated live smoke
-- route-scoped deep audit on affected routes
-- browser action smoke for affected routes and controls
-- warm exhaustive deep audit
-- warm full-app audit
-- screenshot review for bounds/overflow/layout issues on touched screens
-
-## Acceptance Targets
-
-- no dead navigation or dead primary buttons on audited routes
-- no indefinite loading states
-- no relevant console or page errors in audited flows
-- no visible gibberish or broken payload text in audited DOM/API paths
-- no meaningful regression in write flows:
-  - auth
-  - imports
-  - inventory adjustments
-  - sales
-  - returns
-  - files/library
-  - backup
-  - settings
-- hot routes should trend toward sub-500 ms mobile route-ready or route-local
-  LCP when feasible; misses require measured blocker evidence
+- `strong`: the phase has a stable process and recent keeper results.
+- `in progress`: the phase is active and still harvesting or validating wins.
+- `ongoing`: the phase is long-running, incremental, or sweep-oriented.
 
 ## Phase 0: Canonical Audit Harness And Evidence Pipeline
 
-Make the runtime audit tooling canonical in the active repo and keep one source
-of truth for live testing.
+Status target: `strong`
 
-### Deliverables
+Scope:
 
-- canonical route/action manifest for admin and public surfaces
-- HTML report generation alongside JSON summaries
-- screenshots for desktop and mobile
-- interaction timing evidence for primary controls
-- API timing breakdown for critical read/write flows
-- authenticated browser runner that logs in once and reuses session state
-- route-scoped audit support for faster, cheaper verification
-- browser action smoke for real navigation and button-use checks
-- smarter Docker log scan windows so startup noise does not contaminate route
-  findings
+- Keep the runtime audit tooling canonical inside this repo.
+- Maintain a route/action manifest for admin and public surfaces.
+- Produce HTML and JSON reports plus screenshots.
+- Keep route-scoped audits and browser action smoke easy to run.
+- Keep docker-log scanning scoped to the audited run window.
 
 ## Phase 1: Whole-App Live Audit Baseline
 
-Maintain a reproducible baseline over major routes and sub-views:
+Status target: `strong`
 
-- dashboard
-- products
-- inventory
-- POS
-- sales
-- returns
-- contacts
-- files
-- backup
-- branches
-- users
-- audit log
-- settings
-- receipt settings
-- server
-- loyalty points
-- public catalog
+Scope:
 
-### Baseline Evidence
-
-- cold and warm route timings
-- first visible shell timing
-- first interactive control timing
-- critical button/interaction timing
-- visible clipping/overflow/layout-shift review
-- dead-button, stale-loading, invalid-session, and navigation mismatch checks
-- route "hot path" summaries that classify whether the dominant cost is:
-  - API/server latency
-  - chunk/load cost
-  - render cost
-  - post-render layout churn
-  - interaction/state churn
+- Repeated authenticated audits over the core admin and public routes.
+- Track cold and warm timings, route-ready, interaction timings, and notable
+  layout or session issues.
+- Keep explicit before/after comparisons for each accepted change.
 
 ## Phase 2: Frontend Hotspot Program
 
-Focus first on the highest-value route and interaction hotspots.
+Status target: `in progress`
 
-### Priority Areas
+Priority surfaces:
 
 - `Inventory.jsx`
 - `Products.jsx`
@@ -162,55 +95,44 @@ Focus first on the highest-value route and interaction hotspots.
 - `Settings.jsx`
 - `Backup.jsx`
 - `FilesPage.jsx`
+- `Returns.jsx`
 
-### Methods
+Preferred tactics:
 
-- map data flow and render flow before editing
-- remove repeated transforms and duplicate grouping/flattening work
-- move expensive work off hot render paths
-- prefer `Map`/`Set`/indexed lookups where repeated linear scans dominate
-- add memoization only where measured rerender churn exists
-- lazy-load non-critical helpers and feature branches by user intent
-- virtualize or window large lists where measured rendering cost justifies it
-- preserve stable shells during refreshes
-- avoid helper text or loading placeholders becoming LCP
-- remove dead branches, duplicate helpers, stale loaders, and broken fallbacks
-
-### Shared Frontend Policy
-
-- stable shell first
-- route-critical content eager enough to avoid blank or stalled first paint
-- non-critical enrichments deferred until after first useful render
-- no indefinite loading without clear timeout/failure classification
+- remove hidden work from first render
+- build derived data only when the surface actually opens
+- reuse already-built grouped structures instead of recomputing them
+- memoize only where measured rerender churn exists
+- avoid broad UI changes when a helper-level or surface-level seam will do
 
 ## Phase 3: Backend Hotspot Program
 
-Focus on request flow, payload shape, and repeated server-side work.
+Status target: `in progress`
 
-### Priority Areas
+Priority areas:
 
-- `services/importJobs.js`
-- `routes/products.js`
-- `routes/inventory.js`
-- `routes/sales.js`
-- `routes/system/index.js`
-- `services/googleDriveSync/index.js`
-- `routes/contacts.js`
-- `routes/returns.js`
+- `backend/src/services/importJobs.js`
+- `backend/src/routes/products.js`
+- `backend/src/routes/inventory.js`
+- `backend/src/routes/sales.js`
+- `backend/src/routes/system/index.js`
+- `backend/src/services/googleDriveSync/index.js`
+- `backend/src/routes/contacts.js`
+- `backend/src/routes/returns.js`
 
-### Methods
+Preferred tactics:
 
-- trace request -> query -> transform -> response
-- measure endpoint latency and payload size before refactors
-- trim query projection and enrichment where payloads are too broad
-- reduce repeated parsing/joining/hydration passes
-- batch or defer expensive work where synchronous paths are too heavy
-- prefer response-boundary normalization over UI-side repair
-- verify index and cache strategy for hot domains
+- trim repeated response assembly
+- cache short-lived repeated same-session reads when safe
+- bound hot-path waits
+- reduce redundant hydration and parsing
+- tighten payloads before changing architecture
 
-## Phase 4: Systematic Folder Sweep
+## Phase 4: Session-By-Session Folder Sweep
 
-After hotspot work, sweep the repo in measured ownership slices:
+Status target: `ongoing`
+
+Sweep order:
 
 1. app shell, auth, shared loaders, navigation, runtime helpers
 2. dashboard, inventory, products, POS
@@ -219,62 +141,26 @@ After hotspot work, sweep the repo in measured ownership slices:
 4. public/catalog and portal surfaces
 5. backend routes, backend services, backend core utilities
 
-### Sweep Rules
+Guardrails:
 
-- review files line by line inside the active slice
-- keep changes scoped to measured or clearly broken behavior
 - no style churn
-- dead code removal requires search evidence, passing tests/build, and no live
-  report regression
+- no dead-code removals without caller search evidence
+- no helper merges without tests/build and live reports staying clean
 
-## Cross-Cutting Correctness Track
+## Migration Track
 
-This track runs alongside performance work when the measured evidence shows
-shared correctness issues.
+The long-range migration track stays active alongside the optimization work:
 
-### Current High-Value Correctness Themes
+- expand TypeScript in the frontend where it strengthens contracts, shared
+  helpers, and high-churn surfaces
+- only introduce Python or other runtime languages where they clearly improve a
+  bounded workflow without raising deployment or support risk
+- do not mix language migration into an unrelated hot-path fix when it would
+  muddy verification
 
-- settings-backed writes use one shared refresh contract
-- receipt template, print settings, preview, and export flows consume one
-  applied config path
-- import review/apply flows update dependent product/inventory surfaces without
-  manual reload
-- permission/session payloads must keep navigation and access checks consistent
-- upload/media references must be sanitized before stale object paths leak to
-  the UI
+## Branching And Commit Discipline
 
-## Frontend-First TypeScript Migration Track
-
-Migration is allowed only when it improves safety, correctness, or velocity
-without destabilizing runtime verification.
-
-### Rules
-
-- TypeScript-first on frontend/shared contracts
-- backend remains runtime-stable JS unless a measured reason justifies more
-  migration
-- Python is not introduced into runtime paths casually; reserve it for tooling,
-  reporting, or clearly justified background workflows
-- no language churn for its own sake
-
-### Near-Term Migration Targets
-
-- shared settings write contracts
-- receipt/print/applied-config contracts
-- route audit manifest contracts
-- shared helper modules where types improve correctness and reduce regressions
-
-## Resource-Efficiency And Workflow Tightening
-
-This program explicitly includes refinement of:
-
-- loops and nested loops
-- repeated transforms
-- hidden helper work
-- cache use
-- same-session refresh behavior
-- audit verification loops
-- worker/runtime bring-up discipline
-
-The desired outcome is software that is stronger, more stable, more efficient,
-and better at using resources without wasting them.
+- Use descriptive branch names tied to the work, not tool names.
+- Keep validated changes small and push them to `main`.
+- Preserve dirty local user workspaces by using clean worktrees for validation.
+- Reject tempting changes when the whole-app picture stops being calm.

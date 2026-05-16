@@ -11,6 +11,12 @@ Business OS specifically. The goal is not "maximum caching" or "maximum
 cleverness"; the goal is fast, reliable, secure business software that behaves
 well on slower remote links and across long-running sessions.
 
+Operational tracking for the live optimization program is split into:
+
+- `OPTIMIZATION-MASTER-PLAN.md`
+- `OPTIMIZATION-STATUS.md`
+- `OPTIMIZATION-SESSION-LOG.md`
+
 ## Guiding Rules
 
 1. Local-first beats network-first for business data reads.
