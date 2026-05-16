@@ -231,7 +231,6 @@ export default function Products() {
   const [variantModal, setVariantModal] = useState(null) // parent product for adding variant
   const [collapsedProductSections, setCollapsedProductSections] = useState(() => new Set())
   const [collapsedProductGroups, setCollapsedProductGroups] = useState(() => new Set())
-  const [initialDesktopRevealReady, setInitialDesktopRevealReady] = useState(false)
   const [isProductFilterMenuOpen, setIsProductFilterMenuOpen] = useState(false)
   const loadedOnceRef = useRef(false)
   const auxOptionsLoadedRef = useRef(false)
@@ -1032,26 +1031,6 @@ export default function Products() {
   useEffect(() => {
     setProductPageDraft(String(productSafePage))
   }, [productSafePage])
-
-  useEffect(() => {
-    if (initialDesktopRevealReady || loading) return
-    if (!visibleProducts.length || loadError) {
-      setInitialDesktopRevealReady(true)
-      return
-    }
-    let cancelled = false
-    let nestedFrame = null
-    const frame = window.requestAnimationFrame(() => {
-      nestedFrame = window.requestAnimationFrame(() => {
-        if (!cancelled) setInitialDesktopRevealReady(true)
-      })
-    })
-    return () => {
-      cancelled = true
-      window.cancelAnimationFrame(frame)
-      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame)
-    }
-  }, [initialDesktopRevealReady, loadError, loading, visibleIdsSignature, visibleProducts.length])
 
   const toggleSelectionScope = useCallback((ids, checked) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
@@ -2198,7 +2177,6 @@ export default function Products() {
         collapsedProductSections={collapsedProductSections}
         desktopSelectAllRef={desktopSelectAllRef}
         getGroupSummaryParts={getGroupSummaryParts}
-        initialDesktopRevealReady={initialDesktopRevealReady}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
         isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
         loading={loading}
