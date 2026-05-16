@@ -19,20 +19,25 @@ Primary clean verification worktree:
 Latest verified reports:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T02-03-59-309Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T02-03-59-309Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T02-39-51-142Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T02-39-51-142Z\summary.html)
 - Full app audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T02-03-59-631Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T02-03-59-631Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T02-44-05-698Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T02-44-05-698Z\summary.html)
 
 Current verified runtime health:
 
 - local health: [http://127.0.0.1:4000/health](http://127.0.0.1:4000/health)
-- frontend hash: `2c792eec27cb6b02`
+- frontend hash: `01a21b59873504a5`
 
 Current notable findings:
 
-- warm exhaustive deep audit is currently clean
-- warm full app audit is currently clean
-- Returns route-specific checks are currently clean after trimming a redundant
+- deep audit currently shows:
+  - `desktop/inventory` document-time pocket
+  - `desktop/returns` long task
+  - `mobile/returns` long task
+  - `mobile/public_catalog:section-tabs` interaction warning
+- full app audit is currently failing on remote public fetch reachability, which
+  still looks environment-side rather than local app behavior
+- Returns route-specific checks remain improved after trimming a redundant
   post-load selection cleanup render
 
 Fresh route-scoped inventory evidence from the current clean runtime:
@@ -111,8 +116,10 @@ Current direction:
 - continue shared hidden-work reduction
 - prefer helper/data-flow improvements over UI reshaping
 - keep checking screenshots for overflow/out-of-bounds regressions
-- current strongest follow-through lane is product/shared workflow efficiency now
-  that Inventory and Returns are quiet on the latest warm baseline
+- current strongest follow-through lane is still product/shared workflow
+  efficiency, but recent action-history deferral and shell-startup candidates
+  were rejected because they improved local route traces without keeping the
+  whole-app warm picture calm
 
 ### Phase 3: Backend Hotspots
 
@@ -171,7 +178,7 @@ Primary optimization lane:
 
 Immediate next measured target:
 
-- product/shared workflow tightening from the new clean baseline
+- product/shared workflow tightening from the restored baseline
 - likely seams:
   - derived-data churn
   - hidden post-load rerenders

@@ -5,6 +5,43 @@ reconstruct the program state from chat history alone.
 
 ## 2026-05-16
 
+### Status refresh after rejected Products action-history deferral
+
+Summary:
+
+- Tested a Products candidate that delayed action-history admin user hydration
+  until after first paint.
+- Focused route checks passed, but the Products route itself got slower and the
+  broader warm whole-app picture did not improve enough to justify keeping it.
+- Rolled the code back fully and refreshed the status tracker to match the
+  restored baseline.
+
+Verification:
+
+- `frontend: npm.cmd run test:utils`
+- `frontend: npm.cmd run build`
+- runtime force-recreate
+- `live-smoke`
+- route-scoped Products deep audit
+- route-scoped Products browser action smoke
+- warm exhaustive deep audit
+- full app audit reruns
+
+Measured result:
+
+- route-scoped Products candidate timings regressed instead of improving:
+  - desktop ready: `534 -> 850 ms`
+  - mobile ready: `333 -> 585 ms`
+- restored baseline after rollback is tracked in
+  `ops/docs/OPTIMIZATION-STATUS.md`
+
+Notes:
+
+- This was the right rejection: the candidate reduced one early sidecar fetch
+  but did not create an honest route-level win.
+- The session still produced useful evidence and kept the repo tracker aligned
+  with the real restored baseline.
+
 ### Returns selection cleanup rerender guard
 
 - File:
