@@ -19,6 +19,14 @@ This project uses a layered documentation model to keep architecture, operations
   - API route inventory by domain.
 - `FILE-MAP.md`
   - backend/frontend ownership map.
+- `OPTIMIZATION-MASTER-PLAN.md`
+  - canonical whole-program optimization, correctness, and migration plan.
+- `OPTIMIZATION-STATUS.md`
+  - current phase status, baseline pointers, and active focus.
+- `OPTIMIZATION-SESSION-LOG.md`
+  - validated session-by-session keeper log.
+- `OPTIMIZATION-ROADMAP.md`
+  - optimization principles and architecture-level roadmap.
 - `DOCUMENTATION-STRUCTURE.md`
   - this document.
 

@@ -1,5 +1,11 @@
 # Business OS Optimization Roadmap
 
+This roadmap now works alongside the live tracking docs below:
+
+- `ops/docs/OPTIMIZATION-MASTER-PLAN.md`
+- `ops/docs/OPTIMIZATION-STATUS.md`
+- `ops/docs/OPTIMIZATION-SESSION-LOG.md`
+
 This roadmap turns the broad optimization ideas into a step-by-step plan for
 Business OS specifically. The goal is not "maximum caching" or "maximum
 cleverness"; the goal is fast, reliable, secure business software that behaves
