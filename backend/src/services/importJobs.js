@@ -47,11 +47,14 @@ const MAX_ZIP_UNCOMPRESSED_BYTES = 8 * 1024 * 1024 * 1024
 const IMPORT_ANALYZE_QUEUE_NAME = process.env.IMPORT_ANALYZE_QUEUE_NAME || 'business-os-import-analyze'
 const IMPORT_APPLY_QUEUE_NAME = process.env.IMPORT_APPLY_QUEUE_NAME || 'business-os-import-apply'
 const IMPORT_MEDIA_WAIT_TIMEOUT_MS = Math.max(60_000, Number(process.env.IMPORT_MEDIA_WAIT_TIMEOUT_MS || 30 * 60 * 1000))
+const IMPORT_JOB_LIST_CACHE_MS = 5_000
+const IMPORT_JOB_LIST_CACHEABLE_STATUSES = new Set(['completed', 'completed_with_errors', 'failed', 'cancelled', 'awaiting_review'])
 const runningLocalJobs = new Set()
 let bullConnection = null
 let bullQueues = { analyze: null, apply: null }
 let bullWorkers = { analyze: null, apply: null }
 let bullStatus = { driver: 'bullmq', available: false, reason: 'not_checked', producerReady: false, workerActive: false }
+const importJobListCache = new Map()
 
 function nowIso() {
   return new Date().toISOString()
@@ -114,6 +117,39 @@ async function* rowBatchesFromArray(rows = [], batchSize = IMPORT_ROW_BATCH_SIZE
 function safeJson(value, fallback = {}) {
   if (value && typeof value === 'object') return value
   try { return JSON.parse(String(value || '')) } catch (_) { return fallback }
+}
+
+function normalizeImportJobListLimit(limit = 50) {
+  return Math.max(1, Math.min(200, Number(limit || 50)))
+}
+
+function clearImportJobListCache() {
+  importJobListCache.clear()
+}
+
+function readCachedImportJobList(limit = 50) {
+  const safeLimit = normalizeImportJobListLimit(limit)
+  const record = importJobListCache.get(safeLimit)
+  if (record && record.expiresAt > Date.now()) return record.jobs
+  if (record) importJobListCache.delete(safeLimit)
+  return null
+}
+
+function canCacheImportJobList(jobs = []) {
+  return jobs.every((job) => IMPORT_JOB_LIST_CACHEABLE_STATUSES.has(String(job?.status || '').trim().toLowerCase()))
+}
+
+function writeCachedImportJobList(limit = 50, jobs = []) {
+  const safeLimit = normalizeImportJobListLimit(limit)
+  if (!canCacheImportJobList(jobs)) {
+    importJobListCache.delete(safeLimit)
+    return jobs
+  }
+  importJobListCache.set(safeLimit, {
+    jobs,
+    expiresAt: Date.now() + IMPORT_JOB_LIST_CACHE_MS,
+  })
+  return jobs
 }
 
 function stringify(value) {
@@ -242,6 +278,7 @@ function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriv
     actor.userId || null,
     actor.userName || null,
   )
+  clearImportJobListCache()
   return getImportJob(id)
 }
 
@@ -252,12 +289,16 @@ function getImportJob(id) {
 }
 
 function listImportJobs({ limit = 50 } = {}) {
-  return db.prepare(`
+  const safeLimit = normalizeImportJobListLimit(limit)
+  const cached = readCachedImportJobList(safeLimit)
+  if (cached) return cached
+  const jobs = db.prepare(`
     SELECT *
     FROM import_jobs
     ORDER BY created_at DESC, id DESC
     LIMIT ?
-  `).all(Math.max(1, Math.min(200, Number(limit || 50)))).map((row) => decorateImportJobRow(reconcileImportJobRow(row))).filter(Boolean)
+  `).all(safeLimit).map((row) => decorateImportJobRow(reconcileImportJobRow(row))).filter(Boolean)
+  return writeCachedImportJobList(safeLimit, jobs)
 }
 
 function updateJob(id, patch = {}) {
@@ -283,6 +324,7 @@ function updateJob(id, patch = {}) {
   if (!entries.length) return getImportJob(id)
   const assignments = entries.map(([key]) => `${key} = @${key}`).join(', ')
   db.prepare(`UPDATE import_jobs SET ${assignments}, updated_at = CURRENT_TIMESTAMP::text WHERE id = @id`).run({ id, ...Object.fromEntries(entries) })
+  clearImportJobListCache()
   return getImportJob(id)
 }
 
@@ -934,6 +976,7 @@ function addJobFile(jobId, file = {}, kind = 'csv', relativePath = '') {
     String(file.mimetype || ''),
     stats?.size || Number(file.size || 0) || 0,
   )
+  clearImportJobListCache()
   return db.prepare('SELECT * FROM import_job_files WHERE id = ?').get(result.lastInsertRowid)
 }
 
@@ -3168,6 +3211,7 @@ function resetImportJobForRetry(jobId, { mode = 'analyze' } = {}) {
       jobId,
     )
   })()
+  clearImportJobListCache()
 
   broadcast('runtime')
   return getImportJob(jobId)
@@ -3264,6 +3308,7 @@ async function cancelAllImportJobs({ reason = 'Background import cancelled by sy
         updated_at = CURRENT_TIMESTAMP
     WHERE job_id IN (${placeholders}) AND status IN ('stored', 'queued_media')
   `).run(reason, ...jobIds)
+  clearImportJobListCache()
   const remaining = await waitForImportJobsToStop(jobIds, waitMs)
   return { cancelled: jobs.length, remaining, jobIds }
 }
@@ -3293,6 +3338,7 @@ async function deleteImportJob(jobId, { force = false } = {}) {
     db.prepare('DELETE FROM import_job_files WHERE job_id = ?').run(jobId)
     db.prepare('DELETE FROM import_jobs WHERE id = ?').run(jobId)
   })()
+  clearImportJobListCache()
   deleteImportJobFiles(jobId)
   broadcast('runtime')
   return { deleted: true, id: jobId }
@@ -3309,6 +3355,7 @@ async function deleteAllImportJobs({ removeFiles = true } = {}) {
     db.prepare('DELETE FROM import_job_files').run()
     db.prepare('DELETE FROM import_jobs').run()
   })()
+  clearImportJobListCache()
   if (removeFiles) clearImportRuntimeFiles()
   broadcast('runtime')
   return { deleted: ids.length }

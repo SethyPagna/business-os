@@ -85,9 +85,10 @@ function getMediaType({ mimeType = '', fileName = '' } = {}) {
 
 function sanitizeOriginalFileName(originalName = '') {
   const raw = String(originalName || '').trim()
-  const ext = String(path.extname(raw || '').toLowerCase() || '')
+  const normalizedRaw = raw.replace(/\\/g, '/')
+  const ext = String(path.posix.extname(normalizedRaw || '').toLowerCase() || '')
   const fallbackExt = ext || '.bin'
-  const base = path.basename(raw || `file${fallbackExt}`, ext)
+  const base = path.posix.basename(normalizedRaw || `file${fallbackExt}`, ext)
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^\.+|\.+$/g, '')
@@ -97,7 +98,7 @@ function sanitizeOriginalFileName(originalName = '') {
 }
 
 function preserveOriginalDisplayName(originalName = '') {
-  const raw = path.basename(String(originalName || '').trim())
+  const raw = path.posix.basename(String(originalName || '').trim().replace(/\\/g, '/'))
     .replace(/[\u0000-\u001f]/g, '')
     .slice(0, MAX_ORIGINAL_FILE_NAME_LENGTH)
     .trim()
