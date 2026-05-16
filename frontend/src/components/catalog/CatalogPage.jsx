@@ -2943,14 +2943,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
       || (activeTab === 'faq' && displayConfig.showFaq)
       || (activeTab === 'ai' && displayConfig.aiEnabled)
     ) ? activeTab : null
-    const secondaryTabsToPrime = publicView && publicSecondaryTabsPrimed
-      ? [
-          displayConfig.showAbout ? 'about' : null,
-          displayConfig.showMembership ? 'membership' : null,
-          displayConfig.showFaq ? 'faq' : null,
-        ].filter(Boolean)
-      : []
-    if (!activeSecondaryTab && !secondaryTabsToPrime.length) return null
+    if (!activeSecondaryTab && !(publicView && publicSecondaryTabsPrimed)) return null
 
     return (
       <Suspense fallback={(
@@ -2958,12 +2951,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
           <div className="text-sm text-slate-500">Loading...</div>
         </SectionShell>
       )}>
-        <div className="relative">
-          {activeSecondaryTab ? renderSecondaryTabPanel(activeSecondaryTab, true) : null}
-          {secondaryTabsToPrime
-            .filter((tab) => tab !== activeSecondaryTab)
-            .map((tab) => renderSecondaryTabPanel(tab, false))}
-        </div>
+        {activeSecondaryTab ? renderSecondaryTabPanel(activeSecondaryTab, true) : null}
       </Suspense>
     )
   }
