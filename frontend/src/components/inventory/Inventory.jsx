@@ -196,6 +196,9 @@ export default function Inventory() {
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
+  const [inventoryBranchPickerOpen, setInventoryBranchPickerOpen] = useState(false)
+  const [inventoryGroupPickerOpen, setInventoryGroupPickerOpen] = useState(false)
+  const [inventoryStockPickerOpen, setInventoryStockPickerOpen] = useState(false)
   const [inventoryBrandPickerOpen, setInventoryBrandPickerOpen] = useState(false)
   const [inventoryMovementUserPickerOpen, setInventoryMovementUserPickerOpen] = useState(false)
   const [userOptions, setUserOptions] = useState([])
@@ -278,6 +281,36 @@ export default function Inventory() {
     transfer: inventoryReasons.filter((item) => item?.type === 'transfer'),
     move: inventoryReasons.filter((item) => item?.type === 'move'),
   }), [inventoryReasons])
+
+  const inventoryGroupChoices = useMemo(() => ([
+    { value: 'all', label: t('all') || 'All' },
+    { value: 'grouped', label: t('groups') || 'Groups' },
+    { value: 'parent', label: t('parents') || 'Parents' },
+    { value: 'variant', label: t('variants') || 'Variants' },
+    { value: 'standalone', label: t('standalone') || 'Standalone' },
+  ]), [t])
+
+  const inventoryStockChoices = useMemo(() => ([
+    { value: 'all', label: t('all') || 'All' },
+    { value: 'in_stock', label: t('in_stock') || 'In stock' },
+    { value: 'low', label: t('low_stock') || 'Low stock' },
+    { value: 'out', label: t('out_of_stock') || 'Out of stock' },
+  ]), [t])
+
+  const selectedInventoryBranchLabel = useMemo(() => {
+    if (branchFilter === 'all') return t('all_branches') || 'All branches'
+    return branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter
+  }, [branchFilter, branches, t])
+
+  const selectedInventoryGroupLabel = useMemo(
+    () => inventoryGroupChoices.find((option) => option.value === groupFilter)?.label || (t('groups') || 'Groups'),
+    [groupFilter, inventoryGroupChoices, t],
+  )
+
+  const selectedInventoryStockLabel = useMemo(
+    () => inventoryStockChoices.find((option) => option.value === stockFilter)?.label || (t('stock_status') || 'Stock'),
+    [inventoryStockChoices, stockFilter, t],
+  )
 
   const needsStatsData = inventorySection === 'all' || inventorySection === 'stats' || inventorySection === 'products' || tab === 'products'
   const needsProductSummary = inventorySection === 'all' || inventorySection === 'products' || tab === 'products'
@@ -2444,75 +2477,174 @@ export default function Inventory() {
       ].filter(Boolean)
     }
 
-    return [
-      branches.length > 1 ? {
-        id: 'branch',
-        label: t('branch') || 'Branch',
-        render: ({ closeMenu }) => (
-          <label className="block">
-            <span className="sr-only">{t('branch') || 'Branch'}</span>
-            <select
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-              value={branchFilter}
-              onChange={(event) => {
-                setBranchFilter(event.target.value || 'all')
-                closeMenu()
-              }}
-              aria-label={t('branch') || 'Branch'}
-            >
-              <option value="all">{t('all_branches') || 'All branches'}</option>
-              {branches.map((branch) => (
-                <option key={`branch-${branch.id}`} value={String(branch.id)}>{branch.name}</option>
-              ))}
-            </select>
-          </label>
+      return [
+        branches.length > 1 ? {
+          id: 'branch',
+          label: t('branch') || 'Branch',
+          render: ({ closeMenu }) => (
+            inventoryBranchPickerOpen ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
+                    onClick={() => setInventoryBranchPickerOpen(false)}
+                  >
+                    {t('back') || 'Back'}
+                  </button>
+                  {branchFilter !== 'all' ? (
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+                      onClick={() => {
+                        setBranchFilter('all')
+                        closeMenu()
+                      }}
+                    >
+                      {t('clear') || 'Clear'}
+                    </button>
+                  ) : null}
+                </div>
+                <label className="block">
+                  <span className="sr-only">{t('branch') || 'Branch'}</span>
+                  <select
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+                    value={branchFilter}
+                    onChange={(event) => {
+                      setBranchFilter(event.target.value || 'all')
+                      closeMenu()
+                    }}
+                    aria-label={t('branch') || 'Branch'}
+                  >
+                    <option value="all">{t('all_branches') || 'All branches'}</option>
+                    {branches.map((branch) => (
+                      <option key={`branch-${branch.id}`} value={String(branch.id)}>{branch.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
+                onClick={() => setInventoryBranchPickerOpen(true)}
+              >
+                <span className="truncate">{selectedInventoryBranchLabel}</span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
+              </button>
+            )
         ),
       } : null,
       {
         id: 'group',
         label: t('groups') || 'Groups',
         render: ({ closeMenu }) => (
-          <label className="block">
-            <span className="sr-only">{t('groups') || 'Groups'}</span>
-            <select
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-              value={groupFilter}
-              onChange={(event) => {
-                setGroupFilter(event.target.value || 'all')
-                closeMenu()
-              }}
-              aria-label={t('groups') || 'Groups'}
+          inventoryGroupPickerOpen ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
+                  onClick={() => setInventoryGroupPickerOpen(false)}
+                >
+                  {t('back') || 'Back'}
+                </button>
+                {groupFilter !== 'grouped' ? (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+                    onClick={() => {
+                      setGroupFilter('grouped')
+                      closeMenu()
+                    }}
+                  >
+                    {t('clear') || 'Clear'}
+                  </button>
+                ) : null}
+              </div>
+              <label className="block">
+                <span className="sr-only">{t('groups') || 'Groups'}</span>
+                <select
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+                  value={groupFilter}
+                  onChange={(event) => {
+                    setGroupFilter(event.target.value || 'grouped')
+                    closeMenu()
+                  }}
+                  aria-label={t('groups') || 'Groups'}
+                >
+                  {inventoryGroupChoices.map((option) => (
+                    <option key={`group-${option.value}`} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
+              onClick={() => setInventoryGroupPickerOpen(true)}
             >
-              <option value="all">{t('all') || 'All'}</option>
-              <option value="grouped">{t('groups') || 'Groups'}</option>
-              <option value="parent">{t('parents') || 'Parents'}</option>
-              <option value="variant">{t('variants') || 'Variants'}</option>
-              <option value="standalone">{t('standalone') || 'Standalone'}</option>
-            </select>
-          </label>
+              <span className="truncate">{selectedInventoryGroupLabel}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
+            </button>
+          )
         ),
       },
       {
         id: 'stock',
         label: t('stock_status') || 'Stock',
         render: ({ closeMenu }) => (
-          <label className="block">
-            <span className="sr-only">{t('stock_status') || 'Stock'}</span>
-            <select
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-              value={stockFilter}
-              onChange={(event) => {
-                setStockFilter(event.target.value || 'all')
-                closeMenu()
-              }}
-              aria-label={t('stock_status') || 'Stock'}
+          inventoryStockPickerOpen ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
+                  onClick={() => setInventoryStockPickerOpen(false)}
+                >
+                  {t('back') || 'Back'}
+                </button>
+                {stockFilter !== 'all' ? (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+                    onClick={() => {
+                      setStockFilter('all')
+                      closeMenu()
+                    }}
+                  >
+                    {t('clear') || 'Clear'}
+                  </button>
+                ) : null}
+              </div>
+              <label className="block">
+                <span className="sr-only">{t('stock_status') || 'Stock'}</span>
+                <select
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+                  value={stockFilter}
+                  onChange={(event) => {
+                    setStockFilter(event.target.value || 'all')
+                    closeMenu()
+                  }}
+                  aria-label={t('stock_status') || 'Stock'}
+                >
+                  {inventoryStockChoices.map((option) => (
+                    <option key={`stock-${option.value}`} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
+              onClick={() => setInventoryStockPickerOpen(true)}
             >
-              <option value="all">{t('all') || 'All'}</option>
-              <option value="in_stock">{t('in_stock') || 'In stock'}</option>
-              <option value="low">{t('low_stock') || 'Low stock'}</option>
-              <option value="out">{t('out_of_stock') || 'Out of stock'}</option>
-            </select>
-          </label>
+              <span className="truncate">{selectedInventoryStockLabel}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
+            </button>
+          )
         ),
       },
       inventoryBrands.length ? {
@@ -2578,9 +2710,14 @@ export default function Inventory() {
     branches,
     brandFilter,
     groupFilter,
+    inventoryBranchPickerOpen,
     inventoryBrands,
     inventoryBrandPickerOpen,
+    inventoryGroupChoices,
+    inventoryGroupPickerOpen,
     inventoryMovementUserPickerOpen,
+    inventoryStockChoices,
+    inventoryStockPickerOpen,
     movFilter,
     movementGroupMode,
     movementMonthFilter,
@@ -2589,7 +2726,10 @@ export default function Inventory() {
     movementYearFilter,
     movementYears,
     isAdmin,
+    selectedInventoryBranchLabel,
     selectedInventoryBrandLabel,
+    selectedInventoryGroupLabel,
+    selectedInventoryStockLabel,
     selectedMovementUserLabel,
     stockFilter,
     t,
@@ -2638,6 +2778,9 @@ export default function Inventory() {
     setMovementMonthFilter('all')
     setMovementGroupMode('time')
     setMovementSortDirection('desc')
+    setInventoryBranchPickerOpen(false)
+    setInventoryGroupPickerOpen(false)
+    setInventoryStockPickerOpen(false)
     setInventoryBrandPickerOpen(false)
     setInventoryMovementUserPickerOpen(false)
   }, [])
@@ -2911,6 +3054,9 @@ export default function Inventory() {
             onClear={clearInventoryFilters}
             onOpenChange={(open) => {
               if (open) return
+              setInventoryBranchPickerOpen(false)
+              setInventoryGroupPickerOpen(false)
+              setInventoryStockPickerOpen(false)
               setInventoryBrandPickerOpen(false)
               setInventoryMovementUserPickerOpen(false)
             }}
