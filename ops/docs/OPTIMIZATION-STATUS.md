@@ -15,26 +15,29 @@ Last updated: 2026-05-16
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash: `63286155746732e7`
+- latest verified frontend hash: `989b285f0957ef6e`
 
 Latest verified reports:
 
 - deep audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T08-02-39-261Z\summary.html`
-- route-scoped inventory audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T08-01-26-701Z\summary.html`
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T09-10-25-077Z\summary.html`
+- route-scoped dashboard/products/inventory audit:
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T09-08-49-057Z\summary.html`
 - full-app audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T08-02-39-639Z\summary.html`
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T09-12-46-013Z\summary.html`
 
 Current honest pockets:
 
 - no repeatable app-side hard findings on the latest warm exhaustive rerun
-- remaining noise is ambient browser document-time drift on dashboard and mobile
-  branches, not a stable route interaction failure
+- the previous `api/notifications/summary` pressure on inventory is no longer a
+  live warm-baseline finding after the backend cache pass
+- the remaining mobile inventory browser-action nav miss is harness-shaped and
+  did not reproduce as a deep-audit route failure
 
 Recent route-level win:
 
 - `inventory`
+- `dashboard/products/inventory` shared summary path
 
 ## Current Working Rules
 
@@ -46,6 +49,9 @@ Recent route-level win:
 
 ## Recently Accepted Wins
 
+- Notification summary now reuses a short-lived server-side cache keyed by
+  effective section access and summary preferences, which removed the shared
+  inventory-side summary hotspot from the warm baseline.
 - Inventory no longer builds product-tab filter sections off movement-only state,
   and admin user options now wait for the Movements tab.
 - Public catalog keeps chunk preloading but no longer pre-mounts hidden
@@ -60,6 +66,11 @@ Recent route-level win:
 
 ## Recently Rejected Candidates
 
+- Notification-center summary deferral:
+  looked like a reasonable shared-background delay, but real route timing on
+  Products regressed and did not hold the gate
+- Returns cached display-field reuse:
+  reduced repeated formatting locally, but warm route reruns got slower instead
 - products loadPromise bookkeeping removal:
   the code was dead-looking, but the real route metrics got worse after proper
   worktree-targeted runtime verification

@@ -7,6 +7,8 @@ const { getExpiringProducts, getStockAlertProducts } = require('../businessMetri
 const { getDriveSyncConfig } = require('../services/googleDriveSync')
 
 const router = express.Router()
+const NOTIFICATION_SUMMARY_CACHE_TTL_MS = 15 * 1000
+const notificationSummaryCache = new Map()
 
 const NOTIFICATION_SETTING_KEYS = [
   'notifications_inventory_enabled',
@@ -31,6 +33,47 @@ function normalizeBoolean(value, fallback = true) {
 function toNumber(value, fallback = 0) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function pruneNotificationSummaryCache(now = Date.now()) {
+  notificationSummaryCache.forEach((entry, key) => {
+    if (!entry || Number(entry.expiresAt || 0) <= now) {
+      notificationSummaryCache.delete(key)
+    }
+  })
+}
+
+function getNotificationSummaryCacheKey(req, preferences) {
+  return JSON.stringify({
+    inventory: !!(preferences?.inventoryEnabled && hasPermission(req.user, 'inventory')),
+    expiry: !!(preferences?.expiryEnabled && hasPermission(req.user, 'products')),
+    sales: !!(preferences?.salesEnabled && hasPermission(req.user, 'sales')),
+    loyalty: !!(preferences?.loyaltyEnabled && hasPermission(req.user, 'contacts')),
+    portal: !!(preferences?.portalEnabled && hasPermission(req.user, 'customer_portal')),
+    system: !!(preferences?.systemEnabled && hasPermission(req.user, 'backup')),
+    expiryDays: Number(preferences?.expiryDays || 0),
+    loyaltyThreshold: Number(preferences?.loyaltyThreshold || 0),
+  })
+}
+
+function cloneNotificationSummaryPayload(payload = {}) {
+  return JSON.parse(JSON.stringify(payload))
+}
+
+function getCachedNotificationSummary(key, now = Date.now()) {
+  const entry = notificationSummaryCache.get(key)
+  if (!entry || Number(entry.expiresAt || 0) <= now) {
+    if (entry) notificationSummaryCache.delete(key)
+    return null
+  }
+  return cloneNotificationSummaryPayload(entry.payload)
+}
+
+function setCachedNotificationSummary(key, payload, now = Date.now()) {
+  notificationSummaryCache.set(key, {
+    expiresAt: now + NOTIFICATION_SUMMARY_CACHE_TTL_MS,
+    payload: cloneNotificationSummaryPayload(payload),
+  })
 }
 
 function loadNotificationPreferences() {
@@ -390,7 +433,15 @@ function buildSystemSection() {
 }
 
 router.get('/summary', authToken, (req, res) => {
+  const now = Date.now()
+  pruneNotificationSummaryCache(now)
   const preferences = loadNotificationPreferences()
+  const cacheKey = getNotificationSummaryCacheKey(req, preferences)
+  const cached = getCachedNotificationSummary(cacheKey, now)
+  if (cached) {
+    res.json(cached)
+    return
+  }
   const sections = []
 
   if (preferences.inventoryEnabled && hasPermission(req.user, 'inventory')) {
@@ -425,12 +476,22 @@ router.get('/summary', authToken, (req, res) => {
 
   const unreadCount = sections.reduce((sum, section) => sum + Number(section.count || 0), 0)
 
-  res.json({
+  const payload = {
     unreadCount,
     generatedAt: new Date().toISOString(),
     preferences,
     sections,
-  })
+  }
+  setCachedNotificationSummary(cacheKey, payload, now)
+  res.json(payload)
 })
 
 module.exports = router
+module.exports._test = {
+  NOTIFICATION_SUMMARY_CACHE_TTL_MS,
+  pruneNotificationSummaryCache,
+  getNotificationSummaryCacheKey,
+  getCachedNotificationSummary,
+  setCachedNotificationSummary,
+  notificationSummaryCache,
+}

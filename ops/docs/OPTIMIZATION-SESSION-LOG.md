@@ -8,6 +8,13 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Notification summary server-side cache
+  - area: `backend/src/routes/notifications.js`
+  - result: kept
+  - note: `/api/notifications/summary` now reuses a short-lived cache keyed by
+    effective access and preferences, which removed the shared inventory-side
+    summary pressure from the warm baseline
+
 - Inventory filter tab-scoping cleanup
   - route: `inventory`
   - result: kept
@@ -38,6 +45,24 @@ This is a concise running log of what actually happened in recent sessions.
     settled job lists
 
 ### Rejected
+
+- Branches delayed action-history hydration
+  - area: `frontend/src/components/branches/Branches.jsx`
+  - result: rejected
+  - note: copied the delayed history pattern from Customers, but desktop
+    Branches document time got much worse in the real route audit
+
+- Notification-center delayed summary fetch
+  - area: `frontend/src/components/shared/NotificationCenter.jsx`
+  - result: rejected
+  - note: looked like a shared-background win, but Products route timing
+    regressed once it was validated live
+
+- Returns cached display-field reuse
+  - area: `frontend/src/components/returns/Returns.jsx`
+  - result: rejected
+  - note: precomputing row display fields did not survive warm reruns and made
+    Returns slower
 
 - Returns global mobile deferred-card threshold
   - area: `frontend/src/components/returns/ReturnsListSurface.jsx`
