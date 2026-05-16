@@ -5,6 +5,59 @@ reconstruct the program state from chat history alone.
 
 ## 2026-05-16
 
+### Import tracker list caching and filename sanitizer hardening
+
+- Files:
+  - `backend/src/services/importJobs.js`
+  - `backend/src/fileAssets.js`
+  - `backend/test/importJobPerformanceHardening.test.js`
+  - `backend/package.json`
+
+Summary:
+
+- added a short-lived cache for settled `listImportJobs({ limit: 8 })` payloads
+  so the background import tracker stops rebuilding and reparsing the same
+  completed-job list on every dashboard poll
+- cache invalidates on job writes, file attachments, retry/reset, cancel, and
+  delete paths
+- fixed `sanitizeOriginalFileName(...)` so Windows-style traversal separators
+  are normalized correctly inside the Linux runtime; this restored the backend
+  utility suite to green
+
+Verification:
+
+- `backend: node test/importJobPerformanceHardening.test.js`
+- `backend: node test/uploadSecurity.test.js`
+- `backend: npm.cmd run test:utils`
+- `frontend: npm.cmd run test:utils`
+- `frontend: npm.cmd run build`
+- runtime force-recreate
+- `live-smoke`
+- route-scoped Dashboard deep audit
+- route-scoped Dashboard browser action smoke
+- warm exhaustive deep audit reruns
+- full app audit
+
+Measured result:
+
+- dashboard-focused route verification settled clean:
+  - deep audit: `ops/runtime/reports/deep-live-audit-2026-05-16T04-01-41-026Z`
+  - browser action smoke: `ops/runtime/reports/browser-action-smoke-2026-05-16T04-01-41-718Z`
+- full app audit settled clean:
+  - `ops/runtime/reports/full-app-audit-2026-05-16T04-02-35-863Z`
+- the older dashboard API/import-tracker contention no longer dominated the
+  verified route picture; remaining exhaustive-deep noise drifted back to
+  ambient public catalog / mobile returns pockets
+
+Notes:
+
+- this session also exposed a real baseline correctness issue in the backend
+  utility suite, not caused by the import-job cache work
+- fixing the filename sanitizer was the right call because it repaired the
+  standing gate without disturbing runtime behavior
+- exhaustive deep reruns still have ambient movement, so the next frontend pass
+  should stay narrow and avoid reopening shell or tracker churn
+
 ### Status refresh after rejected Products action-history deferral
 
 Summary:

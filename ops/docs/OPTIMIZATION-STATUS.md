@@ -19,39 +19,37 @@ Primary clean verification worktree:
 Latest verified reports:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T02-39-51-142Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T02-39-51-142Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T04-04-58-584Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T04-04-58-584Z\summary.html)
 - Full app audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T02-44-05-698Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T02-44-05-698Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T04-02-35-863Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T04-02-35-863Z\summary.html)
 
 Current verified runtime health:
 
 - local health: [http://127.0.0.1:4000/health](http://127.0.0.1:4000/health)
-- frontend hash: `01a21b59873504a5`
+- frontend hash: `aed4dc431ccdfc4b`
 
 Current notable findings:
 
-- deep audit currently shows:
-  - `desktop/inventory` document-time pocket
-  - `desktop/returns` long task
+- dashboard/API contention improved after import-job list hardening; recent
+  dashboard-focused route checks are clean
+- latest exhaustive deep rerun still shows older ambient pockets:
+  - `desktop/public_catalog:section-tabs`
+  - `mobile/sales` document-time warning
   - `mobile/returns` long task
-  - `mobile/public_catalog:section-tabs` interaction warning
-- full app audit is currently failing on remote public fetch reachability, which
-  still looks environment-side rather than local app behavior
-- Returns route-specific checks remain improved after trimming a redundant
-  post-load selection cleanup render
+- latest full app audit is clean
 
-Fresh route-scoped inventory evidence from the current clean runtime:
+Fresh route-scoped dashboard evidence from the current clean runtime:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-28-47-769Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-28-47-769Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T04-01-41-026Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T04-01-41-026Z\summary.html)
 - Browser action smoke:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T01-28-48-582Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T01-28-48-582Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T04-01-41-718Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T04-01-41-718Z\summary.html)
 
-Current inventory route-only status:
+Current dashboard route-only status:
 
-- focused Inventory route checks are clean
-- desktop Inventory Filters interaction no longer shows up in the warm whole-app
-  warning set after collapsing branch/group/stock pickers behind summary selectors
+- focused Dashboard route checks are clean
+- `/api/dashboard` and shared `/api/import-jobs?limit=8` no longer show up as
+  the dominant dashboard route blockers in the latest route-scoped verification
 
 ## Phase Details
 
@@ -139,6 +137,9 @@ Current direction:
 - keep reducing repeated work on first-hit and repeated-hit server paths
 - prefer bounded waits, cache discipline, and payload trimming over broad
   rewrites
+- latest keeper added a short-lived import-job list cache for settled tracker
+  payloads and fixed cross-platform filename sanitization so backend utility
+  gates stay green
 
 ### Phase 4: Folder Sweep
 
@@ -183,6 +184,11 @@ Immediate next measured target:
   - derived-data churn
   - hidden post-load rerenders
   - cross-surface refresh/update flow
+
+Secondary measured target:
+
+- ambient public catalog / mobile returns route pockets that still drift in the
+  exhaustive deep audit even after dashboard contention cooled down
 
 Secondary lane:
 
