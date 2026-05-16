@@ -304,7 +304,18 @@ export default function Returns() {
 
   useEffect(() => {
     const validIds = new Set(visibleReturns.map((ret) => Number(ret.id)).filter((id) => Number.isFinite(id)))
-    setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
+    setSelectedIds((current) => {
+      let changed = false
+      const next = new Set()
+      current.forEach((id) => {
+        if (validIds.has(id)) {
+          next.add(id)
+        } else {
+          changed = true
+        }
+      })
+      return changed ? next : current
+    })
   }, [visibleReturns])
 
   useEffect(() => {
