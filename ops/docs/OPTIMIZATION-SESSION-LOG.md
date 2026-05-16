@@ -5,6 +5,46 @@ reconstruct the program state from chat history alone.
 
 ## 2026-05-16
 
+### Inventory filter summary selectors
+
+- File:
+  - `frontend/src/components/inventory/Inventory.jsx`
+
+Summary:
+
+- Moved Inventory product-tab `Branch`, `Groups`, and `Stock` filters onto the
+  same summary-first path already used by `Brand`.
+- The Filters menu now opens with lightweight summary rows first and only mounts
+  the underlying `<select>` controls after one more tap.
+- Preserved the existing Inventory UI shape and filter behavior while trimming
+  hidden work on the filter-open interaction.
+
+Verification:
+
+- `frontend: npm.cmd run test:utils`
+- `frontend: npm.cmd run build`
+- runtime force-recreate
+- `live-smoke`
+- route-scoped Inventory deep audit
+- route-scoped Inventory browser action smoke
+- warm exhaustive deep audit
+- warm full-app audit rerun
+
+Measured result:
+
+- baseline warm whole-app finding removed:
+  - `desktop/inventory:button:Filters`
+- route-scoped Inventory checks stayed clean after the change
+- warm whole-app audit settled back to the older Returns rendering pockets,
+  which made this change acceptable to keep
+
+Notes:
+
+- A first whole-app pass briefly woke unrelated catalog/returns noise, but the
+  required warm rerun settled with Inventory still quiet.
+- External remote reachability wobble remained in the full-app audit and was
+  treated as environment noise, not a local app regression.
+
 ### Plan and status tracking moved into repo docs
 
 - Files:

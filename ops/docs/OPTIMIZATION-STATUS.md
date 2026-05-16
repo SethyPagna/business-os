@@ -19,37 +19,36 @@ Primary clean verification worktree:
 Latest restored reports:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-12-30-694Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-12-30-694Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-32-39-444Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-32-39-444Z\summary.html)
 - Full app audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T01-15-37-511Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T01-15-37-511Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T01-32-39-471Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T01-32-39-471Z\summary.html)
 
 Current verified runtime health:
 
 - local health: [http://127.0.0.1:4000/health](http://127.0.0.1:4000/health)
-- frontend hash: `56c6e2179cc48085`
+- frontend hash: `6e98d5ab207178e0`
 
 Current notable findings:
 
-- deep audit currently settles to one app-side interaction pocket:
-  - `desktop/inventory:button:Filters`
+- deep audit currently settles to the older Returns rendering pockets:
+  - `desktop/returns`
+  - `mobile/returns`
 - full app audit currently shows external reachability wobble rather than a local
   app failure:
-  - remote public website fetch failure on the latest rerun
+  - remote admin entry fetch failure on the latest rerun
 
-Fresh route-scoped catalog evidence from the current clean runtime:
+Fresh route-scoped inventory evidence from the current clean runtime:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-03-13-732Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-03-13-732Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-28-47-769Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-28-47-769Z\summary.html)
 - Browser action smoke:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T01-03-14-609Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T01-03-14-609Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T01-28-48-582Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T01-28-48-582Z\summary.html)
 
-Current catalog route-only status:
+Current inventory route-only status:
 
-- focused public catalog tab checks are clean on the restored runtime
-- latest rejected experiment:
-  - public secondary tabs DOM priming removal
-  - route-focused checks passed
-  - whole-app warm reruns did not stay calm, so the change was rolled back
+- focused Inventory route checks are clean
+- desktop Inventory Filters interaction no longer shows up in the warm whole-app
+  warning set after collapsing branch/group/stock pickers behind summary selectors
 
 ## Phase Details
 
@@ -172,8 +171,8 @@ Primary optimization lane:
 
 Immediate next measured target:
 
-- desktop inventory Filters interaction path
-- likely seam: hidden picker/control work rather than visual layout changes
+- Returns rendering path, especially warm desktop/mobile long-task pressure
+- likely seam: shared visible-row work, not a broad route rewrite
 
 Secondary lane:
 
