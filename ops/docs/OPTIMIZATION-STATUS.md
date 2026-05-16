@@ -16,26 +16,24 @@ Primary clean verification worktree:
 
 - `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta`
 
-Latest restored reports:
+Latest verified reports:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-32-39-444Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-32-39-444Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T02-03-59-309Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T02-03-59-309Z\summary.html)
 - Full app audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T01-32-39-471Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T01-32-39-471Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T02-03-59-631Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T02-03-59-631Z\summary.html)
 
 Current verified runtime health:
 
 - local health: [http://127.0.0.1:4000/health](http://127.0.0.1:4000/health)
-- frontend hash: `6e98d5ab207178e0`
+- frontend hash: `2c792eec27cb6b02`
 
 Current notable findings:
 
-- deep audit currently settles to the older Returns rendering pockets:
-  - `desktop/returns`
-  - `mobile/returns`
-- full app audit currently shows external reachability wobble rather than a local
-  app failure:
-  - remote admin entry fetch failure on the latest rerun
+- warm exhaustive deep audit is currently clean
+- warm full app audit is currently clean
+- Returns route-specific checks are currently clean after trimming a redundant
+  post-load selection cleanup render
 
 Fresh route-scoped inventory evidence from the current clean runtime:
 
@@ -113,6 +111,8 @@ Current direction:
 - continue shared hidden-work reduction
 - prefer helper/data-flow improvements over UI reshaping
 - keep checking screenshots for overflow/out-of-bounds regressions
+- current strongest follow-through lane is product/shared workflow efficiency now
+  that Inventory and Returns are quiet on the latest warm baseline
 
 ### Phase 3: Backend Hotspots
 
@@ -171,8 +171,11 @@ Primary optimization lane:
 
 Immediate next measured target:
 
-- Returns rendering path, especially warm desktop/mobile long-task pressure
-- likely seam: shared visible-row work, not a broad route rewrite
+- product/shared workflow tightening from the new clean baseline
+- likely seams:
+  - derived-data churn
+  - hidden post-load rerenders
+  - cross-surface refresh/update flow
 
 Secondary lane:
 

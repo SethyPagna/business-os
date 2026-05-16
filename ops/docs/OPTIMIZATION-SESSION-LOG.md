@@ -5,6 +5,42 @@ reconstruct the program state from chat history alone.
 
 ## 2026-05-16
 
+### Returns selection cleanup rerender guard
+
+- File:
+  - `frontend/src/components/returns/Returns.jsx`
+
+Summary:
+
+- Tightened the `selectedIds` cleanup effect so Returns only writes state when a
+  visible selection actually became invalid.
+- This removes a redundant post-load rerender on the Returns route while
+  keeping the same selection behavior and UI shape.
+
+Verification:
+
+- `frontend: npm.cmd run test:utils`
+- `frontend: npm.cmd run build`
+- runtime force-recreate
+- `live-smoke`
+- route-scoped Returns deep audit
+- route-scoped Returns browser action smoke
+- warm exhaustive deep audit
+- warm full-app audit
+
+Measured result:
+
+- route-scoped Returns checks stayed clean
+- warm exhaustive deep audit settled clean
+- warm full-app audit settled clean
+
+Notes:
+
+- An earlier Returns repagination candidate looked promising in route-only
+  checks but woke unrelated whole-app movement and was rolled back.
+- This smaller state-write guard is the version that held up across the full
+  loop and became the new clean baseline.
+
 ### Inventory filter summary selectors
 
 - File:
