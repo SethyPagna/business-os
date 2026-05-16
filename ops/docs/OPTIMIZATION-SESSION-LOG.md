@@ -8,6 +8,12 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Inventory filter tab-scoping cleanup
+  - route: `inventory`
+  - result: kept
+  - note: product-tab filter sections were split away from movement-only state,
+    and admin user loading now waits until the Movements tab is active
+
 - Public catalog hidden secondary-tab render removal
   - route: `public_catalog`
   - result: kept
@@ -32,6 +38,12 @@ This is a concise running log of what actually happened in recent sessions.
     settled job lists
 
 ### Rejected
+
+- Returns global mobile deferred-card threshold
+  - area: `frontend/src/components/returns/ReturnsListSurface.jsx`
+  - result: rejected
+  - note: making the mobile deferred-card threshold global across groups made
+    both desktop and mobile Returns slower in the real route audit
 
 - Products orphaned load-promise bookkeeping removal
   - area: `frontend/src/components/products/Products.jsx`

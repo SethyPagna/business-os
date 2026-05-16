@@ -629,11 +629,11 @@ export default function Inventory() {
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
   useEffect(() => {
-    if (!isActive || !isAdmin) return
+    if (!isActive || !isAdmin || tab !== 'movements') return
     window.api.getUsers()
       .then((rows) => setUserOptions(Array.isArray(rows) ? rows : []))
       .catch(() => setUserOptions([]))
-  }, [isActive, isAdmin])
+  }, [isActive, isAdmin, tab])
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
@@ -2307,177 +2307,188 @@ export default function Inventory() {
     visibleMovementGroups,
   ])
 
-  const inventoryFilterSections = useMemo(() => {
-    if (tab === 'rfid') {
-      return [
-        branches.length > 1 ? {
-          id: 'branch',
-          label: t('branch') || 'Branch',
-          options: [
-            { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
-            ...branches.map((branch) => ({
-              id: `branch-${branch.id}`,
-              label: branch.name,
-              active: branchFilter === String(branch.id),
-              onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
-            })),
-          ],
-        } : null,
-      ].filter(Boolean)
-    }
+  const inventoryRfidFilterSections = useMemo(() => ([
+    branches.length > 1 ? {
+      id: 'branch',
+      label: t('branch') || 'Branch',
+      options: [
+        { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
+        ...branches.map((branch) => ({
+          id: `branch-${branch.id}`,
+          label: branch.name,
+          active: branchFilter === String(branch.id),
+          onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
+        })),
+      ],
+    } : null,
+  ].filter(Boolean)), [branchFilter, branches, t])
 
-    if (tab === 'movements') {
-      return [
-        branches.length > 1 ? {
-          id: 'branch',
-          label: t('branch') || 'Branch',
-          options: [
-            { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
-            ...branches.map((branch) => ({
-              id: `branch-${branch.id}`,
-              label: branch.name,
-              active: branchFilter === String(branch.id),
-              onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
-            })),
-          ],
-        } : null,
-        {
-          id: 'movement-type',
-          label: t('activity') || 'Activity',
-          options: [
-            { id: 'all', label: t('all_types') || 'All types', active: movFilter === 'all', onClick: () => setMovFilter('all') },
-            ['sale', t('sale') || 'Sale'],
-            ['purchase', t('purchase') || 'Purchase'],
-            ['return', t('returns') || 'Return'],
-            ['return_reversal', t('return_type_writeoff') || 'Return reversal'],
-            ['adjustment', t('adjustment') || 'Adjustment'],
-            ['transfer', t('stock_transfer') || 'Transfer'],
-          ].slice(1).map(([value, label]) => ({
-            id: value,
-            label,
-            active: movFilter === value,
-            onClick: () => setMovFilter(movFilter === value ? 'all' : value),
-          })),
-        },
-        isAdmin ? {
-          id: 'movement-user',
-          label: t('user') || 'User',
-          render: ({ closeMenu }) => (
-            inventoryMovementUserPickerOpen ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
-                    onClick={() => setInventoryMovementUserPickerOpen(false)}
-                  >
-                    {t('back') || 'Back'}
-                  </button>
-                  {movementUserFilter !== 'all' ? (
-                    <button
-                      type="button"
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
-                      onClick={() => {
-                        setMovementUserFilter('all')
-                        closeMenu()
-                      }}
-                    >
-                      {t('clear') || 'Clear'}
-                    </button>
-                  ) : null}
-                </div>
-                <label className="block">
-                  <span className="sr-only">{t('user') || 'User'}</span>
-                  <select
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-                    value={movementUserFilter}
-                    onChange={(event) => {
-                      setMovementUserFilter(event.target.value || 'all')
-                      closeMenu()
-                    }}
-                    aria-label={t('user') || 'User'}
-                  >
-                    <option value="all">{t('all_users') || 'All users'}</option>
-                    {userOptions
-                      .map((option) => {
-                        const id = String(option?.id || '')
-                        if (!id) return null
-                        return (
-                          <option key={`user-${id}`} value={id}>
-                            {option?.name || option?.username || `User ${id}`}
-                          </option>
-                        )
-                      })
-                      .filter(Boolean)}
-                  </select>
-                </label>
-              </div>
-            ) : (
+  const inventoryMovementFilterSections = useMemo(() => ([
+    branches.length > 1 ? {
+      id: 'branch',
+      label: t('branch') || 'Branch',
+      options: [
+        { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
+        ...branches.map((branch) => ({
+          id: `branch-${branch.id}`,
+          label: branch.name,
+          active: branchFilter === String(branch.id),
+          onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
+        })),
+      ],
+    } : null,
+    {
+      id: 'movement-type',
+      label: t('activity') || 'Activity',
+      options: [
+        { id: 'all', label: t('all_types') || 'All types', active: movFilter === 'all', onClick: () => setMovFilter('all') },
+        ['sale', t('sale') || 'Sale'],
+        ['purchase', t('purchase') || 'Purchase'],
+        ['return', t('returns') || 'Return'],
+        ['return_reversal', t('return_type_writeoff') || 'Return reversal'],
+        ['adjustment', t('adjustment') || 'Adjustment'],
+        ['transfer', t('stock_transfer') || 'Transfer'],
+      ].slice(1).map(([value, label]) => ({
+        id: value,
+        label,
+        active: movFilter === value,
+        onClick: () => setMovFilter(movFilter === value ? 'all' : value),
+      })),
+    },
+    isAdmin ? {
+      id: 'movement-user',
+      label: t('user') || 'User',
+      render: ({ closeMenu }) => (
+        inventoryMovementUserPickerOpen ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
-                className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
-                onClick={() => setInventoryMovementUserPickerOpen(true)}
+                className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
+                onClick={() => setInventoryMovementUserPickerOpen(false)}
               >
-                <span className="truncate">{selectedMovementUserLabel}</span>
-                <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
+                {t('back') || 'Back'}
               </button>
-            )
-          ),
-        } : null,
-        {
-          id: 'movement-year',
-          label: 'Year',
-          options: [
-            { id: 'all', label: 'All years', active: movementYearFilter === 'all', onClick: () => { setMovementYearFilter('all'); setMovementMonthFilter('all') } },
-            ...movementYears.map((year) => ({
-              id: `year-${year}`,
-              label: year,
-              active: movementYearFilter === year,
-              onClick: () => {
-                const next = movementYearFilter === year ? 'all' : year
-                setMovementYearFilter(next)
-                if (next === 'all') setMovementMonthFilter('all')
-              },
-            })),
-          ],
-        },
-        {
-          id: 'movement-month',
-          label: 'Month',
-          options: [
-            { id: 'all', label: 'All months', active: movementMonthFilter === 'all', onClick: () => setMovementMonthFilter('all') },
-            ...Array.from({ length: 12 }, (_, index) => {
-              const month = String(index + 1)
-              const label = new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' })
-              return {
-                id: `month-${month}`,
-                label,
-                active: movementMonthFilter === month,
-                onClick: () => setMovementMonthFilter(movementMonthFilter === month ? 'all' : month),
-              }
-            }),
-          ],
-        },
-        {
-          id: 'movement-grouping',
-          label: t('group_by') || 'Group by',
-          options: [
-            { id: 'time', label: t('group_by_time') || 'Time only', active: movementGroupMode === 'time', onClick: () => setMovementGroupMode('time') },
-            { id: 'time-action', label: t('group_by_time_action') || 'Time + activity', active: movementGroupMode === 'time+action', onClick: () => setMovementGroupMode('time+action') },
-          ],
-        },
-        {
-          id: 'movement-sort',
-          label: t('sort') || 'Sort',
-          options: [
-            { id: 'desc', label: t('newest_first') || 'Newest first', active: movementSortDirection === 'desc', onClick: () => setMovementSortDirection('desc') },
-            { id: 'asc', label: t('oldest_first') || 'Oldest first', active: movementSortDirection === 'asc', onClick: () => setMovementSortDirection('asc') },
-          ],
-        },
-      ].filter(Boolean)
-    }
+              {movementUserFilter !== 'all' ? (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+                  onClick={() => {
+                    setMovementUserFilter('all')
+                    closeMenu()
+                  }}
+                >
+                  {t('clear') || 'Clear'}
+                </button>
+              ) : null}
+            </div>
+            <label className="block">
+              <span className="sr-only">{t('user') || 'User'}</span>
+              <select
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+                value={movementUserFilter}
+                onChange={(event) => {
+                  setMovementUserFilter(event.target.value || 'all')
+                  closeMenu()
+                }}
+                aria-label={t('user') || 'User'}
+              >
+                <option value="all">{t('all_users') || 'All users'}</option>
+                {userOptions
+                  .map((option) => {
+                    const id = String(option?.id || '')
+                    if (!id) return null
+                    return (
+                      <option key={`user-${id}`} value={id}>
+                        {option?.name || option?.username || `User ${id}`}
+                      </option>
+                    )
+                  })
+                  .filter(Boolean)}
+              </select>
+            </label>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
+            onClick={() => setInventoryMovementUserPickerOpen(true)}
+          >
+            <span className="truncate">{selectedMovementUserLabel}</span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
+          </button>
+        )
+      ),
+    } : null,
+    {
+      id: 'movement-year',
+      label: 'Year',
+      options: [
+        { id: 'all', label: 'All years', active: movementYearFilter === 'all', onClick: () => { setMovementYearFilter('all'); setMovementMonthFilter('all') } },
+        ...movementYears.map((year) => ({
+          id: `year-${year}`,
+          label: year,
+          active: movementYearFilter === year,
+          onClick: () => {
+            const next = movementYearFilter === year ? 'all' : year
+            setMovementYearFilter(next)
+            if (next === 'all') setMovementMonthFilter('all')
+          },
+        })),
+      ],
+    },
+    {
+      id: 'movement-month',
+      label: 'Month',
+      options: [
+        { id: 'all', label: 'All months', active: movementMonthFilter === 'all', onClick: () => setMovementMonthFilter('all') },
+        ...Array.from({ length: 12 }, (_, index) => {
+          const month = String(index + 1)
+          const label = new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' })
+          return {
+            id: `month-${month}`,
+            label,
+            active: movementMonthFilter === month,
+            onClick: () => setMovementMonthFilter(movementMonthFilter === month ? 'all' : month),
+          }
+        }),
+      ],
+    },
+    {
+      id: 'movement-grouping',
+      label: t('group_by') || 'Group by',
+      options: [
+        { id: 'time', label: t('group_by_time') || 'Time only', active: movementGroupMode === 'time', onClick: () => setMovementGroupMode('time') },
+        { id: 'time-action', label: t('group_by_time_action') || 'Time + activity', active: movementGroupMode === 'time+action', onClick: () => setMovementGroupMode('time+action') },
+      ],
+    },
+    {
+      id: 'movement-sort',
+      label: t('sort') || 'Sort',
+      options: [
+        { id: 'desc', label: t('newest_first') || 'Newest first', active: movementSortDirection === 'desc', onClick: () => setMovementSortDirection('desc') },
+        { id: 'asc', label: t('oldest_first') || 'Oldest first', active: movementSortDirection === 'asc', onClick: () => setMovementSortDirection('asc') },
+      ],
+    },
+  ].filter(Boolean)), [
+    branchFilter,
+    branches,
+    inventoryMovementUserPickerOpen,
+    isAdmin,
+    movFilter,
+    movementGroupMode,
+    movementMonthFilter,
+    movementSortDirection,
+    movementUserFilter,
+    movementYearFilter,
+    movementYears,
+    selectedMovementUserLabel,
+    t,
+    userOptions,
+  ])
 
-      return [
+  const inventoryProductFilterSections = useMemo(() => (
+    [
         branches.length > 1 ? {
           id: 'branch',
           label: t('branch') || 'Branch',
@@ -2705,7 +2716,7 @@ export default function Inventory() {
         ),
       } : null,
     ].filter(Boolean)
-  }, [
+  ), [
     branchFilter,
     branches,
     brandFilter,
@@ -2715,28 +2726,22 @@ export default function Inventory() {
     inventoryBrandPickerOpen,
     inventoryGroupChoices,
     inventoryGroupPickerOpen,
-    inventoryMovementUserPickerOpen,
     inventoryStockChoices,
     inventoryStockPickerOpen,
-    movFilter,
-    movementGroupMode,
-    movementMonthFilter,
-    movementSortDirection,
-    movementUserFilter,
-    movementYearFilter,
-    movementYears,
-    isAdmin,
     selectedInventoryBranchLabel,
     selectedInventoryBrandLabel,
     selectedInventoryGroupLabel,
     selectedInventoryStockLabel,
-    selectedMovementUserLabel,
     stockFilter,
     t,
-    tab,
     tr,
-    userOptions,
   ])
+
+  const inventoryFilterSections = useMemo(() => {
+    if (tab === 'rfid') return inventoryRfidFilterSections
+    if (tab === 'movements') return inventoryMovementFilterSections
+    return inventoryProductFilterSections
+  }, [inventoryMovementFilterSections, inventoryProductFilterSections, inventoryRfidFilterSections, tab])
 
   const activeInventoryFilterCount = useMemo(() => {
     if (tab === 'rfid') {

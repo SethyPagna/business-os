@@ -15,25 +15,26 @@ Last updated: 2026-05-16
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash: `9383755b1e8c266a`
+- latest verified frontend hash: `63286155746732e7`
 
 Latest verified reports:
 
 - deep audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T07-16-03-931Z\summary.html`
-- route-scoped public catalog audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T07-11-57-255Z\summary.html`
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T08-02-39-261Z\summary.html`
+- route-scoped inventory audit:
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T08-01-26-701Z\summary.html`
 - full-app audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T07-13-46-744Z\summary.html`
+  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T08-02-39-639Z\summary.html`
 
 Current honest pockets:
 
 - no repeatable app-side hard findings on the latest warm exhaustive rerun
-- remaining noise is mostly ambient navigation drift rather than a stable hotspot
+- remaining noise is ambient browser document-time drift on dashboard and mobile
+  branches, not a stable route interaction failure
 
 Recent route-level win:
 
-- `public_catalog`
+- `inventory`
 
 ## Current Working Rules
 
@@ -45,6 +46,8 @@ Recent route-level win:
 
 ## Recently Accepted Wins
 
+- Inventory no longer builds product-tab filter sections off movement-only state,
+  and admin user options now wait for the Movements tab.
 - Public catalog keeps chunk preloading but no longer pre-mounts hidden
   secondary tab panels after priming.
 - Products no longer schedules an orphaned desktop reveal state update after load.
