@@ -99,6 +99,7 @@ export default function Returns() {
   const [returnPage, setReturnPage] = useState(1)
   const [returnPageSize, setReturnPageSize] = useState(() => getInitialReturnPageSize())
   const [collapsedReturnSections, setCollapsedReturnSections] = useState(() => new Set())
+  const [isReturnsFilterMenuOpen, setIsReturnsFilterMenuOpen] = useState(false)
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
@@ -414,78 +415,81 @@ export default function Returns() {
       : { label: tr('export_customer_returns', 'Export customer returns', 'នាំចេញការត្រឡប់ពីអតិថិជន'), onClick: () => exportVisible(customerRows, 'returns-customer') },
   ].filter(Boolean)), [customerRows, exportSelected, exportVisible, filtered, monthFilter, scope, selectedReturns.length, supplierRows, tr, typeFilter, typeOptions, visibleReturns, yearFilter])
 
-  const filterSections = useMemo(() => ([
-    {
-      id: 'scope',
-      label: tr('scope', 'Scope'),
-      options: [
-        { id: CUSTOMER_SCOPE, label: tr('customer_returns', 'Customer Returns'), active: scope === CUSTOMER_SCOPE, onClick: () => setScope(CUSTOMER_SCOPE) },
-        { id: SUPPLIER_SCOPE, label: tr('supplier_returns', 'Supplier Returns'), active: scope === SUPPLIER_SCOPE, onClick: () => setScope(SUPPLIER_SCOPE) },
-      ],
-    },
-    {
-      id: 'year',
-      label: tr('year', 'Year'),
-      options: [
-        { id: 'all', label: tr('all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
-        ...availableYears.map((year) => ({
-          id: `year-${year}`,
-          label: year,
-          active: yearFilter === year,
-          onClick: () => {
-            const next = yearFilter === year ? 'all' : year
-            setYearFilter(next)
-            if (next === 'all') setMonthFilter('all')
-          },
-        })),
-      ],
-    },
-    {
-      id: 'month',
-      label: tr('month', 'Month'),
-      options: [
-        { id: 'all', label: tr('all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
-        ...Array.from({ length: 12 }, (_, index) => {
-          const month = String(index + 1)
-          return {
-            id: `month-${month}`,
-            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
-            active: monthFilter === month,
-            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
-          }
-        }),
-      ],
-    },
-    {
-      id: 'type',
-      label: tr('type', 'Type'),
-      options: [
-        { id: 'all', label: tr('all_types', 'All types'), active: typeFilter === 'all', onClick: () => setTypeFilter('all') },
-        ...typeOptions.map(([id, label]) => ({
-          id,
-          label,
-          active: typeFilter === id,
-          onClick: () => setTypeFilter(typeFilter === id ? 'all' : id),
-        })),
-      ],
-    },
-    {
-      id: 'grouping',
-      label: tr('group_by', 'Group by'),
-      options: [
-        { id: 'time', label: tr('group_by_time', 'Time only'), active: returnGroupMode === 'time', onClick: () => setReturnGroupMode('time') },
-        { id: 'time-action', label: tr('group_by_time_action', 'Time + type'), active: returnGroupMode === 'time+action', onClick: () => setReturnGroupMode('time+action') },
-      ],
-    },
-    {
-      id: 'sort',
-      label: tr('sort', 'Sort'),
-      options: [
-        { id: 'desc', label: tr('newest_first', 'Newest first'), active: returnSortDirection === 'desc', onClick: () => setReturnSortDirection('desc') },
-        { id: 'asc', label: tr('oldest_first', 'Oldest first'), active: returnSortDirection === 'asc', onClick: () => setReturnSortDirection('asc') },
-      ],
-    },
-  ]), [availableYears, monthFilter, returnGroupMode, returnSortDirection, scope, tr, typeFilter, typeOptions, yearFilter])
+  const filterSections = useMemo(() => {
+    if (!isReturnsFilterMenuOpen) return []
+    return [
+      {
+        id: 'scope',
+        label: tr('scope', 'Scope'),
+        options: [
+          { id: CUSTOMER_SCOPE, label: tr('customer_returns', 'Customer Returns'), active: scope === CUSTOMER_SCOPE, onClick: () => setScope(CUSTOMER_SCOPE) },
+          { id: SUPPLIER_SCOPE, label: tr('supplier_returns', 'Supplier Returns'), active: scope === SUPPLIER_SCOPE, onClick: () => setScope(SUPPLIER_SCOPE) },
+        ],
+      },
+      {
+        id: 'year',
+        label: tr('year', 'Year'),
+        options: [
+          { id: 'all', label: tr('all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+          ...availableYears.map((year) => ({
+            id: `year-${year}`,
+            label: year,
+            active: yearFilter === year,
+            onClick: () => {
+              const next = yearFilter === year ? 'all' : year
+              setYearFilter(next)
+              if (next === 'all') setMonthFilter('all')
+            },
+          })),
+        ],
+      },
+      {
+        id: 'month',
+        label: tr('month', 'Month'),
+        options: [
+          { id: 'all', label: tr('all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+          ...Array.from({ length: 12 }, (_, index) => {
+            const month = String(index + 1)
+            return {
+              id: `month-${month}`,
+              label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
+              active: monthFilter === month,
+              onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
+            }
+          }),
+        ],
+      },
+      {
+        id: 'type',
+        label: tr('type', 'Type'),
+        options: [
+          { id: 'all', label: tr('all_types', 'All types'), active: typeFilter === 'all', onClick: () => setTypeFilter('all') },
+          ...typeOptions.map(([id, label]) => ({
+            id,
+            label,
+            active: typeFilter === id,
+            onClick: () => setTypeFilter(typeFilter === id ? 'all' : id),
+          })),
+        ],
+      },
+      {
+        id: 'grouping',
+        label: tr('group_by', 'Group by'),
+        options: [
+          { id: 'time', label: tr('group_by_time', 'Time only'), active: returnGroupMode === 'time', onClick: () => setReturnGroupMode('time') },
+          { id: 'time-action', label: tr('group_by_time_action', 'Time + type'), active: returnGroupMode === 'time+action', onClick: () => setReturnGroupMode('time+action') },
+        ],
+      },
+      {
+        id: 'sort',
+        label: tr('sort', 'Sort'),
+        options: [
+          { id: 'desc', label: tr('newest_first', 'Newest first'), active: returnSortDirection === 'desc', onClick: () => setReturnSortDirection('desc') },
+          { id: 'asc', label: tr('oldest_first', 'Oldest first'), active: returnSortDirection === 'asc', onClick: () => setReturnSortDirection('asc') },
+        ],
+      },
+    ]
+  }, [availableYears, isReturnsFilterMenuOpen, monthFilter, returnGroupMode, returnSortDirection, scope, tr, typeFilter, typeOptions, yearFilter])
 
   const activeFilterCount = useMemo(
     () => [yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time', returnSortDirection !== 'desc'].filter(Boolean).length,
@@ -605,6 +609,7 @@ export default function Returns() {
           label={tr('filters', 'Filters')}
           activeCount={activeFilterCount}
           sections={filterSections}
+          onOpenChange={setIsReturnsFilterMenuOpen}
           onClear={() => {
             setScope(CUSTOMER_SCOPE)
             setYearFilter('all')
