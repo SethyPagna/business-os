@@ -5,6 +5,47 @@ reconstruct the program state from chat history alone.
 
 ## 2026-05-16
 
+### Returns lazy filter-menu sections
+
+- File:
+  - `frontend/src/components/returns/Returns.jsx`
+
+Summary:
+
+- moved Returns onto the same lazy filter-menu pattern already used by
+  Products and POS
+- Returns now builds its filter section model only while the Filters menu is
+  open instead of doing that hidden work on every route render
+- preserved the existing Returns UI shape and filter behavior
+
+Verification:
+
+- `frontend: npm.cmd run test:utils`
+- `frontend: npm.cmd run build`
+- runtime force-recreate
+- `live-smoke`
+- route-scoped Returns deep audit
+- route-scoped Returns browser action smoke
+- warm exhaustive deep audit
+- warm full app audit
+
+Measured result:
+
+- route-scoped Returns checks settled clean:
+  - deep audit: `ops/runtime/reports/deep-live-audit-2026-05-16T05-04-15-524Z`
+  - browser action smoke: `ops/runtime/reports/browser-action-smoke-2026-05-16T05-04-16-628Z`
+- warm exhaustive deep audit settled clean:
+  - `ops/runtime/reports/deep-live-audit-2026-05-16T05-07-38-823Z`
+- warm full app audit settled clean:
+  - `ops/runtime/reports/full-app-audit-2026-05-16T05-05-27-132Z`
+
+Notes:
+
+- an earlier sequence of Returns render-path experiments improved focused
+  traces but woke unrelated whole-app movement and were rolled back
+- this smaller hidden-work trim is the version that held steady across the
+  full loop and became the new clean baseline
+
 ### Import tracker list caching and filename sanitizer hardening
 
 - Files:

@@ -19,24 +19,20 @@ Primary clean verification worktree:
 Latest verified reports:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T04-04-58-584Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T04-04-58-584Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T05-07-38-823Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T05-07-38-823Z\summary.html)
 - Full app audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T04-02-35-863Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T04-02-35-863Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T05-05-27-132Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T05-05-27-132Z\summary.html)
 
 Current verified runtime health:
 
 - local health: [http://127.0.0.1:4000/health](http://127.0.0.1:4000/health)
-- frontend hash: `aed4dc431ccdfc4b`
+- frontend hash: `2dc39ed211caee2e`
 
 Current notable findings:
 
-- dashboard/API contention improved after import-job list hardening; recent
-  dashboard-focused route checks are clean
-- latest exhaustive deep rerun still shows older ambient pockets:
-  - `desktop/public_catalog:section-tabs`
-  - `mobile/sales` document-time warning
-  - `mobile/returns` long task
+- latest warm exhaustive deep audit is clean
 - latest full app audit is clean
+- route-scoped Returns checks are also clean after deferring filter menu work
 
 Fresh route-scoped dashboard evidence from the current clean runtime:
 
@@ -50,6 +46,13 @@ Current dashboard route-only status:
 - focused Dashboard route checks are clean
 - `/api/dashboard` and shared `/api/import-jobs?limit=8` no longer show up as
   the dominant dashboard route blockers in the latest route-scoped verification
+
+Fresh route-scoped Returns evidence from the current clean runtime:
+
+- Deep audit:
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T05-04-15-524Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T05-04-15-524Z\summary.html)
+- Browser action smoke:
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T05-04-16-628Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T05-04-16-628Z\summary.html)
 
 ## Phase Details
 
