@@ -8,6 +8,12 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Public catalog hidden secondary-tab render removal
+  - route: `public_catalog`
+  - result: kept
+  - note: kept chunk preloading, but stopped rendering hidden primed secondary
+    tab panels after idle warmup
+
 - Products orphaned reveal-state cleanup
   - route: `products`
   - result: kept
@@ -26,6 +32,12 @@ This is a concise running log of what actually happened in recent sessions.
     settled job lists
 
 ### Rejected
+
+- Products orphaned load-promise bookkeeping removal
+  - area: `frontend/src/components/products/Products.jsx`
+  - result: rejected
+  - note: looked like dead bookkeeping, but real route timings regressed once
+    the verify worktree runtime was recreated correctly
 
 - Backup version hard timeout fallback
   - area: `backend/src/services/backupPackages.js`
