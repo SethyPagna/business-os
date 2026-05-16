@@ -16,29 +16,40 @@ Primary clean verification worktree:
 
 - `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta`
 
-Latest clean warm reports:
+Latest restored reports:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-15T23-53-41-069Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-15T23-53-41-069Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-12-30-694Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-12-30-694Z\summary.html)
 - Full app audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-15T23-56-12-943Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-15T23-56-12-943Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T01-15-37-511Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T01-15-37-511Z\summary.html)
 
 Current verified runtime health:
 
 - local health: [http://127.0.0.1:4000/health](http://127.0.0.1:4000/health)
-- frontend hash: `0be34b850275e8f4`
+- frontend hash: `56c6e2179cc48085`
 
-Fresh route-scoped products baseline from the current clean runtime:
+Current notable findings:
+
+- deep audit currently settles to one app-side interaction pocket:
+  - `desktop/inventory:button:Filters`
+- full app audit currently shows external reachability wobble rather than a local
+  app failure:
+  - remote public website fetch failure on the latest rerun
+
+Fresh route-scoped catalog evidence from the current clean runtime:
 
 - Deep audit:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T00-05-39-801Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T00-05-39-801Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-03-13-732Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T01-03-13-732Z\summary.html)
 - Browser action smoke:
-  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T00-05-40-637Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T00-05-40-637Z\summary.html)
+  [C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T01-03-14-609Z\summary.html](C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\browser-action-smoke-2026-05-16T01-03-14-609Z\summary.html)
 
-Current products route-only measurements:
+Current catalog route-only status:
 
-- desktop products ready: `980 ms`
-- mobile products ready: `477 ms`
+- focused public catalog tab checks are clean on the restored runtime
+- latest rejected experiment:
+  - public secondary tabs DOM priming removal
+  - route-focused checks passed
+  - whole-app warm reruns did not stay calm, so the change was rolled back
 
 ## Phase Details
 
@@ -161,8 +172,8 @@ Primary optimization lane:
 
 Immediate next measured target:
 
-- desktop products route hidden-work path
-- likely seam: initial route-side helper/data assembly, not UI reshaping
+- desktop inventory Filters interaction path
+- likely seam: hidden picker/control work rather than visual layout changes
 
 Secondary lane:
 
