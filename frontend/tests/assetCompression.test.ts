@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const ROOT = new URL('../', import.meta.url)
 const SOURCE_DIRS = ['public', 'src']
@@ -8,8 +9,8 @@ const MEDIA_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.sv
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'])
 const IMAGE_BUDGET_BYTES = 40 * 1024
 
-function collectMediaFiles(dirUrl, output = []) {
-  const dirPath = dirUrl.pathname
+function collectMediaFiles(dirUrl: URL, output: URL[] = []): URL[] {
+  const dirPath = fileURLToPath(dirUrl)
   if (!fs.existsSync(dirPath)) return output
   for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
     const child = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, dirUrl)
@@ -26,7 +27,7 @@ const oversizedImages = mediaFiles
   .filter((entry) => entry.bytes > IMAGE_BUDGET_BYTES)
 
 assert.deepEqual(
-  oversizedImages.map((entry) => `${path.relative(ROOT.pathname, entry.fileUrl.pathname)} (${entry.bytes} bytes)`),
+  oversizedImages.map((entry) => `${path.relative(fileURLToPath(ROOT), fileURLToPath(entry.fileUrl))} (${entry.bytes} bytes)`),
   [],
   'frontend source images and logos must stay at or below 40KB',
 )

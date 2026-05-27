@@ -4,7 +4,28 @@ import {
   localizePortalProduct,
   normalizePortalTranslations,
   stringifyPortalTranslations,
-} from '../src/components/catalog/portalContentI18n.mjs'
+} from '../src/components/catalog/portalContentI18n.ts'
+
+type LocalizedFaqItem = { question: string; answer: string }
+type LocalizedAboutBlock = { title: string; body: string }
+type LocalizedPortalConfig = {
+  businessName?: string
+  businessTagline?: string
+  intro?: string
+  aboutTitle?: string
+  aboutContent?: string
+  aiTitle?: string
+  aiIntro?: string
+  faqTitle?: string
+  faqItems: LocalizedFaqItem[]
+  aboutBlocks: LocalizedAboutBlock[]
+  linkLabels: Record<string, string>
+}
+type LocalizedPortalProduct = {
+  name?: string
+  description?: string
+  category?: string
+}
 
 const config = {
   businessName: 'Leang Cosmetic',
@@ -41,7 +62,7 @@ const config = {
   },
 }
 
-const localized = localizePortalConfig(config, 'zh-cn')
+const localized = localizePortalConfig(config, 'zh-cn') as LocalizedPortalConfig
 assert.equal(localized.aboutTitle, '关于我们')
 assert.equal(localized.aboutContent, '中文关于内容')
 assert.equal(localized.aiTitle, '美容顾问')
@@ -64,7 +85,7 @@ const defaultCopyLocalized = localizePortalConfig({
   aiDisclaimer: 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.',
   faqTitle: 'Frequently asked questions',
   translations: {},
-}, 'zh-CN')
+}, 'zh-CN') as LocalizedPortalConfig
 
 assert.notEqual(defaultCopyLocalized.aboutTitle, 'About us')
 assert.notEqual(defaultCopyLocalized.aiTitle, 'Beauty Assistant')
@@ -81,7 +102,7 @@ const product = localizePortalProduct({
       category: '护肤',
     },
   },
-}, 'zh-CN')
+}, 'zh-CN') as LocalizedPortalProduct
 
 assert.equal(product.name, 'AHA Serum')
 assert.equal(product.description, '焕亮精华')

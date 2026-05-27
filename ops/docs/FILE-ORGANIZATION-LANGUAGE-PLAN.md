@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 431 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 432 in this file.
 
 ## Goal
 
@@ -15,8 +15,8 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
   - 86 `.ts`
   - 1 `.css`
 - Frontend tests: 76 focused test files under `frontend/tests`.
-  - 56 `.mjs`
-  - 20 `.ts`
+  - 45 `.mjs`
+  - 31 `.ts`
 - Backend source: 87 files under `backend/src`.
   - 83 `.js`
   - 1 `.sql`
@@ -3452,6 +3452,16 @@ Decision rule:
     date math, gives keyed-action tests a `Set<string>`, and replaces Khmer
     mojibake fixtures in the script typography test. This intentionally merges
     multiple small prior-style moves into one larger verified conversion slice.
+432. Convert the app-shell and portal test cluster to TypeScript. Done:
+    Eleven more tests now run as `.ts`: `appShellUtils`,
+    `publicErrorRecovery`, `runtimeErrorClassifier`, `sectionNavigation`,
+    `dashboardDataReliability`, `assetCompression`,
+    `portalTranslateController`, `portalContentI18n`, `portalFaqVocabulary`,
+    `portalEditorUtils`, and `portalCatalogDisplay`. The batch keeps the
+    conversion strategy larger per session while still scoped to low-risk
+    assertion harnesses. It also tightens fake storage, fake DOM, fake event,
+    URL path, callback, and portal localization payload types so the converted
+    tests are checked by strict TypeScript instead of only being renamed.
 
 ## Safety Gates
 

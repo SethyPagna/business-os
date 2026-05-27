@@ -4,11 +4,13 @@ import {
   normalizeAboutBlocks,
   normalizeGoogleMapsEmbed,
   serializeAboutBlocks,
-} from '../src/components/catalog/portalEditorUtils.mjs'
+} from '../src/components/catalog/portalEditorUtils.ts'
 
 let failed = 0
 
-function runTest(name, fn) {
+type TestCallback = () => void
+
+function runTest(name: string, fn: TestCallback): void {
   try {
     fn()
     console.log(`PASS ${name}`)

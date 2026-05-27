@@ -8,14 +8,16 @@ import {
   getPortalPromotionDetails,
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
-} from '../src/components/catalog/portalCatalogDisplay.mjs'
+} from '../src/components/catalog/portalCatalogDisplay.ts'
 
 const tailwindConfig = fs.readFileSync(new URL('../tailwind.config.mjs', import.meta.url), 'utf8')
 const catalogEditorSource = fs.readFileSync(new URL('../src/components/catalog/CatalogEditorSurface.jsx', import.meta.url), 'utf8')
 
 let failed = 0
 
-function runTest(name, fn) {
+type TestCallback = () => void
+
+function runTest(name: string, fn: TestCallback): void {
   try {
     fn()
     console.log(`PASS ${name}`)
@@ -26,8 +28,8 @@ function runTest(name, fn) {
   }
 }
 
-const copy = (key, fallback) => fallback || key
-const formatPortalPrice = (usd, khr, config) => {
+const copy = (key: string, fallback?: string): string => fallback || key
+const formatPortalPrice = (usd: unknown, khr: unknown, config: { priceDisplay?: string }): string => {
   if (config.priceDisplay === 'KHR') return `${Number(khr || 0).toFixed(0)} KHR`
   if (config.priceDisplay === 'BOTH') return `$${Number(usd || 0).toFixed(2)} / ${Number(khr || 0).toFixed(0)} KHR`
   return `$${Number(usd || 0).toFixed(2)}`

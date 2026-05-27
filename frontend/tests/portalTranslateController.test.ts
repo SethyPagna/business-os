@@ -8,38 +8,67 @@ import {
   removePortalTranslateWidgetHost,
   storePortalTranslatePreference,
   writePortalTranslateTarget,
-} from '../src/components/catalog/portalTranslateController.mjs'
+} from '../src/components/catalog/portalTranslateController.ts'
 
 const originalWindow = globalThis.window
 const originalDocument = globalThis.document
 const originalEvent = globalThis.Event
 
-function createStorage() {
-  const data = new Map()
+type MinimalStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+type FakeNode = {
+  tagName?: string
+  id: string
+  className: string
+  style?: Record<string, string>
+  parentNode: FakeBody | null
+  attributes?: Record<string, string>
+  setAttribute?: (key: string, value: string) => void
+  remove?: () => void
+}
+type FakeBody = {
+  className: string
+  appendChild: (node: FakeNode) => void
+}
+type FakeCombo = {
+  value: string
+  events: string[]
+  dispatchEvent: (event: { type: string }) => void
+}
+type FakeDocument = {
+  documentElement: { className: string }
+  body: FakeBody
+  cookie: string
+  createElement: (tag: string) => FakeNode
+  querySelectorAll: (selector: string) => Array<FakeNode | FakeCombo>
+  __combo: FakeCombo
+}
+
+function createStorage(): MinimalStorage {
+  const data = new Map<string, string>()
   return {
-    getItem(key) {
-      return data.has(key) ? data.get(key) : null
+    getItem(key: string) {
+      return data.get(key) ?? null
     },
-    setItem(key, value) {
+    setItem(key: string, value: string) {
       data.set(key, String(value))
     },
-    removeItem(key) {
+    removeItem(key: string) {
       data.delete(key)
     },
   }
 }
 
-function createDocument() {
-  const cookies = new Map()
-  const hosts = []
-  const combo = {
+function createDocument(): FakeDocument {
+  const cookies = new Map<string, string>()
+  const hosts: FakeNode[] = []
+  const combo: FakeCombo = {
     value: '',
     events: [],
     dispatchEvent(event) {
       this.events.push(event.type)
     },
   }
-  const body = {
+  const body: FakeBody = {
     className: '',
     appendChild(node) {
       if (!hosts.includes(node)) hosts.push(node)
@@ -52,7 +81,7 @@ function createDocument() {
     get cookie() {
       return Array.from(cookies.entries()).map(([key, value]) => `${key}=${value}`).join('; ')
     },
-    set cookie(value) {
+    set cookie(value: string) {
       const text = String(value || '')
       const [pair] = text.split(';')
       const index = pair.indexOf('=')
@@ -62,25 +91,26 @@ function createDocument() {
       if (/expires=Thu, 01 Jan 1970/i.test(text)) cookies.delete(key)
       else cookies.set(key, nextValue)
     },
-    createElement(tag) {
-      return {
+    createElement(tag: string) {
+      const node: FakeNode = {
         tagName: String(tag || '').toUpperCase(),
         id: '',
         className: '',
         style: {},
         parentNode: null,
         attributes: {},
-        setAttribute(key, value) {
-          this.attributes[key] = String(value)
+        setAttribute(key: string, value: string) {
+          node.attributes![key] = String(value)
         },
         remove() {
-          const index = hosts.indexOf(this)
+          const index = hosts.indexOf(node)
           if (index >= 0) hosts.splice(index, 1)
-          this.parentNode = null
+          node.parentNode = null
         },
       }
+      return node
     },
-    querySelectorAll(selector) {
+    querySelectorAll(selector: string) {
       if (selector === '#business-os-portal-translate-widget-host') {
         return hosts.filter((node) => node.id === 'business-os-portal-translate-widget-host')
       }
@@ -92,35 +122,41 @@ function createDocument() {
 }
 
 try {
-  globalThis.window = {
+  const testGlobals = globalThis as unknown as { window: Window; document: Document; Event: typeof Event }
+  const document = createDocument()
+  const window = {
     location: { hostname: 'leangcosmetics.crane-qilin.ts.net', pathname: '/public' },
     localStorage: createStorage(),
     sessionStorage: createStorage(),
   }
-  globalThis.document = createDocument()
-  globalThis.Event = class Event {
-    constructor(type) {
+  class TestEvent {
+    type: string
+
+    constructor(type: string) {
       this.type = type
     }
   }
-  globalThis.window.Event = globalThis.Event
+  testGlobals.window = window as unknown as Window
+  testGlobals.document = document as unknown as Document
+  testGlobals.Event = TestEvent as unknown as typeof Event
+  ;(testGlobals.window as unknown as { Event: typeof Event }).Event = testGlobals.Event
 
   assert.equal(writePortalTranslateTarget('en', 'fr'), 'fr')
-  assert.match(globalThis.document.cookie, /googtrans=%2Fen%2Ffr|googtrans=\/en\/fr/)
+  assert.match(document.cookie, /googtrans=%2Fen%2Ffr|googtrans=\/en\/fr/)
   assert.equal(readStoredTranslateTarget('en'), 'fr')
   assert.equal(isPortalTranslateApplied('en', 'fr'), false)
   assert.equal(normalizeTranslateTarget('zh-cn', 'en'), 'zh-CN')
   assert.equal(writePortalTranslateTarget('en', 'zh-cn'), 'zh-CN')
-  assert.match(globalThis.document.cookie, /zh-CN/)
+  assert.match(document.cookie, /zh-CN/)
   assert.equal(applyGoogleTranslateSelection('en', 'zh-cn'), true)
-  assert.equal(globalThis.document.__combo.value, 'zh-CN')
-  assert.deepEqual(globalThis.document.__combo.events, ['input', 'change'])
+  assert.equal(document.__combo.value, 'zh-CN')
+  assert.deepEqual(document.__combo.events, ['input', 'change'])
 
-  globalThis.document.documentElement.className = 'translated-ltr'
+  document.documentElement.className = 'translated-ltr'
   assert.equal(isPortalTranslateApplied('en', 'zh-CN'), true)
 
   assert.equal(writePortalTranslateTarget('en', 'original'), 'original')
-  globalThis.document.documentElement.className = ''
+  document.documentElement.className = ''
   assert.equal(readStoredTranslateTarget('en'), 'original')
   assert.equal(isPortalTranslateApplied('en', 'original'), true)
 
@@ -132,13 +168,14 @@ try {
   const firstHost = ensurePortalTranslateWidgetHost()
   const secondHost = ensurePortalTranslateWidgetHost()
   assert.equal(firstHost, secondHost)
-  assert.equal(globalThis.document.querySelectorAll('#business-os-portal-translate-widget-host').length, 1)
+  assert.equal(document.querySelectorAll('#business-os-portal-translate-widget-host').length, 1)
   removePortalTranslateWidgetHost()
-  assert.equal(globalThis.document.querySelectorAll('#business-os-portal-translate-widget-host').length, 0)
+  assert.equal(document.querySelectorAll('#business-os-portal-translate-widget-host').length, 0)
 
   console.log('portalTranslateController tests passed')
 } finally {
-  globalThis.window = originalWindow
-  globalThis.document = originalDocument
-  globalThis.Event = originalEvent
+  const testGlobals = globalThis as unknown as { window: Window | undefined; document: Document | undefined; Event: typeof Event | undefined }
+  testGlobals.window = originalWindow
+  testGlobals.document = originalDocument
+  testGlobals.Event = originalEvent
 }

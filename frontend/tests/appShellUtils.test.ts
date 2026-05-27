@@ -5,7 +5,9 @@ import { getAdminPageFromPath, getMountedPageLimit, isAdminAppPath, isPublicCata
 let failed = 0
 const appContextSource = readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
 
-function runTest(name, fn) {
+type TestCallback = () => void
+
+function runTest(name: string, fn: TestCallback): void {
   try {
     fn()
     console.log(`PASS ${name}`)

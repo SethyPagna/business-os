@@ -3,18 +3,20 @@ import {
   clearPublicDomRecoveryMarker,
   isPublicDomMutationError,
   shouldAttemptPublicDomRecovery,
-} from '../src/app/publicErrorRecovery.mjs'
+} from '../src/app/publicErrorRecovery.ts'
 
-function createStorage() {
-  const data = new Map()
+type MinimalStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+
+function createStorage(): MinimalStorage {
+  const data = new Map<string, string>()
   return {
-    getItem(key) {
-      return data.has(key) ? data.get(key) : null
+    getItem(key: string) {
+      return data.get(key) ?? null
     },
-    setItem(key, value) {
+    setItem(key: string, value: string) {
       data.set(key, String(value))
     },
-    removeItem(key) {
+    removeItem(key: string) {
       data.delete(key)
     },
   }

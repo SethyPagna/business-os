@@ -238,7 +238,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\appShellUtils.test.mjs',
+      'node frontend\\tests\\appShellUtils.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -249,7 +249,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\runtimeErrorClassifier.test.mjs',
+      'node frontend\\tests\\runtimeErrorClassifier.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -259,7 +259,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\portalCatalogDisplay.test.mjs',
+      'node frontend\\tests\\portalCatalogDisplay.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -269,8 +269,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\portalContentI18n.test.mjs',
-      'node frontend\\tests\\portalFaqVocabulary.test.mjs',
+      'node frontend\\tests\\portalContentI18n.test.ts',
+      'node frontend\\tests\\portalFaqVocabulary.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -280,7 +280,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\portalEditorUtils.test.mjs',
+      'node frontend\\tests\\portalEditorUtils.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -292,7 +292,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\portalLanguagePacks.test.ts',
-      'node frontend\\tests\\portalFaqVocabulary.test.mjs',
+      'node frontend\\tests\\portalFaqVocabulary.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -584,7 +584,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/types/jsx-modules.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\dashboardDataReliability.test.mjs',
+      'node frontend\\tests\\dashboardDataReliability.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -607,7 +607,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\navigationConfig.test.ts',
-      'node frontend\\tests\\sectionNavigation.test.mjs',
+      'node frontend\\tests\\sectionNavigation.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -618,7 +618,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\utilsSettingsBarrel.test.ts',
-      'node frontend\\tests\\sectionNavigation.test.mjs',
+      'node frontend\\tests\\sectionNavigation.test.ts',
       'node frontend\\tests\\settingsRefresh.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
@@ -674,7 +674,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\dateHelpers.test.ts',
-      'node frontend\\tests\\dashboardDataReliability.test.mjs',
+      'node frontend\\tests\\dashboardDataReliability.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -696,7 +696,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\exportPackages.test.mjs',
-      'node frontend\\tests\\dashboardDataReliability.test.mjs',
+      'node frontend\\tests\\dashboardDataReliability.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -761,7 +761,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\scriptTypography.test.ts',
-      'node frontend\\tests\\portalCatalogDisplay.test.mjs',
+      'node frontend\\tests\\portalCatalogDisplay.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },

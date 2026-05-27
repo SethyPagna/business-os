@@ -6,7 +6,13 @@ import {
 import {
   localizePortalConfig,
   localizePortalFaqText,
-} from '../src/components/catalog/portalContentI18n.mjs'
+} from '../src/components/catalog/portalContentI18n.ts'
+
+type LocalizedFaqItem = { question: string; answer: string }
+type LocalizedPortalConfig = {
+  faqTitle: string
+  faqItems: LocalizedFaqItem[]
+}
 
 const config = {
   faqTitle: 'Frequently asked questions',
@@ -52,16 +58,16 @@ const defaultFaqConfig = {
   translations: {},
 }
 
-const localized = localizePortalConfig(config, 'zh-CN')
+const localized = localizePortalConfig(config, 'zh-CN') as LocalizedPortalConfig
 assert.notEqual(localized.faqItems[0].question, config.faqItems[0].question)
 assert.notEqual(localized.faqItems[0].answer, config.faqItems[0].answer)
 assert.match(localized.faqItems[0].question, /肤质|产品/)
 
-const fallbackText = localizePortalFaqText(config.faqItems[1].question, 'zh-CN')
+const fallbackText = String(localizePortalFaqText(config.faqItems[1].question, 'zh-CN'))
 assert.notEqual(fallbackText, config.faqItems[1].question)
 assert.match(fallbackText, /敏感肌|预算|产品/)
 
-const english = localizePortalConfig(config, 'en')
+const english = localizePortalConfig(config, 'en') as LocalizedPortalConfig
 assert.equal(english.faqItems[0].question, config.faqItems[0].question)
 
 const firstPartyLanguages = FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS
@@ -69,7 +75,7 @@ const firstPartyLanguages = FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS
   .filter((language) => language !== 'en')
 
 for (const language of firstPartyLanguages) {
-  const localizedDefault = localizePortalConfig(defaultFaqConfig, language)
+  const localizedDefault = localizePortalConfig(defaultFaqConfig, language) as LocalizedPortalConfig
   assert.notEqual(localizedDefault.faqTitle, defaultFaqConfig.faqTitle, `${language} faq title should localize`)
   localizedDefault.faqItems.forEach((item, index) => {
     const original = defaultFaqConfig.faqItems[index]
@@ -79,15 +85,15 @@ for (const language of firstPartyLanguages) {
     assert.doesNotMatch(item.answer, /\b(products|membership points|available in store|skin type|out of stock)\b/i, `${language} answer ${index + 1} still has public English fragments`)
   })
 
-  const edited = localizePortalFaqText('Can I ask for sensitive skin products within a specific budget?', language)
+  const edited = String(localizePortalFaqText('Can I ask for sensitive skin products within a specific budget?', language))
   assert.notEqual(edited, 'Can I ask for sensitive skin products within a specific budget?', `${language} edited FAQ should use vocabulary fallback`)
   assert.doesNotMatch(edited, /\b(sensitive skin|products|specific budget)\b/i, `${language} edited FAQ still has key English fragments`)
 }
 
-const protectedCopy = localizePortalFaqText(
+const protectedCopy = String(localizePortalFaqText(
   'Contact Leang Cosmetics through Facebook, Instagram, Telegram, or phone for product stock advice.',
   'km',
-)
+))
 assert.match(protectedCopy, /Leang Cosmetics/)
 assert.match(protectedCopy, /Facebook/)
 assert.match(protectedCopy, /Instagram/)

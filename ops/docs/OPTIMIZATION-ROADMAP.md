@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 439.
+- Latest completed implementation move in this roadmap: Move 442.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4939,3 +4939,14 @@ Move 441 status:
   barrel wrapper. The batch reduces frontend test `.mjs` files from 71 to 56
   while increasing typed tests from 5 to 20, and it intentionally combines
   related conversion moves so future sessions can make larger verified slices.
+
+Move 442 status:
+- Move 442 converts the app-shell/runtime/dashboard/portal test cluster to
+  TypeScript in one session. The converted `.ts` tests cover app shell path
+  helpers, public DOM recovery, injected-runtime error suppression, section
+  navigation, dashboard reliability guards, source asset size budgets, portal
+  translation controller DOM behavior, portal content localization, FAQ
+  vocabulary fallback, portal editor helpers, and portal catalog display
+  helpers. Frontend tests now stand at 45 `.mjs` and 31 `.ts`, and the batch
+  deliberately merges small conversion moves while keeping each harness typed,
+  directly executable, and covered by the frontend utility suite.
