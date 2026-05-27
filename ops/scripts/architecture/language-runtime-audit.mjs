@@ -233,11 +233,23 @@ const FOCUSED_TEST_COVERAGE = [
 const CONVERTED_TYPESCRIPT_SLICES = [
   {
     implementation: 'frontend/src/app/appShellUtils.ts',
-    compatibilityWrapper: 'frontend/src/app/appShellUtils.mjs',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\appShellUtils.test.mjs',
+      'npm.cmd --prefix frontend run build',
+    ],
+  },
+  {
+    implementation: 'frontend/src/runtime/runtimeErrorClassifier.ts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after callers moved to TypeScript source',
+    declarationSupport: '',
+    proof: [
+      'npm.cmd --prefix frontend run typecheck',
+      'node frontend\\tests\\runtimeErrorClassifier.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -1093,11 +1105,15 @@ async function collectFocusedTestCoverage() {
 async function collectConvertedTypeScriptSlices() {
   return mapLimit(CONVERTED_TYPESCRIPT_SLICES, MATRIX_CHECK_CONCURRENCY, async (entry) => {
     const implementationExists = await pathExists(path.join(ROOT_DIR, entry.implementation))
-    const compatibilityWrapperExists = await pathExists(path.join(ROOT_DIR, entry.compatibilityWrapper))
+    const wrapperRequired = Boolean(entry.compatibilityWrapper)
+    const compatibilityWrapperExists = wrapperRequired
+      ? await pathExists(path.join(ROOT_DIR, entry.compatibilityWrapper))
+      : true
     const declarationSupportExists = entry.declarationSupport ? await pathExists(path.join(ROOT_DIR, entry.declarationSupport)) : true
     return {
       ...entry,
       implementationExists,
+      wrapperRequired,
       compatibilityWrapperExists,
       declarationSupportExists,
       covered: implementationExists && compatibilityWrapperExists && declarationSupportExists,
@@ -1256,8 +1272,8 @@ function renderReport(summary) {
   const convertedRows = summary.convertedTypeScriptSlices.map((entry) => [
     `\`${entry.implementation}\``,
     entry.implementationExists ? 'yes' : 'no',
-    `\`${entry.compatibilityWrapper}\``,
-    entry.compatibilityWrapperExists ? 'yes' : 'no',
+    entry.compatibilityWrapper ? `\`${entry.compatibilityWrapper}\`` : entry.wrapperStatus || 'none',
+    entry.wrapperRequired ? (entry.compatibilityWrapperExists ? 'yes' : 'no') : 'n/a',
     entry.declarationSupport ? `\`${entry.declarationSupport}\`` : 'none',
     entry.declarationSupportExists ? 'yes' : 'no',
     entry.proof.map((proof) => `\`${proof}\``).join('<br>'),
@@ -1473,6 +1489,8 @@ async function main() {
       implementation: entry.implementation,
       implementationExists: entry.implementationExists,
       compatibilityWrapper: entry.compatibilityWrapper,
+      wrapperStatus: entry.wrapperStatus,
+      wrapperRequired: entry.wrapperRequired,
       compatibilityWrapperExists: entry.compatibilityWrapperExists,
       declarationSupport: entry.declarationSupport,
       declarationSupportExists: entry.declarationSupportExists,

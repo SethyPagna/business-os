@@ -25,7 +25,7 @@ import UserProfileModal from '../users/UserProfileModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import NotificationCenter from '../shared/NotificationCenter'
-import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.mjs'
+import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 
 const ICONS_BY_ID = {
   dashboard: LayoutDashboard,

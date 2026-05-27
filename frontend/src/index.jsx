@@ -5,13 +5,13 @@ import '@fontsource/noto-sans-khmer/500.css'
 import '@fontsource/noto-sans-khmer/600.css'
 import App from './App'
 import { AppProvider } from './AppContext'
-import { isPublicCatalogPath } from './app/appShellUtils.mjs'
+import { isPublicCatalogPath } from './app/appShellUtils.ts'
 import './styles/main.css'
 import {
   isGuardableStyleSheetError,
   shouldSuppressRuntimeError,
   shouldSuppressSecurityPolicyViolation,
-} from './runtime/runtimeErrorClassifier.mjs'
+} from './runtime/runtimeErrorClassifier.ts'
 
 function registerOfflineAppShell() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return

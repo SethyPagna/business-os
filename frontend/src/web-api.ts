@@ -21,7 +21,7 @@ import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.js'
 import {
   shouldSuppressRuntimeError,
   shouldSuppressSecurityPolicyViolation,
-} from './runtime/runtimeErrorClassifier.mjs'
+} from './runtime/runtimeErrorClassifier'
 
 type AnyRecord = Record<string, any>
 type LazyApiMethod = (...args: any[]) => Promise<any>

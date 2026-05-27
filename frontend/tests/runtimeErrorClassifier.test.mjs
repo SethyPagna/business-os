@@ -4,7 +4,7 @@ import {
   isLikelyInjectedRuntimeSource,
   shouldSuppressRuntimeError,
   shouldSuppressSecurityPolicyViolation,
-} from '../src/runtime/runtimeErrorClassifier.mjs'
+} from '../src/runtime/runtimeErrorClassifier.ts'
 
 assert.equal(isFirstPartyBuiltAssetSource('https://leangcosmetics.crane-qilin.ts.net/assets/vendor.js'), true)
 assert.equal(isFirstPartyBuiltAssetSource('/assets/vendor-react.js'), true)
