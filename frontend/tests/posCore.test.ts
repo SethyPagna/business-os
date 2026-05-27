@@ -9,11 +9,13 @@ import {
   getVariantChoices,
   getVariantRootProduct,
   resolveCartPriceValues,
-} from '../src/components/pos/posCore.mjs'
+} from '../src/components/pos/posCore.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback) {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -34,7 +36,7 @@ await runTest('grouped products resolve to their parent card and sorted variant 
   const children = buildVariantChildrenByParentId(products)
   const visible = buildVisibleProductCards(products, productsById)
 
-  assert.equal(getVariantRootProduct(products[1], productsById).id, 1)
+  assert.equal(getVariantRootProduct(products[1], productsById)?.id, 1)
   assert.deepEqual(getVariantChoices(visible[0], children).map((item) => item.name), ['Root Product', 'Variant A', 'Variant B'])
   assert.deepEqual(visible.map((item) => item.id), [1])
 })
@@ -46,7 +48,7 @@ await runTest('product lookup ignores invalid ids', () => {
     { id: null, name: 'Missing' },
   ])
 
-  assert.equal(productsById.get(1).name, 'Valid')
+  assert.equal(productsById.get(1)?.name, 'Valid')
   assert.equal(productsById.has(Number.NaN), false)
   assert.equal(productsById.size, 1)
 })
@@ -74,7 +76,7 @@ await runTest('same-name grouped families and standalone items share one POS opt
   const visible = buildVisibleProductCards(products, productsById)
 
   assert.equal(visible.length, 1)
-  assert.equal(visible[0].__groupMeta.groupKind, 'option')
+  assert.equal((visible[0]?.__groupMeta as { groupKind?: string } | undefined)?.groupKind, 'option')
   assert.deepEqual(getVariantChoices(visible[0]).map((item) => item.id), [30, 31, 32])
 })
 

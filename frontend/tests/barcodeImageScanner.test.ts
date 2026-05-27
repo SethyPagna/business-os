@@ -1,9 +1,32 @@
 import assert from 'node:assert/strict'
-import { scanBarcodeFromImageFile } from '../src/components/products/scanning/barcodeImageScanner.mjs'
+import { scanBarcodeFromImageFile } from '../src/components/products/scanning/barcodeImageScanner.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type AsyncTestCallback = () => Promise<void>
+type TestBarcodeImageElement = {
+  onload: ((this: GlobalEventHandlers, ev: Event) => unknown) | null
+  onerror: ((this: GlobalEventHandlers, ev: Event) => unknown) | null
+  src: string
+}
+
+function createLoadedImage(): TestBarcodeImageElement {
+  let currentSrc = ''
+  const image: TestBarcodeImageElement = {
+    onload: null,
+    onerror: null,
+    set src(value: string) {
+      currentSrc = value
+      queueMicrotask(() => image.onload?.call(globalThis as unknown as GlobalEventHandlers, new Event('load')))
+    },
+    get src() {
+      return currentSrc
+    },
+  }
+  return image
+}
+
+async function runTest(name: string, fn: AsyncTestCallback) {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -21,7 +44,7 @@ await runTest('scanBarcodeFromImageFile returns the decoded image value', async 
       readDataUrl: async () => 'data:image/png;base64,abc123',
       loadZxingModule: async () => ({
         BrowserMultiFormatReader: class {
-          async decodeFromImageElement(image) {
+          async decodeFromImageElement(image: { src: string }) {
             assert.equal(image.src, 'data:image/png;base64,abc123')
             return {
               getText() {
@@ -31,15 +54,7 @@ await runTest('scanBarcodeFromImageFile returns the decoded image value', async 
           }
         },
       }),
-      createImage: () => ({
-        set src(value) {
-          this._src = value
-          queueMicrotask(() => this.onload?.())
-        },
-        get src() {
-          return this._src
-        },
-      }),
+      createImage: createLoadedImage,
     },
   )
 
@@ -61,20 +76,12 @@ await runTest('scanBarcodeFromImageFile uses native BarcodeDetector before loadi
           return ['qr_code', 'ean_13']
         }
 
-        async detect(image) {
+        async detect(image: { src: string }) {
           assert.equal(image.src, 'data:image/png;base64,native123')
           return [{ rawValue: 'NATIVE-001' }]
         }
       },
-      createImage: () => ({
-        set src(value) {
-          this._src = value
-          queueMicrotask(() => this.onload?.())
-        },
-        get src() {
-          return this._src
-        },
-      }),
+      createImage: createLoadedImage,
     },
   )
 
@@ -99,15 +106,7 @@ await runTest('scanBarcodeFromImageFile rejects empty image results', async () =
             }
           },
         }),
-        createImage: () => ({
-          set src(value) {
-            this._src = value
-            queueMicrotask(() => this.onload?.())
-          },
-          get src() {
-            return this._src
-          },
-        }),
+        createImage: createLoadedImage,
       },
     ),
     /could not find a barcode/i,

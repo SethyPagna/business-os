@@ -4,11 +4,31 @@ import {
   buildProductFilterSections,
   buildProductSupplierOptions,
   countActiveProductFilters,
-} from '../src/components/products/helpers/productMenuHelpers.mjs'
+} from '../src/components/products/helpers/productMenuHelpers.ts'
 
-const calls = []
-const exportProductsCsv = (rows, prefix) => calls.push({ rows, prefix })
-const tr = (key, fallback) => `${fallback} (${key})`
+type ProductRow = Record<string, unknown>
+type ExportCall = { rows: ProductRow[]; prefix: string }
+type ActionLogEntry = [name: string, value: string]
+type MenuActionItem = { onClick: () => void }
+type FilterSection = ReturnType<typeof buildProductFilterSections>[number]
+
+const calls: ExportCall[] = []
+const exportProductsCsv = (rows: ProductRow[], prefix: string) => {
+  calls.push({ rows, prefix })
+}
+const tr = (key: string, fallback?: string) => `${fallback} (${key})`
+
+function asActionItem(item: unknown): MenuActionItem {
+  assert.notEqual(item, 'divider')
+  assert.equal(typeof (item as MenuActionItem | null)?.onClick, 'function')
+  return item as MenuActionItem
+}
+
+function requireSection(sections: FilterSection[], id: string): FilterSection {
+  const section = sections.find((item) => item.id === id)
+  assert.ok(section, `Missing filter section ${id}`)
+  return section
+}
 
 const filtered = [{ id: 1 }]
 const selectedProducts = [{ id: 2 }]
@@ -46,9 +66,9 @@ assert.deepEqual(
   'export menu includes active filter choices in stable order',
 )
 
-exportItems[1].onClick()
-exportItems[2].onClick()
-exportItems.at(-1).onClick()
+asActionItem(exportItems[1]).onClick()
+asActionItem(exportItems[2]).onClick()
+asActionItem(exportItems.at(-1)).onClick()
 assert.deepEqual(
   calls,
   [
@@ -84,8 +104,8 @@ assert.equal(
 
 assert.equal(countActiveProductFilters(), 0, 'default filters count as inactive')
 
-const actionLog = []
-const action = (name) => (value) => actionLog.push([name, value])
+const actionLog: ActionLogEntry[] = []
+const action = (name: string) => (value: string) => actionLog.push([name, value])
 const sections = buildProductFilterSections({
   availableCreatedYears: [2025, 2026],
   branches: [{ id: 1, name: 'Main' }, { id: 2, name: 'Mall' }],
@@ -141,13 +161,13 @@ assert.deepEqual(
   ['sort', 'created-year', 'created-month', 'branch', 'group', 'stock', 'category', 'brand', 'supplier'],
   'filter sections preserve Products menu ordering',
 )
-assert.equal(sections.find((section) => section.id === 'branch').options[2].active, true)
-assert.equal(sections.find((section) => section.id === 'brand').options[1].active, true)
-sections.find((section) => section.id === 'created-year').options[0].onClick()
-sections.find((section) => section.id === 'created-year').options[2].onClick()
-sections.find((section) => section.id === 'created-month').options[1].onClick()
-sections.find((section) => section.id === 'branch').options[2].onClick()
-sections.find((section) => section.id === 'stock').options[3].onClick()
+assert.equal(requireSection(sections, 'branch').options[2]?.active, true)
+assert.equal(requireSection(sections, 'brand').options[1]?.active, true)
+requireSection(sections, 'created-year').options[0]?.onClick()
+requireSection(sections, 'created-year').options[2]?.onClick()
+requireSection(sections, 'created-month').options[1]?.onClick()
+requireSection(sections, 'branch').options[2]?.onClick()
+requireSection(sections, 'stock').options[3]?.onClick()
 assert.deepEqual(
   actionLog,
   [

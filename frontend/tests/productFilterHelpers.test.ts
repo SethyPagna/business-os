@@ -4,7 +4,7 @@ import {
   buildProductSearchTerms,
   filterProductsForPage,
   getProductBranchQuantity,
-} from '../src/components/products/helpers/productFilterHelpers.mjs'
+} from '../src/components/products/helpers/productFilterHelpers.ts'
 
 const products = [
   {

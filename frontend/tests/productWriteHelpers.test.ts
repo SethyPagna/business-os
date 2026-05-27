@@ -15,7 +15,7 @@ import {
   getPreferredProductRestoreBranchId,
   resolveRestoredProductParentId,
   summarizeProductBulkRun,
-} from '../src/components/products/helpers/productWriteHelpers.mjs'
+} from '../src/components/products/helpers/productWriteHelpers.ts'
 
 const basePayload = buildProductWritePayload({
   name: 'Product A',
@@ -264,7 +264,7 @@ assert.deepEqual(
       fromBranchId: '1',
       toBranchId: '2',
       quantity: '5',
-    },
+    } as unknown as Parameters<typeof buildProductTransferStockPayload>[1],
     {
       reason: 'Bulk branch change',
       user: { id: 11, name: 'Mover' },
@@ -290,7 +290,7 @@ assert.deepEqual(
       fromBranchId: 'bad',
       toBranchId: '',
       quantity: 'bad',
-    },
+    } as unknown as Parameters<typeof buildProductTransferStockPayload>[1],
     {
       productId: '9',
       productName: 'Override Product',

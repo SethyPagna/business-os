@@ -360,13 +360,13 @@ Last updated: 2026-05-18
     check opened the Product import modal and passed on frontend hash
     `0028bc915078664f`.
   - Sixth Phase 26 physical move complete: Product scanner files
-    `BarcodeScannerModal.jsx`, `barcodeImageScanner.mjs`,
-    `barcodeScannerState.mjs`, and `scanbotScanner.mjs` now live in
+    `BarcodeScannerModal.jsx`, `barcodeImageScanner.ts`,
+    `barcodeScannerState.ts`, and `scanbotScanner.ts` now live in
     `frontend/src/components/products/scanning`; the focused Product scanner
     live check opened Scan barcode, applied a manual barcode value back to the
     form, and passed on frontend hash `4fdf242042c73694`.
   - Seventh Phase 26 physical move complete: Product history helper logic
-    `productHistoryHelpers.mjs` now lives in
+    `productHistoryHelpers.ts` now lives in
     `frontend/src/components/products/history`; product history helper tests,
     source checks, typecheck, production build, runtime health, and the focused
     Product page action live check passed on frontend hash
@@ -400,7 +400,7 @@ Last updated: 2026-05-18
     page action live check, and focused Product scanner live check passed on
     frontend hash `e0871873ba445219`.
   - Twelfth Phase 26 physical move complete: Products page helper functions now
-    live in `frontend/src/components/products/helpers/productPageHelpers.mjs`.
+    live in `frontend/src/components/products/helpers/productPageHelpers.ts`.
     Products imports debounced state, brand color parsing, brand lookup
     normalization, and frame scheduling from that module. Helper source tests,
     source checks, typecheck, production build, runtime health, focused Product
@@ -423,7 +423,7 @@ Last updated: 2026-05-18
     `f04520d849d51963`.
   - Fifteenth Phase 26 physical move complete: Product filter/export helpers
     now live in
-    `frontend/src/components/products/helpers/productFilterHelpers.mjs`.
+    `frontend/src/components/products/helpers/productFilterHelpers.ts`.
     Products delegates search-term parsing, branch quantity lookup, filtered
     product selection, and CSV export row shaping to that module. Focused helper
     tests, source checks, typecheck, production build, runtime health, focused
@@ -431,7 +431,7 @@ Last updated: 2026-05-18
     passed on frontend hash `8a33b1bdd672f31c`.
   - Sixteenth Phase 26 physical move complete: Product selection/pagination
     helpers now live in
-    `frontend/src/components/products/helpers/productSelectionHelpers.mjs`.
+    `frontend/src/components/products/helpers/productSelectionHelpers.ts`.
     Products delegates visible id extraction, selected-visible id resolution,
     pagination summary math, selected product filtering, letter jump targets,
     and selection-scope predicates to that module. Focused helper tests, source
@@ -440,7 +440,7 @@ Last updated: 2026-05-18
     hash `f0b69a89f50f0e7f`.
   - Seventeenth Phase 26 physical move complete: Product group view helpers now
     live in
-    `frontend/src/components/products/helpers/productGroupViewHelpers.mjs`.
+    `frontend/src/components/products/helpers/productGroupViewHelpers.ts`.
     Products delegates grouped product price labels and grouped summary chip
     text to that module. Focused helper tests, source checks, typecheck,
     production build, runtime health, focused Product page action live check,
@@ -448,7 +448,7 @@ Last updated: 2026-05-18
     `5781a6bf1ff07e16`.
   - Eighteenth Phase 26 physical move complete: Product display data helpers now
     live in
-    `frontend/src/components/products/helpers/productDisplayHelpers.mjs`.
+    `frontend/src/components/products/helpers/productDisplayHelpers.ts`.
     Products delegates lookup map construction, merged brand options, branch
     id/name maps, branch summary labels, and stock-status classification to
     that module. Focused helper tests, source checks, typecheck, production
@@ -456,7 +456,7 @@ Last updated: 2026-05-18
     Product scanner live check passed on frontend hash `6039db439c681904`.
   - Nineteenth Phase 26 physical move complete: Product menu metadata helpers
     now live in
-    `frontend/src/components/products/helpers/productMenuHelpers.mjs`. Products
+    `frontend/src/components/products/helpers/productMenuHelpers.ts`. Products
     delegates export menu item construction, supplier filter option
     normalization, and active filter count calculation to that module. Focused
     helper tests, source checks, typecheck, production build, runtime health,
@@ -464,7 +464,7 @@ Last updated: 2026-05-18
     check passed on frontend hash `2641f1ce0445f430`.
   - Twentieth Phase 26 organization move complete: Product filter menu section
     builder logic now lives in
-    `frontend/src/components/products/helpers/productMenuHelpers.mjs`. Products
+    `frontend/src/components/products/helpers/productMenuHelpers.ts`. Products
     delegates year/month, branch, group, stock, category, brand, and supplier
     filter section construction to that module while keeping the shared
     `FilterMenu` UI unchanged. Focused helper tests, source checks, typecheck,
@@ -473,7 +473,7 @@ Last updated: 2026-05-18
     `b96c2bf7d1b6c06e`.
   - Twenty-first Phase 26 organization move complete: Product row display state
     helper logic now lives in
-    `frontend/src/components/products/helpers/productDisplayHelpers.mjs`.
+    `frontend/src/components/products/helpers/productDisplayHelpers.ts`.
     Products delegates purchase-price fallback, margin math, visible stock
     quantity, promotion calculation, compact brand/category metadata, branch
     labels, and mobile stock badge presentation to that module while preserving
@@ -518,7 +518,7 @@ Last updated: 2026-05-18
     `3e2b508f0b07839b`.
   - Twenty-sixth Phase 26 organization move complete: Product collection index
     construction now lives in
-    `frontend/src/components/products/helpers/productSelectionHelpers.mjs`.
+    `frontend/src/components/products/helpers/productSelectionHelpers.ts`.
     Products delegates the `productsById` map and `parentProductIds` set used
     by grouping and filtering to that module. Focused helper tests, source
     checks, typecheck, production build, performance verification, runtime
@@ -526,7 +526,7 @@ Last updated: 2026-05-18
     live check passed on frontend hash `d225ee10885691f9`.
   - Twenty-seventh Phase 26 organization move complete: Product restore/write
     payload construction now lives in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates undo/redo restore and deleted-product recreation payload
     shaping to that helper through a small user-context wrapper. Focused helper
     tests, source checks, typecheck, production build, performance
@@ -535,7 +535,7 @@ Last updated: 2026-05-18
     `87ac9fa332bb6004`.
   - Twenty-eighth Phase 26 organization move complete: Product branch-stock
     restore adjustment planning now lives in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates snapshot/current branch stock diffing to that helper, so
     restore loops execute preplanned add/remove deltas and avoid invalid branch
     ids or NaN quantities. Focused helper tests, source checks, typecheck,
@@ -544,7 +544,7 @@ Last updated: 2026-05-18
     frontend hash `f8c95fdbb7171cff`.
   - Twenty-ninth Phase 26 organization move complete: Deleted-product restore
     planning helpers now live in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates default branch selection, deleted-id set construction,
     preferred restore branch selection, and deleted-parent remapping to source-
     tested helpers. Focused helper tests, source checks, typecheck, production
@@ -553,7 +553,7 @@ Last updated: 2026-05-18
     frontend hash `f355894dc1465d5c`.
   - Thirtieth Phase 26 organization move complete: Product clear-stock
     adjustment planning now lives in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates bulk out-of-stock branch-row filtering and unit-cost
     resolution to that helper, so the nested mutation loop only executes valid
     preplanned removal adjustments. Focused helper tests, source checks,
@@ -562,7 +562,7 @@ Last updated: 2026-05-18
     check passed on frontend hash `2fbb7e7e9a4dee2c`.
   - Thirty-first Phase 26 organization move complete: Product branch-move
     planning now lives in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates transfer-vs-initialize-vs-no-op branch-change decisions
     to source-tested helpers and only executes explicit plans in the mutation
     loop. Focused helper tests, source checks, typecheck, production build,
@@ -571,7 +571,7 @@ Last updated: 2026-05-18
     `749aede9830d88e9`.
   - Thirty-second Phase 26 organization move complete: Product bulk-run summary
     logic now lives in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates concurrent-run success/failure id extraction to that
     helper for bulk delete, bulk add stock, bulk branch move, and bulk update
     flows. A focused test caught the `Number(null) === 0` edge, so the helper
@@ -581,7 +581,7 @@ Last updated: 2026-05-18
     check passed on frontend hash `8e1cbcfe93564245`.
   - Thirty-third Phase 26 organization move complete: Product bulk-update
     payload construction now lives in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates defined-update filtering, optimistic-lock timestamp
     selection, redo fallback timestamps, and user attribution to that helper
     for bulk update and redo flows. Focused helper tests, source checks,
@@ -590,7 +590,7 @@ Last updated: 2026-05-18
     check passed on frontend hash `b7f08da087125792`.
   - Thirty-fourth Phase 26 organization move complete: Product bulk edit
     update builders now live in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates info and pricing form-to-update shaping to those helpers,
     including blank-field omission, safe low-stock threshold parsing, and shared
     price normalization. Focused helper tests, source checks, typecheck,
@@ -599,7 +599,7 @@ Last updated: 2026-05-18
     frontend hash `2b36f4913641bbb3`.
   - Thirty-fifth Phase 26 organization move complete: Product stock adjustment
     payload construction now lives in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates bulk add-stock and clear-stock `adjustStock` payload
     construction to that helper, including product ids/names, branch ids,
     quantities, reasons, user attribution, and unit-cost fallback/override
@@ -614,7 +614,7 @@ Last updated: 2026-05-18
     payload delegation is now complete in `Products.jsx`. Restore branch-stock
     sync, deleted-product stock restore, clear-stock, bulk add-stock, and branch
     initialization all use
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs` for
+    `frontend/src/components/products/helpers/productWriteHelpers.ts` for
     `window.api.adjustStock(...)` payloads. The helper now supports snapshot
     product-name overrides and zero-quantity branch initialization while
     preserving purchase/cost unit-cost fallback behavior. Focused helper tests,
@@ -623,7 +623,7 @@ Last updated: 2026-05-18
     scanner live check passed on frontend hash `543cc58df3c2b094`.
   - Thirty-seventh Phase 26 organization move complete: Product transfer-stock
     payload construction now lives in
-    `frontend/src/components/products/helpers/productWriteHelpers.mjs`.
+    `frontend/src/components/products/helpers/productWriteHelpers.ts`.
     Products delegates bulk branch-transfer payload construction to that helper
     while keeping ownership of transfer-vs-initialize workflow decisions. A
     focused helper test caught invalid branch-id normalization before build

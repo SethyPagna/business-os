@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 442.
+- Latest completed implementation move in this roadmap: Move 443.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4950,3 +4950,13 @@ Move 442 status:
   helpers. Frontend tests now stand at 45 `.mjs` and 31 `.ts`, and the batch
   deliberately merges small conversion moves while keeping each harness typed,
   directly executable, and covered by the frontend utility suite.
+
+Move 443 status:
+- Move 443 converts the product, POS, and scanner helper test cluster to
+  TypeScript in one session. The converted `.ts` tests cover product filtering,
+  selection, grouped-card summaries, row display state, export/filter menus,
+  write payloads, restore ordering, page helper normalization, POS grouping and
+  price-mode identity, scanner presentation state, Scanbot mode choice, and
+  image barcode scanning. Frontend tests now stand at 33 `.mjs` and 43 `.ts`,
+  and the batch keeps fake DOM/scanner fixtures typed without relaxing strict
+  compiler checks.

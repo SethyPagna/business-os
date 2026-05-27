@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict'
-import { getPreferredScannerMode } from '../src/components/products/scanning/scanbotScanner.mjs'
+import { getPreferredScannerMode } from '../src/components/products/scanning/scanbotScanner.ts'
 
 const originalWindow = globalThis.window
 const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
 const originalDocument = globalThis.document
 
-function setNavigator(value) {
+type TestNavigator = {
+  mediaDevices?: { getUserMedia: () => Promise<unknown> }
+  permissions?: { query: () => Promise<{ state: string }> }
+}
+type TestDocument = {
+  permissionsPolicy?: { allowsFeature: (feature: string) => boolean }
+}
+
+const testGlobals = globalThis as unknown as { window: Window; document: Document }
+
+function setNavigator(value: TestNavigator) {
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     writable: true,
@@ -14,8 +24,8 @@ function setNavigator(value) {
 }
 
 async function run() {
-  globalThis.window = {}
-  globalThis.document = {}
+  testGlobals.window = {} as Window
+  testGlobals.document = {} as Document
 
   setNavigator({})
   {
@@ -24,13 +34,13 @@ async function run() {
     assert.equal(result.reason, 'unsupported')
   }
 
-  globalThis.document = {
+  testGlobals.document = {
     permissionsPolicy: {
-      allowsFeature(feature) {
+      allowsFeature(feature: string) {
         return feature !== 'camera'
       },
     },
-  }
+  } as unknown as Document
   setNavigator({
     mediaDevices: { getUserMedia: async () => ({}) },
     permissions: {
@@ -44,7 +54,7 @@ async function run() {
     assert.equal(result.permissionState, 'blocked')
   }
 
-  globalThis.document = {}
+  testGlobals.document = {} as Document
 
   setNavigator({
     mediaDevices: { getUserMedia: async () => ({}) },
@@ -91,20 +101,20 @@ run()
     if (originalNavigatorDescriptor) {
       Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor)
     } else {
-      delete globalThis.navigator
+      Reflect.deleteProperty(globalThis, 'navigator')
     }
-    globalThis.document = originalDocument
-    globalThis.window = originalWindow
+    testGlobals.document = originalDocument
+    testGlobals.window = originalWindow
     console.log('scanbotScanner tests passed')
   })
   .catch((error) => {
     if (originalNavigatorDescriptor) {
       Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor)
     } else {
-      delete globalThis.navigator
+      Reflect.deleteProperty(globalThis, 'navigator')
     }
-    globalThis.document = originalDocument
-    globalThis.window = originalWindow
+    testGlobals.document = originalDocument
+    testGlobals.window = originalWindow
     console.error(error)
     process.exit(1)
   })

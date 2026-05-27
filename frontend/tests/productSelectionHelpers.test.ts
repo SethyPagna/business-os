@@ -10,7 +10,7 @@ import {
   isSelectionScopeFullySelected,
   isSelectionScopePartiallySelected,
   normalizePositiveProductIds,
-} from '../src/components/products/helpers/productSelectionHelpers.mjs'
+} from '../src/components/products/helpers/productSelectionHelpers.ts'
 
 const products = [
   { id: 1, name: 'A' },
@@ -29,8 +29,8 @@ assert.deepEqual(buildSelectedVisibleIds(new Set([1, 2, 3]), [2, 4]), [2])
 assert.deepEqual(buildSelectedProducts(products, new Set([2])).map((product) => product.name), ['B'])
 
 const productIdMap = buildProductIdMap(products)
-assert.equal(productIdMap.get(1).name, 'A')
-assert.equal(productIdMap.get(2).name, 'B')
+assert.equal(productIdMap.get(1)?.name, 'A')
+assert.equal(productIdMap.get(2)?.name, 'B')
 assert.equal(productIdMap.has(0), false, 'product id map ignores missing ids')
 assert.deepEqual([...buildParentProductIdSet([
   { id: 1, parent_id: null },

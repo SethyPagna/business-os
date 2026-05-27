@@ -2,14 +2,14 @@ import assert from 'node:assert/strict'
 import {
   buildProductGroupPriceLabel,
   buildProductGroupSummaryParts,
-} from '../src/components/products/helpers/productGroupViewHelpers.mjs'
+} from '../src/components/products/helpers/productGroupViewHelpers.ts'
 
-const fmtUSD = (value) => `$${Number(value || 0).toFixed(2)}`
-const t = (key) => ({
+const fmtUSD = (value: unknown) => `$${Number(value || 0).toFixed(2)}`
+const t = (key: string) => ({
   option: 'option',
   options: 'options',
   stock: 'Stock',
-}[key] || key)
+} as Record<string, string>)[key] || key
 
 assert.equal(
   buildProductGroupPriceLabel({ hasMultipleItems: true, minSellingPriceUsd: 5, maxSellingPriceUsd: 9 }, fmtUSD),

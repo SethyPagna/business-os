@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { createProductHistoryRequestId, orderProductRestoreSnapshots } from '../src/components/products/history/productHistoryHelpers.mjs'
+import { createProductHistoryRequestId, orderProductRestoreSnapshots } from '../src/components/products/history/productHistoryHelpers.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback) {
   try {
     await fn()
     console.log(`PASS ${name}`)

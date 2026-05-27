@@ -6,7 +6,7 @@ import {
   buildProductBrandOptions,
   buildProductRowDisplayState,
   getProductStockStatus,
-} from '../src/components/products/helpers/productDisplayHelpers.mjs'
+} from '../src/components/products/helpers/productDisplayHelpers.ts'
 
 assert.deepEqual(
   buildNameLookupMap([{ name: 'Skin Care', id: 1 }, { name: 'Makeup', id: 2 }]),

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 432 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 433 in this file.
 
 ## Goal
 
@@ -15,8 +15,8 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
   - 86 `.ts`
   - 1 `.css`
 - Frontend tests: 76 focused test files under `frontend/tests`.
-  - 45 `.mjs`
-  - 31 `.ts`
+  - 33 `.mjs`
+  - 43 `.ts`
 - Backend source: 87 files under `backend/src`.
   - 83 `.js`
   - 1 `.sql`
@@ -2761,7 +2761,7 @@ Decision rule:
     `frontend/src/components/pos/posCore.ts` now builds product lookups and
     visible POS cards with direct loops, skipping invalid product IDs and
     avoiding the transient map/filter arrays previously used in these shared
-    checkout helpers. `frontend/tests/posCore.test.mjs` covers the invalid-ID
+    checkout helpers. `frontend/tests/posCore.test.ts` covers the invalid-ID
     lookup guard. This was a local TypeScript helper cleanup; no folder move or
     runtime conversion was needed.
 331. Remove import-service chained normalization allocations. Done:
@@ -3462,6 +3462,17 @@ Decision rule:
     assertion harnesses. It also tightens fake storage, fake DOM, fake event,
     URL path, callback, and portal localization payload types so the converted
     tests are checked by strict TypeScript instead of only being renamed.
+433. Convert the product, POS, and scanner helper test cluster to TypeScript. Done:
+    Twelve more tests now run as `.ts`: `productFilterHelpers`,
+    `productSelectionHelpers`, `productGroupViewHelpers`,
+    `productDisplayHelpers`, `productMenuHelpers`, `productWriteHelpers`,
+    `productHistoryHelpers`, `productPageHelpers`, `posCore`,
+    `barcodeScannerState`, `scanbotScanner`, and `barcodeImageScanner`.
+    The batch imports TypeScript helper implementations directly, tightens
+    async harness callbacks, narrows fake barcode image/scanner globals, uses
+    explicit menu-item and filter-section guards, and keeps intentionally
+    malformed normalization fixtures behind `unknown` casts instead of
+    weakening TypeScript settings.
 
 ## Safety Gates
 
