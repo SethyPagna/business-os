@@ -421,15 +421,15 @@ Code files scanned: **540**
 | 409 | `frontend/tests/adminShellMediaGuards.test.mjs` | 0 |
 | 410 | `frontend/tests/apiHttp.test.mjs` | 3 |
 | 411 | `frontend/tests/appRefresh.test.mjs` | 2 |
-| 412 | `frontend/tests/appShellUtils.test.mjs` | 1 |
-| 413 | `frontend/tests/assetCompression.test.mjs` | 1 |
+| 412 | `frontend/tests/appShellUtils.test.ts` | 1 |
+| 413 | `frontend/tests/assetCompression.test.ts` | 1 |
 | 414 | `frontend/tests/backupJobs.test.mjs` | 0 |
 | 415 | `frontend/tests/barcodeImageScanner.test.mjs` | 1 |
 | 416 | `frontend/tests/barcodeScannerState.test.mjs` | 1 |
 | 417 | `frontend/tests/bulkOps.test.ts` | 1 |
 | 418 | `frontend/tests/contactImportWorker.test.mjs` | 1 |
 | 419 | `frontend/tests/csvImport.test.mjs` | 1 |
-| 420 | `frontend/tests/dashboardDataReliability.test.mjs` | 0 |
+| 420 | `frontend/tests/dashboardDataReliability.test.ts` | 0 |
 | 421 | `frontend/tests/dateHelpers.test.ts` | 2 |
 | 422 | `frontend/tests/deviceInfo.test.ts` | 2 |
 | 423 | `frontend/tests/exportPackages.test.mjs` | 1 |
@@ -456,12 +456,12 @@ Code files scanned: **540**
 | 444 | `frontend/tests/performanceLoadingUx.test.mjs` | 0 |
 | 445 | `frontend/tests/permissionEditor.test.mjs` | 0 |
 | 446 | `frontend/tests/permissions.test.ts` | 0 |
-| 447 | `frontend/tests/portalCatalogDisplay.test.mjs` | 3 |
-| 448 | `frontend/tests/portalContentI18n.test.mjs` | 0 |
-| 449 | `frontend/tests/portalEditorUtils.test.mjs` | 1 |
-| 450 | `frontend/tests/portalFaqVocabulary.test.mjs` | 0 |
+| 447 | `frontend/tests/portalCatalogDisplay.test.ts` | 1 |
+| 448 | `frontend/tests/portalContentI18n.test.ts` | 0 |
+| 449 | `frontend/tests/portalEditorUtils.test.ts` | 1 |
+| 450 | `frontend/tests/portalFaqVocabulary.test.ts` | 0 |
 | 451 | `frontend/tests/portalLanguagePacks.test.ts` | 0 |
-| 452 | `frontend/tests/portalTranslateController.test.mjs` | 2 |
+| 452 | `frontend/tests/portalTranslateController.test.ts` | 3 |
 | 453 | `frontend/tests/posCore.test.mjs` | 1 |
 | 454 | `frontend/tests/pricingContacts.test.mjs` | 1 |
 | 455 | `frontend/tests/productBatches.test.ts` | 0 |
@@ -479,15 +479,15 @@ Code files scanned: **540**
 | 467 | `frontend/tests/productSearchPagination.test.mjs` | 0 |
 | 468 | `frontend/tests/productSelectionHelpers.test.mjs` | 0 |
 | 469 | `frontend/tests/productWriteHelpers.test.mjs` | 0 |
-| 470 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 |
+| 470 | `frontend/tests/publicErrorRecovery.test.ts` | 1 |
 | 471 | `frontend/tests/receiptSettingsSync.test.mjs` | 0 |
 | 472 | `frontend/tests/receiptTemplate.test.mjs` | 1 |
 | 473 | `frontend/tests/returnsLayout.test.mjs` | 0 |
-| 474 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 0 |
+| 474 | `frontend/tests/runtimeErrorClassifier.test.ts` | 0 |
 | 475 | `frontend/tests/salesImportWorker.test.mjs` | 1 |
 | 476 | `frontend/tests/scanbotScanner.test.mjs` | 2 |
 | 477 | `frontend/tests/scriptTypography.test.ts` | 0 |
-| 478 | `frontend/tests/sectionNavigation.test.mjs` | 0 |
+| 478 | `frontend/tests/sectionNavigation.test.ts` | 0 |
 | 479 | `frontend/tests/settingsConflictHelpers.test.ts` | 1 |
 | 480 | `frontend/tests/settingsRefresh.test.ts` | 0 |
 | 481 | `frontend/tests/storagePolicy.test.ts` | 1 |
@@ -6025,17 +6025,17 @@ Code files scanned: **540**
 | 1 | `testNormalizeRefreshChannels` | function | 5 |
 | 2 | `testRefreshAppDataDispatchesMergedDetail` | function | 12 |
 
-### 3.412 `frontend/tests/appShellUtils.test.mjs`
+### 3.412 `frontend/tests/appShellUtils.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 8 |
+| 1 | `runTest` | function | 10 |
 
-### 3.413 `frontend/tests/assetCompression.test.mjs`
+### 3.413 `frontend/tests/assetCompression.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `collectMediaFiles` | function | 11 |
+| 1 | `collectMediaFiles` | function | 12 |
 
 ### 3.414 `frontend/tests/backupJobs.test.mjs`
 
@@ -6071,7 +6071,7 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.420 `frontend/tests/dashboardDataReliability.test.mjs`
+### 3.420 `frontend/tests/dashboardDataReliability.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6222,25 +6222,23 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.447 `frontend/tests/portalCatalogDisplay.test.mjs`
+### 3.447 `frontend/tests/portalCatalogDisplay.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 18 |
-| 2 | `copy` | const arrow | 29 |
-| 3 | `formatPortalPrice` | const arrow | 30 |
+| 1 | `runTest` | function | 20 |
 
-### 3.448 `frontend/tests/portalContentI18n.test.mjs`
+### 3.448 `frontend/tests/portalContentI18n.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.449 `frontend/tests/portalEditorUtils.test.mjs`
+### 3.449 `frontend/tests/portalEditorUtils.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 11 |
+| 1 | `runTest` | function | 13 |
 
-### 3.450 `frontend/tests/portalFaqVocabulary.test.mjs`
+### 3.450 `frontend/tests/portalFaqVocabulary.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6248,12 +6246,13 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.452 `frontend/tests/portalTranslateController.test.mjs`
+### 3.452 `frontend/tests/portalTranslateController.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `createStorage` | function | 17 |
-| 2 | `createDocument` | function | 32 |
+| 1 | `createStorage` | function | 46 |
+| 2 | `createDocument` | function | 61 |
+| 3 | `TestEvent` | class | 132 |
 
 ### 3.453 `frontend/tests/posCore.test.mjs`
 
@@ -6344,11 +6343,11 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.470 `frontend/tests/publicErrorRecovery.test.mjs`
+### 3.470 `frontend/tests/publicErrorRecovery.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `createStorage` | function | 8 |
+| 1 | `createStorage` | function | 10 |
 
 ### 3.471 `frontend/tests/receiptSettingsSync.test.mjs`
 
@@ -6364,7 +6363,7 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.474 `frontend/tests/runtimeErrorClassifier.test.mjs`
+### 3.474 `frontend/tests/runtimeErrorClassifier.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6385,7 +6384,7 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.478 `frontend/tests/sectionNavigation.test.mjs`
+### 3.478 `frontend/tests/sectionNavigation.test.ts`
 
 - No top-level named symbols detected.
 

@@ -421,15 +421,15 @@ Code files documented: **540**
 | 409 | `frontend/tests/adminShellMediaGuards.test.mjs` | 2 | 0 | 0 | 0 |
 | 410 | `frontend/tests/apiHttp.test.mjs` | 2 | 0 | 0 | 0 |
 | 411 | `frontend/tests/appRefresh.test.mjs` | 2 | 0 | 1 | 0 |
-| 412 | `frontend/tests/appShellUtils.test.mjs` | 3 | 0 | 1 | 0 |
-| 413 | `frontend/tests/assetCompression.test.mjs` | 3 | 0 | 0 | 0 |
+| 412 | `frontend/tests/appShellUtils.test.ts` | 3 | 0 | 1 | 0 |
+| 413 | `frontend/tests/assetCompression.test.ts` | 4 | 0 | 0 | 0 |
 | 414 | `frontend/tests/backupJobs.test.mjs` | 2 | 0 | 0 | 0 |
 | 415 | `frontend/tests/barcodeImageScanner.test.mjs` | 2 | 0 | 1 | 0 |
 | 416 | `frontend/tests/barcodeScannerState.test.mjs` | 2 | 0 | 1 | 0 |
 | 417 | `frontend/tests/bulkOps.test.ts` | 2 | 0 | 1 | 0 |
 | 418 | `frontend/tests/contactImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
 | 419 | `frontend/tests/csvImport.test.mjs` | 3 | 0 | 1 | 0 |
-| 420 | `frontend/tests/dashboardDataReliability.test.mjs` | 2 | 0 | 0 | 0 |
+| 420 | `frontend/tests/dashboardDataReliability.test.ts` | 2 | 0 | 0 | 0 |
 | 421 | `frontend/tests/dateHelpers.test.ts` | 2 | 0 | 1 | 0 |
 | 422 | `frontend/tests/deviceInfo.test.ts` | 2 | 0 | 1 | 0 |
 | 423 | `frontend/tests/exportPackages.test.mjs` | 4 | 0 | 2 | 0 |
@@ -456,12 +456,12 @@ Code files documented: **540**
 | 444 | `frontend/tests/performanceLoadingUx.test.mjs` | 2 | 0 | 0 | 0 |
 | 445 | `frontend/tests/permissionEditor.test.mjs` | 2 | 0 | 0 | 0 |
 | 446 | `frontend/tests/permissions.test.ts` | 2 | 0 | 1 | 0 |
-| 447 | `frontend/tests/portalCatalogDisplay.test.mjs` | 2 | 0 | 0 | 0 |
-| 448 | `frontend/tests/portalContentI18n.test.mjs` | 1 | 0 | 0 | 0 |
-| 449 | `frontend/tests/portalEditorUtils.test.mjs` | 1 | 0 | 0 | 0 |
-| 450 | `frontend/tests/portalFaqVocabulary.test.mjs` | 1 | 0 | 0 | 0 |
+| 447 | `frontend/tests/portalCatalogDisplay.test.ts` | 2 | 0 | 0 | 0 |
+| 448 | `frontend/tests/portalContentI18n.test.ts` | 1 | 0 | 0 | 0 |
+| 449 | `frontend/tests/portalEditorUtils.test.ts` | 1 | 0 | 0 | 0 |
+| 450 | `frontend/tests/portalFaqVocabulary.test.ts` | 1 | 0 | 0 | 0 |
 | 451 | `frontend/tests/portalLanguagePacks.test.ts` | 1 | 0 | 0 | 0 |
-| 452 | `frontend/tests/portalTranslateController.test.mjs` | 1 | 0 | 0 | 0 |
+| 452 | `frontend/tests/portalTranslateController.test.ts` | 1 | 0 | 0 | 0 |
 | 453 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
 | 454 | `frontend/tests/pricingContacts.test.mjs` | 3 | 0 | 1 | 0 |
 | 455 | `frontend/tests/productBatches.test.ts` | 2 | 0 | 1 | 0 |
@@ -479,15 +479,15 @@ Code files documented: **540**
 | 467 | `frontend/tests/productSearchPagination.test.mjs` | 2 | 0 | 0 | 0 |
 | 468 | `frontend/tests/productSelectionHelpers.test.mjs` | 1 | 0 | 0 | 0 |
 | 469 | `frontend/tests/productWriteHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 470 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 | 0 | 0 | 0 |
+| 470 | `frontend/tests/publicErrorRecovery.test.ts` | 1 | 0 | 0 | 0 |
 | 471 | `frontend/tests/receiptSettingsSync.test.mjs` | 2 | 0 | 0 | 0 |
 | 472 | `frontend/tests/receiptTemplate.test.mjs` | 4 | 0 | 2 | 0 |
 | 473 | `frontend/tests/returnsLayout.test.mjs` | 2 | 0 | 0 | 0 |
-| 474 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 1 | 0 | 0 | 0 |
+| 474 | `frontend/tests/runtimeErrorClassifier.test.ts` | 1 | 0 | 0 | 0 |
 | 475 | `frontend/tests/salesImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
 | 476 | `frontend/tests/scanbotScanner.test.mjs` | 2 | 0 | 1 | 0 |
 | 477 | `frontend/tests/scriptTypography.test.ts` | 2 | 0 | 1 | 0 |
-| 478 | `frontend/tests/sectionNavigation.test.mjs` | 2 | 0 | 0 | 0 |
+| 478 | `frontend/tests/sectionNavigation.test.ts` | 2 | 0 | 0 | 0 |
 | 479 | `frontend/tests/settingsConflictHelpers.test.ts` | 2 | 0 | 1 | 0 |
 | 480 | `frontend/tests/settingsRefresh.test.ts` | 1 | 0 | 0 | 0 |
 | 481 | `frontend/tests/storagePolicy.test.ts` | 1 | 0 | 0 | 0 |
@@ -3187,7 +3187,7 @@ Code files documented: **540**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/index.jsx`
-  - `frontend/tests/appShellUtils.test.mjs`
+  - `frontend/tests/appShellUtils.test.ts`
 
 ### 3.154 `frontend/src/app/publicErrorRecovery.mjs`
 
@@ -7079,7 +7079,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.412 `frontend/tests/appShellUtils.test.mjs`
+### 3.412 `frontend/tests/appShellUtils.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7091,13 +7091,14 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.413 `frontend/tests/assetCompression.test.mjs`
+### 3.413 `frontend/tests/assetCompression.test.ts`
 
 - Declared exports: none detected
-- Imports (3)
+- Imports (4)
   - `node:assert/strict`
   - `node:fs`
   - `node:path`
+  - `node:url`
 - Internal dependencies (0)
   - none
 - Referenced by (0)
@@ -7171,7 +7172,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.420 `frontend/tests/dashboardDataReliability.test.mjs`
+### 3.420 `frontend/tests/dashboardDataReliability.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7471,7 +7472,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.447 `frontend/tests/portalCatalogDisplay.test.mjs`
+### 3.447 `frontend/tests/portalCatalogDisplay.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7482,7 +7483,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.448 `frontend/tests/portalContentI18n.test.mjs`
+### 3.448 `frontend/tests/portalContentI18n.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7492,7 +7493,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.449 `frontend/tests/portalEditorUtils.test.mjs`
+### 3.449 `frontend/tests/portalEditorUtils.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7502,7 +7503,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.450 `frontend/tests/portalFaqVocabulary.test.mjs`
+### 3.450 `frontend/tests/portalFaqVocabulary.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7522,7 +7523,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.452 `frontend/tests/portalTranslateController.test.mjs`
+### 3.452 `frontend/tests/portalTranslateController.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7713,7 +7714,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.470 `frontend/tests/publicErrorRecovery.test.mjs`
+### 3.470 `frontend/tests/publicErrorRecovery.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7759,7 +7760,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.474 `frontend/tests/runtimeErrorClassifier.test.mjs`
+### 3.474 `frontend/tests/runtimeErrorClassifier.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7803,7 +7804,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.478 `frontend/tests/sectionNavigation.test.mjs`
+### 3.478 `frontend/tests/sectionNavigation.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
