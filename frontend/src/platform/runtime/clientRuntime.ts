@@ -1,4 +1,3 @@
-// @ts-expect-error constants.js is a legacy JavaScript boundary in the TypeScript migration queue.
 import { STORAGE_KEYS } from '../../constants.js'
 // @ts-expect-error localDb.js is a legacy JavaScript boundary in the TypeScript migration queue.
 import { resetLocalMirrorDb } from '../../api/localDb.js'
