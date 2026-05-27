@@ -23,6 +23,7 @@
     "src/components/receipt-settings/**/*.ts",
     "src/components/shared/**/*.ts",
     "src/components/utils-settings/**/*.ts",
+    "src/platform/runtime/**/*.ts",
     "src/platform/storage/**/*.ts",
     "src/utils/**/*.ts",
     "src/components/products/helpers/**/*.ts",
