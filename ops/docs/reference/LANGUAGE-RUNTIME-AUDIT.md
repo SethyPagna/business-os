@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-27T19:02:09.210Z
+Generated: 2026-05-27T19:11:37.836Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 514
+- Files scanned: 516
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -25,7 +25,7 @@ Generated: 2026-05-27T19:02:09.210Z
 | JavaScript | 184 |
 | JavaScript modules | 121 |
 | React JSX | 107 |
-| TypeScript | 70 |
+| TypeScript | 72 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |
@@ -35,14 +35,16 @@ Generated: 2026-05-27T19:02:09.210Z
 
 ## Conversion Candidates
 
-No conversion candidates detected.
+| Track | File | Lines | Score | Rule |
+| --- | --- | --- | --- | --- |
+| Web Worker extraction | frontend/src/utils/csv.ts | 234 | 6 | Browser CPU/file parsing/media work candidate. |
 
 ## First Executable Slices
 
 | Track | First candidate | Lines | Score | Required proof |
 | --- | --- | --- | --- | --- |
 | TypeScript utility conversion | none | 0 | 0 | `npm.cmd --prefix frontend run typecheck`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`rg old import path after rename or extension change` |
-| Web Worker extraction | none | 0 | 0 | `npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright flow for the affected import/scanner/media action`<br>`fallback path when Worker construction fails` |
+| Web Worker extraction | `frontend/src/utils/csv.ts` | 234 | 6 | `npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright flow for the affected import/scanner/media action`<br>`fallback path when Worker construction fails` |
 | SQL/DuckDB/data-path optimization | none | 0 | 0 | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.js`<br>`backup/restore or count-diff rehearsal for changed data paths`<br>`before/after timing on the same fixture` |
 
 ## Verification Matrix
