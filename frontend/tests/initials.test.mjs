@@ -5,7 +5,7 @@ import {
   compareInitialKeys,
   getInitialKey,
   getInitialType,
-} from '../src/utils/initials.mjs'
+} from '../src/utils/initials.ts'
 
 let failed = 0
 

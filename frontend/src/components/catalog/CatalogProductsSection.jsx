@@ -4,7 +4,7 @@ import { ProductImg } from '../products/shared/primitives'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.mjs'
-import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.mjs'
+import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.js'
 
 function getBadgeIcon(badge) {

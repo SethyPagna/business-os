@@ -1,8 +1,8 @@
-import { compareInitialKeys, getInitialKey } from './initials.mjs'
+import { compareInitialKeys, getInitialKey } from './initials.ts'
 
 type ProductId = number
 
-interface ProductRecord {
+export interface ProductRecord {
   id?: unknown
   parent_id?: unknown
   name?: unknown

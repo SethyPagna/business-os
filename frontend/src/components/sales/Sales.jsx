@@ -12,7 +12,7 @@ import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import {
   beginTrackedRequest,

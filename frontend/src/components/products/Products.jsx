@@ -1,4 +1,4 @@
-﻿// Products
+// Products
 // Main Products page; all sub-modals are imported from sibling files.
 
 import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
@@ -19,12 +19,12 @@ import {
 } from './surfaces/ProductRowParts'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
-import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
+import { buildProductGroupSections } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.mjs'
-import { getAvailableYears, toggleIdSet } from '../../utils/groupedRecords.mjs'
-import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.mjs'
+import { getAvailableYears, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
@@ -61,7 +61,7 @@ import {
   buildProductThumbnailState,
   normalizeProductGallery,
   updateProductLightboxIndex,
-} from './helpers/productGalleryHelpers.mjs'
+} from './helpers/productGalleryHelpers.ts'
 import {
   buildProductExportRows,
   buildProductSearchTerms,

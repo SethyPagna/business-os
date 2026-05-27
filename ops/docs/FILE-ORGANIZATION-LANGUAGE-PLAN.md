@@ -236,7 +236,7 @@ Decision rule:
     source checks, typecheck, production build, runtime health, focused Product
     page Playwright, and focused Product scanner Playwright passed on frontend
     hash `a440b744817036af`.
-17. Split product gallery helpers. Done: `productGalleryHelpers.mjs` now lives
+17. Split product gallery helpers. Done: `productGalleryHelpers.ts` now lives
     in `frontend/src/components/products/helpers`, owning gallery
     normalization, product gallery fallback selection, and public product image
     URL resolution. `Products.jsx` no longer imports `resolvePublicAssetUrl`
@@ -314,7 +314,7 @@ Decision rule:
     health, focused Product page Playwright, and focused Product scanner
     Playwright passed on frontend hash `8426a118f46c25cc`.
 26. Split product lightbox state helper. Done:
-    `productGalleryHelpers.mjs` now also owns lightbox image URL resolution,
+    `productGalleryHelpers.ts` now also owns lightbox image URL resolution,
     empty-gallery handling, and start-index clamping. `Products.jsx` now
     delegates lightbox state construction while keeping the lightbox UI and
     navigation actions unchanged. The moved behavior has focused source tests
@@ -323,7 +323,7 @@ Decision rule:
     build, runtime health, focused Product page Playwright, and focused Product
     scanner Playwright passed on frontend hash `3469c4d8b3425629`.
 27. Split product lightbox index helpers and remove dead overlay branch. Done:
-    `productGalleryHelpers.mjs` now also owns reusable lightbox index clamping
+    `productGalleryHelpers.ts` now also owns reusable lightbox index clamping
     and active lightbox index updates. `Products.jsx` now delegates gallery
     index changes to that helper and no longer carries the disabled legacy
     `false && lightbox` overlay branch. The moved behavior has focused source
@@ -332,7 +332,7 @@ Decision rule:
     runtime health, focused Product page Playwright, and focused Product
     scanner Playwright passed on frontend hash `713180d4d834b1ce`.
 28. Split product detail lightbox gallery-input helper. Done:
-    `productGalleryHelpers.mjs` now also owns the detail-modal lightbox input
+    `productGalleryHelpers.ts` now also owns the detail-modal lightbox input
     decision: prefer a normalized clicked gallery when present, otherwise fall
     back to the clicked image source. `Products.jsx` now delegates that
     gallery/source fallback before opening the shared lightbox, keeping the
@@ -342,7 +342,7 @@ Decision rule:
     focused Product page Playwright, and focused Product scanner Playwright
     passed on frontend hash `ce63c5f06c94a85e`.
 29. Split product thumbnail state helper. Done:
-    `productGalleryHelpers.mjs` now also owns row thumbnail state construction:
+    `productGalleryHelpers.ts` now also owns row thumbnail state construction:
     one normalized gallery, a `hasImage` flag, and the first thumbnail path.
     Desktop and mobile product rows now compute that state once per row and use
     it for both thumbnail display and lightbox open, instead of repeating
@@ -1050,24 +1050,24 @@ Decision rule:
     imports. Added `frontend/tests/formatters.test.mjs` to the frontend utility
     suite. `language-runtime-audit.mjs` now records the formatter conversion in
     `convertedTypeScriptSlices`, and the next TypeScript utility candidate is
-    `frontend/src/utils/groupedRecords.mjs`.
+    `frontend/src/utils/groupedRecords.ts`.
 115. Convert grouped-record helper to TypeScript. Done:
     The shared time/alphabet grouping implementation moved to
     `frontend/src/utils/groupedRecords.ts`, while
-    `frontend/src/utils/groupedRecords.mjs` remains as the compatibility wrapper
+    `frontend/src/utils/groupedRecords.ts` remains as the compatibility wrapper
     for existing component and test imports. Removed duplicated unused Khmer
     initial ordering from the grouping helper and documented the remaining
-    `initials.mjs` boundary with `frontend/src/utils/initials.d.mts`.
+    `initials.ts` boundary with `frontend/src/utils/initials.ts`.
     `language-runtime-audit.mjs` now records the grouped-record conversion in
     `convertedTypeScriptSlices`.
 116. Convert initials helper to TypeScript. Done:
     The shared alphabet/Khmer initial classification implementation moved to
     `frontend/src/utils/initials.ts`, while
-    `frontend/src/utils/initials.mjs` remains as the stable compatibility
+    `frontend/src/utils/initials.ts` remains as the stable compatibility
     wrapper for products, POS, inventory, catalog, grouping helpers, and tests.
     Added `frontend/tests/initials.test.mjs` to cover Latin, Khmer, numeric,
     symbol, aggregation, product-derived options, and sort ordering behavior.
-    `frontend/src/utils/initials.d.mts` now documents the public `.mjs` wrapper
+    `frontend/src/utils/initials.ts` now documents the public `.mjs` wrapper
     boundary used by converted TypeScript callers.
 117. Convert media upload helper to TypeScript. Done:
     The upload-state and media cache-busting helper moved to
@@ -1088,9 +1088,9 @@ Decision rule:
 119. Convert product grouping helper to TypeScript. Done:
     The product family/grouping implementation moved to
     `frontend/src/utils/productGrouping.ts`, while
-    `frontend/src/utils/productGrouping.mjs` remains as the compatibility
+    `frontend/src/utils/productGrouping.ts` remains as the compatibility
     wrapper for Products, Inventory, POS, and existing tests. Added
-    `frontend/src/utils/productGrouping.d.mts` for the stable `.mjs` boundary.
+    `frontend/src/utils/productGrouping.ts` for the stable `.mjs` boundary.
     Focused product grouping, POS core, and product page helper tests passed.
 120. Convert product display helper to TypeScript. Done:
     The product row display, stock status, branch label, brand option, and
@@ -1107,7 +1107,7 @@ Decision rule:
     `frontend/src/components/products/helpers/productFilterHelpers.ts`, while
     `productFilterHelpers.mjs` remains as the compatibility wrapper for the
     Products page and focused tests. Added
-    `frontend/src/utils/groupedRecords.d.mts` so TypeScript component helpers
+    `frontend/src/utils/groupedRecords.ts` so TypeScript component helpers
     can import the stable grouped-record wrapper without losing type coverage.
     Focused filter helper, grouped records, product search pagination, and
     product page helper tests passed.
@@ -1126,7 +1126,7 @@ Decision rule:
     `frontend/src/components/products/helpers/productWriteHelpers.ts`, while
     `productWriteHelpers.mjs` remains as the compatibility wrapper for the
     Products page and focused tests. Added
-    `frontend/src/components/products/helpers/productGalleryHelpers.d.mts` so
+    `frontend/src/components/products/helpers/productGalleryHelpers.ts` so
     the typed write helper can keep using the stable gallery helper boundary.
     Focused write helper, action stability, search pagination, and strict
     frontend typecheck tests passed.
@@ -1222,7 +1222,7 @@ Decision rule:
 137. Convert product gallery helper to TypeScript. Done:
     The product gallery normalization and lightbox helper moved to
     `frontend/src/components/products/helpers/productGalleryHelpers.ts`, while
-    `productGalleryHelpers.mjs` remains as the compatibility wrapper for
+    `productGalleryHelpers.ts` remains as the compatibility wrapper for
     Products, product write helpers, and focused tests. The typed helper keeps
     unknown gallery inputs explicit, preserves public asset URL resolution, and
     keeps lightbox index clamping near the gallery state logic.
@@ -1286,7 +1286,7 @@ Decision rule:
     to `frontend/src/components/catalog/portalContentI18n.ts`, while
     `portalContentI18n.mjs` remains as the compatibility wrapper for catalog
     surfaces and focused portal i18n tests. Added
-    `portalLanguagePacks.d.mts` so the typed helper can import the existing
+    `portalLanguagePacks.ts` so the typed helper can import the existing
     language-pack module without forcing a second large conversion in the same
     move.
 147. Convert portal editor utility helper to TypeScript. Done:
@@ -1298,9 +1298,9 @@ Decision rule:
 148. Convert portal language pack helper to TypeScript. Done:
     The first-party portal language pack and lookup helper moved to
     `frontend/src/components/catalog/portalLanguagePacks.ts`, while
-    `portalLanguagePacks.mjs` remains as the compatibility wrapper for
+    `portalLanguagePacks.ts` remains as the compatibility wrapper for
     `CatalogPage.jsx`, portal i18n helpers, and focused portal vocabulary
-    tests. `portalLanguagePacks.d.mts` remains as the small typed wrapper
+    tests. `portalLanguagePacks.ts` remains as the small typed wrapper
     declaration needed for TypeScript imports through the stable `.mjs`
     boundary.
 149. Convert contact option helper to TypeScript. Done:

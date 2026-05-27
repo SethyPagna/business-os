@@ -4,7 +4,7 @@ import {
   getPortalLanguageText,
   isFirstPartyPortalLanguage,
   normalizeFirstPartyPortalLanguage,
-} from '../src/components/catalog/portalLanguagePacks.mjs'
+} from '../src/components/catalog/portalLanguagePacks.ts'
 
 const values = FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS.map((option) => option.value)
 

@@ -1,4 +1,4 @@
-import { matchesYearMonthFilters } from '../../../utils/groupedRecords.mjs'
+import { matchesYearMonthFilters } from '../../../utils/groupedRecords.ts'
 import { formatPriceNumber } from '../../../utils/pricing.js'
 
 interface BranchStockRecord {
@@ -115,11 +115,13 @@ export function filterProductsForPage(products: ProductRecord[] = [], filters: P
         ? normalizedSearchTerms.every((term) => haystack.includes(term))
         : normalizedSearchTerms.some((term) => haystack.includes(term))
     )
+    const createdYear = String(createdYearFilter || 'all')
+    const createdMonth = String(createdMonthFilter || 'all')
     const matchCat = catFilter === 'all' || product.category === catFilter
     const matchBrand = brandFilter === 'all' || String(product.brand || '').toLowerCase() === String(brandFilter).toLowerCase()
     const matchBranch = branchFilter === 'all' || (product.branch_stock || []).some((stock) => String(stock.branch_id) === String(branchFilter))
     const matchSupplier = supplierFilter === 'all' || String(product.supplier || '').toLowerCase() === String(supplierFilter).toLowerCase()
-    const matchCreated = matchesYearMonthFilters(product.created_at, { year: createdYearFilter, month: createdMonthFilter })
+    const matchCreated = matchesYearMonthFilters(product.created_at, { year: createdYear, month: createdMonth })
     const isParent = Boolean(product.is_group || parentProductIds.has(Number(product.id)))
     const isVariant = Boolean(product.parent_id)
     const matchGroup =

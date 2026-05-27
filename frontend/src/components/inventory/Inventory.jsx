@@ -1,4 +1,4 @@
-﻿// Main Inventory page sub-components imported from sibling files.
+// Main Inventory page sub-components imported from sibling files.
 
 import { Fragment, Suspense, lazy, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
@@ -20,9 +20,9 @@ import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
-import { aggregateInitialOptions, buildInitialOptionsFromProducts } from '../../utils/initials.mjs'
-import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { aggregateInitialOptions, buildInitialOptionsFromProducts } from '../../utils/initials.ts'
+import { buildProductGroupSections } from '../../utils/productGrouping.ts'
 import { buildBatchPreview } from '../../utils/productBatches.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'

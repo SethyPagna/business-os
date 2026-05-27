@@ -1065,7 +1065,7 @@ Current checkpoint:
   `a440b744817036af`.
 - Thirteenth Phase 26 physical move complete: Product gallery helper functions
   now live under
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`. The
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module owns gallery normalization, primary-image fallback selection, and
   public product image URL resolution. `Products.jsx` now depends on that helper
   instead of carrying local gallery normalization or direct public asset URL
@@ -1145,7 +1145,7 @@ Current checkpoint:
   scanner live check passed on frontend hash `8426a118f46c25cc`.
 - Twenty-second Phase 26 organization move complete: Product lightbox state
   construction now lives under
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`. The
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module now also owns lightbox image URL resolution, empty-gallery handling,
   and safe start-index clamping. `Products.jsx` now delegates lightbox state
   construction while preserving the lightbox UI and navigation actions. Focused
@@ -1154,7 +1154,7 @@ Current checkpoint:
   check passed on frontend hash `3469c4d8b3425629`.
 - Twenty-third Phase 26 organization move complete: Product lightbox index
   update logic now lives under
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`. The
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module now also owns reusable lightbox index clamping and active lightbox
   index updates. `Products.jsx` delegates gallery index changes to that helper
   and no longer carries the disabled legacy `false && lightbox` overlay branch.
@@ -1163,7 +1163,7 @@ Current checkpoint:
   live check passed on frontend hash `713180d4d834b1ce`.
 - Twenty-fourth Phase 26 organization move complete: Product detail lightbox
   gallery-input fallback now lives under
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`. The
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module now also owns the detail-modal decision to prefer a normalized clicked
   gallery or fall back to the clicked source image. `Products.jsx` delegates
   that fallback before opening the shared lightbox while preserving the detail
@@ -1172,7 +1172,7 @@ Current checkpoint:
   scanner live check passed on frontend hash `ce63c5f06c94a85e`.
 - Twenty-fifth Phase 26 organization move complete: Product thumbnail state
   construction now lives under
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`. The
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module now also owns one normalized row gallery, a `hasImage` flag, and first
   thumbnail path. Desktop and mobile product rows compute thumbnail state once
   and reuse it for thumbnail display and lightbox open. A stale removed
@@ -2079,16 +2079,16 @@ Cleanup checkpoint:
   `formatters.js` remains as a compatibility wrapper, and
   `frontend/tests/formatters.test.mjs` is part of the frontend utility suite.
   The language audit now lists both completed TypeScript slices and advances
-  the next TypeScript candidate to `frontend/src/utils/groupedRecords.mjs`.
+  the next TypeScript candidate to `frontend/src/utils/groupedRecords.ts`.
 - The grouped-record helper slice is now complete:
   `frontend/src/utils/groupedRecords.ts` owns the time/alphabet grouping
-  implementation, `groupedRecords.mjs` remains as the compatibility wrapper
-  used by existing component and test imports, and `initials.d.mts` documents
-  the typed boundary to `initials.mjs`. The conversion also removes unused
+  implementation, `groupedRecords.ts` remains as the compatibility wrapper
+  used by existing component and test imports, and `initials.ts` documents
+  the typed boundary to `initials.ts`. The conversion also removes unused
   duplicated Khmer initial-order constants from the grouping helper.
 - The initials helper slice is now complete:
   `frontend/src/utils/initials.ts` owns alphabet/Khmer initial classification,
-  `initials.mjs` remains as the compatibility wrapper for existing imports, and
+  `initials.ts` remains as the compatibility wrapper for existing imports, and
   `frontend/tests/initials.test.mjs` covers classification, aggregation,
   product-derived options, and stable sort order. The language audit records the
   implementation, wrapper, declaration, and proof commands as a completed
@@ -2109,8 +2109,8 @@ Cleanup checkpoint:
 - The product grouping helper slice is now complete:
   `frontend/src/utils/productGrouping.ts` owns product family expansion,
   same-name option grouping, variant ordering, section labels, and group
-  summaries, while `productGrouping.mjs` remains as the compatibility wrapper
-  for Products, Inventory, POS, and focused tests. `productGrouping.d.mts`
+  summaries, while `productGrouping.ts` remains as the compatibility wrapper
+  for Products, Inventory, POS, and focused tests. `productGrouping.ts`
   documents the stable `.mjs` boundary for converted TypeScript callers.
 - The product display helper slice is now complete:
   `frontend/src/components/products/helpers/productDisplayHelpers.ts` owns row
@@ -2123,7 +2123,7 @@ Cleanup checkpoint:
   `frontend/src/components/products/helpers/productFilterHelpers.ts` owns
   search-term parsing, product filter predicates, branch quantity lookup, and
   export-row formatting, while `productFilterHelpers.mjs` remains as the
-  compatibility wrapper for Products and tests. `groupedRecords.d.mts` now
+  compatibility wrapper for Products and tests. `groupedRecords.ts` now
   documents the grouped-record wrapper used by TypeScript component helpers.
 - The product menu helper slice is now complete:
   `frontend/src/components/products/helpers/productMenuHelpers.ts` owns export
@@ -2136,7 +2136,7 @@ Cleanup checkpoint:
   product write payloads, restore parent/branch planning, branch-stock
   adjustment deltas, stock-transfer payloads, bulk update summaries, and bulk
   info/pricing updates, while `productWriteHelpers.mjs` remains as the
-  compatibility wrapper for Products and tests. `productGalleryHelpers.d.mts`
+  compatibility wrapper for Products and tests. `productGalleryHelpers.ts`
   documents the gallery helper boundary used by this typed module.
 - The product import planner slice is now complete:
   `frontend/src/components/products/import/productImportPlanner.ts` owns CSV
@@ -2212,7 +2212,7 @@ Cleanup checkpoint:
   `frontend/src/components/products/helpers/productGalleryHelpers.ts` owns
   gallery normalization, thumbnail state, public image URL resolution, lightbox
   input fallback, and lightbox index clamping, while
-  `productGalleryHelpers.mjs` remains as the compatibility wrapper for
+  `productGalleryHelpers.ts` remains as the compatibility wrapper for
   Products, typed write helpers, and focused tests.
 - The product group view helper slice is now complete:
   `frontend/src/components/products/helpers/productGroupViewHelpers.ts` owns
@@ -2261,7 +2261,7 @@ Cleanup checkpoint:
   `frontend/src/components/catalog/portalContentI18n.ts` owns translation
   parsing/stringifying, config and product localization, FAQ exact/vocabulary
   fallback, and protected public-copy terms, while `portalContentI18n.mjs`
-  remains as the compatibility wrapper and `portalLanguagePacks.d.mts` types
+  remains as the compatibility wrapper and `portalLanguagePacks.ts` types
   the existing language-pack import.
 - The portal editor utility helper slice is now complete:
   `frontend/src/components/catalog/portalEditorUtils.ts` owns about-block
@@ -2272,9 +2272,9 @@ Cleanup checkpoint:
 - The portal language pack helper slice is now complete:
   `frontend/src/components/catalog/portalLanguagePacks.ts` owns first-party
   portal language options, normalization, membership checks, and translated
-  text lookup, while `portalLanguagePacks.mjs` remains as the compatibility
+  text lookup, while `portalLanguagePacks.ts` remains as the compatibility
   wrapper for catalog surfaces and focused portal vocabulary tests. The tiny
-  `portalLanguagePacks.d.mts` declaration stays because TypeScript needs it to
+  `portalLanguagePacks.ts` declaration stays because TypeScript needs it to
   type imports through the stable `.mjs` wrapper.
 - The contact option helper slice is now complete:
   `frontend/src/components/contacts/contactOptionUtils.ts` owns contact-option

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildProductGroups, buildProductGroupSections, getNameInitialSection, normalizeProductGroupName } from '../src/utils/productGrouping.mjs'
+import { buildProductGroups, buildProductGroupSections, getNameInitialSection, normalizeProductGroupName } from '../src/utils/productGrouping.ts'
 
 let failed = 0
 

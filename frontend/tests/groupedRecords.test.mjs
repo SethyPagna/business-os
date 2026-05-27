@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildAlphabetActionSections, buildTimeActionSections, getAlphabetInitialSection, getTimeGroupingMode } from '../src/utils/groupedRecords.mjs'
+import { buildAlphabetActionSections, buildTimeActionSections, getAlphabetInitialSection, getTimeGroupingMode } from '../src/utils/groupedRecords.ts'
 
 let failed = 0
 

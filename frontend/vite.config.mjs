@@ -134,7 +134,7 @@ function manualChunks(id) {
     ) {
       return 'catalog-preview'
     }
-    if (normalized.includes('/src/utils/initials.mjs')) {
+    if (normalized.includes('/src/utils/initials.ts')) {
       return 'initials-utils'
     }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
@@ -152,7 +152,7 @@ function manualChunks(id) {
     }
     if (
       normalized.includes('/src/components/shared/PortalMenu.jsx')
-      || normalized.includes('/src/components/catalog/portalLanguagePacks.mjs')
+      || normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
       || normalized.includes('/src/components/catalog/portalContentI18n.mjs')
       || normalized.includes('/src/components/catalog/portalTranslateController.mjs')
       || normalized.includes('/src/components/catalog/portalEditorUtils.mjs')

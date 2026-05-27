@@ -408,7 +408,7 @@ Last updated: 2026-05-18
     frontend hash `a440b744817036af`.
   - Thirteenth Phase 26 physical move complete: Product gallery helper
     functions now live in
-    `frontend/src/components/products/helpers/productGalleryHelpers.mjs`.
+    `frontend/src/components/products/helpers/productGalleryHelpers.ts`.
     Products imports gallery normalization, product gallery fallback selection,
     and public product image URL resolution from that module. Helper source
     tests, source checks, typecheck, production build, runtime health, focused
@@ -483,7 +483,7 @@ Last updated: 2026-05-18
     `8426a118f46c25cc`.
   - Twenty-second Phase 26 organization move complete: Product lightbox state
     construction now lives in
-    `frontend/src/components/products/helpers/productGalleryHelpers.mjs`.
+    `frontend/src/components/products/helpers/productGalleryHelpers.ts`.
     Products delegates lightbox image URL resolution, empty-gallery handling,
     and start-index clamping to that module while preserving the lightbox UI and
     navigation actions. Focused helper tests, source checks, typecheck,
@@ -492,7 +492,7 @@ Last updated: 2026-05-18
     `3469c4d8b3425629`.
   - Twenty-third Phase 26 organization move complete: Product lightbox index
     update logic now lives in
-    `frontend/src/components/products/helpers/productGalleryHelpers.mjs`.
+    `frontend/src/components/products/helpers/productGalleryHelpers.ts`.
     Products delegates gallery index changes to that module and no longer
     carries the disabled legacy `false && lightbox` overlay branch. Focused
     helper tests, source checks, typecheck, production build, runtime health,
@@ -500,7 +500,7 @@ Last updated: 2026-05-18
     check passed on frontend hash `713180d4d834b1ce`.
   - Twenty-fourth Phase 26 organization move complete: Product detail lightbox
     gallery-input fallback now lives in
-    `frontend/src/components/products/helpers/productGalleryHelpers.mjs`.
+    `frontend/src/components/products/helpers/productGalleryHelpers.ts`.
     Products delegates the detail-modal gallery/source fallback to that module
     before opening the shared lightbox, preserving the detail modal UI while
     making the fallback behavior source-tested. Focused helper tests, source
@@ -509,7 +509,7 @@ Last updated: 2026-05-18
     frontend hash `ce63c5f06c94a85e`.
   - Twenty-fifth Phase 26 organization move complete: Product thumbnail state
     construction now lives in
-    `frontend/src/components/products/helpers/productGalleryHelpers.mjs`.
+    `frontend/src/components/products/helpers/productGalleryHelpers.ts`.
     Products desktop and mobile rows compute one normalized thumbnail state per
     row and reuse it for thumbnail display and lightbox open. A stale removed
     callback dependency crashed Products during first live verification; root

@@ -58,7 +58,7 @@ import {
   getPortalLanguageText,
   isFirstPartyPortalLanguage,
   normalizeFirstPartyPortalLanguage,
-} from './portalLanguagePacks.mjs'
+} from './portalLanguagePacks.ts'
 import {
   localizePortalConfig,
   localizePortalProducts,

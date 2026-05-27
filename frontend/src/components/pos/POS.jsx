@@ -50,7 +50,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
-import { aggregateInitialOptions } from '../../utils/initials.mjs'
+import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 import { getKhmerTextProps } from '../../utils/scriptTypography.js'
 const Receipt = lazy(() => import('../receipt/Receipt'))

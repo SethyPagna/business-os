@@ -1,4 +1,4 @@
-import { compareInitialKeys, getInitialKey } from './initials.mjs'
+import { compareInitialKeys, getInitialKey } from './initials.ts'
 
 type AnyRow = Record<string, any>
 type SortDirection = 'asc' | 'desc' | string

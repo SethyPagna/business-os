@@ -1,7 +1,7 @@
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
-import { buildProductGroups } from '../../utils/productGrouping.mjs'
-import type { ProductGroupRecord } from '../../utils/productGrouping.mjs'
-import { aggregateInitialOptions } from '../../utils/initials.mjs'
+import { buildProductGroups } from '../../utils/productGrouping.ts'
+import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
+import { aggregateInitialOptions } from '../../utils/initials.ts'
 
 type ProductRecord = ProductGroupRecord & {
   id?: unknown

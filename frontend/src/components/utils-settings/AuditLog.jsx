@@ -6,7 +6,7 @@ import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { clampPage } from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,

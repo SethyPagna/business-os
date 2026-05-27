@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {
   FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
   getPortalLanguageText,
-} from '../src/components/catalog/portalLanguagePacks.mjs'
+} from '../src/components/catalog/portalLanguagePacks.ts'
 import {
   localizePortalConfig,
   localizePortalFaqText,

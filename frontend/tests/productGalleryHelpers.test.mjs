@@ -8,7 +8,7 @@ import {
   normalizeProductGallery,
   resolveProductImageUrl,
   updateProductLightboxIndex,
-} from '../src/components/products/helpers/productGalleryHelpers.mjs'
+} from '../src/components/products/helpers/productGalleryHelpers.ts'
 
 assert.deepEqual(
   normalizeProductGallery([' one.jpg ', 'two.jpg', 'one.jpg', '', null, 'three.jpg'], 'fallback.jpg'),

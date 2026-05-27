@@ -1,5 +1,5 @@
 import { normalizePriceValue } from '../../../utils/pricing.js'
-import { normalizeProductGallery } from './productGalleryHelpers.mjs'
+import { normalizeProductGallery } from './productGalleryHelpers.ts'
 
 type StockAdjustmentType = 'add' | 'remove'
 

@@ -10,7 +10,7 @@ import PaginationControls, { paginateItems } from '../shared/PaginationControls.
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,

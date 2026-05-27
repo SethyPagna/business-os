@@ -266,7 +266,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   {
     implementation: 'frontend/src/components/catalog/portalContentI18n.ts',
     compatibilityWrapper: 'frontend/src/components/catalog/portalContentI18n.mjs',
-    declarationSupport: 'frontend/src/components/catalog/portalLanguagePacks.d.mts',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\portalContentI18n.test.mjs',
@@ -286,8 +286,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/catalog/portalLanguagePacks.ts',
-    compatibilityWrapper: 'frontend/src/components/catalog/portalLanguagePacks.mjs',
-    declarationSupport: 'frontend/src/components/catalog/portalLanguagePacks.d.mts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after catalog surfaces and tests moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\portalLanguagePacks.test.mjs',
@@ -359,8 +360,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/groupedRecords.ts',
-    compatibilityWrapper: 'frontend/src/utils/groupedRecords.mjs',
-    declarationSupport: 'frontend/src/utils/initials.d.mts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after list surfaces and tests moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\groupedRecords.test.mjs',
@@ -369,8 +371,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/initials.ts',
-    compatibilityWrapper: 'frontend/src/utils/initials.mjs',
-    declarationSupport: 'frontend/src/utils/initials.d.mts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after product, inventory, POS, catalog, and tests moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\initials.test.mjs',
@@ -399,8 +402,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/productGrouping.ts',
-    compatibilityWrapper: 'frontend/src/utils/productGrouping.mjs',
-    declarationSupport: 'frontend/src/utils/productGrouping.d.mts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after Products, Inventory, POS, and tests moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productGrouping.test.mjs',
@@ -422,7 +426,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   {
     implementation: 'frontend/src/components/products/helpers/productFilterHelpers.ts',
     compatibilityWrapper: 'frontend/src/components/products/helpers/productFilterHelpers.mjs',
-    declarationSupport: 'frontend/src/utils/groupedRecords.d.mts',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productFilterHelpers.test.mjs',
@@ -444,7 +448,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   {
     implementation: 'frontend/src/components/products/helpers/productWriteHelpers.ts',
     compatibilityWrapper: 'frontend/src/components/products/helpers/productWriteHelpers.mjs',
-    declarationSupport: 'frontend/src/components/products/helpers/productGalleryHelpers.d.mts',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productWriteHelpers.test.mjs',
@@ -454,7 +458,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/products/helpers/productGalleryHelpers.ts',
-    compatibilityWrapper: 'frontend/src/components/products/helpers/productGalleryHelpers.mjs',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after Products and focused tests moved to TypeScript source',
     declarationSupport: 'frontend/src/utils/publicAssetUrls.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',

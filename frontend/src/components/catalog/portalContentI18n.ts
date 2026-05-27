@@ -1,4 +1,4 @@
-import { getPortalLanguageText } from './portalLanguagePacks.mjs'
+import { getPortalLanguageText } from './portalLanguagePacks.ts'
 
 type PlainRecord = Record<string, unknown>
 type TextRecord = Record<string, string>

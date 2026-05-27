@@ -14,7 +14,7 @@ import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countA
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
-import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
+import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.ts'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
