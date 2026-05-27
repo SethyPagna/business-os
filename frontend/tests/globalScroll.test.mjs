@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const source = readFileSync(new URL('../src/components/shared/globalScroll.js', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../src/components/shared/globalScroll.ts', import.meta.url), 'utf8')
 
 assert.match(
   source,
@@ -17,7 +17,7 @@ assert.match(
 
 assert.match(
   source,
-  /node\.getClientRects\?\.\(\)\.length > 0/,
+  /clientRectCount > 0/,
   'Global scroll controls should target the visible mounted page',
 )
 

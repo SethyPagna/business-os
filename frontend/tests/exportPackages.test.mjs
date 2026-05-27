@@ -89,7 +89,7 @@ await runTest('zip worker path keeps a synchronous fallback oracle', async () =>
   const rawText = Buffer.from(await zipBlob.arrayBuffer()).toString('utf8')
   assert.match(rawText, /fallback\.csv/)
 
-  const csvSource = fs.readFileSync(new URL('../src/utils/csv.js', import.meta.url), 'utf8')
+  const csvSource = fs.readFileSync(new URL('../src/utils/csv.ts', import.meta.url), 'utf8')
   const workerSource = fs.readFileSync(new URL('../src/utils/csvExportWorker.ts', import.meta.url), 'utf8')
   assert.match(csvSource, /new Worker\(new URL\('\.\/csvExportWorker\.mjs', import\.meta\.url\), \{ type: 'module' \}\)/)
   assert.match(csvSource, /finish\(buildZip\(files\)\)/)
