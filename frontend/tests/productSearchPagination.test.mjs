@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const productsPage = readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
-const productsSurface = readFileSync(new URL('../src/components/products/ProductsListSurface.jsx', import.meta.url), 'utf8')
+const productFilterHelpers = readFileSync(new URL('../src/components/products/helpers/productFilterHelpers.ts', import.meta.url), 'utf8')
+const productMenuHelpers = readFileSync(new URL('../src/components/products/helpers/productMenuHelpers.ts', import.meta.url), 'utf8')
+const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.jsx', import.meta.url), 'utf8')
 const posPage = readFileSync(new URL('../src/components/pos/POS.jsx', import.meta.url), 'utf8')
 const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.jsx', import.meta.url), 'utf8')
 const apiMethods = readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
@@ -39,8 +41,8 @@ assert.match(
   'Products page should show refreshing state instead of a false no-data search result while data is in flight',
 )
 assert.match(
-  productsPage,
-  /p\.unit \|\| ''/,
+  productFilterHelpers,
+  /product\?\.unit/,
   'Products search should include unit names so unit review can jump into matching products',
 )
 assert.match(
@@ -90,6 +92,16 @@ assert.match(
 )
 assert.match(
   posPage,
+  /const POS_CATALOG_LOAD_TIMEOUT_MS = 15000/,
+  'POS catalog bootstrap should have a named timeout budget',
+)
+assert.match(
+  posPage,
+  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*searchProducts\(productQuery\)[\s\S]*getCategories\(\)[\s\S]*getBranches\(\)[\s\S]*getProductFilters\(\{\}\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
+  'POS catalog bootstrap should apply the named timeout to product, category, branch, and filter reads',
+)
+assert.match(
+  posPage,
   /getProductFilters\(\{\}\)/,
   'POS filter panel should receive global filter metadata',
 )
@@ -99,7 +111,7 @@ assert.match(
   'POS filter panel should name the grouping filter Groups',
 )
 assert.match(
-  productsPage,
+  productMenuHelpers,
   /label:\s*t\('groups'\) \|\| 'Groups'/,
   'Products filter menu should name the grouping filter Groups',
 )

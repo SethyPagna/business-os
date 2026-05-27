@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { deriveScannerPresentation } from '../src/components/products/barcodeScannerState.mjs'
+import { deriveScannerPresentation } from '../src/components/products/scanning/barcodeScannerState.mjs'
 
 let failed = 0
 

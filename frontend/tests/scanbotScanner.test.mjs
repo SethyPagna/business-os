@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { getPreferredScannerMode } from '../src/components/products/scanbotScanner.mjs'
+import { getPreferredScannerMode } from '../src/components/products/scanning/scanbotScanner.mjs'
 
 const originalWindow = globalThis.window
 const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')

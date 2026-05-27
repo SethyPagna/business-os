@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { scanBarcodeFromImageFile } from '../src/components/products/barcodeImageScanner.mjs'
+import { scanBarcodeFromImageFile } from '../src/components/products/scanning/barcodeImageScanner.mjs'
 
 let failed = 0
 

@@ -1,0 +1,240 @@
+import { X } from 'lucide-react'
+import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
+import { getContrastingTextColor } from '../../../utils/color.js'
+import { calculateProductDiscount } from '../../../utils/pricing.js'
+import { buildBatchPreview, getVisibleProductBatches } from '../../../utils/productBatches.mjs'
+
+export default function ProductDetailModal({
+  p,
+  catMap,
+  unitMap,
+  brandColorMap,
+  fmtUSD,
+  fmtKHR,
+  onEdit,
+  onAddVariant,
+  onDiscount,
+  onAdjustStock,
+  onDelete,
+  onClose,
+  onImageClick,
+  t,
+}) {
+  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+  const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
+  const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
+  const specialUsd = p.special_price_usd || 0
+  const specialKhr = p.special_price_khr || 0
+  const promotion = calculateProductDiscount(p)
+  const marginUsd = p.selling_price_usd - purchaseUsd
+  const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd) * 100 : 0
+  const gallery = Array.isArray(p?.image_gallery) && p.image_gallery.length
+    ? p.image_gallery.filter(Boolean).slice(0, 5)
+    : (p?.image_path ? [p.image_path] : [])
+  const primaryImage = gallery[0] || ''
+  const unitColor = unitMap?.[p.unit]?.color || ''
+  const categoryColor = catMap?.[p.category]?.color || '#6b7280'
+  const brandColor = brandColorMap?.[String(p.brand || '').trim().replace(/\s+/g, ' ').toLowerCase()] || ''
+  const expiryDate = String(p.expiry_date || '').trim()
+  const expiryDaysLeft = expiryDate ? Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - Date.now()) / 86400000) : null
+  const visibleBatches = getVisibleProductBatches(p)
+  const batchPreview = buildBatchPreview(p, 'all', { limit: 6 })
+
+  const Row = ({ label, children }) => (
+    <div className="flex gap-3">
+      <span className="w-28 flex-shrink-0 pt-0.5 text-xs text-gray-400">{label}</span>
+      <span className="flex-1 text-sm text-gray-800 dark:text-gray-200">{children}</span>
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="flex max-h-[88vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-lg sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+          <div className="min-w-0 flex items-center gap-3">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100 text-xl dark:bg-gray-700">
+              {primaryImage ? (
+                <ProductImg
+                  src={primaryImage}
+                  alt={p.name}
+                  className="h-full w-full cursor-zoom-in object-cover"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onImageClick?.(primaryImage, gallery, 0)
+                  }}
+                />
+              ) : (
+                <ProductImagePlaceholder compact className="h-full w-full rounded-lg" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="truncate font-bold text-gray-900 dark:text-white">{p.name}</div>
+              {p.sku ? <div className="font-mono text-xs text-gray-400">{p.sku}</div> : null}
+            </div>
+          </div>
+          <button onClick={onClose} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-2.5 overflow-auto p-4">
+          {p.category ? (
+            <Row label={T('label_category', 'Category')}>
+              <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: categoryColor, color: getContrastingTextColor(categoryColor) }}>
+                {p.category}
+              </span>
+            </Row>
+          ) : null}
+          {p.barcode ? <Row label={T('label_barcode', 'Barcode')}><span className="font-mono">{p.barcode}</span></Row> : null}
+          {p.brand ? (
+            <Row label={T('brand', 'Brand')}>
+              {brandColor ? (
+                <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: brandColor, color: getContrastingTextColor(brandColor) }}>
+                  {p.brand}
+                </span>
+              ) : p.brand}
+            </Row>
+          ) : null}
+          {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
+          {p.unit ? (
+            <Row label={T('label_unit', 'Unit')}>
+              {unitColor ? (
+                <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
+                  {p.unit}
+                </span>
+              ) : p.unit}
+            </Row>
+          ) : null}
+          <Row label={T('label_stock', 'Stock')}>
+            <strong className="text-gray-900 dark:text-white">{p.stock_quantity}</strong>
+            {p.unit ? (
+              unitColor ? (
+                <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
+                  {p.unit}
+                </span>
+              ) : (
+                <span className="ml-1">{p.unit}</span>
+              )
+            ) : null}
+          </Row>
+          {expiryDate ? (
+            <Row label={T('product_expiry_date', 'Expiry')}>
+              <span className={expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}>
+                {expiryDate}
+                {expiryDaysLeft != null ? (
+                  <span className="ml-2 text-xs">
+                    {expiryDaysLeft < 0
+                      ? `${T('expired', 'Expired')} ${Math.abs(expiryDaysLeft)}d`
+                      : `${expiryDaysLeft}d`}
+                  </span>
+                ) : null}
+              </span>
+            </Row>
+          ) : null}
+          {p.description ? <Row label={T('label_description', 'Description')}>{p.description}</Row> : null}
+
+          <div className="space-y-2 border-t border-gray-100 pt-2 dark:border-gray-700">
+            <Row label={T('label_cost_purchase', 'Cost In (Purchase)')}>
+              <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
+              {purchaseKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
+            </Row>
+            <Row label={T('label_selling_price', 'Selling Price')}>
+              <span className="text-green-600">{fmtUSD(p.selling_price_usd)}</span>
+              {p.selling_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</span> : null}
+            </Row>
+            {(specialUsd > 0 || specialKhr > 0) ? (
+              <Row label={T('special_price', 'Special Price')}>
+                <span className="text-blue-600">{fmtUSD(specialUsd || p.selling_price_usd || 0)}</span>
+                {(specialKhr > 0 || p.selling_price_khr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || p.selling_price_khr || 0)}</span> : null}
+              </Row>
+            ) : null}
+            {promotion.active ? (
+              <Row label={T('product_discount', 'Discounts')}>
+                <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
+                {promotion.applied_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr)}</span> : null}
+                <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: p.discount_badge_color || '#e11d48' }}>
+                  {p.discount_label || `${promotion.percent_off || 0}%`}
+                </span>
+              </Row>
+            ) : null}
+            <Row label={T('label_margin', 'Margin')}>
+              <span className={marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}>
+                {fmtUSD(marginUsd)} ({marginPct.toFixed(1)}%)
+              </span>
+            </Row>
+          </div>
+
+          {(p.branch_stock || []).length > 0 ? (
+            <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
+              <div className="mb-1.5 text-xs text-gray-400">{T('label_branches', 'Branch Stock')}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {(p.branch_stock || []).map((bs) => (
+                  <span
+                    key={bs.branch_id}
+                    className={`rounded-full px-2 py-0.5 text-xs ${
+                      bs.quantity > 0
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30'
+                        : 'bg-gray-100 text-gray-400 dark:bg-gray-700'
+                    }`}
+                  >
+                    {bs.branch_name}: {bs.quantity}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {visibleBatches.length ? (
+            <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
+              <div className="mb-1.5 text-xs text-gray-400">{T('batches', 'Batches')}</div>
+              <div className="space-y-1.5">
+                {batchPreview.items.map((batch) => (
+                  <div key={batch.id || batch.batch_id} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batch.lot_code || T('batch', 'Batch')}</span>
+                      <span className="text-gray-500 dark:text-gray-300">{batch.quantity}</span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-300">
+                      {batch.expiry_date || T('no_expiry', 'No expiry')}
+                    </div>
+                  </div>
+                ))}
+                {batchPreview.extraCount ? (
+                  <div className="text-[11px] text-gray-400">+{batchPreview.extraCount} {T('more', 'more')}</div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <Row label={T('status', 'Status')}>
+            {p.stock_quantity <= (p.out_of_stock_threshold || 0) ? (
+              <span className="badge-red">{T('out_of_stock', 'Out of stock')}</span>
+            ) : p.stock_quantity <= (p.low_stock_threshold || 10) ? (
+              <span className="badge-yellow">{T('low_stock', 'Low stock')}</span>
+            ) : (
+              <span className="badge-green">{T('in_stock', 'In stock')}</span>
+            )}
+          </Row>
+
+          {p.created_at ? (
+            <Row label={T('label_added', 'Added')}>
+              {new Date(p.created_at.includes('T') ? p.created_at : `${p.created_at}Z`).toLocaleDateString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+              })}
+            </Row>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
+          {onAddVariant ? <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onAddVariant}>{T('add_variant', 'Add variant')}</button> : null}
+          <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onDiscount}>{T('product_discount', 'Discounts')}</button>
+          <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onAdjustStock}>{T('adjust_stock', 'Adjust stock')}</button>
+          <button className="btn-primary flex-1 px-3 py-2 text-xs" onClick={onEdit}>{T('edit', 'Edit')}</button>
+          <button className="btn-danger px-3 py-2 text-xs" onClick={onDelete}>{T('delete', 'Delete')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}

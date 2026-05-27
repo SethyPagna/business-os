@@ -5,26 +5,29 @@ import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } fro
 import { ChevronDown, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
-import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
-import { ThreeDotPortal } from '../shared/PortalMenu'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
-import { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
-import { ProductImg, ProductImagePlaceholder } from './primitives'
-import ProductsListSurface from './ProductsListSurface'
-import ProductsHeaderActions from './HeaderActions'
+import { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls.jsx'
+import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
+import ProductsListSurface from './surfaces/ProductsListSurface'
+import ProductsHeaderActions from './surfaces/HeaderActions'
+import {
+  ProductBatchPreview,
+  ProductDetailsCell,
+  ProductDiscountBadge,
+  ProductRowActions,
+} from './surfaces/ProductRowParts'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.mjs'
-import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './productHistoryHelpers.mjs'
-import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.mjs'
+import { getAvailableYears, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.mjs'
-import { buildBatchPreview } from '../../utils/productBatches.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
-import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.js'
 import {
   beginTrackedRequest,
@@ -32,147 +35,96 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   settleLoaderMap,
+  withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 import { getContrastingTextColor } from '../../utils/color.js'
+import {
+  CREATED_MONTH_OPTIONS,
+  DEFAULT_META_PILL_COLOR,
+  PRODUCTS_AUX_OPTIONS_TIMEOUT_MS,
+  PRODUCTS_FILTER_META_TIMEOUT_MS,
+  PRODUCTS_BY_ID_TIMEOUT_MS,
+  PRODUCT_WRITE_MUTATION_TIMEOUT_MS,
+  PRODUCT_DELETE_MUTATION_TIMEOUT_MS,
+  PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
+  PRODUCT_STOCK_MUTATION_TIMEOUT_MS,
+} from './config/productPageConfig.mjs'
+import {
+  normalizeBrandLookup,
+  parseBrandColorMap,
+  useDebouncedValue,
+  waitForNextFrame,
+} from './helpers/productPageHelpers.mjs'
+import {
+  buildProductLightboxGalleryInput,
+  buildProductLightboxState,
+  buildProductThumbnailState,
+  normalizeProductGallery,
+  updateProductLightboxIndex,
+} from './helpers/productGalleryHelpers.mjs'
+import {
+  buildProductExportRows,
+  buildProductSearchTerms,
+  filterProductsForPage,
+  getProductBranchQuantity,
+} from './helpers/productFilterHelpers.mjs'
+import {
+  buildJumpTargetIdsByLetter,
+  buildParentProductIdSet,
+  buildProductIdMap,
+  buildProductPaginationState,
+  buildSelectedProducts,
+  buildSelectedVisibleIds,
+  buildVisibleProductIds,
+  isSelectionScopeFullySelected as isSelectionScopeFullySelectedHelper,
+  isSelectionScopePartiallySelected as isSelectionScopePartiallySelectedHelper,
+  normalizePositiveProductIds,
+} from './helpers/productSelectionHelpers.mjs'
+import {
+  buildProductGroupPriceLabel,
+  buildProductGroupSummaryParts,
+} from './helpers/productGroupViewHelpers.mjs'
+import {
+  buildDeletedProductIdSet,
+  buildDefinedProductUpdates,
+  buildProductBranchMovePlan,
+  buildProductBranchStockAdjustments,
+  buildProductBulkInfoUpdates,
+  buildProductBulkPricingUpdates,
+  buildProductBulkUpdatePayload,
+  buildProductClearStockAdjustments,
+  buildProductStockAdjustmentPayload,
+  buildProductTransferStockPayload,
+  buildProductWritePayload as buildProductWritePayloadForSnapshot,
+  getDefaultProductRestoreBranchId,
+  getPreferredProductRestoreBranchId,
+  resolveRestoredProductParentId,
+  summarizeProductBulkRun,
+} from './helpers/productWriteHelpers.mjs'
+import {
+  buildBranchNameByIdMap,
+  buildNameLookupMap,
+  buildProductRowDisplayState,
+  buildProductBranchSummaryLabel,
+  buildProductBrandOptions,
+  getProductStockStatus,
+} from './helpers/productDisplayHelpers.mjs'
+import {
+  buildProductExportItems,
+  buildProductFilterSections,
+  buildProductSupplierOptions,
+  countActiveProductFilters,
+} from './helpers/productMenuHelpers.mjs'
 
-const ManageCategoriesModal = lazy(() => import('./ManageCategoriesModal'))
-const ManageBrandsModal = lazy(() => import('./ManageBrandsModal'))
-const ManageUnitsModal = lazy(() => import('./ManageUnitsModal'))
-const BulkImportModal = lazy(() => import('./BulkImportModal'))
-const BulkAddStockModal = lazy(() => import('./BulkAddStockModal'))
-const VariantFormModal = lazy(() => import('./VariantFormModal'))
-const ProductForm = lazy(() => import('./ProductForm'))
-const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
+const ManageCategoriesModal = lazy(() => import('./lookups/ManageCategoriesModal'))
+const ManageBrandsModal = lazy(() => import('./lookups/ManageBrandsModal'))
+const ManageUnitsModal = lazy(() => import('./lookups/ManageUnitsModal'))
+const BulkImportModal = lazy(() => import('./import/BulkImportModal'))
+const BulkAddStockModal = lazy(() => import('./forms/BulkAddStockModal'))
+const VariantFormModal = lazy(() => import('./forms/VariantFormModal'))
+const ProductForm = lazy(() => import('./forms/ProductForm'))
+const ProductDetailModal = lazy(() => import('./surfaces/ProductDetailModal'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
-const CREATED_MONTH_OPTIONS = [
-  ['01', 'Jan'],
-  ['02', 'Feb'],
-  ['03', 'Mar'],
-  ['04', 'Apr'],
-  ['05', 'May'],
-  ['06', 'Jun'],
-  ['07', 'Jul'],
-  ['08', 'Aug'],
-  ['09', 'Sep'],
-  ['10', 'Oct'],
-  ['11', 'Nov'],
-  ['12', 'Dec'],
-]
-const DEFAULT_META_PILL_COLOR = '#e2e8f0'
-
-function multiMatch(text, terms) {
-  return terms.every(t => text.toLowerCase().includes(t.toLowerCase()))
-}
-
-function useDebouncedValue(value, delayMs = 180) {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs)
-    return () => window.clearTimeout(timer)
-  }, [delayMs, value])
-  return debounced
-}
-
-function parseBrandColorMap(raw) {
-  if (!raw) return {}
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
-  } catch (_) {
-    return {}
-  }
-}
-
-function normalizeBrandLookup(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
-}
-
-function waitForNextFrame() {
-  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-    return Promise.resolve()
-  }
-  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
-}
-
-function ProductDiscountBadge({ product, promotion, fmtUSD, label, overlay = false }) {
-  const promo = promotion || calculateProductDiscount(product)
-  if (!promo?.active) return null
-  const className = overlay
-    ? 'absolute right-1 top-1 inline-flex max-w-[9rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60'
-    : 'inline-flex max-w-[10rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60'
-  const title = `${label} ${fmtUSD(promo.applied_price_usd || 0)}`
-  return (
-    <span className={className} title={title}>
-      {label} {fmtUSD(promo.applied_price_usd || 0)}
-    </span>
-  )
-}
-
-function ThreeDot({ onDetails, onEdit, onDelete, onAddVariant, onDiscount, onAdjustStock, t }) {
-  const label = (key, fallback) => (typeof t === 'function' ? (t(key) || fallback) : fallback)
-  return (
-    <ThreeDotPortal
-      onDetails={onDetails}
-      onEdit={onEdit}
-      onDelete={onDelete}
-      onAddVariant={onAddVariant}
-      labels={{
-        details: label('view_details', label('details', 'View Details')),
-        edit: label('edit', 'Edit'),
-        addVariant: label('add_variant', 'Add Variant'),
-        delete: label('delete', 'Delete'),
-        ariaLabel: label('actions', 'Open actions menu'),
-      }}
-      extraItems={[
-        onDiscount && { label: label('discounts', 'Discounts'), onClick: onDiscount, color: 'orange' },
-        onAdjustStock && { label: label('adjust_stock', 'Adjust stock'), onClick: onAdjustStock, color: 'green' },
-      ]}
-    />
-  )
-}
-
-function ProductBatchPreview({ product, branchId = 'all', tr, compact = false }) {
-  const preview = buildBatchPreview(product, branchId, { limit: compact ? 2 : 3 })
-  if (!preview.totalCount) return null
-  return (
-    <div className={`flex flex-wrap items-center gap-1 ${compact ? 'mt-1' : 'mt-1.5'}`}>
-      {preview.items.map((batch) => (
-        <span
-          key={`${product?.id || 'product'}-batch-${batch.id || batch.batch_id}`}
-          className="inline-flex max-w-[13rem] items-center truncate rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
-          title={`${batch.lot_code || tr('batch', 'Batch', 'Batch')} / ${batch.expiry_date || tr('no_expiry', 'No expiry', 'No expiry')} / ${batch.quantity}`}
-        >
-          {batch.lot_code || tr('batch', 'Batch', 'Batch')} / {batch.expiry_date || tr('no_expiry', 'No expiry', 'No expiry')} / {batch.quantity}
-        </span>
-      ))}
-      {preview.extraCount ? (
-        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          +{preview.extraCount}
-        </span>
-      ) : null}
-    </div>
-  )
-}
-
-function ProductDetailsCell({ product, promotion, branchLabel, selectedBranchName, selectedBranchId = 'all', renderMetaPill, tr, fmtUSD }) {
-  const detailPills = [
-    selectedBranchName ? { key: 'branch', label: selectedBranchName, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
-    branchLabel ? { key: 'branches', label: branchLabel, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
-    product.sku ? { key: 'sku', label: product.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' } : null,
-    product.barcode ? { key: 'barcode', label: product.barcode, className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' } : null,
-  ].filter(Boolean)
-
-  return (
-    <div className="min-h-[4.25rem] max-w-[17rem]">
-      <div className="flex flex-wrap items-center gap-1">
-        {detailPills.map((item) => renderMetaPill(item))}
-        <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'Discounts')} />
-        {!detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
-      </div>
-      <ProductBatchPreview product={product} branchId={selectedBranchId} tr={tr} />
-    </div>
-  )
-}
 
 
 export default function Products() {
@@ -237,11 +189,23 @@ export default function Products() {
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
+  const productSaveInFlightRef = useRef(false)
+  const productDeleteInFlightRef = useRef(false)
+  const bulkActionInFlightRef = useRef(false)
   const desktopSelectAllRef = useRef(null)
   const mobileSelectAllRef = useRef(null)
   const initializedCollapsedGroupKeysRef = useRef(new Set())
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'products' })
   const debouncedSearch = useDebouncedValue(search, 180)
+  const runProductWriteMutation = useCallback((loader, label, timeoutMs = PRODUCT_WRITE_MUTATION_TIMEOUT_MS) => (
+    withLoaderTimeout(loader, label, timeoutMs)
+  ), [])
+  const runProductDeleteMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, PRODUCT_DELETE_MUTATION_TIMEOUT_MS)
+  ), [])
+  const runProductStockMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, PRODUCT_STOCK_MUTATION_TIMEOUT_MS)
+  ), [])
 
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -321,9 +285,9 @@ export default function Products() {
         const shouldLoadAuxOptions = !auxOptionsLoadedRef.current || !categories.length || !units.length || !branches.length
         if (shouldLoadAuxOptions) {
           void settleLoaderMap({
-            categories: () => window.api.getCategories(),
-            units: () => window.api.getUnits(),
-            branches: () => window.api.getBranches(),
+            categories: () => withLoaderTimeout(() => window.api.getCategories(), 'Product categories', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
+            units: () => withLoaderTimeout(() => window.api.getUnits(), 'Product units', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
+            branches: () => withLoaderTimeout(() => window.api.getBranches(), 'Product branches', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
           }).then((auxResult) => {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
             const cats = auxResult.values.categories
@@ -338,7 +302,7 @@ export default function Products() {
           }).catch(() => {})
         }
 
-        void window.api.getProductFilters({}).then((filters) => {
+        void withLoaderTimeout(() => window.api.getProductFilters({}), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS).then((filters) => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
           setProductFilterMeta({
             brands: Array.isArray(filters?.brands) ? filters.brands : [],
@@ -383,7 +347,11 @@ export default function Products() {
         .filter((id) => Number.isFinite(id) && id > 0),
     )).slice(0, 100)
     if (!uniqueIds.length) return []
-    const payload = await window.api.getProductsByIds(uniqueIds, { include: 'branch_stock,images,batches' })
+    const payload = await withLoaderTimeout(
+      () => window.api.getProductsByIds(uniqueIds, { include: 'branch_stock,images,batches' }),
+      'Products by id',
+      PRODUCTS_BY_ID_TIMEOUT_MS,
+    )
     return Array.isArray(payload?.items) ? payload.items : []
   }, [])
 
@@ -414,14 +382,15 @@ export default function Products() {
 
   const handleSave = async (form) => {
     if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
+    if (!beginSingleAction(productSaveInFlightRef)) return
     try {
       const data = { ...form, userId: user.id, userName: user.name }
 
       if (!selected) {
-        const res = await window.api.createProduct(data)
+        const res = await runProductWriteMutation(() => window.api.createProduct(data), 'Create product')
         if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
       } else {
-        const res = await window.api.updateProduct(selected.id, data)
+        const res = await runProductWriteMutation(() => window.api.updateProduct(selected.id, data), 'Update product')
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
       }
 
@@ -430,28 +399,14 @@ export default function Products() {
     } catch(e) {
       console.error('[handleSave] error:', e)
       notify(e.message || 'Failed to save product', 'error')
+    } finally {
+      finishSingleAction(productSaveInFlightRef)
     }
-  }
-
-  const normalizeGallery = (value, fallback = null) => {
-    const input = Array.isArray(value) ? value : []
-    const seen = new Set()
-    const list = []
-    for (const entry of input) {
-      const path = String(entry || '').trim()
-      if (!path || seen.has(path)) continue
-      seen.add(path)
-      list.push(path)
-      if (list.length >= 5) break
-    }
-    const fallbackValue = String(fallback || '').trim()
-    if (!list.length && fallbackValue) list.push(fallbackValue)
-    return list.slice(0, 5)
   }
 
   const uploadGalleryImages = async (productId, gallery = []) => {
     const next = []
-    for (const entry of normalizeGallery(gallery)) {
+    for (const entry of normalizeProductGallery(gallery)) {
       if (!entry.startsWith('data:image/')) {
         next.push(entry)
         continue
@@ -464,18 +419,23 @@ export default function Products() {
             ? '.gif'
             : '.jpg'
       const fileName = `product_${productId || 'new'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
-      const uploaded = await window.api.uploadProductImage({ productId, filePath: entry, fileName })
+      const uploaded = await runProductWriteMutation(
+        () => window.api.uploadProductImage({ productId, filePath: entry, fileName }),
+        'Upload product image',
+        PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
+      )
       if (!uploaded?.path) throw new Error(uploaded?.error || 'Image upload failed')
       next.push(uploaded.path)
     }
-    return normalizeGallery(next)
+    return normalizeProductGallery(next)
   }
 
   const handleSaveWithGallery = async (form) => {
     if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
+    if (!beginSingleAction(productSaveInFlightRef)) return
     try {
       const previousSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const galleryInput = normalizeGallery(form.image_gallery, form.image_path || null)
+      const galleryInput = normalizeProductGallery(form.image_gallery, form.image_path || null)
       const uploadedGallery = await uploadGalleryImages(selected?.id || null, galleryInput)
       const createClientRequestId = !selected
         ? `product_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -491,19 +451,20 @@ export default function Products() {
       let createdProductId = 0
 
       if (!selected) {
-        const res = await window.api.createProduct(payload)
+        const res = await runProductWriteMutation(() => window.api.createProduct(payload), 'Create product')
         if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
         createdProductId = extractHistoryResultId(res)
       } else {
-        const res = await window.api.updateProduct(selected.id, payload)
+        const res = await runProductWriteMutation(() => window.api.updateProduct(selected.id, payload), 'Update product')
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
       }
 
       const targetProductId = selected ? Number(selected.id || 0) : createdProductId
       const latestProducts = await fetchProductsByIds([targetProductId])
+      const latestProductsById = buildProductIdMap(latestProducts || [])
       const latestProductSnapshot = selected
         ? cloneHistorySnapshot(
-            (latestProducts || []).find((product) => Number(product?.id || 0) === targetProductId)
+            latestProductsById.get(targetProductId)
             || { ...payload, id: targetProductId },
           )
         : resolveCreatedHistorySnapshot({
@@ -531,23 +492,27 @@ export default function Products() {
     } catch (e) {
       console.error('[handleSaveWithGallery] error:', e)
       notify(e.message || 'Failed to save product', 'error')
+    } finally {
+      finishSingleAction(productSaveInFlightRef)
     }
   }
 
   const handleBulkDelete = async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
-    if (!confirm(`Delete ${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''}? This cannot be undone.`)) return
+    if (!beginSingleAction(bulkActionInFlightRef, { blocked: bulkActionBusy })) return
+    if (!confirm(`Delete ${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''}? This cannot be undone.`)) {
+      finishSingleAction(bulkActionInFlightRef)
+      return
+    }
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     try {
       const deletionRun = await runConcurrentTasks(selectedVisibleIds, async (id) => {
-        const result = await window.api.deleteProduct(id)
+        const result = await runProductDeleteMutation(() => window.api.deleteProduct(id), 'Delete product')
         if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
         return Number(id)
       })
-      const failedIds = deletionRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id))
-      const failed = failedIds.length
-      const done = deletionRun.successes.length
+      const { done, failed, failedIds } = summarizeProductBulkRun(deletionRun)
       setSelectedIds(new Set(failedIds))
       await load(true)
       const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
@@ -560,10 +525,10 @@ export default function Products() {
           },
           redo: async () => {
             const idsToDelete = restoredEntries.length
-              ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-              : deletedSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
+              ? normalizePositiveProductIds(restoredEntries, (entry) => entry.restoredId)
+              : normalizePositiveProductIds(deletedSnapshots, (snapshot) => snapshot.id)
             const redoRun = await runConcurrentTasks(idsToDelete, async (id) => {
-              const result = await window.api.deleteProduct(id)
+              const result = await runProductDeleteMutation(() => window.api.deleteProduct(id), 'Re-delete product')
               if (result?.success === false) throw new Error(result.error || 'Failed to re-delete product')
             })
             if (redoRun.failures.length) throw new Error(redoRun.failures[0]?.error?.message || 'Failed to re-delete product')
@@ -574,6 +539,7 @@ export default function Products() {
       if (failed) notify(`Deleted ${done}, ${failed} failed`, 'warning')
       else notify(`${done} product${done > 1 ? 's' : ''} deleted`)
     } finally {
+      finishSingleAction(bulkActionInFlightRef)
       setBulkActionBusy(false)
     }
   }
@@ -603,7 +569,7 @@ export default function Products() {
       setSelectedIds(new Set(failedIds))
       const affectedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
       if (done > 0 && affectedSnapshots.length) {
-        const affectedIds = affectedSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
+        const affectedIds = normalizePositiveProductIds(affectedSnapshots, (snapshot) => snapshot.id)
         actionHistory.pushAction({
           label: `Set ${done} product${done === 1 ? '' : 's'} out of stock`,
           undo: () => restoreProductSnapshots(affectedSnapshots, 'Undo out-of-stock action'),
@@ -623,7 +589,7 @@ export default function Products() {
 
   const handleBulkChangeBranch = async (branchId) => {
     if (!selectedVisibleIds.length || !branchId || bulkActionBusy) return
-    const branch = branches.find(b => String(b.id) === String(branchId))
+    const branch = branchesById.get(String(branchId))
     if (!branch) return
     if (!confirm(`Move stock of ${selectedVisibleCount} product(s) to "${branch.name}"?`)) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
@@ -674,10 +640,14 @@ export default function Products() {
     setSelectedIds(new Set(visibleIds))
   }
   const handleDelete = async (p) => {
-    if (!confirm(`${t('confirm_delete')} "${p.name}"?`)) return
+    if (!beginSingleAction(productDeleteInFlightRef)) return
+    if (!confirm(`${t('confirm_delete')} "${p.name}"?`)) {
+      finishSingleAction(productDeleteInFlightRef)
+      return
+    }
     try {
       const snapshot = cloneHistorySnapshot(p)
-      await window.api.deleteProduct(p.id, user.id, user.name)
+      await runProductDeleteMutation(() => window.api.deleteProduct(p.id, user.id, user.name), 'Delete product')
       await load(true)
       let restoredEntries = []
       actionHistory.pushAction({
@@ -688,7 +658,7 @@ export default function Products() {
         redo: async () => {
           const targetId = Number(restoredEntries[0]?.restoredId || snapshot.id || 0)
           if (!targetId) return
-          const result = await window.api.deleteProduct(targetId)
+          const result = await runProductDeleteMutation(() => window.api.deleteProduct(targetId), 'Delete product again')
           if (result?.success === false) throw new Error(result.error || 'Failed to delete product again')
           await load(true)
         },
@@ -696,55 +666,34 @@ export default function Products() {
       notify('Product deleted')
       setDetailProduct(null)
     } catch(e) { notify(e.message || 'Failed', 'error') }
+    finally { finishSingleAction(productDeleteInFlightRef) }
   }
 
-  const catMap = useMemo(() => Object.fromEntries(categories.map(c => [c.name, c])), [categories])
-  const unitMap = useMemo(() => Object.fromEntries(units.map(unit => [unit.name, unit])), [units])
-  const brandOptions = useMemo(() => {
-    const fromProducts = (productFilterMeta.brands || [])
-      .map((brand) => String(brand || '').trim())
-      .filter(Boolean)
-    let fromSettings = []
-    try {
-      const parsed = JSON.parse(settings?.product_brand_options || '[]')
-      if (Array.isArray(parsed)) {
-        fromSettings = parsed.map((entry) => String(entry || '').trim()).filter(Boolean)
-      }
-    } catch (_) {}
-    return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
-  }, [productFilterMeta.brands, settings?.product_brand_options])
+  const catMap = useMemo(() => buildNameLookupMap(categories), [categories])
+  const unitMap = useMemo(() => buildNameLookupMap(units), [units])
+  const brandOptions = useMemo(
+    () => buildProductBrandOptions(productFilterMeta.brands, settings?.product_brand_options),
+    [productFilterMeta.brands, settings?.product_brand_options],
+  )
   const brandColorMap = useMemo(
     () => parseBrandColorMap(settings?.product_brand_color_map),
     [settings?.product_brand_color_map],
   )
-  const branchNameById = useMemo(
-    () => new Map(branches.map((branch) => [String(branch.id), branch.name])),
-    [branches],
-  )
+  const branchNameById = useMemo(() => buildBranchNameByIdMap(branches), [branches])
+  const branchesById = useMemo(() => new Map((Array.isArray(branches) ? branches : []).map((branch) => [String(branch?.id), branch])), [branches])
   const [lightbox, setLightbox] = useState(null)
   const availableCreatedYears = useMemo(
     () => getAvailableYears(products, (product) => product?.created_at),
     [products],
   )
-  const resolveImageUrl = (src) => {
-    const raw = String(src || '').trim()
-    if (!raw) return ''
-    return resolvePublicAssetUrl(raw)
-  }
-
-  const getProductGallery = (product) => normalizeGallery(product?.image_gallery, product?.image_path || null)
   const getBrandColor = useCallback(
     (brandName) => brandColorMap[normalizeBrandLookup(brandName)] || '',
     [brandColorMap],
   )
-  const getBranchSummaryLabel = useCallback((product) => {
-    const rows = (product?.branch_stock || [])
-      .filter((entry) => Number(entry?.quantity || 0) > 0)
-      .sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0))
-    if (!rows.length) return ''
-    const visible = rows.slice(0, 2).map((entry) => `${entry.branch_name || branchNameById.get(String(entry.branch_id)) || entry.branch_id}: ${entry.quantity}`)
-    return rows.length > 2 ? `${visible.join(', ')} +${rows.length - 2}` : visible.join(', ')
-  }, [branchNameById])
+  const getBranchSummaryLabel = useCallback(
+    (product) => buildProductBranchSummaryLabel(product, branchNameById),
+    [branchNameById],
+  )
   const renderMetaPill = useCallback((item) => {
     if (!item?.label) return null
     const color = item.color || DEFAULT_META_PILL_COLOR
@@ -785,129 +734,41 @@ export default function Products() {
   }
 
   const openLightbox = (gallery, startIndex = 0, title = '') => {
-    const list = normalizeGallery(gallery).map(resolveImageUrl).filter(Boolean)
-    if (!list.length) return
-    const index = Math.max(0, Math.min(startIndex, list.length - 1))
-    setLightbox({ images: list, index, title })
+    const nextLightbox = buildProductLightboxState(gallery, startIndex, title)
+    if (nextLightbox) setLightbox(nextLightbox)
   }
 
-  // Define helper functions before using them in filters
-  const getBranchQty = useCallback((p, branchId) => (
-    p.branch_stock || []
-  ).find((stock) => String(stock.branch_id) === String(branchId))?.quantity ?? 0, [])
-  const parentProductIds = useMemo(() => new Set(
-    products
-      .map((product) => Number(product?.parent_id || 0))
-      .filter(Boolean),
-  ), [products])
+  const getBranchQty = useCallback((product, branchId) => getProductBranchQuantity(product, branchId), [])
+  const parentProductIds = useMemo(() => buildParentProductIdSet(products), [products])
   const getStockBadge = (p) => {
-    const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
-    if (qty<=(p.out_of_stock_threshold||0)) return <span className="badge-red">{t('out_of_stock')}</span>
-    if (qty<=(p.low_stock_threshold||10))   return <span className="badge-yellow">{t('low_stock')}</span>
+    const status = getProductStockStatus(p, { branchFilter, getBranchQty })
+    if (status === 'out_of_stock') return <span className="badge-red">{t('out_of_stock')}</span>
+    if (status === 'low_stock') return <span className="badge-yellow">{t('low_stock')}</span>
     return <span className="badge-green">{t('in_stock')}</span>
   }
 
   // Search: comma-separated terms. Mode AND = all terms must match. Mode OR = any term matches.
   // Spaces within a term are treated as part of the search string (no space=AND split).
-  const searchTerms = useMemo(
-    () => (search.trim()
-      ? search.split(',').map((term) => term.trim().toLowerCase()).filter(Boolean)
-      : []),
-    [search],
-  )
-  const filtered = useMemo(() => products.filter((p) => {
-    const hay = `${p.name} ${p.sku || ''} ${p.barcode || ''} ${p.category || ''} ${p.brand || ''} ${p.unit || ''} ${p.supplier || ''} ${p.description || ''}`.toLowerCase()
-    const matchSearch = searchTerms.length === 0 || (
-      searchMode === 'AND'
-        ? searchTerms.every((term) => hay.includes(term))
-        : searchTerms.some((term) => hay.includes(term))
-    )
-    const matchCat = catFilter === 'all' || p.category === catFilter
-    const matchBrand = brandFilter === 'all' || (p.brand || '').toLowerCase() === brandFilter.toLowerCase()
-    const matchBranch = branchFilter === 'all' || (p.branch_stock || []).some((bs) => String(bs.branch_id) === branchFilter)
-    const matchSupplier = supplierFilter === 'all' || (p.supplier || '').toLowerCase() === supplierFilter.toLowerCase()
-    const matchCreated = matchesYearMonthFilters(p.created_at, { year: createdYearFilter, month: createdMonthFilter })
-    const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
-    const isVariant = Boolean(p.parent_id)
-    const matchGroup =
-      groupFilter === 'all'
-        ? true
-        : groupFilter === 'grouped'
-          ? isParent || isVariant
-          : groupFilter === 'parent'
-          ? isParent && !isVariant
-          : groupFilter === 'variant'
-            ? isVariant
-            : !isParent && !isVariant
-    const qty = branchFilter !== 'all' ? getBranchQty(p, branchFilter) : p.stock_quantity
-
-    if (branchFilter !== 'all' && stockFilter !== 'out' && qty <= (p.out_of_stock_threshold || 0)) return false
-
-    const matchStock =
-      stockFilter === 'all' ? true
-        : stockFilter === 'out' ? qty <= (p.out_of_stock_threshold || 0)
-          : stockFilter === 'low' ? qty > (p.out_of_stock_threshold || 0) && qty <= (p.low_stock_threshold || 10)
-            : stockFilter === 'in_stock' ? qty > (p.low_stock_threshold || 10)
-              : true
-    return matchSearch && matchCat && matchBrand && matchBranch && matchSupplier && matchCreated && matchGroup && matchStock
-  }), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, getBranchQty, groupFilter, parentProductIds, products, searchMode, searchTerms, stockFilter, supplierFilter])
+  const searchTerms = useMemo(() => buildProductSearchTerms(search), [search])
+  const filtered = useMemo(() => filterProductsForPage(products, {
+    brandFilter,
+    branchFilter,
+    catFilter,
+    createdMonthFilter,
+    createdYearFilter,
+    groupFilter,
+    parentProductIds,
+    searchMode,
+    searchTerms,
+    stockFilter,
+    supplierFilter,
+  }), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, parentProductIds, products, searchMode, searchTerms, stockFilter, supplierFilter])
 
   const exportProductsCsv = useCallback((rowsToExport = filtered, filePrefix = 'products') => {
-    const toImageName = (value) => String(value || '').split(/[\\/]/).pop() || ''
-    const toImageUrl = (value) => String(value || '').trim()
-    const priceCsv = (value) => formatPriceNumber(value || 0)
-    const rows = rowsToExport.map((p) => ({
-      Name: p.name || '', SKU: p.sku || '', Barcode: p.barcode || '',
-      Category: p.category || '', Brand: p.brand || '', Unit: p.unit || '', Description: p.description || '',
-      Created_At: p.created_at || '',
-      Selling_Price_USD: priceCsv(p.selling_price_usd), Selling_Price_KHR: priceCsv(p.selling_price_khr),
-      Special_Price_USD: priceCsv(p.special_price_usd || p.selling_price_usd || 0), Special_Price_KHR: priceCsv(p.special_price_khr || p.selling_price_khr || 0),
-      Discount_Enabled: p.discount_enabled ? 'Yes' : 'No',
-      Discount_Type: p.discount_type || 'percent',
-      Discount_Percent: priceCsv(p.discount_percent || 0),
-      Discount_Amount_USD: priceCsv(p.discount_amount_usd || 0),
-      Discount_Amount_KHR: priceCsv(p.discount_amount_khr || 0),
-      Discount_Label: p.discount_label || '',
-      Discount_Badge_Color: p.discount_badge_color || '',
-      Discount_Starts_At: p.discount_starts_at || '',
-      Discount_Ends_At: p.discount_ends_at || '',
-      Purchase_Price_USD: priceCsv(p.purchase_price_usd || p.cost_price_usd || 0), Purchase_Price_KHR: priceCsv(p.purchase_price_khr || p.cost_price_khr || 0),
-      Cost_Price_USD: priceCsv(p.cost_price_usd || p.purchase_price_usd || 0), Cost_Price_KHR: priceCsv(p.cost_price_khr || p.purchase_price_khr || 0),
-      Stock_Quantity: p.stock_quantity || 0,
-      Low_Stock_Threshold: p.low_stock_threshold || 0, Supplier: p.supplier || '',
-      Image_Filename_1: toImageName((p.image_gallery || [])[0] || p.image_path || ''),
-      Image_Filename_2: toImageName((p.image_gallery || [])[1] || ''),
-      Image_Filename_3: toImageName((p.image_gallery || [])[2] || ''),
-      Image_Filename_4: toImageName((p.image_gallery || [])[3] || ''),
-      Image_Filename_5: toImageName((p.image_gallery || [])[4] || ''),
-      Image_URL_1: toImageUrl((p.image_gallery || [])[0] || p.image_path || ''),
-      Image_URL_2: toImageUrl((p.image_gallery || [])[1] || ''),
-      Image_URL_3: toImageUrl((p.image_gallery || [])[2] || ''),
-      Image_URL_4: toImageUrl((p.image_gallery || [])[3] || ''),
-      Image_URL_5: toImageUrl((p.image_gallery || [])[4] || ''),
-      Image_Filenames: (p.image_gallery || []).map((entry) => toImageName(entry)).filter(Boolean).join('|'),
-      Image_URLs: (p.image_gallery || []).map((entry) => toImageUrl(entry)).filter(Boolean).join('|'),
-      Image_Conflict_Mode: '',
-      Branch: (() => {
-        const primary = (p.branch_stock || []).find(bs => (bs.quantity || 0) > 0)
-        return primary?.branch_name || ''
-      })(),
-      Branch_Stock_JSON: JSON.stringify((p.branch_stock || []).map(bs => ({
-        branch_id: bs.branch_id,
-        branch_name: bs.branch_name,
-        quantity: bs.quantity || 0,
-      }))),
-      Parent_ID: p.parent_id || '',
-      Is_Group: p.is_group ? 'Yes' : 'No',
-      Active: p.is_active ? 'Yes' : 'No',
-    }))
-    downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0,10)}.csv`, rows)
+    downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0,10)}.csv`, buildProductExportRows(rowsToExport))
   }, [filtered])
 
-  const productsById = useMemo(
-    () => new Map(products.map((product) => [Number(product?.id || 0), product])),
-    [products],
-  )
+  const productsById = useMemo(() => buildProductIdMap(products), [products])
 
   const productSections = useMemo(
     () => buildProductGroupSections(filtered, {
@@ -931,29 +792,29 @@ export default function Products() {
     [allVisibleProducts],
   )
 
-  const visibleIds = useMemo(
-    () => visibleProducts.map((product) => Number(product.id)).filter((id) => Number.isFinite(id)),
-    [visibleProducts],
-  )
+  const visibleIds = useMemo(() => buildVisibleProductIds(visibleProducts), [visibleProducts])
   const visibleIdsSignature = useMemo(() => visibleIds.join(','), [visibleIds])
   const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIdsSignature])
   const selectedVisibleIds = useMemo(
-    () => [...selectedIds].filter((id) => visibleIdSet.has(Number(id))),
-    [selectedIds, visibleIdSet],
+    () => buildSelectedVisibleIds(selectedIds, visibleIds),
+    [selectedIds, visibleIds],
   )
   const selectedVisibleIdsSet = useMemo(
     () => new Set(selectedVisibleIds),
     [selectedVisibleIds],
   )
   const selectedVisibleCount = selectedVisibleIds.length
-  const productSafePageSize = Math.max(1, Number(productPageSize || PAGE_SIZE_OPTIONS[0]))
-  const productSafePage = clampPage(productPage, productTotal, productSafePageSize)
-  const productTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(productTotal || 0)) / productSafePageSize))
-  const productStart = productTotal ? (((productSafePage - 1) * productSafePageSize) + 1) : 0
-  const productEnd = productTotal ? Math.min(productTotal, productSafePage * productSafePageSize) : 0
-  const productSummaryLabel = productTotal
-    ? `${productStart.toLocaleString()}-${productEnd.toLocaleString()} / ${Number(productTotal || 0).toLocaleString()}`
-    : '0 / 0'
+  const {
+    safePage: productSafePage,
+    safePageSize: productSafePageSize,
+    totalPages: productTotalPages,
+    summaryLabel: productSummaryLabel,
+  } = useMemo(() => buildProductPaginationState({
+    page: productPage,
+    total: productTotal,
+    pageSize: productPageSize,
+    fallbackPageSize: PAGE_SIZE_OPTIONS[0],
+  }), [productPage, productPageSize, productTotal])
   const productSelectAllLabel = `${t('select_all') || 'Select all'} (${visibleProducts.length})`
   const productSelectedLabel = tr('products_selected_count', `${selectedVisibleCount} selected`)
   const productChipLabels = useMemo(() => ({
@@ -965,19 +826,13 @@ export default function Products() {
     delete: tr('delete_short', 'Delete'),
   }), [tr])
   const selectedProducts = useMemo(
-    () => visibleProducts.filter((product) => selectedVisibleIdsSet.has(Number(product.id))),
+    () => buildSelectedProducts(visibleProducts, selectedVisibleIdsSet),
     [selectedVisibleIdsSet, visibleProducts],
   )
-  const jumpTargetIdsByLetter = useMemo(() => {
-    const targets = new Map()
-    productSections.forEach((section) => {
-      if (collapsedProductSections.has(section.id)) return
-      const firstGroup = section.groups[0]
-      if (!firstGroup) return
-      targets.set(section.label, Number(firstGroup.anchorId || firstGroup.leadProduct?.id || firstGroup.items?.[0]?.id || 0))
-    })
-    return targets
-  }, [collapsedProductSections, productSections])
+  const jumpTargetIdsByLetter = useMemo(
+    () => buildJumpTargetIdsByLetter(productSections, collapsedProductSections),
+    [collapsedProductSections, productSections],
+  )
   const visibleLetters = useMemo(
     () => [...jumpTargetIdsByLetter.keys()].sort(compareInitialKeys),
     [jumpTargetIdsByLetter],
@@ -1055,49 +910,51 @@ export default function Products() {
   }, [productSafePageSize])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => ids.length > 0 && ids.every((id) => selectedVisibleIdsSet.has(Number(id))),
+    (ids = []) => isSelectionScopeFullySelectedHelper(ids, selectedVisibleIdsSet),
     [selectedVisibleIdsSet],
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => ids.some((id) => selectedVisibleIdsSet.has(Number(id))) && !isSelectionScopeFullySelected(ids),
-    [isSelectionScopeFullySelected, selectedVisibleIdsSet],
+    (ids = []) => isSelectionScopePartiallySelectedHelper(ids, selectedVisibleIdsSet),
+    [selectedVisibleIdsSet],
   )
   const isProductSelected = useCallback(
     (id) => selectedVisibleIdsSet.has(Number(id)),
     [selectedVisibleIdsSet],
   )
 
-  const productExportItems = useMemo(() => ([
-    { label: tr('export_visible_products', 'Export visible products'), onClick: () => exportProductsCsv(filtered, 'products-visible') },
-    selectedProducts.length ? { label: tr('export_selected_products', 'Export selected products'), onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
-    stockFilter !== 'all' ? { label: tr('export_filtered_stock_state', 'Export filtered stock state'), onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
-    catFilter !== 'all' ? { label: tr('export_filtered_category', 'Export filtered category'), onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
-    brandFilter !== 'all' ? { label: tr('export_filtered_brand', 'Export filtered brand'), onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
-    supplierFilter !== 'all' ? { label: tr('export_filtered_supplier', 'Export filtered supplier'), onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
-    branchFilter !== 'all' ? { label: tr('export_filtered_branch', 'Export filtered branch'), onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
-    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: tr('export_filtered_created_time', 'Export filtered created-time range'), onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
-    'divider',
-    { label: tr('export_full_product_list', 'Export full product list'), onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
-  ].filter(Boolean)), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, exportProductsCsv, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
+  const productExportItems = useMemo(() => buildProductExportItems({
+    brandFilter,
+    branchFilter,
+    catFilter,
+    createdMonthFilter,
+    createdYearFilter,
+    exportProductsCsv,
+    filtered,
+    products,
+    selectedProducts,
+    stockFilter,
+    supplierFilter,
+    tr,
+  }), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, exportProductsCsv, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
 
   const suppliers = useMemo(
-    () => [...new Set((productFilterMeta.suppliers || []).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => buildProductSupplierOptions(productFilterMeta.suppliers),
     [productFilterMeta.suppliers],
   )
 
-  const activeFilters = [
-    catFilter !== 'all' ? 1 : 0,
-    brandFilter !== 'all' ? 1 : 0,
-    branchFilter !== 'all' ? 1 : 0,
-    supplierFilter !== 'all' ? 1 : 0,
-    stockFilter !== 'all' ? 1 : 0,
-    groupFilter !== 'all' ? 1 : 0,
-    initialFilter !== 'all' ? 1 : 0,
-    createdYearFilter !== 'all' ? 1 : 0,
-    createdMonthFilter !== 'all' ? 1 : 0,
-    productSortDirection !== 'desc' ? 1 : 0,
-  ].reduce((sum, value) => sum + value, 0)
+  const activeFilters = countActiveProductFilters({
+    brandFilter,
+    branchFilter,
+    catFilter,
+    createdMonthFilter,
+    createdYearFilter,
+    groupFilter,
+    initialFilter,
+    productSortDirection,
+    stockFilter,
+    supplierFilter,
+  })
 
   const clearAllFilters = useCallback(() => {
     setCatFilter('all')
@@ -1165,20 +1022,12 @@ export default function Products() {
   }, [jumpTargetIdsByLetter])
 
   const getGroupPriceLabel = useCallback((group) => {
-    const min = Number(group?.minSellingPriceUsd || 0)
-    const max = Number(group?.maxSellingPriceUsd || 0)
-    if (group?.hasMultipleItems && min !== max) return `${fmtUSD(min)} - ${fmtUSD(max)}`
-    return fmtUSD(max || min || 0)
+    return buildProductGroupPriceLabel(group, fmtUSD)
   }, [fmtUSD])
 
   const getGroupSummaryParts = useCallback((group, { includeCount = true } = {}) => {
-    const parts = [
-      includeCount ? `${group?.items?.length || 0} ${(group?.items?.length || 0) === 1 ? (t('option') || 'option') : (t('options') || 'options')}` : null,
-      `${group?.stockTotal || 0} ${(t('stock') || 'stock').toLowerCase()}`,
-      getGroupPriceLabel(group),
-    ]
-    return parts.filter(Boolean)
-  }, [getGroupPriceLabel, t])
+    return buildProductGroupSummaryParts(group, { includeCount, t, fmtUSD })
+  }, [fmtUSD, t])
 
   const snapshotProductsByIds = useCallback((ids = []) => (
     products
@@ -1186,63 +1035,28 @@ export default function Products() {
       .map((product) => JSON.parse(JSON.stringify(product)))
   ), [products])
 
-  const buildProductWritePayload = useCallback((snapshot = {}) => {
-    const gallery = normalizeGallery(snapshot.image_gallery, snapshot.image_path || null)
-    return {
-      name: snapshot.name || '',
-      sku: snapshot.sku || '',
-      barcode: snapshot.barcode || '',
-      category: snapshot.category || '',
-      brand: snapshot.brand || '',
-      unit: snapshot.unit || 'pcs',
-      description: snapshot.description || '',
-      selling_price_usd: normalizePriceValue(snapshot.selling_price_usd || 0),
-      selling_price_khr: normalizePriceValue(snapshot.selling_price_khr || 0),
-      special_price_usd: normalizePriceValue(snapshot.special_price_usd ?? snapshot.selling_price_usd ?? 0),
-      special_price_khr: normalizePriceValue(snapshot.special_price_khr ?? snapshot.selling_price_khr ?? 0),
-      purchase_price_usd: normalizePriceValue(snapshot.purchase_price_usd || snapshot.cost_price_usd || 0),
-      purchase_price_khr: normalizePriceValue(snapshot.purchase_price_khr || snapshot.cost_price_khr || 0),
-      cost_price_usd: normalizePriceValue(snapshot.cost_price_usd || snapshot.purchase_price_usd || 0),
-      cost_price_khr: normalizePriceValue(snapshot.cost_price_khr || snapshot.purchase_price_khr || 0),
-      low_stock_threshold: Number(snapshot.low_stock_threshold || 0),
-      out_of_stock_threshold: Number(snapshot.out_of_stock_threshold || 0),
-      supplier: snapshot.supplier || '',
-      custom_fields: snapshot.custom_fields || {},
-      image_gallery: gallery,
-      image_path: gallery[0] || null,
-      is_active: snapshot.is_active ? 1 : 0,
-      is_group: snapshot.parent_id ? 0 : (snapshot.is_group ? 1 : 0),
-      parent_id: snapshot.parent_id ? Number(snapshot.parent_id) : null,
-      userId: user.id,
-      userName: user.name,
-    }
-  }, [user.id, user.name])
+  const buildProductWritePayload = useCallback((snapshot = {}) => (
+    buildProductWritePayloadForSnapshot(snapshot, { id: user.id, name: user.name })
+  ), [user.id, user.name])
 
   const restoreProductBranchStock = useCallback(async (productId, snapshot, currentProduct, reason) => {
-    const targetMap = new Map((snapshot?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), Number(entry?.quantity || 0)]))
-    const currentMap = new Map((currentProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), Number(entry?.quantity || 0)]))
-    const branchIds = [...new Set([...targetMap.keys(), ...currentMap.keys()].filter((id) => Number.isFinite(id) && id > 0))]
-
-    const syncRun = await runConcurrentTasks(branchIds, async (branchId) => {
-      const targetQty = Number(targetMap.get(branchId) || 0)
-      const currentQty = Number(currentMap.get(branchId) || 0)
-      if (targetQty === currentQty) return
-      const delta = Math.abs(targetQty - currentQty)
-      await window.api.adjustStock({
-        productId,
-        productName: snapshot?.name || currentProduct?.name || '',
-        type: targetQty > currentQty ? 'add' : 'remove',
-        quantity: delta,
-        branchId,
-        unitCostUsd: snapshot?.purchase_price_usd || snapshot?.cost_price_usd || 0,
-        unitCostKhr: snapshot?.purchase_price_khr || snapshot?.cost_price_khr || 0,
-        reason,
-        userId: user.id,
-        userName: user.name,
-      })
+    const adjustments = buildProductBranchStockAdjustments(snapshot, currentProduct)
+    const syncRun = await runConcurrentTasks(adjustments, async ({ branchId, type, quantity }) => {
+      await runProductStockMutation(
+        () => window.api.adjustStock(buildProductStockAdjustmentPayload(snapshot, {
+          productId,
+          productName: snapshot?.name || currentProduct?.name || '',
+          type,
+          quantity,
+          branchId,
+          reason,
+          user: { id: user.id, name: user.name },
+        })),
+        'Restore product branch stock',
+      )
     })
     if (syncRun.failures.length) throw (syncRun.failures[0]?.error || new Error('Failed to restore branch stock'))
-  }, [user.id, user.name])
+  }, [runProductStockMutation, user.id, user.name])
 
   const restoreProductSnapshots = useCallback(async (snapshots = [], reason = 'Restore products') => {
     if (!snapshots.length) return
@@ -1252,31 +1066,23 @@ export default function Products() {
       const productId = Number(snapshot?.id || 0)
       const currentProduct = latestMap.get(productId)
       if (!currentProduct) return
-      await window.api.updateProduct(productId, buildProductWritePayload(snapshot))
+      await runProductWriteMutation(() => window.api.updateProduct(productId, buildProductWritePayload(snapshot)), 'Restore product')
       await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
     })
     if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))
     await load(true)
-  }, [buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock])
+  }, [buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock, runProductWriteMutation])
 
   const restoreDeletedProducts = useCallback(async (snapshots = [], reason = 'Restore deleted products') => {
     if (!snapshots.length) return []
-    const defaultBranchId = Number(branches.find((branch) => branch.is_default)?.id || branches[0]?.id || 0)
+    const defaultBranchId = getDefaultProductRestoreBranchId(branches)
     const restored = []
     const orderedSnapshots = orderProductRestoreSnapshots(snapshots)
     const restoredIdMap = new Map()
-    const deletedIdSet = new Set(
-      orderedSnapshots
-        .map((snapshot) => Number(snapshot?.id || 0))
-        .filter((id) => Number.isFinite(id) && id > 0),
-    )
+    const deletedIdSet = buildDeletedProductIdSet(orderedSnapshots)
     for (const snapshot of orderedSnapshots) {
-      const preferredBranchId = Number((snapshot?.branch_stock || []).find((entry) => Number(entry?.quantity || 0) > 0)?.branch_id || defaultBranchId || 0)
-      const originalParentId = Number(snapshot?.parent_id || 0)
-      const parentWasDeleted = originalParentId > 0 && deletedIdSet.has(originalParentId)
-      const resolvedParentId = parentWasDeleted
-        ? Number(restoredIdMap.get(originalParentId) || 0)
-        : originalParentId
+      const preferredBranchId = getPreferredProductRestoreBranchId(snapshot, defaultBranchId)
+      const resolvedParentId = resolveRestoredProductParentId(snapshot, deletedIdSet, restoredIdMap)
       const createPayload = {
         ...buildProductWritePayload({
           ...snapshot,
@@ -1286,7 +1092,7 @@ export default function Products() {
         branch_id: preferredBranchId || defaultBranchId || '',
         stock_quantity: 0,
       }
-      const result = await window.api.createProduct(createPayload)
+      const result = await runProductWriteMutation(() => window.api.createProduct(createPayload), 'Restore deleted product')
       const restoredId = Number(result?.id || result?.data?.id || 0)
       if (!restoredId) throw new Error(result?.error || 'Failed to restore deleted product')
       const snapshotId = Number(snapshot?.id || 0)
@@ -1302,7 +1108,7 @@ export default function Products() {
     if (stockRestoreRun.failures.length) throw (stockRestoreRun.failures[0]?.error || new Error('Failed to restore deleted product stock'))
     await load(true)
     return restored
-  }, [branches, buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock])
+  }, [branches, buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock, runProductWriteMutation])
 
   const pushCreatedProductHistory = useCallback((snapshot, label = '') => {
     const baseSnapshot = cloneHistorySnapshot(snapshot)
@@ -1312,7 +1118,7 @@ export default function Products() {
     actionHistory.pushAction({
       label: label || `Add product ${baseSnapshot?.name || ''}`.trim(),
       undo: async () => {
-        const result = await window.api.deleteProduct(activeCreatedProductId)
+        const result = await runProductDeleteMutation(() => window.api.deleteProduct(activeCreatedProductId), 'Undo product creation')
         if (result?.success === false) throw new Error(result.error || 'Failed to undo product creation')
         await load(true)
       },
@@ -1322,14 +1128,15 @@ export default function Products() {
       },
     })
     return true
-  }, [actionHistory, load, restoreDeletedProducts])
+  }, [actionHistory, load, restoreDeletedProducts, runProductDeleteMutation])
 
   const handleVariantDone = useCallback(async (payload = {}) => {
     setVariantModal(null)
     const createdProductId = Number(payload?.createdProductId || 0)
     const latestProducts = await fetchProductsByIds([createdProductId])
+    const latestProductsById = buildProductIdMap(latestProducts || [])
     const latestVariantSnapshot = cloneHistorySnapshot(
-      (latestProducts || []).find((product) => Number(product?.id || 0) === createdProductId)
+      latestProductsById.get(createdProductId)
       || { ...(payload?.snapshot || {}), id: createdProductId },
     )
     if (latestVariantSnapshot?.id) {
@@ -1351,20 +1158,21 @@ export default function Products() {
     const clearRun = await runConcurrentTasks(productIds, async (productId) => {
       const currentProduct = latestMap.get(Number(productId))
       if (!currentProduct) return
-      const branchRows = (currentProduct.branch_stock || []).filter((entry) => Number(entry?.quantity || 0) > 0)
-      const branchRun = await runConcurrentTasks(branchRows, async (entry) => {
-        await window.api.adjustStock({
-          productId: Number(productId),
-          productName: currentProduct.name || '',
-          type: 'remove',
-          quantity: Number(entry.quantity || 0),
-          branchId: Number(entry.branch_id || 0),
-          unitCostUsd: currentProduct.purchase_price_usd || currentProduct.cost_price_usd || 0,
-          unitCostKhr: currentProduct.purchase_price_khr || currentProduct.cost_price_khr || 0,
-          reason,
-          userId: user.id,
-          userName: user.name,
-        })
+      const adjustments = buildProductClearStockAdjustments(currentProduct)
+      const branchRun = await runConcurrentTasks(adjustments, async (adjustment) => {
+        await runProductStockMutation(
+          () => window.api.adjustStock(buildProductStockAdjustmentPayload(currentProduct, {
+            productId,
+            type: 'remove',
+            quantity: adjustment.quantity,
+            branchId: adjustment.branchId,
+            unitCostUsd: adjustment.unitCostUsd,
+            unitCostKhr: adjustment.unitCostKhr,
+            reason,
+            user: { id: user.id, name: user.name },
+          })),
+          'Clear product stock',
+        )
       })
       if (branchRun.failures.length) throw (branchRun.failures[0]?.error || new Error('Failed to clear branch stock'))
     })
@@ -1381,39 +1189,30 @@ export default function Products() {
 
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    const failedIds = []
-    const updatedIds = []
 
     const addRun = await runConcurrentTasks(productIds, async (productId) => {
       const currentProduct = latestMap.get(Number(productId))
       if (!currentProduct) {
         throw new Error('Product not found')
       }
-      await window.api.adjustStock({
-        productId: Number(productId),
-        productName: currentProduct.name || '',
-        type: 'add',
-        quantity: amount,
-        branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
-        unitCostUsd: currentProduct.purchase_price_usd || currentProduct.cost_price_usd || 0,
-        unitCostKhr: currentProduct.purchase_price_khr || currentProduct.cost_price_khr || 0,
-        reason,
-        userId: user.id,
-        userName: user.name,
-      })
+      await runProductStockMutation(
+        () => window.api.adjustStock(buildProductStockAdjustmentPayload(currentProduct, {
+          productId,
+          type: 'add',
+          quantity: amount,
+          branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
+          reason,
+          user: { id: user.id, name: user.name },
+        })),
+        'Bulk add product stock',
+      )
       return Number(productId)
     })
-    updatedIds.push(...addRun.successes.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
-    failedIds.push(...addRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
+    const summary = summarizeProductBulkRun(addRun)
 
     await load(true)
-    return {
-      done: updatedIds.length,
-      failed: failedIds.length,
-      failedIds,
-      updatedIds,
-    }
-  }, [fetchProductsByIds, load, user.id, user.name])
+    return summary
+  }, [fetchProductsByIds, load, runProductStockMutation, user.id, user.name])
 
   const moveProductsToBranch = useCallback(async (productIds = [], branchId, reason = 'Bulk branch change') => {
     const numericBranchId = Number(branchId || 0)
@@ -1423,57 +1222,46 @@ export default function Products() {
 
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    const failedIds = []
-    const updatedIds = []
 
     const moveRun = await runConcurrentTasks(productIds, async (productId) => {
       const product = latestMap.get(Number(productId))
       if (!product) {
         throw new Error('Product not found')
       }
-      const currentBranch = (product.branch_stock || []).find((entry) => Number(entry?.quantity || 0) > 0)
-      if (currentBranch && Number(currentBranch.branch_id) !== numericBranchId && Number(currentBranch.quantity || 0) > 0) {
-        await window.api.transferStock({
-          fromBranchId: Number(currentBranch.branch_id),
-          toBranchId: numericBranchId,
-          productId: Number(productId),
-          productName: product.name || '',
-          quantity: Number(currentBranch.quantity || 0),
-          note: reason,
-          userId: user.id,
-          userName: user.name,
-        })
-      } else if (!currentBranch) {
-        await window.api.adjustStock({
-          productId: Number(productId),
-          productName: product.name || '',
-          type: 'add',
-          quantity: 0,
-          branchId: numericBranchId,
-          reason,
-          userId: user.id,
-          userName: user.name,
-        })
+      const movePlan = buildProductBranchMovePlan(product, numericBranchId)
+      if (movePlan?.action === 'transfer') {
+        await runProductStockMutation(
+          () => window.api.transferStock(buildProductTransferStockPayload(product, movePlan, {
+            productId,
+            reason,
+            user: { id: user.id, name: user.name },
+          })),
+          'Move product branch stock',
+        )
+      } else if (movePlan?.action === 'initialize') {
+        await runProductStockMutation(
+          () => window.api.adjustStock(buildProductStockAdjustmentPayload(product, {
+            productId,
+            type: 'add',
+            quantity: 0,
+            branchId: movePlan.branchId,
+            reason,
+            user: { id: user.id, name: user.name },
+          })),
+          'Initialize product branch stock',
+        )
       }
       return Number(productId)
     })
-    updatedIds.push(...moveRun.successes.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
-    failedIds.push(...moveRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
+    const summary = summarizeProductBulkRun(moveRun)
 
     await load(true)
-    return {
-      done: updatedIds.length,
-      failed: failedIds.length,
-      failedIds,
-      updatedIds,
-    }
-  }, [fetchProductsByIds, load, user.id, user.name])
+    return summary
+  }, [fetchProductsByIds, load, runProductStockMutation, user.id, user.name])
 
   const runBulkProductUpdates = useCallback(async (updates) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
-    const nextUpdates = Object.fromEntries(
-      Object.entries(updates).filter(([, value]) => value !== undefined),
-    )
+    const nextUpdates = buildDefinedProductUpdates(updates)
     if (!Object.keys(nextUpdates).length) {
       notify('No changes specified', 'warning')
       return
@@ -1481,25 +1269,24 @@ export default function Products() {
     if (!window.confirm(`Do you want to update ${selectedVisibleCount} product${selectedVisibleCount === 1 ? '' : 's'}?`)) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
-    const failedIds = []
     let done = 0
     let failed = 0
     try {
       const updateRun = await runConcurrentTasks(selectedVisibleIds, async (id) => {
         const current = productsById.get(Number(id))
-        const result = await window.api.updateProduct(id, {
-          ...nextUpdates,
-          updated_at: current?.updated_at || undefined,
-          expectedUpdatedAt: current?.updated_at || undefined,
-          userId: user.id,
-          userName: user.name,
-        })
+        const result = await runProductWriteMutation(
+          () => window.api.updateProduct(
+            id,
+            buildProductBulkUpdatePayload(nextUpdates, current, { id: user.id, name: user.name }),
+          ),
+          'Bulk update product',
+        )
         if (result?.success === false) throw new Error(result.error || 'Failed to update product')
         return Number(id)
       })
-      done = updateRun.successes.length
-      failed = updateRun.failures.length
-      failedIds.push(...updateRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
+      const { done: completedCount, failed: failedCount, failedIds } = summarizeProductBulkRun(updateRun)
+      done = completedCount
+      failed = failedCount
       setSelectedIds(new Set(failedIds))
       setBulkEditMode(null)
       setBulkEditForm({})
@@ -1512,13 +1299,13 @@ export default function Products() {
           redo: async () => {
             const redoRun = await runConcurrentTasks(restoredSnapshots, async (snapshot) => {
               const current = productsById.get(Number(snapshot.id))
-              const result = await window.api.updateProduct(snapshot.id, {
-                ...nextUpdates,
-                updated_at: current?.updated_at || snapshot?.updated_at || undefined,
-                expectedUpdatedAt: current?.updated_at || snapshot?.updated_at || undefined,
-                userId: user.id,
-                userName: user.name,
-              })
+              const result = await runProductWriteMutation(
+                () => window.api.updateProduct(
+                  snapshot.id,
+                  buildProductBulkUpdatePayload(nextUpdates, current, { id: user.id, name: user.name }, snapshot?.updated_at),
+                ),
+                'Redo product bulk update',
+              )
               if (result?.success === false) throw new Error(result.error || 'Failed to reapply product update')
             })
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to reapply product update'))
@@ -1535,135 +1322,61 @@ export default function Products() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
+  }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
 
-  const productFilterSections = useMemo(() => {
-    if (!isProductFilterMenuOpen) return []
-    return [
-    {
-      id: 'sort',
-      label: t('sort') || 'Sort',
-      options: [
-        { id: 'created-desc', label: t('newest_first') || 'Newest first', active: productSortDirection === 'desc', onClick: () => setProductSortDirection('desc') },
-        { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
-      ],
+  const productFilterSections = useMemo(() => buildProductFilterSections({
+    availableCreatedYears,
+    branches,
+    brandOptions,
+    categories,
+    filters: {
+      brandFilter,
+      branchFilter,
+      catFilter,
+      createdMonthFilter,
+      createdYearFilter,
+      groupFilter,
+      productSortDirection,
+      stockFilter,
+      supplierFilter,
     },
-    availableCreatedYears.length ? {
-      id: 'created-year',
-      label: t('year') || 'Year',
-      options: [
-        { id: 'created-year-all', label: t('all') || 'All', active: createdYearFilter === 'all', onClick: () => { setCreatedYearFilter('all'); setCreatedMonthFilter('all') } },
-        ...availableCreatedYears.map((year) => ({
-          id: `created-year-${year}`,
-          label: String(year),
-          active: createdYearFilter === String(year),
-          onClick: () => {
-            const nextYear = createdYearFilter === String(year) ? 'all' : String(year)
-            setCreatedYearFilter(nextYear)
-            if (nextYear === 'all') setCreatedMonthFilter('all')
-          },
-        })),
-      ],
-    } : null,
-    {
-      id: 'created-month',
-      label: t('month') || 'Month',
-      options: [
-        { id: 'created-month-all', label: t('all') || 'All', active: createdMonthFilter === 'all', onClick: () => setCreatedMonthFilter('all') },
-        ...CREATED_MONTH_OPTIONS.map(([value, label]) => ({
-          id: `created-month-${value}`,
-          label,
-          active: createdMonthFilter === value,
-          onClick: () => setCreatedMonthFilter(createdMonthFilter === value ? 'all' : value),
-        })),
-      ],
-    },
-    branches.length > 1 ? {
-      id: 'branch',
-      label: t('branch') || 'Branch',
-      options: [
-        { id: 'branch-all', label: t('all') || 'All', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
-        ...branches.map((branch) => ({
-          id: `branch-${branch.id}`,
-          label: branch.name,
-          active: branchFilter === String(branch.id),
-          onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
-        })),
-      ],
-    } : null,
-    {
-      id: 'group',
-      label: t('groups') || 'Groups',
-      options: [
-        { id: 'group-all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
-        { id: 'group-grouped', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
-        { id: 'group-standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
-      ],
-    },
-    {
-      id: 'stock',
-      label: t('stock_status') || 'Stock status',
-      options: [
-        { id: 'stock-all', label: t('all') || 'All', active: stockFilter === 'all', onClick: () => setStockFilter('all') },
-        { id: 'stock-in', label: t('in_stock') || 'In Stock', active: stockFilter === 'in_stock', onClick: () => setStockFilter('in_stock') },
-        { id: 'stock-low', label: t('low_stock') || 'Low', active: stockFilter === 'low', onClick: () => setStockFilter('low') },
-        { id: 'stock-out', label: t('out_of_stock') || 'Out', active: stockFilter === 'out', onClick: () => setStockFilter('out') },
-      ],
-    },
-    categories.length ? {
-      id: 'category',
-      label: t('category') || 'Category',
-      options: [
-        { id: 'cat-all', label: t('all') || 'All', active: catFilter === 'all', onClick: () => setCatFilter('all') },
-        ...categories.map((category) => ({
-          id: `cat-${category.id}`,
-          label: category.name,
-          active: catFilter === category.name,
-          onClick: () => setCatFilter(catFilter === category.name ? 'all' : category.name),
-        })),
-      ],
-    } : null,
-    brandOptions.length ? {
-      id: 'brand',
-      label: t('brand') || 'Brand',
-      options: [
-        { id: 'brand-all', label: t('all_brands') || 'All Brands', active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
-        ...brandOptions.map((brand) => ({
-          id: `brand-${brand}`,
-          label: brand,
-          active: brandFilter === brand,
-          onClick: () => setBrandFilter(brandFilter === brand ? 'all' : brand),
-        })),
-      ],
-    } : null,
-    suppliers.length ? {
-      id: 'supplier',
-      label: t('supplier') || 'Supplier',
-      options: [
-        { id: 'supplier-all', label: t('suppliers') || 'All Suppliers', active: supplierFilter === 'all', onClick: () => setSupplierFilter('all') },
-        ...suppliers.map((supplier) => ({
-          id: `supplier-${supplier}`,
-          label: supplier,
-          active: supplierFilter === supplier,
-          onClick: () => setSupplierFilter(supplierFilter === supplier ? 'all' : supplier),
-        })),
-      ],
-    } : null,
-  ].filter(Boolean)
-  }, [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, isProductFilterMenuOpen, productSortDirection, stockFilter, supplierFilter, suppliers, t, tr])
+    isOpen: isProductFilterMenuOpen,
+    monthOptions: CREATED_MONTH_OPTIONS,
+    setBrandFilter,
+    setBranchFilter,
+    setCatFilter,
+    setCreatedMonthFilter,
+    setCreatedYearFilter,
+    setGroupFilter,
+    setProductSortDirection,
+    setStockFilter,
+    setSupplierFilter,
+    suppliers,
+    t,
+  }), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, isProductFilterMenuOpen, productSortDirection, stockFilter, supplierFilter, suppliers, t])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
-    const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
-    const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
-    const promotion = calculateProductDiscount(p, exchangeRate)
-    const marginUsd = p.selling_price_usd - purchaseUsd
-    const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd * 100) : 0
-    const selectedBranchName = branchFilter !== 'all' ? branchNameById.get(String(branchFilter)) : ''
-    const branchSummaryLabel = branchFilter === 'all' ? getBranchSummaryLabel(p) : ''
-    const compactMeta = [
-      p.brand ? { key: 'brand', label: p.brand, color: getBrandColor(p.brand) } : null,
-      p.category ? { key: 'category', label: p.category, color: catMap[p.category]?.color } : null,
-    ].filter(Boolean)
+    const {
+      branchSummaryLabel,
+      compactMeta,
+      marginPct,
+      marginUsd,
+      promotion,
+      purchaseKhr,
+      purchaseUsd,
+      qty,
+      selectedBranchName,
+    } = buildProductRowDisplayState(p, {
+      branchFilter,
+      branchNameById,
+      catMap,
+      exchangeRate,
+      getBranchQty,
+      getBranchSummaryLabel,
+      getBrandColor,
+      t,
+    })
+    const thumbnailState = buildProductThumbnailState(p)
     return (
       <tr
         key={p.id}
@@ -1675,18 +1388,18 @@ export default function Products() {
           <input type="checkbox" className="rounded" checked={isProductSelected(p.id)} onChange={() => toggleSelect(p.id)} />
         </td>
         <td className="px-3 py-2">
-          {getProductGallery(p).length
-            ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-10 h-10 rounded-lg object-cover cursor-zoom-in hover:ring-2 hover:ring-blue-400" onClick={(e) => { e.stopPropagation(); openLightbox(getProductGallery(p), 0, p.name) }} />
+          {thumbnailState.hasImage
+            ? <ProductImg src={thumbnailState.thumbnail} alt={p.name} className="w-10 h-10 rounded-lg object-cover cursor-zoom-in hover:ring-2 hover:ring-blue-400" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, p.name) }} />
             : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
         </td>
-        <td className="px-3 py-2">
+        <td className="px-3 py-2 align-top">
           {compactMeta.length ? (
             <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1">
               {compactMeta.map((item) => renderMetaPill(item))}
             </div>
           ) : null}
-          <div className="flex items-center gap-1.5">
-            <div {...getKhmerTextProps(p.name, 'font-medium text-gray-900 dark:text-white')}>{p.name}</div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <div {...getKhmerTextProps(p.name, 'min-w-0 break-words font-medium text-gray-900 dark:text-white')}>{p.name}</div>
             {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
             {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">variant</span> : null}
           </div>
@@ -1729,13 +1442,13 @@ export default function Products() {
         </td>
         <td className="px-3 py-2 text-right">
           <div className="font-bold text-gray-900 dark:text-white">
-            {branchFilter !== 'all' ? getBranchQty(p, branchFilter) : p.stock_quantity}
+            {qty}
             {renderUnitChip(p.unit)}
           </div>
         </td>
         <td className="px-3 py-2 text-center">{getStockBadge(p)}</td>
         <td className="px-2 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-          <ThreeDot
+          <ProductRowActions
             onDetails={() => setDetailProduct(p)}
             onEdit={() => openProductFormTab(p, 'basic')}
             onDelete={() => handleDelete(p)}
@@ -1747,24 +1460,22 @@ export default function Products() {
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderMetaPill, renderUnitChip, t, tr])
+  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getStockBadge, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderMetaPill, renderUnitChip, t, tr])
 
   const renderMobileProductCard = useCallback((p, { indented = false } = {}) => {
-    const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
-    const qty = branchFilter !== 'all' ? getBranchQty(p, branchFilter) : p.stock_quantity
-    const isOut = qty <= (p.out_of_stock_threshold || 0)
-    const isLow = !isOut && qty <= (p.low_stock_threshold || 10)
-    const promotion = calculateProductDiscount(p, exchangeRate)
-    const mobileStatusLabel = isOut
-      ? (t('out_of_stock') || 'Out')
-      : isLow
-        ? (t('low_stock') || 'Low')
-        : (t('in_stock') || 'In Stock')
-    const mobileStatusClass = isOut
-      ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300'
-      : isLow
-        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-        : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+    const {
+      mobileStatusClass,
+      mobileStatusLabel,
+      promotion,
+      purchaseUsd,
+      qty,
+    } = buildProductRowDisplayState(p, {
+      branchFilter,
+      exchangeRate,
+      getBranchQty,
+      t,
+    })
+    const thumbnailState = buildProductThumbnailState(p)
 
     return (
       <div
@@ -1776,8 +1487,8 @@ export default function Products() {
         <div className="flex items-start gap-3">
           <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={isProductSelected(p.id)} onChange={(e) => { e.stopPropagation(); toggleSelect(p.id) }} onClick={(e) => e.stopPropagation()} />
           <div className="relative flex-shrink-0">
-            {getProductGallery(p).length
-              ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={(e) => { e.stopPropagation(); openLightbox(getProductGallery(p), 0, p.name) }} />
+            {thumbnailState.hasImage
+              ? <ProductImg src={thumbnailState.thumbnail} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, p.name) }} />
               : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
             <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
           </div>
@@ -1791,7 +1502,7 @@ export default function Products() {
                   {mobileStatusLabel}
                 </span>
                 <span onClick={(event) => event.stopPropagation()}>
-                  <ThreeDot
+                  <ProductRowActions
                     onDetails={() => setDetailProduct(p)}
                     onEdit={() => openProductFormTab(p, 'basic')}
                     onDelete={() => handleDelete(p)}
@@ -1853,7 +1564,7 @@ export default function Products() {
         </div>
       </div>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getProductGallery, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderUnitChip, t, tr])
+  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderUnitChip, t, tr])
 
   if (loadError && !loading && !products.length && !categories.length && !units.length && !branches.length) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
@@ -1885,7 +1596,7 @@ export default function Products() {
         </div>
       </div>
 
-      {/* Search row + filter toggle */}
+      {/* Search row */}
       <div className="mb-3 overflow-x-auto pb-1">
         <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
           <input
@@ -1894,29 +1605,31 @@ export default function Products() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <div className="flex shrink-0 overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600">
+          <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-gray-300 bg-white p-0.5 dark:border-gray-600 dark:bg-gray-900">
             {['AND', 'OR'].map((mode) => (
               <button
                 key={mode}
                 onClick={() => setSearchMode(mode)}
-                className={`min-w-[2.9rem] px-2 py-1.5 text-xs font-bold transition-colors ${searchMode === mode ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-400'}`}
+                className={`min-w-[2.65rem] rounded-lg px-2 py-1.5 text-xs font-bold transition-colors ${searchMode === mode ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'}`}
               >
                 {mode}
               </button>
             ))}
           </div>
-          <FilterMenu
-            label={t('filters') || 'Filters'}
-            activeCount={activeFilters}
-            sections={productFilterSections}
-            onClear={clearAllFilters}
-            onOpenChange={setIsProductFilterMenuOpen}
-            compact
-          />
         </div>
       </div>
 
-      <ActionHistoryBar history={actionHistory} className="mb-3" />
+      <div className="mb-3 flex min-w-0 items-center gap-2">
+        <ActionHistoryBar history={actionHistory} className="mb-0 min-w-0 flex-1" />
+        <FilterMenu
+          label={t('filters') || 'Filters'}
+          activeCount={activeFilters}
+          sections={productFilterSections}
+          onClear={clearAllFilters}
+          onOpenChange={setIsProductFilterMenuOpen}
+          compact
+        />
+      </div>
 
       {refreshingProducts && !loading ? (
         <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
@@ -1988,7 +1701,7 @@ export default function Products() {
               </button>
             </div>
           </div>
-          <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_4.9rem] items-center gap-1.5">
+          <div className={`mt-1.5 grid items-center gap-1.5 ${hasSelected ? 'grid-cols-[minmax(0,1fr)_4.9rem]' : 'grid-cols-1'}`}>
               <label className="inline-flex min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                 <input
                   type="checkbox"
@@ -2003,19 +1716,16 @@ export default function Products() {
                     : productSelectAllLabel}
                 </span>
               </label>
-              <button
-                type="button"
-                disabled={!hasSelected || bulkActionBusy}
-                onClick={hasSelected ? handleBulkDelete : undefined}
-                aria-hidden={!hasSelected}
-                className={`inline-flex h-8 min-w-[4.8rem] shrink-0 items-center justify-center whitespace-nowrap rounded-2xl border px-2.5 text-[10px] font-semibold shadow-sm transition-colors ${
-                  hasSelected
-                    ? 'border-rose-200 bg-white text-rose-700 hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/50 dark:bg-slate-950 dark:text-rose-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/20'
-                    : 'pointer-events-none border-transparent bg-transparent text-transparent shadow-none'
-                }`}
-              >
-                {productChipLabels.delete}
-              </button>
+              {hasSelected ? (
+                <button
+                  type="button"
+                  disabled={bulkActionBusy}
+                  onClick={handleBulkDelete}
+                  className="inline-flex h-8 min-w-[4.8rem] shrink-0 items-center justify-center whitespace-nowrap rounded-2xl border border-rose-200 bg-white px-2.5 text-[10px] font-semibold text-rose-700 shadow-sm transition-colors hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/50 dark:bg-slate-950 dark:text-rose-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/20"
+                >
+                  {productChipLabels.delete}
+                </button>
+              ) : null}
           </div>
         </div>
         {hasSelected ? (
@@ -2074,13 +1784,7 @@ export default function Products() {
               </div>
             </div>
             <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
-              const updates = {}
-              if (bulkEditForm.category) updates.category = bulkEditForm.category
-              if (bulkEditForm.unit) updates.unit = bulkEditForm.unit
-              if (bulkEditForm.supplier) updates.supplier = bulkEditForm.supplier
-              if (bulkEditForm.brand) updates.brand = bulkEditForm.brand
-              if (bulkEditForm.low_stock_threshold !== undefined && bulkEditForm.low_stock_threshold !== '') updates.low_stock_threshold = parseInt(bulkEditForm.low_stock_threshold)
-              await runBulkProductUpdates(updates)
+              await runBulkProductUpdates(buildProductBulkInfoUpdates(bulkEditForm))
             }}>Apply to {selectedVisibleCount} products</button>
           </div>
         )}
@@ -2104,14 +1808,7 @@ export default function Products() {
                 </div>
                 <p className="text-xs text-gray-400 mt-1">KHR prices will auto-calculate at current exchange rate</p>
                 <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
-                  const updates = {}
-                  if (bulkEditForm.selling_price_usd !== '' && bulkEditForm.selling_price_usd !== undefined) updates.selling_price_usd = normalizePriceValue(bulkEditForm.selling_price_usd)
-                  if (bulkEditForm.selling_price_khr !== '' && bulkEditForm.selling_price_khr !== undefined) updates.selling_price_khr = normalizePriceValue(bulkEditForm.selling_price_khr)
-                  if (bulkEditForm.special_price_usd !== '' && bulkEditForm.special_price_usd !== undefined) updates.special_price_usd = normalizePriceValue(bulkEditForm.special_price_usd)
-                  if (bulkEditForm.special_price_khr !== '' && bulkEditForm.special_price_khr !== undefined) updates.special_price_khr = normalizePriceValue(bulkEditForm.special_price_khr)
-                  if (bulkEditForm.purchase_price_usd !== '' && bulkEditForm.purchase_price_usd !== undefined) updates.purchase_price_usd = normalizePriceValue(bulkEditForm.purchase_price_usd)
-                  if (bulkEditForm.purchase_price_khr !== '' && bulkEditForm.purchase_price_khr !== undefined) updates.purchase_price_khr = normalizePriceValue(bulkEditForm.purchase_price_khr)
-                  await runBulkProductUpdates(updates)
+                  await runBulkProductUpdates(buildProductBulkPricingUpdates(bulkEditForm))
                 }}>Apply to {selectedVisibleCount} products</button>
               </div>
             )}
@@ -2208,47 +1905,11 @@ export default function Products() {
             onDelete={()=>handleDelete(detailProduct)}
             onClose={()=>setDetailProduct(null)}
             onImageClick={(src, gallery, startIndex = 0) => {
-              const sourceGallery = Array.isArray(gallery) && gallery.length ? gallery : [src]
+              const sourceGallery = buildProductLightboxGalleryInput(src, gallery)
               openLightbox(sourceGallery, startIndex, detailProduct?.name || '')
             }}
           />
         </Suspense>
-      )}
-
-      {false && lightbox && lightbox.images?.length && (
-        <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 cursor-zoom-out" onClick={() => { setLightbox(null) }}>
-          <div className="relative max-w-3xl w-full max-h-[90vh] flex items-center justify-center" onClick={e => e.stopPropagation()}>
-            <img src={lightbox.images[lightbox.index]} alt="Product preview" className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain" />
-            <div className="absolute top-2 left-2 flex items-center gap-2">
-              <button
-                onClick={() => setLightbox((curr) => {
-                  if (!curr?.images?.length) return curr
-                  const total = curr.images.length
-                  const index = (curr.index - 1 + total) % total
-                  return { ...curr, index }
-                })}
-                className="bg-black/60 text-white rounded-full px-3 py-1 text-sm hover:bg-black/80"
-              >
-                Prev
-              </button>
-              <button
-                onClick={() => setLightbox((curr) => {
-                  if (!curr?.images?.length) return curr
-                  const total = curr.images.length
-                  const index = (curr.index + 1) % total
-                  return { ...curr, index }
-                })}
-                className="bg-black/60 text-white rounded-full px-3 py-1 text-sm hover:bg-black/80"
-              >
-                Next
-              </button>
-              <span className="text-xs text-white/90 bg-black/50 rounded-full px-2.5 py-1">
-                {lightbox.index + 1}/{lightbox.images.length}
-              </span>
-            </div>
-            <button onClick={() => { setLightbox(null) }} className="absolute top-2 right-2 bg-black/60 text-white rounded-full w-9 h-9 flex items-center justify-center text-xl hover:bg-black/80">?</button>
-          </div>
-        </div>
       )}
 
       {lightbox && lightbox.images?.length ? (
@@ -2259,7 +1920,7 @@ export default function Products() {
             images={lightbox?.images || []}
             index={lightbox?.index || 0}
             onClose={() => setLightbox(null)}
-            onIndexChange={(index) => setLightbox((curr) => (curr ? { ...curr, index } : curr))}
+            onIndexChange={(index) => setLightbox((curr) => updateProductLightboxIndex(curr, index))}
             labels={{
               prev: t('prev') || 'Prev',
               next: t('next') || 'Next',
@@ -2280,10 +1941,10 @@ export default function Products() {
             onClose={() => setBulkAddModal(null)}
             onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0 } = {}) => {
               const numericQuantity = Number(quantity || 0)
-              const successfulIds = updatedIds.filter((id) => Number.isFinite(Number(id)))
+              const successfulIds = normalizePositiveProductIds(updatedIds)
               const restoredSnapshots = (bulkAddModal?.snapshots || []).filter((snapshot) => successfulIds.includes(Number(snapshot?.id || 0)))
               setBulkAddModal(null)
-              setSelectedIds(new Set(failedIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))))
+              setSelectedIds(new Set(normalizePositiveProductIds(failedIds)))
               if (done > 0 && restoredSnapshots.length && numericQuantity > 0) {
                 actionHistory.pushAction({
                   label: `Add stock to ${done} product${done === 1 ? '' : 's'}`,
