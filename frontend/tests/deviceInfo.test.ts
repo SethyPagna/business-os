@@ -1,20 +1,22 @@
 import assert from 'node:assert/strict'
-import { getClientDeviceInfo, getClientMetaHeaders } from '../src/utils/deviceInfo.js'
+import { getClientDeviceInfo, getClientMetaHeaders } from '../src/utils/deviceInfo.ts'
 
 let failed = 0
 
-function runTest(name, fn) {
+type TestCallback = () => void
+
+function runTest(name: string, fn: TestCallback): void {
   try {
     fn()
     console.log(`PASS ${name}`)
-  } catch (error) {
+  } catch (error: unknown) {
     failed += 1
     console.error(`FAIL ${name}`)
     console.error(error)
   }
 }
 
-function withNavigator(userAgent, fn) {
+function withNavigator(userAgent: string, fn: TestCallback): void {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
@@ -26,7 +28,7 @@ function withNavigator(userAgent, fn) {
     if (descriptor) {
       Object.defineProperty(globalThis, 'navigator', descriptor)
     } else {
-      delete globalThis.navigator
+      Reflect.deleteProperty(globalThis, 'navigator')
     }
   }
 }
@@ -50,7 +52,7 @@ runTest('getClientMetaHeaders returns stable header names', () => {
   withNavigator('Mozilla/5.0 (Mac OS X) AppleWebKit/605.1.15 Version/17 Safari/605.1.15', () => {
     const headers = getClientMetaHeaders()
     assert.equal(headers['x-device-name'], 'Safari on macOS')
-    assert.match(headers['x-client-time'], /^\d{4}-\d{2}-\d{2}T/)
+    assert.match(String(headers['x-client-time'] || ''), /^\d{4}-\d{2}-\d{2}T/)
     assert.equal('x-device-tz' in headers, true)
   })
 })

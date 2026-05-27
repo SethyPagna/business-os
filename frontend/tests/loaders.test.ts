@@ -7,15 +7,17 @@ import {
   isTrackedRequestCurrent,
   settleLoaderMap,
   withLoaderTimeout,
-} from '../src/utils/loaders.mjs'
+} from '../src/utils/loaders.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
-  } catch (error) {
+  } catch (error: unknown) {
     failed += 1
     console.error(`FAIL ${name}`)
     console.error(error)
@@ -31,7 +33,8 @@ await runTest('settleLoaderMap keeps successful values when one loader fails', a
   assert.equal(result.hasAnySuccess, true)
   assert.equal(result.hasErrors, true)
   assert.deepEqual(result.values.users, ['a'])
-  assert.equal(result.errors.roles.message, 'roles failed')
+  const rolesError = result.errors.roles
+  assert.equal(rolesError instanceof Error ? rolesError.message : '', 'roles failed')
 })
 
 await runTest('getFirstLoaderError returns the first useful message', () => {
@@ -63,16 +66,16 @@ await runTest('createLoaderTimeoutError returns a stable typed timeout error', (
 })
 
 await runTest('withLoaderTimeout resolves successful loaders before the timeout', async () => {
-  globalThis.window = globalThis
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis })
   const result = await withLoaderTimeout(() => Promise.resolve(['ok']), 'Fast load', 50)
   assert.deepEqual(result, ['ok'])
 })
 
 await runTest('withLoaderTimeout rejects slow loaders with a timeout error', async () => {
-  globalThis.window = globalThis
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis })
   await assert.rejects(
     () => withLoaderTimeout(() => new Promise((resolve) => setTimeout(resolve, 25)), 'Slow load', 5),
-    (error) => error?.code === 'loader_timeout',
+    (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'loader_timeout',
   )
 })
 

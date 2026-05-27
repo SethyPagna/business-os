@@ -354,7 +354,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\formatters.test.mjs',
+      'node frontend\\tests\\formatters.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -497,7 +497,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productHistoryHelpers.test.mjs',
-      'node frontend\\tests\\historyHelpers.test.mjs',
+      'node frontend\\tests\\historyHelpers.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -529,7 +529,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\bulkOps.test.mjs',
+      'node frontend\\tests\\bulkOps.test.ts',
       'node frontend\\tests\\actionStability.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -606,7 +606,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\navigationConfig.test.mjs',
+      'node frontend\\tests\\navigationConfig.test.ts',
       'node frontend\\tests\\sectionNavigation.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -617,9 +617,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/types/jsx-modules.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\utilsSettingsBarrel.test.mjs',
+      'node frontend\\tests\\utilsSettingsBarrel.test.ts',
       'node frontend\\tests\\sectionNavigation.test.mjs',
-      'node frontend\\tests\\settingsRefresh.test.mjs',
+      'node frontend\\tests\\settingsRefresh.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -629,8 +629,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\settingsConflictHelpers.test.mjs',
-      'node frontend\\tests\\settingsRefresh.test.mjs',
+      'node frontend\\tests\\settingsConflictHelpers.test.ts',
+      'node frontend\\tests\\settingsRefresh.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -640,7 +640,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\storagePolicy.test.mjs',
+      'node frontend\\tests\\storagePolicy.test.ts',
       'node frontend\\tests\\apiHttp.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -651,7 +651,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\actionGuards.test.mjs',
+      'node frontend\\tests\\actionGuards.test.ts',
       'node frontend\\tests\\actionStability.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -673,7 +673,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\dateHelpers.test.mjs',
+      'node frontend\\tests\\dateHelpers.test.ts',
       'node frontend\\tests\\dashboardDataReliability.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -684,7 +684,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\deviceInfo.test.mjs',
+      'node frontend\\tests\\deviceInfo.test.ts',
       'node frontend\\tests\\apiHttp.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -706,7 +706,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\historyHelpers.test.mjs',
+      'node frontend\\tests\\historyHelpers.test.ts',
       'node frontend\\tests\\productHistoryHelpers.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -727,8 +727,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/utils/csv.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\formatters.test.mjs',
-      'node frontend\\tests\\dateHelpers.test.mjs',
+      'node frontend\\tests\\formatters.test.ts',
+      'node frontend\\tests\\dateHelpers.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -738,7 +738,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\permissions.test.mjs',
+      'node frontend\\tests\\permissions.test.ts',
       'node frontend\\tests\\permissionEditor.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -749,7 +749,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\productBatches.test.mjs',
+      'node frontend\\tests\\productBatches.test.ts',
       'node frontend\\tests\\productPageHelpers.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -760,7 +760,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\scriptTypography.test.mjs',
+      'node frontend\\tests\\scriptTypography.test.ts',
       'node frontend\\tests\\portalCatalogDisplay.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -771,7 +771,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/utils/appRefresh.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\settingsRefresh.test.mjs',
+      'node frontend\\tests\\settingsRefresh.test.ts',
       'node frontend\\tests\\appRefresh.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],

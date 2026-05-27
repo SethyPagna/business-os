@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 430 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 431 in this file.
 
 ## Goal
 
@@ -15,8 +15,8 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
   - 86 `.ts`
   - 1 `.css`
 - Frontend tests: 76 focused test files under `frontend/tests`.
-  - 71 `.mjs`
-  - 5 `.ts`
+  - 56 `.mjs`
+  - 20 `.ts`
 - Backend source: 87 files under `backend/src`.
   - 83 `.js`
   - 1 `.sql`
@@ -1052,7 +1052,7 @@ Decision rule:
     The shared formatter implementation moved to
     `frontend/src/utils/formatters.ts`, while `frontend/src/utils/formatters.js`
     remains as the compatibility wrapper for existing extensionless and legacy
-    imports. Added `frontend/tests/formatters.test.mjs` to the frontend utility
+    imports. Added `frontend/tests/formatters.test.ts` to the frontend utility
     suite. `language-runtime-audit.mjs` now records the formatter conversion in
     `convertedTypeScriptSlices`, and the next TypeScript utility candidate is
     `frontend/src/utils/groupedRecords.ts`.
@@ -3441,6 +3441,17 @@ Decision rule:
     the first test-runner slice toward the no-JavaScript end state; the
     remaining `.mjs` tests stay on the old path until each batch is typed and
     script references are updated.
+431. Convert a larger frontend utility-test batch to TypeScript. Done:
+    Fifteen more focused tests now run as `.ts` and import TypeScript
+    implementation files directly where available: `actionGuards`, `bulkOps`,
+    `dateHelpers`, `deviceInfo`, `formatters`, `historyHelpers`, `loaders`,
+    `navigationConfig`, `permissions`, `settingsConflictHelpers`,
+    `settingsRefresh`, `storagePolicy`, `scriptTypography`, `productBatches`,
+    and `utilsSettingsBarrel`. The batch also tightens typed test harnesses,
+    narrows unknown loader/history error payloads, uses `Date.getTime()` for
+    date math, gives keyed-action tests a `Set<string>`, and replaces Khmer
+    mojibake fixtures in the script typography test. This intentionally merges
+    multiple small prior-style moves into one larger verified conversion slice.
 
 ## Safety Gates
 

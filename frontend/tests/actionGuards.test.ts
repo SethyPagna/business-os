@@ -6,15 +6,17 @@ import {
   finishKeyedAction,
   finishNamedAction,
   finishSingleAction,
-} from '../src/utils/actionGuards.mjs'
+} from '../src/utils/actionGuards.ts'
 
 let failed = 0
 
-function runTest(name, fn) {
+type TestCallback = () => void
+
+function runTest(name: string, fn: TestCallback): void {
   try {
     fn()
     console.log(`PASS ${name}`)
-  } catch (error) {
+  } catch (error: unknown) {
     failed += 1
     console.error(`FAIL ${name}`)
     console.error(error)
@@ -50,7 +52,7 @@ runTest('named action guard tracks the active action name', () => {
 })
 
 runTest('keyed action guard allows different keys but blocks duplicate keys', () => {
-  const ref = { current: new Set() }
+  const ref = { current: new Set<string>() }
   assert.equal(beginKeyedAction(ref, 'logo'), true)
   assert.equal(beginKeyedAction(ref, 'logo'), false)
   assert.equal(beginKeyedAction(ref, 'cover'), true)
@@ -60,7 +62,7 @@ runTest('keyed action guard allows different keys but blocks duplicate keys', ()
 })
 
 runTest('keyed action guard rejects blank keys and blocked starts', () => {
-  const ref = { current: new Set() }
+  const ref = { current: new Set<string>() }
   assert.equal(beginKeyedAction(ref, ''), false)
   assert.equal(beginKeyedAction(ref, 'avatar', { blocked: true }), false)
   assert.equal(ref.current.size, 0)

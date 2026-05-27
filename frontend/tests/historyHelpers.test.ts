@@ -3,15 +3,18 @@ import {
   cloneHistorySnapshot,
   extractHistoryResultId,
   resolveCreatedHistorySnapshot,
-} from '../src/utils/historyHelpers.mjs'
+} from '../src/utils/historyHelpers.ts'
 
 let failed = 0
+type ResolveOptions = NonNullable<Parameters<typeof resolveCreatedHistorySnapshot>[0]>
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
-  } catch (error) {
+  } catch (error: unknown) {
     failed += 1
     console.error(`FAIL ${name}`)
     console.error(error)
@@ -45,7 +48,7 @@ await runTest('resolveCreatedHistorySnapshot prefers an explicit created id', ()
 
 await runTest('resolveCreatedHistorySnapshot falls back to client request id matching', () => {
   const result = resolveCreatedHistorySnapshot({
-    result: { success: true },
+    result: { success: true } as ResolveOptions['result'],
     latestItems: [
       { id: 22, name: 'Gamma', client_request_id: 'product_history_token' },
     ],
@@ -58,7 +61,7 @@ await runTest('resolveCreatedHistorySnapshot falls back to client request id mat
 
 await runTest('resolveCreatedHistorySnapshot falls back to the provided snapshot when needed', () => {
   const result = resolveCreatedHistorySnapshot({
-    result: { success: true },
+    result: { success: true } as ResolveOptions['result'],
     latestItems: [],
     fallbackSnapshot: { id: 31, name: 'Draft Product' },
   })

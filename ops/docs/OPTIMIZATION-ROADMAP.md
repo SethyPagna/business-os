@@ -2077,7 +2077,7 @@ Cleanup checkpoint:
 - The next TypeScript helper slice is also complete:
   `frontend/src/utils/formatters.ts` owns the formatter implementation,
   `formatters.js` remains as a compatibility wrapper, and
-  `frontend/tests/formatters.test.mjs` is part of the frontend utility suite.
+  `frontend/tests/formatters.test.ts` is part of the frontend utility suite.
   The language audit now lists both completed TypeScript slices and advances
   the next TypeScript candidate to `frontend/src/utils/groupedRecords.ts`.
 - The grouped-record helper slice is now complete:
@@ -2158,7 +2158,7 @@ Cleanup checkpoint:
 - The dashboard date helper slice is now complete:
   `frontend/src/utils/dateHelpers.ts` owns local `todayStr` and `offsetDate`
   formatting, while `dateHelpers.js` remains as the compatibility wrapper for
-  the utils barrel and Dashboard import. `frontend/tests/dateHelpers.test.mjs`
+  the utils barrel and Dashboard import. `frontend/tests/dateHelpers.test.ts`
   gives this slice focused local-date coverage.
 - The client device metadata slice is now complete:
   `frontend/src/utils/deviceInfo.ts` owns browser/OS detection and client meta
@@ -4928,3 +4928,14 @@ Move 440 status:
   Unicode escapes. This reduces the remaining first-party `.mjs` count while
   keeping the broader test suite on its existing path until each next batch is
   typed, imported, and verified.
+
+Move 441 status:
+- Move 441 converts a larger frontend utility-test batch to TypeScript in one
+  session. The converted `.ts` tests cover action guards, bounded bulk tasks,
+  local date helpers, device metadata headers, timestamp/number formatters,
+  history snapshots, loader timeout helpers, navigation config, permission
+  parsing, settings conflict diffs, settings refresh routing, storage policy,
+  Khmer script typography, product batch previews, and the utils-settings
+  barrel wrapper. The batch reduces frontend test `.mjs` files from 71 to 56
+  while increasing typed tests from 5 to 20, and it intentionally combines
+  related conversion moves so future sessions can make larger verified slices.

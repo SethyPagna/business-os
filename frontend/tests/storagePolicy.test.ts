@@ -6,15 +6,17 @@ import {
   isCooldownActive,
   maxStoredNumber,
   shouldPersistLocalMirror,
-} from '../src/platform/storage/storagePolicy.mjs'
+} from '../src/platform/storage/storagePolicy.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
-  } catch (error) {
+  } catch (error: unknown) {
     failed += 1
     console.error(`FAIL ${name}`)
     console.error(error)

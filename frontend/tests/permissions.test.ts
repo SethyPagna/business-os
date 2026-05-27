@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { parsePermissionMap } from '../src/utils/permissions.js'
+import { parsePermissionMap } from '../src/utils/permissions.ts'
 
 assert.deepEqual(parsePermissionMap('{"products":true,"inventory":false}'), {
   products: true,

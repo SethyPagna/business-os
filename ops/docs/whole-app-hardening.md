@@ -229,7 +229,7 @@ Last updated: 2026-05-18
 - Verification after Phase 8.4 checkpoint:
   - `node test/routeContracts.test.js`
   - `node tests/actionStability.test.mjs`
-  - `node tests/actionGuards.test.mjs`
+  - `node tests/actionGuards.test.ts`
   - `node tests/performanceLoadingUx.test.mjs`
   - `node tests/apiHttp.test.mjs`
   - Backend `npm.cmd run test:utils`

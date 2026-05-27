@@ -4,7 +4,7 @@ import {
   CATEGORY_REFRESH_CHANNELS,
   getSettingsRefreshChannels,
   UNIT_REFRESH_CHANNELS,
-} from '../src/utils/settingsRefresh.js'
+} from '../src/utils/settingsRefresh.ts'
 
 assert.deepEqual(
   getSettingsRefreshChannels({

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildBatchPreview, getVisibleProductBatches } from '../src/utils/productBatches.mjs'
+import { buildBatchPreview, getVisibleProductBatches } from '../src/utils/productBatches.ts'
 
 const product = {
   batches: [
