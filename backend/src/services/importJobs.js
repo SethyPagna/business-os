@@ -414,7 +414,8 @@ function listImportJobs({ limit = 50, types = null } = {}) {
     LIMIT ?
   `).all(...normalizedTypes, safeLimit)
   const jobs = decorateImportJobRows(rows)
-  return normalizedTypes.length ? jobs : writeCachedImportJobList(safeLimit, jobs)
+  if (normalizedTypes.length) return jobs
+  return writeCachedImportJobList(safeLimit, jobs)
 }
 
 function updateJob(id, patch = {}) {
