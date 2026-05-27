@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-27T18:55:55.751Z
+Generated: 2026-05-27T19:02:09.511Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 608
+- Files scanned: 612
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -17,7 +17,7 @@ Generated: 2026-05-27T18:55:55.751Z
 | .js | 185 |
 | .mjs | 161 |
 | .jsx | 107 |
-| .ts | 67 |
+| .ts | 71 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -30,7 +30,7 @@ Generated: 2026-05-27T18:55:55.751Z
 
 | Area | Files |
 | --- | --- |
-| frontend/utils | 59 |
+| frontend/utils | 62 |
 | frontend/components/products | 44 |
 | ops/docs/reference | 30 |
 | backend/routes | 24 |
@@ -50,10 +50,10 @@ Generated: 2026-05-27T18:55:55.751Z
 | ops/scripts/powershell | 8 |
 | frontend/components/pos | 7 |
 | ops/scripts/runtime/storage | 7 |
+| frontend/api | 6 |
 | frontend/components/returns | 6 |
 | ops/scripts/runtime/audits | 6 |
 | ops/scripts/verification | 6 |
-| frontend/api | 5 |
 | frontend/app | 4 |
 | frontend/components/files | 4 |
 | frontend/components/users | 4 |
@@ -73,13 +73,13 @@ Generated: 2026-05-27T18:55:55.751Z
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3443 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2734 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/lang/km.json | 2715 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2681 | ops/docs/reference |
+| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2365 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | backend/src/routes/products.js | 2218 | backend/routes |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
-| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2124 | ops/docs/reference |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2105 | ops/docs/reference |
 | frontend/tests/performanceLoadingUx.test.mjs | 2077 | frontend/tests/performanceLoadingUx.test.mjs |
 | frontend/src/components/dashboard/Dashboard.jsx | 2063 | frontend/components/dashboard |
