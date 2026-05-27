@@ -13,6 +13,7 @@
   "include": [
     "src/*.ts",
     "src/app/**/*.ts",
+    "src/api/**/*.ts",
     "src/runtime/**/*.ts",
     "src/types/**/*.ts",
     "src/components/catalog/**/*.ts",

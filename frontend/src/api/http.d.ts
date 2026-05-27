@@ -3,3 +3,5 @@ export const FRONTEND_BUILD_INFO: {
   revision?: string
   builtAt?: string
 }
+
+export function getSyncServerUrl(): string
