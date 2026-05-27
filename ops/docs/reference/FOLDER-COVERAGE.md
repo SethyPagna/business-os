@@ -1458,10 +1458,10 @@ Total folders documented: **81**
 | 18 | `formatters.test.mjs` | Project source/support file |
 | 19 | `globalScroll.test.mjs` | Project source/support file |
 | 20 | `globalScrollControls.test.mjs` | Project source/support file |
-| 21 | `groupedRecords.test.mjs` | Project source/support file |
+| 21 | `groupedRecords.test.ts` | Project source/support file |
 | 22 | `historyHelpers.test.mjs` | Project source/support file |
 | 23 | `importJobRefresh.test.mjs` | Project source/support file |
-| 24 | `initials.test.mjs` | Project source/support file |
+| 24 | `initials.test.ts` | Project source/support file |
 | 25 | `inventoryImportWorker.test.mjs` | Project source/support file |
 | 26 | `inventoryMobileCardLayout.test.mjs` | Project source/support file |
 | 27 | `inventoryMovementGroups.test.mjs` | Project source/support file |
@@ -1482,7 +1482,7 @@ Total folders documented: **81**
 | 42 | `portalContentI18n.test.mjs` | Project source/support file |
 | 43 | `portalEditorUtils.test.mjs` | Project source/support file |
 | 44 | `portalFaqVocabulary.test.mjs` | Project source/support file |
-| 45 | `portalLanguagePacks.test.mjs` | Project source/support file |
+| 45 | `portalLanguagePacks.test.ts` | Project source/support file |
 | 46 | `portalTranslateController.test.mjs` | Project source/support file |
 | 47 | `posCore.test.mjs` | Project source/support file |
 | 48 | `pricingContacts.test.mjs` | Project source/support file |
@@ -1490,8 +1490,8 @@ Total folders documented: **81**
 | 50 | `productDiscountUx.test.mjs` | Project source/support file |
 | 51 | `productDisplayHelpers.test.mjs` | Project source/support file |
 | 52 | `productFilterHelpers.test.mjs` | Project source/support file |
-| 53 | `productGalleryHelpers.test.mjs` | Project source/support file |
-| 54 | `productGrouping.test.mjs` | Project source/support file |
+| 53 | `productGalleryHelpers.test.ts` | Project source/support file |
+| 54 | `productGrouping.test.ts` | Project source/support file |
 | 55 | `productGroupViewHelpers.test.mjs` | Project source/support file |
 | 56 | `productHistoryHelpers.test.mjs` | Project source/support file |
 | 57 | `productImportPlanner.test.mjs` | Project source/support file |

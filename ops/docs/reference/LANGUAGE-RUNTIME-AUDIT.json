@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T22:45:18.927Z",
+  "generatedAt": "2026-05-27T22:56:28.141Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -25,7 +25,7 @@
     ],
     [
       "JavaScript modules",
-      113
+      108
     ],
     [
       "React JSX",
@@ -33,7 +33,7 @@
     ],
     [
       "TypeScript",
-      84
+      89
     ],
     [
       "Windows batch",
@@ -67,7 +67,7 @@
     ],
     [
       ".mjs",
-      113
+      108
     ],
     [
       ".jsx",
@@ -75,7 +75,7 @@
     ],
     [
       ".ts",
-      84
+      89
     ],
     [
       ".bat",
@@ -601,7 +601,7 @@
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\portalLanguagePacks.test.mjs",
+        "node frontend\\tests\\portalLanguagePacks.test.ts",
         "node frontend\\tests\\portalFaqVocabulary.test.mjs",
         "npm.cmd --prefix frontend run build"
       ],
@@ -710,7 +710,7 @@
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\groupedRecords.test.mjs",
+        "node frontend\\tests\\groupedRecords.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -726,7 +726,7 @@
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\initials.test.mjs",
+        "node frontend\\tests\\initials.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -772,7 +772,7 @@
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productGrouping.test.mjs",
+        "node frontend\\tests\\productGrouping.test.ts",
         "node frontend\\tests\\posCore.test.mjs",
         "npm.cmd --prefix frontend run build"
       ],
@@ -853,7 +853,7 @@
       "declarationSupport": "frontend/src/utils/publicAssetUrls.d.ts",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productGalleryHelpers.test.mjs",
+        "node frontend\\tests\\productGalleryHelpers.test.ts",
         "node frontend\\tests\\productWriteHelpers.test.mjs",
         "npm.cmd --prefix frontend run build"
       ],

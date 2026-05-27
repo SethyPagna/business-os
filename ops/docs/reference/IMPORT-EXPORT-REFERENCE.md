@@ -436,10 +436,10 @@ Code files documented: **540**
 | 424 | `frontend/tests/formatters.test.mjs` | 2 | 0 | 1 | 0 |
 | 425 | `frontend/tests/globalScroll.test.mjs` | 2 | 0 | 0 | 0 |
 | 426 | `frontend/tests/globalScrollControls.test.mjs` | 2 | 0 | 1 | 0 |
-| 427 | `frontend/tests/groupedRecords.test.mjs` | 2 | 0 | 1 | 0 |
+| 427 | `frontend/tests/groupedRecords.test.ts` | 2 | 0 | 1 | 0 |
 | 428 | `frontend/tests/historyHelpers.test.mjs` | 1 | 0 | 0 | 0 |
 | 429 | `frontend/tests/importJobRefresh.test.mjs` | 1 | 0 | 0 | 0 |
-| 430 | `frontend/tests/initials.test.mjs` | 1 | 0 | 0 | 0 |
+| 430 | `frontend/tests/initials.test.ts` | 1 | 0 | 0 | 0 |
 | 431 | `frontend/tests/inventoryImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
 | 432 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 2 | 0 | 0 | 0 |
 | 433 | `frontend/tests/inventoryMovementGroups.test.mjs` | 2 | 0 | 1 | 0 |
@@ -460,7 +460,7 @@ Code files documented: **540**
 | 448 | `frontend/tests/portalContentI18n.test.mjs` | 1 | 0 | 0 | 0 |
 | 449 | `frontend/tests/portalEditorUtils.test.mjs` | 1 | 0 | 0 | 0 |
 | 450 | `frontend/tests/portalFaqVocabulary.test.mjs` | 1 | 0 | 0 | 0 |
-| 451 | `frontend/tests/portalLanguagePacks.test.mjs` | 1 | 0 | 0 | 0 |
+| 451 | `frontend/tests/portalLanguagePacks.test.ts` | 1 | 0 | 0 | 0 |
 | 452 | `frontend/tests/portalTranslateController.test.mjs` | 1 | 0 | 0 | 0 |
 | 453 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
 | 454 | `frontend/tests/pricingContacts.test.mjs` | 3 | 0 | 1 | 0 |
@@ -468,8 +468,8 @@ Code files documented: **540**
 | 456 | `frontend/tests/productDiscountUx.test.mjs` | 2 | 0 | 0 | 0 |
 | 457 | `frontend/tests/productDisplayHelpers.test.mjs` | 1 | 0 | 0 | 0 |
 | 458 | `frontend/tests/productFilterHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 459 | `frontend/tests/productGalleryHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 460 | `frontend/tests/productGrouping.test.mjs` | 2 | 0 | 1 | 0 |
+| 459 | `frontend/tests/productGalleryHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 460 | `frontend/tests/productGrouping.test.ts` | 2 | 0 | 1 | 0 |
 | 461 | `frontend/tests/productGroupViewHelpers.test.mjs` | 1 | 0 | 0 | 0 |
 | 462 | `frontend/tests/productHistoryHelpers.test.mjs` | 2 | 0 | 1 | 0 |
 | 463 | `frontend/tests/productImportPlanner.test.mjs` | 3 | 0 | 1 | 0 |
@@ -6616,7 +6616,7 @@ Code files documented: **540**
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
-  - `frontend/tests/groupedRecords.test.mjs`
+  - `frontend/tests/groupedRecords.test.ts`
 
 ### 3.374 `frontend/src/utils/historyHelpers.mjs`
 
@@ -6887,7 +6887,7 @@ Code files documented: **540**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/pos/posCore.ts`
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/tests/productGrouping.test.mjs`
+  - `frontend/tests/productGrouping.test.ts`
 
 ### 3.395 `frontend/src/utils/publicAssetUrls.d.ts`
 
@@ -7260,7 +7260,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.427 `frontend/tests/groupedRecords.test.mjs`
+### 3.427 `frontend/tests/groupedRecords.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7291,7 +7291,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.430 `frontend/tests/initials.test.mjs`
+### 3.430 `frontend/tests/initials.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7521,7 +7521,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.451 `frontend/tests/portalLanguagePacks.test.mjs`
+### 3.451 `frontend/tests/portalLanguagePacks.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7605,7 +7605,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.459 `frontend/tests/productGalleryHelpers.test.mjs`
+### 3.459 `frontend/tests/productGalleryHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7615,7 +7615,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.460 `frontend/tests/productGrouping.test.mjs`
+### 3.460 `frontend/tests/productGrouping.test.ts`
 
 - Declared exports: none detected
 - Imports (2)

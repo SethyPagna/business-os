@@ -436,10 +436,10 @@ Code files scanned: **540**
 | 424 | `frontend/tests/formatters.test.mjs` | 1 |
 | 425 | `frontend/tests/globalScroll.test.mjs` | 0 |
 | 426 | `frontend/tests/globalScrollControls.test.mjs` | 1 |
-| 427 | `frontend/tests/groupedRecords.test.mjs` | 1 |
+| 427 | `frontend/tests/groupedRecords.test.ts` | 1 |
 | 428 | `frontend/tests/historyHelpers.test.mjs` | 1 |
 | 429 | `frontend/tests/importJobRefresh.test.mjs` | 4 |
-| 430 | `frontend/tests/initials.test.mjs` | 1 |
+| 430 | `frontend/tests/initials.test.ts` | 1 |
 | 431 | `frontend/tests/inventoryImportWorker.test.mjs` | 1 |
 | 432 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 0 |
 | 433 | `frontend/tests/inventoryMovementGroups.test.mjs` | 1 |
@@ -460,7 +460,7 @@ Code files scanned: **540**
 | 448 | `frontend/tests/portalContentI18n.test.mjs` | 0 |
 | 449 | `frontend/tests/portalEditorUtils.test.mjs` | 1 |
 | 450 | `frontend/tests/portalFaqVocabulary.test.mjs` | 0 |
-| 451 | `frontend/tests/portalLanguagePacks.test.mjs` | 0 |
+| 451 | `frontend/tests/portalLanguagePacks.test.ts` | 0 |
 | 452 | `frontend/tests/portalTranslateController.test.mjs` | 2 |
 | 453 | `frontend/tests/posCore.test.mjs` | 1 |
 | 454 | `frontend/tests/pricingContacts.test.mjs` | 1 |
@@ -468,8 +468,8 @@ Code files scanned: **540**
 | 456 | `frontend/tests/productDiscountUx.test.mjs` | 1 |
 | 457 | `frontend/tests/productDisplayHelpers.test.mjs` | 0 |
 | 458 | `frontend/tests/productFilterHelpers.test.mjs` | 0 |
-| 459 | `frontend/tests/productGalleryHelpers.test.mjs` | 0 |
-| 460 | `frontend/tests/productGrouping.test.mjs` | 1 |
+| 459 | `frontend/tests/productGalleryHelpers.test.ts` | 0 |
+| 460 | `frontend/tests/productGrouping.test.ts` | 1 |
 | 461 | `frontend/tests/productGroupViewHelpers.test.mjs` | 2 |
 | 462 | `frontend/tests/productHistoryHelpers.test.mjs` | 1 |
 | 463 | `frontend/tests/productImportPlanner.test.mjs` | 1 |
@@ -6111,11 +6111,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.427 `frontend/tests/groupedRecords.test.mjs`
+### 3.427 `frontend/tests/groupedRecords.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
 ### 3.428 `frontend/tests/historyHelpers.test.mjs`
 
@@ -6132,11 +6132,11 @@ Code files scanned: **540**
 | 3 | `testDispatchOnlyOnTerminalTransition` | function | 23 |
 | 4 | `testDispatchEmitsExpectedEvents` | function | 47 |
 
-### 3.430 `frontend/tests/initials.test.mjs`
+### 3.430 `frontend/tests/initials.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 12 |
+| 1 | `runTest` | function | 14 |
 
 ### 3.431 `frontend/tests/inventoryImportWorker.test.mjs`
 
@@ -6244,7 +6244,7 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.451 `frontend/tests/portalLanguagePacks.test.mjs`
+### 3.451 `frontend/tests/portalLanguagePacks.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6285,15 +6285,15 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.459 `frontend/tests/productGalleryHelpers.test.mjs`
+### 3.459 `frontend/tests/productGalleryHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.460 `frontend/tests/productGrouping.test.mjs`
+### 3.460 `frontend/tests/productGrouping.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
 ### 3.461 `frontend/tests/productGroupViewHelpers.test.mjs`
 

@@ -156,8 +156,8 @@ Total files documented: **603**
 | 144 | `backend/test/uploadSecurity.test.js` | backend-root | 59 | 2.0 | Project source/support file |
 | 145 | `frontend/.npmrc` | frontend-root | 14 | 0.4 | Project source/support file |
 | 146 | `frontend/index.html` | frontend-root | 24 | 1.0 | Project source/support file |
-| 147 | `frontend/package-lock.json` | frontend-root | 3803 | 130.5 | Configuration/data manifest |
-| 148 | `frontend/package.json` | frontend-root | 40 | 4.1 | Configuration/data manifest |
+| 147 | `frontend/package-lock.json` | frontend-root | 3804 | 130.6 | Configuration/data manifest |
+| 148 | `frontend/package.json` | frontend-root | 41 | 4.1 | Configuration/data manifest |
 | 149 | `frontend/postcss.config.mjs` | frontend-root | 7 | 0.1 | Project source/support file |
 | 150 | `frontend/public/favicon.ico` | frontend-root | 0 | 11.4 | Project source/support file |
 | 151 | `frontend/public/icon.png` | frontend-root | 0 | 11.4 | Project source/support file |
@@ -465,10 +465,10 @@ Total files documented: **603**
 | 453 | `frontend/tests/formatters.test.mjs` | frontend-root | 36 | 0.9 | Project source/support file |
 | 454 | `frontend/tests/globalScroll.test.mjs` | frontend-root | 25 | 0.7 | Project source/support file |
 | 455 | `frontend/tests/globalScrollControls.test.mjs` | frontend-root | 32 | 1.1 | Project source/support file |
-| 456 | `frontend/tests/groupedRecords.test.mjs` | frontend-root | 115 | 3.7 | Project source/support file |
+| 456 | `frontend/tests/groupedRecords.test.ts` | frontend-root | 117 | 3.8 | Project source/support file |
 | 457 | `frontend/tests/historyHelpers.test.mjs` | frontend-root | 72 | 2.1 | Project source/support file |
 | 458 | `frontend/tests/importJobRefresh.test.mjs` | frontend-root | 87 | 2.4 | Project source/support file |
-| 459 | `frontend/tests/initials.test.mjs` | frontend-root | 66 | 2.1 | Project source/support file |
+| 459 | `frontend/tests/initials.test.ts` | frontend-root | 68 | 2.2 | Project source/support file |
 | 460 | `frontend/tests/inventoryImportWorker.test.mjs` | frontend-root | 39 | 1.7 | Project source/support file |
 | 461 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | frontend-root | 43 | 2.3 | Project source/support file |
 | 462 | `frontend/tests/inventoryMovementGroups.test.mjs` | frontend-root | 64 | 2.3 | Project source/support file |
@@ -489,7 +489,7 @@ Total files documented: **603**
 | 477 | `frontend/tests/portalContentI18n.test.mjs` | frontend-root | 94 | 3.3 | Project source/support file |
 | 478 | `frontend/tests/portalEditorUtils.test.mjs` | frontend-root | 57 | 1.9 | Project source/support file |
 | 479 | `frontend/tests/portalFaqVocabulary.test.mjs` | frontend-root | 104 | 4.9 | Project source/support file |
-| 480 | `frontend/tests/portalLanguagePacks.test.mjs` | frontend-root | 50 | 3.1 | Project source/support file |
+| 480 | `frontend/tests/portalLanguagePacks.test.ts` | frontend-root | 50 | 3.1 | Project source/support file |
 | 481 | `frontend/tests/portalTranslateController.test.mjs` | frontend-root | 145 | 4.5 | Project source/support file |
 | 482 | `frontend/tests/posCore.test.mjs` | frontend-root | 167 | 6.2 | Project source/support file |
 | 483 | `frontend/tests/pricingContacts.test.mjs` | frontend-root | 108 | 3.9 | Project source/support file |
@@ -497,8 +497,8 @@ Total files documented: **603**
 | 485 | `frontend/tests/productDiscountUx.test.mjs` | frontend-root | 52 | 2.4 | Project source/support file |
 | 486 | `frontend/tests/productDisplayHelpers.test.mjs` | frontend-root | 107 | 3.5 | Project source/support file |
 | 487 | `frontend/tests/productFilterHelpers.test.mjs` | frontend-root | 108 | 3.1 | Project source/support file |
-| 488 | `frontend/tests/productGalleryHelpers.test.mjs` | frontend-root | 141 | 4.3 | Project source/support file |
-| 489 | `frontend/tests/productGrouping.test.mjs` | frontend-root | 112 | 4.8 | Project source/support file |
+| 488 | `frontend/tests/productGalleryHelpers.test.ts` | frontend-root | 141 | 4.3 | Project source/support file |
+| 489 | `frontend/tests/productGrouping.test.ts` | frontend-root | 114 | 5.1 | Project source/support file |
 | 490 | `frontend/tests/productGroupViewHelpers.test.mjs` | frontend-root | 53 | 1.4 | Project source/support file |
 | 491 | `frontend/tests/productHistoryHelpers.test.mjs` | frontend-root | 44 | 1.4 | Project source/support file |
 | 492 | `frontend/tests/productImportPlanner.test.mjs` | frontend-root | 279 | 13.6 | Project source/support file |
@@ -521,7 +521,7 @@ Total files documented: **603**
 | 509 | `frontend/tests/settingsRefresh.test.mjs` | frontend-root | 73 | 1.6 | Project source/support file |
 | 510 | `frontend/tests/storagePolicy.test.mjs` | frontend-root | 42 | 1.3 | Project source/support file |
 | 511 | `frontend/tests/utilsSettingsBarrel.test.mjs` | frontend-root | 19 | 1.1 | Project source/support file |
-| 512 | `frontend/tsconfig.json` | frontend-root | 42 | 1.2 | Configuration/data manifest |
+| 512 | `frontend/tsconfig.json` | frontend-root | 44 | 1.2 | Configuration/data manifest |
 | 513 | `frontend/vite.config.mjs` | frontend-root | 234 | 9.1 | Project source/support file |
 | 514 | `ops/scripts/architecture/generated-bulk-audit.mjs` | project-scripts | 607 | 23.0 | Project source/support file |
 | 515 | `ops/scripts/architecture/language-runtime-audit.mjs` | project-scripts | 1566 | 67.6 | Project source/support file |
