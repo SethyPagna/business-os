@@ -102,10 +102,11 @@ export function getVariantChoices(product: ProductRecord | null | undefined, var
 }
 
 export function buildPosFilterMeta(filters: Record<string, unknown> = {}, fallbackInitials: unknown[] = []): PosFilterMeta {
+  const initials = Array.isArray(filters?.initials) ? filters.initials : fallbackInitials
   return {
     brands: Array.isArray(filters?.brands) ? filters.brands : [],
     suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
-    initials: aggregateInitialOptions(filters?.initials || fallbackInitials || []),
+    initials: aggregateInitialOptions(initials),
   }
 }
 
