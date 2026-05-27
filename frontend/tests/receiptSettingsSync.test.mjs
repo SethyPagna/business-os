@@ -12,7 +12,8 @@ const settingsWriteOptionsSource = fs.readFileSync(new URL('../src/utils/setting
 
 assert.match(appContextSource, /const saveSettings = useCallback\(async \(newSettings, options = \{\}\)/)
 assert.match(appContextSource, /const normalizedOptions = normalizeSettingsWriteOptions\(options\)/)
-assert.match(appContextSource, /window\.api\.saveSettings\(serverUpdates, normalizedOptions\)/)
+assert.match(appContextSource, /const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000/)
+assert.match(appContextSource, /withLoaderTimeout\(\s*\(\) => window\.api\.saveSettings\(serverUpdates, normalizedOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/)
 assert.match(appContextSource, /if \(!normalizedOptions\.silentToast\) notify\(t\('settings_saved'\)\)/)
 
 assert.match(receiptSettingsSource, /silentToast:\s*!options\.showToast/)

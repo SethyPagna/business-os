@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../AppContext.jsx'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from './loaders.mjs'
+
+const ACTION_HISTORY_LOAD_TIMEOUT_MS = 10000
+const ACTION_HISTORY_USERS_TIMEOUT_MS = 8000
 
 function normalizeEntry(entry = {}, index = 0) {
   return {
@@ -22,6 +31,8 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   const [busy, setBusy] = useState('')
   const [userFilter, setUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState([])
+  const historyRequestRef = useRef(0)
+  const usersRequestRef = useRef(0)
   const isAdmin = useMemo(() => {
     const roleCode = String(user?.role_code || '').toLowerCase()
     const username = String(user?.username || '').toLowerCase()
@@ -35,12 +46,18 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   }, [user])
 
   const refreshServerItems = useCallback(() => {
-    if (typeof window === 'undefined' || !window.api?.getActionHistory) return
-    window.api.getActionHistory(scope, Math.max(3, limit), {
-      all: isAdmin ? 1 : undefined,
-      userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
-    })
+    if (typeof window === 'undefined' || !window.api?.getActionHistory) return Promise.resolve()
+    const requestId = beginTrackedRequest(historyRequestRef)
+    return withLoaderTimeout(
+      () => window.api.getActionHistory(scope, Math.max(3, limit), {
+        all: isAdmin ? 1 : undefined,
+        userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
+      }),
+      'Action history',
+      ACTION_HISTORY_LOAD_TIMEOUT_MS,
+    )
       .then((result) => {
+        if (!isTrackedRequestCurrent(historyRequestRef, requestId)) return
         setServerItems(Array.isArray(result?.items) ? result.items : [])
       })
       .catch(() => {})
@@ -54,10 +71,24 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   useEffect(() => {
     if (!enabled) return
     if (!isAdmin || typeof window === 'undefined' || !window.api?.getUsers) return
-    window.api.getUsers()
-      .then((rows) => setUserOptions(Array.isArray(rows) ? rows : []))
-      .catch(() => setUserOptions([]))
+    const requestId = beginTrackedRequest(usersRequestRef)
+    withLoaderTimeout(
+      () => window.api.getUsers(),
+      'Action history users',
+      ACTION_HISTORY_USERS_TIMEOUT_MS,
+    )
+      .then((rows) => {
+        if (!isTrackedRequestCurrent(usersRequestRef, requestId)) return
+        setUserOptions(Array.isArray(rows) ? rows : [])
+      })
+      .catch(() => {})
+    return () => invalidateTrackedRequest(usersRequestRef)
   }, [enabled, isAdmin])
+
+  useEffect(() => () => {
+    invalidateTrackedRequest(historyRequestRef)
+    invalidateTrackedRequest(usersRequestRef)
+  }, [])
 
   const pushAction = useCallback((entry) => {
     const nextEntry = normalizeEntry(entry)

@@ -69,7 +69,7 @@ await runTest('background import modals notify parent pages when a job is queued
     '../src/components/inventory/InventoryImportModal.jsx',
     '../src/components/sales/SalesImportModal.jsx',
     '../src/components/contacts/ContactImportModal.jsx',
-    '../src/components/products/BulkImportModal.jsx',
+    '../src/components/products/import/BulkImportModal.jsx',
   ]
   for (const file of files) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')

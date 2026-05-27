@@ -64,6 +64,17 @@ await runTest('receipt export supports PNG image download from the same rendered
   assert.match(receiptSource, /receipt_image_short|saving_image/)
 })
 
+await runTest('receipt asset inlining uses bounded workers', () => {
+  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+  assert.match(utilSource, /const RECEIPT_ASSET_INLINE_CONCURRENCY = 3/)
+  assert.match(utilSource, /async function mapReceiptAssets/)
+  assert.match(utilSource, /Math\.min\(RECEIPT_ASSET_INLINE_CONCURRENCY, list\.length\)/)
+  assert.match(utilSource, /await mapReceiptAssets\(images, async \(image\) =>/)
+  assert.match(utilSource, /await mapReceiptAssets\(nodes, async \(node\) =>/)
+  assert.doesNotMatch(utilSource, /Promise\.all\(images\.map/)
+  assert.doesNotMatch(utilSource, /Promise\.all\(nodes\.map/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

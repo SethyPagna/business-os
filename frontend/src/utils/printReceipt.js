@@ -5,6 +5,7 @@ import {
 } from './receiptAppliedConfig.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
+const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
 
 function parsePrintNumber(value, fallback) {
   const parsed = Number.parseFloat(String(value ?? ''))
@@ -143,10 +144,24 @@ function blobToDataUrl(blob) {
   })
 }
 
+async function mapReceiptAssets(items, worker) {
+  const list = Array.from(items || [])
+  if (!list.length) return
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(RECEIPT_ASSET_INLINE_CONCURRENCY, list.length) }, async () => {
+    while (nextIndex < list.length) {
+      const index = nextIndex
+      nextIndex += 1
+      await worker(list[index], index)
+    }
+  })
+  await Promise.all(workers)
+}
+
 async function inlineImageNodeSources(root) {
   if (!root || !(root instanceof HTMLElement)) return
   const images = Array.from(root.querySelectorAll('img'))
-  await Promise.all(images.map(async (image) => {
+  await mapReceiptAssets(images, async (image) => {
     const src = String(image.getAttribute('src') || '').trim()
     if (!src || /^data:/i.test(src)) return
     try {
@@ -163,7 +178,7 @@ async function inlineImageNodeSources(root) {
       image.removeAttribute('src')
       image.style.visibility = 'hidden'
     }
-  }))
+  })
 }
 
 function extractUrlsFromCssValue(value) {
@@ -175,7 +190,7 @@ function extractUrlsFromCssValue(value) {
 async function inlineStyleAssetUrls(root) {
   if (!root || !(root instanceof HTMLElement)) return
   const nodes = [root, ...root.querySelectorAll('*')]
-  await Promise.all(nodes.map(async (node) => {
+  await mapReceiptAssets(nodes, async (node) => {
     if (!(node instanceof HTMLElement)) return
     const style = node.getAttribute('style') || ''
     const urls = extractUrlsFromCssValue(style)
@@ -203,7 +218,7 @@ async function inlineStyleAssetUrls(root) {
     }
 
     node.setAttribute('style', nextStyle)
-  }))
+  })
 }
 
 function normalizePrintableRoot(root, widthMm) {

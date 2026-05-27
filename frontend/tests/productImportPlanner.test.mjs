@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { analyzeProductImportRows, analyzeProductImportText } from '../src/components/products/productImportPlanner.mjs'
+import { analyzeProductImportRows, analyzeProductImportText } from '../src/components/products/import/productImportPlanner.mjs'
 
 let failed = 0
 
@@ -170,13 +170,13 @@ await runTest('large product import analysis keeps deterministic row counts', ()
 })
 
 await runTest('bulk import modal does not fetch the full product catalog before review', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /await\s+window\.api\.getProducts\(/)
   assert.match(source, /Existing-product conflicts\s+[\s\S]*server import job/)
 })
 
 await runTest('bulk import modal stops the async start sequence after cancel is requested', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
   assert.match(source, /useRef/)
   assert.match(source, /cancelRequestedRef/)
   assert.match(source, /throwIfImportCancelled/)
@@ -185,8 +185,8 @@ await runTest('bulk import modal stops the async start sequence after cancel is 
   assert.match(source, /isBlockingProductImportIssue/)
   assert.match(source, /blockingIssueCount/)
 
-  const startMatches = [...source.matchAll(/await\s+window\.api\.startImportJob\(jobId,\s*\{\s*source:/g)]
-  assert.ok(startMatches.length >= 2, 'expected image-only and CSV import start calls')
+  const startMatches = [...source.matchAll(/await\s+withLoaderTimeout\(\s*\(\) => window\.api\.startImportJob\(jobId,\s*\{\s*source:/g)]
+  assert.ok(startMatches.length >= 2, 'expected timeout-wrapped image-only and CSV import start calls')
   for (const match of startMatches) {
     const previousGuard = source.lastIndexOf('throwIfImportCancelled()', match.index)
     assert.ok(previousGuard >= 0, 'startImportJob must be guarded by throwIfImportCancelled')
@@ -195,7 +195,7 @@ await runTest('bulk import modal stops the async start sequence after cancel is 
 })
 
 await runTest('bulk import modal surfaces grouped families, filter hints, inline edits, undo, and target clarity', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
 
   assert.match(source, /CONFLICT_FILTER_OPTIONS/)
   assert.doesNotMatch(source, /value:\s*'identifier',\s*label:\s*'SKU\/barcode'/)
@@ -213,10 +213,13 @@ await runTest('bulk import modal surfaces grouped families, filter hints, inline
   assert.match(source, /buildVisibleFamilyRows/)
   assert.match(source, /createFamilyContextEntry/)
   assert.match(source, /visibleReviewRowCount/)
+  assert.match(source, /const conflictGroups = useMemo\(\(\) => \{[\s\S]*for \(const entry of conflicts\)/)
+  assert.doesNotMatch(source, /sameName:\s*conflicts\.filter\(/)
+  assert.doesNotMatch(source, /pricing:\s*conflicts\.filter\(/)
 })
 
 await runTest('bulk import modal explains specific review errors before apply', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
 
   assert.match(source, /getProductImportRowIssueDetails/)
   assert.match(source, /reviewIssueSummary/)
@@ -233,7 +236,7 @@ await runTest('bulk import modal explains specific review errors before apply', 
 })
 
 await runTest('bulk import modal has collapsible inline details and cancelled job recovery', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
 
   assert.match(source, /collapsedDetailRows/)
   assert.match(source, /toggleInlineDetails/)
@@ -244,6 +247,30 @@ await runTest('bulk import modal has collapsible inline details and cancelled jo
   assert.match(source, /Back to upload/)
   assert.match(source, /cancelledImportRecovery/)
   assert.match(source, /isCancelledStartError/)
+  assert.match(source, /const IMPORT_JOB_STATUS_TIMEOUT_MS = 10000/)
+  assert.match(source, /const IMPORT_JOB_PREFLIGHT_TIMEOUT_MS = 15000/)
+  assert.match(
+    source,
+    /withLoaderTimeout\(\s*\(\) => window\.api\.getImportJob\(jobId\),\s*'Product import job status',\s*IMPORT_JOB_STATUS_TIMEOUT_MS,\s*\)/,
+  )
+  assert.match(
+    source,
+    /withLoaderTimeout\(\s*\(\) => window\.api\.preflightImportJob\(jobId\),\s*'Product import preflight',\s*IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,\s*\)/,
+  )
+  assert.doesNotMatch(source, /const payload = await window\.api\.getImportJob\(jobId\)/)
+  assert.doesNotMatch(source, /const preflight = await window\.api\.preflightImportJob\(jobId\)/)
+})
+
+await runTest('corrupted Khmer text is blocked before import', () => {
+  const analysis = analyzeProductImportRows([
+    { name: '??????? CeraVe Serum', brand: '????', selling_price_usd: '12', stock_quantity: '1' },
+  ], [])
+
+  assert.equal(analysis.cleanRows.length, 0)
+  assert.equal(analysis.conflicts.length, 1)
+  assert.equal(analysis.conflicts[0].conflictType, 'possible_encoding_corruption')
+  assert.deepEqual(analysis.conflicts[0].issueTypes, ['possible_encoding_corruption'])
+  assert.match(analysis.errors[0], /UTF-8 or UTF-16/)
 })
 
 if (failed > 0) {

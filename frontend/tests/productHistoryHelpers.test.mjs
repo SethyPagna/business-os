@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createProductHistoryRequestId, orderProductRestoreSnapshots } from '../src/components/products/productHistoryHelpers.mjs'
+import { createProductHistoryRequestId, orderProductRestoreSnapshots } from '../src/components/products/history/productHistoryHelpers.mjs'
 
 let failed = 0
 

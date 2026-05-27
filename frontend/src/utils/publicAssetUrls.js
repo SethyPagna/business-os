@@ -1,4 +1,5 @@
 import { STORAGE_KEYS } from '../constants.js'
+import { FRONTEND_BUILD_INFO } from '../api/http.js'
 
 function trimBaseUrl(value) {
   return String(value || '').trim().replace(/\/$/, '')
@@ -10,6 +11,21 @@ function normalizeUploadPath(value) {
   if (raw.startsWith('/uploads/')) return raw
   if (raw.startsWith('uploads/')) return `/${raw}`
   return raw
+}
+
+function appendAssetVersion(url, version = '') {
+  const normalizedVersion = String(version || '').trim()
+  if (!normalizedVersion || /^data:|^blob:/i.test(String(url || ''))) return url
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+    if (!parsed.pathname.startsWith('/uploads/')) return url
+    if (!parsed.searchParams.get('v')) parsed.searchParams.set('v', normalizedVersion)
+    if (/^https?:\/\//i.test(String(url || ''))) return parsed.toString()
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`
+  } catch (_) {
+    const joiner = String(url || '').includes('?') ? '&' : '?'
+    return `${url}${joiner}v=${encodeURIComponent(normalizedVersion)}`
+  }
 }
 
 function isLocalLikeHostname(hostname = '') {
@@ -50,5 +66,6 @@ export function resolvePublicAssetUrl(value, options = {}) {
   const configuredBase = trimBaseUrl(options.publicAssetBaseUrl || getStoredPublicAssetBaseUrl())
   const fallbackBase = trimBaseUrl(options.fallbackBaseUrl || getSafeCurrentOrigin())
   const base = configuredBase || fallbackBase
-  return base ? `${base}${normalized}` : normalized
+  const assetUrl = base ? `${base}${normalized}` : normalized
+  return appendAssetVersion(assetUrl, options.assetVersion || FRONTEND_BUILD_INFO.hash || '')
 }

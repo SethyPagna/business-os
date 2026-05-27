@@ -11,8 +11,23 @@
     "lib": ["ES2022", "DOM"]
   },
   "include": [
+    "src/app/**/*.ts",
     "src/types/**/*.ts",
-    "src/utils/**/*.ts"
+    "src/components/catalog/**/*.ts",
+    "src/components/contacts/**/*.ts",
+    "src/components/dashboard/charts/**/*.ts",
+    "src/components/inventory/**/*.ts",
+    "src/components/pos/**/*.ts",
+    "src/components/sales/**/*.ts",
+    "src/components/receipt-settings/**/*.ts",
+    "src/components/shared/**/*.ts",
+    "src/components/utils-settings/**/*.ts",
+    "src/platform/storage/**/*.ts",
+    "src/utils/**/*.ts",
+    "src/components/products/helpers/**/*.ts",
+    "src/components/products/history/**/*.ts",
+    "src/components/products/import/**/*.ts",
+    "src/components/products/scanning/**/*.ts"
   ],
   "exclude": [
     "node_modules"

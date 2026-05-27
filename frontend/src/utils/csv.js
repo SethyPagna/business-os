@@ -2,6 +2,7 @@
 // Shared CSV download helper used across Dashboard, Products, Contacts, and Utils.
 
 export const UTF8_BOM = '\uFEFF'
+const ZIP_EXPORT_WORKER_TIMEOUT_MS = 30000
 
 function escapeCsvValue(value) {
   if (value == null) return ''
@@ -41,6 +42,18 @@ export function downloadCSV(filename, rows) {
   const csv = buildCSV(rows)
   if (!csv) return
   downloadBlob(filename, new Blob([UTF8_BOM, csv], { type: 'text/csv;charset=utf-8' }))
+}
+
+function normalizeZipFile(file) {
+  if (!file) return null
+  const name = String(file.name || file.filename || '').trim()
+  if (!name) return null
+  let content = file.content
+  if ((content === undefined || content === null) && Array.isArray(file.rows)) {
+    content = buildCSV(file.rows)
+  }
+  if (content === undefined || content === null) return null
+  return { name, content: String(content) }
 }
 
 const CRC32_TABLE = (() => {
@@ -87,10 +100,11 @@ function encodeZipTimestamp(date = new Date()) {
 export function buildZip(files = []) {
   const encoder = new TextEncoder()
   const normalizedFiles = files
-    .filter((file) => file && file.name && file.content !== undefined && file.content !== null)
+    .map(normalizeZipFile)
+    .filter(Boolean)
     .map((file) => ({
-      name: String(file.name),
-      bytes: encoder.encode(String(file.content)),
+      name: file.name,
+      bytes: encoder.encode(file.content),
     }))
   if (!normalizedFiles.length) return null
 
@@ -160,8 +174,42 @@ export function buildZip(files = []) {
   return new Blob([...localParts, ...centralParts, endRecord], { type: 'application/zip' })
 }
 
+export function buildZipInWorker(files = [], options = {}) {
+  const timeoutMs = Number(options.timeoutMs || ZIP_EXPORT_WORKER_TIMEOUT_MS)
+  if (typeof Worker !== 'function') return Promise.resolve(buildZip(files))
+  return new Promise((resolve) => {
+    let worker = null
+    let settled = false
+    const finish = (blob) => {
+      if (settled) return
+      settled = true
+      globalThis.clearTimeout(timeout)
+      worker?.terminate()
+      resolve(blob || buildZip(files))
+    }
+    const timeout = globalThis.setTimeout(() => finish(buildZip(files)), timeoutMs)
+    try {
+      worker = new Worker(new URL('./csvExportWorker.mjs', import.meta.url), { type: 'module' })
+      worker.onmessage = (event) => {
+        const message = event?.data || {}
+        finish(message.type === 'result' ? message.blob : null)
+      }
+      worker.onerror = () => finish(buildZip(files))
+      worker.postMessage({ id: `${Date.now()}:${Math.random()}`, files })
+    } catch (_) {
+      finish(buildZip(files))
+    }
+  })
+}
+
 export function downloadZipFiles(filename, files = []) {
   const blob = buildZip(files)
+  if (!blob) return
+  downloadBlob(filename, blob)
+}
+
+export async function downloadZipFilesAsync(filename, files = [], options = {}) {
+  const blob = await buildZipInWorker(files, options)
   if (!blob) return
   downloadBlob(filename, blob)
 }

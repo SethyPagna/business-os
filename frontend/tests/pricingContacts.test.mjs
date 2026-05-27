@@ -91,9 +91,9 @@ await runTest('serializeContactOptions round-trips structured contact options', 
 })
 
 await runTest('customer membership generation always uses the LCMN prefix', () => {
-  const source = readFileSync(new URL('../src/components/contacts/customerMembershipNumber.js', import.meta.url), 'utf8')
-  assert.match(source, /const prefix = 'LCMN'/)
-  assert.match(source, /return `\$\{prefix\}-\$\{entropy\.slice\(-8\)\.padStart\(8, '0'\)\}`/)
+  const source = readFileSync(new URL('../src/components/contacts/customerMembershipNumber.ts', import.meta.url), 'utf8')
+  assert.match(source, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LCMN'/)
+  assert.match(source, /return `\$\{CUSTOMER_MEMBERSHIP_PREFIX\}-\$\{entropy\.slice\(-MEMBERSHIP_ENTROPY_LENGTH\)\.padStart\(MEMBERSHIP_ENTROPY_LENGTH, '0'\)\}`/)
 })
 
 await runTest('customers tab loads loyalty points from the main customer payload', () => {

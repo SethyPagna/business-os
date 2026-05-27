@@ -39,6 +39,18 @@ await runTest('grouped products resolve to their parent card and sorted variant 
   assert.deepEqual(visible.map((item) => item.id), [1])
 })
 
+await runTest('product lookup ignores invalid ids', () => {
+  const productsById = buildProductsById([
+    { id: 1, name: 'Valid' },
+    { id: 'bad', name: 'Bad' },
+    { id: null, name: 'Missing' },
+  ])
+
+  assert.equal(productsById.get(1).name, 'Valid')
+  assert.equal(productsById.has(Number.NaN), false)
+  assert.equal(productsById.size, 1)
+})
+
 await runTest('same-name standalone products collapse into one POS card with distinct choices', () => {
   const products = [
     { id: 21, name: 'Velvet Tint', parent_id: null, selling_price_usd: 7.5 },
