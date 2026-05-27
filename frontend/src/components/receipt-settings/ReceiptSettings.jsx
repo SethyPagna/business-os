@@ -12,6 +12,9 @@ import PrintSettings     from './PrintSettings'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
+const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000
+const RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS = 10000
+
 // ----- Shared primitives (defined locally to avoid circular imports) ----------
 function Section({ title, children }) {
   return (
@@ -112,6 +115,7 @@ export default function ReceiptSettings() {
           },
         ),
         'Receipt settings save',
+        RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
       )
       if (result?.conflict) {
         throw new Error(t('settings_conflict') || 'Settings changed on another device. Reload and try again.')
@@ -120,10 +124,18 @@ export default function ReceiptSettings() {
 
       if (options.showToast) {
         try {
-          await withLoaderTimeout(() => loadSettingsRef.current(), 'Receipt settings refresh')
+          await withLoaderTimeout(
+            () => loadSettingsRef.current(),
+            'Receipt settings refresh',
+            RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS,
+          )
         } catch (_) {}
       } else {
-        Promise.resolve(loadSettingsRef.current()).catch(() => {})
+        void withLoaderTimeout(
+          () => loadSettingsRef.current(),
+          'Receipt settings silent refresh',
+          RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS,
+        ).catch(() => {})
       }
     } catch (error) {
       if (options.showToast) {
@@ -198,9 +210,12 @@ export default function ReceiptSettings() {
       {/* ?€?€ Editor panel ?€?€ */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-gray-50 dark:bg-zinc-950">
         <div className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50/95 px-4 pb-3 pt-4 backdrop-blur dark:border-gray-800 dark:bg-zinc-950/95 sm:px-6 sm:pt-6">
-          <h1 className="flex min-w-0 flex-1 items-center gap-2 truncate text-lg font-bold text-gray-900 dark:text-white sm:text-2xl">
+          <h1
+            className="flex min-w-0 flex-1 items-center gap-2 truncate text-lg font-bold text-gray-900 dark:text-white sm:text-2xl"
+            title={t('rs_auto_save_hint') || 'Toggle any field on/off. All changes auto-save and apply instantly to the live preview and to receipts printed from POS & Sales.'}
+          >
             <Printer className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            {t('receipt_template')}
+            {t('receipt_settings') || t('receipt_template') || 'Receipt Settings'}
           </h1>
           <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
             <button onClick={() => setPreviewOpen(true)} className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:hidden">

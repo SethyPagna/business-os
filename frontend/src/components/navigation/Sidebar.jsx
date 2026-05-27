@@ -25,6 +25,7 @@ import UserProfileModal from '../users/UserProfileModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import NotificationCenter from '../shared/NotificationCenter'
+import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.mjs'
 
 const ICONS_BY_ID = {
   dashboard: LayoutDashboard,
@@ -88,6 +89,13 @@ function withAlpha(hex, alpha) {
 
 function mergeStyles(...styles) {
   return Object.assign({}, ...styles.filter(Boolean))
+}
+
+function announcePageIntent(pageId, source = 'pointer') {
+  if (typeof window === 'undefined' || !pageId) return
+  window.dispatchEvent(new CustomEvent(APP_PAGE_INTENT_EVENT, {
+    detail: { pageId, source },
+  }))
 }
 
 export default function Sidebar() {
@@ -170,7 +178,9 @@ export default function Sidebar() {
               return (
                 <button
                   key={item.id}
+                  onFocus={() => announcePageIntent(item.id, 'focus')}
                   onClick={() => navigateTo(item.id)}
+                  onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
                   className={`${sidebarBg ? `flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors ${hoverClass} ${textClass} ${isActiveItem ? activeClass : ''}` : `sidebar-item flex w-full items-center gap-2 text-left ${isActiveItem ? 'active' : ''}`} ${item.id === 'server' ? 'mt-2' : ''}`}
                   style={isActiveItem ? activeStyle : textStyle}
                 >
@@ -260,22 +270,27 @@ export default function Sidebar() {
           return (
             <button
               key={item.id}
+              onFocus={() => announcePageIntent(item.id, 'focus')}
               onClick={() => { navigateTo(item.id); setMoreOpen(false) }}
-              className={`flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (isActiveItem ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
+              onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
+              onTouchStart={() => announcePageIntent(item.id, 'touch')}
+              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (isActiveItem ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
               style={isActiveItem ? mobileActiveStyle : mobileInactiveStyle}
             >
-              <Icon className="h-4 w-4" />
-              <span className="max-w-[62px] truncate text-[10px] font-medium">{getNavLabel(item, t, language)}</span>
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="block max-w-[68px] truncate whitespace-nowrap text-center text-[9.5px] font-medium leading-3">
+                {getNavLabel(item, t, language)}
+              </span>
             </button>
           )
         })}
         <button
           onClick={() => setMoreOpen((open) => !open)}
-          className={`flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (moreOpen ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
+          className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (moreOpen ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
           style={moreOpen ? mobileActiveStyle : mobileInactiveStyle}
         >
-          <MoreHorizontal className="h-4 w-4" />
-          <span className="text-[10px] font-medium">{t('more') || 'More'}</span>
+          <MoreHorizontal className="h-4 w-4 shrink-0" />
+          <span className="block max-w-[68px] truncate whitespace-nowrap text-center text-[9.5px] font-medium leading-3">{t('more') || 'More'}</span>
         </button>
       </nav>
 
@@ -293,7 +308,10 @@ export default function Sidebar() {
                 return (
                   <button
                     key={item.id}
+                    onFocus={() => announcePageIntent(item.id, 'focus')}
                     onClick={() => { navigateTo(item.id); setMoreOpen(false) }}
+                    onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
+                    onTouchStart={() => announcePageIntent(item.id, 'touch')}
                     className={`relative flex flex-col items-center gap-1.5 rounded-xl p-3 text-xs font-medium transition-colors ${!sidebarTextColor ? (isActiveItem ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-400') : (isActiveItem ? 'bg-white/70 dark:bg-slate-800/70' : 'bg-gray-50 dark:bg-gray-800')}`}
                     style={isActiveItem ? mobileActiveStyle : mobileInactiveStyle}
                   >

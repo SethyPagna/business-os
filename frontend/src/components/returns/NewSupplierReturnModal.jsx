@@ -6,6 +6,11 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+
+const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
+const SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS = 12000
+const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000
 
 export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmtUSD, fmtKHR }) {
   const { user, t } = useApp()
@@ -31,7 +36,9 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const [compensationKhr, setCompensationKhr] = useState('')
   const bootstrapRequestRef = useRef(0)
   const inventoryRequestRef = useRef(0)
+  const productsBranchRef = useRef('')
   const aliveRef = useRef(true)
+  const submitInFlightRef = useRef(false)
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -50,6 +57,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
             window.api.getSuppliers(),
           ]),
           'Supplier return setup',
+          SUPPLIER_RETURN_SETUP_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         const activeBranches = (branchRows || []).filter((branch) => branch.is_active)
@@ -63,8 +71,6 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         notify(error?.message || tr('failed_to_load_data', 'Failed to load data'), 'error')
-        setBranches([])
-        setSuppliers([])
       } finally {
         if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         setLoading(false)
@@ -77,25 +83,31 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   useEffect(() => {
     if (!branchId) {
       invalidateTrackedRequest(inventoryRequestRef)
+      productsBranchRef.current = ''
       setLoadingProducts(false)
       setProducts([])
       return undefined
     }
     const requestId = beginTrackedRequest(inventoryRequestRef)
+    if (productsBranchRef.current !== String(branchId)) {
+      setProducts([])
+      setQuantities({})
+    }
     setLoadingProducts(true)
     async function loadInventory() {
       try {
         const rows = await withLoaderTimeout(
           () => window.api.getInventorySummary({ branchId: Number(branchId) }),
           'Supplier return inventory',
+          SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         const next = (rows || []).filter((product) => (product.display_quantity || 0) > 0)
+        productsBranchRef.current = String(branchId)
         setProducts(next)
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         notify(error?.message || tr('failed_to_load_data', 'Failed to load data'), 'error')
-        setProducts([])
       } finally {
         if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         setLoadingProducts(false)
@@ -159,30 +171,36 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     if (!reason.trim()) return notify(tr('return_reason_required', 'Reason is required'), 'error')
     if (!selectedItems.length) return notify(tr('select_items_to_return', 'Select at least one item to return.'), 'error')
 
+    if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
-      await window.api.createSupplierReturn({
-        cashier_id: user?.id || null,
-        cashier_name: user?.name || user?.username || null,
-        branch_id: Number(branchId),
-        supplier_id: Number(supplierId),
-        supplier_name: supplier?.name || null,
-        reason: reason.trim(),
-        notes: notes.trim() || null,
-        settlement,
-        supplier_compensation_usd: effectiveCompensationUsd,
-        supplier_compensation_khr: effectiveCompensationKhr,
-        items: selectedItems,
-      })
+      const result = await withLoaderTimeout(
+        () => window.api.createSupplierReturn({
+          cashier_id: user?.id || null,
+          cashier_name: user?.name || user?.username || null,
+          branch_id: Number(branchId),
+          supplier_id: Number(supplierId),
+          supplier_name: supplier?.name || null,
+          reason: reason.trim(),
+          notes: notes.trim() || null,
+          settlement,
+          supplier_compensation_usd: effectiveCompensationUsd,
+          supplier_compensation_khr: effectiveCompensationKhr,
+          items: selectedItems,
+        }),
+        'Create supplier return',
+        SUPPLIER_RETURN_CREATE_TIMEOUT_MS,
+      )
       notify(tr('supplier_return_success', 'Supplier return processed successfully'), 'success')
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
-      onSuccess?.()
+      await Promise.resolve(onSuccess?.(result))
       onClose?.()
     } catch (error) {
       notify(error?.message || tr('error', 'Error'), 'error')
     } finally {
+      finishSingleAction(submitInFlightRef)
       setSubmitting(false)
     }
   }

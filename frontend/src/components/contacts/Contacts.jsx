@@ -4,12 +4,20 @@
 import { Suspense, lazy, useState } from 'react'
 import { BookUser, Download, Truck, Upload, Users, Warehouse } from 'lucide-react'
 import { useApp } from '../../AppContext'
-import { downloadZipFiles } from '../../utils/csv'
+import { downloadZipFilesAsync } from '../../utils/csv'
 import { CustomersTab } from './CustomersTab'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'
-import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
+import { getFirstLoaderError, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.mjs'
+
+const CONTACTS_EXPORT_LOAD_TIMEOUT_MS = 12000
+
+function normalizeContactExportRows(value) {
+  if (Array.isArray(value)) return value
+  if (Array.isArray(value?.items)) return value.items
+  return []
+}
 
 const TABS = (t) => [
   { id: 'customers', label: t('customers') || 'Customers', icon: Users },
@@ -131,13 +139,25 @@ export default function Contacts() {
   const handleExportAll = async () => {
     try {
       const result = await settleLoaderMap({
-        customers: () => window.api.getCustomers(),
-        suppliers: () => window.api.getSuppliers(),
-        delivery: () => window.api.getDeliveryContacts(),
+        customers: () => withLoaderTimeout(
+          () => window.api.getCustomers(),
+          'Contacts export customers',
+          CONTACTS_EXPORT_LOAD_TIMEOUT_MS,
+        ),
+        suppliers: () => withLoaderTimeout(
+          () => window.api.getSuppliers(),
+          'Contacts export suppliers',
+          CONTACTS_EXPORT_LOAD_TIMEOUT_MS,
+        ),
+        delivery: () => withLoaderTimeout(
+          () => window.api.getDeliveryContacts(),
+          'Contacts export delivery',
+          CONTACTS_EXPORT_LOAD_TIMEOUT_MS,
+        ),
       })
-      const customers = Array.isArray(result.values.customers) ? result.values.customers : []
-      const suppliers = Array.isArray(result.values.suppliers) ? result.values.suppliers : []
-      const delivery = Array.isArray(result.values.delivery) ? result.values.delivery : []
+      const customers = normalizeContactExportRows(result.values.customers)
+      const suppliers = normalizeContactExportRows(result.values.suppliers)
+      const delivery = normalizeContactExportRows(result.values.delivery)
       const today = new Date().toISOString().slice(0, 10)
 
       const files = []
@@ -187,7 +207,7 @@ export default function Contacts() {
       }
 
       if (files.length) {
-        downloadZipFiles(`contacts-export-${today}.zip`, files)
+        await downloadZipFilesAsync(`contacts-export-${today}.zip`, files)
       }
 
       const total = customers.length + suppliers.length + delivery.length

@@ -10,6 +10,7 @@ import PageHeader from '../shared/PageHeader'
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.mjs'
+import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.js'
 import {
   buildCacheBustedMediaPath,
@@ -17,6 +18,10 @@ import {
   reduceUploadState,
   sanitizePersistedMediaPath,
 } from '../../utils/mediaUpload.js'
+
+const SETTINGS_OTP_STATUS_TIMEOUT_MS = 8000
+const SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS = 8000
+const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
 const FALLBACK_COPY = {
   en: {
@@ -360,11 +365,14 @@ export default function Settings() {
   const [settingsSection, setSettingsSection] = useState('all')
   const [settingsConflict, setSettingsConflict] = useState(null)
   const [showConflictReview, setShowConflictReview] = useState(false)
+  const [savingSettings, setSavingSettings] = useState(false)
   const [uploadStates, setUploadStates] = useState(() => ({
     ui_app_favicon_image: createInitialUploadState(),
   }))
   const otpStatusRequestRef = useRef(0)
   const faviconPreviewRequestRef = useRef(0)
+  const settingsSaveInFlightRef = useRef(false)
+  const uploadInFlightKeysRef = useRef(new Set())
   const uploadControllersRef = useRef(new Map())
   const uploadOriginalValuesRef = useRef(new Map())
   const uploadPreviewUrlsRef = useRef(new Map())
@@ -438,7 +446,11 @@ export default function Settings() {
     const requestId = beginTrackedRequest(otpStatusRequestRef)
     async function loadOtpStatus() {
       try {
-        const result = await withLoaderTimeout(() => window.api.otpStatus(user.id), 'OTP status')
+        const result = await withLoaderTimeout(
+          () => window.api.otpStatus(user.id),
+          'OTP status',
+          SETTINGS_OTP_STATUS_TIMEOUT_MS,
+        )
         if (!aliveRef.current || !isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
         setOtpStatus(!!result?.otpEnabled)
       } catch {
@@ -467,7 +479,7 @@ export default function Settings() {
         const preview = await withLoaderTimeout(
           () => createCircularFaviconDataUrl(source, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
           'Settings favicon preview',
-          8000,
+          SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS,
         )
         if (!isTrackedRequestCurrent(faviconPreviewRequestRef, requestId) || !aliveRef.current) return
         setAppFaviconPreview(preview || source)
@@ -651,6 +663,7 @@ export default function Settings() {
   }, [updateUploadState])
 
   const uploadImageSetting = async (key) => {
+    if (!beginKeyedAction(uploadInFlightKeysRef, key)) return
     try {
       const file = await new Promise((resolve) => {
         const input = document.createElement('input')
@@ -677,13 +690,17 @@ export default function Settings() {
         fileName: file.name,
         previewUrl: localPreview,
       })
-      const uploaded = await window.api.uploadFileAsset({
-        file,
-        userId: user?.id,
-        userName: user?.name,
-        signal: controller.signal,
-        onProgress: ({ percent }) => updateUploadState(key, { type: 'progress', progress: percent }),
-      })
+      const uploaded = await withLoaderTimeout(
+        () => window.api.uploadFileAsset({
+          file,
+          userId: user?.id,
+          userName: user?.name,
+          signal: controller.signal,
+          onProgress: ({ percent }) => updateUploadState(key, { type: 'progress', progress: percent }),
+        }),
+        'Upload settings image',
+        SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,
+      )
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
       if (!aliveRef.current) return
       const nextPath = buildCacheBustedMediaPath(uploaded.public_path, uploaded.cache_version)
@@ -704,40 +721,49 @@ export default function Settings() {
         if (!cancelled) notify(error?.message || 'Image upload failed', 'error')
       }
     } finally {
+      finishKeyedAction(uploadInFlightKeysRef, key)
       uploadControllersRef.current.delete(key)
       uploadOriginalValuesRef.current.delete(key)
     }
   }
 
   const handleSaveSettings = async () => {
+    if (!beginSingleAction(settingsSaveInFlightRef, { blocked: savingSettings })) return
     if (uploadingImage) {
+      finishSingleAction(settingsSaveInFlightRef)
       notify(uiLanguage === 'km' ? 'សូមរង់ចាំឱ្យការផ្ទុករូបភាពបញ្ចប់សិន។' : 'Wait for the image upload to finish before saving settings.', 'error')
       return
     }
+    setSavingSettings(true)
     const sanitizedForm = {
       ...form,
       ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, settings.ui_app_favicon_image || ''),
     }
-    const result = await saveSettings(sanitizedForm, {
-      reason: 'settings-saved',
-      source: 'settings:form-save',
-    })
-    if (result?.conflict) {
-      setSettingsConflict(buildSettingsConflictState({
-        attempted: result?.attempted || sanitizedForm,
-        currentSettings: result?.currentSettings || {},
-        actualUpdatedAt: result?.actualUpdatedAt || null,
-        expectedUpdatedAt: result?.expectedUpdatedAt || null,
+    try {
+      const result = await saveSettings(sanitizedForm, {
+        reason: 'settings-saved',
+        source: 'settings:form-save',
+      })
+      if (result?.conflict) {
+        setSettingsConflict(buildSettingsConflictState({
+          attempted: result?.attempted || sanitizedForm,
+          currentSettings: result?.currentSettings || {},
+          actualUpdatedAt: result?.actualUpdatedAt || null,
+          expectedUpdatedAt: result?.expectedUpdatedAt || null,
+        }))
+        setShowConflictReview(false)
+        return
+      }
+      setForm((current) => ({
+        ...current,
+        ui_app_favicon_image: sanitizedForm.ui_app_favicon_image,
       }))
+      setSettingsConflict(null)
       setShowConflictReview(false)
-      return
+    } finally {
+      finishSingleAction(settingsSaveInFlightRef)
+      setSavingSettings(false)
     }
-    setForm((current) => ({
-      ...current,
-      ui_app_favicon_image: sanitizedForm.ui_app_favicon_image,
-    }))
-    setSettingsConflict(null)
-    setShowConflictReview(false)
   }
 
   const conflictFieldRows = useMemo(() => (
@@ -804,9 +830,9 @@ export default function Settings() {
         className="mb-6"
         stackOnMobile={false}
         actions={(
-          <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium sm:px-4 sm:py-2 sm:text-sm" onClick={handleSaveSettings}>
+          <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium sm:px-4 sm:py-2 sm:text-sm" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
             <Save className="h-4 w-4" />
-            <span>{t('save')}</span>
+            <span>{savingSettings ? (t('saving') || 'Saving...') : t('save')}</span>
           </button>
         )}
       />
@@ -1691,8 +1717,8 @@ export default function Settings() {
           </SettingsSection>
         ) : null}
 
-        <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={handleSaveSettings}>
-          {t('save')}
+        <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
+          {savingSettings ? (t('saving') || 'Saving...') : t('save')}
         </button>
       </div>
     </div>

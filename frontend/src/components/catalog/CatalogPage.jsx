@@ -26,8 +26,6 @@ import {
   Ticket,
   Upload,
 } from 'lucide-react'
-import enTranslations from '../../lang/en.json'
-import kmTranslations from '../../lang/km.json'
 import { useIsPageActive } from '../shared/pageActivity'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import {
@@ -36,6 +34,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { SectionShell } from './catalogUi'
 import {
   createAboutBlock,
@@ -53,7 +52,7 @@ import {
   productMatchesPortalBranches,
 } from './portalCatalogDisplay.mjs'
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
-import { ProductImg } from '../products/primitives'
+import { ProductImg } from '../products/shared/primitives'
 import {
   FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
   getPortalLanguageText,
@@ -97,6 +96,21 @@ const CatalogEditorSurface = lazy(loadCatalogEditorSurface)
 const CatalogSecondaryTabs = lazy(loadCatalogSecondaryTabs)
 const CatalogProductsSection = lazy(loadCatalogProductsSection)
 const CatalogPreviewSurface = lazy(loadCatalogPreviewSurface)
+
+const CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS = 8000
+const CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS = 10000
+const CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
+const CATALOG_PORTAL_CONFIG_TIMEOUT_MS = 10000
+const CATALOG_PORTAL_META_TIMEOUT_MS = 10000
+const CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
+const CATALOG_PORTAL_FAVICON_TIMEOUT_MS = 8000
+const CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS = 25000
+const CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
+const CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS = 30000
+const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
+const CATALOG_PORTAL_REVIEW_TIMEOUT_MS = 12000
+const CATALOG_SUBMISSION_MAX_SCREENSHOTS = 8
+const CATALOG_IMAGE_READ_CONCURRENCY = 2
 
 function getAboutBlockLabel(type) {
   if (type === 'image') return 'Image block'
@@ -757,6 +771,34 @@ function ImageField({
   )
 }
 
+function readImageFileAsDataUrl(file, errorMessage = 'Failed to read image') {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error(errorMessage))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function readImageFilesAsDataUrls(files, { limit = CATALOG_SUBMISSION_MAX_SCREENSHOTS, errorMessage = 'Failed to read image' } = {}) {
+  const selected = Array.from(files || [])
+    .filter((file) => file && String(file.type || '').startsWith('image/'))
+    .slice(0, Math.max(0, Number(limit) || 0))
+  if (!selected.length) return []
+
+  const results = new Array(selected.length)
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(CATALOG_IMAGE_READ_CONCURRENCY, selected.length) }, async () => {
+    while (nextIndex < selected.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await readImageFileAsDataUrl(selected[index], errorMessage)
+    }
+  })
+  await Promise.all(workers)
+  return results.filter(Boolean)
+}
+
 /** Open picker for one image and return data URL for immediate preview/save. */
 async function pickImageAsDataUrl() {
   const file = await new Promise((resolve) => {
@@ -767,13 +809,7 @@ async function pickImageAsDataUrl() {
     input.click()
   })
   if (!file) return null
-
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('Failed to read image'))
-    reader.readAsDataURL(file)
-  })
+  return readImageFileAsDataUrl(file)
 }
 
 /** Open picker for multiple images and return data URLs. */
@@ -786,15 +822,7 @@ async function pickMultipleImagesAsDataUrls() {
     input.onchange = () => resolve(Array.from(input.files || []))
     input.click()
   })
-
-  const images = await Promise.all(files.map((file) => new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('Failed to read image'))
-    reader.readAsDataURL(file)
-  })))
-
-  return images.filter(Boolean)
+  return readImageFilesAsDataUrls(files)
 }
 
 /** Replace localized {token} placeholders with runtime values. */
@@ -805,14 +833,6 @@ function replaceVars(template, values) {
 function getPortalResourceText(lang, key) {
   const packed = getPortalLanguageText(lang, key)
   if (packed) return packed
-  const bundle = lang === 'km' ? kmTranslations : enTranslations
-  const scoped = bundle?.pages?.publicPortal?.[key]
-    || bundle?.publicPortal?.[key]
-    || bundle?.pages?.portalEditor?.[key]
-    || bundle?.portalEditor?.[key]
-  if (typeof scoped === 'string' && scoped.trim() && !isBrokenLocalizedString(scoped)) return scoped
-  const topLevel = bundle?.[key]
-  if (typeof topLevel === 'string' && topLevel.trim() && !isBrokenLocalizedString(topLevel)) return topLevel
   return ''
 }
 
@@ -1073,6 +1093,7 @@ export default function CatalogPage({ publicView = false }) {
   const publicScrollAnchorRef = useRef(0)
   const publicPortalNavRef = useRef(null)
   const mediaUploadControllersRef = useRef(new Map())
+  const mediaUploadInFlightTargetsRef = useRef(new Set())
   const mediaUploadPreviewUrlsRef = useRef(new Map())
   const mediaUploadOriginalValuesRef = useRef(new Map())
   const aliveRef = useRef(true)
@@ -1295,7 +1316,11 @@ export default function CatalogPage({ publicView = false }) {
     const requestId = beginTrackedRequest(assistantStatusRequestRef)
     async function loadAssistantStatus() {
       try {
-        const result = await withLoaderTimeout(() => window.api.getPortalAiStatus(), 'Portal AI status')
+        const result = await withLoaderTimeout(
+          () => window.api.getPortalAiStatus(),
+          'Portal AI status',
+          CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS,
+        )
         if (!aliveRef.current || !isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
         setAssistantUsage(result?.usage || null)
         setAssistantRequestPolicy(result?.requestPolicy || null)
@@ -1378,8 +1403,16 @@ export default function CatalogPage({ publicView = false }) {
 
   async function loadPortalEditorData(requestId, nextConfig, nextMeta, nextProducts) {
     const [providersResult, reviewResult] = await Promise.allSettled([
-      withLoaderTimeout(() => window.api.getAiProviders(), 'Portal AI providers'),
-      withLoaderTimeout(() => window.api.getPortalSubmissionsForReview(), 'Portal review items'),
+      withLoaderTimeout(
+        () => window.api.getAiProviders(),
+        'Portal AI providers',
+        CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
+      ),
+      withLoaderTimeout(
+        () => window.api.getPortalSubmissionsForReview(),
+        'Portal review items',
+        CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
+      ),
     ])
     if (!isPortalLoadCurrent(requestId)) return
 
@@ -1422,7 +1455,7 @@ export default function CatalogPage({ publicView = false }) {
       if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId) && reportError) {
         setPortalError('')
       }
-      await withLoaderTimeout(() => loadPortal(), 'Customer portal')
+      await withLoaderTimeout(() => loadPortal(), 'Customer portal', CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS)
     } catch (error) {
       if (!aliveRef.current || !isTrackedRequestCurrent(portalBootstrapRequestRef, requestId) || !reportError) return
       setPortalError(error?.message || 'Failed to load customer portal')
@@ -1438,7 +1471,11 @@ export default function CatalogPage({ publicView = false }) {
     if (!isPageActive) return
     const requestId = beginTrackedRequest(loadRequestRef)
     if (publicView) {
-      const portalConfig = await window.api.getPortalConfig()
+      const portalConfig = await withLoaderTimeout(
+        () => window.api.getPortalConfig(),
+        'Portal config',
+        CATALOG_PORTAL_CONFIG_TIMEOUT_MS,
+      )
       if (!isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
       const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
@@ -1461,7 +1498,11 @@ export default function CatalogPage({ publicView = false }) {
         reviewItems: [],
       })
 
-      window.api.getPortalCatalogMeta?.()
+      withLoaderTimeout(
+        () => window.api.getPortalCatalogMeta?.(),
+        'Portal catalog metadata',
+        CATALOG_PORTAL_META_TIMEOUT_MS,
+      )
         .then((metaResult) => {
           if (!aliveRef.current || !isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
           setCategories(Array.isArray(metaResult?.categories) ? metaResult.categories : [])
@@ -1472,7 +1513,11 @@ export default function CatalogPage({ publicView = false }) {
       return
     }
 
-    const bootstrapResult = await window.api.getPortalBootstrap()
+    const bootstrapResult = await withLoaderTimeout(
+      () => window.api.getPortalBootstrap(),
+      'Portal bootstrap',
+      CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS,
+    )
     if (!isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
     const portalConfig = bootstrapResult?.config || null
@@ -1576,7 +1621,11 @@ export default function CatalogPage({ publicView = false }) {
       initial: portalProductInitial,
     }
 
-    withLoaderTimeout(() => window.api.searchPortalCatalogProducts(params), 'Portal product search', 12000)
+    withLoaderTimeout(
+      () => window.api.searchPortalCatalogProducts(params),
+      'Portal product search',
+      CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS,
+    )
       .then((result) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
         const nextItems = Array.isArray(result?.items) ? result.items : []
@@ -1707,7 +1756,7 @@ export default function CatalogPage({ publicView = false }) {
       withLoaderTimeout(
         () => createCircularFaviconDataUrl(iconSource, faviconOptions),
         'Portal favicon',
-        8000,
+        CATALOG_PORTAL_FAVICON_TIMEOUT_MS,
       )
         .then((faviconHref) => {
           if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
@@ -2081,6 +2130,7 @@ export default function CatalogPage({ publicView = false }) {
   async function uploadPortalMedia(target, accept = 'image/*') {
     const targetKey = String(target || '').trim()
     if (!targetKey) return ''
+    if (!beginKeyedAction(mediaUploadInFlightTargetsRef, targetKey)) return ''
     try {
       const file = await new Promise((resolve) => {
         const input = document.createElement('input')
@@ -2107,13 +2157,17 @@ export default function CatalogPage({ publicView = false }) {
         previewUrl: localPreview,
       })
 
-      const uploaded = await window.api.uploadFileAsset({
-        file,
-        userId: user?.id,
-        userName: user?.name,
-        signal: controller.signal,
-        onProgress: ({ percent }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
-      })
+      const uploaded = await withLoaderTimeout(
+        () => window.api.uploadFileAsset({
+          file,
+          userId: user?.id,
+          userName: user?.name,
+          signal: controller.signal,
+          onProgress: ({ percent }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
+        }),
+        'Upload portal media',
+        CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,
+      )
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
       if (!aliveRef.current) return ''
 
@@ -2137,6 +2191,7 @@ export default function CatalogPage({ publicView = false }) {
       }
       return ''
     } finally {
+      finishKeyedAction(mediaUploadInFlightTargetsRef, targetKey)
       mediaUploadControllersRef.current.delete(targetKey)
       mediaUploadOriginalValuesRef.current.delete(targetKey)
     }
@@ -2538,6 +2593,7 @@ export default function CatalogPage({ publicView = false }) {
           profile: assistantProfile,
         }),
         'Portal AI request',
+        CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(assistantRequestRef, requestId)) return
       setAssistantResponse(result || null)
@@ -2574,6 +2630,7 @@ export default function CatalogPage({ publicView = false }) {
       const result = await withLoaderTimeout(
         () => window.api.lookupPortalMembership(value),
         label,
+        CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(membershipLookupRequestRef, requestId)) return null
       if (!result) {
@@ -2587,9 +2644,6 @@ export default function CatalogPage({ publicView = false }) {
       return result
     } catch (error) {
       if (!isTrackedRequestCurrent(membershipLookupRequestRef, requestId)) return null
-      if (clearOnMissing) {
-        setMembershipData(null)
-      }
       setMembershipError(error?.message || 'Lookup failed')
       return null
     } finally {
@@ -2618,7 +2672,7 @@ export default function CatalogPage({ publicView = false }) {
     if (!aliveRef.current) return
     setSubmissionDraft((current) => ({
       ...current,
-      screenshots: [...current.screenshots, ...next].slice(0, 8),
+      screenshots: [...current.screenshots, ...next].slice(0, CATALOG_SUBMISSION_MAX_SCREENSHOTS),
     }))
   }
 
@@ -2629,12 +2683,12 @@ export default function CatalogPage({ publicView = false }) {
 
     if (!files.length) return
     event.preventDefault()
-    const images = await Promise.all(files.map((file) => new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = () => reject(new Error('Failed to read pasted image'))
-      reader.readAsDataURL(file)
-    })))
+    const remainingSlots = CATALOG_SUBMISSION_MAX_SCREENSHOTS - submissionDraft.screenshots.length
+    if (remainingSlots <= 0) return
+    const images = await readImageFilesAsDataUrls(files, {
+      limit: remainingSlots,
+      errorMessage: 'Failed to read pasted image',
+    })
     await addSubmissionImages(images)
   }
 
@@ -2653,17 +2707,20 @@ export default function CatalogPage({ publicView = false }) {
       return
     }
 
-    if (submissionSavingRef.current) return
+    if (!beginSingleAction(submissionSavingRef, { blocked: submissionSaving })) return
 
     try {
-      submissionSavingRef.current = true
       setSubmissionSaving(true)
-      await window.api.createPortalSubmission({
-        membershipNumber: membershipNumberValue,
-        platform: submissionDraft.platform,
-        note: submissionDraft.note,
-        screenshots: submissionDraft.screenshots,
-      })
+      await withLoaderTimeout(
+        () => window.api.createPortalSubmission({
+          membershipNumber: membershipNumberValue,
+          platform: submissionDraft.platform,
+          note: submissionDraft.note,
+          screenshots: submissionDraft.screenshots,
+        }),
+        'Create portal submission',
+        CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS,
+      )
       notify(copy('shareSubmitted', 'Submission sent for review.'), 'success')
       setSubmissionDraft({ platform: '', note: '', screenshots: [] })
       await refreshMembershipData(membershipNumberValue, {
@@ -2677,24 +2734,27 @@ export default function CatalogPage({ publicView = false }) {
     } catch (error) {
       notify(error?.message || 'Submission failed', 'error')
     } finally {
-      submissionSavingRef.current = false
+      finishSingleAction(submissionSavingRef)
       setSubmissionSaving(false)
     }
   }
 
   async function handleReviewSubmission(item, status) {
-    if (reviewSavingRef.current) return
+    if (!beginSingleAction(reviewSavingRef, { blocked: reviewSavingId != null, value: item.id })) return
 
     try {
-      reviewSavingRef.current = true
       setReviewSavingId(item.id)
-      await window.api.reviewPortalSubmission(item.id, {
-        status,
-        reward_points: item.reward_points || 0,
-        review_note: item.review_note || '',
-        userId: user?.id,
-        userName: user?.name,
-      })
+      await withLoaderTimeout(
+        () => window.api.reviewPortalSubmission(item.id, {
+          status,
+          reward_points: item.reward_points || 0,
+          review_note: item.review_note || '',
+          userId: user?.id,
+          userName: user?.name,
+        }),
+        'Review portal submission',
+        CATALOG_PORTAL_REVIEW_TIMEOUT_MS,
+      )
       notify(copy('reviewSaved', 'Review saved.'), 'success')
       await loadPortal()
       if (membershipData?.customer?.membership_number) {
@@ -2707,7 +2767,7 @@ export default function CatalogPage({ publicView = false }) {
     } catch (error) {
       notify(error?.message || 'Failed to save review', 'error')
     } finally {
-      reviewSavingRef.current = false
+      finishSingleAction(reviewSavingRef)
       setReviewSavingId(null)
     }
   }

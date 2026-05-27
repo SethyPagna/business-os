@@ -11,6 +11,7 @@ import UserProfileModal from './UserProfileModal'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -60,6 +61,10 @@ const INITIAL_ROLE_FORM = {
   name: '',
   permissions: {},
 }
+const USERS_LIST_TIMEOUT_MS = 8000
+const ROLES_LIST_TIMEOUT_MS = 8000
+const USER_MUTATION_TIMEOUT_MS = 12000
+const ROLE_MUTATION_TIMEOUT_MS = 12000
 
 /**
  * 1.2.1 Render-safe fallback for nullable contact values.
@@ -138,11 +143,23 @@ export default function Users() {
     confirmPassword: '',
   })
   const [saving, setSaving] = useState(false)
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [deletingRoleId, setDeletingRoleId] = useState(null)
+  const saveUserInFlightRef = useRef(false)
+  const passwordInFlightRef = useRef(false)
+  const saveRoleInFlightRef = useRef(false)
+  const deleteRoleInFlightRef = useRef(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [rolesLoading, setRolesLoading] = useState(false)
   const [loadError, setLoadError] = useState(null)
   const actionHistory = useActionHistory({ limit: 3, notify })
+  const runUserMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, USER_MUTATION_TIMEOUT_MS)
+  ), [])
+  const runRoleMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, ROLE_MUTATION_TIMEOUT_MS)
+  ), [])
 
   /**
    * 2. Authorization Guards
@@ -174,16 +191,12 @@ export default function Users() {
         setRolesLoading(true)
       }
       try {
-        const nextRoles = await withLoaderTimeout(() => window.api.getRoles(), 'Roles list', 8000)
+        const nextRoles = await withLoaderTimeout(() => window.api.getRoles(), 'Roles list', ROLES_LIST_TIMEOUT_MS)
         if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
         setRoles(Array.isArray(nextRoles) ? nextRoles : [])
         rolesLoadedOnceRef.current = true
       } catch (error) {
         if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
-        if (!rolesLoadedOnceRef.current) {
-          setRoles([])
-          rolesLoadedOnceRef.current = true
-        }
         if (tab === 'roles') {
           notify(error?.message || tr('roles_load_failed', 'Failed to load roles'), 'warning')
         }
@@ -226,7 +239,7 @@ export default function Users() {
       }
       try {
         const usersResult = await Promise.allSettled([
-          withLoaderTimeout(() => window.api.getUsers(), 'Users list', 8000),
+          withLoaderTimeout(() => window.api.getUsers(), 'Users list', USERS_LIST_TIMEOUT_MS),
         ])
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -248,11 +261,8 @@ export default function Users() {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const nextMessage = error?.message || tr('users_load_failed', 'Failed to load users')
         if (!loadedOnceRef.current) {
-          setUsers([])
-          setRoles([])
           setLoadError(nextMessage)
           notify(nextMessage, 'error')
-          loadedOnceRef.current = true
         } else {
           const refreshMessage = tr('users_refresh_failed', 'Unable to refresh users right now. Showing the latest loaded data.')
           setLoadError((current) => current || refreshMessage)
@@ -427,6 +437,7 @@ export default function Users() {
       notify(tr('cannot_manage_admin_account', 'You cannot modify another admin account.'), 'error')
       return
     }
+    if (!beginSingleAction(saveUserInFlightRef, { blocked: saving })) return
 
     setSaving(true)
     try {
@@ -444,8 +455,8 @@ export default function Users() {
       }
 
       const result = selectedUser
-        ? await window.api.updateUser(selectedUser.id, payload)
-        : await window.api.createUser({ ...payload, password: userForm.password })
+        ? await runUserMutation(() => window.api.updateUser(selectedUser.id, payload), 'Update user')
+        : await runUserMutation(() => window.api.createUser({ ...payload, password: userForm.password }), 'Create user')
 
       if (result?.success === false) {
         notify(result.error || 'Failed to save user', 'error')
@@ -458,12 +469,12 @@ export default function Users() {
         actionHistory.pushAction({
           label: `Edit user ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const undoResult = await window.api.updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot))
+            const undoResult = await runUserMutation(() => window.api.updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot)), 'Undo user update')
             if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore user')
             await load({ silent: true })
           },
           redo: async () => {
-            const redoResult = await window.api.updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot))
+            const redoResult = await runUserMutation(() => window.api.updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot)), 'Redo user update')
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply user changes')
             await load({ silent: true })
           },
@@ -478,6 +489,7 @@ export default function Users() {
     } catch (error) {
       notify(error?.message || 'Failed to save user', 'error')
     } finally {
+      finishSingleAction(saveUserInFlightRef)
       setSaving(false)
     }
   }
@@ -509,15 +521,17 @@ export default function Users() {
       notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
       return
     }
+    if (!beginSingleAction(passwordInFlightRef, { blocked: passwordSaving })) return
 
+    setPasswordSaving(true)
     try {
-      const result = await window.api.changeUserPassword(selectedUser.id, {
+      const result = await runUserMutation(() => window.api.changeUserPassword(selectedUser.id, {
         currentPassword: allowAdminOverride ? undefined : currentPassword,
         newPassword,
         adminOverride: allowAdminOverride,
         userId: currentUser?.id,
         userName: currentUser?.name,
-      })
+      }), 'Change user password')
       if (result?.success === false) {
         notify(result.error || 'Failed to change password', 'error')
         return
@@ -531,6 +545,9 @@ export default function Users() {
       setModal(null)
     } catch (error) {
       notify(error?.message || 'Failed to change password', 'error')
+    } finally {
+      finishSingleAction(passwordInFlightRef)
+      setPasswordSaving(false)
     }
   }
 
@@ -539,6 +556,7 @@ export default function Users() {
       notify(tr('role_name_required', 'Role name is required'), 'error')
       return
     }
+    if (!beginSingleAction(saveRoleInFlightRef, { blocked: saving })) return
 
     setSaving(true)
     try {
@@ -550,8 +568,8 @@ export default function Users() {
         userName: currentUser?.name,
       }
       const result = selectedRole
-        ? await window.api.updateRole(selectedRole.id, payload)
-        : await window.api.createRole(payload)
+        ? await runRoleMutation(() => window.api.updateRole(selectedRole.id, payload), 'Update role')
+        : await runRoleMutation(() => window.api.createRole(payload), 'Create role')
 
       if (result?.success === false) {
         notify(result.error || 'Failed to save role', 'error')
@@ -564,12 +582,12 @@ export default function Users() {
         actionHistory.pushAction({
           label: `Edit role ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const undoResult = await window.api.updateRole(previousSnapshot.id, buildRoleWritePayload(previousSnapshot))
+            const undoResult = await runRoleMutation(() => window.api.updateRole(previousSnapshot.id, buildRoleWritePayload(previousSnapshot)), 'Undo role update')
             if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
             await load({ silent: true })
           },
           redo: async () => {
-            const redoResult = await window.api.updateRole(nextSnapshot.id, buildRoleWritePayload(nextSnapshot))
+            const redoResult = await runRoleMutation(() => window.api.updateRole(nextSnapshot.id, buildRoleWritePayload(nextSnapshot)), 'Redo role update')
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply role changes')
             await load({ silent: true })
           },
@@ -581,12 +599,12 @@ export default function Users() {
           actionHistory.pushAction({
             label: `Add role ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              const undoResult = await window.api.deleteRole(createdRoleId, { userId: currentUser?.id, userName: currentUser?.name })
+              const undoResult = await runRoleMutation(() => window.api.deleteRole(createdRoleId, { userId: currentUser?.id, userName: currentUser?.name }), 'Undo role creation')
               if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to undo role creation')
               await load({ silent: true })
             },
             redo: async () => {
-              const redoResult = await window.api.createRole(buildRoleWritePayload(createdSnapshot))
+              const redoResult = await runRoleMutation(() => window.api.createRole(buildRoleWritePayload(createdSnapshot)), 'Redo role creation')
               if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to recreate role')
               createdRoleId = extractHistoryResultId(redoResult)
               await load({ silent: true })
@@ -603,6 +621,7 @@ export default function Users() {
     } catch (error) {
       notify(error?.message || 'Failed to save role', 'error')
     } finally {
+      finishSingleAction(saveRoleInFlightRef)
       setSaving(false)
     }
   }
@@ -615,14 +634,19 @@ export default function Users() {
       notify(tr('users_assigned_count', '{n} user(s) still assigned').replace('{n}', assignedCount), 'error')
       return
     }
-    if (!window.confirm(`Delete role "${role.name}"?`)) return
+    if (!beginSingleAction(deleteRoleInFlightRef, { blocked: deletingRoleId != null, value: role.id })) return
+    if (!window.confirm(`Delete role "${role.name}"?`)) {
+      finishSingleAction(deleteRoleInFlightRef)
+      return
+    }
 
+    setDeletingRoleId(role.id)
     try {
       const snapshot = cloneHistorySnapshot(role)
-      const result = await window.api.deleteRole(role.id, {
+      const result = await runRoleMutation(() => window.api.deleteRole(role.id, {
         userId: currentUser?.id,
         userName: currentUser?.name,
-      })
+      }), 'Delete role')
       if (result?.success === false) {
         notify(result.error || 'Failed to delete role', 'error')
         return
@@ -631,7 +655,7 @@ export default function Users() {
       actionHistory.pushAction({
         label: `Delete role ${snapshot.name || ''}`.trim(),
         undo: async () => {
-          const undoResult = await window.api.createRole(buildRoleWritePayload(snapshot))
+          const undoResult = await runRoleMutation(() => window.api.createRole(buildRoleWritePayload(snapshot)), 'Undo role deletion')
           if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
           restoredRoleId = extractHistoryResultId(undoResult)
           await load({ silent: true })
@@ -639,7 +663,7 @@ export default function Users() {
         redo: async () => {
           const targetId = restoredRoleId || Number(snapshot.id || 0)
           if (!targetId) return
-          const redoResult = await window.api.deleteRole(targetId, { userId: currentUser?.id, userName: currentUser?.name })
+          const redoResult = await runRoleMutation(() => window.api.deleteRole(targetId, { userId: currentUser?.id, userName: currentUser?.name }), 'Redo role deletion')
           if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to delete role again')
           await load({ silent: true })
         },
@@ -648,6 +672,9 @@ export default function Users() {
       await load()
     } catch (error) {
       notify(error?.message || 'Failed to delete role', 'error')
+    } finally {
+      finishSingleAction(deleteRoleInFlightRef)
+      setDeletingRoleId(null)
     }
   }
 
@@ -842,7 +869,7 @@ export default function Users() {
                   {canManage ? (
                     <div className="flex gap-2">
                       <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => openEditRole(role)} disabled={role.is_system}>{t('edit') || 'Edit'}</button>
-                      {!role.is_system ? <button type="button" className="btn-danger px-3 py-1 text-xs" onClick={() => handleDeleteRole(role)}>{t('delete') || 'Delete'}</button> : null}
+                      {!role.is_system ? <button type="button" className="btn-danger px-3 py-1 text-xs" onClick={() => handleDeleteRole(role)} disabled={deletingRoleId === role.id}>{deletingRoleId === role.id ? (t('loading') || 'Deleting...') : (t('delete') || 'Delete')}</button> : null}
                     </div>
                   ) : null}
                 </div>
@@ -974,7 +1001,7 @@ export default function Users() {
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" className="btn-secondary" onClick={() => setModal(null)}>{t('cancel') || 'Cancel'}</button>
-              <button type="button" className="btn-primary" onClick={handleResetPassword}>{tr('change_password', 'Change password')}</button>
+              <button type="button" className="btn-primary" onClick={handleResetPassword} disabled={passwordSaving}>{passwordSaving ? (t('loading') || 'Saving...') : tr('change_password', 'Change password')}</button>
             </div>
           </div>
         </Modal>

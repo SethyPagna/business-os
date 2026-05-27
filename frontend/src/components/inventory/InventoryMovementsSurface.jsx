@@ -1,5 +1,5 @@
 ﻿import { Fragment } from 'react'
-import { ChevronDown, ChevronRight, Package } from 'lucide-react'
+import { ChevronDown, ChevronRight, Info, Package } from 'lucide-react'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import ExportMenu from '../shared/ExportMenu'
 
@@ -49,13 +49,24 @@ export default function InventoryMovementsSurface({
   visibleMovementQuantity,
   visibleMovementRecordCount,
 }) {
+  const movementInfo = tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.')
+
   return (
         <>
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/60">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('grouped_movement_history', 'Grouped movement history', '?????????????????????????????')}</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">{tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.', '??????????????????????????????? ??????????????????????????? ?????????????????????? ????????? ????????? ????????????')}</div>
+                <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-white">
+                  <span>{tr('grouped_movement_history', 'Grouped movement history')}</span>
+                  <button
+                    type="button"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-800 dark:hover:text-blue-300"
+                    title={movementInfo}
+                    aria-label={movementInfo}
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <div className="text-xs text-gray-500 dark:text-gray-400">{visibleMovementGroups.length} groups · {visibleMovementRecordCount} records · {visibleMovementQuantity} quantity</div>
@@ -66,11 +77,11 @@ export default function InventoryMovementsSurface({
                       type="button"
                       className="btn-secondary px-2.5 py-1 text-[11px]"
                       onClick={() => {
-                        if (!window.confirm(tr('confirm_export_selected_movements', 'Do you want to export the selected movement groups?', '?????????????????????????????????????????'))) return
+                        if (!window.confirm(tr('confirm_export_selected_movements'))) return
                         exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected')
                       }}
                     >
-                      {tr('export_selected', 'Export selected', '?????????????????')}
+                      {tr('export_selected', 'Export selected')}
                     </button>
                     <button type="button" className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedMovementIds(new Set())}>
                       {t('clear') || 'Clear'}
@@ -78,7 +89,7 @@ export default function InventoryMovementsSurface({
                   </div>
                 ) : null}
                 <ExportMenu
-                  label={tr('export', 'Export', '??????')}
+                  label={tr('export', 'Export')}
                   items={inventoryExportItems}
                   compact
                 />
@@ -95,7 +106,7 @@ export default function InventoryMovementsSurface({
                   className={`btn-secondary px-2.5 py-1 text-[11px] ${showMovementDateFilter ? 'border-blue-400 text-blue-700 dark:text-blue-300' : ''}`}
                   onClick={() => setShowMovementDateFilter((current) => !current)}
                 >
-                  {tr('custom_range', 'Custom range', '??????????????')}
+                  {tr('custom_range', 'Custom range')}
                 </button>
                 <div className="max-w-full truncate rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                   {movementDateRangeLabel}
@@ -118,7 +129,7 @@ export default function InventoryMovementsSurface({
             {showMovementDateFilter ? (
               <div className="mt-3 grid gap-3 sm:grid-cols-2 md:max-w-xl">
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('start_date', 'Start date', '????????????????????')}</span>
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('start_date', 'Start date')}</span>
                   <input
                     type="date"
                     className="input text-sm"
@@ -127,7 +138,7 @@ export default function InventoryMovementsSurface({
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('end_date', 'End date', '?????????????????')}</span>
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('end_date', 'End date')}</span>
                   <input
                     type="date"
                     className="input text-sm"
@@ -226,7 +237,7 @@ export default function InventoryMovementsSurface({
                                   </div>
                                   <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</div>
                                   <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
-                                    <span>{getMovementRecordCount(group)} {tr('records', 'records', '?????????')}</span>
+                                    <span>{getMovementRecordCount(group)} {tr('records', 'records')}</span>
                                     {group.branchSummary ? <span>{group.branchSummary}</span> : null}
                                     {group.userSummary ? <span>{group.userSummary}</span> : null}
                                   </div>
@@ -421,7 +432,7 @@ export default function InventoryMovementsSurface({
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
                                         {group.movementLabel}
                                       </span>
-                                      <span className="text-[10px] text-gray-400">{getMovementRecordCount(group)} {tr('records', 'records', '?????????')}</span>
+                                      <span className="text-[10px] text-gray-400">{getMovementRecordCount(group)} {tr('records', 'records')}</span>
                                     </div>
                                     {group.reasonSummary ? <div className="mt-1 max-w-[220px] truncate text-[11px] text-gray-500">{group.reasonSummary}</div> : null}
                                   </td>

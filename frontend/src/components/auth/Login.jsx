@@ -44,6 +44,23 @@ function clearPendingOauthLogin() {
   } catch (_) {}
 }
 
+function readOauthCallbackResult() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.OAUTH_CALLBACK_RESULT) || ''
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch (_) {
+    return null
+  }
+}
+
+function clearOauthCallbackResult() {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.OAUTH_CALLBACK_RESULT)
+  } catch (_) {}
+}
+
 function OauthButton({ icon: Icon, label, onClick, disabled, loading }) {
   return (
     <button
@@ -271,7 +288,11 @@ export default function Login() {
     const tokenType = String(hash.get('type') || url.searchParams.get('type') || '').trim().toLowerCase()
     const provider = String(url.searchParams.get('auth_provider') || '').trim().toLowerCase()
     const errorDescription = hash.get('error_description') || url.searchParams.get('error_description') || ''
-    if (!accessToken && !errorDescription) return undefined
+    const callbackResult = readOauthCallbackResult()
+    const matchingStoredCallback = callbackResult
+      && String(callbackResult.mode || '').trim().toLowerCase() === mode
+      && (!provider || String(callbackResult.provider || '').trim().toLowerCase() === provider)
+    if (!accessToken && !errorDescription && !matchingStoredCallback) return undefined
 
     const clearCallbackUrl = () => {
       const cleanUrl = `${url.origin}${url.pathname}`
@@ -293,12 +314,36 @@ export default function Login() {
 
       if (mode !== 'login') {
         clearPendingOauthLogin()
+        clearOauthCallbackResult()
         clearCallbackUrl()
+        return
+      }
+
+      if (matchingStoredCallback) {
+        clearPendingOauthLogin()
+        clearOauthCallbackResult()
+        clearCallbackUrl()
+        if (!isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) return
+        if (callbackResult.status !== 'success') {
+          setError(callbackResult.error || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
+          return
+        }
+        if (callbackResult.otpRequired) {
+          setOtpRequired(true)
+          setPendingUserId(callbackResult.userId)
+          return
+        }
+        if (callbackResult.user) {
+          await persistAuthenticatedUser(callbackResult.user, sessionDuration, callbackResult.sessionExpiresAt || '')
+          return
+        }
+        setError(callbackResult.error || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
         return
       }
 
       if (errorDescription) {
         clearPendingOauthLogin()
+        clearOauthCallbackResult()
         clearCallbackUrl()
         if (isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) setError(errorDescription)
         return
@@ -332,6 +377,7 @@ export default function Login() {
         }), 'OAuth sign-in completion')
         clearCallbackUrl()
         clearPendingOauthLogin()
+        clearOauthCallbackResult()
         if (!isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) return
 
         if (result?.otpRequired) {
@@ -347,6 +393,7 @@ export default function Login() {
       } catch (oauthError) {
         clearCallbackUrl()
         clearPendingOauthLogin()
+        clearOauthCallbackResult()
         if (isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) {
           setError(oauthError?.message || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
         }

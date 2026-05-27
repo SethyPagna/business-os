@@ -1,12 +1,15 @@
-﻿import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, RotateCcw, Search, Undo2 } from 'lucide-react'
-import { useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -14,6 +17,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 const ReturnDetailModal = lazy(() => import('./ReturnDetailModal'))
 const EditReturnModal = lazy(() => import('./EditReturnModal'))
 const NewReturnModal = lazy(() => import('./NewReturnModal'))
@@ -22,6 +26,10 @@ const ReturnsListSurface = lazy(() => import('./ReturnsListSurface'))
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
+const RETURNS_LOAD_TIMEOUT_MS = 20000
+const RETURNS_DETAIL_TIMEOUT_MS = 10000
+const RETURNS_SNAPSHOT_TIMEOUT_MS = 10000
+const RETURNS_HISTORY_RESTORE_TIMEOUT_MS = 15000
 
 function normalizeScope(value) {
   return value === SUPPLIER_SCOPE ? SUPPLIER_SCOPE : CUSTOMER_SCOPE
@@ -39,6 +47,34 @@ function getReturnTypeLabel(ret, tr) {
     return ret?.supplier_settlement || tr('settlement_refund', 'refund')
   }
   return ret?.return_type || tr('manual_return', 'manual')
+}
+
+function normalizeFiniteIdsFrom(items = [], getValue = (value) => value) {
+  return items.reduce((normalized, item) => {
+    const id = Number(getValue(item))
+    if (Number.isFinite(id)) normalized.push(id)
+    return normalized
+  }, [])
+}
+
+function normalizeFiniteIds(ids = []) {
+  return normalizeFiniteIdsFrom(ids)
+}
+
+function countSelectedIds(ids = [], selectedIds = new Set()) {
+  let count = 0
+  for (const id of ids) {
+    if (selectedIds.has(id)) count += 1
+  }
+  return count
+}
+
+function countActiveFlags(flags = []) {
+  let count = 0
+  for (const flag of flags) {
+    if (flag) count += 1
+  }
+  return count
 }
 
 function exportReturnRows(rows = [], tr) {
@@ -69,9 +105,7 @@ export default function Returns() {
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
     const candidate = fallbackKm || fallbackEn
-    return /(Ã|Â|â€|â€™|â€œ|â€|áž|áŸ|à¸|áº|Ð|Ñ|Ø|Ù|�|ï¿½)/.test(String(candidate || ''))
-      ? fallbackEn
-      : candidate
+    return isBrokenLocalizedString(String(candidate || '')) ? fallbackEn : candidate
   }, [])
   const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
@@ -103,9 +137,11 @@ export default function Returns() {
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
+  const historyRestoreInFlightRef = useRef(false)
   const loadPromiseRef = useRef(null)
   const loadWatchdogRef = useRef(null)
   const selectAllRef = useRef(null)
+  const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns' })
   const deferredSearch = useDeferredValue(search)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const returnsDateRange = useMemo(() => {
@@ -150,7 +186,7 @@ export default function Returns() {
           ...(typeFilter !== 'all' ? { type: typeFilter } : {}),
           ...returnsDateRange,
         }
-        const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns', 20000)
+        const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns', RETURNS_LOAD_TIMEOUT_MS)
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
         setRows(Array.isArray(result) ? result : [])
         loadedOnceRef.current = true
@@ -216,7 +252,11 @@ export default function Returns() {
     }
     setDetailRet(null)
     try {
-      const fresh = await withLoaderTimeout(() => window.api.getReturn(ret.id), 'Return details')
+      const fresh = await withLoaderTimeout(
+        () => window.api.getReturn(ret.id),
+        'Return details',
+        RETURNS_DETAIL_TIMEOUT_MS,
+      )
       if (!isTrackedRequestCurrent(editRequestRef, requestId)) return
       setEditRet(fresh || ret)
     } catch {
@@ -224,6 +264,102 @@ export default function Returns() {
       setEditRet(ret)
     }
   }
+
+  const buildReturnHistoryPayload = useCallback((snapshot) => {
+    if (!snapshot?.id) throw new Error('Return snapshot is missing an id')
+    return {
+      reason: snapshot.reason || '',
+      return_type: snapshot.return_type || 'restock',
+      notes: snapshot.notes || '',
+      total_refund_usd: snapshot.total_refund_usd || 0,
+      total_refund_khr: snapshot.total_refund_khr || 0,
+      branch_id: snapshot.branch_id || null,
+      updated_at: snapshot.updated_at || null,
+      items: (Array.isArray(snapshot.items) ? snapshot.items : []).map((item) => ({
+        sale_item_id: item.sale_item_id || null,
+        product_id: item.product_id || null,
+        product_name: item.product_name || null,
+        quantity: item.quantity || 0,
+        applied_price_usd: item.applied_price_usd || 0,
+        applied_price_khr: item.applied_price_khr || 0,
+        cost_price_usd: item.cost_price_usd || 0,
+        cost_price_khr: item.cost_price_khr || 0,
+        return_to_stock: item.return_to_stock !== false,
+        branch_id: item.branch_id || snapshot.branch_id || null,
+      })),
+    }
+  }, [])
+
+  const fetchReturnSnapshot = useCallback(async (returnId, fallback = null) => {
+    const numericId = Number(returnId || 0)
+    if (!numericId) return cloneHistorySnapshot(fallback || null)
+    try {
+      const latest = await withLoaderTimeout(
+        () => window.api.getReturn(numericId),
+        'Return snapshot',
+        RETURNS_SNAPSHOT_TIMEOUT_MS,
+      )
+      return cloneHistorySnapshot(latest || fallback || null)
+    } catch {
+      return cloneHistorySnapshot(fallback || null)
+    }
+  }, [])
+
+  const restoreReturnSnapshot = useCallback(async (snapshot, historyReason) => {
+    if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
+    if (!beginSingleAction(historyRestoreInFlightRef)) return
+    try {
+      await withLoaderTimeout(
+        () => window.api.updateReturn(snapshot.id, {
+          ...buildReturnHistoryPayload(snapshot),
+          notes: historyReason || snapshot.notes || '',
+        }),
+        'Restore return snapshot',
+        RETURNS_HISTORY_RESTORE_TIMEOUT_MS,
+      )
+      await loadReturns(true)
+    } finally {
+      finishSingleAction(historyRestoreInFlightRef)
+    }
+  }, [buildReturnHistoryPayload, loadReturns])
+
+  const handleReturnMutationSuccess = useCallback(async (mutation) => {
+    const kind = String(mutation?.kind || '')
+    const result = mutation?.result || null
+    const previousSnapshot = cloneHistorySnapshot(mutation?.previousSnapshot || null)
+    const createdId = Number(result?.id || mutation?.id || 0)
+    const effectiveId = createdId || Number(previousSnapshot?.id || 0)
+    const latestSnapshot = effectiveId
+      ? await fetchReturnSnapshot(effectiveId, mutation?.snapshot || previousSnapshot || result)
+      : null
+
+    await loadReturns(true)
+
+    if (kind === 'edit' && previousSnapshot?.id && latestSnapshot?.id) {
+      const returnLabel = latestSnapshot.return_number || previousSnapshot.return_number || `#${latestSnapshot.id}`
+      actionHistory.pushAction({
+        label: `Edit return ${returnLabel}`,
+        entity: 'return',
+        entity_id: latestSnapshot.id,
+        scope: 'returns',
+        undo: () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit'),
+        redo: () => restoreReturnSnapshot(latestSnapshot, 'Redo return edit'),
+      })
+      return
+    }
+
+    if (latestSnapshot?.id) {
+      const returnLabel = latestSnapshot.return_number || `#${latestSnapshot.id}`
+      actionHistory.pushAction({
+        label: kind === 'supplier-create'
+          ? `Create supplier return ${returnLabel}`
+          : `Create return ${returnLabel}`,
+        entity: kind === 'supplier-create' ? 'supplier_return' : 'return',
+        entity_id: latestSnapshot.id,
+        scope: 'returns',
+      })
+    }
+  }, [actionHistory, fetchReturnSnapshot, loadReturns, restoreReturnSnapshot])
 
   const availableYears = useMemo(
     () => getAvailableYears(rows, (ret) => ret?.created_at),
@@ -272,14 +408,14 @@ export default function Returns() {
     sortDirection: returnSortDirection,
   }), [filtered, monthFilter, returnGroupMode, returnSortDirection, timeMode, tr, yearFilter])
 
+  useEffect(() => {
+    setReturnPage(1)
+  }, [deferredSearch, monthFilter, returnGroupMode, returnSortDirection, scope, typeFilter, yearFilter])
+
   const allVisibleReturns = useMemo(
     () => allReturnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
     [allReturnSections],
   )
-
-  useEffect(() => {
-    setReturnPage(1)
-  }, [deferredSearch, monthFilter, returnGroupMode, returnSortDirection, scope, typeFilter, yearFilter])
 
   const pagedReturns = useMemo(
     () => paginateItems(allVisibleReturns, returnPage, returnPageSize),
@@ -303,8 +439,13 @@ export default function Returns() {
     [returnSections],
   )
 
+  const visibleIds = useMemo(
+    () => normalizeFiniteIdsFrom(visibleReturns, (ret) => ret.id),
+    [visibleReturns],
+  )
+
   useEffect(() => {
-    const validIds = new Set(visibleReturns.map((ret) => Number(ret.id)).filter((id) => Number.isFinite(id)))
+    const validIds = new Set(visibleIds)
     setSelectedIds((current) => {
       let changed = false
       const next = new Set()
@@ -317,7 +458,7 @@ export default function Returns() {
       })
       return changed ? next : current
     })
-  }, [visibleReturns])
+  }, [visibleIds])
 
   useEffect(() => {
     setCollapsedReturnSections((current) => {
@@ -326,11 +467,6 @@ export default function Returns() {
       return next.size === current.size ? current : next
     })
   }, [returnSections])
-
-  const visibleIds = useMemo(
-    () => visibleReturns.map((ret) => Number(ret.id)).filter((id) => Number.isFinite(id)),
-    [visibleReturns],
-  )
 
   const selectedReturns = useMemo(
     () => visibleReturns.filter((ret) => selectedIds.has(Number(ret.id))),
@@ -357,7 +493,8 @@ export default function Returns() {
   }, [visibleIds])
 
   const toggleSelectionScope = useCallback((ids, checked) => {
-    setSelectedIds((current) => toggleIdSet(current, ids, checked))
+    const normalized = normalizeFiniteIds(ids)
+    setSelectedIds((current) => toggleIdSet(current, normalized, checked))
   }, [])
 
   const toggleReturnSection = useCallback((sectionId) => {
@@ -370,30 +507,56 @@ export default function Returns() {
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id))),
+    (ids = []) => {
+      const normalized = normalizeFiniteIds(ids)
+      return normalized.length > 0 && countSelectedIds(normalized, selectedIds) === normalized.length
+    },
     [selectedIds],
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSelectionScopeFullySelected(ids),
-    [isSelectionScopeFullySelected, selectedIds],
+    (ids = []) => {
+      const normalized = normalizeFiniteIds(ids)
+      const selectedCount = countSelectedIds(normalized, selectedIds)
+      return selectedCount > 0 && selectedCount < normalized.length
+    },
+    [selectedIds],
   )
 
-  const customerRows = filtered.filter((ret) => normalizeScope(ret.return_scope) === CUSTOMER_SCOPE)
-  const supplierRows = filtered.filter((ret) => normalizeScope(ret.return_scope) === SUPPLIER_SCOPE)
+  const returnScopeSummary = useMemo(() => {
+    const summary = {
+      customerRows: [],
+      supplierRows: [],
+      customerStats: {
+        refundedUsd: 0,
+        restockCount: 0,
+        writeoffCount: 0,
+        refundOnlyCount: 0,
+      },
+      supplierStats: {
+        count: 0,
+        compensationUsd: 0,
+        lossUsd: 0,
+      },
+    }
+    for (const ret of filtered) {
+      if (normalizeScope(ret.return_scope) === SUPPLIER_SCOPE) {
+        summary.supplierRows.push(ret)
+        summary.supplierStats.count += 1
+        summary.supplierStats.compensationUsd += ret.supplier_compensation_usd || 0
+        summary.supplierStats.lossUsd += ret.supplier_loss_usd || 0
+        continue
+      }
+      summary.customerRows.push(ret)
+      summary.customerStats.refundedUsd += ret.total_refund_usd || 0
+      if (ret.return_type === 'restock') summary.customerStats.restockCount += 1
+      else if (ret.return_type === 'writeoff') summary.customerStats.writeoffCount += 1
+      else if (ret.return_type === 'refund') summary.customerStats.refundOnlyCount += 1
+    }
+    return summary
+  }, [filtered])
 
-  const customerStats = {
-    refundedUsd: customerRows.reduce((sum, ret) => sum + (ret.total_refund_usd || 0), 0),
-    restockCount: customerRows.filter((ret) => ret.return_type === 'restock').length,
-    writeoffCount: customerRows.filter((ret) => ret.return_type === 'writeoff').length,
-    refundOnlyCount: customerRows.filter((ret) => ret.return_type === 'refund').length,
-  }
-
-  const supplierStats = {
-    count: supplierRows.length,
-    compensationUsd: supplierRows.reduce((sum, ret) => sum + (ret.supplier_compensation_usd || 0), 0),
-    lossUsd: supplierRows.reduce((sum, ret) => sum + (ret.supplier_loss_usd || 0), 0),
-  }
+  const { customerRows, supplierRows, customerStats, supplierStats } = returnScopeSummary
 
   const exportVisible = useCallback((rowsToExport = visibleReturns, prefix = 'returns-visible') => {
     downloadCSV(`${prefix}-${new Date().toISOString().slice(0, 10)}.csv`, exportReturnRows(rowsToExport, tr))
@@ -492,7 +655,7 @@ export default function Returns() {
   }, [availableYears, isReturnsFilterMenuOpen, monthFilter, returnGroupMode, returnSortDirection, scope, tr, typeFilter, typeOptions, yearFilter])
 
   const activeFilterCount = useMemo(
-    () => [yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time', returnSortDirection !== 'desc'].filter(Boolean).length,
+    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time', returnSortDirection !== 'desc']),
     [monthFilter, returnGroupMode, returnSortDirection, scope, typeFilter, yearFilter],
   )
   const showReturnActionGroups = returnGroupMode === 'time+action'
@@ -557,39 +720,43 @@ export default function Returns() {
         </div>
       ) : null}
 
+      <div className="mb-3 overflow-x-auto pb-1">
+        <ActionHistoryBar history={actionHistory} className="min-w-max" t={t} />
+      </div>
+
       {scope === CUSTOMER_SCOPE ? (
-        <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-          <div className="card px-3 py-2">
+        <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('total_refunded', 'Total Refunded')} onClick={() => setTypeFilter('all')}>
             <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('total_refunded', 'Total Refunded')}</div>
             <div className="text-sm font-bold text-orange-700 dark:text-orange-400">{fmtUSD(customerStats.refundedUsd)}</div>
-          </div>
-          <div className="card px-3 py-2">
+          </button>
+          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('restocked', 'Restocked')} onClick={() => setTypeFilter('restock')}>
             <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('restocked', 'Restocked')}</div>
             <div className="text-sm font-bold text-green-700 dark:text-green-400">{customerStats.restockCount}</div>
-          </div>
-          <div className="card px-3 py-2">
+          </button>
+          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('written_off', 'Written Off')} onClick={() => setTypeFilter('writeoff')}>
             <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('written_off', 'Written Off')}</div>
             <div className="text-sm font-bold text-red-600 dark:text-red-400">{customerStats.writeoffCount}</div>
-          </div>
-          <div className="card px-3 py-2">
+          </button>
+          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('refund_only', 'Refund Only')} onClick={() => setTypeFilter('refund')}>
             <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('refund_only', 'Refund Only')}</div>
             <div className="text-sm font-bold text-blue-600 dark:text-blue-400">{customerStats.refundOnlyCount}</div>
-          </div>
+          </button>
         </div>
       ) : (
-        <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-          <div className="card px-3 py-2">
+        <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('supplier_returns', 'Supplier Returns')} onClick={() => setTypeFilter('all')}>
             <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('supplier_returns', 'Supplier Returns')}</div>
             <div className="text-sm font-bold text-gray-800 dark:text-gray-200">{supplierStats.count}</div>
-          </div>
-          <div className="card px-3 py-2">
+          </button>
+          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('supplier_compensation', 'Compensation')} onClick={() => setTypeFilter('refund')}>
             <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('supplier_compensation', 'Compensation')}</div>
             <div className="text-sm font-bold text-emerald-700 dark:text-emerald-400">{fmtUSD(supplierStats.compensationUsd)}</div>
-          </div>
-          <div className="card px-3 py-2">
+          </button>
+          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('business_loss', 'Business loss')} onClick={() => setTypeFilter('credit')}>
             <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('business_loss', 'Business loss')}</div>
             <div className="text-sm font-bold text-rose-600 dark:text-rose-400">{fmtUSD(supplierStats.lossUsd)}</div>
-          </div>
+          </button>
         </div>
       )}
 
@@ -682,7 +849,11 @@ export default function Returns() {
           <EditReturnModal
             ret={editRet}
             onClose={() => setEditRet(null)}
-            onSuccess={loadReturns}
+            onSuccess={(result) => handleReturnMutationSuccess({
+              kind: 'edit',
+              result,
+              previousSnapshot: editRet,
+            })}
             fmtUSD={fmtUSD}
             notify={notify}
           />
@@ -693,7 +864,7 @@ export default function Returns() {
         <Suspense fallback={null}>
           <NewReturnModal
             onClose={() => setShowCustomerForm(false)}
-            onSuccess={loadReturns}
+            onSuccess={(result) => handleReturnMutationSuccess({ kind: 'create', result })}
             fmtUSD={fmtUSD}
             notify={notify}
           />
@@ -704,7 +875,7 @@ export default function Returns() {
         <Suspense fallback={null}>
           <NewSupplierReturnModal
             onClose={() => setShowSupplierForm(false)}
-            onSuccess={loadReturns}
+            onSuccess={(result) => handleReturnMutationSuccess({ kind: 'supplier-create', result })}
             notify={notify}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}

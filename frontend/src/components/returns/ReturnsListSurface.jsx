@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 const deferredMobileCardStyle = {
@@ -9,6 +9,11 @@ const deferredMobileCardStyle = {
 const deferredDesktopRowStyle = {
   contentVisibility: 'auto',
   containIntrinsicSize: '56px',
+}
+
+function detectMobileViewport() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia('(max-width: 639px)').matches
 }
 
 function ReturnsDesktopSkeletonRows() {
@@ -74,10 +79,25 @@ export default function ReturnsListSurface({
   visibleIds,
 }) {
   let desktopRenderedRowCount = 0
+  const [isMobileViewport, setIsMobileViewport] = useState(() => detectMobileViewport())
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+    const media = window.matchMedia('(max-width: 639px)')
+    const apply = () => setIsMobileViewport(media.matches)
+    apply()
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', apply)
+      return () => media.removeEventListener('change', apply)
+    }
+    media.addListener(apply)
+    return () => media.removeListener(apply)
+  }, [])
 
   return (
     <>
-      <div className="card hidden overflow-hidden sm:block">
+      {!isMobileViewport ? (
+      <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
             <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-700/50">
@@ -208,8 +228,10 @@ export default function ReturnsListSurface({
           </table>
         </div>
       </div>
+      ) : null}
 
-      <div className="space-y-2 sm:hidden">
+      {isMobileViewport ? (
+      <div className="space-y-2">
         {loading ? (
           <ReturnsMobileSkeletonCards />
         ) : filtered.length === 0 ? (
@@ -299,6 +321,7 @@ export default function ReturnsListSurface({
           )
         })}
       </div>
+      ) : null}
     </>
   )
 }

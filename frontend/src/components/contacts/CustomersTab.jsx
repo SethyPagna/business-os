@@ -9,9 +9,10 @@ import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import { ThreeDotMenu, DetailModal, ContactTable, useContactSelection } from './shared'
+import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
@@ -41,6 +42,7 @@ function tr(t, key, fallback) {
 
 const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
 const CustomerFormModal = lazy(() => import('./CustomerFormModal.jsx'))
+const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 
 function CustomersTab({ t, notify, active = true }) {
   const { user } = useApp()
@@ -49,6 +51,9 @@ function CustomersTab({ t, notify, active = true }) {
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
+  const saveInFlightRef = useRef(false)
+  const deleteInFlightRef = useRef(false)
+  const bulkDeleteInFlightRef = useRef(false)
   const [customers, setCustomers] = useState([])
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(null)
@@ -200,7 +205,7 @@ function CustomersTab({ t, notify, active = true }) {
       }
     })
   ), [contactFilterSections, t])
-  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length
+  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'])
   const hasActiveCustomerSearchOrFilters = deferredSearch.trim().length > 0 || activeFilterCount > 0
   const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
     const next = new Set(current)
@@ -229,6 +234,10 @@ function CustomersTab({ t, notify, active = true }) {
     userId: user?.id,
     userName: user?.name,
   }), [user?.id, user?.name])
+
+  const runCustomerMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, CUSTOMER_MUTATION_TIMEOUT_MS)
+  ), [])
 
   const load = useCallback(async ({ silent = false, label = 'Customers' } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -320,11 +329,14 @@ function CustomersTab({ t, notify, active = true }) {
   }, [active, load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
+    if (!beginSingleAction(saveInFlightRef)) return
     if (!String(form.name || '').trim()) {
+      finishSingleAction(saveInFlightRef)
       notify(tr(t, 'name_required', 'Name required'), 'error')
       return
     }
     if (!String(form.membership_number || '').trim()) {
+      finishSingleAction(saveInFlightRef)
       notify(tr(t, 'membership_number_required', 'Membership number is required'), 'error')
       return
     }
@@ -333,8 +345,8 @@ function CustomersTab({ t, notify, active = true }) {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const result = selected
-        ? await window.api.updateCustomer(selected.id, payload)
-        : await window.api.createCustomer(payload)
+        ? await runCustomerMutation(() => window.api.updateCustomer(selected.id, payload), 'Update customer')
+        : await runCustomerMutation(() => window.api.createCustomer(payload), 'Create customer')
       if (result?.success === false) {
         notify(result.error || 'Failed', 'error')
         return
@@ -344,12 +356,18 @@ function CustomersTab({ t, notify, active = true }) {
         actionHistory.pushAction({
           label: `Edit customer ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const restoreResult = await window.api.updateCustomer(existingSnapshot.id, buildCustomerPayload(existingSnapshot))
+            const restoreResult = await runCustomerMutation(
+              () => window.api.updateCustomer(existingSnapshot.id, buildCustomerPayload(existingSnapshot)),
+              'Undo customer edit',
+            )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore customer')
             await load({ silent: true, label: 'Customers undo edit' })
           },
           redo: async () => {
-            const redoResult = await window.api.updateCustomer(nextSnapshot.id, buildCustomerPayload(nextSnapshot))
+            const redoResult = await runCustomerMutation(
+              () => window.api.updateCustomer(nextSnapshot.id, buildCustomerPayload(nextSnapshot)),
+              'Redo customer edit',
+            )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply customer changes')
             await load({ silent: true, label: 'Customers redo edit' })
           },
@@ -361,11 +379,14 @@ function CustomersTab({ t, notify, active = true }) {
           actionHistory.pushAction({
             label: `Add customer ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              await window.api.deleteCustomer(createdCustomerId)
+              await runCustomerMutation(() => window.api.deleteCustomer(createdCustomerId), 'Undo customer create')
               await load({ silent: true, label: 'Customers undo create' })
             },
             redo: async () => {
-              const recreateResult = await window.api.createCustomer(buildCustomerPayload(createdSnapshot))
+              const recreateResult = await runCustomerMutation(
+                () => window.api.createCustomer(buildCustomerPayload(createdSnapshot)),
+                'Redo customer create',
+              )
               if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate customer')
               createdCustomerId = extractHistoryResultId(recreateResult)
               await load({ silent: true, label: 'Customers redo create' })
@@ -379,19 +400,28 @@ function CustomersTab({ t, notify, active = true }) {
       await load({ silent: true, label: 'Customers after save' })
     } catch (error) {
       notify(error.message || 'Failed', 'error')
+    } finally {
+      finishSingleAction(saveInFlightRef)
     }
   }
 
   const handleDelete = async (customer) => {
-    if (!confirm(`Delete customer "${customer.name}"?`)) return
+    if (!beginSingleAction(deleteInFlightRef)) return
+    if (!confirm(`Delete customer "${customer.name}"?`)) {
+      finishSingleAction(deleteInFlightRef)
+      return
+    }
     try {
       const snapshot = cloneHistorySnapshot(customer)
-      await window.api.deleteCustomer(customer.id)
+      await runCustomerMutation(() => window.api.deleteCustomer(customer.id), 'Delete customer')
       let restoredCustomerId = 0
       actionHistory.pushAction({
         label: `Delete customer ${snapshot.name || ''}`.trim(),
         undo: async () => {
-          const restoreResult = await window.api.createCustomer(buildCustomerPayload(snapshot))
+          const restoreResult = await runCustomerMutation(
+            () => window.api.createCustomer(buildCustomerPayload(snapshot)),
+            'Undo customer delete',
+          )
           if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore customer')
           restoredCustomerId = extractHistoryResultId(restoreResult)
           await load({ silent: true, label: 'Customers undo delete' })
@@ -399,7 +429,7 @@ function CustomersTab({ t, notify, active = true }) {
         redo: async () => {
           const targetId = restoredCustomerId || Number(snapshot.id || 0)
           if (!targetId) return
-          await window.api.deleteCustomer(targetId)
+          await runCustomerMutation(() => window.api.deleteCustomer(targetId), 'Redo customer delete')
           await load({ silent: true, label: 'Customers redo delete' })
         },
       })
@@ -409,33 +439,39 @@ function CustomersTab({ t, notify, active = true }) {
       await load({ silent: true, label: 'Customers after delete' })
     } catch (error) {
       notify(error.message || 'Failed', 'error')
+    } finally {
+      finishSingleAction(deleteInFlightRef)
     }
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || bulkActionBusy) return
-    if (!confirm(`Delete ${selectedIds.size} customer(s)?`)) return
+    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!confirm(`Delete ${selectedIds.size} customer(s)?`)) {
+      finishSingleAction(bulkDeleteInFlightRef)
+      return
+    }
     const ids = [...selectedIds]
-    const snapshots = customers.filter((customer) => ids.includes(Number(customer?.id || 0))).map((customer) => JSON.parse(JSON.stringify(customer)))
+    const snapshots = buildSelectedSnapshots(customers, ids)
     const failedIds = []
     setBulkActionBusy(true)
     try {
       const deleteRun = await runConcurrentTasks(ids, async (id) => {
-        await window.api.deleteCustomer(id)
+        await runCustomerMutation(() => window.api.deleteCustomer(id), 'Bulk delete customers')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length
       failedIds.push(...deleteRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
       setSelectedIds(new Set(failedIds))
       await load({ silent: true, label: 'Customers refresh after delete' })
-      const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      const failedIdSet = new Set(failedIds)
+      const deletedSnapshots = snapshots.filter((snapshot) => !failedIdSet.has(Number(snapshot?.id || 0)))
       if (deletedCount > 0 && deletedSnapshots.length) {
         let restoredEntries = []
         actionHistory.pushAction({
           label: `Delete ${deletedCount} customer${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot) => {
-              const result = await window.api.createCustomer({
+              const result = await runCustomerMutation(() => window.api.createCustomer({
                 name: snapshot.name || '',
                 membership_number: snapshot.membership_number || '',
                 phone: snapshot.phone || '',
@@ -445,7 +481,7 @@ function CustomersTab({ t, notify, active = true }) {
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
-              })
+              }), 'Restore deleted customers')
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
             if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore customer'))
@@ -454,7 +490,9 @@ function CustomersTab({ t, notify, active = true }) {
           },
           redo: async () => {
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => window.api.deleteCustomer(id))
+            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => (
+              runCustomerMutation(() => window.api.deleteCustomer(id), 'Redo bulk customer delete')
+            ))
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete customer'))
             await load({ silent: true, label: 'Customers redo delete' })
           },
@@ -466,6 +504,7 @@ function CustomersTab({ t, notify, active = true }) {
         notify(`${deletedCount} ${tr(t, 'deleted', 'deleted')}`)
       }
     } finally {
+      finishSingleAction(bulkDeleteInFlightRef)
       setBulkActionBusy(false)
     }
   }

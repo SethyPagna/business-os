@@ -7,17 +7,64 @@
 //   color     {string}    Bar fill color (default: #2563eb)
 //   isCount   {boolean}   If true, formats axis labels as counts not currency
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fmtShort, fmtCount } from '../../../utils/formatters'
 import NoData from './NoData'
 
+function chartLabelsNeedYear(labels) {
+  const years = new Set()
+  labels.forEach((label) => {
+    const match = String(label || '').match(/^(\d{4})(?:-\d{2})?(?:-\d{2})?$/)
+    if (match) years.add(match[1])
+  })
+  return years.size > 1
+}
+
+function formatAxisLabel(value, includeYear = false) {
+  const raw = String(value || '')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return includeYear ? `${raw.slice(2, 4)}-${raw.slice(5)}` : raw.slice(5)
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    const month = Number(raw.slice(5, 7))
+    const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    const monthLabel = names[month - 1] || raw.slice(5)
+    return includeYear ? `${monthLabel} '${raw.slice(2, 4)}` : monthLabel
+  }
+  if (/^\d{4}$/.test(raw)) return raw
+  return raw.length > 5 ? raw.slice(-5) : raw
+}
+
 export default function BarChart({ data, valueKey, labelKey, color = '#2563eb', isCount = false }) {
   // ⚑ Hook must come before any early return (Rules of Hooks)
+  const chartRef = useRef(null)
+  const [chartWidth, setChartWidth] = useState(760)
   const [tooltip, setTooltip] = useState(null)
+  useEffect(() => {
+    const node = chartRef.current
+    if (!node) return undefined
+    const updateWidth = () => {
+      const nextWidth = Math.round(node.getBoundingClientRect().width || 0)
+      if (nextWidth > 0) setChartWidth(nextWidth)
+    }
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
   if (!data?.length) return <NoData />
-  const W = 560, H = 180, PAD_L = 48, PAD_B = 28, PAD_T = 16, PAD_R = 8
+  const isCompact = chartWidth < 460
+  const W = Math.max(300, chartWidth)
+  const H = isCompact ? 178 : 196
+  const PAD_L = isCompact ? 42 : 54
+  const PAD_B = isCompact ? 28 : 32
+  const PAD_T = 12
+  const PAD_R = isCompact ? 12 : 16
+  const axisFontSize = isCompact ? 11.5 : 12.5
+  const xFontSize = isCompact ? 11.5 : 12.5
+  const valueFontSize = isCompact ? 11.5 : 12.5
   const plotW = W - PAD_L - PAD_R
   const plotH = H - PAD_T - PAD_B
+  const axisLabels = data.map((d) => String(d[labelKey] || ''))
+  const includeYear = chartLabelsNeedYear(axisLabels)
   const vals  = data.map(d => Number(d[valueKey]) || 0)
   const max   = Math.max(...vals, 0.01)
   const rawStep = max / 4
@@ -26,38 +73,41 @@ export default function BarChart({ data, valueKey, labelKey, color = '#2563eb', 
   const yTicks = [1,2,3,4].map(i => i * step)
   const yMax  = yTicks[3]
 
-  const barW  = Math.max(4, Math.min(36, plotW / data.length * 0.6))
+  const barW  = Math.max(isCompact ? 7 : 5, Math.min(isCompact ? 28 : 34, plotW / data.length * 0.58))
   const gap   = plotW / data.length
 
   function yPx(v) { return PAD_T + plotH - (v / yMax) * plotH }
 
-  const maxLabels = Math.floor(plotW / 36)
+  const maxLabels = Math.floor(plotW / (includeYear ? 88 : 70))
   const step_lbl  = Math.max(1, Math.ceil(data.length / maxLabels))
+  const visibleYTicks = isCompact
+    ? yTicks.filter((_, index) => index === 0 || index === yTicks.length - 1 || index % 2 === 0)
+    : yTicks
 
   return (
-    <div className="relative">
+    <div ref={chartRef} className="relative">
       {tooltip && (
-        <div className="absolute z-20 pointer-events-none bg-gray-900 text-white text-xs rounded-lg px-2.5 py-1.5 shadow-xl whitespace-nowrap"
+        <div className="absolute z-20 pointer-events-none whitespace-nowrap rounded-xl bg-gray-900 px-3 py-2 text-sm text-white shadow-xl"
           style={{ left: tooltip.x, top: tooltip.y, transform: 'translate(-50%, -110%)' }}>
-          <div className="font-semibold">{tooltip.label}</div>
-          <div>{isCount ? tooltip.val : fmtShort(tooltip.val)}</div>
+          <div className="font-bold">{tooltip.label}</div>
+          <div className="font-medium">{isCount ? tooltip.val : fmtShort(tooltip.val)}</div>
         </div>
       )}
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" style={{ height: H }}
         onMouseLeave={() => setTooltip(null)}>
-        {yTicks.map(v => {
+        {visibleYTicks.map(v => {
           const y = yPx(v)
           if (y < PAD_T) return null
           return (
             <g key={v}>
-              <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="#e5e7eb" strokeWidth="1" strokeDasharray="4 3" />
-              <text x={PAD_L - 6} y={y + 4} textAnchor="end" fontSize="11" fill="#9ca3af">
-                {isCount ? fmtCount(v) : fmtShort(v)}
-              </text>
-            </g>
+              <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1.15" strokeDasharray="4 5" />
+                <text x={PAD_L - 9} y={y + axisFontSize * 0.34} textAnchor="end" fontSize={axisFontSize} fontWeight="700" fill="#64748b">
+                  {isCount ? fmtCount(v) : fmtShort(v)}
+                </text>
+              </g>
           )
         })}
-        <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + plotH} y2={PAD_T + plotH} stroke="#d1d5db" strokeWidth="1" />
+        <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + plotH} y2={PAD_T + plotH} stroke="#cbd5e1" strokeWidth="1.35" />
 
         {data.map((d, i) => {
           const val  = Number(d[valueKey]) || 0
@@ -67,7 +117,7 @@ export default function BarChart({ data, valueKey, labelKey, color = '#2563eb', 
           const y    = PAD_T + plotH - barH
           const showLbl = i % step_lbl === 0
           const raw = String(d[labelKey] || '')
-          const lbl = raw.length > 5 ? raw.slice(-5) : raw
+          const lbl = formatAxisLabel(raw, includeYear)
           return (
             <g key={i}
               onMouseEnter={(e) => {
@@ -77,15 +127,15 @@ export default function BarChart({ data, valueKey, labelKey, color = '#2563eb', 
                 const scale = rect.width / vbW
                 setTooltip({ x: cx * scale, y: y * scale, label: raw, val })
               }}>
-              <rect x={x} y={y} width={barW} height={barH} fill={color} rx="3" opacity="0.85"
+              <rect x={x} y={y} width={barW} height={barH} fill={color} rx="5" opacity="0.88"
                 className="cursor-pointer hover:opacity-100 transition-opacity" />
               {barH > 22 && (
-                <text x={cx} y={y - 3} textAnchor="middle" fontSize="10" fill={color} fontWeight="500">
+                <text x={cx} y={y - 7} textAnchor="middle" fontSize={valueFontSize} fill={color} fontWeight="750">
                   {isCount ? fmtCount(val) : fmtShort(val)}
                 </text>
               )}
               {showLbl && (
-                <text x={cx} y={PAD_T + plotH + 16} textAnchor="middle" fontSize="11" fill="#6b7280">
+                <text x={cx} y={PAD_T + plotH + 24} textAnchor="middle" fontSize={xFontSize} fontWeight="700" fill="#475569">
                   {lbl}
                 </text>
               )}

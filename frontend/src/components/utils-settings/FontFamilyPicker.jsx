@@ -11,7 +11,7 @@ const FONTS = [
   { id: 'outfit',  label: 'Outfit',          css: "'Outfit', sans-serif" },
   { id: 'mono',    label: 'Monospace',       css: "'Courier New', Courier, monospace" },
   { id: 'serif',   label: 'Serif',           css: "Georgia, 'Times New Roman', serif" },
-  { id: 'khmer',   label: 'Khmer (Noto)',    css: "'Noto Sans Khmer', 'Khmer OS', sans-serif" },
+  { id: 'khmer',   label: 'Khmer UI (Noto)', css: "'Noto Sans Khmer', 'Khmer OS Siemreap', 'Battambang', sans-serif" },
   { id: 'hanuman', label: 'Hanuman',         css: "'Hanuman', 'Noto Sans Khmer', serif" },
   { id: 'battambang', label: 'Battambang',   css: "'Battambang', 'Noto Sans Khmer', sans-serif" },
 ]
@@ -55,4 +55,3 @@ function FontFamilyPicker({ value, onChange }) {
     </div>
   )
 }
-

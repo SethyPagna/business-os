@@ -24,6 +24,7 @@ export default function FilesProvidersTab({
   providers,
   loadProviders,
   testingProviderId,
+  deletingProviderId,
   startEditProvider,
   testProvider,
   removeProvider,
@@ -81,13 +82,13 @@ export default function FilesProvidersTab({
                   <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => startEditProvider(provider)}>
                     Edit
                   </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => testProvider(provider.id)} disabled={testingProviderId === provider.id}>
+                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => testProvider(provider.id)} disabled={testingProviderId != null}>
                     <TestTube2 className="mr-2 inline h-4 w-4" />
                     {testingProviderId === provider.id ? 'Testing...' : 'Test'}
                   </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => removeProvider(provider)}>
+                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => removeProvider(provider)} disabled={deletingProviderId != null}>
                     <Trash2 className="mr-2 inline h-4 w-4" />
-                    Delete
+                    {deletingProviderId === provider.id ? 'Deleting...' : 'Delete'}
                   </button>
                 </div>
               </div>

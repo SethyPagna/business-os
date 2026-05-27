@@ -1,17 +1,17 @@
-// ?�?� POS ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// POS
 /**
  * Point-of-Sale screen.
  * Sub-components (ProductImage, CartItem, QuickAddModal) are imported from
- * sibling files. The POS doc-comment from the original is preserved below.
+ * sibling files.
  *
  * Key features:
- *   ??Multiple concurrent orders (tabs) ??cashiers can hold up to 6 open orders
- *   ??Fully-scrollable cart panel
- *   ??Collapsible customer / delivery sections
- *   ??Inline "add new" modals for customers and delivery contacts
- *   ??Receipt shown as an overlay
+ *   - Multiple concurrent orders (tabs) so cashiers can hold up to 6 open orders
+ *   - Fully scrollable cart panel
+ *   - Collapsible customer and delivery sections
+ *   - Inline "add new" modals for customers and delivery contacts
+ *   - Receipt shown as an overlay
  *
- * Layout (desktop ??md):   [Products] | [Cart + Payment]  side-by-side, full height.
+ * Layout (desktop >= md):  [Products] | [Cart + Payment] side-by-side, full height.
  * Layout (mobile  < md):   Tab bar toggles between Products and Cart views.
  */
 
@@ -33,7 +33,6 @@ import FilterPanel from './FilterPanel'
 import PaginationControls from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
-  buildPosFilterMeta,
   buildProductsById,
   buildVariantChildrenByParentId,
   buildVisibleProductCards,
@@ -51,11 +50,20 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
+import { aggregateInitialOptions } from '../../utils/initials.mjs'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
+import { getKhmerTextProps } from '../../utils/scriptTypography.js'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 
-// ?�?� Customer contact-option helpers (mirrors CustomersTab) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
+const POS_CONTACT_OPTIONS_TIMEOUT_MS = 8000
+const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
+const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
+const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
+const POS_CHECKOUT_TIMEOUT_MS = 20000
+
+// Customer contact-option helpers (mirrors CustomersTab)
 import { parseContactOptions } from '../contacts/CustomersTab'
 
 
@@ -83,14 +91,13 @@ function ProductDiscountBadge({ product, exchangeRate, fmtUSD, label = 'Discount
     </span>
   )
 }
-
 export default function POS() {
   const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('pos')
   const posCopy = useCallback((en, km) => ((settings.language || 'en') === 'km' ? km : en), [settings.language])
 
-  // ?�?� Remote data (shared across all orders) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Remote data shared across all orders
   const [products,         setProducts]         = useState([])
   const [categories,       setCategories]       = useState([])
   const [branches,         setBranches]         = useState([])
@@ -98,7 +105,7 @@ export default function POS() {
   const [deliveryContacts, setDeliveryContacts] = useState([])
   const [defaultBranchId,  setDefaultBranchId]  = useState(null)
 
-  // ?�?� Product filter state ??persisted in sessionStorage so navigation doesn't reset them ?�?�
+// Product filter state is persisted in sessionStorage so navigation does not reset it
   const [search,          setSearch]          = useState('')
   const [searchMode,      setSearchMode]      = useState('AND') // 'AND' | 'OR'
   const [categoryFilter,  setCategoryFilter]  = useState(() => sessionStorage.getItem('pos_cat')      || 'all')
@@ -122,7 +129,7 @@ export default function POS() {
   const setPersistedGroup    = v => { sessionStorage.setItem('pos_group',    v); setGroupFilter(v) }
   const setPersistedSupplier = v => { sessionStorage.setItem('pos_supplier', v); setSupplierFilter(v) }
   const setPersistedInitial  = v => { sessionStorage.setItem('pos_initial',  v); setInitialFilter(v) }
-  // ?�?� Multi-order state ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Multi-order state
   // Restore orders from sessionStorage so navigating away and back preserves
   // all open orders, carts, customer info, and delivery details.
   const [orders, setOrders] = useState(() => {
@@ -143,11 +150,11 @@ export default function POS() {
     try { return parseInt(sessionStorage.getItem('bos_pos_counter') || '2', 10) } catch { return 2 }
   })
 
-  // The currently-visible order. Derived ??not stored separately.
+  // The currently visible order. Derived, not stored separately.
   const resolvedActiveId = activeId && orders.find(o => o.id === activeId) ? activeId : orders[0]?.id
   const active = orders.find(o => o.id === resolvedActiveId) || orders[0]
 
-  // ?�?� Sync payment method default when settings load ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Sync payment method default when settings load
   useEffect(() => {
     if (!settings.pos_payment_methods) return
     try {
@@ -208,7 +215,7 @@ export default function POS() {
     if (resolvedActiveId === orderId) setActiveId(renumbered[Math.max(0, idx - 1)].id)
   }
 
-  // ?�?� Collapsible section visibility ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Collapsible section visibility
   const [showCustomer,  setShowCustomer]  = useState(false)
   const [showDelivery,  setShowDelivery]  = useState(false)
 
@@ -218,13 +225,13 @@ export default function POS() {
     if (active?.isDelivery)      setShowDelivery(true)
   }, [activeId]) // eslint-disable-line ??intentionally only on tab switch
 
-  // ?�?� Autocomplete suggestions (UI-level, not per-order) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Autocomplete suggestions (UI-level, not per-order)
   const [customerSuggestions,  setCustomerSuggestions]  = useState([])
   const [deliverySuggestions,  setDeliverySuggestions]  = useState([])
   const [showCustomerDrop,     setShowCustomerDrop]     = useState(false)
   const [showDeliveryDrop,     setShowDeliveryDrop]     = useState(false)
 
-  // ?�?� Inline quick-add modals ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Inline quick-add modals
   const [showAddCustomer,  setShowAddCustomer]  = useState(false)
   const [newCustomerForm,  setNewCustomerForm]  = useState({ name: '', membership_number: '', phone: '', address: '' })
   const [savingCustomer,   setSavingCustomer]   = useState(false)
@@ -232,12 +239,12 @@ export default function POS() {
   const [showAddDelivery,  setShowAddDelivery]  = useState(false)
   const [newDeliveryForm,  setNewDeliveryForm]  = useState({ name: '', phone: '', area: '' })
 
-  // ?�?� Customer option picker (shown after selecting a customer with multiple options) ?�?�
+// Customer option picker shown after selecting a customer with multiple options
   const [customerOptionsList, setCustomerOptionsList] = useState([])
   const [showOptionPicker,    setShowOptionPicker]    = useState(false)
   const [savingDelivery,   setSavingDelivery]   = useState(false)
 
-  // ?�?� Other UI state ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Other UI state
   const [mobileView,       setMobileView]       = useState('products') // 'products' | 'cart'
   const [detailProduct,    setDetailProduct]    = useState(null)
   const [loading,          setLoading]          = useState(false)
@@ -252,13 +259,12 @@ export default function POS() {
 
   const searchRef = useRef()
   const catalogRequestRef = useRef(0)
-  const productFilterRequestRef = useRef(0)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const membershipRequestRef = useRef(0)
+  const membershipInfoRef = useRef(null)
   const savingCustomerRef = useRef(false)
   const savingDeliveryRef = useRef(false)
-  const globalProductFilterMetaLoadedRef = useRef(false)
   const checkoutInFlightRef = useRef(false)
   const taxRate   = parseFloat(settings.tax_rate || '0') / 100
   const redeemPointsStep = Math.max(1, parseInt(settings.customer_portal_redeem_points || '100', 10) || 100)
@@ -292,6 +298,10 @@ export default function POS() {
     })
   }, [])
 
+  useEffect(() => {
+    membershipInfoRef.current = membershipInfo
+  }, [membershipInfo])
+
   const loadCatalogData = useCallback(async (label = 'POS catalog data') => {
     const requestId = beginTrackedRequest(catalogRequestRef)
     setCatalogRefreshing(true)
@@ -312,13 +322,15 @@ export default function POS() {
         sort: 'name_asc',
         include: 'branch_stock,images,family',
       }
-      const [productPayload, cats, brs] = await withLoaderTimeout(
+      const [productPayload, cats, brs, filterPayload] = await withLoaderTimeout(
         () => Promise.all([
           window.api.searchProducts(productQuery),
           window.api.getCategories(),
           window.api.getBranches(),
+          window.api.getProductFilters({}),
         ]),
         label,
+        POS_CATALOG_LOAD_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
       const prods = Array.isArray(productPayload?.items)
@@ -326,11 +338,12 @@ export default function POS() {
         : (Array.isArray(productPayload) ? productPayload : [])
       applyCatalogData(prods, cats, brs)
       setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
-      setProductFilterMeta((current) => (
-        globalProductFilterMetaLoadedRef.current
-          ? current
-          : buildPosFilterMeta(productPayload?.filters || {}, productPayload?.initials || [])
-      ))
+      const filters = filterPayload || productPayload?.filters || {}
+      setProductFilterMeta({
+        brands: Array.isArray(filters?.brands) ? filters.brands : [],
+        suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
+        initials: aggregateInitialOptions(filters?.initials || productPayload?.initials || []),
+      })
       return { prods, cats, brs }
     } catch (error) {
       if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
@@ -343,26 +356,10 @@ export default function POS() {
     }
   }, [applyCatalogData, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, hasProductDiscoveryQuery, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
 
-  const loadGlobalProductFilterMeta = useCallback(async (label = 'POS product filters') => {
-    if (globalProductFilterMetaLoadedRef.current) return null
-    const requestId = beginTrackedRequest(productFilterRequestRef)
-    try {
-      const filters = await withLoaderTimeout(() => window.api.getProductFilters({}), label)
-      if (!isTrackedRequestCurrent(productFilterRequestRef, requestId)) return null
-      setProductFilterMeta(buildPosFilterMeta(filters || {}))
-      globalProductFilterMetaLoadedRef.current = true
-      return filters
-    } catch (error) {
-      if (!isTrackedRequestCurrent(productFilterRequestRef, requestId)) return null
-      console.error('[POS] product filter load failed:', error.message)
-      return null
-    }
-  }, [])
-
   const loadCustomers = useCallback(async (label = 'POS customers') => {
     const requestId = beginTrackedRequest(customerRequestRef)
     try {
-      const data = await withLoaderTimeout(() => window.api.getCustomers(), label)
+      const data = await withLoaderTimeout(() => window.api.getCustomers(), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
       const nextCustomers = Array.isArray(data) ? data : []
       setCustomers(nextCustomers)
@@ -377,10 +374,7 @@ export default function POS() {
   const loadDeliveryContacts = useCallback(async (label = 'POS delivery contacts') => {
     const requestId = beginTrackedRequest(deliveryRequestRef)
     try {
-      const data = await withLoaderTimeout(
-        () => window.api.getDeliveryContacts().catch(() => []),
-        label,
-      )
+      const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(deliveryRequestRef, requestId)) return null
       const nextContacts = Array.isArray(data) ? data : []
       setDeliveryContacts(nextContacts)
@@ -403,6 +397,7 @@ export default function POS() {
       const data = await withLoaderTimeout(
         () => window.api.lookupPortalMembership(membershipNumber),
         label,
+        POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(membershipRequestRef, requestId)) return null
       setMembershipInfo(data || null)
@@ -410,6 +405,11 @@ export default function POS() {
       return data || null
     } catch (error) {
       if (!isTrackedRequestCurrent(membershipRequestRef, requestId)) return null
+      const currentMembershipNumber = String(membershipInfoRef.current?.customer?.membership_number || '').trim().toLowerCase()
+      if (currentMembershipNumber && currentMembershipNumber === String(membershipNumber || '').trim().toLowerCase()) {
+        setMembershipError('')
+        return membershipInfoRef.current
+      }
       setMembershipInfo(null)
       setMembershipError(error?.message || posCopy('Membership lookup failed'))
       return null
@@ -420,11 +420,10 @@ export default function POS() {
     }
   }, [posCopy])
 
-  // ?�?� Initial data load ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Initial data load
   useEffect(() => {
     if (!isActive) {
       invalidateTrackedRequest(catalogRequestRef)
-      invalidateTrackedRequest(productFilterRequestRef)
       invalidateTrackedRequest(customerRequestRef)
       invalidateTrackedRequest(deliveryRequestRef)
       invalidateTrackedRequest(membershipRequestRef)
@@ -444,21 +443,12 @@ export default function POS() {
     ])
   }, [isActive, loadCustomers, loadDeliveryContacts])
 
-  useEffect(() => {
-    if (!isActive || !filterOpen || globalProductFilterMetaLoadedRef.current) return
-    void loadGlobalProductFilterMeta()
-  }, [filterOpen, isActive, loadGlobalProductFilterMeta])
-
-  // ?�?� Sync-push: reload when another device changes data ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Sync-push reload when another device changes data
   useEffect(() => {
     if (!isActive || !syncChannel) return
     const { channel } = syncChannel
     if (channel === 'products' || channel === 'branches' || channel === 'categories') {
-      globalProductFilterMetaLoadedRef.current = false
       void loadCatalogData('POS sync catalog')
-      if (filterOpen) {
-        void loadGlobalProductFilterMeta('POS sync product filters')
-      }
     }
     if (channel === 'customers') {
       void loadCustomers('POS sync customers')
@@ -466,17 +456,16 @@ export default function POS() {
     if (channel === 'deliveryContacts') {
       void loadDeliveryContacts('POS sync delivery contacts')
     }
-  }, [filterOpen, isActive, loadCatalogData, loadCustomers, loadDeliveryContacts, loadGlobalProductFilterMeta, syncChannel])
+  }, [isActive, loadCatalogData, loadCustomers, loadDeliveryContacts, syncChannel])
 
   useEffect(() => () => {
     invalidateTrackedRequest(catalogRequestRef)
-    invalidateTrackedRequest(productFilterRequestRef)
     invalidateTrackedRequest(customerRequestRef)
     invalidateTrackedRequest(deliveryRequestRef)
     invalidateTrackedRequest(membershipRequestRef)
   }, [])
 
-  // ?�?� Customer autocomplete ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Customer autocomplete
   useEffect(() => {
     const q = (active?.customerSearch || '').toLowerCase().trim()
     if (!q) { setCustomerSuggestions([]); return }
@@ -487,7 +476,7 @@ export default function POS() {
     )
   }, [active?.customerSearch, customers])
 
-  // ?�?� Delivery autocomplete ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Delivery autocomplete
   useEffect(() => {
     const q = (active?.deliverySearch || '').toLowerCase().trim()
     if (!q) { setDeliverySuggestions([]); return }
@@ -524,7 +513,7 @@ export default function POS() {
     void loadMembershipInfo(membershipNumber, 'POS membership lookup')
   }, [active?.customer?.membership_number, isActive, loadMembershipInfo, syncChannel?.ts])
 
-  // ?�?� Customer actions ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Customer actions
   const selectCustomer = (c) => {
     const opts = parseContactOptions(c.address)
     setCustomerSuggestions([])
@@ -541,7 +530,7 @@ export default function POS() {
       setCustomerOptionsList(opts)
       setShowOptionPicker(true)
     } else if (opts.length === 1) {
-      // Single option ??auto-apply it
+      // Single option: auto-apply it
       const o = opts[0]
       patchActive({
         customer: {
@@ -561,7 +550,7 @@ export default function POS() {
       })
       setShowOptionPicker(false)
     } else {
-      // No options ??use customer top-level data
+      // No options: use customer top-level data
       patchActive({
         customer: { id: c.id || null, name: c.name, phone: c.phone || '', email: c.email || '', membership_number: c.membership_number || '', address: '' },
         customerSearch: c.name,
@@ -601,7 +590,11 @@ export default function POS() {
     savingCustomerRef.current = true
     setSavingCustomer(true)
     try {
-      const created = await window.api.createCustomer(newCustomerForm)
+      const created = await withLoaderTimeout(
+        () => window.api.createCustomer(newCustomerForm),
+        'Create POS customer',
+        POS_CUSTOMER_CREATE_TIMEOUT_MS,
+      )
       const createdCustomer = {
         ...newCustomerForm,
         ...created,
@@ -627,7 +620,7 @@ export default function POS() {
     }
   }
 
-  // ?�?� Delivery actions ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Delivery actions
   const selectDelivery = (d) => {
     patchActive({ selectedDelivery: d, deliverySearch: d.name })
     setDeliverySuggestions([])
@@ -647,7 +640,11 @@ export default function POS() {
         ...newDeliveryForm,
         name: newDeliveryForm.name.trim() || `Driver ${newDeliveryForm.phone.trim()}`,
       }
-      const res = await window.api.createDeliveryContact(payload)
+      const res = await withLoaderTimeout(
+        () => window.api.createDeliveryContact(payload),
+        'Create POS delivery contact',
+        POS_DELIVERY_CREATE_TIMEOUT_MS,
+      )
       notify('Delivery contact added')
       const created = { ...payload, id: res.id }
       setDeliveryContacts(prev => [...prev, created])
@@ -662,7 +659,7 @@ export default function POS() {
     }
   }
 
-  // ?�?� Product filter ??comma-separated terms, AND/OR mode (same as Products page) ?�
+// Product filter: comma-separated terms, AND/OR mode (same as Products page)
   const deferredSearch = useDeferredValue(search)
   const searchTerms = useMemo(() => (
     deferredSearch.trim()
@@ -699,14 +696,14 @@ export default function POS() {
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
   }, [productFilterMeta.brands, settings?.product_brand_options])
   const initialOptions = useMemo(
-    () => productFilterMeta.initials || [],
+    () => aggregateInitialOptions(productFilterMeta.initials || []),
     [productFilterMeta.initials],
   )
 
-  // ?�?� Foolproof product filter ??products NOT matching ALL active filters are 100% hidden ?�?�
+// Products that do not match every active filter are fully hidden
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
-      // ??Search
+      // Search
       if (searchTerms.length > 0) {
         const hay = `${p.name} ${p.sku||''} ${p.barcode||''} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
         const hit = searchMode === 'AND'
@@ -715,22 +712,22 @@ export default function POS() {
         if (!hit) return false
       }
 
-      // ??Category ??exact match, hide all others
+      // Category exact match
       if (categoryFilter !== 'all' && p.category !== categoryFilter) return false
 
-      // ??Brand ??exact match (case-insensitive), hide all others
+      // Brand exact match (case-insensitive)
       if (normalizedBrandFilter !== 'all' && (p.brand || '').toLowerCase() !== normalizedBrandFilter) return false
 
-      // ??Supplier ??exact match (case-insensitive), hide all others
+      // Supplier exact match (case-insensitive)
       if (normalizedSupplierFilter !== 'all' && (p.supplier||'').toLowerCase() !== normalizedSupplierFilter) return false
 
-      // ??Branch ??require a branch_stock entry for the selected branch; hide if absent
+      // Branch requires a branch_stock entry for the selected branch.
       if (branchFilterId != null) {
         const bs = (p.branch_stock||[]).find(b => b.branch_id === branchFilterId)
         if (!bs) return false
       }
 
-      // ??Compute effective quantity for this product in the active context
+      // Compute the effective quantity for this product in the active context.
       const qty = (() => {
         if (branchFilterId != null) {
           const bs = (p.branch_stock||[]).find(b => b.branch_id === branchFilterId)
@@ -743,7 +740,7 @@ export default function POS() {
         return p.stock_quantity
       })()
 
-      // ??Stock filter (explicit)
+      // Explicit stock filter.
       if (stockFilter === 'out')      return qty <= (p.out_of_stock_threshold || 0)
       if (stockFilter === 'low')      return qty > (p.out_of_stock_threshold || 0) && qty <= (p.low_stock_threshold || 10)
       if (stockFilter === 'in_stock') return qty > (p.low_stock_threshold || 10)
@@ -767,6 +764,7 @@ export default function POS() {
   ])
 
   const productsById = useMemo(() => buildProductsById(products), [products])
+  const branchesById = useMemo(() => new Map((Array.isArray(branches) ? branches : []).map((branch) => [Number(branch?.id), branch])), [branches])
 
   const variantChildrenByParentId = useMemo(
     () => buildVariantChildrenByParentId(products),
@@ -893,7 +891,7 @@ export default function POS() {
     return getProductGallery(product)[0] || product?.image_path || ''
   }, [getProductGallery])
 
-  // ?�?� Cart mutations ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Cart mutations
   function addToCart(product, priceMode = 'selling') {
     const assignedBranchId = branchFilter !== 'all'
       ? parseInt(branchFilter, 10)
@@ -936,7 +934,7 @@ export default function POS() {
   const updateQty = (cartLineId, qty) => {
     if (qty <= 0) { patchActive({ cart: active.cart.filter((item) => getCartLineId(item) !== cartLineId) }); return }
     const cartItem = active.cart.find((item) => getCartLineId(item) === cartLineId)
-    const product = products.find((entry) => Number(entry.id) === Number(cartItem?.id))
+    const product = productsById.get(Number(cartItem?.id))
     if (qty > getDisplayStock(product, cartItem)) { notify(t('not_enough_stock'), 'error'); return }
     patchActive({ cart: active.cart.map((item) => getCartLineId(item) === cartLineId ? { ...item, quantity: qty } : item) })
   }
@@ -968,12 +966,12 @@ export default function POS() {
   const updateItemBranch = (cartLineId, branchId) => {
     const nextBranchId = branchId ? parseInt(branchId, 10) : null
     const item = active.cart.find((entry) => getCartLineId(entry) === cartLineId)
-    const product = products.find((entry) => Number(entry.id) === Number(item?.id))
+    const product = productsById.get(Number(item?.id))
     if (!item || !product) return
 
     const available = getDisplayStock(product, { ...item, branch_id: nextBranchId })
     if (item.quantity > available) {
-      const branchName = branches.find((branch) => Number(branch.id) === Number(nextBranchId))?.name || t('selected_branch') || 'selected branch'
+      const branchName = branchesById.get(Number(nextBranchId))?.name || t('selected_branch') || 'selected branch'
       notify(`${t('not_enough_stock') || 'Not enough stock'} (${branchName})`, 'error')
       return
     }
@@ -981,7 +979,7 @@ export default function POS() {
     patchActive({ cart: active.cart.map((entry) => getCartLineId(entry) === cartLineId ? { ...entry, branch_id: nextBranchId } : entry) })
   }
 
-  // ?�?� Totals (derived from active order) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Totals derived from the active order
   const subtotalUsd  = active.cart.reduce((s, i) => s + i.applied_price_usd * i.quantity, 0)
   const subtotalKhr  = active.cart.reduce((s, i) => s + i.applied_price_khr * i.quantity, 0)
 
@@ -1032,7 +1030,7 @@ export default function POS() {
     }
   }, [membershipRedeemUnits, maxMembershipUnits]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ?�?� Checkout ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Checkout
   const openStatusPicker = useCallback(() => {
     if (loading || checkoutInFlightRef.current || active.cart.length === 0) return
     setShowStatusPicker(true)
@@ -1141,7 +1139,11 @@ export default function POS() {
     }
 
     try {
-      const result = await window.api.createSale(saleData)
+      const result = await withLoaderTimeout(
+        () => window.api.createSale(saleData),
+        'Create POS sale',
+        POS_CHECKOUT_TIMEOUT_MS,
+      )
       if (result.success) {
         const receiptNumber = result.receiptNumber || result.receipt_number || `RCP-${Date.now()}`
         setReceiptQueue(q => [...q, { ...saleData, id: result.id, receiptNumber, created_at: new Date().toISOString() }])
@@ -1161,11 +1163,11 @@ export default function POS() {
     }
   }
 
-  // ?�?� Render ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+// Render
   return (
     <div className="flex flex-col h-full overflow-hidden">
 
-      {/* ?�?� Mobile tab bar ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
+      {/* Mobile tab bar */}
       <div className="md:hidden flex flex-shrink-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <button onClick={() => setMobileView('products')} className={`flex-1 py-2.5 text-sm font-medium ${mobileView === 'products' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>{t('products') || 'Products'}</button>
         <button onClick={() => setMobileView('cart')}     className={`flex-1 py-2.5 text-sm font-medium relative ${mobileView === 'cart' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>
@@ -1174,11 +1176,11 @@ export default function POS() {
         </button>
       </div>
 
-      {/* ?�?� Two-panel main layout ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/* Two-panel main layout */}
+      <div className="flex flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
 
-        {/* ?��??��??��??��??��??��??��??��??��???LEFT: Products panel ?��??��??��??��??��??��??��??��??��??��???*/}
-        <div className={`flex flex-col flex-1 min-h-0 min-w-0 bg-gray-50 dark:bg-gray-900 ${mobileView === 'cart' ? 'hidden md:flex' : 'flex'}`}>
+        {/* Left: Products panel */}
+        <div className={`flex flex-col flex-1 min-h-0 min-w-0 bg-gray-50 dark:bg-gray-900 md:min-w-[38rem] ${mobileView === 'cart' ? 'hidden md:flex' : 'flex'}`}>
 
           {/* Filter bar */}
           <div className="flex-shrink-0 p-3 space-y-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
@@ -1202,7 +1204,7 @@ export default function POS() {
                     </button>
                   ))}
                 </div>
-                {/* Filter toggle button ??shows active count badge */}
+                {/* Filter toggle button with active-count badge */}
                 {(() => {
                   const activeFilters = [
                     categoryFilter !== 'all' ? 1 : 0,
@@ -1337,10 +1339,10 @@ export default function POS() {
                       aria-label={posCopy('Preview product images', 'Preview product images')}
                     >
                       {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
-                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'បញ្ចុះតម្លៃ')} />
+                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'Discounts')} />
                     </button>
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2">{p.__displayName || p.name}</p>
+                      <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>{p.__displayName || p.name}</p>
                       {groupProduct ? (
                         <span
                           className="inline-flex flex-shrink-0 items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
@@ -1357,14 +1359,14 @@ export default function POS() {
                     </p>
                     {p.selling_price_khr > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</p> : null}
                     {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
-                      <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
+                      <p {...getKhmerTextProps(t('special_price') || 'Special', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
                     ) : null}
                     {promotion.active ? (
                       <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">
-                        {p.discount_label || posCopy('Discounts', 'បញ្ចុះតម្លៃ')} {fmtUSD(promotion.applied_price_usd)}
+                        {p.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
                       </p>
                     ) : null}
-                    <p className={`text-xs mt-0.5 ${stock <= (p.low_stock_threshold || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`}>
+                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 ${stock <= (p.low_stock_threshold || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`)}>
                       {groupProduct ? `${variants.length} ${choiceLabel}` : `${stock} ${p.unit}`}
                     </p>
                     {groupProduct && groupMeta?.stockTotal ? (
@@ -1383,10 +1385,10 @@ export default function POS() {
           </div>
         </div>
 
-        {/* ?��??��??��??��??��??��???RIGHT: Cart panel ?��??��??��??��??��??��???*/}
-        <div className={`flex flex-col flex-shrink-0 w-full md:w-80 lg:w-96 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 h-full min-h-0 ${mobileView === 'products' ? 'hidden md:flex' : 'flex'}`}>
+        {/* Right: Cart panel */}
+        <div className={`flex flex-col flex-shrink-0 w-full md:w-80 md:min-w-80 lg:w-96 lg:min-w-96 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 h-full min-h-0 ${mobileView === 'products' ? 'hidden md:flex' : 'flex'}`}>
 
-          {/* ?�?� Order tabs ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
+          {/* Order tabs */}
           <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 overflow-x-auto bg-gray-50 dark:bg-gray-900 scroll-x">
             {orders.map(order => (
               <div key={order.id} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer
@@ -1407,7 +1409,7 @@ export default function POS() {
             )}
           </div>
 
-          {/* ?�?� Scrollable area: items + customer + delivery + payment ?�?�?� */}
+          {/* Scrollable area: items + customer + delivery + payment */}
           {/*    Everything EXCEPT order tabs and checkout button scrolls.  */}
           <div className="flex-1 overflow-y-auto min-h-0">
 
@@ -1430,7 +1432,7 @@ export default function POS() {
                       onQtyChange={updateQty} onPriceChange={updatePrice}
                       onBranchChange={updateItemBranch}
                       onRemove={id => patchActive({ cart: active.cart.filter(i => getCartLineId(i) !== id) })}
-                      onShowDetails={() => { const p = products.find(pr => pr.id === item.id); if (p) setDetailProduct(p) }}
+                      onShowDetails={() => { const p = productsById.get(Number(item.id)); if (p) setDetailProduct(p) }}
                       fmtUSD={fmtUSD} fmtKHR={fmtKHR} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate}
                     />
                   ))}
@@ -1438,7 +1440,7 @@ export default function POS() {
               )}
             </div>
 
-            {/* ?�?� Customer section (collapsible) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
+            {/* Customer section (collapsible) */}
             <div className="border-t border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between px-3 py-2">
                 <button className="flex-1 text-left flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400" onClick={() => setShowCustomer(v => !v)}>
@@ -1471,7 +1473,7 @@ export default function POS() {
                   </div>
                   {active.customer.name && (
                     <div className="space-y-1.5">
-                      {/* Option label badge ??shown when an option is selected */}
+                      {/* Option label badge shown when an option is selected */}
                       {active.customer._optionLabel && (
                         <div className="flex items-center gap-1.5">
                           <span className="badge-blue text-xs">{active.customer._optionLabel}</span>
@@ -1486,7 +1488,7 @@ export default function POS() {
                         <label htmlFor="pos-customer-address-inline" className="sr-only">{t('address')}</label>
                         <input id="pos-customer-address-inline" name="pos_customer_address_inline" autoComplete="street-address" className="input text-xs py-1" placeholder={t('address')} value={active.customer.address||''} onChange={e => patchActive({ customer: { ...active.customer, address: e.target.value } })} />
                       </div>
-                      {/* Option picker ??appears inline when customer has multiple options */}
+                      {/* Option picker appears inline when a customer has multiple options */}
                       {showOptionPicker && customerOptionsList.length > 0 && (
                         <div className="border border-blue-200 dark:border-blue-700 rounded-xl overflow-hidden shadow-sm">
                           <div className="bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 flex items-center justify-between">
@@ -1512,7 +1514,7 @@ export default function POS() {
               )}
             </div>
 
-            {/* ?�?� Delivery section (collapsible with toggle) ?�?�?�?�?�?�?�?�?�?�?�?�?� */}
+            {/* Delivery section (collapsible with toggle) */}
             <div className="border-t border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between px-3 py-2">
                 <button className="flex-1 text-left flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400" onClick={() => setShowDelivery(v => !v)}>
@@ -1559,7 +1561,7 @@ export default function POS() {
                     )}
                   </div>
 
-                  {/* Delivery fee ??USD input + KHR auto-display */}
+                  {/* Delivery fee with USD input and KHR auto-display */}
                   <div>
                     <label htmlFor="pos-delivery-fee-usd" className="text-xs text-gray-400 block mb-1">{t('delivery_fee')||'Delivery fee'}</label>
                     <div className="flex gap-2 items-center">
@@ -1590,7 +1592,7 @@ export default function POS() {
               )}
             </div>
 
-            {/* ?�?� Discount + Order Summary + Payment ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
+            {/* Discount + order summary + payment */}
             <div className="border-t border-gray-200 dark:border-gray-700 px-3 pt-3 pb-2 space-y-3">
 
               {/* Discount */}
@@ -1703,7 +1705,7 @@ export default function POS() {
             </div>{/* end scroll area content */}
           </div>{/* end scrollable area */}
 
-          {/* ?�?� Checkout button ??always pinned at the bottom ?�?�?�?�?�?�?�?�?�?�?� */}
+          {/* Checkout button pinned at the bottom */}
           <div className="flex-shrink-0 px-3 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
             <button className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0}>
               {loading ? t('loading') : `${t('done') || 'Done'}${active.isDelivery ? ` - ${t('pos_delivery') || 'Delivery'}` : ''}`}
@@ -1713,7 +1715,7 @@ export default function POS() {
         </div>{/* end cart panel */}
       </div>{/* end two-panel layout */}
 
-      {/* ?�?� Sale Status Picker ??shown when Done is tapped ?�?�?�?�?�?�?�?�?�?�?� */}
+          {/* Sale status picker shown when Done is tapped */}
       {showStatusPicker && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm fade-in">
@@ -1741,7 +1743,7 @@ export default function POS() {
         </div>
       )}
 
-      {/* ?�?� Quick-add Customer modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
+      {/* Quick-add customer modal */}
       {showAddCustomer && (
         <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
           <div><label htmlFor="pos-quick-customer-name" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('name')} *</label><input id="pos-quick-customer-name" name="pos_quick_customer_name" className="input" value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))} autoComplete="name" autoFocus /></div>
@@ -1753,7 +1755,7 @@ export default function POS() {
         </QuickAddModal>
       )}
 
-      {/* ?�?� Quick-add Delivery Contact modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
+      {/* Quick-add delivery contact modal */}
       {showAddDelivery && (
         <QuickAddModal title={t('add_delivery_contact')||'Add Delivery Contact'} saving={savingDelivery} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
           <div><label htmlFor="pos-quick-delivery-name" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Driver / Rider Name</label><input id="pos-quick-delivery-name" name="pos_quick_delivery_name" className="input" value={newDeliveryForm.name} onChange={e => setNewDeliveryForm(f => ({ ...f, name: e.target.value }))} autoComplete="name" autoFocus /></div>
@@ -1765,7 +1767,7 @@ export default function POS() {
         </QuickAddModal>
       )}
 
-      {/* ?�?� Product detail bottom-sheet ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
+      {/* Product detail bottom-sheet */}
       {detailProduct && (() => {
         const p = detailProduct
         const stock = getDisplayStock(p)
@@ -1810,7 +1812,7 @@ export default function POS() {
                   <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price')||'Special'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</span>{(p.special_price_khr || p.selling_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(p.special_price_khr || p.selling_price_khr || 0)}</span>}</div></div>
                 ) : null}
                 {promotion.active ? (
-                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'បញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span>}</div></div>
+                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'Discounts')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span>}</div></div>
                 ) : null}
                 <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock')||'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (p.low_stock_threshold || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{stock} {p.unit}</span></div>
                 {groupProduct ? (
@@ -1827,19 +1829,19 @@ export default function POS() {
                               {variant.__variantLabel ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{variant.__variantLabel}</span> : null}
                               <div className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{variant.name}</div>
                             </div>
-                            <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{variantStock} {variant.unit}</div>
+                            <div {...getKhmerTextProps(variant.unit, 'mt-0.5 text-xs text-gray-500 dark:text-gray-400')}>{variantStock} {variant.unit}</div>
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               <button className="btn-primary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'selling'); setDetailProduct(null) }}>
                                 {fmtUSD(variant.selling_price_usd || 0)}
                               </button>
                               {(variant.special_price_usd || 0) > 0 || (variant.special_price_khr || 0) > 0 ? (
                                 <button className="btn-secondary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'special'); setDetailProduct(null) }}>
-                                  {posCopy('Special', 'ពិសេស')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
+                                  {posCopy('Special', 'Special')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
                                 </button>
                               ) : null}
                               {variantPromotion.active ? (
                                 <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'promotion'); setDetailProduct(null) }}>
-                                  {variant.discount_label || posCopy('Discounts', 'បញ្ចុះតម្លៃ')} {fmtUSD(variantPromotion.applied_price_usd)}
+                                  {variant.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(variantPromotion.applied_price_usd)}
                                 </button>
                               ) : null}
                             </div>
@@ -1854,16 +1856,16 @@ export default function POS() {
                 <div className="border-t border-gray-200 p-4 dark:border-gray-700">
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <button className="btn-primary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'selling'); setDetailProduct(null) }}>
-                      {stock <= (p.out_of_stock_threshold || 0) ? t('out_of_stock') : `${posCopy('Regular', 'ធម្មតា')} ${fmtUSD(p.selling_price_usd || 0)}`}
+                      {stock <= (p.out_of_stock_threshold || 0) ? t('out_of_stock') : `${posCopy('Regular', 'Regular')} ${fmtUSD(p.selling_price_usd || 0)}`}
                     </button>
                     {promotion.active ? (
                       <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'promotion'); setDetailProduct(null) }}>
-                        {p.discount_label || posCopy('Discounts', 'បញ្ចុះតម្លៃ')} {fmtUSD(promotion.applied_price_usd)}
+                        {p.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
                       </button>
                     ) : null}
                     {((p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0) ? (
                       <button className="btn-secondary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'special'); setDetailProduct(null) }}>
-                        {posCopy('Special', 'ពិសេស')} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
+                        {posCopy('Special', 'Special')} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
                       </button>
                     ) : null}
                   </div>
@@ -1874,7 +1876,7 @@ export default function POS() {
         )
       })()}
 
-      {/* ?�?� Receipt overlay ??shown after each completed sale ?�?�?�?�?�?�?�?�?�?� */}
+      {/* Receipt overlay shown after each completed sale */}
       {/*   Displayed on top of the POS so other orders remain intact.   */}
       {(imageLightbox || receiptQueue.length > 0) ? (
         <Suspense fallback={null}>

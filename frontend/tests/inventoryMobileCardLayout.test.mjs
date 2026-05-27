@@ -11,19 +11,19 @@ assert.match(
 
 assert.match(
   inventoryProductsSource,
-  /className="mt-1 min-w-0 truncate pl-6 text-\[10px\] leading-3\.5 text-gray-500 dark:text-gray-300" title=\{productTagText\}/,
+  /className="mt-0\.5 min-h-\[0\.65rem\] min-w-0 pl-6 text-\[10px\] leading-3 text-gray-500 dark:text-gray-300" title=\{productTagText\}/,
   'Mobile inventory card should render product details as a single ellipsized line below the product name',
 )
 
 assert.match(
   inventoryProductsSource,
-  /className="flex max-w-\[7rem\] shrink-0 flex-col items-end gap-1 text-right"[\s\S]*\{qty\}[\s\S]*<span className=\{`max-w-full whitespace-nowrap rounded-full px-2 py-0\.5 text-\[9\.5px\] font-semibold leading-none \$\{scls\}`\}>\{slbl\}<\/span>/,
+  /className="flex max-w-\[7rem\] shrink-0 flex-col items-end gap-0\.5 text-right"[\s\S]*\{qty\}[\s\S]*<span className=\{`max-w-full whitespace-nowrap rounded-full px-2 py-0\.5 text-\[9\.5px\] font-semibold leading-none \$\{scls\}`\}>\{slbl\}<\/span>/,
   'Quantity and stock status should stack into compact separate rows without crowding the product details',
 )
 
 assert.match(
   inventoryProductsSource,
-  /className="mt-2 flex items-start justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-700"[\s\S]*Sold \{soldQty\} \| Rev \{fmtUSD\(revenue\)\}[\s\S]*className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1\.5 text-\[11px\] font-semibold[\s\S]*\{t\('adjust'\)\}/,
+  /className="mt-0\.5 flex items-start justify-between gap-2 border-t border-gray-100 pt-0\.5 dark:border-gray-700"[\s\S]*Sold \{soldQty\} \| Rev \{fmtUSD\(revenue\)\}[\s\S]*className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1\.5 text-\[11px\] font-semibold[\s\S]*\{t\('adjust'\)\}/,
   'Adjust action should sit beside pricing and sales metrics as a professional compact button',
 )
 

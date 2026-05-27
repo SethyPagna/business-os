@@ -7,6 +7,8 @@ import {
 } from '../../utils/loaders.mjs'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
+const RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS = 12000
+
 export default function ReceiptPreview({ tpl, settings }) {
   const [ReceiptComp, setReceiptComp] = useState(null)
   const [loadError, setLoadError] = useState(null)
@@ -20,7 +22,11 @@ export default function ReceiptPreview({ tpl, settings }) {
     setReceiptComp(null)
     async function loadPreview() {
       try {
-        const mod = await withLoaderTimeout(() => import('../receipt/Receipt'), 'Receipt preview')
+        const mod = await withLoaderTimeout(
+          () => import('../receipt/Receipt'),
+          'Receipt preview',
+          RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS,
+        )
         if (!aliveRef.current || !isTrackedRequestCurrent(previewRequestRef, requestId)) return
         setReceiptComp(() => mod.default)
       } catch (error) {

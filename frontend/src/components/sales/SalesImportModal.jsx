@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import {
@@ -7,10 +7,44 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { countCsvDataRows } from '../../utils/csvRowCounter.mjs'
 
-function countCsvDataRows(text) {
-  const lines = String(text || '').split(/\r?\n/).filter((line) => line.trim())
-  return Math.max(0, lines.length - 1)
+const SALES_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
+const SALES_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 30000
+const SALES_IMPORT_JOB_START_TIMEOUT_MS = 12000
+const SALES_IMPORT_ROW_COUNT_TIMEOUT_MS = 5000
+
+function countSalesCsvRowsInWorker(text) {
+  if (typeof Worker === 'undefined') {
+    return Promise.resolve(countCsvDataRows(text))
+  }
+
+  return new Promise((resolve, reject) => {
+    const id = `sales-import-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const worker = new Worker(new URL('./salesImportWorker.mjs', import.meta.url), { type: 'module' })
+    const timeoutId = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('Sales import row count timed out'))
+    }, SALES_IMPORT_ROW_COUNT_TIMEOUT_MS)
+    const cleanup = () => {
+      window.clearTimeout(timeoutId)
+      worker.terminate()
+    }
+
+    worker.onmessage = (event) => {
+      const message = event.data || {}
+      if (message.id !== id) return
+      cleanup()
+      if (message.type === 'result') resolve(Number(message.rowCount || 0))
+      else reject(new Error(message.error || 'Sales import row count failed'))
+    }
+    worker.onerror = (error) => {
+      cleanup()
+      reject(new Error(error?.message || 'Sales import worker failed'))
+    }
+    worker.postMessage({ id, text })
+  })
 }
 
 export default function SalesImportModal({ onClose, onDone }) {
@@ -19,8 +53,11 @@ export default function SalesImportModal({ onClose, onDone }) {
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const [previewRowCount, setPreviewRowCount] = useState(0)
+  const [analyzingCsv, setAnalyzingCsv] = useState(false)
   const importRequestRef = useRef(0)
   const importInFlightRef = useRef(false)
+  const rowCountRequestRef = useRef(0)
   const aliveRef = useRef(true)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
@@ -34,19 +71,39 @@ export default function SalesImportModal({ onClose, onDone }) {
     }
   }
 
-  const previewRowCount = useMemo(() => countCsvDataRows(csvText), [csvText])
-
   useEffect(() => () => {
     aliveRef.current = false
     invalidateTrackedRequest(importRequestRef)
   }, [])
 
+  const analyzeCsvText = async (text) => {
+    const nextText = String(text || '')
+    const requestId = rowCountRequestRef.current + 1
+    rowCountRequestRef.current = requestId
+    setAnalyzingCsv(true)
+    let nextCount = 0
+    try {
+      nextCount = await countSalesCsvRowsInWorker(nextText)
+    } catch (_) {
+      nextCount = countCsvDataRows(nextText)
+    }
+    if (!aliveRef.current || rowCountRequestRef.current !== requestId) return
+    setPreviewRowCount(nextCount)
+    setAnalyzingCsv(false)
+  }
+
+  const setSalesCsvText = (text, name = fileName) => {
+    const nextText = String(text || '')
+    setCsvText(nextText)
+    setFileName(String(name || 'sales.csv'))
+    setResult(null)
+    void analyzeCsvText(nextText)
+  }
+
   const handlePickFile = async () => {
     const picked = await window.api.openCSVDialog?.()
     if (!picked?.content) return
-    setCsvText(String(picked.content || ''))
-    setFileName(String(picked.name || 'sales.csv'))
-    setResult(null)
+    setSalesCsvText(picked.content, picked.name || 'sales.csv')
   }
 
   const handleDownloadTemplate = () => {
@@ -54,26 +111,40 @@ export default function SalesImportModal({ onClose, onDone }) {
   }
 
   const handleImport = async () => {
-    if (importInFlightRef.current) return
-    const rowCount = countCsvDataRows(csvText)
+    if (!beginSingleAction(importInFlightRef)) return
+    const rowCount = previewRowCount || countCsvDataRows(csvText)
+    if (analyzingCsv) {
+      finishSingleAction(importInFlightRef)
+      notify(tr('sales_import_wait_row_check', 'Wait for the CSV row check to finish.'), 'error')
+      return
+    }
     if (!rowCount) {
+      finishSingleAction(importInFlightRef)
       notify(tr('sales_import_choose_rows', 'Choose a CSV file with at least one sale row.', 'សូមជ្រើសឯកសារ CSV ដែលមានយ៉ាងហោចណាស់មួយជួរលក់។'), 'error')
       return
     }
 
     const requestId = beginTrackedRequest(importRequestRef)
-    importInFlightRef.current = true
     setLoading(true)
     try {
       const created = await withLoaderTimeout(
         () => window.api.createImportJob({ type: 'sales', policy: { source: 'sales_modal' } }),
         'Sales import job',
+        SALES_IMPORT_JOB_CREATE_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(importRequestRef, requestId)) return
       const job = created?.job || created
       if (!job?.id) throw new Error('Import job was not created')
-      await window.api.uploadImportJobCsv({ jobId: job.id, text: csvText, fileName: fileName || 'sales.csv' })
-      await window.api.startImportJob(job.id)
+      await withLoaderTimeout(
+        () => window.api.uploadImportJobCsv({ jobId: job.id, text: csvText, fileName: fileName || 'sales.csv' }),
+        'Sales import CSV upload',
+        SALES_IMPORT_JOB_UPLOAD_TIMEOUT_MS,
+      )
+      await withLoaderTimeout(
+        () => window.api.startImportJob(job.id),
+        'Sales import start',
+        SALES_IMPORT_JOB_START_TIMEOUT_MS,
+      )
       const queuedResult = { imported: 0, duplicates: 0, queued: rowCount, jobId: job.id, errors: [] }
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
       setResult(queuedResult)
@@ -87,7 +158,7 @@ export default function SalesImportModal({ onClose, onDone }) {
         notify(error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'), 'error')
       }
     } finally {
-      importInFlightRef.current = false
+      finishSingleAction(importInFlightRef)
       if (isTrackedRequestCurrent(importRequestRef, requestId) && aliveRef.current) {
         setLoading(false)
       }
@@ -121,11 +192,13 @@ export default function SalesImportModal({ onClose, onDone }) {
           name="sales_import_csv"
           className="input min-h-[180px] font-mono text-xs"
           value={csvText}
-          onChange={(event) => setCsvText(event.target.value)}
+          onChange={(event) => setSalesCsvText(event.target.value, fileName)}
           placeholder={tr('csv_paste_placeholder', 'Paste CSV here if you do not want to pick a file.', 'បិទភ្ជាប់ CSV នៅទីនេះ ប្រសិនបើអ្នកមិនចង់ជ្រើសឯកសារ។')}
         />
         <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-          {tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', previewRowCount)}
+          {analyzingCsv
+            ? tr('sales_import_checking_rows', 'Checking rows...')
+            : tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', previewRowCount)}
         </div>
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
@@ -144,7 +217,7 @@ export default function SalesImportModal({ onClose, onDone }) {
         ) : null}
         <div className="flex gap-2">
           <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={loading}>{t('close') || 'Close'}</button>
-          <button type="button" className="btn-primary flex-1" disabled={loading || !String(csvText || '').trim()} onClick={handleImport}>
+          <button type="button" className="btn-primary flex-1" disabled={loading || analyzingCsv || !String(csvText || '').trim()} onClick={handleImport}>
             {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : tr('import_sales_button', 'Import sales', 'នាំចូលការលក់')}
           </button>
         </div>

@@ -183,6 +183,16 @@ function DoctorStatusPill({ label, check }) {
   )
 }
 
+const INTEGRATION_DOCTOR_TIMEOUT_MS = 12000
+const INTEGRATION_DOCTOR_DEEP_TIMEOUT_MS = 30000
+const SYSTEM_JOB_STATUS_TIMEOUT_MS = 10000
+const SYSTEM_JOB_CANCEL_TIMEOUT_MS = 12000
+const SYSTEM_JOB_STATUS_MAX_FAILURES = 4
+const DRIVE_SYNC_ACTION_TIMEOUT_MS = 12000
+const DRIVE_SYNC_OAUTH_TIMEOUT_MS = 15000
+const DRIVE_SYNC_QUEUE_TIMEOUT_MS = 12000
+const BACKUP_JOB_QUEUE_TIMEOUT_MS = 15000
+
 function IntegrationDoctorCard({ copy, notify, active }) {
   const [doctor, setDoctor] = useState(null)
   const [busy, setBusy] = useState('')
@@ -198,7 +208,11 @@ function IntegrationDoctorCard({ copy, notify, active }) {
     setBusy(deep ? 'deep' : 'quick')
     try {
       await yieldToBrowser()
-      const result = await window.api.getIntegrationDoctor?.({ deep })
+      const result = await withLoaderTimeout(
+        () => window.api.getIntegrationDoctor?.({ deep }),
+        deep ? 'Deep integration doctor' : 'Integration doctor',
+        deep ? INTEGRATION_DOCTOR_DEEP_TIMEOUT_MS : INTEGRATION_DOCTOR_TIMEOUT_MS,
+      )
       if (!mountedRef.current) return
       setDoctor(result?.item || null)
       if (deep) notify(copy('integration_doctor_complete', 'Integration doctor complete'), 'success')
@@ -290,8 +304,14 @@ function useCopy(t) {
   return (key, fallback, fallbackKm = fallback) => {
     const value = t?.(key)
     if (value && value !== key && !isBrokenLocalizedString(value)) return value
-    if (isKhmer) return BACKUP_LOCAL_COPY.km?.[key] || fallbackKm
-    return fallback
+    if (isKhmer) {
+      const localKm = BACKUP_LOCAL_COPY.km?.[key]
+      if (localKm && !isBrokenLocalizedString(localKm)) return localKm
+      if (fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
+    }
+    const localEn = BACKUP_LOCAL_COPY.en?.[key]
+    if (localEn && !isBrokenLocalizedString(localEn)) return localEn
+    return isBrokenLocalizedString(fallback) ? key : fallback
   }
 }
 
@@ -359,6 +379,7 @@ function startJobWatcher(jobId, {
   let timer = null
   let lastSignature = ''
   let changedOnLastTick = true
+  let consecutiveFailures = 0
   const basePollMs = Math.max(1000, Number(pollMs || 1200))
 
   const stop = () => {
@@ -381,9 +402,14 @@ function startJobWatcher(jobId, {
     }
     inFlight = true
     try {
-      const result = await window.api.getSystemJob?.(jobId)
+      const result = await withLoaderTimeout(
+        () => window.api.getSystemJob?.(jobId),
+        `${reason} status`,
+        SYSTEM_JOB_STATUS_TIMEOUT_MS,
+      )
       const job = result?.item || result
       if (stopped) return
+      consecutiveFailures = 0
       const signature = getJobSignature(job)
       const changed = signature !== lastSignature
       changedOnLastTick = changed
@@ -399,16 +425,24 @@ function startJobWatcher(jobId, {
         if (typeof onError === 'function') onError(new Error(message), job)
       }
     } catch (error) {
-      stop()
-      if (typeof onError === 'function') onError(error)
+      consecutiveFailures += 1
+      changedOnLastTick = false
+      if (consecutiveFailures >= SYSTEM_JOB_STATUS_MAX_FAILURES) {
+        stop()
+        if (typeof onError === 'function') onError(error)
+      }
     } finally {
       inFlight = false
       if (!stopped) {
         const hiddenDelay = typeof document !== 'undefined' && document.visibilityState === 'hidden'
           ? basePollMs * 4
           : basePollMs
+        const failureDelay = consecutiveFailures > 0
+          ? Math.min(15000, basePollMs * (2 ** Math.min(consecutiveFailures, 3)))
+          : basePollMs
         const sameStateDelay = !changedOnLastTick && lastSignature ? Math.round(basePollMs * 1.35) : basePollMs
-        scheduleTick(hiddenDelay > basePollMs ? hiddenDelay : sameStateDelay)
+        const nextDelay = Math.max(failureDelay, hiddenDelay > basePollMs ? hiddenDelay : sameStateDelay)
+        scheduleTick(nextDelay)
       }
     }
   }
@@ -645,7 +679,11 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!job?.id || actionLockRef.current) return
     if (!beginAction('cancel')) return
     try {
-      const result = await window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page')
+      const result = await withLoaderTimeout(
+        () => window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page'),
+        'Cancel backup job',
+        SYSTEM_JOB_CANCEL_TIMEOUT_MS,
+      )
       const nextJob = result?.item || result
       if (nextJob && isMountedRef.current) {
         activeJobSignatureRef.current = getJobSignature(nextJob)
@@ -663,12 +701,16 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!beginAction('save')) return
     try {
       await yieldToBrowser()
-      const result = await window.api.saveGoogleDriveSyncPreferences?.({
-        folderName: form.folderName,
-        deleteMissing: form.deleteMissing,
-        enabled: form.enabled,
-        syncIntervalSeconds: minutesToSyncSeconds(form.syncIntervalMinutes),
-      })
+      const result = await withLoaderTimeout(
+        () => window.api.saveGoogleDriveSyncPreferences?.({
+          folderName: form.folderName,
+          deleteMissing: form.deleteMissing,
+          enabled: form.enabled,
+          syncIntervalSeconds: minutesToSyncSeconds(form.syncIntervalMinutes),
+        }),
+        'Save Google Drive sync preferences',
+        DRIVE_SYNC_ACTION_TIMEOUT_MS,
+      )
       setStatus(result?.item || status)
       dirtyFieldsRef.current.clear()
       actionHistory?.pushAction?.({
@@ -700,15 +742,19 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!beginAction('connect')) return
     try {
       await yieldToBrowser()
-      const result = await window.api.startGoogleDriveSyncOauth?.({
-        clientId: form.clientId,
-        folderName: form.folderName,
-        deleteMissing: form.deleteMissing,
-        enabled: form.enabled,
-        syncIntervalSeconds: minutesToSyncSeconds(form.syncIntervalMinutes),
-        returnOrigin: window.location.origin,
-        returnPath: window.location.pathname + window.location.search,
-      })
+      const result = await withLoaderTimeout(
+        () => window.api.startGoogleDriveSyncOauth?.({
+          clientId: form.clientId,
+          folderName: form.folderName,
+          deleteMissing: form.deleteMissing,
+          enabled: form.enabled,
+          syncIntervalSeconds: minutesToSyncSeconds(form.syncIntervalMinutes),
+          returnOrigin: window.location.origin,
+          returnPath: window.location.pathname + window.location.search,
+        }),
+        'Start Google Drive connection',
+        DRIVE_SYNC_OAUTH_TIMEOUT_MS,
+      )
       const authUrl = result?.authUrl
       if (!authUrl) throw new Error(copy('drive_sync_connect_failed', 'Google Drive connection failed'))
       actionHistory?.pushAction?.({
@@ -730,7 +776,11 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!beginAction('sync')) return
     try {
       await yieldToBrowser()
-      const queued = await window.api.queueGoogleDriveSyncNow?.()
+      const queued = await withLoaderTimeout(
+        () => window.api.queueGoogleDriveSyncNow?.(),
+        'Queue Google Drive sync',
+        DRIVE_SYNC_QUEUE_TIMEOUT_MS,
+      )
       notify(copy('drive_sync_queued', 'Google Drive sync queued'), 'info')
       window.setTimeout(() => {
         trackQueuedJob(queued, 'Google Drive sync', {
@@ -765,7 +815,11 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!beginAction('disconnect')) return
     try {
       await yieldToBrowser()
-      await window.api.disconnectGoogleDriveSync?.()
+      await withLoaderTimeout(
+        () => window.api.disconnectGoogleDriveSync?.(),
+        'Disconnect Google Drive sync',
+        DRIVE_SYNC_ACTION_TIMEOUT_MS,
+      )
       window.setTimeout(() => load({ force: true }), 0)
       actionHistory?.pushAction?.({
         scope: 'backup',
@@ -786,7 +840,11 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!beginAction('forget')) return
     try {
       await yieldToBrowser()
-      await window.api.forgetGoogleDriveSyncCredentials?.({ confirm: true })
+      await withLoaderTimeout(
+        () => window.api.forgetGoogleDriveSyncCredentials?.({ confirm: true }),
+        'Forget Google Drive credentials',
+        DRIVE_SYNC_ACTION_TIMEOUT_MS,
+      )
       setForm((current) => ({
         ...current,
         clientId: '',
@@ -1056,10 +1114,10 @@ function BackupOverview({ copy, onSelect }) {
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200">
                 <Icon className="h-4 w-4" />
               </span>
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold text-gray-900 dark:text-white">{entry.title}</span>
-                <span className="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">{entry.body}</span>
-              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-gray-900 dark:text-white">{entry.title}</div>
+                <div className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{entry.body}</div>
+              </div>
             </div>
           </button>
         )
@@ -1118,7 +1176,11 @@ export default function Backup() {
     if (!beginBackupAction('folder-export')) return
     try {
       await yieldToBrowser()
-      const queued = await window.api.queueBackupFolderExport?.(exportDestination)
+      const queued = await withLoaderTimeout(
+        () => window.api.queueBackupFolderExport?.(exportDestination),
+        'Queue backup export',
+        BACKUP_JOB_QUEUE_TIMEOUT_MS,
+      )
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) {
         const queuedJob = queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_export_queued', 'Backup export queued') }
@@ -1185,7 +1247,11 @@ export default function Backup() {
     if (!beginBackupAction('folder-import')) return
     try {
       await yieldToBrowser()
-      const queued = await window.api.queueBackupFolderRestore?.(folderImportPath)
+      const queued = await withLoaderTimeout(
+        () => window.api.queueBackupFolderRestore?.(folderImportPath),
+        'Queue backup restore',
+        BACKUP_JOB_QUEUE_TIMEOUT_MS,
+      )
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) {
         const queuedJob = queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_restore_queued', 'Backup restore queued') }
@@ -1248,7 +1314,11 @@ export default function Backup() {
     if (!job?.id || actionLockRef.current) return
     if (!beginBackupAction('cancel')) return
     try {
-      const result = await window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page')
+      const result = await withLoaderTimeout(
+        () => window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page'),
+        'Cancel backup job',
+        SYSTEM_JOB_CANCEL_TIMEOUT_MS,
+      )
       const nextJob = result?.item || result
       if (nextJob && aliveRef.current) {
         activeJobSignatureRef.current = getJobSignature(nextJob)
@@ -1269,7 +1339,7 @@ export default function Backup() {
           icon={HardDriveDownload}
           tone="blue"
           title={copy('backup', 'Backup')}
-          subtitle={copy('backup_page_subtitle', 'Create, restore, and verify full Business OS backups.', '?????? ????? ?????????? backup Business OS ???????')}
+          subtitle={copy('backup_page_subtitle', 'Create, restore, and verify full Business OS backups.', 'បង្កើត ស្ដារ និងពិនិត្យ backup Business OS ពេញលេញ។')}
         />
         <SectionSwitcher
           label=""
@@ -1417,4 +1487,3 @@ export default function Backup() {
     </div>
   )
 }
-

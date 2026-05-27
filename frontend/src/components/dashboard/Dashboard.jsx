@@ -5,6 +5,9 @@ import { useRef } from 'react'
 import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
 import { BarChart, LineChart, DonutChart } from './charts'
 import MiniStat from './MiniStat'
+import { buildCSV, downloadCSV, downloadZipFilesAsync } from '../../utils/csv'
+import { buildStandaloneReportHtml } from '../../utils/exportReports'
+import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage'
 import { fmtTime } from '../../utils/formatters'
 import { formatPriceNumber } from '../../utils/pricing.js'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
@@ -18,6 +21,8 @@ import { isInvalidSessionError } from '../../api/http.js'
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
 const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`
 const DASHBOARD_CHART_POINT_LIMIT = 180
+const DASHBOARD_SUMMARY_TIMEOUT_MS = 30000
+const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000
 const EMPTY_DASHBOARD_SUMMARY = {
   today_count: 0,
   today_total: 0,
@@ -106,7 +111,7 @@ function normalizeDashboardRangeId(rangeId) {
 function compactDashboardMetaParts(parts = []) {
   return parts
     .map((part) => (typeof part === 'string' ? part.trim() : ''))
-    .filter((part) => part && part !== 'â€”' && part !== '-')
+    .filter((part) => part && part !== '-' && part !== '--')
 }
 
 function formatDashboardHourLabel(hourValue) {
@@ -282,7 +287,7 @@ export default function Dashboard() {
     const requestId = beginTrackedRequest(summaryRequestRef)
     if (markLoading) setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => window.api.getDashboard(), label, 30_000)
+      const data = await withLoaderTimeout(() => window.api.getDashboard(), label, DASHBOARD_SUMMARY_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       const normalized = normalizeDashboardSummaryPayload(data)
       if (!normalized || !isDashboardSummaryPayload(normalized)) {
@@ -319,7 +324,7 @@ export default function Dashboard() {
       const data = await withLoaderTimeout(
         () => window.api.getAnalytics({ startDate: start, endDate: end, granularity: gran }),
         'Dashboard analytics',
-        30_000,
+        DASHBOARD_ANALYTICS_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
       const normalized = normalizeDashboardAnalyticsPayload(data)
@@ -457,6 +462,11 @@ export default function Dashboard() {
   const chartData = analytics?.periodData || []
   const chartRenderData = useMemo(() => downsampleChartRows(chartData), [chartData])
   const topList   = topMode === 'qty' ? (analytics?.topProductsQty || []) : (analytics?.topProducts || [])
+  const revenueFlowLabel = translateOr('revenue_flow', 'Revenue Flow')
+  const grossSalesLabel = translateOr('gross_sales', 'Gross Sales')
+  const netRevenueLabel = translateOr('net_revenue', 'Net Revenue')
+  const refundsLabel = translateOr('refunds', 'Refunds')
+  const salesCountLabel = translateOr('sales_count', 'Sales Count')
   const stockValueFormulaText = translateOr('dashboard_formula_stock_value', 'Stock value = quantity on hand x unit cost')
   const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds')
   const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
@@ -954,7 +964,7 @@ export default function Dashboard() {
     const manifestRows = buildReportManifestRows(buildDashboardManifestEntries())
     const reportContent = buildStandaloneReportHtml({
       title: 'Dashboard Analytics Report',
-      subtitle: `${periodShort} â€¢ ${rangeLabel}`,
+      subtitle: `${periodShort} - ${rangeLabel}`,
       exportedAt: new Date().toISOString(),
       summaryCards: periodKpis.slice(0, 6).map((kpi) => ({
         label: kpi.label,
@@ -987,9 +997,16 @@ export default function Dashboard() {
       charts: [
         {
           type: 'line',
-          title: 'Revenue over time',
-          subtitle: periodShort,
-          props: { data: chartData, lines: [{ key: 'revenue_usd', color: '#2563eb', label: translateOr('revenue', 'Revenue') || 'Revenue' }] },
+          title: 'Revenue flow over time',
+          subtitle: 'Gross sales, refunds, and net revenue',
+          props: {
+            data: chartData,
+            lines: [
+              { key: 'gross_sales_usd', color: '#0891b2', label: grossSalesLabel },
+              { key: 'refund_usd', color: '#f97316', label: refundsLabel },
+              { key: 'revenue_usd', color: '#2563eb', label: netRevenueLabel },
+            ],
+          },
         },
         {
           type: 'line',
@@ -1006,8 +1023,8 @@ export default function Dashboard() {
         },
         {
           type: 'bar',
-          title: 'Transactions over time',
-          subtitle: 'Sales activity volume',
+          title: 'Sales count over time',
+          subtitle: 'Number of receipts/sale records',
           props: { data: chartData, valueKey: 'count', labelKey: 'period', color: '#7c3aed', isCount: true },
         },
         {
@@ -1064,7 +1081,7 @@ export default function Dashboard() {
       reportFileName: 'dashboard-report.html',
       reportContent,
     })
-    downloadZipFiles(`dashboard-report-${exportStamp}.zip`, files)
+    await downloadZipFilesAsync(`dashboard-report-${exportStamp}.zip`, files)
   }, [
     activeChart,
     analytics,
@@ -1249,13 +1266,16 @@ export default function Dashboard() {
       ) : null}
 
       {/* Range selector */}
-      <div className="card p-3 sm:p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300 sm:text-base">{t('period_label')||'Range'}:</span>
-            <div className="flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
+      <div className="card p-2.5 sm:p-3">
+        <div className="flex flex-col gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-300 sm:text-sm">{t('period_label')||'Range'}:</span>
+            <span className="min-w-0 flex-1 truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300 sm:text-sm">{rangeLabel}</span>
+          </div>
+          <div className="flex gap-1 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible">
               {RANGE_PRESETS.map(p => (
                 <button key={p.id} onClick={() => setRangeId(p.id)}
-                className={`min-h-10 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold transition-colors sm:text-[15px] ${rangeId===p.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
+                className={`min-h-7 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${rangeId===p.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
                 {p.label}
               </button>
             ))}
@@ -1295,7 +1315,6 @@ export default function Dashboard() {
               </select>
             </div>
           )}
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300 sm:ml-auto sm:text-sm">{rangeLabel}</span>
         </div>
       </div>
 
@@ -1320,17 +1339,21 @@ export default function Dashboard() {
           ) : (
             <>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
-              {periodKpis.map((kpi) => (
+              {periodKpis.map((kpi, index) => {
+                const isLastOddCard = periodKpis.length % 2 === 1 && index === periodKpis.length - 1
+                return (
                 <MiniStat
                   key={kpi.id}
-                label={kpi.label}
-                value={kpi.value}
-                sub={kpi.sub}
-                color={kpi.color}
-                trend={kpi.trend}
-                onClick={() => setKpiDetail(kpi)}
-              />
-            ))}
+                  label={kpi.label}
+                  value={kpi.value}
+                  sub={kpi.sub}
+                  color={kpi.color}
+                  trend={kpi.trend}
+                  onClick={() => setKpiDetail(kpi)}
+                  className={isLastOddCard ? 'col-span-2 sm:col-span-1' : ''}
+                />
+                )
+              })}
           </div>
           </>
         )}
@@ -1338,41 +1361,49 @@ export default function Dashboard() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-        <div className="lg:col-span-2 card p-3 sm:p-4">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('analytics')}</h2>
-            <div className="flex gap-1 flex-wrap">
-              {[['revenue', t('revenue')],['profit', t('profit_vs_cogs')],['volume', t('transactions')]].map(([id,lbl]) => (
+        <div className="lg:col-span-2 card p-3 sm:p-3.5">
+          <div className="mb-1.5 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">{t('analytics')}</h2>
+            <div className="inline-flex w-full max-w-full rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90 sm:w-auto">
+              <div className="flex min-w-0 gap-1 overflow-x-auto">
+              {[['revenue', revenueFlowLabel],['profit', t('profit_vs_cogs')],['volume', salesCountLabel]].map(([id,lbl]) => (
                 <button key={id} onClick={() => setActiveChart(id)}
-                  className={`min-h-10 rounded-xl px-4 py-2 text-sm font-semibold sm:text-[15px] ${activeChart===id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                  className={`min-h-7 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${activeChart===id ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-slate-700 dark:text-white dark:ring-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white'}`}>
                   {lbl}
                 </button>
               ))}
+              </div>
             </div>
           </div>
-          {analyticsPending ? <div className="h-36 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" />
-          : analyticsUnavailable ? <div className="h-36 flex flex-col items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
-          : chartRenderData.length === 0 ? <div className="h-36 flex items-center justify-center text-gray-400 text-sm">{t('no_data')}</div>
+          {analyticsPending ? <div className="h-52 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-700" />
+          : analyticsUnavailable ? <div className="flex h-52 flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/60 px-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+          : chartRenderData.length === 0 ? <div className="flex h-52 items-center justify-center text-sm text-gray-400">{t('no_data')}</div>
           : activeChart === 'revenue' ? (
             <>
-              <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb', label: translateOr('revenue', 'Revenue') }]} />
-              <div className="flex items-center gap-3 mt-2">
-                <div className="flex items-center gap-1.5"><div className="w-3 h-1 rounded bg-blue-600"/><span className="text-xs text-gray-500">{t('revenue')} (USD)</span></div>
+              <LineChart data={chartRenderData} lines={[
+                { key:'gross_sales_usd', color:'#0891b2', label: grossSalesLabel },
+                { key:'refund_usd', color:'#f97316', label: refundsLabel },
+                { key:'revenue_usd', color:'#2563eb', label: netRevenueLabel },
+              ]} />
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-cyan-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{grossSalesLabel}</span></div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-orange-500"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{refundsLabel}</span></div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-blue-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{netRevenueLabel}</span></div>
               </div>
             </>
           ) : activeChart === 'profit' ? (
             <>
               <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb' },{ key:'cost_usd', color:'#dc2626' },{ key:'profit_usd', color:'#16a34a' }]} />
-              <div className="flex items-center gap-4 mt-2 flex-wrap">
-                <div className="flex items-center gap-1.5"><div className="w-3 h-1 rounded bg-blue-600"/><span className="text-xs text-gray-500">{t('revenue')}</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-1 rounded bg-red-600"/><span className="text-xs text-gray-500">{t('cogs')}</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-1 rounded bg-green-600"/><span className="text-xs text-gray-500">{t('profit')}</span></div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-blue-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{t('revenue')}</span></div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-red-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{t('cogs')}</span></div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-green-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{t('profit')}</span></div>
               </div>
             </>
           ) : (
             <>
               <BarChart data={chartRenderData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
-              <div className="flex items-center gap-1.5 mt-2"><div className="w-3 h-3 rounded bg-purple-600"/><span className="text-xs text-gray-500">{t('transactions')}</span></div>
+              <div className="mt-1.5 flex items-center gap-1.5"><div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-3.5 w-3.5 rounded bg-purple-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{salesCountLabel}</span></div></div>
             </>
           )}
         </div>
@@ -1741,7 +1772,7 @@ export default function Dashboard() {
         {/* Expiring Products */}
         <div className="card">
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'áž€áž¶ážšáž‡áž¼áž“ážŠáŸ†ážŽáž¹áž„áž•áž»ážáž€áŸ†ážŽážáŸ‹')}</h2>
+            <h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>
             {(summary?.expiring_products?.length||0) > 0 && (
               <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-medium">{summary.expiring_products.length}</span>
             )}

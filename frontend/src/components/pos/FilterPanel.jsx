@@ -1,5 +1,13 @@
 import { Boxes, Building2, Package, Tags, Truck, X } from 'lucide-react'
 
+function countActiveFlags(flags = []) {
+  let count = 0
+  for (const flag of flags) {
+    if (flag) count += 1
+  }
+  return count
+}
+
 export default function POSFilterPanel({
   open,
   t,
@@ -24,14 +32,14 @@ export default function POSFilterPanel({
   if (!open) return null
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
 
-  const activeCount = [
+  const activeCount = countActiveFlags([
     categoryFilter !== 'all',
     brandFilter !== 'all',
     branchFilter !== 'all',
     stockFilter !== 'all',
     groupFilter !== 'all',
     supplierFilter !== 'all',
-  ].filter(Boolean).length
+  ])
 
   const clearAll = () => {
     setCategoryFilter('all')

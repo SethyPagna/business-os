@@ -1,6 +1,10 @@
 // ── EditReturnModal ──────────────────────────────────────────────────────────
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
+
+const RETURN_UPDATE_TIMEOUT_MS = 15000
 
 export default
 function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
@@ -26,6 +30,7 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
   const [notes,        setNotes]        = useState(ret.notes || '')
   const [items,        setItems]        = useState(existingItems.map(i => ({ ...i, returnQty: i.quantity })))
   const [submitting,   setSubmitting]   = useState(false)
+  const submitInFlightRef = useRef(false)
 
   const reasonValue = RETURN_REASONS.includes(reason) ? reason : OTHER_LABEL
   const finalReason = reasonValue === OTHER_LABEL ? customReason : reason
@@ -43,34 +48,39 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
 
   const handleSubmit = async () => {
     if (!finalReason.trim()) { notify(T('return_reason','Please provide a reason'), 'error'); return }
+    if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
-      await window.api.updateReturn(ret.id, {
-        reason:            finalReason,
-        return_type:       returnType,
-        notes:             notes || null,
-        total_refund_usd:  totalRefund,
-        total_refund_khr:  totalRefundKhr,
-        cashier_id:        user?.id,
-        cashier_name:      user?.name || user?.username,
-        items: activeItems.map(it => ({
-          sale_item_id:      it.sale_item_id || null,
-          product_id:        it.product_id,
-          product_name:      it.product_name,
-          quantity:          it.returnQty,
-          applied_price_usd: it.applied_price_usd || 0,
-          applied_price_khr: it.applied_price_khr || 0,
-          cost_price_usd:    it.cost_price_usd || 0,
-          cost_price_khr:    it.cost_price_khr || 0,
-          return_to_stock:   it.return_to_stock !== false,
-          branch_id:         it.branch_id || ret.branch_id || null,
-        })),
-      })
+      const result = await withLoaderTimeout(
+        () => window.api.updateReturn(ret.id, {
+          reason:            finalReason,
+          return_type:       returnType,
+          notes:             notes || null,
+          total_refund_usd:  totalRefund,
+          total_refund_khr:  totalRefundKhr,
+          cashier_id:        user?.id,
+          cashier_name:      user?.name || user?.username,
+          items: activeItems.map(it => ({
+            sale_item_id:      it.sale_item_id || null,
+            product_id:        it.product_id,
+            product_name:      it.product_name,
+            quantity:          it.returnQty,
+            applied_price_usd: it.applied_price_usd || 0,
+            applied_price_khr: it.applied_price_khr || 0,
+            cost_price_usd:    it.cost_price_usd || 0,
+            cost_price_khr:    it.cost_price_khr || 0,
+            return_to_stock:   it.return_to_stock !== false,
+            branch_id:         it.branch_id || ret.branch_id || null,
+          })),
+        }),
+        'Update return',
+        RETURN_UPDATE_TIMEOUT_MS,
+      )
       notify(T('success','Return updated successfully'))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-      onSuccess()
+      await Promise.resolve(onSuccess?.(result))
       onClose()
     } catch (e) {
       if (e?.conflict || e?.code === 'write_conflict') {
@@ -79,6 +89,7 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
       }
       notify((T('error','Error') || 'Error') + ': ' + (e.message || e), 'error')
     } finally {
+      finishSingleAction(submitInFlightRef)
       setSubmitting(false)
     }
   }

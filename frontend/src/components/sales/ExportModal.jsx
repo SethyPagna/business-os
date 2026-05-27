@@ -2,6 +2,10 @@ import { useMemo, useState } from 'react'
 import { CalendarRange, Eye, FileSpreadsheet, Upload } from 'lucide-react'
 import Modal from '../shared/Modal'
 import StatusBadge from './StatusBadge'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
+
+const SALES_EXPORT_PREVIEW_TIMEOUT_MS = 20000
+const SALES_EXPORT_CSV_TIMEOUT_MS = 30000
 
 export default function ExportModal({ onClose, t, fmtUSD }) {
   const [period, setPeriod] = useState('monthly')
@@ -81,7 +85,11 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
     try {
       const dates = validateDates()
       setLoading(true)
-      const data = await window.api.getSalesExport({ startDate: dates.start, endDate: dates.end })
+      const data = await withLoaderTimeout(
+        () => window.api.getSalesExport({ startDate: dates.start, endDate: dates.end }),
+        'Sales export preview',
+        SALES_EXPORT_PREVIEW_TIMEOUT_MS,
+      )
       setPreview(data)
     } catch (error) {
       alert(error?.message || tr('error_loading_export', 'Error loading export'))
@@ -94,7 +102,11 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
     try {
       const dates = validateDates()
       setLoading(true)
-      const data = await window.api.getSalesExport({ startDate: dates.start, endDate: dates.end, format: 'csv' })
+      const data = await withLoaderTimeout(
+        () => window.api.getSalesExport({ startDate: dates.start, endDate: dates.end, format: 'csv' }),
+        'Sales export CSV',
+        SALES_EXPORT_CSV_TIMEOUT_MS,
+      )
       const csvText = typeof data === 'string' ? data : buildCsvFallback(data, dates)
       downloadCsvBlob(csvText, dates)
     } catch (error) {

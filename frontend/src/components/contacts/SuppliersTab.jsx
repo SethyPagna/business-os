@@ -10,9 +10,10 @@ import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import { ThreeDotMenu, DetailModal, ContactTable, useContactSelection } from './shared'
+import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
@@ -28,6 +29,7 @@ import {
 } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
+const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
 function SupplierForm({ supplier, onSave, onClose, t }) {
   const init = supplier
@@ -153,6 +155,9 @@ function SuppliersTab({ t, notify, active = true }) {
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
+  const saveInFlightRef = useRef(false)
+  const deleteInFlightRef = useRef(false)
+  const bulkDeleteInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -286,7 +291,7 @@ function SuppliersTab({ t, notify, active = true }) {
     },
 
   ]), [availableYears, groupMode, monthFilter, sortDirection, tr, yearFilter])
-  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length
+  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'])
   const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
@@ -314,6 +319,10 @@ function SuppliersTab({ t, notify, active = true }) {
     userId: user?.id,
     userName: user?.name,
   }), [user?.id, user?.name])
+
+  const runSupplierMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, SUPPLIER_MUTATION_TIMEOUT_MS)
+  ), [])
 
   const load = useCallback(async ({ silent = false, label = 'Suppliers' } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -382,13 +391,17 @@ function SuppliersTab({ t, notify, active = true }) {
   }, [active, load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
-    if (!String(form.name || '').trim()) return notify(t('name_required') || 'Name required', 'error')
+    if (!beginSingleAction(saveInFlightRef)) return
+    if (!String(form.name || '').trim()) {
+      finishSingleAction(saveInFlightRef)
+      return notify(t('name_required') || 'Name required', 'error')
+    }
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const result = selected
-        ? await window.api.updateSupplier(selected.id, payload)
-        : await window.api.createSupplier(payload)
+        ? await runSupplierMutation(() => window.api.updateSupplier(selected.id, payload), 'Update supplier')
+        : await runSupplierMutation(() => window.api.createSupplier(payload), 'Create supplier')
       if (result?.success === false) {
         notify(result.error || 'Failed', 'error')
         return
@@ -398,12 +411,18 @@ function SuppliersTab({ t, notify, active = true }) {
         actionHistory.pushAction({
           label: `Edit supplier ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const restoreResult = await window.api.updateSupplier(existingSnapshot.id, buildSupplierPayload(existingSnapshot))
+            const restoreResult = await runSupplierMutation(
+              () => window.api.updateSupplier(existingSnapshot.id, buildSupplierPayload(existingSnapshot)),
+              'Undo supplier edit',
+            )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore supplier')
             await load({ silent: true, label: 'Suppliers undo edit' })
           },
           redo: async () => {
-            const redoResult = await window.api.updateSupplier(nextSnapshot.id, buildSupplierPayload(nextSnapshot))
+            const redoResult = await runSupplierMutation(
+              () => window.api.updateSupplier(nextSnapshot.id, buildSupplierPayload(nextSnapshot)),
+              'Redo supplier edit',
+            )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply supplier changes')
             await load({ silent: true, label: 'Suppliers redo edit' })
           },
@@ -415,11 +434,14 @@ function SuppliersTab({ t, notify, active = true }) {
           actionHistory.pushAction({
             label: `Add supplier ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              await window.api.deleteSupplier(createdSupplierId)
+              await runSupplierMutation(() => window.api.deleteSupplier(createdSupplierId), 'Undo supplier create')
               await load({ silent: true, label: 'Suppliers undo create' })
             },
             redo: async () => {
-              const recreateResult = await window.api.createSupplier(buildSupplierPayload(createdSnapshot))
+              const recreateResult = await runSupplierMutation(
+                () => window.api.createSupplier(buildSupplierPayload(createdSnapshot)),
+                'Redo supplier create',
+              )
               if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate supplier')
               createdSupplierId = extractHistoryResultId(recreateResult)
               await load({ silent: true, label: 'Suppliers redo create' })
@@ -433,19 +455,28 @@ function SuppliersTab({ t, notify, active = true }) {
       await load({ silent: true, label: 'Suppliers after save' })
     } catch (error) {
       notify(error?.message || 'Failed', 'error')
+    } finally {
+      finishSingleAction(saveInFlightRef)
     }
   }
 
   const handleDelete = async (supplier) => {
-    if (!confirm(`Delete supplier "${supplier.name}"?`)) return
+    if (!beginSingleAction(deleteInFlightRef)) return
+    if (!confirm(`Delete supplier "${supplier.name}"?`)) {
+      finishSingleAction(deleteInFlightRef)
+      return
+    }
     try {
       const snapshot = cloneHistorySnapshot(supplier)
-      await window.api.deleteSupplier(supplier.id)
+      await runSupplierMutation(() => window.api.deleteSupplier(supplier.id), 'Delete supplier')
       let restoredSupplierId = 0
       actionHistory.pushAction({
         label: `Delete supplier ${snapshot.name || ''}`.trim(),
         undo: async () => {
-          const restoreResult = await window.api.createSupplier(buildSupplierPayload(snapshot))
+          const restoreResult = await runSupplierMutation(
+            () => window.api.createSupplier(buildSupplierPayload(snapshot)),
+            'Undo supplier delete',
+          )
           if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore supplier')
           restoredSupplierId = extractHistoryResultId(restoreResult)
           await load({ silent: true, label: 'Suppliers undo delete' })
@@ -453,7 +484,7 @@ function SuppliersTab({ t, notify, active = true }) {
         redo: async () => {
           const targetId = restoredSupplierId || Number(snapshot.id || 0)
           if (!targetId) return
-          await window.api.deleteSupplier(targetId)
+          await runSupplierMutation(() => window.api.deleteSupplier(targetId), 'Redo supplier delete')
           await load({ silent: true, label: 'Suppliers redo delete' })
         },
       })
@@ -463,33 +494,39 @@ function SuppliersTab({ t, notify, active = true }) {
       await load({ silent: true, label: 'Suppliers after delete' })
     } catch (error) {
       notify(error?.message || 'Failed', 'error')
+    } finally {
+      finishSingleAction(deleteInFlightRef)
     }
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || bulkActionBusy) return
-    if (!confirm(`Delete ${selectedIds.size} supplier(s)?`)) return
+    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!confirm(`Delete ${selectedIds.size} supplier(s)?`)) {
+      finishSingleAction(bulkDeleteInFlightRef)
+      return
+    }
     const ids = [...selectedIds]
-    const snapshots = suppliers.filter((supplier) => ids.includes(Number(supplier?.id || 0))).map((supplier) => JSON.parse(JSON.stringify(supplier)))
+    const snapshots = buildSelectedSnapshots(suppliers, ids)
     const failedIds = []
     setBulkActionBusy(true)
     try {
       const deleteRun = await runConcurrentTasks(ids, async (id) => {
-        await window.api.deleteSupplier(id)
+        await runSupplierMutation(() => window.api.deleteSupplier(id), 'Bulk delete suppliers')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length
       failedIds.push(...deleteRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
       setSelectedIds(new Set(failedIds))
       await load({ silent: true, label: 'Suppliers refresh after delete' })
-      const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      const failedIdSet = new Set(failedIds)
+      const deletedSnapshots = snapshots.filter((snapshot) => !failedIdSet.has(Number(snapshot?.id || 0)))
       if (deletedCount > 0 && deletedSnapshots.length) {
         let restoredEntries = []
         actionHistory.pushAction({
           label: `Delete ${deletedCount} supplier${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot) => {
-              const result = await window.api.createSupplier({
+              const result = await runSupplierMutation(() => window.api.createSupplier({
                 name: snapshot.name || '',
                 phone: snapshot.phone || '',
                 email: snapshot.email || '',
@@ -499,7 +536,7 @@ function SuppliersTab({ t, notify, active = true }) {
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
-              })
+              }), 'Restore deleted suppliers')
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
             if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore supplier'))
@@ -508,7 +545,9 @@ function SuppliersTab({ t, notify, active = true }) {
           },
           redo: async () => {
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => window.api.deleteSupplier(id))
+            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => (
+              runSupplierMutation(() => window.api.deleteSupplier(id), 'Redo bulk supplier delete')
+            ))
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete supplier'))
             await load({ silent: true, label: 'Suppliers redo delete' })
           },
@@ -520,6 +559,7 @@ function SuppliersTab({ t, notify, active = true }) {
         notify(`${deletedCount} ${t('deleted') || 'deleted'}`)
       }
     } finally {
+      finishSingleAction(bulkDeleteInFlightRef)
       setBulkActionBusy(false)
     }
   }

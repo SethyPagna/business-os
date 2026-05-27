@@ -10,6 +10,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 
 const COPY = {
   en: {
@@ -114,6 +115,8 @@ const LOYALTY_SECTION_OPTIONS = [
   { value: 'lookup', label: 'Lookup', hint: 'Check a customer membership number and current balance.' },
   { value: 'leaders', label: 'Top Points', hint: 'Show customers with the highest current point balances.' },
 ]
+const LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS = 12000
+const LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 
 function sanitizeInteger(value, fallback, min = 0) {
   const num = Math.floor(Number(value))
@@ -175,14 +178,13 @@ export default function LoyaltyPointsPage() {
     const requestId = beginTrackedRequest(customerPointsRequestRef)
     setCustomerPointsLoading(true)
     try {
-      const rows = await withLoaderTimeout(() => window.api.getCustomers(), label)
+      const rows = await withLoaderTimeout(() => window.api.getCustomers(), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
       const nextRows = Array.isArray(rows) ? rows : []
       setCustomerPoints(nextRows)
       return nextRows
     } catch (_) {
       if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
-      setCustomerPoints([])
       return null
     } finally {
       if (isTrackedRequestCurrent(customerPointsRequestRef, requestId)) {
@@ -231,8 +233,7 @@ export default function LoyaltyPointsPage() {
   }
 
   async function handleSave() {
-    if (saveInFlightRef.current) return
-    saveInFlightRef.current = true
+    if (!beginSingleAction(saveInFlightRef)) return
     try {
       setSaving(true)
       await saveSettings({
@@ -250,7 +251,7 @@ export default function LoyaltyPointsPage() {
     } catch (error) {
       notify(error?.message || 'Failed to save point rules', 'error')
     } finally {
-      saveInFlightRef.current = false
+      finishSingleAction(saveInFlightRef)
       setSaving(false)
     }
   }
@@ -267,7 +268,11 @@ export default function LoyaltyPointsPage() {
     try {
       setLookupLoading(true)
       setLookupError('')
-      const result = await withLoaderTimeout(() => window.api.lookupPortalMembership(value), 'Loyalty membership lookup')
+      const result = await withLoaderTimeout(
+        () => window.api.lookupPortalMembership(value),
+        'Loyalty membership lookup',
+        LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
+      )
       if (!isTrackedRequestCurrent(lookupRequestRef, requestId)) return
       if (!result) {
         setLookupData(null)

@@ -9,6 +9,11 @@ import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 
+const PROFILE_LOAD_TIMEOUT_MS = 10000
+const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
+const PROFILE_VERIFICATION_CAPS_TIMEOUT_MS = 8000
+const PROFILE_AUTH_METHODS_TIMEOUT_MS = 12000
+
 /**
  * 1. User Profile Modal
  * 1.1 Purpose
@@ -259,7 +264,8 @@ export default function UserProfileModal({ onClose }) {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key && !isBrokenLocalizedString(value)) return value
     const khmerFallback = PROFILE_KM_FALLBACKS[key] || fallbackKm
-    return isKhmer ? khmerFallback : fallbackEn
+    if (isKhmer && !isBrokenLocalizedString(khmerFallback)) return khmerFallback
+    return fallbackEn
   }
   const [loading, setLoading] = useState(true)
   const [savingProfile, setSavingProfile] = useState(false)
@@ -296,6 +302,9 @@ export default function UserProfileModal({ onClose }) {
   const avatarFileInputRef = useRef(null)
   const avatarObjectUrlRef = useRef('')
   const loadProfileRequestRef = useRef(0)
+  const saveProfileInFlightRef = useRef(false)
+  const savePasswordInFlightRef = useRef(false)
+  const avatarUploadInFlightRef = useRef(false)
   const saveSessionInFlightRef = useRef(false)
   const oauthRequestInFlightRef = useRef(false)
 
@@ -332,10 +341,26 @@ export default function UserProfileModal({ onClose }) {
     if (!profile) setLoading(true)
     try {
       const result = await settleLoaderMap({
-        profile: () => window.api.getUserProfile(user.id),
-        otp: () => window.api.otpStatus(user.id),
-        caps: () => window.api.getVerificationCapabilities?.().catch(() => null),
-        authMethods: () => window.api.getUserAuthMethods?.(user.id).catch(() => null),
+        profile: () => withLoaderTimeout(
+          () => window.api.getUserProfile(user.id),
+          'Profile details',
+          PROFILE_LOAD_TIMEOUT_MS,
+        ),
+        otp: () => withLoaderTimeout(
+          () => window.api.otpStatus(user.id),
+          'Profile OTP status',
+          PROFILE_OTP_STATUS_TIMEOUT_MS,
+        ),
+        caps: () => withLoaderTimeout(
+          () => window.api.getVerificationCapabilities?.(),
+          'Profile verification capabilities',
+          PROFILE_VERIFICATION_CAPS_TIMEOUT_MS,
+        ).catch(() => null),
+        authMethods: () => withLoaderTimeout(
+          () => window.api.getUserAuthMethods?.(user.id),
+          'Profile sign-in methods',
+          PROFILE_AUTH_METHODS_TIMEOUT_MS,
+        ).catch(() => null),
       })
       const profileResult = result.values.profile
       const otpResult = result.values.otp
@@ -400,7 +425,7 @@ export default function UserProfileModal({ onClose }) {
    * 4.3 Session-duration preference update.
    */
   const handleProfileSave = async () => {
-    if (savingProfile) return
+    if (savingProfile || saveProfileInFlightRef.current) return
     if (!profile?.name?.trim() || !profile?.username?.trim()) {
       notify(tr('name_username_required', 'Name and username are required'), 'error')
       return
@@ -410,6 +435,7 @@ export default function UserProfileModal({ onClose }) {
       return
     }
 
+    saveProfileInFlightRef.current = true
     setSavingProfile(true)
     try {
       const previousEmail = String(profile.email || '').trim().toLowerCase()
@@ -456,16 +482,18 @@ export default function UserProfileModal({ onClose }) {
     } catch (error) {
       notify(error?.message || 'Failed to save profile', 'error')
     } finally {
+      saveProfileInFlightRef.current = false
       setSavingProfile(false)
     }
   }
 
   const handlePasswordSave = async () => {
-    if (savingPassword) return
+    if (savingPassword || savePasswordInFlightRef.current) return
     if (newPassword.length < 4) return notify(tr('new_password_min_length', 'Use at least 4 characters for the new password'), 'error')
     if (newPassword !== confirmPassword) return notify(tr('new_password_confirm_mismatch', 'New password confirmation does not match'), 'error')
     if (!canAdminOverride && !currentPassword.trim()) return notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
 
+    savePasswordInFlightRef.current = true
     setSavingPassword(true)
     try {
       const result = await withLoaderTimeout(() => window.api.changeUserPassword(user.id, {
@@ -492,6 +520,7 @@ export default function UserProfileModal({ onClose }) {
     } catch (error) {
       notify(error?.message || 'Failed to change password', 'error')
     } finally {
+      savePasswordInFlightRef.current = false
       setSavingPassword(false)
     }
   }
@@ -666,7 +695,8 @@ export default function UserProfileModal({ onClose }) {
   }
 
   const saveAvatarFromEditor = async () => {
-    if (uploadingAvatar) return
+    if (uploadingAvatar || avatarUploadInFlightRef.current) return
+    avatarUploadInFlightRef.current = true
     setUploadingAvatar(true)
     try {
       const blob = await renderAvatarCropBlob({
@@ -690,6 +720,7 @@ export default function UserProfileModal({ onClose }) {
     } catch (error) {
       notify(error?.message || tr('avatar_upload_failed', 'Avatar upload failed'), 'error')
     } finally {
+      avatarUploadInFlightRef.current = false
       setUploadingAvatar(false)
     }
   }

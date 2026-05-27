@@ -1,5 +1,5 @@
 import { Bot, ExternalLink, Eye, Images, Plus, Save, Search, ShoppingBag, Sparkles, Upload } from 'lucide-react'
-import { ProductImg } from '../products/primitives'
+import { ProductImg } from '../products/shared/primitives'
 import { useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'

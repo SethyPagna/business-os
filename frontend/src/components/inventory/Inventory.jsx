@@ -1,8 +1,8 @@
 ﻿// Main Inventory page sub-components imported from sibling files.
 
-import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Fragment, Suspense, lazy, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
-import { useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing.js'
 import ExportMenu from '../shared/ExportMenu'
@@ -11,9 +11,9 @@ import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
+import InventoryProductsSurface from './InventoryProductsSurface'
 const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
 const InventoryImportModal = lazy(() => import('./InventoryImportModal'))
-const InventoryProductsSurface = lazy(() => import('./InventoryProductsSurface'))
 const InventoryMovementsSurface = lazy(() => import('./InventoryMovementsSurface'))
 const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface'))
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
@@ -21,10 +21,11 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
-import { aggregateInitialOptions } from '../../utils/initials.mjs'
+import { aggregateInitialOptions, buildInitialOptionsFromProducts } from '../../utils/initials.mjs'
 import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
 import { buildBatchPreview } from '../../utils/productBatches.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
@@ -32,9 +33,21 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   settleLoaderMap,
+  withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 
 const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
+const INVENTORY_USER_OPTIONS_TIMEOUT_MS = 8000
+const INVENTORY_REASONS_TIMEOUT_MS = 8000
+const INVENTORY_BRANCHES_TIMEOUT_MS = 8000
+const INVENTORY_STATS_TIMEOUT_MS = 12000
+const INVENTORY_PRODUCTS_TIMEOUT_MS = 12000
+const INVENTORY_MOVEMENTS_TIMEOUT_MS = 15000
+const INVENTORY_RFID_TIMEOUT_MS = 8000
+const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000
+const INVENTORY_RETURNS_STATS_TIMEOUT_MS = 12000
+const INVENTORY_DASHBOARD_STATS_TIMEOUT_MS = 12000
+const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
 
 function reuseSetWhenUnchanged(current, nextValues = []) {
   const next = new Set(nextValues)
@@ -43,6 +56,72 @@ function reuseSetWhenUnchanged(current, nextValues = []) {
     if (!next.has(value)) return next
   }
   return current
+}
+
+function normalizeFiniteIdsFrom(items = [], getValue = (value) => value) {
+  return items.reduce((normalized, item) => {
+    const id = Number(getValue(item))
+    if (Number.isFinite(id)) normalized.push(id)
+    return normalized
+  }, [])
+}
+
+function normalizeFiniteIds(ids = []) {
+  return normalizeFiniteIdsFrom(ids)
+}
+
+function countActiveFlags(flags = []) {
+  let count = 0
+  for (const flag of flags) {
+    if (flag) count += 1
+  }
+  return count
+}
+
+function countSelectedIds(ids = [], selectedIds = new Set()) {
+  let count = 0
+  for (const id of ids) {
+    if (selectedIds.has(id)) count += 1
+  }
+  return count
+}
+
+function renderDestinationProductOptions(products = [], excludedProductId) {
+  const excludedId = Number(excludedProductId)
+  return products.map((product) => {
+    const id = Number(product?.id)
+    if (Number.isFinite(excludedId) && id === excludedId) return null
+    return <option key={product.id} value={product.id}>{product.name}</option>
+  })
+}
+
+const INVENTORY_MOBILE_INITIAL_ITEM_LIMIT = 4
+
+function limitInventorySectionsForMobile(sections = [], maxItems = INVENTORY_MOBILE_INITIAL_ITEM_LIMIT) {
+  const limit = Math.max(1, Number(maxItems || INVENTORY_MOBILE_INITIAL_ITEM_LIMIT))
+  let remaining = limit
+  const limitedSections = []
+  for (const section of sections) {
+    if (remaining <= 0) break
+    const nextGroups = []
+    for (const group of section?.groups || []) {
+      if (remaining <= 0) break
+      const groupItems = Array.isArray(group?.items) ? group.items : []
+      if (!groupItems.length) continue
+      const visibleItems = groupItems.slice(0, remaining)
+      remaining -= visibleItems.length
+      nextGroups.push({
+        ...group,
+        items: visibleItems,
+      })
+    }
+    if (!nextGroups.length) continue
+    limitedSections.push({
+      ...section,
+      groups: nextGroups,
+    })
+  }
+  return limitedSections
 }
 
 function priceCsv(value) {
@@ -151,10 +230,15 @@ export default function Inventory() {
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('inventory')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const safeT = useCallback((key, fallback) => {
+    const value = typeof t === 'function' ? t(key) : null
+    return value && value !== key && !isBrokenLocalizedString(value) ? value : fallback
+  }, [t])
   const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
-    if (value && value !== key) return value
-    return isKhmer ? fallbackKm : fallbackEn
+    if (value && value !== key && !isBrokenLocalizedString(value)) return value
+    if (isKhmer && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
+    return fallbackEn
   }, [isKhmer, t])
   const [summary,       setSummary]       = useState([])
   const [stockStats,    setStockStats]    = useState(null)
@@ -184,8 +268,16 @@ export default function Inventory() {
   const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
   const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
   const [inventoryProductsLoaded, setInventoryProductsLoaded] = useState(false)
+  const [initialInventoryDesktopRevealReady, setInitialInventoryDesktopRevealReady] = useState(false)
+  const [initialInventoryMobileRevealReady, setInitialInventoryMobileRevealReady] = useState(false)
+  const [initialInventoryMobileFullListReady, setInitialInventoryMobileFullListReady] = useState(false)
+  const [isInventoryMobileViewport, setIsInventoryMobileViewport] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth < 640
+  })
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState('all')
   const [inventoryInitials, setInventoryInitials] = useState([])
+  const [cachedInventoryInitialOptions, setCachedInventoryInitialOptions] = useState([])
   const [inventoryProductFilters, setInventoryProductFilters] = useState({ brands: [] })
   const [selectedProductIds, setSelectedProductIds] = useState(() => new Set())
   const [inventoryBatch, setInventoryBatch] = useState(null)
@@ -196,9 +288,6 @@ export default function Inventory() {
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
-  const [inventoryBranchPickerOpen, setInventoryBranchPickerOpen] = useState(false)
-  const [inventoryGroupPickerOpen, setInventoryGroupPickerOpen] = useState(false)
-  const [inventoryStockPickerOpen, setInventoryStockPickerOpen] = useState(false)
   const [inventoryBrandPickerOpen, setInventoryBrandPickerOpen] = useState(false)
   const [inventoryMovementUserPickerOpen, setInventoryMovementUserPickerOpen] = useState(false)
   const [userOptions, setUserOptions] = useState([])
@@ -235,7 +324,18 @@ export default function Inventory() {
   const loadPromiseRef = useRef(null)
   const pendingLoadRef = useRef(null)
   const latestLoadRef = useRef(null)
+  const inventoryReasonsLoadedRef = useRef(false)
+  const inventoryReasonsPromiseRef = useRef(null)
+  const inventoryUsersLoadedRef = useRef(false)
+  const inventoryUsersPromiseRef = useRef(null)
+  const adjustStockInFlightRef = useRef(false)
+  const moveStockInFlightRef = useRef(false)
+  const transferStockInFlightRef = useRef(false)
+  const batchInventoryInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory' })
+  const runInventoryMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
+  ), [])
   const movementTimeMode = useMemo(
     () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
     [movementMonthFilter, movementYearFilter],
@@ -251,22 +351,45 @@ export default function Inventory() {
     }
     return username === 'admin' || roleCode === 'admin' || !!permissions.all
   }, [user])
+  const branchesById = useMemo(() => new Map(
+    (Array.isArray(branches) ? branches : []).map((branch) => [String(branch?.id), branch]),
+  ), [branches])
+  const defaultBranch = useMemo(() => (
+    branches.find((branch) => branch.is_default) || branches[0] || null
+  ), [branches])
+  const defaultTransferDestinationBySourceId = useMemo(() => {
+    const branchIds = (Array.isArray(branches) ? branches : [])
+      .map((branch) => String(branch?.id || ''))
+      .filter(Boolean)
+    const firstBranchId = branchIds[0] || ''
+    const secondBranchId = branchIds[1] || ''
+    return new Map(branchIds.map((branchId) => [
+      branchId,
+      branchId !== firstBranchId ? firstBranchId : secondBranchId,
+    ]))
+  }, [branches])
+  const summaryById = useMemo(() => new Map(
+    (Array.isArray(summary) ? summary : []).map((product) => [Number(product?.id || 0), product]),
+  ), [summary])
+  const getBranchLabel = useCallback((branchId, fallback = '') => (
+    branchesById.get(String(branchId))?.name || fallback || String(branchId || '')
+  ), [branchesById])
 
   const rfidGatewayStatus = useMemo(() => {
     const branchName = branchFilter === 'all'
       ? (t('all_branches') || 'All branches')
-      : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || `Branch ${branchFilter}`)
+      : getBranchLabel(branchFilter, `Branch ${branchFilter}`)
     return {
       connected: false,
-      label: tr('rfid_not_connected', 'Not connected', '????????????'),
+      label: tr('rfid_not_connected', 'Not connected'),
       branchName,
       readerCount: Number(rfidStatus?.readerCount || 0),
-      activeSession: rfidStatus?.activeSession?.id ? `${tr('rfid_session', 'Session', '????')} #${rfidStatus.activeSession.id}` : tr('rfid_no_active_session', 'No active RFID session', '?????????? RFID ?????????????'),
+      activeSession: rfidStatus?.activeSession?.id ? `${tr('rfid_session', 'Session')} #${rfidStatus.activeSession.id}` : tr('rfid_no_active_session', 'No active RFID session'),
       queuedReads: 0,
       unknownTags: Number(rfidStatus?.exceptionCount || 0),
-      lastHeartbeat: rfidStatus?.tagCount ? `${rfidStatus.tagCount} ${tr('rfid_tags_linked', 'tags linked', '??????????????')}` : tr('rfid_no_reader_heartbeat', 'No reader heartbeat yet', '?????????? heartbeat ?? reader'),
+      lastHeartbeat: rfidStatus?.tagCount ? `${rfidStatus.tagCount} ${tr('rfid_tags_linked', 'tags linked')}` : tr('rfid_no_reader_heartbeat', 'No reader heartbeat yet'),
     }
-  }, [branchFilter, branches, rfidStatus, t, tr])
+  }, [branchFilter, getBranchLabel, rfidStatus, t, tr])
 
   const rfidSectionOptions = useMemo(() => (
     RFID_SECTION_OPTIONS.map((option) => ({
@@ -282,50 +405,59 @@ export default function Inventory() {
     move: inventoryReasons.filter((item) => item?.type === 'move'),
   }), [inventoryReasons])
 
-  const inventoryGroupChoices = useMemo(() => ([
-    { value: 'all', label: t('all') || 'All' },
-    { value: 'grouped', label: t('groups') || 'Groups' },
-    { value: 'parent', label: t('parents') || 'Parents' },
-    { value: 'variant', label: t('variants') || 'Variants' },
-    { value: 'standalone', label: t('standalone') || 'Standalone' },
-  ]), [t])
-
-  const inventoryStockChoices = useMemo(() => ([
-    { value: 'all', label: t('all') || 'All' },
-    { value: 'in_stock', label: t('in_stock') || 'In stock' },
-    { value: 'low', label: t('low_stock') || 'Low stock' },
-    { value: 'out', label: t('out_of_stock') || 'Out of stock' },
-  ]), [t])
-
-  const selectedInventoryBranchLabel = useMemo(() => {
-    if (branchFilter === 'all') return t('all_branches') || 'All branches'
-    return branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter
-  }, [branchFilter, branches, t])
-
-  const selectedInventoryGroupLabel = useMemo(
-    () => inventoryGroupChoices.find((option) => option.value === groupFilter)?.label || (t('groups') || 'Groups'),
-    [groupFilter, inventoryGroupChoices, t],
-  )
-
-  const selectedInventoryStockLabel = useMemo(
-    () => inventoryStockChoices.find((option) => option.value === stockFilter)?.label || (t('stock_status') || 'Stock'),
-    [inventoryStockChoices, stockFilter, t],
-  )
-
-  const needsStatsData = inventorySection === 'all' || inventorySection === 'stats' || inventorySection === 'products' || tab === 'products'
-  const needsProductSummary = inventorySection === 'all' || inventorySection === 'products' || tab === 'products'
-  const needsMovementData = inventorySection === 'all' || inventorySection === 'movements' || tab === 'movements'
-  const needsRfidData = inventorySection === 'all' || inventorySection === 'rfid' || tab === 'rfid'
+  const needsStatsData = inventorySection === 'all' || inventorySection === 'stats'
+  const needsProductSummary = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
+  const needsMovementData = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
+  const needsRfidData = inventorySection === 'rfid' || (inventorySection === 'all' && tab === 'rfid')
 
   const loadInventoryReasons = useCallback(async () => {
     try {
-      const result = await window.api.getInventoryReasons?.()
+      const result = await withLoaderTimeout(
+        () => window.api.getInventoryReasons?.() ?? Promise.resolve({ items: [] }),
+        'Inventory reasons',
+        INVENTORY_REASONS_TIMEOUT_MS,
+      )
       const items = Array.isArray(result?.items) ? result.items : []
       setInventoryReasons(items)
+      inventoryReasonsLoadedRef.current = true
+      return items
     } catch {
-      setInventoryReasons([])
+      inventoryReasonsLoadedRef.current = false
+      return inventoryReasons
     }
-  }, [])
+  }, [inventoryReasons])
+
+  const ensureInventoryReasonsLoaded = useCallback(async () => {
+    if (inventoryReasonsLoadedRef.current) return inventoryReasons
+    if (inventoryReasonsPromiseRef.current) return inventoryReasonsPromiseRef.current
+    const promise = loadInventoryReasons().finally(() => {
+      inventoryReasonsPromiseRef.current = null
+    })
+    inventoryReasonsPromiseRef.current = promise
+    return promise
+  }, [inventoryReasons, loadInventoryReasons])
+
+  const ensureInventoryUsersLoaded = useCallback(async () => {
+    if (!isAdmin) return []
+    if (inventoryUsersLoadedRef.current) return userOptions
+    if (inventoryUsersPromiseRef.current) return inventoryUsersPromiseRef.current
+    const promise = withLoaderTimeout(() => window.api.getUsers(), 'Inventory user filters', INVENTORY_USER_OPTIONS_TIMEOUT_MS)
+      .then((rows) => {
+        const nextRows = Array.isArray(rows) ? rows : []
+        setUserOptions(nextRows)
+        inventoryUsersLoadedRef.current = true
+        return nextRows
+      })
+      .catch(() => {
+        inventoryUsersLoadedRef.current = false
+        return userOptions
+      })
+      .finally(() => {
+        inventoryUsersPromiseRef.current = null
+      })
+    inventoryUsersPromiseRef.current = promise
+    return promise
+  }, [isAdmin, userOptions])
 
   const load = useCallback(async (silent = false, options = {}) => {
     const force = !!options?.force
@@ -345,7 +477,7 @@ export default function Inventory() {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
             setLoading(false)
-            setLoadError(tr('inventory_load_slow', 'Inventory is taking longer than expected. Tap Refresh or revisit in a moment.', '???????????????????????????????????? ??????????????? ??????????????????????'))
+            setLoadError(tr('inventory_load_slow', 'Inventory is taking longer than expected. Tap Refresh or revisit in a moment.'))
           }, 15000)
         }
       }
@@ -375,26 +507,46 @@ export default function Inventory() {
       }
       try {
         const primaryLoaders = {
-          branches: () => window.api.getBranches(),
+          branches: () => withLoaderTimeout(
+            () => window.api.getBranches(),
+            'Inventory branches',
+            INVENTORY_BRANCHES_TIMEOUT_MS,
+          ),
           ...(needsStatsData ? {
-            stats: () => window.api.getInventoryStats(statsQuery),
+            stats: () => withLoaderTimeout(
+              () => window.api.getInventoryStats(statsQuery),
+              'Inventory stats',
+              INVENTORY_STATS_TIMEOUT_MS,
+            ),
           } : {}),
           ...(needsProductSummary ? {
-            summary: () => window.api.searchInventoryProducts(productQuery),
+            summary: () => withLoaderTimeout(
+              () => window.api.searchInventoryProducts(productQuery),
+              'Inventory products',
+              INVENTORY_PRODUCTS_TIMEOUT_MS,
+            ),
           } : {}),
           ...(needsMovementData ? {
-            movements: () => window.api.getInventoryMovements({
-              ...branchOpts,
-              search: deferredSearch || undefined,
-              searchMode,
-              startDate: movementStartDate || undefined,
-              endDate: movementEndDate || undefined,
-              page: movementMeta.page,
-              pageSize: movementMeta.pageSize,
-            }),
+            movements: () => withLoaderTimeout(
+              () => window.api.getInventoryMovements({
+                ...branchOpts,
+                search: deferredSearch || undefined,
+                searchMode,
+                startDate: movementStartDate || undefined,
+                endDate: movementEndDate || undefined,
+                page: movementMeta.page,
+                pageSize: movementMeta.pageSize,
+              }),
+              'Inventory movements',
+              INVENTORY_MOVEMENTS_TIMEOUT_MS,
+            ),
           } : {}),
           ...(needsRfidData ? {
-            rfid: () => (window.api.getRfidStatus ? window.api.getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
+            rfid: () => withLoaderTimeout(
+              () => (window.api.getRfidStatus ? window.api.getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
+              'Inventory RFID status',
+              INVENTORY_RFID_TIMEOUT_MS,
+            ),
           } : {}),
         }
         const result = await settleLoaderMap(primaryLoaders)
@@ -431,7 +583,7 @@ export default function Inventory() {
           setStockStatsLoaded(true)
           setStatsRefreshError('')
         } else if (needsStatsData && loadedOnceRef.current) {
-          setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.', '????????????????????????????????????????? ??????????????????????????????????????'))
+          setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.'))
         }
         if (needsMovementData && Array.isArray(movs)) {
           setMovements(movs || [])
@@ -475,8 +627,16 @@ export default function Inventory() {
 
         if (needsStatsData) {
           void settleLoaderMap({
-            returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
-            dashboard: () => window.api.getDashboard().catch(() => ({})),
+            returns: () => withLoaderTimeout(
+              () => window.api.getReturns({ scope: 'all' }),
+              'Inventory returns stats',
+              INVENTORY_RETURNS_STATS_TIMEOUT_MS,
+            ),
+            dashboard: () => withLoaderTimeout(
+              () => window.api.getDashboard(),
+              'Inventory dashboard stats',
+              INVENTORY_DASHBOARD_STATS_TIMEOUT_MS,
+            ),
           }).then((secondaryResult) => {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
             const rets = secondaryResult.values.returns
@@ -489,20 +649,33 @@ export default function Inventory() {
               })
             }
             if (Array.isArray(rets)) {
-              const active = rets.filter((ret) => (ret.status || 'completed') !== 'cancelled')
-              const customerReturns = active.filter((ret) => (ret.return_scope || 'customer') !== 'supplier')
-              const supplierReturns = active.filter((ret) => (ret.return_scope || 'customer') === 'supplier')
-              const totalItems = customerReturns.reduce((sumItems, ret) => sumItems + (ret.items?.reduce((acc, item) => acc + (item.quantity || 0), 0) || 0), 0)
-              setReturnStats({
-                count: customerReturns.length,
-                refund_usd: customerReturns.reduce((sumRefund, ret) => sumRefund + (ret.total_refund_usd || 0), 0),
-                refund_khr: customerReturns.reduce((sumRefund, ret) => sumRefund + (ret.total_refund_khr || 0), 0),
-                items: totalItems,
-                restock: customerReturns.filter((ret) => (ret.return_type || 'restock') === 'restock').length,
-                supplier_count: supplierReturns.length,
-                supplier_compensation_usd: supplierReturns.reduce((sumCompensation, ret) => sumCompensation + (ret.supplier_compensation_usd || 0), 0),
-                supplier_loss_usd: supplierReturns.reduce((sumLoss, ret) => sumLoss + (ret.supplier_loss_usd || 0), 0),
-              })
+              const nextReturnStats = {
+                count: 0,
+                refund_usd: 0,
+                refund_khr: 0,
+                items: 0,
+                restock: 0,
+                supplier_count: 0,
+                supplier_compensation_usd: 0,
+                supplier_loss_usd: 0,
+              }
+              for (const ret of rets) {
+                if ((ret.status || 'completed') === 'cancelled') continue
+                if ((ret.return_scope || 'customer') === 'supplier') {
+                  nextReturnStats.supplier_count += 1
+                  nextReturnStats.supplier_compensation_usd += ret.supplier_compensation_usd || 0
+                  nextReturnStats.supplier_loss_usd += ret.supplier_loss_usd || 0
+                  continue
+                }
+                nextReturnStats.count += 1
+                nextReturnStats.refund_usd += ret.total_refund_usd || 0
+                nextReturnStats.refund_khr += ret.total_refund_khr || 0
+                if ((ret.return_type || 'restock') === 'restock') nextReturnStats.restock += 1
+                for (const item of ret.items || []) {
+                  nextReturnStats.items += item.quantity || 0
+                }
+              }
+              setReturnStats(nextReturnStats)
             }
           }).catch(() => {})
         }
@@ -512,7 +685,7 @@ export default function Inventory() {
         if (!silent && !loadedOnceRef.current) {
           setLoadError(e.message || 'Failed to load inventory')
         } else if (!silent) {
-          setLoadError(tr('inventory_refresh_failed', 'Inventory could not refresh right now. Showing the latest loaded data.', '??????????????????????????????????? ???????????????????????????????????????'))
+          setLoadError(tr('inventory_refresh_failed', 'Inventory could not refresh right now. Showing the latest loaded data.'))
         }
       } finally {
         window.clearTimeout(loadWatchdogRef.current)
@@ -587,9 +760,9 @@ export default function Inventory() {
     }
   }, [isActive])
   useEffect(() => {
-    if (!isActive) return
-    loadInventoryReasons()
-  }, [isActive, loadInventoryReasons])
+    if (!isActive || reasonManager.open !== true) return
+    void ensureInventoryReasonsLoaded()
+  }, [ensureInventoryReasonsLoaded, isActive, reasonManager.open])
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const ch = syncChannel.channel
@@ -617,23 +790,22 @@ export default function Inventory() {
   }, [inventoryReasons, reasonDraft, reasonManager.type, saveReasonCatalog])
 
   const renameSavedReason = useCallback(async (entry) => {
-    const nextLabel = window.prompt(tr('rename_reason_prompt', 'Rename saved reason', '???????????????????????????????'), entry?.label || '')
+    const nextLabel = window.prompt(tr('rename_reason_prompt', 'Rename saved reason'), entry?.label || '')
     if (!nextLabel) return
     const next = inventoryReasons.map((item) => item.id === entry.id ? { ...item, label: nextLabel.trim() } : item)
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
 
   const deleteSavedReason = useCallback(async (entry) => {
-    if (!window.confirm(tr('delete_saved_reason_confirm', `Delete saved reason "${entry?.label || ''}"?`, `?????????? "${entry?.label || ''}"?`))) return
+    if (!window.confirm(tr('delete_saved_reason_confirm'))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
   useEffect(() => {
-    if (!isActive || !isAdmin || tab !== 'movements') return
-    window.api.getUsers()
-      .then((rows) => setUserOptions(Array.isArray(rows) ? rows : []))
-      .catch(() => setUserOptions([]))
-  }, [isActive, isAdmin, tab])
+    const showingMovements = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
+    if (!isActive || !isAdmin || !showingMovements) return
+    void ensureInventoryUsersLoaded()
+  }, [ensureInventoryUsersLoaded, inventorySection, isActive, isAdmin, tab])
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
@@ -665,11 +837,15 @@ export default function Inventory() {
     if (adjustSaving) return
     const qty = parseFloat(adjustForm.quantity)
     if (!qty || qty <= 0) return notify('Invalid quantity', 'error')
-    const selectedAdjustProduct = summary.find((product) => Number(product.id) === Number(adjustForm.product_id || adjustModal?.id)) || adjustModal
+    const selectedAdjustProduct = summaryById.get(Number(adjustForm.product_id || adjustModal?.id)) || adjustModal
     const previousSnapshot = cloneHistorySnapshot(selectedAdjustProduct)
     const numericBranchId = adjustForm.branch_id ? parseInt(adjustForm.branch_id, 10) : null
+    const selectedBranchStockById = new Map(
+      (selectedAdjustProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), entry]),
+    )
+    const selectedBranchStock = numericBranchId ? selectedBranchStockById.get(numericBranchId) : null
     const previousQuantity = numericBranchId
-      ? Number((selectedAdjustProduct?.branch_stock || []).find((entry) => Number(entry?.branch_id || 0) === numericBranchId)?.quantity || 0)
+      ? Number(selectedBranchStock?.quantity || 0)
       : Number(getStockQty(selectedAdjustProduct) || 0)
     const adjustmentRequest = {
       productId: selectedAdjustProduct.id,
@@ -685,8 +861,7 @@ export default function Inventory() {
     }
     if (adjustForm.type === 'remove') {
       if (numericBranchId) {
-        const bs = (adjustModal.branch_stock || []).find(s => s.branch_id === numericBranchId)
-        const available = bs?.quantity || 0
+        const available = selectedBranchStock?.quantity || 0
         if (available <= 0) { notify(t('error')||'No stock in this branch to remove', 'error'); return }
         if (qty > available) { notify(`Cannot remove ${qty} - only ${available} available`, 'error'); return }
       } else {
@@ -696,14 +871,18 @@ export default function Inventory() {
       }
     }
     const adjustConfirmLabel = adjustForm.type === 'set'
-      ? tr('confirm_set_stock', `Do you want to set stock for "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `?????????????????????????? "${selectedAdjustProduct?.name || adjustModal?.name || '?????????'}" ??????`)
+      ? tr('confirm_set_stock')
       : adjustForm.type === 'remove'
-        ? tr('confirm_remove_stock', `Do you want to remove stock from "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `?????????????????? "${selectedAdjustProduct?.name || adjustModal?.name || '?????????'}" ??????`)
-        : tr('confirm_add_stock', `Do you want to add stock to "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `?????????????????????? "${selectedAdjustProduct?.name || adjustModal?.name || '?????????'}" ??????`)
-    if (!window.confirm(adjustConfirmLabel)) return
+        ? tr('confirm_remove_stock')
+        : tr('confirm_add_stock')
+    if (!beginSingleAction(adjustStockInFlightRef, { blocked: adjustSaving })) return
+    if (!window.confirm(adjustConfirmLabel)) {
+      finishSingleAction(adjustStockInFlightRef)
+      return
+    }
     setAdjustSaving(true)
     try {
-      const res = await window.api.adjustStock(adjustmentRequest)
+      const res = await runInventoryMutation(() => window.api.adjustStock(adjustmentRequest), 'Adjust inventory stock')
       if (res?.success) {
         actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
@@ -713,12 +892,12 @@ export default function Inventory() {
               : adjustmentRequest.type === 'remove'
                 ? { ...adjustmentRequest, type: 'add', reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
                 : { ...adjustmentRequest, type: 'remove', reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-            const undoResult = await window.api.adjustStock(inverseRequest)
+            const undoResult = await runInventoryMutation(() => window.api.adjustStock(inverseRequest), 'Undo inventory adjustment')
             if (!undoResult?.success) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
             await load(true)
           },
           redo: async () => {
-            const redoResult = await window.api.adjustStock({ ...adjustmentRequest, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` })
+            const redoResult = await runInventoryMutation(() => window.api.adjustStock({ ...adjustmentRequest, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` }), 'Redo inventory adjustment')
             if (!redoResult?.success) throw new Error(redoResult?.error || 'Failed to redo stock adjustment')
             await load(true)
           },
@@ -729,24 +908,29 @@ export default function Inventory() {
       }
       else notify(res?.error || 'Adjustment failed', 'error')
     } catch (e) { notify(e?.message || 'Error', 'error') }
-    finally { setAdjustSaving(false) }
+    finally {
+      finishSingleAction(adjustStockInFlightRef)
+      setAdjustSaving(false)
+    }
   }
 
   const openAdjust = (p) => {
+    void ensureInventoryReasonsLoaded()
     setAdjustModal(p)
-    const defaultBranchId = branches.find(branch => branch.is_default)?.id?.toString() || branches[0]?.id?.toString() || ''
+    const defaultBranchId = defaultBranch?.id?.toString() || ''
     setAdjustForm({ product_id: p.id, type:'add', quantity:1, unit_cost_usd: p.purchase_price_usd || p.cost_price_usd || 0, unit_cost_khr: p.purchase_price_khr || 0, reason:'', branch_id: defaultBranchId })
   }
 
   const openMove = (p) => {
+    void ensureInventoryReasonsLoaded()
     setMoveModal(p)
     const defaultBranchId = branchFilter !== 'all'
       ? String(branchFilter)
-      : branches.find(branch => branch.is_default)?.id?.toString() || branches[0]?.id?.toString() || ''
+      : defaultBranch?.id?.toString() || ''
     setMoveForm({
       mode: 'existing',
       destination_product_id: '',
-      destination_name: `${p.name} - ${tr('damaged', 'Damaged', '???')}`,
+      destination_name: `${p.name} - ${tr('damaged', 'Damaged')}`,
       quantity: 1,
       branch_id: defaultBranchId,
       reason: 'broken',
@@ -761,15 +945,14 @@ export default function Inventory() {
   }
 
   const openTransfer = (p) => {
+    void ensureInventoryReasonsLoaded()
     const branchStock = Array.isArray(p?.branch_stock) ? p.branch_stock : []
     const firstStockBranch = branchStock.find((item) => Number(item?.quantity || 0) > 0)?.branch_id
     const defaultSourceId = branchFilter !== 'all'
       ? String(branchFilter)
-      : String(firstStockBranch || branches.find((branch) => branch.is_default)?.id || branches[0]?.id || '')
+      : String(firstStockBranch || defaultBranch?.id || '')
     const defaultDestinationId = String(
-      branches.find((branch) => String(branch.id) !== defaultSourceId)?.id
-      || branches[0]?.id
-      || '',
+      defaultTransferDestinationBySourceId.get(defaultSourceId) || '',
     )
     setTransferModal(p)
     setTransferForm({
@@ -782,14 +965,18 @@ export default function Inventory() {
 
   const openMovementProductDetail = useCallback(async (movement) => {
     const productId = Number(movement?.product_id || 0)
-    const current = productId ? summary.find((product) => Number(product.id) === productId) : null
+    const current = productId ? summaryById.get(productId) : null
     if (current) {
       setDetailProduct(current)
       return
     }
     if (productId && window.api.getProductsByIds) {
       try {
-        const result = await window.api.getProductsByIds([productId], { include: 'branch_stock,images,batches' })
+        const result = await withLoaderTimeout(
+          () => window.api.getProductsByIds([productId], { include: 'branch_stock,images,batches' }),
+          'Inventory product detail',
+          INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS,
+        )
         const product = Array.isArray(result?.items) ? result.items[0] : null
         if (product) {
           setDetailProduct(product)
@@ -810,12 +997,12 @@ export default function Inventory() {
         quantity: Number(movement.quantity || 0),
       }] : [],
     })
-  }, [summary, t])
+  }, [summaryById, t])
 
   const handleMoveStock = async () => {
     if (moveSaving || !moveModal) return
     const qty = parseFloat(moveForm.quantity)
-    if (!qty || qty <= 0) return notify(tr('invalid_quantity', 'Invalid quantity', '??????????????????'), 'error')
+    if (!qty || qty <= 0) return notify(tr('invalid_quantity', 'Invalid quantity'), 'error')
     const request = {
       sourceProductId: moveModal.id,
       destinationProductId: moveForm.mode === 'existing' ? Number(moveForm.destination_product_id || 0) : null,
@@ -838,44 +1025,49 @@ export default function Inventory() {
       userName: user?.name || user?.username,
     }
     if (moveForm.mode === 'existing' && !request.destinationProductId) {
-      return notify(tr('choose_destination_product', 'Choose a destination product row.', '??????????????????????????'), 'error')
+      return notify(tr('choose_destination_product', 'Choose a destination product row.'), 'error')
     }
     if (moveForm.mode === 'new' && !String(moveForm.destination_name || '').trim()) {
-      return notify(tr('name_required_alert', 'Name is required', '?????????????'), 'error')
+      return notify(tr('name_required_alert', 'Name is required'), 'error')
     }
     const moveTargetLabel = moveForm.mode === 'existing'
-      ? tr('existing_product', 'existing product', '??????????????????')
+      ? tr('existing_product', 'existing product')
       : String(moveForm.destination_name || '').trim()
-    if (!window.confirm(tr('confirm_move_stock', `Do you want to move stock from "${moveModal.name}" to "${moveTargetLabel}"?`, `???????????????????????? "${moveModal.name}" ?? "${moveTargetLabel}" ??????`))) return
+    if (!beginSingleAction(moveStockInFlightRef, { blocked: moveSaving })) return
+    if (!window.confirm(tr('confirm_move_stock'))) {
+      finishSingleAction(moveStockInFlightRef)
+      return
+    }
     setMoveSaving(true)
     try {
-      const result = await window.api.moveStockRow(request)
-      if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', '?????????????????????????'))
+      const result = await runInventoryMutation(() => window.api.moveStockRow(request), 'Move inventory stock')
+      if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed'))
       actionHistory.pushAction({
-        label: `${tr('move_stock', 'Move stock', '?????????????')}: ${moveModal.name}`,
+        label: `${tr('move_stock', 'Move stock')}: ${moveModal.name}`,
         undo: async () => {
-          const undoResult = await window.api.moveStockRow({
+          const undoResult = await runInventoryMutation(() => window.api.moveStockRow({
             sourceProductId: result.destinationProductId || request.destinationProductId,
             destinationProductId: request.sourceProductId,
             branchId: request.branchId,
             quantity: qty,
             reason: `Undo: ${request.reason}`,
-          })
-          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed', 'Undo ?????????'))
+          }), 'Undo inventory stock move')
+          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed'))
           await load(true)
         },
         redo: async () => {
-          const redoResult = await window.api.moveStockRow(request)
-          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed', 'Redo ?????????'))
+          const redoResult = await runInventoryMutation(() => window.api.moveStockRow(request), 'Redo inventory stock move')
+          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
           await load(true)
         },
       })
-      notify(tr('stock_moved', 'Stock moved', '????????????????'))
+      notify(tr('stock_moved', 'Stock moved'))
       setMoveModal(null)
       await load(true)
     } catch (error) {
-      notify(error?.message || tr('stock_move_failed', 'Stock move failed', '?????????????????????????'), 'error')
+      notify(error?.message || tr('stock_move_failed', 'Stock move failed'), 'error')
     } finally {
+      finishSingleAction(moveStockInFlightRef)
       setMoveSaving(false)
     }
   }
@@ -884,29 +1076,37 @@ export default function Inventory() {
     if (transferSaving || !transferModal) return
     const quantity = Number.parseFloat(transferForm.quantity)
     if (!transferForm.from_branch_id || !transferForm.to_branch_id) {
-      notify(tr('select_transfer_branches', 'Choose both source and destination branches.', '?????????????????????? ?????????????'), 'error')
+      notify(tr('select_transfer_branches', 'Choose both source and destination branches.'), 'error')
       return
     }
     if (transferForm.from_branch_id === transferForm.to_branch_id) {
-      notify(tr('transfer_branch_must_differ', 'Source and destination branches must be different.', '??????? ???????????? ???????????????'), 'error')
+      notify(tr('transfer_branch_must_differ', 'Source and destination branches must be different.'), 'error')
       return
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      notify(tr('invalid_quantity', 'Invalid quantity', '??????????????????'), 'error')
+      notify(tr('invalid_quantity', 'Invalid quantity'), 'error')
       return
     }
     if (!String(transferForm.reason || '').trim()) {
-      notify(tr('transfer_reason_required', 'A transfer reason is required.', '???????????????????????????????'), 'error')
+      notify(tr('transfer_reason_required', 'A transfer reason is required.'), 'error')
       return
     }
-    const fromBranch = branches.find((branch) => String(branch.id) === String(transferForm.from_branch_id))
-    const toBranch = branches.find((branch) => String(branch.id) === String(transferForm.to_branch_id))
-    if (!window.confirm(tr('confirm_transfer_stock', `Do you want to transfer ${quantity} from "${fromBranch?.name || transferForm.from_branch_id}" to "${toBranch?.name || transferForm.to_branch_id}"?`, `?????????????? ${quantity} ?? "${fromBranch?.name || transferForm.from_branch_id}" ?? "${toBranch?.name || transferForm.to_branch_id}" ??????`))) return
+    const fromBranch = branchesById.get(String(transferForm.from_branch_id))
+    const toBranch = branchesById.get(String(transferForm.to_branch_id))
+    if (!fromBranch || !toBranch) {
+      notify(tr('select_transfer_branches', 'Choose both source and destination branches.'), 'error')
+      return
+    }
+    if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
+    if (!window.confirm(tr('confirm_transfer_stock'))) {
+      finishSingleAction(transferStockInFlightRef)
+      return
+    }
 
     setTransferSaving(true)
     try {
       const previousSnapshot = cloneHistorySnapshot(transferModal)
-      const result = await window.api.transferInventoryStock({
+      const result = await runInventoryMutation(() => window.api.transferInventoryStock({
         productId: transferModal.id,
         fromBranchId: transferForm.from_branch_id,
         toBranchId: transferForm.to_branch_id,
@@ -914,12 +1114,12 @@ export default function Inventory() {
         reason: transferForm.reason,
         userId: user?.id,
         userName: user?.name || user?.username,
-      })
-      if (!result?.success) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed', '??????????????????????'))
+      }), 'Transfer inventory stock')
+      if (!result?.success) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed'))
       actionHistory.pushAction({
-        label: `${tr('transfer', 'Transfer', '?????')}: ${transferModal.name}`,
+        label: `${tr('transfer', 'Transfer')}: ${transferModal.name}`,
         undo: async () => {
-          const undoResult = await window.api.transferInventoryStock({
+          const undoResult = await runInventoryMutation(() => window.api.transferInventoryStock({
             productId: transferModal.id,
             fromBranchId: transferForm.to_branch_id,
             toBranchId: transferForm.from_branch_id,
@@ -927,12 +1127,12 @@ export default function Inventory() {
             reason: `Undo: ${transferForm.reason}`,
             userId: user?.id,
             userName: user?.name || user?.username,
-          })
-          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed', 'Undo ?????????'))
+          }), 'Undo inventory stock transfer')
+          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed'))
           await load(true)
         },
         redo: async () => {
-          const redoResult = await window.api.transferInventoryStock({
+          const redoResult = await runInventoryMutation(() => window.api.transferInventoryStock({
             productId: transferModal.id,
             fromBranchId: transferForm.from_branch_id,
             toBranchId: transferForm.to_branch_id,
@@ -940,17 +1140,18 @@ export default function Inventory() {
             reason: `Redo: ${transferForm.reason}`,
             userId: user?.id,
             userName: user?.name || user?.username,
-          })
-          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed', 'Redo ?????????'))
+          }), 'Redo inventory stock transfer')
+          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
           await load(true)
         },
       })
-      notify(tr('stock_transferred', 'Stock transferred', '?????????????'))
+      notify(tr('stock_transferred', 'Stock transferred'))
       setTransferModal(null)
       await load(true)
     } catch (error) {
-      notify(error?.message || tr('stock_transfer_failed', 'Stock transfer failed', '??????????????????????'), 'error')
+      notify(error?.message || tr('stock_transfer_failed', 'Stock transfer failed'), 'error')
     } finally {
+      finishSingleAction(transferStockInFlightRef)
       setTransferSaving(false)
     }
   }
@@ -1008,6 +1209,100 @@ export default function Inventory() {
     () => inventoryProductSections.flatMap((section) => section.items),
     [inventoryProductSections],
   )
+  const visibleInventoryProductIds = useMemo(
+    () => visibleInventoryProducts.reduce((ids, product) => {
+      const id = Number(product?.id)
+      if (Number.isFinite(id)) ids.push(id)
+      return ids
+    }, []),
+    [visibleInventoryProducts],
+  )
+  const visibleInventoryProductsSignature = useMemo(
+    () => visibleInventoryProductIds.join(','),
+    [visibleInventoryProductIds],
+  )
+  const initialMobileInventorySections = useMemo(
+    () => limitInventorySectionsForMobile(inventoryProductSections, INVENTORY_MOBILE_INITIAL_ITEM_LIMIT),
+    [inventoryProductSections],
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+    const media = window.matchMedia('(max-width: 639px)')
+    const syncViewport = (event) => {
+      setIsInventoryMobileViewport(Boolean(event?.matches))
+    }
+    syncViewport(media)
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', syncViewport)
+      return () => media.removeEventListener('change', syncViewport)
+    }
+    if (typeof media.addListener === 'function') {
+      media.addListener(syncViewport)
+      return () => media.removeListener(syncViewport)
+    }
+    return undefined
+  }, [])
+
+  useEffect(() => {
+    if (initialInventoryDesktopRevealReady || loading) return
+    if (!visibleInventoryProducts.length || loadError) {
+      setInitialInventoryDesktopRevealReady(true)
+      return
+    }
+    let cancelled = false
+    let nestedFrame = null
+    const frame = window.requestAnimationFrame(() => {
+      nestedFrame = window.requestAnimationFrame(() => {
+        if (!cancelled) setInitialInventoryDesktopRevealReady(true)
+      })
+    })
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame)
+    }
+  }, [initialInventoryDesktopRevealReady, loadError, loading, visibleInventoryProducts.length, visibleInventoryProductsSignature])
+
+  useEffect(() => {
+    if (initialInventoryMobileRevealReady) return
+    const showingProductsForReveal = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
+    if (!showingProductsForReveal) {
+      setInitialInventoryMobileRevealReady(true)
+      return
+    }
+    if (showingProductsForReveal && !inventoryProductsLoaded && !loadError) return
+    setInitialInventoryMobileRevealReady(true)
+  }, [
+    initialInventoryMobileRevealReady,
+    inventoryProductsLoaded,
+    inventorySection,
+    loadError,
+    tab,
+  ])
+
+  useLayoutEffect(() => {
+    setInitialInventoryMobileFullListReady(false)
+  }, [inventorySection, tab, visibleInventoryProductsSignature])
+
+  useEffect(() => {
+    const showingProductsForReveal = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
+    if (!isActive || !showingProductsForReveal || !initialInventoryMobileRevealReady || initialInventoryMobileFullListReady || !visibleInventoryProducts.length) return
+    if (visibleInventoryProducts.length <= INVENTORY_MOBILE_INITIAL_ITEM_LIMIT) {
+      setInitialInventoryMobileFullListReady(true)
+      return
+    }
+    const timer = window.setTimeout(() => setInitialInventoryMobileFullListReady(true), 140)
+    return () => window.clearTimeout(timer)
+  }, [
+    initialInventoryMobileFullListReady,
+    initialInventoryMobileRevealReady,
+    isActive,
+    inventorySection,
+    tab,
+    visibleInventoryProducts.length,
+    visibleInventoryProductsSignature,
+  ])
 
   useEffect(() => {
     setInventoryProductPage(1)
@@ -1054,9 +1349,9 @@ export default function Inventory() {
   ])
 
   useEffect(() => {
-    const validIds = new Set(visibleInventoryProducts.map((product) => Number(product.id)).filter((id) => Number.isFinite(id)))
+    const validIds = new Set(visibleInventoryProductIds)
     setSelectedProductIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id))))
-  }, [visibleInventoryProducts])
+  }, [visibleInventoryProductIds])
 
   useEffect(() => {
     if (!inventorySelectAllRef.current) return
@@ -1074,8 +1369,8 @@ export default function Inventory() {
       setSelectedProductIds(new Set())
       return
     }
-    setSelectedProductIds(new Set(visibleInventoryProducts.map((product) => Number(product.id)).filter((id) => Number.isFinite(id))))
-  }, [visibleInventoryProducts])
+    setSelectedProductIds(new Set(visibleInventoryProductIds))
+  }, [visibleInventoryProductIds])
 
   const selectedProducts = useMemo(
     () => visibleInventoryProducts.filter((product) => selectedProductIds.has(Number(product.id))),
@@ -1086,16 +1381,14 @@ export default function Inventory() {
   const buildBatchDraft = useCallback((product) => {
     const defaultBranchId = branchFilter !== 'all'
       ? String(branchFilter)
-      : branches.find((branch) => branch.is_default)?.id?.toString() || branches[0]?.id?.toString() || ''
+      : defaultBranch?.id?.toString() || ''
     const branchStock = Array.isArray(product?.branch_stock) ? product.branch_stock : []
     const firstStockBranch = branchStock.find((item) => Number(item?.quantity || 0) > 0)?.branch_id
     const defaultSourceId = branchFilter !== 'all'
       ? String(branchFilter)
-      : String(firstStockBranch || branches.find((branch) => branch.is_default)?.id || branches[0]?.id || '')
+      : String(firstStockBranch || defaultBranch?.id || '')
     const defaultDestinationId = String(
-      branches.find((branch) => String(branch.id) !== defaultSourceId)?.id
-      || branches[0]?.id
-      || '',
+      defaultTransferDestinationBySourceId.get(defaultSourceId) || '',
     )
     return {
       id: Number(product.id),
@@ -1112,7 +1405,7 @@ export default function Inventory() {
       note: '',
       moveMode: 'existing',
       destinationProductId: '',
-      destinationName: `${product.name} - ${tr('damaged', 'Damaged', '???')}`,
+      destinationName: `${product.name} - ${tr('damaged', 'Damaged')}`,
       sellingPriceUsd: product.selling_price_usd || '',
       specialPriceUsd: product.special_price_usd || '',
       discountEnabled: false,
@@ -1124,14 +1417,15 @@ export default function Inventory() {
       stockQty: getStockQty(product),
       error: '',
     }
-  }, [branchFilter, branches, getStockQty, tr])
+  }, [branchFilter, defaultBranch, defaultTransferDestinationBySourceId, getStockQty, tr])
 
   const openInventoryBatchSession = useCallback(() => {
     if (!selectedProducts.length) return
+    void ensureInventoryReasonsLoaded()
     setInventoryBatch({
       items: selectedProducts.map((product) => buildBatchDraft(product)),
     })
-  }, [buildBatchDraft, selectedProducts])
+  }, [buildBatchDraft, ensureInventoryReasonsLoaded, selectedProducts])
 
   const updateInventoryBatchLine = useCallback((productId, patch) => {
     setInventoryBatch((current) => {
@@ -1163,35 +1457,39 @@ export default function Inventory() {
 
   const applyInventoryBatchSession = useCallback(async () => {
     if (batchApplying || !inventoryBatch?.items?.length) return
-    if (!window.confirm(tr('confirm_apply_inventory_batch', `Do you want to apply ${inventoryBatch.items.length} inventory change(s)?`, `??????????????????????????????????? ${inventoryBatch.items.length} ??????`))) return
+    if (!beginSingleAction(batchInventoryInFlightRef, { blocked: batchApplying })) return
+    if (!window.confirm(tr('confirm_apply_inventory_batch'))) {
+      finishSingleAction(batchInventoryInFlightRef)
+      return
+    }
     setBatchApplying(true)
     try {
       const applyRun = await runConcurrentTasks(inventoryBatch.items, async (item) => {
         const quantity = Number.parseFloat(item.quantity)
         if (!Number.isFinite(quantity) || quantity <= 0) {
-          throw new Error(tr('invalid_quantity', 'Invalid quantity', '??????????????????'))
+          throw new Error(tr('invalid_quantity', 'Invalid quantity'))
         }
         if (item.action === 'adjust') {
-          const result = await window.api.adjustStock({
+          const result = await runInventoryMutation(() => window.api.adjustStock({
             productId: item.productId,
             productName: item.productName,
             type: item.adjustType,
             quantity,
-            reason: item.reason || tr('inventory_adjustment', 'Inventory adjustment', '?????????????'),
+            reason: item.reason || tr('inventory_adjustment', 'Inventory adjustment'),
             branchId: item.branchId,
             unitCostUsd: item.unitCostUsd,
             unitCostKhr: item.unitCostKhr,
-          })
-          if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed', '????????????????????'))
+          }), 'Batch adjust inventory stock')
+          if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed'))
         } else if (item.action === 'transfer') {
-          const result = await window.api.transferInventoryStock({
+          const result = await runInventoryMutation(() => window.api.transferInventoryStock({
             productId: item.productId,
             fromBranchId: item.fromBranchId,
             toBranchId: item.toBranchId,
             quantity,
             reason: item.reason,
-          })
-          if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed', '?????????????????'))
+          }), 'Batch transfer inventory stock')
+          if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed'))
         } else if (item.action === 'move') {
           const request = {
             sourceProductId: item.productId,
@@ -1212,13 +1510,13 @@ export default function Inventory() {
               discount_amount_usd: item.discountAmountUsd,
             }
           }
-          const result = await window.api.moveStockRow(request)
-          if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', '?????????????????????????'))
+          const result = await runInventoryMutation(() => window.api.moveStockRow(request), 'Batch move inventory stock')
+          if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed'))
         }
       })
       const failedItems = applyRun.failures.map((entry) => ({
         ...(entry.item || {}),
-        error: entry?.error?.message || tr('save_failed', 'Save failed', '????????????????????'),
+        error: entry?.error?.message || tr('save_failed', 'Save failed'),
       }))
       const successCount = applyRun.successes.length
       await load(true)
@@ -1227,25 +1525,25 @@ export default function Inventory() {
         setSelectedProductIds(new Set())
         notify(
           successCount === 1
-            ? tr('batch_inventory_done_one', 'Applied inventory update.', '??????????????????????????????')
-            : tr('batch_inventory_done_many', `${successCount} inventory updates applied.`, `${successCount} ???????????????????????????????????`),
+            ? tr('batch_inventory_done_one', 'Applied inventory update.')
+            : tr('batch_inventory_done_many', `${successCount} inventory updates applied.`),
         )
         return
       }
       setInventoryBatch({ items: failedItems })
-      setSelectedProductIds(new Set(failedItems.map((item) => Number(item.productId)).filter((id) => Number.isFinite(id))))
+      setSelectedProductIds(new Set(normalizeFiniteIdsFrom(failedItems, (item) => item.productId)))
       notify(
         tr(
           'batch_inventory_partial_failure',
           `${successCount} applied, ${failedItems.length} need review.`,
-          `${successCount} ?????????? ??? ${failedItems.length} ???????????????????`,
         ),
         'warning',
       )
     } finally {
+      finishSingleAction(batchInventoryInFlightRef)
       setBatchApplying(false)
     }
-  }, [batchApplying, inventoryBatch, load, notify, tr])
+  }, [batchApplying, inventoryBatch, load, notify, runInventoryMutation, tr])
 
   const hasServerBackedMovementSearch = !!searchTerms.length
   const filteredMovements = movements.filter(m => {
@@ -1389,17 +1687,41 @@ export default function Inventory() {
     row_move_out:    'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
   }
 
-  // Stats ??backend SQL already nets out returned quantities and revenue
-  const visibleTotalValue = filteredSummary.reduce((s, p) => s + (p.stock_value_usd || 0), 0)
-  const visibleLowStockCount = filteredSummary.filter(p => {
-    const qty = getStockQty(p)
-    return qty > 0 && qty <= p.low_stock_threshold
-  }).length
-  const visibleOutStockCount = filteredSummary.filter(p => getStockQty(p) <= (p.out_of_stock_threshold || 0)).length
+  // Stats from backend SQL already net out returned quantities and revenue.
+  const visibleInventoryStats = useMemo(() => {
+    const stats = {
+      stockValueUsd: 0,
+      lowStock: 0,
+      outOfStock: 0,
+      inStock: 0,
+      netSoldQty: 0,
+      revenueUsd: 0,
+      cogsUsd: 0,
+      storeDiscountUsd: 0,
+      membershipDiscountUsd: 0,
+    }
+    for (const product of filteredSummary) {
+      const qty = getStockQty(product)
+      const outThreshold = product.out_of_stock_threshold || 0
+      stats.stockValueUsd += product.stock_value_usd || 0
+      if (qty > 0 && qty <= product.low_stock_threshold) stats.lowStock += 1
+      if (qty <= outThreshold) stats.outOfStock += 1
+      if (qty > outThreshold) stats.inStock += 1
+      stats.netSoldQty += Math.max(0, product.qty_sold || 0)
+      stats.revenueUsd += Math.max(0, product.revenue_usd || 0)
+      stats.cogsUsd += Math.max(0, product.cogs_usd || 0)
+      stats.storeDiscountUsd += Math.max(0, product.store_discount_usd || 0)
+      stats.membershipDiscountUsd += Math.max(0, product.membership_discount_usd || 0)
+    }
+    return stats
+  }, [filteredSummary, getStockQty])
+  const visibleTotalValue = visibleInventoryStats.stockValueUsd
+  const visibleLowStockCount = visibleInventoryStats.lowStock
+  const visibleOutStockCount = visibleInventoryStats.outOfStock
   const totalValue = Number(stockStats?.stock_value_usd ?? visibleTotalValue)
   const lowStockCount = Number(stockStats?.low_stock ?? visibleLowStockCount)
   const outStockCount = Number(stockStats?.out_of_stock ?? visibleOutStockCount)
-  const inStockCount = Number(stockStats?.in_stock ?? filteredSummary.filter((p) => getStockQty(p) > (p.out_of_stock_threshold || 0)).length)
+  const inStockCount = Number(stockStats?.in_stock ?? visibleInventoryStats.inStock)
   const totalProducts = Number(
     stockStats?.total_products
     ?? (inventoryProductsLoaded ? inventoryProductTotal : null)
@@ -1407,23 +1729,23 @@ export default function Inventory() {
   )
   const totalQtySold = Number(
     stockStats?.net_sold_qty
-    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.qty_sold || 0), 0),
+    ?? visibleInventoryStats.netSoldQty,
   )
   const totalRevenue = Number(
     stockStats?.revenue_usd
-    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.revenue_usd || 0), 0),
+    ?? visibleInventoryStats.revenueUsd,
   )
   const totalCOGS = Number(
     stockStats?.cogs_usd
-    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.cogs_usd || 0), 0),
+    ?? visibleInventoryStats.cogsUsd,
   )
   const totalStoreDiscounts = Number(
     stockStats?.store_discount_usd
-    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.store_discount_usd || 0), 0),
+    ?? visibleInventoryStats.storeDiscountUsd,
   )
   const totalMembershipDiscounts = Number(
     stockStats?.membership_discount_usd
-    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.membership_discount_usd || 0), 0),
+    ?? visibleInventoryStats.membershipDiscountUsd,
   )
   const totalProfit   = totalRevenue - totalCOGS
   const inventoryProductSafePageSize = Math.max(1, Number(inventoryProductPageSize || PAGE_SIZE_OPTIONS[0]))
@@ -1449,11 +1771,11 @@ export default function Inventory() {
     return parts.filter(Boolean)
   }, [getInventoryGroupPriceLabel, t])
   const inventoryControlLabels = useMemo(() => ({
-    selected: tr('inventory_selected_count', `${selectedProducts.length} selected`, `${selectedProducts.length} ????????`),
-    selectAll: `${t('select_all') || 'Select all'} (${visibleInventoryProducts.length})`,
-    batch: tr('inventory_batch_session', 'Batch', '????????'),
-    reasons: tr('saved_reasons', 'Reasons', '???????'),
-  }), [selectedProducts.length, t, tr, visibleInventoryProducts.length])
+    selected: tr('inventory_selected_count', `${selectedProducts.length} selected`),
+    selectAll: `${tr('select_all', 'Select all')} (${visibleInventoryProducts.length})`,
+    batch: tr('inventory_batch_session', 'Batch'),
+    reasons: tr('saved_reasons', 'Reasons'),
+  }), [selectedProducts.length, tr, visibleInventoryProducts.length])
   useEffect(() => {
     setCollapsedInventorySections((current) => {
       const validIds = new Set(inventoryProductSections.map((section) => section.id))
@@ -1469,17 +1791,17 @@ export default function Inventory() {
     })
   }, [inventoryProductSections])
   const isInventorySelectionScopeFullySelected = useCallback((ids = []) => {
-    const normalized = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+    const normalized = normalizeFiniteIds(ids)
     return normalized.length > 0 && normalized.every((id) => selectedProductIds.has(id))
   }, [selectedProductIds])
   const isInventorySelectionScopePartiallySelected = useCallback((ids = []) => {
-    const normalized = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+    const normalized = normalizeFiniteIds(ids)
     if (!normalized.length) return false
-    const selectedCount = normalized.filter((id) => selectedProductIds.has(id)).length
+    const selectedCount = countSelectedIds(normalized, selectedProductIds)
     return selectedCount > 0 && selectedCount < normalized.length
   }, [selectedProductIds])
   const toggleInventorySelectionScope = useCallback((ids = [], checked) => {
-    const normalized = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+    const normalized = normalizeFiniteIds(ids)
     setSelectedProductIds((current) => toggleIdSet(current, normalized, checked))
   }, [])
   const toggleInventorySection = useCallback((sectionId) => {
@@ -1517,45 +1839,66 @@ export default function Inventory() {
     setInventoryProductPageSize(PAGE_SIZE_OPTIONS[nextIndex])
     setInventoryProductPage(1)
   }, [inventoryProductSafePageSize])
-  const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds', '????????????? ??????????? ???????????????????????????????')
-  const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page', '?????????? = ?????????????? x ???????????????? ??????????????????????????????? ?????????????????????????')
-  const inventoryNetSoldFormulaText = tr('inventory_formula_net_sold', 'Net sold = sold quantity - returned quantity', '???????? = ??????????????? - ??????????????????')
-  const inventoryRevenueFormulaText = tr('inventory_formula_revenue', 'Revenue shown is net after discounts and refunds', '?????????????? ?????????????? ???????????????????? ?????????????????????')
-  const inventoryCogsFormulaText = tr('inventory_formula_cogs', 'COGS excludes quantities restored by restocked returns', 'COGS ????????????????????????????????????????????????????????????????????????????')
-  const inventoryProfitFormulaText = tr('inventory_formula_profit', 'Profit = Revenue - COGS', '??????????? = ????? - COGS')
-  const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.', '???????????????????????????????????????????????? ???????????? ???????????????????????????????????')
-  const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.', '???????????????? ????????????????????? ?????????????????????????????????????')
-  const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.', '?????????????? ?????????????????????????????? ????????????????????????????? ??????????????????????????????????????????????????')
+  const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds')
+  const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page')
+  const inventoryNetSoldFormulaText = tr('inventory_formula_net_sold', 'Net sold = sold quantity - returned quantity')
+  const inventoryRevenueFormulaText = tr('inventory_formula_revenue', 'Revenue shown is net after discounts and refunds')
+  const inventoryCogsFormulaText = tr('inventory_formula_cogs', 'COGS excludes quantities restored by restocked returns')
+  const inventoryProfitFormulaText = tr('inventory_formula_profit', 'Profit = Revenue - COGS')
+  const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.')
+  const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.')
+  const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.')
   const statsValue = (value) => (stockStatsLoaded ? value : '...')
   const inventoryStatLabels = {
-    products: t('products') || t('products_total') || 'Products',
-    stockValue: t('stock_value') || 'Stock value',
-    netSold: t('net_sold') || 'Net sold',
-    revenue: t('revenue') || 'Revenue',
-    discounts: tr('discounts_combined', 'Discounts', '??????????????'),
-    cogs: t('cogs') || 'COGS',
-    grossProfit: tr('gross_profit', 'Gross Profit', '????????'),
-    feesCollected: tr('fees_collected', 'Fees collected', '????????????????'),
-    returns: tr('returns_combined', 'Returns', '??????????????'),
+    products: safeT('products', safeT('products_total', 'Products')),
+    lowStock: tr('low_stock', 'Low stock'),
+    outOfStock: tr('out_of_stock', 'Out of stock'),
+    stockValue: tr('stock_value', 'Stock value'),
+    netSold: tr('net_sold', 'Net sold'),
+    revenue: tr('revenue', 'Revenue'),
+    discounts: tr('discounts_combined', 'Discounts'),
+    cogs: tr('cogs', 'COGS'),
+    grossProfit: tr('gross_profit', 'Gross Profit'),
+    feesCollected: tr('fees_collected', 'Fees collected'),
+    returns: tr('returns_combined', 'Returns'),
+    afterReturns: tr('after_returns', 'After returns'),
+    afterRefunds: tr('after_refunds', 'After refunds'),
+    costOfGoodsSold: tr('cost_of_goods_sold', 'Cost of Goods Sold'),
+    allocatedToProducts: tr('allocated_to_products', 'Allocated to sold products'),
+    taxCollected: tr('tax_collected', 'Tax collected'),
+    deliveryFees: tr('delivery_fees', 'Delivery fees'),
+    transactions: tr('transactions', 'Transactions'),
+    returnsCount: tr('returns_count', 'Returns'),
+    refunded: tr('total_refunded', 'Refunded'),
+    formula: tr('formula', 'Formula'),
+    taxPlusDelivery: `${tr('tax_collected', 'Tax')} + ${tr('delivery_fees', 'Delivery')}`,
   }
+  const lowShortLabel = tr('low_stock_short', 'Low')
+  const outShortLabel = tr('out_of_stock_short', 'Out')
+  const matchStockShortLabel = tr('matching_stock_short', 'Matching')
+  const afterReturnsShortLabel = tr('after_returns_short', 'After ret.')
+  const afterRefundsShortLabel = tr('after_refunds_short', 'After ref.')
+  const storeDiscountShortLabel = tr('store_discounts_short', 'Store')
+  const memberShortLabel = tr('membership_short', 'Mem')
+  const taxShortLabel = tr('tax_short', 'Tax')
+  const deliveryShortLabel = tr('delivery_short', 'Del')
+  const customerShortLabel = tr('customer_returns_short', 'Cust')
+  const supplierShortLabel = tr('supplier_returns_short', 'Supp')
+  const marginShortLabel = tr('profit_margin_short', 'margin')
   const primaryStats = [
     {
       id: 'products',
       label: inventoryStatLabels.products,
       value: statsValue(totalProducts),
       cls: 'text-gray-800 dark:text-gray-200',
-      sub: stockStatsLoaded ? (
-        <span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
-          <span className="min-w-0 shrink truncate font-medium text-amber-600 dark:text-amber-300">{lowStockCount} {t('low_stock') || 'Low stock'}</span>
-          <span className="text-slate-300 dark:text-slate-500">/</span>
-          <span className="min-w-0 shrink truncate font-medium text-rose-600 dark:text-rose-300">{outStockCount} {t('out_of_stock') || 'Out of stock'}</span>
-        </span>
-      ) : (t('loading') || 'Loading...'),
+      sub: stockStatsLoaded
+        ? `${lowStockCount} ${lowShortLabel} | ${outStockCount} ${outShortLabel}`
+        : safeT('loading', 'Loading...'),
       details: [
         { label: inventoryStatLabels.products, value: totalProducts },
-        { label: t('low_stock') || 'Low stock', value: lowStockCount },
-        { label: t('out_of_stock') || 'Out of stock', value: outStockCount },
-        { label: t('formula') || 'Formula', value: inventoryThresholdFormulaText },
+        { label: inventoryStatLabels.lowStock, value: lowStockCount },
+        { label: inventoryStatLabels.outOfStock, value: outStockCount },
+        { label: inventoryStatLabels.formula, value: inventoryThresholdFormulaText },
       ],
     },
     {
@@ -1563,10 +1906,11 @@ export default function Inventory() {
       label: inventoryStatLabels.stockValue,
       value: statsValue(fmtUSD(totalValue)),
       cls: 'text-blue-700 dark:text-blue-300',
+        sub: matchStockShortLabel,
       details: [
         { label: inventoryStatLabels.stockValue, value: fmtUSD(totalValue) },
         { label: inventoryStatLabels.products, value: totalProducts },
-        { label: t('formula') || 'Formula', value: inventoryStockValueFormulaText },
+        { label: inventoryStatLabels.formula, value: inventoryStockValueFormulaText },
       ],
     },
     {
@@ -1574,12 +1918,12 @@ export default function Inventory() {
       label: inventoryStatLabels.netSold,
       value: statsValue(totalQtySold),
       cls: 'text-purple-700 dark:text-purple-300',
-      sub: t('after_returns'),
+        sub: afterReturnsShortLabel,
       details: [
         { label: inventoryStatLabels.netSold, value: totalQtySold },
-        { label: t('returns_count') || 'Returns', value: returnStats?.count ?? 0 },
-        { label: t('items') || 'Returned items', value: returnStats?.items ?? 0 },
-        { label: t('formula') || 'Formula', value: inventoryNetSoldFormulaText },
+        { label: inventoryStatLabels.returnsCount, value: returnStats?.count ?? 0 },
+        { label: tr('items', 'Returned items'), value: returnStats?.items ?? 0 },
+        { label: inventoryStatLabels.formula, value: inventoryNetSoldFormulaText },
       ],
     },
     {
@@ -1587,11 +1931,11 @@ export default function Inventory() {
       label: inventoryStatLabels.revenue,
       value: statsValue(fmtUSD(totalRevenue)),
       cls: 'text-emerald-600 dark:text-emerald-400',
-      sub: t('after_refunds') || 'After refunds',
+        sub: afterRefundsShortLabel,
       details: [
         { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
-        { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
-        { label: t('formula') || 'Formula', value: inventoryRevenueFormulaText },
+        { label: inventoryStatLabels.refunded, value: fmtUSD(returnStats?.refund_usd || 0) },
+        { label: inventoryStatLabels.formula, value: inventoryRevenueFormulaText },
       ],
     },
     {
@@ -1599,10 +1943,10 @@ export default function Inventory() {
       label: inventoryStatLabels.cogs,
       value: statsValue(fmtUSD(totalCOGS)),
       cls: 'text-orange-600 dark:text-orange-400',
-      sub: t('cost_of_goods_sold'),
+      sub: inventoryStatLabels.costOfGoodsSold,
       details: [
         { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
-        { label: t('formula') || 'Formula', value: inventoryCogsFormulaText },
+        { label: inventoryStatLabels.formula, value: inventoryCogsFormulaText },
       ],
     },
     {
@@ -1610,12 +1954,12 @@ export default function Inventory() {
       label: inventoryStatLabels.grossProfit,
       value: statsValue(fmtUSD(totalProfit)),
       cls: totalProfit >= 0 ? 'text-blue-700 dark:text-blue-300' : 'text-red-600 dark:text-red-400',
-      sub: totalRevenue > 0 ? `${((totalProfit / totalRevenue) * 100).toFixed(1)}% ${t('profit_margin') || 'margin'}` : '',
+      sub: totalRevenue > 0 ? `${((totalProfit / totalRevenue) * 100).toFixed(1)}% ${marginShortLabel}` : marginShortLabel,
       details: [
         { label: inventoryStatLabels.grossProfit, value: fmtUSD(totalProfit) },
         { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
         { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
-        { label: t('formula') || 'Formula', value: inventoryProfitFormulaText },
+        { label: inventoryStatLabels.formula, value: inventoryProfitFormulaText },
       ],
     },
   ]
@@ -1626,15 +1970,15 @@ export default function Inventory() {
       value: statsValue(fmtUSD(totalStoreDiscounts + totalMembershipDiscounts)),
       cls: 'text-amber-600 dark:text-amber-400',
       border: 'border-amber-400',
-      sub: t('allocated_to_products') || 'Allocated to sold products',
+        sub: `${storeDiscountShortLabel} ${fmtUSD(totalStoreDiscounts)} | ${memberShortLabel} ${fmtUSD(totalMembershipDiscounts)}`,
       detailSections: [
         {
-          title: tr('discount_breakdown', 'Discount breakdown', '??????????????????????'),
+          title: tr('discount_breakdown', 'Discount breakdown'),
           rows: [
-            { label: t('store_discounts') || 'Store discounts', value: fmtUSD(totalStoreDiscounts) },
-            { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(totalMembershipDiscounts) },
-            { label: tr('discounts_total', 'Total discounts', '??????????????????'), value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts) },
-            { label: t('formula') || 'Formula', value: inventoryDiscountFormulaText },
+            { label: tr('store_discounts', 'Store discounts'), value: fmtUSD(totalStoreDiscounts) },
+            { label: tr('membership_discounts', 'Membership discounts'), value: fmtUSD(totalMembershipDiscounts) },
+            { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts) },
+            { label: inventoryStatLabels.formula, value: inventoryDiscountFormulaText },
           ],
         },
       ],
@@ -1645,15 +1989,15 @@ export default function Inventory() {
       value: fmtUSD((taxDelivery.tax || 0) + (taxDelivery.delivery || 0)),
       cls: 'text-indigo-600 dark:text-indigo-400',
       border: 'border-indigo-400',
-      sub: `${t('tax_collected') || 'Tax'} + ${t('delivery_fees') || 'Delivery'}`,
+        sub: `${taxShortLabel} ${fmtUSD(taxDelivery.tax || 0)} | ${deliveryShortLabel} ${fmtUSD(taxDelivery.delivery || 0)}`,
       detailSections: [
         {
-          title: tr('fees_breakdown', 'Fee breakdown', '????????????????'),
+          title: tr('fees_breakdown', 'Fee breakdown'),
           rows: [
-            { label: t('tax_collected') || 'Tax collected', value: fmtUSD(taxDelivery.tax || 0) },
-            { label: t('delivery_fees') || 'Delivery fees', value: fmtUSD(taxDelivery.delivery || 0) },
-            { label: t('transactions') || 'Transactions', value: taxDelivery.deliveryCount || 0 },
-            { label: t('formula') || 'Formula', value: inventoryFeesFormulaText },
+            { label: inventoryStatLabels.taxCollected, value: fmtUSD(taxDelivery.tax || 0) },
+            { label: inventoryStatLabels.deliveryFees, value: fmtUSD(taxDelivery.delivery || 0) },
+            { label: inventoryStatLabels.transactions, value: taxDelivery.deliveryCount || 0 },
+            { label: inventoryStatLabels.formula, value: inventoryFeesFormulaText },
           ],
         },
       ],
@@ -1664,14 +2008,14 @@ export default function Inventory() {
       value: (returnStats?.count ?? 0) + (returnStats?.supplier_count ?? 0),
       cls: 'text-orange-600 dark:text-orange-400',
       border: 'border-orange-400',
-      sub: `${returnStats?.count ?? 0} ${t('customer_returns') || 'customer'} • ${returnStats?.supplier_count ?? 0} ${t('supplier_returns') || 'supplier'}`,
+        sub: `${returnStats?.count ?? 0} ${customerShortLabel} | ${returnStats?.supplier_count ?? 0} ${supplierShortLabel}`,
       detailSections: [
         {
           title: t('returns_count') || 'Customer returns',
           rows: [
-            { label: t('returns_count') || 'Returns', value: returnStats?.count ?? 0 },
-            { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
-            { label: t('items') || 'Items', value: returnStats?.items ?? 0 },
+            { label: inventoryStatLabels.returnsCount, value: returnStats?.count ?? 0 },
+            { label: inventoryStatLabels.refunded, value: fmtUSD(returnStats?.refund_usd || 0) },
+            { label: tr('items', 'Items'), value: returnStats?.items ?? 0 },
             { label: t('restocked_to_inventory') || 'Restocked', value: returnStats?.restock ?? 0 },
           ],
         },
@@ -1691,24 +2035,51 @@ export default function Inventory() {
     () => [...primaryStats, ...financeStats],
     [financeStats, primaryStats],
   )
-  const inventoryBrands = useMemo(() => ((Array.isArray(inventoryProductFilters.brands) && inventoryProductFilters.brands.length
-    ? inventoryProductFilters.brands
-    : [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))]
-  ).sort((a, b) => a.localeCompare(b))), [inventoryProductFilters.brands, summary])
-  const inventoryInitialOptions = useMemo(
-    () => aggregateInitialOptions(Array.isArray(inventoryInitials) ? inventoryInitials : []),
-    [inventoryInitials],
-  )
-  const selectedMovementUserLabel = useMemo(() => (
-    movementUserFilter === 'all'
-      ? (t('all_users') || 'All users')
-      : (userOptions.find((option) => String(option?.id || '') === String(movementUserFilter))?.name
-        || userOptions.find((option) => String(option?.id || '') === String(movementUserFilter))?.username
-        || `User ${movementUserFilter}`)
-  ), [movementUserFilter, t, userOptions])
+  const inventoryBrands = useMemo(() => (
+    (Array.isArray(inventoryProductFilters.brands) && inventoryProductFilters.brands.length
+      ? inventoryProductFilters.brands
+      : [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))]
+    ).sort((a, b) => a.localeCompare(b))
+  ), [inventoryProductFilters.brands, summary])
+  const selectedMovementUserLabel = useMemo(() => {
+    if (movementUserFilter === 'all') return t('all_users') || 'All users'
+    const match = userOptions.find((option) => String(option?.id || '') === movementUserFilter)
+    return match?.name || match?.username || `User ${movementUserFilter}`
+  }, [movementUserFilter, t, userOptions])
   const selectedInventoryBrandLabel = brandFilter === 'all'
     ? (t('all_brands') || 'All brands')
     : brandFilter
+  const apiInventoryInitialOptions = useMemo(
+    () => aggregateInitialOptions(Array.isArray(inventoryInitials) ? inventoryInitials : []).filter((item) => (
+      item?.type === 'latin' || item?.type === 'number' || item?.type === 'khmer'
+    )),
+    [inventoryInitials],
+  )
+  const derivedInventoryInitialOptions = useMemo(
+    () => buildInitialOptionsFromProducts(Array.isArray(summary) ? summary : []),
+    [summary],
+  )
+  const inventoryInitialOptions = useMemo(() => {
+    if (apiInventoryInitialOptions.length) return apiInventoryInitialOptions
+    if (derivedInventoryInitialOptions.length) return derivedInventoryInitialOptions
+    return cachedInventoryInitialOptions
+  }, [apiInventoryInitialOptions, cachedInventoryInitialOptions, derivedInventoryInitialOptions])
+  useEffect(() => {
+    if (apiInventoryInitialOptions.length) {
+      setCachedInventoryInitialOptions((current) => {
+        const serializedCurrent = JSON.stringify(current)
+        const serializedNext = JSON.stringify(apiInventoryInitialOptions)
+        return serializedCurrent === serializedNext ? current : apiInventoryInitialOptions
+      })
+      return
+    }
+    if (derivedInventoryInitialOptions.length) {
+      setCachedInventoryInitialOptions((current) => {
+        if (current.length) return current
+        return derivedInventoryInitialOptions
+      })
+    }
+  }, [apiInventoryInitialOptions, derivedInventoryInitialOptions])
   const selectedMovementGroups = visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id))
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const movementDateRangeLabel = useMemo(() => {
@@ -1778,9 +2149,9 @@ export default function Inventory() {
   }, [movementTimeMode, visibleMovementGroups])
 
   const stockStatusRows = useMemo(() => ([
-    { name: tr('in_stock', 'In Stock', '????????'), value: inStockCount },
-    { name: tr('low_stock', 'Low Stock', '????????'), value: lowStockCount },
-    { name: tr('out_of_stock', 'Out of Stock', '????????'), value: outStockCount },
+    { name: tr('in_stock', 'In Stock'), value: inStockCount },
+    { name: tr('low_stock', 'Low Stock'), value: lowStockCount },
+    { name: tr('out_of_stock', 'Out of Stock'), value: outStockCount },
   ]), [inStockCount, lowStockCount, outStockCount, tr])
 
   const topStockValueRows = useMemo(() => (
@@ -1805,7 +2176,7 @@ export default function Inventory() {
           const key = String(branchStock.branch_id || branchStock.branch_name || '')
           if (!key) return
           const current = map.get(key) || {
-            branch_name: branchStock.branch_name || branches.find((branch) => String(branch.id) === key)?.name || key,
+            branch_name: branchStock.branch_name || getBranchLabel(key, key),
             quantity: 0,
             stock_value_usd: 0,
             product_count: 0,
@@ -1819,11 +2190,11 @@ export default function Inventory() {
       }
     })
     return [...map.values()].sort((left, right) => right.stock_value_usd - left.stock_value_usd || right.quantity - left.quantity)
-  }, [branches, filteredSummary])
+  }, [filteredSummary, getBranchLabel])
 
   const buildInventoryStatsRows = useCallback(() => ([
     { Section: 'Inventory Stats', Metric: 'View Tab', Value: tab },
-    { Section: 'Inventory Stats', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+    { Section: 'Inventory Stats', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : getBranchLabel(branchFilter, branchFilter) },
     { Section: 'Inventory Stats', Metric: 'Brand Filter', Value: brandFilter === 'all' ? 'All brands' : brandFilter },
     { Section: 'Inventory Stats', Metric: 'Stock Filter', Value: stockFilter },
     { Section: 'Inventory Stats', Metric: 'Visible Movement Date Range', Value: movementDateRangeLabel },
@@ -1853,8 +2224,8 @@ export default function Inventory() {
     { Section: 'Inventory Stats', Metric: 'Delivery Fees (USD)', Value: Number(taxDelivery.delivery || 0).toFixed(2) },
   ]), [
     branchFilter,
-    branches,
     brandFilter,
+    getBranchLabel,
     filteredSummary.length,
     lowStockCount,
     movFilter,
@@ -1937,7 +2308,7 @@ export default function Inventory() {
   ])
 
   const buildMovementFilterRows = useCallback(() => ([
-    { Section: 'Movement Filters', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+    { Section: 'Movement Filters', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : getBranchLabel(branchFilter, branchFilter) },
     { Section: 'Movement Filters', Metric: 'Movement Type Filter', Value: movFilter },
     { Section: 'Movement Filters', Metric: 'Year Filter', Value: movementYearFilter },
     { Section: 'Movement Filters', Metric: 'Month Filter', Value: movementMonthFilter },
@@ -1949,7 +2320,7 @@ export default function Inventory() {
     { Section: 'Movement Filters', Metric: 'Visible Movement Quantity', Value: visibleMovementQuantity },
   ]), [
     branchFilter,
-    branches,
+    getBranchLabel,
     movFilter,
     movementGroupMode,
     movementMonthFilter,
@@ -1963,7 +2334,7 @@ export default function Inventory() {
 
   const buildInventoryExportContextRows = useCallback(() => ([
     { Section: 'Export Context', Metric: 'Active Tab', Value: tab },
-    { Section: 'Export Context', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+    { Section: 'Export Context', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : getBranchLabel(branchFilter, branchFilter) },
     { Section: 'Export Context', Metric: 'Brand Filter', Value: brandFilter === 'all' ? 'All brands' : brandFilter },
     { Section: 'Export Context', Metric: 'Stock Filter', Value: stockFilter },
     { Section: 'Export Context', Metric: 'Movement Type Filter', Value: movFilter },
@@ -1979,9 +2350,9 @@ export default function Inventory() {
     { Section: 'Export Context', Metric: 'Generated At', Value: new Date().toISOString() },
   ]), [
     branchFilter,
-    branches,
     brandFilter,
     filteredSummary.length,
+    getBranchLabel,
     movFilter,
     movementDateRangeLabel,
     movementGroupMode,
@@ -2083,7 +2454,7 @@ export default function Inventory() {
       buildReportManifestRows,
       buildReportPackageFiles,
       buildStandaloneReportHtml,
-      downloadZipFiles,
+      downloadZipFilesAsync,
     } = await loadInventoryExportTools()
     const movementRows = buildMovementRows(visibleMovementGroups)
     const productRows = buildInventoryProductRows(filteredSummary)
@@ -2097,15 +2468,15 @@ export default function Inventory() {
     const reportContent = buildStandaloneReportHtml({
       fileName: 'inventory-report.html',
       title: 'Inventory Report',
-      subtitle: `${mode === 'movements' ? 'Movements' : 'Products'} • ${movementDateRangeLabel}`,
+      subtitle: `${mode === 'movements' ? 'Movements' : 'Products'} | ${movementDateRangeLabel}`,
       exportedAt: new Date().toISOString(),
       summaryCards: [
         { label: 'Visible Products', value: filteredSummary.length, sub: `${totalProducts} total products` },
         { label: 'Visible Movement Groups', value: visibleMovementGroups.length, sub: movementDateRangeLabel },
-        { label: tr('stock_value', 'Stock Value', '??????????'), value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit', '????????')} ${fmtUSD(totalProfit)}` },
-        { label: tr('revenue', 'Revenue', '?????'), value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS', '???????????????????')} ${fmtUSD(totalCOGS)}` },
-        { label: tr('low_stock', 'Low Stock', '????????'), value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock', '????????')} ${outStockCount}` },
-        { label: tr('returns_count', 'Returns', '??????????????'), value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded', '????????')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
+        { label: tr('stock_value', 'Stock Value'), value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit')} ${fmtUSD(totalProfit)}` },
+        { label: tr('revenue', 'Revenue'), value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS')} ${fmtUSD(totalCOGS)}` },
+        { label: tr('low_stock', 'Low Stock'), value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock')} ${outStockCount}` },
+        { label: tr('returns_count', 'Returns'), value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
       ],
       metadataGroups: [
         {
@@ -2113,7 +2484,7 @@ export default function Inventory() {
           subtitle: 'Visible inventory scope captured in this export',
           rows: [
             { label: 'View', value: mode },
-            { label: 'Branch', value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+            { label: 'Branch', value: branchFilter === 'all' ? 'All branches' : getBranchLabel(branchFilter, branchFilter) },
             { label: 'Brand', value: brandFilter === 'all' ? 'All brands' : brandFilter },
             { label: 'Stock status', value: stockFilter },
             { label: 'Search', value: search || 'None' },
@@ -2200,11 +2571,10 @@ export default function Inventory() {
       reportFileName: 'inventory-report.html',
       reportContent,
     })
-    downloadZipFiles(`inventory-report-${mode}-${exportStamp}.zip`, files)
+    await downloadZipFilesAsync(`inventory-report-${mode}-${exportStamp}.zip`, files)
   }, [
     branchComparisonRows,
     branchFilter,
-    branches,
     brandFilter,
     buildInventoryFormulaRows,
     buildInventoryProductRows,
@@ -2215,6 +2585,7 @@ export default function Inventory() {
     exportStamp,
     filteredSummary,
     fmtUSD,
+    getBranchLabel,
     lowStockCount,
     movFilter,
     movementDateRangeLabel,
@@ -2244,50 +2615,50 @@ export default function Inventory() {
   const inventoryExportItems = useMemo(() => {
     if (tab === 'movements') {
       return [
-        { label: tr('export_full_inventory_package', 'Export full inventory package', '???????????????????????'), onClick: () => exportInventoryPackage('movements'), color: 'green' },
-        { label: tr('export_inventory_stats', 'Export inventory stats and calculations', '???????????? ???????????????'), onClick: () => exportInventoryStats('inventory-stats') },
+        { label: tr('export_full_inventory_package', 'Export full inventory package'), onClick: () => exportInventoryPackage('movements'), color: 'green' },
+        { label: tr('export_inventory_stats', 'Export inventory stats and calculations'), onClick: () => exportInventoryStats('inventory-stats') },
         'divider',
-        { label: tr('export_visible_movement_groups', `Export visible ${t('movements') || 'movements'}`, '?????????????????????????????'), onClick: () => exportMovementGroups(visibleMovementGroups) },
-        selectedMovementGroups.length ? { label: tr('export_selected_movement_groups', 'Export selected movement groups', '??????????????????????????'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' } : null,
+        { label: tr('export_visible_movement_groups', `Export visible ${t('movements') || 'movements'}`), onClick: () => exportMovementGroups(visibleMovementGroups) },
+        selectedMovementGroups.length ? { label: tr('export_selected_movement_groups', 'Export selected movement groups'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' } : null,
         movementYearFilter !== 'all' || movementMonthFilter !== 'all'
-          ? { label: tr('export_filtered_time_range', 'Export filtered time range', '?????????????????????????????'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-filtered') }
+          ? { label: tr('export_filtered_time_range', 'Export filtered time range'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-filtered') }
           : null,
         branchFilter !== 'all'
-          ? { label: tr('export_filtered_branch_movements', 'Export filtered branch movements', '????????????????????????????'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-branch') }
+          ? { label: tr('export_filtered_branch_movements', 'Export filtered branch movements'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-branch') }
           : null,
         movFilter !== 'all'
-          ? { label: tr('export_filtered_activity_type', 'Export filtered activity type', '??????????????????????????????????'), onClick: () => exportMovementGroups(visibleMovementGroups, `inventory-movements-${movFilter}`) }
+          ? { label: tr('export_filtered_activity_type', 'Export filtered activity type'), onClick: () => exportMovementGroups(visibleMovementGroups, `inventory-movements-${movFilter}`) }
           : null,
         'divider',
-        { label: tr('export_inventory_summary', 'Export inventory summary', '?????????????????'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
-        { label: tr('export_low_stock_summary', 'Export low-stock summary', '????????????????????'), onClick: () => exportInventorySummary(summary.filter((product) => {
+        { label: tr('export_inventory_summary', 'Export inventory summary'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
+        { label: tr('export_low_stock_summary', 'Export low-stock summary'), onClick: () => exportInventorySummary(summary.filter((product) => {
           const qty = getStockQty(product)
           return qty > (product.out_of_stock_threshold || 0) && qty <= (product.low_stock_threshold || 10)
         }), 'inventory-low-stock') },
-        { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary', '????????????????????'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
+        { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
       ].filter(Boolean)
     }
 
     return [
-      { label: tr('export_full_inventory_package', 'Export full inventory package', '???????????????????????'), onClick: () => exportInventoryPackage('products'), color: 'green' },
-      { label: tr('export_inventory_stats', 'Export inventory stats and calculations', '???????????? ???????????????'), onClick: () => exportInventoryStats('inventory-stats') },
+      { label: tr('export_full_inventory_package', 'Export full inventory package'), onClick: () => exportInventoryPackage('products'), color: 'green' },
+      { label: tr('export_inventory_stats', 'Export inventory stats and calculations'), onClick: () => exportInventoryStats('inventory-stats') },
       'divider',
-      { label: tr('export_visible_products', 'Export visible products', '??????????????????????????'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-visible') },
+      { label: tr('export_visible_products', 'Export visible products'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-visible') },
       branchFilter !== 'all'
-        ? { label: tr('export_filtered_branch_products', 'Export filtered branch products', '??????????????????????????????'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-branch') }
+        ? { label: tr('export_filtered_branch_products', 'Export filtered branch products'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-branch') }
         : null,
       stockFilter !== 'all'
-        ? { label: tr('export_filtered_stock_state', 'Export filtered stock state', '?????????????????????????????????'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-${stockFilter}`) }
+        ? { label: tr('export_filtered_stock_state', 'Export filtered stock state'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-${stockFilter}`) }
         : null,
       brandFilter !== 'all'
-        ? { label: tr('export_filtered_brand', 'Export filtered brand', '????????????????????????'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-brand`) }
+        ? { label: tr('export_filtered_brand', 'Export filtered brand'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-brand`) }
         : null,
-      { label: tr('export_full_inventory_summary', 'Export full inventory summary', '????????????????????????'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
-      { label: tr('export_low_stock_summary', 'Export low-stock summary', '????????????????????'), onClick: () => exportInventorySummary(summary.filter((product) => {
+      { label: tr('export_full_inventory_summary', 'Export full inventory summary'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
+      { label: tr('export_low_stock_summary', 'Export low-stock summary'), onClick: () => exportInventorySummary(summary.filter((product) => {
         const qty = getStockQty(product)
         return qty > (product.out_of_stock_threshold || 0) && qty <= (product.low_stock_threshold || 10)
       }), 'inventory-low-stock') },
-      { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary', '????????????????????'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
+      { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
     ].filter(Boolean)
   }, [
     branchFilter,
@@ -2307,208 +2678,78 @@ export default function Inventory() {
     visibleMovementGroups,
   ])
 
-  const inventoryRfidFilterSections = useMemo(() => ([
-    branches.length > 1 ? {
-      id: 'branch',
-      label: t('branch') || 'Branch',
-      options: [
-        { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
-        ...branches.map((branch) => ({
-          id: `branch-${branch.id}`,
-          label: branch.name,
-          active: branchFilter === String(branch.id),
-          onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
-        })),
-      ],
-    } : null,
-  ].filter(Boolean)), [branchFilter, branches, t])
-
-  const inventoryMovementFilterSections = useMemo(() => ([
-    branches.length > 1 ? {
-      id: 'branch',
-      label: t('branch') || 'Branch',
-      options: [
-        { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
-        ...branches.map((branch) => ({
-          id: `branch-${branch.id}`,
-          label: branch.name,
-          active: branchFilter === String(branch.id),
-          onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
-        })),
-      ],
-    } : null,
-    {
-      id: 'movement-type',
-      label: t('activity') || 'Activity',
-      options: [
-        { id: 'all', label: t('all_types') || 'All types', active: movFilter === 'all', onClick: () => setMovFilter('all') },
-        ['sale', t('sale') || 'Sale'],
-        ['purchase', t('purchase') || 'Purchase'],
-        ['return', t('returns') || 'Return'],
-        ['return_reversal', t('return_type_writeoff') || 'Return reversal'],
-        ['adjustment', t('adjustment') || 'Adjustment'],
-        ['transfer', t('stock_transfer') || 'Transfer'],
-      ].slice(1).map(([value, label]) => ({
-        id: value,
-        label,
-        active: movFilter === value,
-        onClick: () => setMovFilter(movFilter === value ? 'all' : value),
-      })),
-    },
-    isAdmin ? {
-      id: 'movement-user',
-      label: t('user') || 'User',
-      render: ({ closeMenu }) => (
-        inventoryMovementUserPickerOpen ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
-                onClick={() => setInventoryMovementUserPickerOpen(false)}
-              >
-                {t('back') || 'Back'}
-              </button>
-              {movementUserFilter !== 'all' ? (
-                <button
-                  type="button"
-                  className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
-                  onClick={() => {
-                    setMovementUserFilter('all')
-                    closeMenu()
-                  }}
-                >
-                  {t('clear') || 'Clear'}
-                </button>
-              ) : null}
-            </div>
-            <label className="block">
-              <span className="sr-only">{t('user') || 'User'}</span>
-              <select
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-                value={movementUserFilter}
-                onChange={(event) => {
-                  setMovementUserFilter(event.target.value || 'all')
-                  closeMenu()
-                }}
-                aria-label={t('user') || 'User'}
-              >
-                <option value="all">{t('all_users') || 'All users'}</option>
-                {userOptions
-                  .map((option) => {
-                    const id = String(option?.id || '')
-                    if (!id) return null
-                    return (
-                      <option key={`user-${id}`} value={id}>
-                        {option?.name || option?.username || `User ${id}`}
-                      </option>
-                    )
-                  })
-                  .filter(Boolean)}
-              </select>
-            </label>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
-            onClick={() => setInventoryMovementUserPickerOpen(true)}
-          >
-            <span className="truncate">{selectedMovementUserLabel}</span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
-          </button>
-        )
-      ),
-    } : null,
-    {
-      id: 'movement-year',
-      label: 'Year',
-      options: [
-        { id: 'all', label: 'All years', active: movementYearFilter === 'all', onClick: () => { setMovementYearFilter('all'); setMovementMonthFilter('all') } },
-        ...movementYears.map((year) => ({
-          id: `year-${year}`,
-          label: year,
-          active: movementYearFilter === year,
-          onClick: () => {
-            const next = movementYearFilter === year ? 'all' : year
-            setMovementYearFilter(next)
-            if (next === 'all') setMovementMonthFilter('all')
-          },
-        })),
-      ],
-    },
-    {
-      id: 'movement-month',
-      label: 'Month',
-      options: [
-        { id: 'all', label: 'All months', active: movementMonthFilter === 'all', onClick: () => setMovementMonthFilter('all') },
-        ...Array.from({ length: 12 }, (_, index) => {
-          const month = String(index + 1)
-          const label = new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' })
-          return {
-            id: `month-${month}`,
-            label,
-            active: movementMonthFilter === month,
-            onClick: () => setMovementMonthFilter(movementMonthFilter === month ? 'all' : month),
-          }
-        }),
-      ],
-    },
-    {
-      id: 'movement-grouping',
-      label: t('group_by') || 'Group by',
-      options: [
-        { id: 'time', label: t('group_by_time') || 'Time only', active: movementGroupMode === 'time', onClick: () => setMovementGroupMode('time') },
-        { id: 'time-action', label: t('group_by_time_action') || 'Time + activity', active: movementGroupMode === 'time+action', onClick: () => setMovementGroupMode('time+action') },
-      ],
-    },
-    {
-      id: 'movement-sort',
-      label: t('sort') || 'Sort',
-      options: [
-        { id: 'desc', label: t('newest_first') || 'Newest first', active: movementSortDirection === 'desc', onClick: () => setMovementSortDirection('desc') },
-        { id: 'asc', label: t('oldest_first') || 'Oldest first', active: movementSortDirection === 'asc', onClick: () => setMovementSortDirection('asc') },
-      ],
-    },
-  ].filter(Boolean)), [
-    branchFilter,
-    branches,
-    inventoryMovementUserPickerOpen,
-    isAdmin,
-    movFilter,
-    movementGroupMode,
-    movementMonthFilter,
-    movementSortDirection,
-    movementUserFilter,
-    movementYearFilter,
-    movementYears,
-    selectedMovementUserLabel,
-    t,
-    userOptions,
-  ])
-
-  const inventoryProductFilterSections = useMemo(() => (
-    [
+  const inventoryFilterSections = useMemo(() => {
+    if (tab === 'rfid') {
+      return [
         branches.length > 1 ? {
           id: 'branch',
           label: t('branch') || 'Branch',
+          options: [
+            { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
+            ...branches.map((branch) => ({
+              id: `branch-${branch.id}`,
+              label: branch.name,
+              active: branchFilter === String(branch.id),
+              onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
+            })),
+          ],
+        } : null,
+      ].filter(Boolean)
+    }
+
+    if (tab === 'movements') {
+      return [
+        branches.length > 1 ? {
+          id: 'branch',
+          label: t('branch') || 'Branch',
+          options: [
+            { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
+            ...branches.map((branch) => ({
+              id: `branch-${branch.id}`,
+              label: branch.name,
+              active: branchFilter === String(branch.id),
+              onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
+            })),
+          ],
+        } : null,
+        {
+          id: 'movement-type',
+          label: t('activity') || 'Activity',
+          options: [
+            { id: 'all', label: t('all_types') || 'All types', active: movFilter === 'all', onClick: () => setMovFilter('all') },
+            ['sale', t('sale') || 'Sale'],
+            ['purchase', t('purchase') || 'Purchase'],
+            ['return', t('returns') || 'Return'],
+            ['return_reversal', t('return_type_writeoff') || 'Return reversal'],
+            ['adjustment', t('adjustment') || 'Adjustment'],
+            ['transfer', t('stock_transfer') || 'Transfer'],
+          ].slice(1).map(([value, label]) => ({
+            id: value,
+            label,
+            active: movFilter === value,
+            onClick: () => setMovFilter(movFilter === value ? 'all' : value),
+          })),
+        },
+        isAdmin ? {
+          id: 'movement-user',
+          label: t('user') || 'User',
           render: ({ closeMenu }) => (
-            inventoryBranchPickerOpen ? (
+            inventoryMovementUserPickerOpen ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <button
                     type="button"
                     className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
-                    onClick={() => setInventoryBranchPickerOpen(false)}
+                    onClick={() => setInventoryMovementUserPickerOpen(false)}
                   >
                     {t('back') || 'Back'}
                   </button>
-                  {branchFilter !== 'all' ? (
+                  {movementUserFilter !== 'all' ? (
                     <button
                       type="button"
                       className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
                       onClick={() => {
-                        setBranchFilter('all')
+                        setMovementUserFilter('all')
                         closeMenu()
                       }}
                     >
@@ -2517,20 +2758,28 @@ export default function Inventory() {
                   ) : null}
                 </div>
                 <label className="block">
-                  <span className="sr-only">{t('branch') || 'Branch'}</span>
+                  <span className="sr-only">{t('user') || 'User'}</span>
                   <select
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-                    value={branchFilter}
+                    value={movementUserFilter}
                     onChange={(event) => {
-                      setBranchFilter(event.target.value || 'all')
+                      setMovementUserFilter(event.target.value || 'all')
                       closeMenu()
                     }}
-                    aria-label={t('branch') || 'Branch'}
+                    aria-label={t('user') || 'User'}
                   >
-                    <option value="all">{t('all_branches') || 'All branches'}</option>
-                    {branches.map((branch) => (
-                      <option key={`branch-${branch.id}`} value={String(branch.id)}>{branch.name}</option>
-                    ))}
+                    <option value="all">{t('all_users') || 'All users'}</option>
+                    {userOptions
+                      .map((option) => {
+                        const id = String(option?.id || '')
+                        if (!id) return null
+                        return (
+                          <option key={`user-${id}`} value={id}>
+                            {option?.name || option?.username || `User ${id}`}
+                          </option>
+                        )
+                      })
+                      .filter(Boolean)}
                   </select>
                 </label>
               </div>
@@ -2538,124 +2787,136 @@ export default function Inventory() {
               <button
                 type="button"
                 className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
-                onClick={() => setInventoryBranchPickerOpen(true)}
+                onClick={() => setInventoryMovementUserPickerOpen(true)}
               >
-                <span className="truncate">{selectedInventoryBranchLabel}</span>
+                <span className="truncate">{selectedMovementUserLabel}</span>
                 <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
               </button>
             )
+          ),
+        } : null,
+        {
+          id: 'movement-year',
+          label: 'Year',
+          options: [
+            { id: 'all', label: 'All years', active: movementYearFilter === 'all', onClick: () => { setMovementYearFilter('all'); setMovementMonthFilter('all') } },
+            ...movementYears.map((year) => ({
+              id: `year-${year}`,
+              label: year,
+              active: movementYearFilter === year,
+              onClick: () => {
+                const next = movementYearFilter === year ? 'all' : year
+                setMovementYearFilter(next)
+                if (next === 'all') setMovementMonthFilter('all')
+              },
+            })),
+          ],
+        },
+        {
+          id: 'movement-month',
+          label: 'Month',
+          options: [
+            { id: 'all', label: 'All months', active: movementMonthFilter === 'all', onClick: () => setMovementMonthFilter('all') },
+            ...Array.from({ length: 12 }, (_, index) => {
+              const month = String(index + 1)
+              const label = new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' })
+              return {
+                id: `month-${month}`,
+                label,
+                active: movementMonthFilter === month,
+                onClick: () => setMovementMonthFilter(movementMonthFilter === month ? 'all' : month),
+              }
+            }),
+          ],
+        },
+        {
+          id: 'movement-grouping',
+          label: t('group_by') || 'Group by',
+          options: [
+            { id: 'time', label: t('group_by_time') || 'Time only', active: movementGroupMode === 'time', onClick: () => setMovementGroupMode('time') },
+            { id: 'time-action', label: t('group_by_time_action') || 'Time + activity', active: movementGroupMode === 'time+action', onClick: () => setMovementGroupMode('time+action') },
+          ],
+        },
+        {
+          id: 'movement-sort',
+          label: t('sort') || 'Sort',
+          options: [
+            { id: 'desc', label: t('newest_first') || 'Newest first', active: movementSortDirection === 'desc', onClick: () => setMovementSortDirection('desc') },
+            { id: 'asc', label: t('oldest_first') || 'Oldest first', active: movementSortDirection === 'asc', onClick: () => setMovementSortDirection('asc') },
+          ],
+        },
+      ].filter(Boolean)
+    }
+
+    return [
+      branches.length > 1 ? {
+        id: 'branch',
+        label: t('branch') || 'Branch',
+        render: ({ closeMenu }) => (
+          <label className="block">
+            <span className="sr-only">{t('branch') || 'Branch'}</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+              value={branchFilter}
+              onChange={(event) => {
+                setBranchFilter(event.target.value || 'all')
+                closeMenu()
+              }}
+              aria-label={t('branch') || 'Branch'}
+            >
+              <option value="all">{t('all_branches') || 'All branches'}</option>
+              {branches.map((branch) => (
+                <option key={`branch-${branch.id}`} value={String(branch.id)}>{branch.name}</option>
+              ))}
+            </select>
+          </label>
         ),
       } : null,
       {
         id: 'group',
         label: t('groups') || 'Groups',
         render: ({ closeMenu }) => (
-          inventoryGroupPickerOpen ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
-                  onClick={() => setInventoryGroupPickerOpen(false)}
-                >
-                  {t('back') || 'Back'}
-                </button>
-                {groupFilter !== 'grouped' ? (
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
-                    onClick={() => {
-                      setGroupFilter('grouped')
-                      closeMenu()
-                    }}
-                  >
-                    {t('clear') || 'Clear'}
-                  </button>
-                ) : null}
-              </div>
-              <label className="block">
-                <span className="sr-only">{t('groups') || 'Groups'}</span>
-                <select
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-                  value={groupFilter}
-                  onChange={(event) => {
-                    setGroupFilter(event.target.value || 'grouped')
-                    closeMenu()
-                  }}
-                  aria-label={t('groups') || 'Groups'}
-                >
-                  {inventoryGroupChoices.map((option) => (
-                    <option key={`group-${option.value}`} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
-              onClick={() => setInventoryGroupPickerOpen(true)}
+          <label className="block">
+            <span className="sr-only">{t('groups') || 'Groups'}</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+              value={groupFilter}
+              onChange={(event) => {
+                setGroupFilter(event.target.value || 'all')
+                closeMenu()
+              }}
+              aria-label={t('groups') || 'Groups'}
             >
-              <span className="truncate">{selectedInventoryGroupLabel}</span>
-              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
-            </button>
-          )
+              <option value="all">{t('all') || 'All'}</option>
+              <option value="grouped">{t('groups') || 'Groups'}</option>
+              <option value="parent">{t('parents') || 'Parents'}</option>
+              <option value="variant">{t('variants') || 'Variants'}</option>
+              <option value="standalone">{t('standalone') || 'Standalone'}</option>
+            </select>
+          </label>
         ),
       },
       {
         id: 'stock',
         label: t('stock_status') || 'Stock',
         render: ({ closeMenu }) => (
-          inventoryStockPickerOpen ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
-                  onClick={() => setInventoryStockPickerOpen(false)}
-                >
-                  {t('back') || 'Back'}
-                </button>
-                {stockFilter !== 'all' ? (
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
-                    onClick={() => {
-                      setStockFilter('all')
-                      closeMenu()
-                    }}
-                  >
-                    {t('clear') || 'Clear'}
-                  </button>
-                ) : null}
-              </div>
-              <label className="block">
-                <span className="sr-only">{t('stock_status') || 'Stock'}</span>
-                <select
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-                  value={stockFilter}
-                  onChange={(event) => {
-                    setStockFilter(event.target.value || 'all')
-                    closeMenu()
-                  }}
-                  aria-label={t('stock_status') || 'Stock'}
-                >
-                  {inventoryStockChoices.map((option) => (
-                    <option key={`stock-${option.value}`} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
-              onClick={() => setInventoryStockPickerOpen(true)}
+          <label className="block">
+            <span className="sr-only">{t('stock_status') || 'Stock'}</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+              value={stockFilter}
+              onChange={(event) => {
+                setStockFilter(event.target.value || 'all')
+                closeMenu()
+              }}
+              aria-label={t('stock_status') || 'Stock'}
             >
-              <span className="truncate">{selectedInventoryStockLabel}</span>
-              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
-            </button>
-          )
+              <option value="all">{t('all') || 'All'}</option>
+              <option value="in_stock">{t('in_stock') || 'In stock'}</option>
+              <option value="low">{t('low_stock') || 'Low stock'}</option>
+              <option value="out">{t('out_of_stock') || 'Out of stock'}</option>
+            </select>
+          </label>
         ),
       },
       inventoryBrands.length ? {
@@ -2716,42 +2977,36 @@ export default function Inventory() {
         ),
       } : null,
     ].filter(Boolean)
-  ), [
+  }, [
     branchFilter,
     branches,
     brandFilter,
     groupFilter,
-    inventoryBranchPickerOpen,
     inventoryBrands,
-    inventoryBrandPickerOpen,
-    inventoryGroupChoices,
-    inventoryGroupPickerOpen,
-    inventoryStockChoices,
-    inventoryStockPickerOpen,
-    selectedInventoryBranchLabel,
-    selectedInventoryBrandLabel,
-    selectedInventoryGroupLabel,
-    selectedInventoryStockLabel,
+    movFilter,
+    movementGroupMode,
+    movementMonthFilter,
+    movementSortDirection,
+    movementUserFilter,
+    movementYearFilter,
+    movementYears,
+    isAdmin,
     stockFilter,
     t,
+    tab,
     tr,
+    userOptions,
   ])
-
-  const inventoryFilterSections = useMemo(() => {
-    if (tab === 'rfid') return inventoryRfidFilterSections
-    if (tab === 'movements') return inventoryMovementFilterSections
-    return inventoryProductFilterSections
-  }, [inventoryMovementFilterSections, inventoryProductFilterSections, inventoryRfidFilterSections, tab])
 
   const activeInventoryFilterCount = useMemo(() => {
     if (tab === 'rfid') {
-      return [
+      return countActiveFlags([
         branchFilter !== 'all',
-      ].filter(Boolean).length
+      ])
     }
 
     if (tab === 'movements') {
-      return [
+      return countActiveFlags([
         branchFilter !== 'all',
         movFilter !== 'all',
         movementUserFilter !== 'all',
@@ -2759,16 +3014,16 @@ export default function Inventory() {
         movementMonthFilter !== 'all',
         movementGroupMode !== 'time',
         movementSortDirection !== 'desc',
-      ].filter(Boolean).length
+      ])
     }
 
-    return [
+    return countActiveFlags([
       branchFilter !== 'all',
       brandFilter !== 'all',
       groupFilter !== 'grouped',
       stockFilter !== 'all',
       inventoryInitialFilter !== 'all',
-    ].filter(Boolean).length
+    ])
   }, [branchFilter, brandFilter, groupFilter, inventoryInitialFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementUserFilter, movementYearFilter, stockFilter, tab])
 
   const clearInventoryFilters = useCallback(() => {
@@ -2783,9 +3038,6 @@ export default function Inventory() {
     setMovementMonthFilter('all')
     setMovementGroupMode('time')
     setMovementSortDirection('desc')
-    setInventoryBranchPickerOpen(false)
-    setInventoryGroupPickerOpen(false)
-    setInventoryStockPickerOpen(false)
     setInventoryBrandPickerOpen(false)
     setInventoryMovementUserPickerOpen(false)
   }, [])
@@ -2807,7 +3059,16 @@ export default function Inventory() {
   const showProductsSection = showInventorySections && tab === 'products'
   const showMovementsSection = showInventorySections && tab === 'movements'
   const showRfidSection = showInventorySections && tab === 'rfid'
+  const inventoryProductControlsRevealReady = isInventoryMobileViewport
+    ? initialInventoryMobileRevealReady
+    : initialInventoryDesktopRevealReady
+  const shouldReserveInventoryInitialBar = showProductsSection && (
+    !inventoryProductsLoaded
+    || inventoryInitialOptions.length > 0
+    || cachedInventoryInitialOptions.length > 0
+  )
   const isMovementsFirstLoad = showMovementsSection && needsMovementData && !movementsLoaded
+  const isProductsFirstLoad = showProductsSection && needsProductSummary && !inventoryProductsLoaded
   const selectInventorySection = (nextSection) => {
     setInventorySection(nextSection)
     if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
@@ -2838,16 +3099,16 @@ export default function Inventory() {
             <button
               onClick={() => setShowImport(true)}
               className="btn-secondary inline-flex min-w-[5.75rem] shrink-0 items-center justify-center whitespace-nowrap px-3 py-1.5 text-xs sm:min-w-[6.5rem] sm:text-sm"
-              title={tr('import', 'Import', '??????')}
+              title={tr('import', 'Import')}
             >
             <span className="inline-flex items-center gap-2">
               <Upload className="h-4 w-4" />
-              {tr('import', 'Import', '??????')}
+              {tr('import', 'Import')}
             </span>
           </button>
           {showProductsSection ? (
             <ExportMenu
-              label={tr('export', 'Export', '??????')}
+              label={tr('export', 'Export')}
               items={inventoryExportItems}
               compact
             />
@@ -2867,6 +3128,7 @@ export default function Inventory() {
       <LoadingWatchdog
         loading={loading}
         timeoutMs={8000}
+        showAfterMs={1200}
         label={t('loading') || 'Loading...'}
         details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : 'Loading products, stock, and movement summaries.'}
         onRetry={() => load(false)}
@@ -2881,137 +3143,26 @@ export default function Inventory() {
 
       {showInventoryStats ? (
       <>
-      {/* ???? Primary Stats bar ???? */}
-      <p className="mb-1 text-[10px] text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
-      <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8">
-        {inventoryStatCards.map((stat) => (
-          <button
-            key={stat.id}
-            type="button"
-            className={`card flex min-w-0 flex-col justify-start px-2.5 py-2 text-left transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
-            onClick={() => setStatDetail(stat)}
-          >
-            <div className="mb-0.5 text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
-            <div className={`truncate text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>
-            {stat.sub ? (
-              <div className="mt-0.5 min-w-0 truncate text-[10px] leading-4 text-gray-500 dark:text-gray-400">
-                {stat.sub}
-              </div>
-            ) : null}
-          </button>
-        ))}
+        <div className="mb-2 grid grid-cols-2 items-start gap-1.5 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8">
+          {inventoryStatCards.map((stat) => (
+            <button
+              key={stat.id}
+              type="button"
+              className={`card flex min-h-[3.85rem] min-w-0 flex-col items-start self-start px-2.5 py-1.5 text-left transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
+              onClick={() => setStatDetail(stat)}
+            >
+              <div className="mb-0.5 text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
+              <div className={`overflow-hidden text-ellipsis whitespace-nowrap text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>
+              {stat.sub ? (
+                <div className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">
+                  {stat.sub}
+                </div>
+              ) : null}
+            </button>
+          ))}
       </div>
       </>
       ) : null}
-
-      {false && (<>
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-2">
-        {[
-          { label:t('products'),    value: totalProducts,            cls:'text-gray-800 dark:text-gray-200' },
-          { label:t('stock_value'), value: fmtUSD(totalValue),       cls:'text-blue-700 dark:text-blue-300' },
-          { label:t('net_sold'),    value: totalQtySold,             cls:'text-purple-700 dark:text-purple-300', sub:t('after_returns') },
-          { label:t('revenue'),     value: fmtUSD(totalRevenue),     cls:'text-green-700 dark:text-green-300', sub:t('after_refunds') },
-          { label:t('cogs'),        value: fmtUSD(totalCOGS),        cls:'text-orange-600 dark:text-orange-400', sub:t('cost_of_goods_sold') },
-          { label:t('gross_profit'),value: fmtUSD(totalProfit),      cls: totalProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400' },
-          { label:t('low_stock'),   value: lowStockCount,            cls: lowStockCount > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400', sub:t('need_restock') },
-          { label:t('out_of_stock'),value: outStockCount,            cls: outStockCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400', sub:t('unavailable') },
-        ].map(stat => (
-          <div key={stat.label} className="card px-3 py-2">
-            <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{stat.label}</div>
-            <div className={`text-sm font-bold ${stat.cls}`}>{stat.value}</div>
-            {stat.sub && <div className="text-[10px] text-gray-400">{stat.sub}</div>}
-          </div>
-        ))}
-      </div>
-
-      {/* ???? Secondary Stats: Returns (compact) ? Tax ? Delivery ???? */}
-      <div className="hidden grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-        {/* Returns ??compact with inline note */}
-        <div className="card px-3 py-2 border-l-2 border-orange-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('returns_count')}</div>
-          <div className="text-sm font-bold text-orange-600 dark:text-orange-400">
-            {returnStats?.count ?? 0}
-            <span className="text-[10px] font-normal text-gray-400 ml-1">{t('transactions')}</span>
-          </div>
-          <div className="text-[10px] text-gray-400 mt-0.5">
-            {returnStats && returnStats.count > 0
-              ? `${returnStats.items} items ? refunded ${fmtUSD(returnStats.refund_usd)}`
-              : t('no_returns')}
-          </div>
-        </div>
-
-        {/* Refunded amount */}
-        <div className="card px-3 py-2 border-l-2 border-red-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('total_refunded')}</div>
-          <div className="text-sm font-bold text-red-600 dark:text-red-400">{fmtUSD(returnStats?.refund_usd ?? 0)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">
-            {returnStats?.restock ?? 0} {t('restocked_to_inventory')}
-          </div>
-        </div>
-
-        {/* Tax collected */}
-        <div className="card px-3 py-2 border-l-2 border-indigo-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('tax_collected')}</div>
-          <div className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{fmtUSD(taxDelivery.tax)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">{t('all_time_sales')}</div>
-        </div>
-
-        {/* Delivery fees */}
-        <div className="card px-3 py-2 border-l-2 border-teal-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('delivery_fees')}</div>
-          <div className="text-sm font-bold text-teal-600 dark:text-teal-400">{fmtUSD(taxDelivery.delivery)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">
-            {taxDelivery.deliveryCount} {t('deliveries_made')}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
-        <div className="card px-3 py-2 border-l-2 border-amber-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('store_discounts') || 'Store discounts'}</div>
-          <div className="text-sm font-bold text-amber-600 dark:text-amber-400">{fmtUSD(totalStoreDiscounts)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">{t('allocated_to_products') || 'Allocated to sold products'}</div>
-        </div>
-
-        <div className="card px-3 py-2 border-l-2 border-emerald-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('membership_discounts') || 'Membership discounts'}</div>
-          <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{fmtUSD(totalMembershipDiscounts)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">{t('allocated_to_products') || 'Allocated to sold products'}</div>
-        </div>
-
-        <div className="card px-3 py-2 border-l-2 border-rose-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('total_refunded') || 'Refunded'}</div>
-          <div className="text-sm font-bold text-rose-600 dark:text-rose-400">{fmtUSD(returnStats?.refund_usd || 0)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">{returnStats?.items || 0} {t('items') || 'items'}</div>
-        </div>
-
-        <div className="card px-3 py-2 border-l-2 border-indigo-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('tax_collected') || 'Tax collected'}</div>
-          <div className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{fmtUSD(taxDelivery.tax || 0)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">{t('completed_sales_only') || 'Completed sales only'}</div>
-        </div>
-
-        <div className="card px-3 py-2 border-l-2 border-sky-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('delivery_fees') || 'Delivery fees'}</div>
-          <div className="text-sm font-bold text-sky-600 dark:text-sky-400">{fmtUSD(taxDelivery.delivery || 0)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">{taxDelivery.deliveryCount || 0} {t('transactions') || 'transactions'}</div>
-        </div>
-
-        <div className="card px-3 py-2 border-l-2 border-orange-400">
-          <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{t('returns_count') || 'Returns'}</div>
-          <div className="text-sm font-bold text-orange-600 dark:text-orange-400">
-            {returnStats?.count ?? 0}
-            <span className="ml-1 text-[10px] font-normal text-gray-400">{t('transactions') || 'transactions'}</span>
-          </div>
-          <div className="text-[10px] text-gray-400 mt-0.5">
-            {returnStats?.restock ?? 0} {t('restocked_to_inventory') || 'restocked'}
-          </div>
-        </div>
-      </div>
-
-      {/* ???? Tabs ???? */}
-      </>
-      )}
       {showInventoryTabs ? (
       <div className="mb-4 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
         {[['products', t('products')], ['movements', t('movements')], ['rfid', 'RFID']].map(([id,label]) => (
@@ -3023,7 +3174,7 @@ export default function Inventory() {
       </div>
       ) : null}
 
-      {/* ???? Filters ???? */}
+      {/* Section */}
       {showInventorySections ? (
       <div className="mb-2 overflow-x-auto pb-1">
         <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
@@ -3032,7 +3183,7 @@ export default function Inventory() {
             name="inventory_search"
             autoComplete="off"
             aria-label="Inventory search"
-            className={`input min-w-0 flex-1 text-sm ${tab === 'products' ? 'rounded-r-none' : ''}`}
+            className="input min-w-0 flex-1 text-sm"
             placeholder={tab === 'products'
               ? `${t('search') || 'Search'} - separate terms with commas, then choose match mode`
               : tab === 'rfid'
@@ -3042,49 +3193,56 @@ export default function Inventory() {
             onChange={e => setSearch(e.target.value)}
           />
           {tab === 'products' && (
-            <div className="flex shrink-0 overflow-hidden rounded-r-lg border border-l-0 border-gray-300 dark:border-gray-600">
+            <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-gray-300 bg-white p-0.5 dark:border-gray-600 dark:bg-gray-900">
               {['AND','OR'].map(m => (
                 <button key={m}
                   onClick={() => setSearchMode(m)}
-                  className={`min-w-[2.9rem] px-2 py-1.5 text-xs font-bold transition-colors ${searchMode===m ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50'}`}>
+                  className={`min-w-[2.65rem] rounded-lg px-2 py-1.5 text-xs font-bold transition-colors ${searchMode===m ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'}`}>
                   {m}
                 </button>
               ))}
             </div>
           )}
-          <FilterMenu
-            label={t('filters') || 'Filters'}
-            activeCount={activeInventoryFilterCount}
-            sections={inventoryFilterSections}
-            onClear={clearInventoryFilters}
-            onOpenChange={(open) => {
-              if (open) return
-              setInventoryBranchPickerOpen(false)
-              setInventoryGroupPickerOpen(false)
-              setInventoryStockPickerOpen(false)
-              setInventoryBrandPickerOpen(false)
-              setInventoryMovementUserPickerOpen(false)
-            }}
-            compact
-          />
+          {showMovementsSection ? (
+            <FilterMenu
+              label={t('filters') || 'Filters'}
+              activeCount={activeInventoryFilterCount}
+              sections={inventoryFilterSections}
+              onClear={clearInventoryFilters}
+              onOpenChange={(open) => {
+                if (open) return
+                setInventoryBrandPickerOpen(false)
+                setInventoryMovementUserPickerOpen(false)
+              }}
+              compact
+            />
+          ) : null}
         </div>
       </div>
       ) : null}
       {showInventorySections && !showMovementsSection ? (
-      <div className="inventory-history-row mb-2 overflow-x-auto pb-1">
-        <ActionHistoryBar history={actionHistory} className="min-w-max" />
+      <div className="inventory-history-row mb-2 flex min-w-0 items-center gap-2">
+        <ActionHistoryBar history={actionHistory} className="min-w-0 flex-1" />
+        <FilterMenu
+          label={t('filters') || 'Filters'}
+          activeCount={activeInventoryFilterCount}
+          sections={inventoryFilterSections}
+          onClear={clearInventoryFilters}
+          onOpenChange={(open) => {
+            if (open) return
+            setInventoryBrandPickerOpen(false)
+            setInventoryMovementUserPickerOpen(false)
+          }}
+          compact
+        />
       </div>
       ) : null}
 
-      {showInventorySections && !showProductsSection ? (
+      {showInventorySections && !showProductsSection && (tab === 'rfid' || isMovementsFirstLoad) ? (
       <p className="text-xs text-gray-400 mb-2">
-        {tab === 'products'
-          ? `${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
-          : tab === 'rfid'
-            ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
-            : isMovementsFirstLoad
-              ? `${t('loading') || 'Loading'} ${t('movements') || 'movements'}...`
-              : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${visibleMovementRecordCount} records - ${visibleMovementQuantity} quantity - ${t('tap_for_details')||'click a row for details'}`}
+        {tab === 'rfid'
+          ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
+          : `${t('loading') || 'Loading'} ${t('movements') || 'movements'}...`}
       </p>
       ) : null}
 
@@ -3092,164 +3250,190 @@ export default function Inventory() {
       {showProductsSection && (
         <>
           <div className="sticky top-2 z-30 mb-2 -mx-1 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-900/60 dark:bg-blue-950/25 sm:mx-0 sm:rounded-xl">
-            <div className="px-2 py-2">
-              <div className="grid min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
-                <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                  {inventoryProductSummaryLabel}
-                </span>
-                <label className="relative inline-flex h-7 w-full min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-                  <span className="sr-only">{t('per_page') || 'per page'}</span>
-                  <select
-                    className="h-full w-full appearance-none bg-transparent pl-2 pr-5 text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                    value={inventoryProductSafePageSize}
-                    onChange={(event) => {
-                      setInventoryProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
-                      setInventoryProductPage(1)
-                    }}
-                    aria-label={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
-                  >
-                    {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
-                </label>
-                <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-                  <button
-                    type="button"
-                    className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-                    disabled={inventoryProductSafePage <= 1}
-                    onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
-                    aria-label="Previous page"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </button>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    aria-label={t('page') || 'Page'}
-                    className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                    value={inventoryProductPageDraft}
-                    onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
-                    onBlur={commitInventoryProductPageDraft}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
-                        commitInventoryProductPageDraft()
-                        event.currentTarget.blur()
-                      } else if (event.key === 'Escape') {
-                        setInventoryProductPageDraft(String(inventoryProductSafePage))
-                        event.currentTarget.blur()
-                      }
-                    }}
-                  />
-                  <span className="pr-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-300">
-                    / {inventoryProductTotalPages}
+            <div className="relative px-2 py-2">
+              <div className={inventoryProductControlsRevealReady ? '' : 'invisible'}>
+                <div className="grid min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+                  <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                    {inventoryProductSummaryLabel}
                   </span>
-                  <button
-                    type="button"
-                    className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-                    disabled={inventoryProductSafePage >= inventoryProductTotalPages}
-                    onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
-                    aria-label="Next page"
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
+                  <label className="relative inline-flex h-7 w-full min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+                    <span className="sr-only">{t('per_page') || 'per page'}</span>
+                    <select
+                      className="h-full w-full appearance-none bg-transparent pl-2 pr-5 text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                      value={inventoryProductSafePageSize}
+                      onChange={(event) => {
+                        setInventoryProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
+                        setInventoryProductPage(1)
+                      }}
+                      aria-label={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
+                    >
+                      {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
+                  </label>
+                  <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+                    <button
+                      type="button"
+                      className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                      disabled={inventoryProductSafePage <= 1}
+                      onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
+                      aria-label="Previous page"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </button>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      aria-label={t('page') || 'Page'}
+                      className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                      value={inventoryProductPageDraft}
+                      onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                      onBlur={commitInventoryProductPageDraft}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          commitInventoryProductPageDraft()
+                          event.currentTarget.blur()
+                        } else if (event.key === 'Escape') {
+                          setInventoryProductPageDraft(String(inventoryProductSafePage))
+                          event.currentTarget.blur()
+                        }
+                      }}
+                    />
+                    <span className="pr-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-300">
+                      / {inventoryProductTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                      disabled={inventoryProductSafePage >= inventoryProductTotalPages}
+                      onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
+                      aria-label="Next page"
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div className={`mt-1.5 grid items-center gap-1.5 ${hasSelectedProducts ? 'grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]' : 'grid-cols-1'}`}>
+                  <label className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
+                    <input
+                      ref={inventorySelectAllRef}
+                      type="checkbox"
+                      className="h-4 w-4 shrink-0 rounded"
+                      checked={visibleInventoryProducts.length > 0 && selectedProductIds.size === visibleInventoryProducts.length}
+                      onChange={(event) => toggleSelectAllProducts(event.target.checked)}
+                    />
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                      {hasSelectedProducts
+                        ? inventoryControlLabels.selected
+                        : inventoryControlLabels.selectAll}
+                    </span>
+                  </label>
+                  {hasSelectedProducts ? (
+                    <>
+                      <button
+                        type="button"
+                        className="inline-flex h-7 min-w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
+                        disabled={!hasSelectedProducts}
+                        onClick={openInventoryBatchSession}
+                        title={tr(
+                          'inventory_batch_hint',
+                          'Select products, review each line in one session, then apply all stock changes together.',
+                        )}
+                        aria-label={inventoryControlLabels.batch}
+                      >
+                        {inventoryControlLabels.batch}
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex h-7 min-w-[4.6rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
+                        onClick={() => setReasonManager({ open: true, type: 'adjust' })}
+                        title={inventoryControlLabels.reasons}
+                        aria-label={inventoryControlLabels.reasons}
+                      >
+                        {inventoryControlLabels.reasons}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               </div>
-              <div className={`mt-1.5 grid items-center gap-1.5 ${hasSelectedProducts ? 'grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]' : 'grid-cols-1'}`}>
-                <label className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
-                  <input
-                    ref={inventorySelectAllRef}
-                    type="checkbox"
-                    className="h-4 w-4 shrink-0 rounded"
-                    checked={visibleInventoryProducts.length > 0 && selectedProductIds.size === visibleInventoryProducts.length}
-                    onChange={(event) => toggleSelectAllProducts(event.target.checked)}
-                  />
-                  <span className="truncate whitespace-nowrap">
-                    {hasSelectedProducts
-                      ? inventoryControlLabels.selected
-                      : inventoryControlLabels.selectAll}
-                  </span>
-                </label>
-                {hasSelectedProducts ? (
-                  <>
-                    <button
-                      type="button"
-                      className="inline-flex h-7 min-w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                      disabled={!hasSelectedProducts}
-                      onClick={openInventoryBatchSession}
-                      title={tr(
-                        'inventory_batch_hint',
-                        'Select products, review each line in one session, then apply all stock changes together.',
-                        '?????????????? ????????????????????????????????????? ????????????????????????????????????????????????????',
-                      )}
-                      aria-label={inventoryControlLabels.batch}
-                    >
-                      {inventoryControlLabels.batch}
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex h-7 min-w-[4.6rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                      onClick={() => setReasonManager({ open: true, type: 'adjust' })}
-                      title={inventoryControlLabels.reasons}
-                      aria-label={inventoryControlLabels.reasons}
-                    >
-                      {inventoryControlLabels.reasons}
-                    </button>
-                  </>
-                ) : null}
-              </div>
+              {!inventoryProductControlsRevealReady ? (
+                <div className="pointer-events-none absolute inset-0 flex flex-col gap-1.5 px-2 py-2">
+                  <div className="grid min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+                    <div className="h-5 rounded-full bg-slate-100 dark:bg-slate-800" />
+                    <div className="h-7 rounded-full bg-slate-100 dark:bg-slate-800" />
+                    <div className="h-7 rounded-full bg-slate-100 dark:bg-slate-800" />
+                  </div>
+                  <div className="grid grid-cols-1 items-center gap-1.5">
+                    <div className="h-9 rounded-2xl border border-slate-200 bg-white/95 dark:border-slate-700 dark:bg-slate-900/85" />
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
-          {showProductsSection && inventoryInitialOptions.length ? (
-            <div className="mb-2 flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1 text-xs dark:border-gray-700 dark:bg-gray-800">
-              <button
-                type="button"
-                className={`h-8 min-w-8 rounded-lg px-2 font-semibold ${inventoryInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
-                onClick={() => setInventoryInitialFilter('all')}
-              >
-                {t('all') || 'All'}
-              </button>
-              {inventoryInitialOptions.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={`h-8 min-w-8 rounded-lg px-2 font-semibold ${inventoryInitialFilter === item.key ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
-                  onClick={() => setInventoryInitialFilter(inventoryInitialFilter === item.key ? 'all' : item.key)}
-                  title={`${item.label} (${item.count})`}
-                >
-                  {item.label}
-                </button>
-              ))}
+          {shouldReserveInventoryInitialBar ? (
+            <div className="mb-2 h-[42px]">
+              {inventoryInitialOptions.length ? (
+                <div className="flex h-full gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1 text-xs dark:border-gray-700 dark:bg-gray-800">
+                  <button
+                    type="button"
+                    className={`h-8 min-w-8 rounded-lg px-2 font-semibold ${inventoryInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                    onClick={() => setInventoryInitialFilter('all')}
+                  >
+                    {t('all') || 'All'}
+                  </button>
+                  {inventoryInitialOptions.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`h-8 min-w-8 rounded-lg px-2 font-semibold ${inventoryInitialFilter === item.key ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      onClick={() => setInventoryInitialFilter(inventoryInitialFilter === item.key ? 'all' : item.key)}
+                      title={`${item.label} (${item.count})`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-full items-center gap-1 overflow-hidden rounded-xl border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-800">
+                  <div className="h-8 min-w-[2.75rem] animate-pulse rounded-lg bg-slate-100 dark:bg-slate-700/80" />
+                  {Array.from({ length: 9 }, (_, index) => (
+                    <div key={`inventory-initial-skeleton-${index}`} className="h-8 min-w-8 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-700/80" />
+                  ))}
+                </div>
+              )}
             </div>
           ) : null}
-          <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_inventory_products', 'Loading inventory products...', 'Loading inventory products...')}</div>}>
-            <InventoryProductsSurface
-              InventoryBatchPreview={InventoryBatchPreview}
-              InventoryDiscountBadge={InventoryDiscountBadge}
-              branchFilter={branchFilter}
-              branches={branches}
-              collapsedInventoryGroups={collapsedInventoryGroups}
-              collapsedInventorySections={collapsedInventorySections}
-              fmtKHR={fmtKHR}
-              fmtUSD={fmtUSD}
-              getInventoryGroupSummaryParts={getInventoryGroupSummaryParts}
-              getStockQty={getStockQty}
-              inventoryProductSections={inventoryProductSections}
-              isInventorySelectionScopeFullySelected={isInventorySelectionScopeFullySelected}
-              isInventorySelectionScopePartiallySelected={isInventorySelectionScopePartiallySelected}
-              loading={loading}
-              openAdjust={openAdjust}
-              selectedProductIds={selectedProductIds}
-              setDetailProduct={setDetailProduct}
-              showProductsSection={showProductsSection}
-              t={t}
-              toggleInventoryGroup={toggleInventoryGroup}
-              toggleInventorySection={toggleInventorySection}
-              toggleInventorySelectionScope={toggleInventorySelectionScope}
-              toggleSelectedProduct={toggleSelectedProduct}
-              visibleInventoryProducts={visibleInventoryProducts}
-            />
-          </Suspense>
+          <InventoryProductsSurface
+            InventoryBatchPreview={InventoryBatchPreview}
+            InventoryDiscountBadge={InventoryDiscountBadge}
+            branchFilter={branchFilter}
+            branches={branches}
+            collapsedInventoryGroups={collapsedInventoryGroups}
+            collapsedInventorySections={collapsedInventorySections}
+            fmtKHR={fmtKHR}
+            fmtUSD={fmtUSD}
+            getInventoryGroupSummaryParts={getInventoryGroupSummaryParts}
+            getStockQty={getStockQty}
+            initialDesktopRevealReady={initialInventoryDesktopRevealReady}
+            initialMobileFullListReady={initialInventoryMobileFullListReady}
+            initialMobileRevealReady={initialInventoryMobileRevealReady}
+            initialMobileInventorySections={initialMobileInventorySections}
+            inventoryProductSections={inventoryProductSections}
+            isInventorySelectionScopeFullySelected={isInventorySelectionScopeFullySelected}
+            isInventorySelectionScopePartiallySelected={isInventorySelectionScopePartiallySelected}
+            loading={loading && isProductsFirstLoad}
+            openAdjust={openAdjust}
+            selectedProductIds={selectedProductIds}
+            setDetailProduct={setDetailProduct}
+            showProductsSection={showProductsSection}
+            t={t}
+            toggleInventoryGroup={toggleInventoryGroup}
+            toggleInventorySection={toggleInventorySection}
+            toggleInventorySelectionScope={toggleInventorySelectionScope}
+            toggleSelectedProduct={toggleSelectedProduct}
+            visibleInventoryProducts={visibleInventoryProducts}
+          />
         </>
       )}
       {/* Movements */}
@@ -3272,7 +3456,7 @@ export default function Inventory() {
             inventoryExportItems={inventoryExportItems}
             isMovementScopeFullySelected={isMovementScopeFullySelected}
             isMovementScopePartiallySelected={isMovementScopePartiallySelected}
-            loading={loading || isMovementsFirstLoad}
+            loading={(loading && !movementsLoaded) || isMovementsFirstLoad}
             movementDateRangeLabel={movementDateRangeLabel}
             movementEndDate={movementEndDate}
             movementMeta={movementMeta}
@@ -3320,7 +3504,7 @@ export default function Inventory() {
         </Suspense>
       ) : null}
 
-      {/* ???? Adjust stock modal ???? */}
+      {/* Section */}
       {statDetail && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setStatDetail(null)}>
           <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
@@ -3365,7 +3549,7 @@ export default function Inventory() {
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
-                <div className="text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {getStockQty(summary.find((product) => Number(product.id) === Number(adjustForm.product_id || adjustModal.id)) || adjustModal)} {adjustModal.unit}</div>
+                <div className="text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {getStockQty(summaryById.get(Number(adjustForm.product_id || adjustModal.id)) || adjustModal)} {adjustModal.unit}</div>
               </div>
               <button onClick={() => setAdjustModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
                 <X className="h-4 w-4" />
@@ -3374,7 +3558,7 @@ export default function Inventory() {
             <div className="modal-scroll p-4 space-y-3">
               {adjustTargetOptions.length > 1 ? (
                 <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('adjust_target', 'Adjust target', '?????????????')}</label>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('adjust_target', 'Adjust target')}</label>
                   <select
                     className="input text-sm"
                     value={adjustForm.product_id || adjustModal.id}
@@ -3455,7 +3639,7 @@ export default function Inventory() {
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">{t('reason')}</label>
                   <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'adjust' })}>
-                    {tr('manage_reasons', 'Manage reasons', '????????????????')}
+                    {tr('manage_reasons', 'Manage reasons')}
                   </button>
                 </div>
                 {reasonsByType.adjust.length ? (
@@ -3493,7 +3677,7 @@ export default function Inventory() {
           <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer', '?????')}</h2>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer')}</h2>
                 <div className="mt-0.5 text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
               <button type="button" onClick={() => setTransferModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
@@ -3502,9 +3686,9 @@ export default function Inventory() {
             </div>
             <div className="modal-scroll space-y-3 p-4">
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch', '???????')}</span>
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch')}</span>
                 <select className="input text-sm" value={transferForm.from_branch_id} onChange={(event) => setTransferForm((current) => ({ ...current, from_branch_id: event.target.value }))}>
-                  <option value="">{tr('choose_branch', 'Choose a branch', '????????????')}</option>
+                  <option value="">{tr('choose_branch', 'Choose a branch')}</option>
                   {branches.map((branch) => {
                     const branchQty = Number((transferModal.branch_stock || []).find((item) => String(item.branch_id) === String(branch.id))?.quantity || 0)
                     return <option key={branch.id} value={branch.id}>{branch.name} ({branchQty})</option>
@@ -3512,9 +3696,9 @@ export default function Inventory() {
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch', '?????????')}</span>
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch')}</span>
                 <select className="input text-sm" value={transferForm.to_branch_id} onChange={(event) => setTransferForm((current) => ({ ...current, to_branch_id: event.target.value }))}>
-                  <option value="">{tr('choose_branch', 'Choose a branch', '????????????')}</option>
+                  <option value="">{tr('choose_branch', 'Choose a branch')}</option>
                   {branches.map((branch) => (
                     <option key={branch.id} value={branch.id}>{branch.name}</option>
                   ))}
@@ -3528,7 +3712,7 @@ export default function Inventory() {
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'} *</span>
                   <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'transfer' })}>
-                    {tr('manage_reasons', 'Manage reasons', '????????????????')}
+                    {tr('manage_reasons', 'Manage reasons')}
                   </button>
                 </div>
                 {reasonsByType.transfer.length ? (
@@ -3545,11 +3729,11 @@ export default function Inventory() {
                     ))}
                   </div>
                 ) : null}
-                <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder', 'Why is this stock moving between branches?', '?????????????????????????????????????')} />
+                <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder')} />
               </label>
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={handleTransferStock} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
-                  {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer', '?????')}
+                  {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
                 </button>
                 <button type="button" onClick={() => setTransferModal(null)} className="btn-secondary text-sm" disabled={transferSaving}>
                   {t('cancel') || 'Cancel'}
@@ -3565,7 +3749,7 @@ export default function Inventory() {
           <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('move_stock', 'Move stock', '?????????????')}</h2>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('move_stock', 'Move stock')}</h2>
                 <div className="mt-0.5 text-xs text-gray-400">{moveModal.name} - {getStockQty(moveModal)} {moveModal.unit}</div>
               </div>
               <button type="button" onClick={() => setMoveModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
@@ -3579,25 +3763,23 @@ export default function Inventory() {
                   className={`rounded-xl border-2 py-2 text-xs font-semibold ${moveForm.mode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
                   onClick={() => setMoveForm((current) => ({ ...current, mode: 'existing' }))}
                 >
-                  {tr('existing_row', 'Existing row', '???????????????')}
+                  {tr('existing_row', 'Existing row')}
                 </button>
                 <button
                   type="button"
                   className={`rounded-xl border-2 py-2 text-xs font-semibold ${moveForm.mode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
                   onClick={() => setMoveForm((current) => ({ ...current, mode: 'new' }))}
                 >
-                  {tr('quick_create_row', 'Quick-create row', '?????????????')}
+                  {tr('quick_create_row', 'Quick-create row')}
                 </button>
               </div>
 
               {moveForm.mode === 'existing' ? (
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row', '??????????????')}</span>
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row')}</span>
                   <select className="input text-sm" value={moveForm.destination_product_id} onChange={(event) => setMoveForm((current) => ({ ...current, destination_product_id: event.target.value }))}>
-                    <option value="">{tr('choose_destination_product', 'Choose a destination product row', '??????????????????????')}</option>
-                    {summary.filter((product) => Number(product.id) !== Number(moveModal.id)).map((product) => (
-                      <option key={product.id} value={product.id}>{product.name}</option>
-                    ))}
+                    <option value="">{tr('choose_destination_product', 'Choose a destination product row')}</option>
+                    {renderDestinationProductOptions(summary, moveModal.id)}
                   </select>
                 </label>
               ) : (
@@ -3607,20 +3789,20 @@ export default function Inventory() {
                     <input className="input text-sm" value={moveForm.destination_name} onChange={(event) => setMoveForm((current) => ({ ...current, destination_name: event.target.value }))} autoComplete="off" />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('selling_price_usd_full', 'Selling Price (USD)', '???????? (USD)')}</span>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('selling_price_usd_full', 'Selling Price (USD)')}</span>
                     <input className="input text-sm" type="number" step="any" min="0" value={moveForm.selling_price_usd} onChange={(event) => setMoveForm((current) => ({ ...current, selling_price_usd: event.target.value }))} autoComplete="off" />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('special_price_usd_full', 'Special Price (USD)', '?????????? (USD)')}</span>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('special_price_usd_full', 'Special Price (USD)')}</span>
                     <input className="input text-sm" type="number" step="any" min="0" value={moveForm.special_price_usd} onChange={(event) => setMoveForm((current) => ({ ...current, special_price_usd: event.target.value }))} autoComplete="off" />
                   </label>
                   <label className="flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 dark:bg-rose-950/30 dark:text-rose-200">
                     <input type="checkbox" checked={!!moveForm.discount_enabled} onChange={(event) => setMoveForm((current) => ({ ...current, discount_enabled: event.target.checked }))} />
-                    {tr('product_discount', 'Discounts', '???????????')}
+                    {tr('product_discount', 'Discounts')}
                   </label>
                   {moveForm.discount_enabled ? (
                     <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{moveForm.discount_type === 'fixed' ? tr('discount_amount_usd', 'Discount amount (USD)', '???????????????? (USD)') : tr('discount_percent', 'Percent off', '?????????????')}</span>
+                      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{moveForm.discount_type === 'fixed' ? tr('discount_amount_usd', 'Discount amount (USD)') : tr('discount_percent', 'Percent off')}</span>
                       <input className="input text-sm" type="number" step="any" min="0" value={moveForm.discount_type === 'fixed' ? moveForm.discount_amount_usd : moveForm.discount_percent} onChange={(event) => setMoveForm((current) => current.discount_type === 'fixed' ? { ...current, discount_amount_usd: event.target.value } : { ...current, discount_percent: event.target.value })} autoComplete="off" />
                     </label>
                   ) : null}
@@ -3643,18 +3825,18 @@ export default function Inventory() {
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'}</span>
                   <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'move' })}>
-                    {tr('manage_reasons', 'Manage reasons', '????????????????')}
+                    {tr('manage_reasons', 'Manage reasons')}
                   </button>
                 </div>
                 <select className="input text-sm" value={moveForm.reason} onChange={(event) => setMoveForm((current) => ({ ...current, reason: event.target.value }))}>
                   {reasonsByType.move.map((entry) => (
                     <option key={entry.id} value={entry.label}>{entry.label}</option>
                   ))}
-                  <option value="broken">{tr('reason_broken', 'Broken', '???')}</option>
-                  <option value="open">{tr('reason_opened', 'Opened', '??????')}</option>
-                  <option value="loose">{tr('reason_loose', 'Loose', '???')}</option>
-                  <option value="discount">{tr('reason_discount', 'Discount / promotion', '??????????? / ??????????')}</option>
-                  <option value="special_price">{tr('reason_special_price', 'Special price', '??????????')}</option>
+                  <option value="broken">{tr('reason_broken', 'Broken')}</option>
+                  <option value="open">{tr('reason_opened', 'Opened')}</option>
+                  <option value="loose">{tr('reason_loose', 'Loose')}</option>
+                  <option value="discount">{tr('reason_discount', 'Discount / promotion')}</option>
+                  <option value="special_price">{tr('reason_special_price', 'Special price')}</option>
                   <option value="other">{t('other') || 'Other'}</option>
                 </select>
               </label>
@@ -3663,7 +3845,7 @@ export default function Inventory() {
                 <textarea className="input min-h-[76px] text-sm" value={moveForm.note} onChange={(event) => setMoveForm((current) => ({ ...current, note: event.target.value }))} />
               </label>
               <div className="flex gap-2 pt-1">
-                <button type="button" onClick={handleMoveStock} className="btn-primary flex-1 text-sm" disabled={moveSaving}>{moveSaving ? (t('saving') || 'Saving...') : tr('move_stock', 'Move stock', '?????????????')}</button>
+                <button type="button" onClick={handleMoveStock} className="btn-primary flex-1 text-sm" disabled={moveSaving}>{moveSaving ? (t('saving') || 'Saving...') : tr('move_stock', 'Move stock')}</button>
                 <button type="button" onClick={() => setMoveModal(null)} className="btn-secondary text-sm" disabled={moveSaving}>{t('cancel') || 'Cancel'}</button>
               </div>
             </div>
@@ -3676,8 +3858,8 @@ export default function Inventory() {
           <div className="flex max-h-[88vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('saved_reasons', 'Saved reasons', '?????????????????????')}</h2>
-                <div className="mt-0.5 text-xs text-gray-400">{tr('saved_reasons_desc', 'Reuse common reasons for stock adjustments, transfers, and row moves.', '???????????????????????????????????????????? ???????? ??????????????????')}</div>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('saved_reasons', 'Saved reasons')}</h2>
+                <div className="mt-0.5 text-xs text-gray-400">{tr('saved_reasons_desc', 'Reuse common reasons for stock adjustments, transfers, and row moves.')}</div>
               </div>
               <button type="button" onClick={() => setReasonManager((current) => ({ ...current, open: false }))} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
                 <X className="h-4 w-4" />
@@ -3701,7 +3883,7 @@ export default function Inventory() {
                   className="input flex-1 text-sm"
                   value={reasonDraft}
                   onChange={(event) => setReasonDraft(event.target.value)}
-                  placeholder={tr('new_reason_placeholder', 'Add a reusable reason', '?????????????????????????????')}
+                  placeholder={tr('new_reason_placeholder', 'Add a reusable reason')}
                   autoComplete="off"
                 />
                 <button type="button" className="btn-primary px-3 text-sm" onClick={addSavedReason} disabled={savingReasons || !reasonDraft.trim()}>
@@ -3719,7 +3901,7 @@ export default function Inventory() {
                   </div>
                 )) : (
                   <div className="rounded-xl border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">
-                    {tr('no_saved_reasons', 'No saved reasons yet for this workflow.', '????????????????????????????????????????????????????')}
+                    {tr('no_saved_reasons', 'No saved reasons yet for this workflow.')}
                   </div>
                 )}
               </div>
@@ -3733,12 +3915,11 @@ export default function Inventory() {
           <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-5xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('inventory_batch_session', 'Batch session', '????????')}</h2>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('inventory_batch_session', 'Batch session')}</h2>
                 <div className="mt-0.5 text-xs text-gray-400">
                   {tr(
                     'inventory_batch_session_desc',
                     'Review each selected product, then apply all stock changes together.',
-                    '???????????????????????????????????? ????????????????????????????????????????????????????',
                   )}
                 </div>
               </div>
@@ -3753,7 +3934,7 @@ export default function Inventory() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{item.productName}</div>
                       <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        {tr('current_stock', 'Current stock', '????????????????')} {item.stockQty} {item.unit || ''}
+                        {tr('current_stock', 'Current stock')} {item.stockQty} {item.unit || ''}
                       </div>
                       {item.error ? (
                         <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
@@ -3763,9 +3944,9 @@ export default function Inventory() {
                     </div>
                     <div className="flex items-center gap-2">
                       <select className="input text-xs" value={item.action} onChange={(event) => updateInventoryBatchLine(item.productId, { action: event.target.value, reason: '' })}>
-                        <option value="adjust">{tr('adjust_stock', 'Adjust stock', '?????????????')}</option>
-                        <option value="transfer">{tr('transfer', 'Transfer', '?????')}</option>
-                        <option value="move">{tr('move_stock', 'Move stock', '?????????????')}</option>
+                        <option value="adjust">{tr('adjust_stock', 'Adjust stock')}</option>
+                        <option value="transfer">{tr('transfer', 'Transfer')}</option>
+                        <option value="move">{tr('move_stock', 'Move stock')}</option>
                       </select>
                       <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30" onClick={() => removeInventoryBatchLine(item.productId)} disabled={batchApplying}>
                         {t('remove') || 'Remove'}
@@ -3801,16 +3982,16 @@ export default function Inventory() {
                     {item.action === 'transfer' ? (
                       <>
                         <label className="block lg:col-span-2">
-                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch', '???????')}</span>
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch')}</span>
                           <select className="input text-sm" value={item.fromBranchId} onChange={(event) => updateInventoryBatchLine(item.productId, { fromBranchId: event.target.value })}>
-                            <option value="">{tr('choose_branch', 'Choose a branch', '????????????')}</option>
+                            <option value="">{tr('choose_branch', 'Choose a branch')}</option>
                             {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
                           </select>
                         </label>
                         <label className="block lg:col-span-2">
-                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch', '?????????')}</span>
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch')}</span>
                           <select className="input text-sm" value={item.toBranchId} onChange={(event) => updateInventoryBatchLine(item.productId, { toBranchId: event.target.value })}>
-                            <option value="">{tr('choose_branch', 'Choose a branch', '????????????')}</option>
+                            <option value="">{tr('choose_branch', 'Choose a branch')}</option>
                             {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
                           </select>
                         </label>
@@ -3820,10 +4001,10 @@ export default function Inventory() {
                     {item.action === 'move' ? (
                       <>
                         <div className="lg:col-span-2">
-                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_row', 'Destination row', '????????')}</span>
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_row', 'Destination row')}</span>
                           <div className="flex gap-1">
-                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'existing' })}>{tr('existing_row', 'Existing', '?????????')}</button>
-                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'new' })}>{tr('new_row', 'New row', '???????')}</button>
+                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'existing' })}>{tr('existing_row', 'Existing')}</button>
+                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'new' })}>{tr('new_row', 'New row')}</button>
                           </div>
                         </div>
                         <label className="block lg:col-span-2">
@@ -3834,12 +4015,10 @@ export default function Inventory() {
                         </label>
                         {item.moveMode === 'existing' ? (
                           <label className="block lg:col-span-4">
-                            <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row', '??????????????')}</span>
+                            <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row')}</span>
                             <select className="input text-sm" value={item.destinationProductId} onChange={(event) => updateInventoryBatchLine(item.productId, { destinationProductId: event.target.value })}>
-                              <option value="">{tr('choose_destination_product', 'Choose a destination product row', '??????????????????????')}</option>
-                              {summary.filter((product) => Number(product.id) !== Number(item.productId)).map((product) => (
-                                <option key={product.id} value={product.id}>{product.name}</option>
-                              ))}
+                              <option value="">{tr('choose_destination_product', 'Choose a destination product row')}</option>
+                              {renderDestinationProductOptions(summary, item.productId)}
                             </select>
                           </label>
                         ) : (
@@ -3855,7 +4034,7 @@ export default function Inventory() {
                       <span className="mb-1 flex items-center justify-between gap-2 text-[11px] font-medium text-gray-600 dark:text-gray-400">
                         <span>{t('reason') || 'Reason'}</span>
                         <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: item.action === 'move' ? 'move' : item.action === 'transfer' ? 'transfer' : 'adjust' })}>
-                          {tr('manage_reasons', 'Manage reasons', '????????????????')}
+                          {tr('manage_reasons', 'Manage reasons')}
                         </button>
                       </span>
                       <div className="space-y-2">
@@ -3878,11 +4057,11 @@ export default function Inventory() {
                             {reasonsByType.move.map((entry) => (
                               <option key={entry.id} value={entry.label}>{entry.label}</option>
                             ))}
-                            <option value="broken">{tr('reason_broken', 'Broken', '???')}</option>
-                            <option value="open">{tr('reason_opened', 'Opened', '??????')}</option>
-                            <option value="loose">{tr('reason_loose', 'Loose', '???')}</option>
-                            <option value="discount">{tr('reason_discount', 'Discount / promotion', '??????????? / ??????????')}</option>
-                            <option value="special_price">{tr('reason_special_price', 'Special price', '??????????')}</option>
+                            <option value="broken">{tr('reason_broken', 'Broken')}</option>
+                            <option value="open">{tr('reason_opened', 'Opened')}</option>
+                            <option value="loose">{tr('reason_loose', 'Loose')}</option>
+                            <option value="discount">{tr('reason_discount', 'Discount / promotion')}</option>
+                            <option value="special_price">{tr('reason_special_price', 'Special price')}</option>
                             <option value="other">{t('other') || 'Other'}</option>
                           </select>
                         ) : (
@@ -3903,7 +4082,7 @@ export default function Inventory() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button type="button" className="btn-primary text-sm" onClick={applyInventoryBatchSession} disabled={batchApplying || !inventoryBatch.items.length}>
-                  {batchApplying ? (t('saving') || 'Saving...') : tr('apply_changes', 'Apply changes', '?????????????????????')}
+                  {batchApplying ? (t('saving') || 'Saving...') : tr('apply_changes', 'Apply changes')}
                 </button>
               </div>
             </div>
@@ -3941,8 +4120,3 @@ export default function Inventory() {
     </div>
   )
 }
-
-
-
-
-

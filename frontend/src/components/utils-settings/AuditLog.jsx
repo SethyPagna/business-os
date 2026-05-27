@@ -13,8 +13,11 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 
 const DEFAULT_ACTION_CLASS = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+const AUDIT_LOG_LOAD_TIMEOUT_MS = 20000
+const AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS = 12000
 
 const ACTION_COLOR_CLASS = {
   create: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
@@ -138,6 +141,34 @@ function readableSummary(log) {
   return null
 }
 
+function normalizeFiniteIdsFrom(items = [], getValue = (value) => value) {
+  return items.reduce((normalized, item) => {
+    const id = Number(getValue(item))
+    if (Number.isFinite(id)) normalized.push(id)
+    return normalized
+  }, [])
+}
+
+function normalizeFiniteIds(ids = []) {
+  return normalizeFiniteIdsFrom(ids)
+}
+
+function countSelectedIds(ids = [], selectedIds = new Set()) {
+  let count = 0
+  for (const id of ids) {
+    if (selectedIds.has(id)) count += 1
+  }
+  return count
+}
+
+function countActiveFlags(flags = []) {
+  let count = 0
+  for (const flag of flags) {
+    if (flag) count += 1
+  }
+  return count
+}
+
 function DetailRow({ label, value, mono }) {
   if (!value && value !== 0) return null
   return (
@@ -173,11 +204,13 @@ export default function AuditLog() {
   const [initialMobileRevealReady, setInitialMobileRevealReady] = useState(false)
   const [detailLog, setDetailLog] = useState(null)
   const [error, setError] = useState(null)
+  const [clearingOldLogs, setClearingOldLogs] = useState(false)
   const skeletonRows = useMemo(() => Array.from({ length: 8 }, (_, index) => index), [])
   const loadedOnceRef = useRef(false)
   const pageLoadRequestedRef = useRef(false)
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef(null)
+  const clearOldLogsInFlightRef = useRef(false)
   const selectAllRef = useRef(null)
   const aliveRef = useRef(true)
   const isAdmin = useMemo(() => {
@@ -287,7 +320,11 @@ export default function AuditLog() {
         userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
         ...auditDateRange,
       }
-      const data = await withLoaderTimeout(() => window.api.getAuditLogs(params), 'Audit log', 20000)
+      const data = await withLoaderTimeout(
+        () => window.api.getAuditLogs(params),
+        'Audit log',
+        AUDIT_LOG_LOAD_TIMEOUT_MS,
+      )
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       const rows = Array.isArray(data) ? data : (data?.items || [])
       const nextTotal = Number(Array.isArray(data) ? rows.length : data?.total || rows.length)
@@ -420,6 +457,10 @@ export default function AuditLog() {
     () => groupedSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
     [groupedSections],
   )
+  const visibleIds = useMemo(
+    () => normalizeFiniteIdsFrom(visibleLogs, (log) => log.id),
+    [visibleLogs],
+  )
   const showMobileLoadingOverlay = hasLoadedOnce && visibleLogs.length > 0 && (!initialMobileRevealReady || loading)
 
   useEffect(() => {
@@ -467,9 +508,9 @@ export default function AuditLog() {
   }, [error, initialMobileRevealReady, loading, visibleLogs.length])
 
   useEffect(() => {
-    const validIds = new Set(visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)))
+    const validIds = new Set(visibleIds)
     setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
-  }, [visibleLogs])
+  }, [visibleIds])
 
   useEffect(() => {
     const validIds = new Set(groupedSections.map((section) => section.id))
@@ -479,10 +520,6 @@ export default function AuditLog() {
     })
   }, [groupedSections])
 
-  const visibleIds = useMemo(
-    () => visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)),
-    [visibleLogs],
-  )
   const selectedLogs = useMemo(
     () => visibleLogs.filter((log) => selectedIds.has(Number(log.id))),
     [selectedIds, visibleLogs],
@@ -508,7 +545,8 @@ export default function AuditLog() {
   }, [visibleIds])
 
   const toggleSelectionScope = useCallback((ids, checked) => {
-    setSelectedIds((current) => toggleIdSet(current, ids, checked))
+    const normalized = normalizeFiniteIds(ids)
+    setSelectedIds((current) => toggleIdSet(current, normalized, checked))
   }, [])
 
   const toggleSectionCollapsed = useCallback((sectionId) => {
@@ -521,13 +559,20 @@ export default function AuditLog() {
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id))),
+    (ids = []) => {
+      const normalized = normalizeFiniteIds(ids)
+      return normalized.length > 0 && countSelectedIds(normalized, selectedIds) === normalized.length
+    },
     [selectedIds],
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSelectionScopeFullySelected(ids),
-    [isSelectionScopeFullySelected, selectedIds],
+    (ids = []) => {
+      const normalized = normalizeFiniteIds(ids)
+      const selectedCount = countSelectedIds(normalized, selectedIds)
+      return selectedCount > 0 && selectedCount < normalized.length
+    },
+    [selectedIds],
   )
 
   function sessionEntryLabel(log) {
@@ -648,28 +693,39 @@ export default function AuditLog() {
   ].filter(Boolean)), [actionFilter, actionOptions, auditUsers, availableYears, copy, groupMode, isAdmin, monthFilter, sortDirection, t, userFilter, yearFilter])
 
   const activeFilterCount = useMemo(
-    () => [yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length,
+    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time']),
     [actionFilter, groupMode, monthFilter, sortDirection, userFilter, yearFilter],
   )
 
   const clearOldAuditLogs = useCallback(async () => {
     if (!isAdmin) return
     if (!window.confirm('Clear audit logs older than 30 days?')) return
+    if (!beginSingleAction(clearOldLogsInFlightRef, { blocked: clearingOldLogs })) return
     try {
+      setClearingOldLogs(true)
       setLoading(true)
-      await window.api.deleteAuditLogsRetention(30)
+      await withLoaderTimeout(
+        () => window.api.deleteAuditLogsRetention(30),
+        'Clear old audit logs',
+        AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,
+      )
       await load(true)
     } catch (err) {
       setError(err?.message || 'Failed to clear old audit logs.')
     } finally {
+      finishSingleAction(clearOldLogsInFlightRef)
+      setClearingOldLogs(false)
       setLoading(false)
     }
-  }, [isAdmin, load])
+  }, [clearingOldLogs, isAdmin, load])
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2 min-w-0">
-        <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
+        <h1
+          className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl"
+          title={t('audit_log_desc') || 'Default columns: Record, Device, User, Action. Click a row to see full details and data changes.'}
+        >
           <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           {t('audit_log') || 'Audit Log'}
         </h1>
@@ -679,7 +735,11 @@ export default function AuditLog() {
             {copy('refresh', 'Refresh')}
           </button>
           {isAdmin ? (
-            <button onClick={clearOldAuditLogs} className="btn-secondary inline-flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
+            <button
+              onClick={clearOldAuditLogs}
+              disabled={clearingOldLogs}
+              className="btn-secondary inline-flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 px-3 py-1.5 text-xs disabled:opacity-50 sm:text-sm"
+            >
               <X className="h-4 w-4" />
               {copy('clear_30_days', 'Clear 30d')}
             </button>
@@ -727,9 +787,7 @@ export default function AuditLog() {
         </div>
       ) : null}
 
-      <p className="mb-2 text-xs leading-5 text-gray-400">{t('audit_log_desc') || 'Click a row to see full details.'}</p>
-
-      <div className="mb-2 min-h-[3.25rem]">
+      <div className="mb-3 min-h-[2.75rem]">
         {loading && !hasLoadedOnce ? (
           <div className="flex h-14 animate-pulse items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
             <div className="h-3 w-40 rounded bg-slate-200 dark:bg-slate-700" />
@@ -741,6 +799,8 @@ export default function AuditLog() {
         ) : (
           <PaginationControls
             className="mb-0"
+            compact
+            compactPageInput
             page={page}
             pageSize={pageSize}
             totalItems={totalLogs}

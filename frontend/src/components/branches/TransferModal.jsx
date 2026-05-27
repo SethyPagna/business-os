@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+
+const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
+const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000
+
+function normalizeTransferStockRows(stock) {
+  if (Array.isArray(stock)) return stock
+  if (Array.isArray(stock?.items)) return stock.items
+  return []
+}
 
 /**
  * 1. Transfer Modal Component
@@ -31,6 +41,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [saving, setSaving] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
   const stockRequestRef = useRef(0)
+  const productsBranchRef = useRef('')
+  const transferInFlightRef = useRef(false)
   const aliveRef = useRef(true)
 
   useEffect(() => () => {
@@ -49,6 +61,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   useEffect(() => {
     if (!fromBranch) {
       invalidateTrackedRequest(stockRequestRef)
+      productsBranchRef.current = ''
       setLoadingProducts(false)
       setProducts([])
       setSelectedProduct(null)
@@ -57,20 +70,26 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     }
 
     const requestId = beginTrackedRequest(stockRequestRef)
+    if (productsBranchRef.current !== String(fromBranch)) {
+      setProducts([])
+      setSelectedProduct(null)
+      setQuantity('')
+    }
     setLoadingProducts(true)
     async function loadStock() {
       try {
         const stock = await withLoaderTimeout(
-          () => window.api.getBranchStock(Number.parseInt(fromBranch, 10)),
+          () => window.api.getBranchStock(Number.parseInt(fromBranch, 10), { page: 1, pageSize: 50, stockState: 'positive' }),
           'Branch stock for transfer',
+          TRANSFER_STOCK_LOAD_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
-        setProducts(Array.isArray(stock) ? stock : [])
+        productsBranchRef.current = String(fromBranch)
+        setProducts(normalizeTransferStockRows(stock))
         setSelectedProduct(null)
         setQuantity('')
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
-        setProducts([])
         setSelectedProduct(null)
         setQuantity('')
         notify(error?.message || (t('failed_to_load_data') || 'Failed to load data'), 'error')
@@ -123,9 +142,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       return
     }
 
+    if (!beginSingleAction(transferInFlightRef, { blocked: saving })) return
     setSaving(true)
     try {
-      const res = await window.api.transferStock({
+      const res = await withLoaderTimeout(() => window.api.transferStock({
         fromBranchId: Number.parseInt(fromBranch, 10),
         toBranchId: Number.parseInt(toBranch, 10),
         productId: selectedProduct.id,
@@ -134,7 +154,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         note,
         userId: user?.id,
         userName: user?.name,
-      })
+      }), 'Transfer branch stock', TRANSFER_STOCK_MUTATION_TIMEOUT_MS)
 
       if (res?.success) {
         const message = (t('transfer_success') || 'Transferred {n} {unit} of "{name}"')
@@ -150,6 +170,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     } catch (error) {
       notify(error?.message || (t('transfer_failed') || 'Transfer failed'), 'error')
     } finally {
+      finishSingleAction(transferInFlightRef)
       setSaving(false)
     }
   }

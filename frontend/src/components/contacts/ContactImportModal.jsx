@@ -2,12 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
 import { useApp } from '../../AppContext'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
-
-function countCsvDataRows(text) {
-  const lines = String(text || '').split(/\r?\n/).filter((line) => line.trim())
-  return Math.max(0, lines.length - 1)
-}
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { countCsvDataRows } from './contactImportParser.mjs'
 
 const CONTACT_IMPORT_CONFIG = {
   customer: {
@@ -27,6 +25,43 @@ const CONTACT_IMPORT_CONFIG = {
   },
 }
 
+const CONTACT_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
+const CONTACT_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 30000
+const CONTACT_IMPORT_JOB_START_TIMEOUT_MS = 12000
+const CONTACT_IMPORT_ROW_COUNT_TIMEOUT_MS = 5000
+
+function countCsvDataRowsInWorker(text) {
+  if (typeof Worker === 'undefined') {
+    return Promise.resolve(countCsvDataRows(text))
+  }
+
+  return new Promise((resolve, reject) => {
+    const id = `contact-import-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const worker = new Worker(new URL('./contactImportWorker.mjs', import.meta.url), { type: 'module' })
+    const timeoutId = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('Contact import row count timed out'))
+    }, CONTACT_IMPORT_ROW_COUNT_TIMEOUT_MS)
+    const cleanup = () => {
+      window.clearTimeout(timeoutId)
+      worker.terminate()
+    }
+
+    worker.onmessage = (event) => {
+      const message = event.data || {}
+      if (message.id !== id) return
+      cleanup()
+      if (message.type === 'result') resolve(Number(message.rowCount || 0))
+      else reject(new Error(message.error || 'Contact import row count failed'))
+    }
+    worker.onerror = (error) => {
+      cleanup()
+      reject(new Error(error?.message || 'Contact import worker failed'))
+    }
+    worker.postMessage({ id, text })
+  })
+}
+
 export default function ContactImportModal({ type, onClose, onDone }) {
   const { notify } = useApp()
   const config = CONTACT_IMPORT_CONFIG[type]
@@ -38,8 +73,10 @@ export default function ContactImportModal({ type, onClose, onDone }) {
   const [result, setResult] = useState(null)
   const [filesOpen, setFilesOpen] = useState(false)
   const [rowCount, setRowCount] = useState(0)
+  const [analyzingCsv, setAnalyzingCsv] = useState(false)
   const aliveRef = useRef(true)
   const inFlightRef = useRef(false)
+  const rowCountRequestRef = useRef(0)
   const signalDone = async (payload) => {
     if (typeof onDone === 'function') {
       await Promise.resolve(onDone(payload))
@@ -53,20 +90,31 @@ export default function ContactImportModal({ type, onClose, onDone }) {
     aliveRef.current = false
   }, [])
 
-  const loadCsvText = (text, name) => {
+  const loadCsvText = async (text, name) => {
     const nextText = String(text || '')
-    const nextCount = countCsvDataRows(nextText)
+    const requestId = rowCountRequestRef.current + 1
+    rowCountRequestRef.current = requestId
     setCsvText(nextText)
     setFileName(String(name || 'contacts.csv'))
-    setRowCount(nextCount)
+    setRowCount(0)
     setResult(null)
+    setAnalyzingCsv(true)
+    let nextCount = 0
+    try {
+      nextCount = await countCsvDataRowsInWorker(nextText)
+    } catch (_) {
+      nextCount = countCsvDataRows(nextText)
+    }
+    if (!aliveRef.current || rowCountRequestRef.current !== requestId) return
+    setRowCount(nextCount)
+    setAnalyzingCsv(false)
     if (!nextCount) notify('Choose a CSV with at least one data row.', 'error')
   }
 
   const handlePickFile = async () => {
     const picked = await window.api.openCSVDialog?.()
     if (!picked?.content) return
-    loadCsvText(picked.content, picked.name || 'contacts.csv')
+    await loadCsvText(picked.content, picked.name || 'contacts.csv')
   }
 
   const handleChooseExistingFile = async (publicPath, asset) => {
@@ -80,7 +128,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
       const headers = { 'bypass-tunnel-reminder': 'true' }
       const response = await fetch(resolvePublicAssetUrl(path), { headers, credentials: 'include' })
       if (!response.ok) throw new Error(`Could not read ${asset?.original_name || path}`)
-      loadCsvText(await response.text(), asset?.original_name || path.split('/').pop() || 'contacts.csv')
+      await loadCsvText(await response.text(), asset?.original_name || path.split('/').pop() || 'contacts.csv')
     } catch (error) {
       notify(error?.message || 'Failed to load CSV from Files', 'error')
     }
@@ -105,31 +153,46 @@ export default function ContactImportModal({ type, onClose, onDone }) {
       notify('Unsupported import type', 'error')
       return
     }
+    if (analyzingCsv) {
+      notify('Wait for the CSV row check to finish.', 'error')
+      return
+    }
     if (!rowCount) {
       notify('Choose a CSV file first.', 'error')
       return
     }
-    if (inFlightRef.current) return
+    if (!beginSingleAction(inFlightRef)) return
 
-    inFlightRef.current = true
     setLoading(true)
     try {
-      const created = await window.api.createImportJob({
-        type: config.jobType,
-        policy: {
-          source: 'contacts_modal',
-          conflictMode,
-          fieldRules,
-        },
-      })
+      const created = await withLoaderTimeout(
+        () => window.api.createImportJob({
+          type: config.jobType,
+          policy: {
+            source: 'contacts_modal',
+            conflictMode,
+            fieldRules,
+          },
+        }),
+        'Contact import job',
+        CONTACT_IMPORT_JOB_CREATE_TIMEOUT_MS,
+      )
       const job = created?.job || created
       if (!job?.id) throw new Error('Import job was not created')
-      await window.api.uploadImportJobCsv({
-        jobId: job.id,
-        text: csvText,
-        fileName: fileName || `${config.jobType}.csv`,
-      })
-      await window.api.startImportJob(job.id)
+      await withLoaderTimeout(
+        () => window.api.uploadImportJobCsv({
+          jobId: job.id,
+          text: csvText,
+          fileName: fileName || `${config.jobType}.csv`,
+        }),
+        'Contact import CSV upload',
+        CONTACT_IMPORT_JOB_UPLOAD_TIMEOUT_MS,
+      )
+      await withLoaderTimeout(
+        () => window.api.startImportJob(job.id),
+        'Contact import start',
+        CONTACT_IMPORT_JOB_START_TIMEOUT_MS,
+      )
       const response = {
         imported: 0,
         updated: 0,
@@ -147,7 +210,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
       if (!aliveRef.current) return
       notify(error?.message || 'Import failed', 'error')
     } finally {
-      inFlightRef.current = false
+      finishSingleAction(inFlightRef)
       if (aliveRef.current) setLoading(false)
     }
   }
@@ -177,8 +240,8 @@ export default function ContactImportModal({ type, onClose, onDone }) {
         {rowCount ? (
           <div className="grid gap-2 text-center text-xs sm:grid-cols-3">
             <div className="rounded-lg bg-slate-50 p-2 dark:bg-zinc-800/70">
-              <div className="text-lg font-bold text-slate-700 dark:text-slate-200">{rowCount}</div>
-              <div className="text-slate-500 dark:text-slate-400">Rows queued</div>
+              <div className="text-lg font-bold text-slate-700 dark:text-slate-200">{analyzingCsv ? '...' : rowCount}</div>
+              <div className="text-slate-500 dark:text-slate-400">{analyzingCsv ? 'Checking rows' : 'Rows queued'}</div>
             </div>
             <div className="rounded-lg bg-blue-50 p-2 dark:bg-blue-900/20">
               <div className="text-lg font-bold text-blue-700 dark:text-blue-300">{conflictMode}</div>
@@ -244,8 +307,8 @@ export default function ContactImportModal({ type, onClose, onDone }) {
         ) : null}
 
         <div className="flex gap-2">
-          <button type="button" className="btn-primary flex-1" disabled={loading || !rowCount} onClick={handleImport}>
-            {loading ? 'Importing...' : 'Import'}
+          <button type="button" className="btn-primary flex-1" disabled={loading || analyzingCsv || !rowCount} onClick={handleImport}>
+            {loading ? 'Importing...' : analyzingCsv ? 'Checking...' : 'Import'}
           </button>
           <button type="button" className="btn-secondary" onClick={onClose}>Close</button>
         </div>

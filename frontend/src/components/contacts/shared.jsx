@@ -61,6 +61,28 @@ export function useContactSelection(rows = []) {
   }
 }
 
+export function countActiveFlags(flags = []) {
+  let count = 0
+  for (const flag of flags) {
+    if (flag) count += 1
+  }
+  return count
+}
+
+export function buildSelectedSnapshots(rows = [], ids = []) {
+  const selectedIdSet = new Set()
+  for (const id of ids) {
+    const numericId = Number(id)
+    if (Number.isFinite(numericId)) selectedIdSet.add(numericId)
+  }
+  return rows.reduce((snapshots, row) => {
+    if (selectedIdSet.has(Number(row?.id || 0))) {
+      snapshots.push(JSON.parse(JSON.stringify(row)))
+    }
+    return snapshots
+  }, [])
+}
+
 /**
  * 2. ThreeDotMenu
  * 2.1 Reusable row-action popup for customer/supplier/delivery lists.

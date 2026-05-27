@@ -8,6 +8,11 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+
+const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
+const RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 10000
+const RETURN_CREATE_TIMEOUT_MS = 15000
 
 export default
 function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
@@ -38,14 +43,19 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
   const [submitting,    setSubmitting]    = useState(false)
   const searchRequestRef = useRef(0)
   const searchInFlightRef = useRef(false)
+  const submitInFlightRef = useRef(false)
 
   const handleSearch = async () => {
-    if (!searchQuery.trim() || searchInFlightRef.current) return
+    if (!searchQuery.trim()) return
+    if (!beginSingleAction(searchInFlightRef)) return
     const requestId = beginTrackedRequest(searchRequestRef)
-    searchInFlightRef.current = true
     setSearching(true)
     try {
-      const sales = await withLoaderTimeout(() => window.api.getSales({ limit: 500 }), 'Return sale search')
+      const sales = await withLoaderTimeout(
+        () => window.api.getSales({ limit: 500 }),
+        'Return sale search',
+        RETURN_SALE_SEARCH_TIMEOUT_MS,
+      )
       if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
       const q = searchQuery.trim().toLowerCase()
       const found = sales.find(s =>
@@ -56,8 +66,9 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
         let alreadyReturned = {}
         try {
           const existingReturns = await withLoaderTimeout(
-            () => window.api.getReturns({ saleId: found.id }).catch(() => []),
+            () => window.api.getReturns({ saleId: found.id }),
             'Return history lookup',
+            RETURN_HISTORY_LOOKUP_TIMEOUT_MS,
           )
           if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
           ;(existingReturns || []).forEach(ret => {
@@ -67,7 +78,14 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
               alreadyReturned[key] = (alreadyReturned[key] || 0) + (ri.quantity || 0)
             })
           })
-        } catch (_) {}
+        } catch (error) {
+          if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
+          notify(
+            T('return_history_lookup_failed', 'Could not verify previous returns for this sale. Please try again before creating a return.'),
+            'error',
+          )
+          return
+        }
         if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
         setFoundSale(found)
         setSelectedItems(items.map(item => {
@@ -86,7 +104,7 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
       notify((T('search_error','Search error') || T('error','Error')) + ': ' + (e.message || e), 'error')
     } finally {
       if (isTrackedRequestCurrent(searchRequestRef, requestId)) {
-        searchInFlightRef.current = false
+        finishSingleAction(searchInFlightRef)
         setSearching(false)
       }
     }
@@ -130,43 +148,49 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
   const handleSubmit = async () => {
     if (!activeItems.length) { notify(T('select_items_to_return','Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason','Please provide a return reason.'), 'error'); return }
+    if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
-      await window.api.createReturn({
-        sale_id:          foundSale?.id   || null,
-        receipt_number:   foundSale?.receipt_number || null,
-        cashier_id:       user?.id,
-        cashier_name:     user?.name || user?.username,
-        customer_name:    foundSale?.customer_name || null,
-        branch_id:        foundSale?.branch_id || null,
-        reason:           finalReason,
-        return_type:      returnType,
-        notes:            notes || null,
-        total_refund_usd: totalRefund,
-        total_refund_khr: totalRefundKhr,
-        exchange_rate:    foundSale?.exchange_rate || 4100,
-        items: activeItems.map(it => ({
-          sale_item_id:      it.id || null,
-          product_id:        it.product_id,
-          product_name:      it.product_name || it.name,
-          quantity:          it.returnQty,
-          applied_price_usd: it.applied_price_usd || 0,
-          applied_price_khr: it.applied_price_khr || 0,
-          cost_price_usd:    it.cost_price_usd || 0,
-          cost_price_khr:    it.cost_price_khr || it.purchase_price_khr || 0,
-          return_to_stock:   it.return_to_stock !== false,
-          branch_id:         it.branch_id || foundSale?.branch_id || null,
-        })),
-      })
+      const result = await withLoaderTimeout(
+        () => window.api.createReturn({
+          sale_id:          foundSale?.id   || null,
+          receipt_number:   foundSale?.receipt_number || null,
+          cashier_id:       user?.id,
+          cashier_name:     user?.name || user?.username,
+          customer_name:    foundSale?.customer_name || null,
+          branch_id:        foundSale?.branch_id || null,
+          reason:           finalReason,
+          return_type:      returnType,
+          notes:            notes || null,
+          total_refund_usd: totalRefund,
+          total_refund_khr: totalRefundKhr,
+          exchange_rate:    foundSale?.exchange_rate || 4100,
+          items: activeItems.map(it => ({
+            sale_item_id:      it.id || null,
+            product_id:        it.product_id,
+            product_name:      it.product_name || it.name,
+            quantity:          it.returnQty,
+            applied_price_usd: it.applied_price_usd || 0,
+            applied_price_khr: it.applied_price_khr || 0,
+            cost_price_usd:    it.cost_price_usd || 0,
+            cost_price_khr:    it.cost_price_khr || it.purchase_price_khr || 0,
+            return_to_stock:   it.return_to_stock !== false,
+            branch_id:         it.branch_id || foundSale?.branch_id || null,
+          })),
+        }),
+        'Create return',
+        RETURN_CREATE_TIMEOUT_MS,
+      )
       notify(T('sale_complete','Return processed successfully'))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-      onSuccess()
+      await Promise.resolve(onSuccess?.(result))
       onClose()
     } catch (e) {
       notify((T('error','Error') || 'Error') + ': ' + (e.message || e), 'error')
     } finally {
+      finishSingleAction(submitInFlightRef)
       setSubmitting(false)
     }
   }
@@ -218,7 +242,7 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                 </div>
               </div>
               <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                <button onClick={() => { invalidateTrackedRequest(searchRequestRef); searchInFlightRef.current = false; setSearching(false); setFoundSale(null); setSelectedItems([]); setStep('items') }}
+                <button onClick={() => { invalidateTrackedRequest(searchRequestRef); finishSingleAction(searchInFlightRef); setSearching(false); setFoundSale(null); setSelectedItems([]); setStep('items') }}
                   className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
                   {T('btn_manual_return','→ Skip — manual return (no sale linked)')}
                 </button>

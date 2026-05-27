@@ -8,6 +8,11 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+
+const OTP_SETUP_TIMEOUT_MS = 12000
+const OTP_CONFIRM_TIMEOUT_MS = 12000
+const OTP_DISABLE_TIMEOUT_MS = 12000
 
 export default function OtpModal({ mode, userId, onClose, onDone, t }) {
   const app = useApp()
@@ -46,7 +51,11 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
 
     async function loadSetup() {
       try {
-        const result = await withLoaderTimeout(() => window.api.otpSetup({ userId }), 'OTP setup')
+        const result = await withLoaderTimeout(
+          () => window.api.otpSetup({ userId }),
+          'OTP setup',
+          OTP_SETUP_TIMEOUT_MS,
+        )
         if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
         if (result?.success) {
           setQrDataUrl(result.qrDataUrl || null)
@@ -75,16 +84,16 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
       setError('Enter the 6-digit code')
       return
     }
-    if (actionInFlightRef.current) return
+    if (!beginSingleAction(actionInFlightRef)) return
 
     const requestId = beginTrackedRequest(actionRequestRef)
-    actionInFlightRef.current = true
     setLoading(true)
     setError('')
     try {
       const result = await withLoaderTimeout(
         () => window.api.otpConfirm({ userId, token: code }),
         'OTP confirmation',
+        OTP_CONFIRM_TIMEOUT_MS,
       )
       if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
       if (result?.success) {
@@ -97,23 +106,23 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
       setError(confirmError?.message || 'Failed to confirm code')
     } finally {
       if (aliveRef.current && isTrackedRequestCurrent(actionRequestRef, requestId)) {
-        actionInFlightRef.current = false
+        finishSingleAction(actionInFlightRef)
         setLoading(false)
       }
     }
   }, [code, onDone, userId])
 
   const handleDisable = useCallback(async () => {
-    if (actionInFlightRef.current) return
+    if (!beginSingleAction(actionInFlightRef)) return
 
     const requestId = beginTrackedRequest(actionRequestRef)
-    actionInFlightRef.current = true
     setLoading(true)
     setError('')
     try {
       const result = await withLoaderTimeout(
         () => window.api.otpDisable({ userId, password }),
         'OTP disable',
+        OTP_DISABLE_TIMEOUT_MS,
       )
       if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
       if (result?.success) {
@@ -126,7 +135,7 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
       setError(disableError?.message || 'Failed to disable')
     } finally {
       if (aliveRef.current && isTrackedRequestCurrent(actionRequestRef, requestId)) {
-        actionInFlightRef.current = false
+        finishSingleAction(actionInFlightRef)
         setLoading(false)
       }
     }

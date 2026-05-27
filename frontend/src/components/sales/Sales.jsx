@@ -13,6 +13,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -25,8 +26,40 @@ const ExportModal = lazy(() => import('./ExportModal'))
 const SalesImportModal = lazy(() => import('./SalesImportModal'))
 import SalesListSurface from './SalesListSurface'
 
+const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
+const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
+const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000
+
 function multiMatch(text, terms) {
   return terms.every((term) => text.toLowerCase().includes(term.toLowerCase()))
+}
+
+function normalizeFiniteIdsFrom(items = [], getValue = (value) => value) {
+  return items.reduce((normalized, item) => {
+    const id = Number(getValue(item))
+    if (Number.isFinite(id)) normalized.push(id)
+    return normalized
+  }, [])
+}
+
+function normalizeFiniteIds(ids = []) {
+  return normalizeFiniteIdsFrom(ids)
+}
+
+function countSelectedIds(ids = [], selectedIds = new Set()) {
+  let count = 0
+  for (const id of ids) {
+    if (selectedIds.has(id)) count += 1
+  }
+  return count
+}
+
+function countActiveFlags(flags = []) {
+  let count = 0
+  for (const flag of flags) {
+    if (flag) count += 1
+  }
+  return count
 }
 
 function getSaleBranchLabel(sale) {
@@ -71,6 +104,7 @@ export default function Sales() {
   const loadWatchdogRef = useRef(null)
   const statusActionRef = useRef(new Set())
   const membershipActionRef = useRef(new Set())
+  const bulkStatusInFlightRef = useRef(false)
   const aliveRef = useRef(true)
   const actionHistory = useActionHistory({ limit: 3, notify })
   const deferredSearch = useDeferredValue(search)
@@ -194,7 +228,7 @@ export default function Sales() {
   useEffect(() => {
     if (!isActive || !isAdmin || !salesFiltersOpen || userOptionsLoaded) return
     let cancelled = false
-    window.api.getUsers()
+    withLoaderTimeout(() => window.api.getUsers(), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS)
       .then((rows) => {
         if (cancelled) return
         setUserOptions(Array.isArray(rows) ? rows : [])
@@ -202,7 +236,7 @@ export default function Sales() {
       })
       .catch(() => {
         if (cancelled) return
-        setUserOptions([])
+        setUserOptionsLoaded(false)
       })
     return () => {
       cancelled = true
@@ -215,21 +249,40 @@ export default function Sales() {
     loadPromiseRef.current = null
   }, [])
 
+  const runSaleStatusMutation = useCallback((saleId, nextStatus, notes) => (
+    withLoaderTimeout(
+      () => window.api.updateSaleStatus(saleId, nextStatus, notes),
+      'Update sale status',
+      SALES_STATUS_MUTATION_TIMEOUT_MS,
+    )
+  ), [])
+
+  const runSaleMembershipMutation = useCallback((saleId, payload) => (
+    withLoaderTimeout(
+      () => window.api.attachSaleCustomer(saleId, payload),
+      'Attach sale membership',
+      SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS,
+    )
+  ), [])
+
   const handleStatusChange = async (saleId, newStatus, notes, recordHistory = true) => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
-    if (statusActionRef.current.has(numericId)) return false
+    const actionKey = String(numericId)
+    if (!beginKeyedAction(statusActionRef, actionKey)) return false
     const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
     const previousStatus = previousSale?.sale_status || 'completed'
     if (recordHistory) {
       const warningText = ['cancelled', 'awaiting_payment', 'completed', 'awaiting_delivery'].includes(newStatus)
         ? translateOr('confirm_sale_status_change_stock', `Change sale ${previousSale?.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}? This can change stock totals.`)
         : translateOr('confirm_sale_status_change', `Change sale ${previousSale?.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}?`)
-      if (!window.confirm(warningText)) return false
+      if (!window.confirm(warningText)) {
+        finishKeyedAction(statusActionRef, actionKey)
+        return false
+      }
     }
-    statusActionRef.current.add(numericId)
     try {
-      await window.api.updateSaleStatus(saleId, newStatus, notes)
+      await runSaleStatusMutation(saleId, newStatus, notes)
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       await loadSales(true)
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
@@ -252,21 +305,21 @@ export default function Sales() {
       notify(`Failed to update status: ${error.message || error}`, 'error')
       return false
     } finally {
-      statusActionRef.current.delete(numericId)
+      finishKeyedAction(statusActionRef, actionKey)
     }
   }
 
   const handleAttachMembership = async (saleId, membershipNumber) => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
-    if (membershipActionRef.current.has(numericId)) return false
+    const actionKey = String(numericId)
+    if (!beginKeyedAction(membershipActionRef, actionKey)) return false
     const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
     const previousMembershipNumber = String(previousSale?.customer_membership_number || '').trim()
     const nextMembershipNumber = String(membershipNumber || '').trim()
-    membershipActionRef.current.add(numericId)
     try {
       const device = getClientDeviceInfo()
-      await window.api.attachSaleCustomer(saleId, {
+      await runSaleMembershipMutation(saleId, {
         membershipNumber: nextMembershipNumber,
         userId: user?.id || null,
         userName: user?.name || null,
@@ -297,14 +350,14 @@ export default function Sales() {
                   device_name: deviceInfo.deviceName || '',
                   device_tz: deviceInfo.deviceTz || '',
                 }
-            await window.api.attachSaleCustomer(saleId, payload)
+            await runSaleMembershipMutation(saleId, payload)
             await loadSales(true)
             window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
             window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
           },
           redo: async () => {
             const deviceInfo = getClientDeviceInfo()
-            await window.api.attachSaleCustomer(saleId, {
+            await runSaleMembershipMutation(saleId, {
               membershipNumber: nextMembershipNumber,
               userId: user?.id || null,
               userName: user?.name || null,
@@ -326,7 +379,7 @@ export default function Sales() {
       notify(error?.message || translateOr('failed_to_attach_membership', 'Failed to link membership'), 'error')
       return false
     } finally {
-      membershipActionRef.current.delete(numericId)
+      finishKeyedAction(membershipActionRef, actionKey)
     }
   }
 
@@ -396,14 +449,19 @@ export default function Sales() {
     [salesSections],
   )
 
+  const filteredIds = useMemo(
+    () => normalizeFiniteIdsFrom(visibleSales, (sale) => sale.id),
+    [visibleSales],
+  )
+
   useEffect(() => {
-    const validIds = new Set(visibleSales.map((sale) => Number(sale.id)).filter((id) => Number.isFinite(id)))
+    const validIds = new Set(filteredIds)
     setSelectedIds((current) => {
       const nextIds = [...current].filter((id) => validIds.has(id))
       if (nextIds.length === current.size && nextIds.every((id) => current.has(id))) return current
       return new Set(nextIds)
     })
-  }, [visibleSales])
+  }, [filteredIds])
 
   useEffect(() => {
     setCollapsedSalesSections((current) => {
@@ -412,11 +470,6 @@ export default function Sales() {
       return next.size === current.size ? current : next
     })
   }, [salesSections])
-
-  const filteredIds = useMemo(
-    () => visibleSales.map((sale) => Number(sale.id)).filter((id) => Number.isFinite(id)),
-    [visibleSales],
-  )
 
   const selectedSales = useMemo(
     () => visibleSales.filter((sale) => selectedIds.has(Number(sale.id))),
@@ -451,7 +504,8 @@ export default function Sales() {
   }
 
   const toggleSelectionScope = useCallback((ids, checked) => {
-    setSelectedIds((current) => toggleIdSet(current, ids, checked))
+    const normalized = normalizeFiniteIds(ids)
+    setSelectedIds((current) => toggleIdSet(current, normalized, checked))
   }, [])
 
   const toggleSalesSection = useCallback((sectionId) => {
@@ -464,13 +518,20 @@ export default function Sales() {
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id))),
+    (ids = []) => {
+      const normalized = normalizeFiniteIds(ids)
+      return normalized.length > 0 && countSelectedIds(normalized, selectedIds) === normalized.length
+    },
     [selectedIds],
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSelectionScopeFullySelected(ids),
-    [isSelectionScopeFullySelected, selectedIds],
+    (ids = []) => {
+      const normalized = normalizeFiniteIds(ids)
+      const selectedCount = countSelectedIds(normalized, selectedIds)
+      return selectedCount > 0 && selectedCount < normalized.length
+    },
+    [selectedIds],
   )
 
   const handleExportSelected = () => {
@@ -497,7 +558,7 @@ export default function Sales() {
       const saleId = Number(entry?.id || 0)
       const nextStatus = String(entry?.status || '').trim()
       if (!saleId || !nextStatus) throw new Error('Invalid sale status entry')
-      await window.api.updateSaleStatus(saleId, nextStatus, notes)
+      await runSaleStatusMutation(saleId, nextStatus, notes)
       return saleId
     })
     const failedIds = statusRun.failures
@@ -519,10 +580,10 @@ export default function Sales() {
       failedIds,
       updatedIds,
     }
-  }, [loadSales])
+  }, [loadSales, runSaleStatusMutation])
 
   const handleBulkStatusUpdate = async (nextStatus) => {
-    if (!selectedSales.length || bulkStatusSaving) return
+    if (!selectedSales.length || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
     const previousStatuses = selectedSales.map((sale) => ({
       id: Number(sale.id),
       status: sale.sale_status || 'completed',
@@ -547,6 +608,7 @@ export default function Sales() {
         failed ? 'warning' : 'success',
       )
     } finally {
+      finishSingleAction(bulkStatusInFlightRef)
       setBulkStatusSaving('')
     }
   }
@@ -659,7 +721,7 @@ export default function Sales() {
   ].filter(Boolean)), [availableYears, isAdmin, monthFilter, salesGroupMode, salesSortDirection, statusFilter, t, translateOr, userFilter, userOptions, yearFilter])
 
   const activeSalesFilterCount = useMemo(
-    () => [statusFilter !== 'all', userFilter !== 'all', yearFilter !== 'all', monthFilter !== 'all', salesGroupMode !== 'time', salesSortDirection !== 'desc'].filter(Boolean).length,
+    () => countActiveFlags([statusFilter !== 'all', userFilter !== 'all', yearFilter !== 'all', monthFilter !== 'all', salesGroupMode !== 'time', salesSortDirection !== 'desc']),
     [monthFilter, salesGroupMode, salesSortDirection, statusFilter, userFilter, yearFilter],
   )
   const showSalesActionGroups = salesGroupMode === 'time+action'

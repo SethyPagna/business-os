@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Trophy } from 'lucide-react'
-import { ProductImg } from '../products/primitives'
+import { ProductImg } from '../products/shared/primitives'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.mjs'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.mjs'
+import { getKhmerTextProps } from '../../utils/scriptTypography.js'
 
 function getBadgeIcon(badge) {
   if (badge?.key === 'promotion') return BadgePercent
@@ -419,16 +420,16 @@ export default function CatalogProductsSection(props) {
               <div className={`space-y-2.5 ${compactCatalogCards ? 'p-3' : 'p-3.5'}`}>
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                   {metadataChips.map((chip) => (
-                    <span key={`${product.id}-${chip}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800 dark:text-slate-200">
+                    <span key={`${product.id}-${chip}`} {...getKhmerTextProps(chip, 'rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800 dark:text-slate-200')}>
                       {chip}
                     </span>
                   ))}
                 </div>
-                <div className={`${compactCatalogCards ? 'text-sm' : 'text-[15px]'} font-semibold leading-tight text-slate-900 dark:text-slate-100`}>
+                <div {...getKhmerTextProps(product.name, `${compactCatalogCards ? 'text-sm' : 'text-[15px]'} font-semibold leading-tight text-slate-900 dark:text-slate-100`)}>
                   {product.name}
                 </div>
                 {showDescription ? (
-                  <p className={`${compactCatalogCards ? 'line-clamp-2 min-h-[2.4rem] text-[11px] leading-[1.15rem]' : 'line-clamp-3 min-h-[2.8rem] text-xs leading-5'} text-slate-600 dark:text-slate-300`}>
+                  <p {...getKhmerTextProps(product.description || copy('noDescription', 'No description available.'), `${compactCatalogCards ? 'line-clamp-2 min-h-[2.4rem] text-[11px] leading-[1.15rem]' : 'line-clamp-3 min-h-[2.8rem] text-xs leading-5'} text-slate-600 dark:text-slate-300`)}>
                     {product.description || copy('noDescription', 'No description available.')}
                   </p>
                 ) : null}

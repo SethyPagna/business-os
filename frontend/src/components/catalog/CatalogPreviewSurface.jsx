@@ -1,6 +1,6 @@
 import { Suspense, lazy } from 'react'
 import { ArrowDown, ArrowUp, Globe, Moon, Sun } from 'lucide-react'
-import { ProductImg } from '../products/primitives'
+import { ProductImg } from '../products/shared/primitives'
 
 const PortalMenu = lazy(() => import('../shared/PortalMenu'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))

@@ -1,7 +1,12 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { AlertTriangle, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react'
 import { useApp } from '../../AppContext'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { refreshAppData } from '../../utils/appRefresh'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
+
+const RESET_DATA_TIMEOUT_MS = 60000
+const FACTORY_RESET_TIMEOUT_MS = 90000
 
 function ConfirmReset({
   title,
@@ -89,6 +94,7 @@ function ResetData({ actionHistory = null }) {
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
   const [mode, setMode] = useState('sales')
   const [working, setWorking] = useState(false)
+  const resetInFlightRef = useRef(false)
 
   const MODES = [
     {
@@ -114,11 +120,15 @@ function ResetData({ actionHistory = null }) {
   const selected = MODES.find((entry) => entry.id === mode)
 
   const doReset = async () => {
-    if (working) return
     if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
+    if (!beginSingleAction(resetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
-      const result = await window.api.resetData(mode)
+      const result = await withLoaderTimeout(
+        () => window.api.resetData(mode),
+        'Reset business data',
+        RESET_DATA_TIMEOUT_MS,
+      )
       if (result?.success) {
         actionHistory?.pushAction?.({
           scope: 'backup',
@@ -134,6 +144,7 @@ function ResetData({ actionHistory = null }) {
     } catch (error) {
       notify(`${T('error', 'Error')}: ${error.message}`, 'error')
     } finally {
+      finishSingleAction(resetInFlightRef)
       setWorking(false)
     }
   }
@@ -184,14 +195,19 @@ function FactoryReset({ actionHistory = null }) {
   const [step, setStep] = useState(0)
   const [typed, setTyped] = useState('')
   const [working, setWorking] = useState(false)
+  const factoryResetInFlightRef = useRef(false)
   const CONFIRM_WORD = 'FACTORY RESET'
 
   async function doFactoryReset() {
-    if (working) return
     if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
+    if (!beginSingleAction(factoryResetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
-      const result = await window.api.factoryReset()
+      const result = await withLoaderTimeout(
+        () => window.api.factoryReset(),
+        'Factory reset',
+        FACTORY_RESET_TIMEOUT_MS,
+      )
       if (result?.success) {
         actionHistory?.pushAction?.({
           scope: 'backup',
@@ -210,6 +226,7 @@ function FactoryReset({ actionHistory = null }) {
       setStep(0)
       setTyped('')
     } finally {
+      finishSingleAction(factoryResetInFlightRef)
       setWorking(false)
     }
   }

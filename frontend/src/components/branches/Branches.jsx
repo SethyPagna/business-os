@@ -10,12 +10,14 @@ import TransferModal from './TransferModal'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   settleLoaderMap,
+  withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 
 /**
@@ -25,6 +27,25 @@ import {
  * - Transfer inventory between branches.
  * - Review transfer history.
  */
+
+const BRANCHES_LIST_TIMEOUT_MS = 10000
+const BRANCHES_SUMMARY_TIMEOUT_MS = 10000
+const BRANCH_TRANSFERS_TIMEOUT_MS = 12000
+const BRANCH_MUTATION_TIMEOUT_MS = 12000
+
+function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:text-slate-100', onClick }) {
+  return (
+    <button
+      type="button"
+      className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-gray-700 dark:bg-gray-800/70 dark:hover:border-blue-900 dark:hover:bg-blue-950/20"
+      title={detail || label}
+      onClick={onClick}
+    >
+      <div className="truncate text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 sm:text-[11px]">{label}</div>
+      <div className={`mt-0.5 truncate text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
+    </button>
+  )
+}
 
 /**
  * 1.2 Shared format helper for transfer timestamps.
@@ -65,12 +86,18 @@ export default function Branches() {
   const [branchStocks, setBranchStocks] = useState({})
   const [expandedBranch, setExpandedBranch] = useState(null)
   const [selectedIds, setSelectedIds] = useState(new Set())
+  const [statDetail, setStatDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
+  const loadPromiseModeRef = useRef('')
+  const saveInFlightRef = useRef(false)
+  const deleteInFlightRef = useRef(false)
+  const bulkDeleteInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 3, notify })
 
   /**
@@ -78,7 +105,13 @@ export default function Branches() {
    * 3.1 Fetch branches + transfer history.
    */
   const load = useCallback(async (silent = loadedOnceRef.current) => {
-    if (loadPromiseRef.current) return loadPromiseRef.current
+    const requestedMode = tab === 'transfers' ? 'transfers' : 'branches'
+    if (loadPromiseRef.current) {
+      if (requestedMode !== 'transfers' || loadPromiseModeRef.current === 'transfers') {
+        return loadPromiseRef.current
+      }
+      await loadPromiseRef.current.catch(() => null)
+    }
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       window.clearTimeout(loadWatchdogRef.current)
@@ -94,11 +127,23 @@ export default function Branches() {
 
       try {
         const tasks = {
-          branches: () => window.api.getBranches(),
-          branchSummary: () => window.api.getBranchSummary?.().catch(() => null),
+          branches: () => withLoaderTimeout(
+            () => window.api.getBranches(),
+            'Branches list',
+            BRANCHES_LIST_TIMEOUT_MS,
+          ),
+          branchSummary: () => withLoaderTimeout(
+            () => window.api.getBranchSummary?.(),
+            'Branch summary',
+            BRANCHES_SUMMARY_TIMEOUT_MS,
+          ).catch(() => null),
         }
         if (tab === 'transfers') {
-          tasks.transfers = () => window.api.getTransfers({})
+          tasks.transfers = () => withLoaderTimeout(
+            () => window.api.getTransfers({}),
+            'Branch transfers',
+            BRANCH_TRANSFERS_TIMEOUT_MS,
+          )
         }
         const result = await settleLoaderMap(tasks)
 
@@ -134,9 +179,11 @@ export default function Branches() {
     const wrappedPromise = promise.finally(() => {
       if (loadPromiseRef.current === wrappedPromise) {
         loadPromiseRef.current = null
+        loadPromiseModeRef.current = ''
       }
     })
     loadPromiseRef.current = wrappedPromise
+    loadPromiseModeRef.current = requestedMode
     return wrappedPromise
   }, [notify, t, tab])
 
@@ -145,6 +192,7 @@ export default function Branches() {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
+      loadPromiseModeRef.current = ''
       setLoading(false)
       return
     }
@@ -174,6 +222,9 @@ export default function Branches() {
    */
   const activeBranches = useMemo(() => branches.filter((branch) => branch.is_active), [branches])
   const selectedCount = selectedIds.size
+  const openStatDetail = useCallback((title, value, detail) => {
+    setStatDetail({ title, value, detail })
+  }, [])
 
   const buildBranchPayload = useCallback((branch = {}) => ({
     name: branch.name || '',
@@ -187,6 +238,10 @@ export default function Branches() {
     userName: user?.name,
   }), [user?.id, user?.name])
 
+  const runBranchMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, BRANCH_MUTATION_TIMEOUT_MS)
+  ), [])
+
   /**
    * 5. Branch Stock Expansion
    * 5.1 Lazy-load stock per branch on first open.
@@ -197,8 +252,17 @@ export default function Branches() {
       return
     }
     if (!branchStocks[branchId]) {
-      const stock = await window.api.getBranchStock(branchId, { page: 1, pageSize: 20, stockState: 'positive' })
-      setBranchStocks((prev) => ({ ...prev, [branchId]: stock }))
+      try {
+        const stock = await withLoaderTimeout(
+          () => window.api.getBranchStock(branchId, { page: 1, pageSize: 20, stockState: 'positive' }),
+          'Branch stock',
+          12000,
+        )
+        setBranchStocks((prev) => ({ ...prev, [branchId]: stock }))
+      } catch (error) {
+        notify(error?.message || (t('failed_to_load_data') || 'Failed to load data'), 'warning')
+        return
+      }
     }
     setExpandedBranch(branchId)
   }
@@ -208,26 +272,35 @@ export default function Branches() {
     if (!current || Array.isArray(current)) return
     const nextPage = Number(current.page || 1) + 1
     if (nextPage > Number(current.totalPages || 1)) return
-    const stock = await window.api.getBranchStock(branchId, { page: nextPage, pageSize: current.pageSize || 20, stockState: current.stockState || 'positive' })
-    setBranchStocks((prev) => ({
-      ...prev,
-      [branchId]: {
-        ...stock,
-        items: [...(current.items || []), ...(stock.items || [])],
-      },
-    }))
+    try {
+      const stock = await withLoaderTimeout(
+        () => window.api.getBranchStock(branchId, { page: nextPage, pageSize: current.pageSize || 20, stockState: current.stockState || 'positive' }),
+        'More branch stock',
+        12000,
+      )
+      setBranchStocks((prev) => ({
+        ...prev,
+        [branchId]: {
+          ...stock,
+          items: [...(current.items || []), ...(stock.items || [])],
+        },
+      }))
+    } catch (error) {
+      notify(error?.message || (t('failed_to_load_data') || 'Failed to load data'), 'warning')
+    }
   }
 
   /**
    * 6. CRUD Actions
    */
   const handleSaveBranch = async (form) => {
+    if (!beginSingleAction(saveInFlightRef)) return
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const res = selected
-        ? await window.api.updateBranch(selected.id, payload)
-        : await window.api.createBranch(payload)
+        ? await runBranchMutation(() => window.api.updateBranch(selected.id, payload), 'Update branch')
+        : await runBranchMutation(() => window.api.createBranch(payload), 'Create branch')
       if (res?.success === false) {
         notify(res.error || 'Failed to save branch', 'error')
         return
@@ -238,12 +311,18 @@ export default function Branches() {
         actionHistory.pushAction({
           label: `Edit branch ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const result = await window.api.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot))
+            const result = await runBranchMutation(
+              () => window.api.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot)),
+              'Undo branch edit',
+            )
             if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
             await load()
           },
           redo: async () => {
-            const result = await window.api.updateBranch(nextSnapshot.id, buildBranchPayload(nextSnapshot))
+            const result = await runBranchMutation(
+              () => window.api.updateBranch(nextSnapshot.id, buildBranchPayload(nextSnapshot)),
+              'Redo branch edit',
+            )
             if (result?.success === false) throw new Error(result.error || 'Failed to reapply branch changes')
             await load()
           },
@@ -253,12 +332,18 @@ export default function Branches() {
         actionHistory.pushAction({
           label: `Add branch ${createdSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const result = await window.api.deleteBranch(createdBranchId, user?.id, user?.name)
+            const result = await runBranchMutation(
+              () => window.api.deleteBranch(createdBranchId, user?.id, user?.name),
+              'Undo branch create',
+            )
             if (!result?.success) throw new Error(result?.error || 'Failed to undo branch creation')
             await load()
           },
           redo: async () => {
-            const result = await window.api.createBranch(buildBranchPayload(createdSnapshot))
+            const result = await runBranchMutation(
+              () => window.api.createBranch(buildBranchPayload(createdSnapshot)),
+              'Redo branch create',
+            )
             if (result?.success === false) throw new Error(result.error || 'Failed to recreate branch')
             createdBranchId = extractHistoryResultId(result)
             await load()
@@ -271,14 +356,23 @@ export default function Branches() {
       await load()
     } catch (error) {
       notify(error?.message || 'Failed to save branch', 'error')
+    } finally {
+      finishSingleAction(saveInFlightRef)
     }
   }
 
   const handleDelete = async (branch) => {
-    if (!window.confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) return
+    if (!beginSingleAction(deleteInFlightRef)) return
+    if (!window.confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) {
+      finishSingleAction(deleteInFlightRef)
+      return
+    }
     try {
       const snapshot = cloneHistorySnapshot(branch)
-      const res = await window.api.deleteBranch(branch.id, user?.id, user?.name)
+      const res = await runBranchMutation(
+        () => window.api.deleteBranch(branch.id, user?.id, user?.name),
+        'Delete branch',
+      )
       if (!res?.success) {
         notify(res?.error || 'Cannot delete branch', 'error')
         return
@@ -287,7 +381,10 @@ export default function Branches() {
       actionHistory.pushAction({
         label: `Delete branch ${snapshot.name || ''}`.trim(),
         undo: async () => {
-          const result = await window.api.createBranch(buildBranchPayload(snapshot))
+          const result = await runBranchMutation(
+            () => window.api.createBranch(buildBranchPayload(snapshot)),
+            'Undo branch delete',
+          )
           if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
           restoredBranchId = extractHistoryResultId(result)
           await load()
@@ -295,7 +392,10 @@ export default function Branches() {
         redo: async () => {
           const targetId = restoredBranchId || Number(snapshot.id || 0)
           if (!targetId) return
-          const result = await window.api.deleteBranch(targetId, user?.id, user?.name)
+          const result = await runBranchMutation(
+            () => window.api.deleteBranch(targetId, user?.id, user?.name),
+            'Redo branch delete',
+          )
           if (!result?.success) throw new Error(result?.error || 'Failed to delete branch again')
           await load()
         },
@@ -304,74 +404,92 @@ export default function Branches() {
       await load()
     } catch (error) {
       notify(error?.message || 'Failed to delete branch', 'error')
+    } finally {
+      finishSingleAction(deleteInFlightRef)
     }
   }
 
   const handleBulkDelete = async () => {
     if (!selectedCount) return
+    if (!beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkDeleteBusy })) return
     const toDelete = branches.filter((branch) => selectedIds.has(branch.id) && !branch.is_default)
     if (!toDelete.length) {
+      finishSingleAction(bulkDeleteInFlightRef)
       notify(t('cannot_delete_default_branch') || 'Cannot delete default branch', 'error')
       return
     }
-    if (!window.confirm(`Delete ${toDelete.length} branch(es)? This cannot be undone.`)) return
-
-    const deletedSnapshots = toDelete.map((branch) => ({ ...branch }))
-
-    const results = await Promise.allSettled(
-      toDelete.map((branch) => window.api.deleteBranch(branch.id, user?.id, user?.name)),
-    )
-    const failedIds = results.flatMap((result, index) => (
-      result.status === 'rejected' || result.value?.success === false
-        ? [Number(toDelete[index]?.id || 0)]
-        : []
-    )).filter((id) => Number.isFinite(id) && id > 0)
-    const failed = failedIds.length
-    setSelectedIds(new Set(failedIds))
-    await load()
-    const restoredSnapshots = deletedSnapshots.filter((branch) => !failedIds.includes(Number(branch?.id || 0)))
-    if (restoredSnapshots.length) {
-      let restoredEntries = []
-      actionHistory.pushAction({
-        label: `Delete ${restoredSnapshots.length} branch${restoredSnapshots.length === 1 ? '' : 'es'}`,
-        undo: async () => {
-          const restoreRun = await runConcurrentTasks(restoredSnapshots, async (snapshot) => {
-            const result = await window.api.createBranch({
-              name: snapshot.name || '',
-              location: snapshot.location || '',
-              phone: snapshot.phone || '',
-              manager: snapshot.manager || '',
-              notes: snapshot.notes || '',
-              is_default: snapshot.is_default ? 1 : 0,
-              is_active: snapshot.is_active ?? 1,
-              userId: user?.id,
-              userName: user?.name,
-            })
-            if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
-            return { originalId: snapshot.id, restoredId: Number(result?.id || result?.data?.id || 0) }
-          })
-          if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore branch'))
-          restoredEntries = restoreRun.successes.map((entry) => entry.value)
-          await load()
-        },
-        redo: async () => {
-          const idsToDelete = restoredEntries.length
-            ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-            : restoredSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
-          const redoRun = await runConcurrentTasks(idsToDelete, async (branchId) => {
-            const result = await window.api.deleteBranch(branchId, user?.id, user?.name)
-            if (!result?.success) throw new Error(result?.error || 'Failed to re-delete branch')
-          })
-          if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete branch'))
-          await load()
-        },
-      })
-    }
-    if (failed > 0) {
-      notify((t('bulk_delete_partial_fail') || '{n} branch(es) could not be deleted.').replace('{n}', String(failed)), 'error')
+    if (!window.confirm(`Delete ${toDelete.length} branch(es)? This cannot be undone.`)) {
+      finishSingleAction(bulkDeleteInFlightRef)
       return
     }
-    notify((t('bulk_deleted_count') || '{n} branch(es) deleted').replace('{n}', String(toDelete.length)))
+
+    setBulkDeleteBusy(true)
+    try {
+      const deletedSnapshots = toDelete.map((branch) => ({ ...branch }))
+      const deleteRun = await runConcurrentTasks(toDelete, async (branch) => {
+        const result = await runBranchMutation(
+          () => window.api.deleteBranch(branch.id, user?.id, user?.name),
+          'Bulk delete branches',
+        )
+        if (!result?.success) throw new Error(result?.error || 'Failed to delete branch')
+        return Number(branch.id || 0)
+      })
+      const failedIds = deleteRun.failures
+        .map((entry) => Number(entry.item?.id || 0))
+        .filter((id) => Number.isFinite(id) && id > 0)
+      const failed = failedIds.length
+      setSelectedIds(new Set(failedIds))
+      await load()
+      const restoredSnapshots = deletedSnapshots.filter((branch) => !failedIds.includes(Number(branch?.id || 0)))
+      if (restoredSnapshots.length) {
+        let restoredEntries = []
+        actionHistory.pushAction({
+          label: `Delete ${restoredSnapshots.length} branch${restoredSnapshots.length === 1 ? '' : 'es'}`,
+          undo: async () => {
+            const restoreRun = await runConcurrentTasks(restoredSnapshots, async (snapshot) => {
+              const result = await runBranchMutation(() => window.api.createBranch({
+                name: snapshot.name || '',
+                location: snapshot.location || '',
+                phone: snapshot.phone || '',
+                manager: snapshot.manager || '',
+                notes: snapshot.notes || '',
+                is_default: snapshot.is_default ? 1 : 0,
+                is_active: snapshot.is_active ?? 1,
+                userId: user?.id,
+                userName: user?.name,
+              }), 'Restore deleted branches')
+              if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
+              return { originalId: snapshot.id, restoredId: Number(result?.id || result?.data?.id || 0) }
+            })
+            if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore branch'))
+            restoredEntries = restoreRun.successes.map((entry) => entry.value)
+            await load()
+          },
+          redo: async () => {
+            const idsToDelete = restoredEntries.length
+              ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
+              : restoredSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
+            const redoRun = await runConcurrentTasks(idsToDelete, async (branchId) => {
+              const result = await runBranchMutation(
+                () => window.api.deleteBranch(branchId, user?.id, user?.name),
+                'Redo bulk branch delete',
+              )
+              if (!result?.success) throw new Error(result?.error || 'Failed to re-delete branch')
+            })
+            if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete branch'))
+            await load()
+          },
+        })
+      }
+      if (failed > 0) {
+        notify((t('bulk_delete_partial_fail') || '{n} branch(es) could not be deleted.').replace('{n}', String(failed)), 'error')
+        return
+      }
+      notify((t('bulk_deleted_count') || '{n} branch(es) deleted').replace('{n}', String(toDelete.length)))
+    } finally {
+      finishSingleAction(bulkDeleteInFlightRef)
+      setBulkDeleteBusy(false)
+    }
   }
 
   /**
@@ -400,13 +518,14 @@ export default function Branches() {
         icon={Building2}
         tone="blue"
         title={t('branches') || 'Branches'}
+        subtitle={t('branch_default_hint') || 'Manage locations, transfer stock between branches, and review movement history from one place.'}
         className="mb-4"
         stackOnMobile={false}
         actionsClassName="self-start pl-2 sm:pl-0"
         actions={(
           <div className="flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {selectedCount > 0 ? (
-            <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete}>
+            <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete} disabled={bulkDeleteBusy}>
               <Trash2 className="h-4 w-4" />
               <span>{(t('delete') || 'Delete')} ({selectedCount})</span>
             </button>
@@ -423,26 +542,26 @@ export default function Branches() {
         )}
       />
 
-      <p className="mb-4 max-w-4xl text-sm text-gray-500 dark:text-gray-400">
-        {t('branch_default_hint') || 'Manage locations, transfer stock between branches, and review movement history from one place.'}
-      </p>
-
       <ActionHistoryBar history={actionHistory} className="mb-4" />
 
       {branchSummary ? (
-        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="mb-4 grid grid-cols-3 gap-1.5 sm:gap-2 xl:grid-cols-6">
           {[
-            [t('branches') || 'Branches', branchSummary.branch_count ?? activeBranches.length, 'text-blue-600 dark:text-blue-300'],
-            [t('products_total') || 'Products', branchSummary.total_products || 0, 'text-slate-700 dark:text-slate-100'],
-            [t('in_stock') || 'In stock', branchSummary.in_stock || 0, 'text-emerald-600 dark:text-emerald-300'],
-            [t('low_stock') || 'Low stock', branchSummary.low_stock || 0, 'text-amber-600 dark:text-amber-300'],
-            [t('out_of_stock') || 'Out of stock', branchSummary.out_of_stock || 0, 'text-red-600 dark:text-red-300'],
-            [t('stock_value') || 'Value', fmtUSD(Number(branchSummary.stock_value_usd || 0)), 'text-cyan-600 dark:text-cyan-300'],
-          ].map(([label, value, color]) => (
-            <div key={label} className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-gray-700 dark:bg-gray-800/70">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</div>
-              <div className={`mt-1 text-lg font-bold ${color}`}>{value}</div>
-            </div>
+            [t('branches_short') || t('branches') || 'Branches', branchSummary.branch_count ?? activeBranches.length, 'text-blue-600 dark:text-blue-300', t('branch_stat_branches_detail') || 'Active branch locations available for stock review and transfer.'],
+            [t('items_short') || 'Items', branchSummary.total_products || 0, 'text-slate-700 dark:text-slate-100', t('branch_stat_products_detail') || 'Unique products counted across branch stock records.'],
+            [t('in_stock_short') || 'In', branchSummary.in_stock || 0, 'text-emerald-600 dark:text-emerald-300', t('branch_stat_in_stock_detail') || 'Products with positive stock in at least one branch.'],
+            [t('low_stock_short') || 'Low', branchSummary.low_stock || 0, 'text-amber-600 dark:text-amber-300', t('branch_stat_low_stock_detail') || 'Products at or below their low stock threshold.'],
+            [t('out_of_stock_short') || 'Out', branchSummary.out_of_stock || 0, 'text-red-600 dark:text-red-300', t('branch_stat_out_stock_detail') || 'Products at or below their out of stock threshold.'],
+            [t('stock_value_short') || 'Value', fmtUSD(Number(branchSummary.stock_value_usd || 0)), 'text-cyan-600 dark:text-cyan-300', t('branch_stat_value_detail') || 'Estimated stock value using available branch stock and product cost.'],
+          ].map(([label, value, color, detail]) => (
+            <BranchStatTile
+              key={label}
+              label={label}
+              value={value}
+              color={color}
+              detail={detail}
+              onClick={() => openStatDetail(label, value, detail)}
+            />
           ))}
         </div>
       ) : null}
@@ -593,12 +712,23 @@ export default function Branches() {
                       {isExpanded ? (
                         <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
                           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-gray-700 dark:text-gray-300">
-                              <span>{t('total_product') || 'Total product'}: <span className="text-gray-900 dark:text-white">{totalProducts}</span></span>
-                              <span>{t('in_stock') || 'In stock'}: <span className="text-green-600">{stockCount}</span></span>
-                              <span>{t('low_stock') || 'Low stock'}: <span className="text-amber-600">{lowStockCount}</span></span>
-                              <span>{t('out_of_stock') || 'Out of stock'}: <span className="text-red-600">{outStockCount}</span></span>
-                              <span>{t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(totalValue)}</span></span>
+                            <div className="grid w-full min-w-0 grid-cols-3 gap-1.5 sm:max-w-3xl sm:gap-2 lg:grid-cols-5">
+                              {[
+                                [t('total_short') || 'Total', totalProducts, 'text-gray-900 dark:text-white', t('branch_stock_total_detail') || 'All products returned by this branch stock view.'],
+                                [t('in_stock_short') || 'In', stockCount, 'text-green-600 dark:text-green-300', t('branch_stock_in_detail') || 'Products with positive quantity in this branch.'],
+                                [t('low_stock_short') || 'Low', lowStockCount, 'text-amber-600 dark:text-amber-300', t('branch_stock_low_detail') || 'Products in this branch at or below low stock threshold.'],
+                                [t('out_of_stock_short') || 'Out', outStockCount, 'text-red-600 dark:text-red-300', t('branch_stock_out_detail') || 'Products in this branch at or below out of stock threshold.'],
+                                [t('stock_value_short') || 'Value', fmtUSD(totalValue), 'text-blue-600 dark:text-blue-300', t('branch_stock_value_detail') || 'Estimated value for positive branch stock.'],
+                              ].map(([label, value, color, detail]) => (
+                                <BranchStatTile
+                                  key={`${branch.id}-${label}`}
+                                  label={label}
+                                  value={value}
+                                  color={color}
+                                  detail={detail}
+                                  onClick={() => openStatDetail(label, value, `${branch.name}: ${detail}`)}
+                                />
+                              ))}
                             </div>
                             <span className="hidden text-sm font-semibold text-gray-700 dark:text-gray-300">
                               {(t('branch_stock_count') || '{n} products in stock').replace('{n}', String(stockCount))}
@@ -753,6 +883,23 @@ export default function Branches() {
           user={user}
           notify={notify}
         />
+      ) : null}
+
+      {statDetail ? (
+        <Modal title={statDetail.title} onClose={() => setStatDetail(null)}>
+          <div className="space-y-3">
+            <div className="rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/70">
+              <div className="text-xs font-semibold uppercase text-slate-400">{statDetail.title}</div>
+              <div className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">{statDetail.value}</div>
+            </div>
+            <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{statDetail.detail}</p>
+            <div className="flex justify-end">
+              <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={() => setStatDetail(null)}>
+                {t('close') || 'Close'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
     </div>
   )

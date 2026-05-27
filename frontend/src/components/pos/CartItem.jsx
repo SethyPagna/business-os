@@ -1,4 +1,5 @@
 import { normalizePriceValue } from '../../utils/pricing.js'
+import { getKhmerTextProps } from '../../utils/scriptTypography.js'
 
 export default function CartItem({
   item, branches, t,
@@ -11,12 +12,12 @@ export default function CartItem({
     <div className="border-b border-gray-100 px-3 py-2.5 last:border-0 dark:border-gray-700">
       <div className="mb-2 flex items-start justify-between">
         <div className="mr-2 min-w-0 flex-1">
-          <p className="leading-snug text-sm font-semibold text-gray-900 dark:text-white">{item.name}</p>
+          <p {...getKhmerTextProps(item.name, 'leading-snug text-sm font-semibold text-gray-900 dark:text-white')}>{item.name}</p>
           {item.price_mode === 'special' ? (
-            <div className="mt-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">{t ? t('special_price') : 'Special price'}</div>
+            <div {...getKhmerTextProps(t ? t('special_price') : 'Special price', 'mt-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400')}>{t ? t('special_price') : 'Special price'}</div>
           ) : null}
           {item.price_mode === 'promotion' ? (
-            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">{item.product_discount_label || (t ? t('promotion_price') : 'Discount price')}</div>
+            <div {...getKhmerTextProps(item.product_discount_label || (t ? t('promotion_price') : 'Discount price'), 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}>{item.product_discount_label || (t ? t('promotion_price') : 'Discount price')}</div>
           ) : null}
         </div>
         <div className="flex flex-shrink-0 items-center gap-0.5">

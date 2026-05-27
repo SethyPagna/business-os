@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,6 +18,13 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+
+const SERVER_PENDING_SYNC_TIMEOUT_MS = 8000
+const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000
+const SERVER_SECURITY_CONFIG_TIMEOUT_MS = 8000
+const SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS = 12000
+const SERVER_SYNC_TEST_TIMEOUT_MS = 12000
 
 function useLocalCopy() {
   const { settings, t } = useApp()
@@ -25,7 +32,8 @@ function useLocalCopy() {
   return (key, fallbackEn, fallbackKm = fallbackEn) => {
     const translated = t?.(key)
     if (translated && translated !== key && !isBrokenLocalizedString(translated)) return translated
-    return isKhmer ? fallbackKm : fallbackEn
+    if (isKhmer && fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
+    return isBrokenLocalizedString(fallbackEn) ? key : fallbackEn
   }
 }
 
@@ -212,6 +220,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
   const mounted = useRef(true)
   const queueRequestRef = useRef(0)
   const serverLogRequestRef = useRef(0)
+  const queueActionInFlightRef = useRef(false)
 
   const loadQueueState = useCallback(async () => {
     if (!active) return
@@ -220,6 +229,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
       const state = await withLoaderTimeout(
         () => window.api?.getPendingSyncState?.(),
         'Pending sync queue',
+        SERVER_PENDING_SYNC_TIMEOUT_MS,
       )
       if (mounted.current && isTrackedRequestCurrent(queueRequestRef, requestId) && state) {
         setPendingSync(state)
@@ -261,7 +271,11 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
     if (!active || !syncUrl) return
     const requestId = beginTrackedRequest(serverLogRequestRef)
     try {
-      const data = await withLoaderTimeout(() => window.api.getSystemDebugLog(), 'Server diagnostics')
+      const data = await withLoaderTimeout(
+        () => window.api.getSystemDebugLog(),
+        'Server diagnostics',
+        SERVER_DIAGNOSTICS_TIMEOUT_MS,
+      )
       if (mounted.current && isTrackedRequestCurrent(serverLogRequestRef, requestId)) {
         setServerLog(data.entries || [])
         setServerInfo({ clients: data.clients, uptime: data.uptime })
@@ -285,22 +299,34 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
 
   async function handleRetryQueue() {
     if (!window.api?.retryPendingSyncNow) return
+    if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
     setRetryingQueue(true)
     try {
-      await window.api.retryPendingSyncNow()
+      await withLoaderTimeout(
+        () => window.api.retryPendingSyncNow(),
+        'Retry pending sync queue',
+        SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,
+      )
       await loadQueueState()
     } finally {
+      finishSingleAction(queueActionInFlightRef)
       setRetryingQueue(false)
     }
   }
 
   async function handleDiscardQueue() {
     if (!window.api?.discardPendingSyncQueue) return
+    if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
     setRetryingQueue(true)
     try {
-      await window.api.discardPendingSyncQueue()
+      await withLoaderTimeout(
+        () => window.api.discardPendingSyncQueue(),
+        'Discard pending sync queue',
+        SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,
+      )
       await loadQueueState()
     } finally {
+      finishSingleAction(queueActionInFlightRef)
       setRetryingQueue(false)
     }
   }
@@ -490,6 +516,7 @@ export default function ServerPage() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const onlineCheckRequestRef = useRef(0)
   const securityConfigRequestRef = useRef(0)
+  const testSyncInFlightRef = useRef(false)
 
   const autoDetected = isAutoDetected(syncUrl)
   const hasServer = !!(syncUrl?.trim())
@@ -534,7 +561,11 @@ export default function ServerPage() {
     const loadSecurityConfig = async () => {
       const requestId = beginTrackedRequest(securityConfigRequestRef)
       try {
-        const config = await withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Sync settings')
+        const config = await withLoaderTimeout(
+          () => window.api.getSystemConfig?.(),
+          'Sync settings',
+          SERVER_SECURITY_CONFIG_TIMEOUT_MS,
+        )
         if (!isTrackedRequestCurrent(securityConfigRequestRef, requestId)) return
         if (config) setSecurityConfig(config)
       } catch (_) {}
@@ -550,10 +581,15 @@ export default function ServerPage() {
       return
     }
 
-    setTesting(true)
+    if (!beginSingleAction(testSyncInFlightRef, { blocked: testing })) return
     setTestResult(null)
+    setTesting(true)
     try {
-      const result = await window.api.testSyncServer(url)
+      const result = await withLoaderTimeout(
+        () => window.api.testSyncServer(url),
+        'Test sync server',
+        SERVER_SYNC_TEST_TIMEOUT_MS,
+      )
       setOnlineCount(result.clients ?? null)
       setTestResult({
         ok: result.ok,
@@ -561,8 +597,10 @@ export default function ServerPage() {
       })
     } catch (error) {
       setTestResult({ ok: false, message: error?.message || 'Connection failed' })
+    } finally {
+      finishSingleAction(testSyncInFlightRef)
+      setTesting(false)
     }
-    setTesting(false)
   }
 
   function handleSave() {

@@ -43,10 +43,6 @@ export default function AllFieldsPanel({ tpl, setT }) {
 
   return (
     <div>
-      <div className="mb-3 rounded-lg bg-green-50 p-3 text-xs text-green-700 dark:bg-green-900/20 dark:text-green-400">
-        {T('rs_auto_save_hint', 'Toggle any field on or off. Changes auto-save and apply to the live preview and printed receipts.')}
-      </div>
-
       <div className="mb-4">
         <label htmlFor="receipt-field-search" className="sr-only">
           {T('search_fields_placeholder', 'Search receipt fields')}

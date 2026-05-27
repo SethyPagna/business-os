@@ -9,6 +9,10 @@ import {
 } from '../../utils/loaders.mjs'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 
+const FILE_PICKER_LOAD_TIMEOUT_MS = 8000
+const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000
+const FILE_PICKER_DELETE_TIMEOUT_MS = 12000
+
 function AssetPreview({ asset }) {
   const previewUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
   if (asset?.media_type === 'image') {
@@ -51,6 +55,8 @@ export default function FilePickerModal({
   const [selectedPaths, setSelectedPaths] = useState([])
   const inputRef = useRef(null)
   const loadRequestRef = useRef(0)
+  const uploadInFlightRef = useRef(false)
+  const deleteInFlightRef = useRef(false)
 
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -61,7 +67,7 @@ export default function FilePickerModal({
     const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library picker')
+      const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setFiles(Array.isArray(result) ? result : [])
     } catch (error) {
@@ -107,11 +113,17 @@ export default function FilePickerModal({
     const selectedFiles = Array.from(event.target.files || [])
     event.target.value = ''
     if (!selectedFiles.length) return
+    if (uploadInFlightRef.current) return
+    uploadInFlightRef.current = true
     setUploading(true)
     try {
       const uploadedAssets = []
       for (const file of selectedFiles) {
-        const asset = await window.api.uploadFileAsset({ file, userId: user?.id, userName: user?.name })
+        const asset = await withLoaderTimeout(
+          () => window.api.uploadFileAsset({ file, userId: user?.id, userName: user?.name }),
+          'Upload picker file asset',
+          FILE_PICKER_UPLOAD_TIMEOUT_MS,
+        )
         if (asset?.public_path) uploadedAssets.push(asset)
       }
       notify(tr('upload_complete', 'Upload complete'), 'success')
@@ -134,26 +146,36 @@ export default function FilePickerModal({
     } catch (error) {
       notify(error?.message || 'Upload failed', 'error')
     } finally {
+      uploadInFlightRef.current = false
       setUploading(false)
     }
   }
 
   async function handleDelete(asset) {
-    if (!asset?.id || deletingAssetId) return
+    if (!asset?.id || deletingAssetId || deleteInFlightRef.current) return
     if (!asset.canDelete) {
       notify(tr('file_in_use', 'This file is still in use and cannot be deleted.'), 'error')
       return
     }
-    if (!window.confirm(`Delete "${asset.original_name}"?`)) return
+    deleteInFlightRef.current = true
+    if (!window.confirm(`Delete "${asset.original_name}"?`)) {
+      deleteInFlightRef.current = false
+      return
+    }
     setDeletingAssetId(asset.id)
     try {
-      await window.api.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined })
+      await withLoaderTimeout(
+        () => window.api.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined }),
+        'Delete picker file asset',
+        FILE_PICKER_DELETE_TIMEOUT_MS,
+      )
       notify(tr('file_deleted', 'File deleted'), 'success')
       await loadFiles()
       setSelectedPaths((current) => current.filter((entry) => entry !== asset.public_path))
     } catch (error) {
       notify(error?.message || 'Delete failed', 'error')
     } finally {
+      deleteInFlightRef.current = false
       setDeletingAssetId(null)
     }
   }
@@ -170,7 +192,7 @@ export default function FilePickerModal({
           <button type="button" className="btn-primary" onClick={() => inputRef.current?.click()} disabled={uploading || deletingAssetId != null}>
             {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
           </button>
-          <input ref={inputRef} type="file" accept={accept} multiple={multiple} className="hidden" onChange={handleUpload} />
+          <input ref={inputRef} type="file" accept={accept} multiple={multiple} className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
         </div>
 
         {loading ? <div className="py-10 text-center text-sm text-slate-400">{tr('loading', 'Loading...')}</div> : null}

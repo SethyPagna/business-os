@@ -10,9 +10,10 @@ import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import { ThreeDotMenu, DetailModal, ContactTable, useContactSelection } from './shared'
+import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
@@ -27,6 +28,7 @@ import {
 } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
+const DELIVERY_CONTACT_MUTATION_TIMEOUT_MS = 12000
 
 // ?€?€ Options helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // Options stored as JSON array in the 'address' TEXT column.
@@ -205,6 +207,9 @@ function DeliveryTab({ t, notify, active = true }) {
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
+  const saveInFlightRef = useRef(false)
+  const deleteInFlightRef = useRef(false)
+  const bulkDeleteInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -326,7 +331,7 @@ function DeliveryTab({ t, notify, active = true }) {
     },
 
   ]), [availableYears, groupMode, monthFilter, sortDirection, tr, yearFilter])
-  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length
+  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'])
   const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
@@ -352,6 +357,10 @@ function DeliveryTab({ t, notify, active = true }) {
     userId: user?.id,
     userName: user?.name,
   }), [user?.id, user?.name])
+
+  const runDeliveryMutation = useCallback((loader, label) => (
+    withLoaderTimeout(loader, label, DELIVERY_CONTACT_MUTATION_TIMEOUT_MS)
+  ), [])
 
   const load = useCallback(async ({ silent = false, label = 'Delivery contacts' } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -419,27 +428,35 @@ function DeliveryTab({ t, notify, active = true }) {
   }, [active, load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
+    if (!beginSingleAction(saveInFlightRef)) return
     if (!String(form.name || '').trim() && !String(form.phone || '').trim()) {
+      finishSingleAction(saveInFlightRef)
       return notify('Driver name or phone is required', 'error')
     }
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const res = selected
-        ? await window.api.updateDeliveryContact(selected.id, payload)
-        : await window.api.createDeliveryContact(payload)
+        ? await runDeliveryMutation(() => window.api.updateDeliveryContact(selected.id, payload), 'Update delivery contact')
+        : await runDeliveryMutation(() => window.api.createDeliveryContact(payload), 'Create delivery contact')
       if (res?.success === false) { notify(res.error||'Failed', 'error'); return }
       if (selected && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
         actionHistory.pushAction({
           label: `Edit delivery contact ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const restoreResult = await window.api.updateDeliveryContact(existingSnapshot.id, buildDeliveryPayload(existingSnapshot))
+            const restoreResult = await runDeliveryMutation(
+              () => window.api.updateDeliveryContact(existingSnapshot.id, buildDeliveryPayload(existingSnapshot)),
+              'Undo delivery contact edit',
+            )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore delivery contact')
             await load({ silent: true, label: 'Delivery contacts undo edit' })
           },
           redo: async () => {
-            const redoResult = await window.api.updateDeliveryContact(nextSnapshot.id, buildDeliveryPayload(nextSnapshot))
+            const redoResult = await runDeliveryMutation(
+              () => window.api.updateDeliveryContact(nextSnapshot.id, buildDeliveryPayload(nextSnapshot)),
+              'Redo delivery contact edit',
+            )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply delivery contact changes')
             await load({ silent: true, label: 'Delivery contacts redo edit' })
           },
@@ -451,11 +468,14 @@ function DeliveryTab({ t, notify, active = true }) {
           actionHistory.pushAction({
             label: `Add delivery contact ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              await window.api.deleteDeliveryContact(createdContactId)
+              await runDeliveryMutation(() => window.api.deleteDeliveryContact(createdContactId), 'Undo delivery contact create')
               await load({ silent: true, label: 'Delivery contacts undo create' })
             },
             redo: async () => {
-              const recreateResult = await window.api.createDeliveryContact(buildDeliveryPayload(createdSnapshot))
+              const recreateResult = await runDeliveryMutation(
+                () => window.api.createDeliveryContact(buildDeliveryPayload(createdSnapshot)),
+                'Redo delivery contact create',
+              )
               if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate delivery contact')
               createdContactId = extractHistoryResultId(recreateResult)
               await load({ silent: true, label: 'Delivery contacts redo create' })
@@ -466,18 +486,26 @@ function DeliveryTab({ t, notify, active = true }) {
       notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
       setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' })
     } catch (e) { notify(e.message||'Failed', 'error') }
+    finally { finishSingleAction(saveInFlightRef) }
   }
 
   const handleDelete = async (c) => {
-    if (!confirm(`Delete "${c.name}"?`)) return
+    if (!beginSingleAction(deleteInFlightRef)) return
+    if (!confirm(`Delete "${c.name}"?`)) {
+      finishSingleAction(deleteInFlightRef)
+      return
+    }
     try {
       const snapshot = cloneHistorySnapshot(c)
-      await window.api.deleteDeliveryContact(c.id)
+      await runDeliveryMutation(() => window.api.deleteDeliveryContact(c.id), 'Delete delivery contact')
       let restoredContactId = 0
       actionHistory.pushAction({
         label: `Delete delivery contact ${snapshot.name || ''}`.trim(),
         undo: async () => {
-          const restoreResult = await window.api.createDeliveryContact(buildDeliveryPayload(snapshot))
+          const restoreResult = await runDeliveryMutation(
+            () => window.api.createDeliveryContact(buildDeliveryPayload(snapshot)),
+            'Undo delivery contact delete',
+          )
           if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore delivery contact')
           restoredContactId = extractHistoryResultId(restoreResult)
           await load({ silent: true, label: 'Delivery contacts undo delete' })
@@ -485,7 +513,7 @@ function DeliveryTab({ t, notify, active = true }) {
         redo: async () => {
           const targetId = restoredContactId || Number(snapshot.id || 0)
           if (!targetId) return
-          await window.api.deleteDeliveryContact(targetId)
+          await runDeliveryMutation(() => window.api.deleteDeliveryContact(targetId), 'Redo delivery contact delete')
           await load({ silent: true, label: 'Delivery contacts redo delete' })
         },
       })
@@ -495,32 +523,37 @@ function DeliveryTab({ t, notify, active = true }) {
       await load({ silent: true, label: 'Delivery contacts after delete' })
     }
     catch (e) { notify(e.message||'Failed', 'error') }
+    finally { finishSingleAction(deleteInFlightRef) }
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || bulkActionBusy) return
-    if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) return
+    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) {
+      finishSingleAction(bulkDeleteInFlightRef)
+      return
+    }
     const ids = [...selectedIds]
-    const snapshots = contacts.filter((contact) => ids.includes(Number(contact?.id || 0))).map((contact) => JSON.parse(JSON.stringify(contact)))
+    const snapshots = buildSelectedSnapshots(contacts, ids)
     const failedIds = []
     setBulkActionBusy(true)
     try {
       const deleteRun = await runConcurrentTasks(ids, async (id) => {
-        await window.api.deleteDeliveryContact(id)
+        await runDeliveryMutation(() => window.api.deleteDeliveryContact(id), 'Bulk delete delivery contacts')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length
       failedIds.push(...deleteRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
       setSelectedIds(new Set(failedIds))
       await load({ silent: true, label: 'Delivery contacts refresh after delete' })
-      const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      const failedIdSet = new Set(failedIds)
+      const deletedSnapshots = snapshots.filter((snapshot) => !failedIdSet.has(Number(snapshot?.id || 0)))
       if (deletedCount > 0 && deletedSnapshots.length) {
         let restoredEntries = []
         actionHistory.pushAction({
           label: `Delete ${deletedCount} delivery contact${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot) => {
-              const result = await window.api.createDeliveryContact({
+              const result = await runDeliveryMutation(() => window.api.createDeliveryContact({
                 name: snapshot.name || '',
                 phone: snapshot.phone || '',
                 area: snapshot.area || '',
@@ -528,7 +561,7 @@ function DeliveryTab({ t, notify, active = true }) {
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
-              })
+              }), 'Restore deleted delivery contacts')
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
             if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore delivery contact'))
@@ -537,7 +570,9 @@ function DeliveryTab({ t, notify, active = true }) {
           },
           redo: async () => {
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => window.api.deleteDeliveryContact(id))
+            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => (
+              runDeliveryMutation(() => window.api.deleteDeliveryContact(id), 'Redo bulk delivery contact delete')
+            ))
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete delivery contact'))
             await load({ silent: true, label: 'Delivery contacts redo delete' })
           },
@@ -549,6 +584,7 @@ function DeliveryTab({ t, notify, active = true }) {
         notify(`${deletedCount} ${t('deleted') || 'deleted'}`)
       }
     } finally {
+      finishSingleAction(bulkDeleteInFlightRef)
       setBulkActionBusy(false)
     }
   }
