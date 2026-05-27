@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-27T20:06:03.173Z
+Generated: 2026-05-27T20:13:43.426Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 625
+- Files scanned: 626
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -17,7 +17,7 @@ Generated: 2026-05-27T20:06:03.173Z
 | .js | 185 |
 | .mjs | 161 |
 | .jsx | 107 |
-| .ts | 84 |
+| .ts | 85 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -45,10 +45,10 @@ Generated: 2026-05-27T20:06:03.173Z
 | frontend/components/utils-settings | 10 |
 | run | 9 |
 | run/docker | 9 |
+| frontend/api | 8 |
 | frontend/components/dashboard | 8 |
 | frontend/components/sales | 8 |
 | ops/scripts/powershell | 8 |
-| frontend/api | 7 |
 | frontend/components/pos | 7 |
 | ops/scripts/runtime/storage | 7 |
 | frontend/components/returns | 6 |
@@ -65,7 +65,7 @@ Generated: 2026-05-27T20:06:03.173Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 11692 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 10799 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8249 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6585 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-ROADMAP.md | 4917 | ops/docs |
@@ -73,7 +73,7 @@ Generated: 2026-05-27T20:06:03.173Z
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3443 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2826 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2831 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/lang/km.json | 2715 | frontend/src/lang |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2365 | ops/docs/reference |
