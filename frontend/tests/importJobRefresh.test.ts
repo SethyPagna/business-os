@@ -4,23 +4,28 @@ import {
   dispatchImportCompletionRefresh,
   getImportCompletionRefreshChannels,
   shouldDispatchImportCompletionRefresh,
-} from '../src/utils/importJobRefresh.js'
+} from '../src/utils/importJobRefresh.ts'
 
-function testProductImportChannels() {
+interface CapturedRefreshEvent {
+  type: string
+  detail: Record<string, unknown>
+}
+
+function testProductImportChannels(): void {
   assert.deepEqual(
     getImportCompletionRefreshChannels({ type: 'products' }),
     ['products', 'inventory', 'categories', 'units', 'settings', 'branches', 'suppliers', 'dashboard'],
   )
 }
 
-function testSupplierImportChannels() {
+function testSupplierImportChannels(): void {
   assert.deepEqual(
     getImportCompletionRefreshChannels({ type: 'suppliers' }),
     ['suppliers', 'products'],
   )
 }
 
-function testDispatchOnlyOnTerminalTransition() {
+function testDispatchOnlyOnTerminalTransition(): void {
   assert.equal(
     shouldDispatchImportCompletionRefresh(
       { id: 'job-1', type: 'products', status: 'running' },
@@ -44,20 +49,23 @@ function testDispatchOnlyOnTerminalTransition() {
   )
 }
 
-function testDispatchEmitsExpectedEvents() {
-  const events = []
+function testDispatchEmitsExpectedEvents(): void {
+  const events: CapturedRefreshEvent[] = []
   globalThis.CustomEvent = class CustomEvent {
-    constructor(type, init = {}) {
+    type: string
+    detail: Record<string, unknown>
+
+    constructor(type: string, init: CustomEventInit = {}) {
       this.type = type
-      this.detail = init.detail
+      this.detail = (init.detail || {}) as Record<string, unknown>
     }
-  }
+  } as typeof CustomEvent
   globalThis.window = {
-    dispatchEvent(event) {
-      events.push(event)
+    dispatchEvent(event: Event) {
+      events.push(event as unknown as CapturedRefreshEvent)
       return true
     },
-  }
+  } as Window & typeof globalThis
 
   const channels = dispatchImportCompletionRefresh(
     { id: 'job-2', type: 'sales', status: 'completed_with_errors' },
@@ -76,8 +84,8 @@ function testDispatchEmitsExpectedEvents() {
   assert.equal(events[0].detail.reason, 'import-completed')
   assert.equal(events[0].detail.source, 'test-suite')
 
-  delete globalThis.window
-  delete globalThis.CustomEvent
+  Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'CustomEvent')
 }
 
 testProductImportChannels()

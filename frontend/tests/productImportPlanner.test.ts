@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { analyzeProductImportRows, analyzeProductImportText } from '../src/components/products/import/productImportPlanner.mjs'
+import { analyzeProductImportRows, analyzeProductImportText } from '../src/components/products/import/productImportPlanner.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+type ImportFixtureRow = Record<string, unknown>
+
+interface ProductImportReviewSubgroupFixture {
+  rowIndexes: number[]
+  suggestedAction: string
+}
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -52,13 +60,15 @@ await runTest('same product name with only price changes plans stock merge', () 
 })
 
 await runTest('malformed existing product rows do not crash import analysis', () => {
-  const analysis = analyzeProductImportRows([
-    { name: 'Safe Cream', sku: 'SAFE-1', selling_price_usd: '8.001', stock_quantity: '2' },
-  ], [
+  const existingProducts = [
     null,
     { id: 20, name: 'Safe Cream', sku: 'SAFE-1', image_gallery: null, selling_price_usd: 8.01 },
     { id: 21, name: '', image_gallery: '{bad json' },
-  ])
+  ] as unknown as ImportFixtureRow[]
+
+  const analysis = analyzeProductImportRows([
+    { name: 'Safe Cream', sku: 'SAFE-1', selling_price_usd: '8.001', stock_quantity: '2' },
+  ], existingProducts)
 
   assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
   assert.equal(analysis.rows[0]._target_product_id, 20)
@@ -98,7 +108,7 @@ await runTest('same-file duplicate barcode rows become review conflicts', () => 
 
   assert.equal(analysis.conflicts.length, 2)
   assert.deepEqual(analysis.conflicts.map((entry) => entry.conflictFields), [['barcode'], ['barcode']])
-  assert.deepEqual(analysis.conflicts[0].importDuplicateRows.barcode, [0, 1])
+  assert.deepEqual(analysis.conflicts[0]?.importDuplicateRows?.barcode, [0, 1])
   assert.equal(analysis.rows[0]._identifier_conflict_mode, 'clear_imported')
   assert.equal(analysis.rows[1]._identifier_conflict_mode, 'clear_imported')
 })
@@ -152,9 +162,10 @@ await runTest('same imported name groups rows into detail subgroups for review',
   assert.ok(group, 'Expected same-name group in analysis')
   assert.equal(group.rowNumbers.length, 3)
   assert.equal(group.subgroups.length, 2)
-  assert.deepEqual(group.subgroups.map((entry) => entry.rowIndexes).sort((a, b) => b.length - a.length), [[0, 1], [2]])
-  assert.equal(group.subgroups[0].suggestedAction, 'merge_stock')
-  assert.equal(group.subgroups.some((entry) => entry.suggestedAction === 'create_variant'), true)
+  const subgroups = group.subgroups as ProductImportReviewSubgroupFixture[]
+  assert.deepEqual(subgroups.map((entry) => entry.rowIndexes).sort((a, b) => b.length - a.length), [[0, 1], [2]])
+  assert.equal(subgroups[0]?.suggestedAction, 'merge_stock')
+  assert.equal(subgroups.some((entry) => entry.suggestedAction === 'create_variant'), true)
 })
 
 await runTest('large product import analysis keeps deterministic row counts', () => {

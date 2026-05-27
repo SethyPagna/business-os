@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { analyzeProductImportText } from '../src/components/products/import/productImportPlanner.mjs'
+import { analyzeProductImportText } from '../src/components/products/import/productImportPlanner.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -18,7 +20,7 @@ async function runTest(name, fn) {
 await runTest('product import worker fallback keeps analysis deterministic', () => {
   const analysis = analyzeProductImportText('name,sku,selling_price_usd,stock_quantity\nSerum,S-1,12,3', [])
   assert.equal(analysis.summary.total, 1)
-  assert.equal(analysis.rows[0]._planned_action, 'new')
+  assert.equal(analysis.rows[0]?._planned_action, 'new')
 })
 
 await runTest('bulk product import worker has timeout and sync fallback guardrails', () => {

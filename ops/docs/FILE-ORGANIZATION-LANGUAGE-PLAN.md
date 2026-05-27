@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 433 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 434 in this file.
 
 ## Goal
 
@@ -15,8 +15,8 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
   - 86 `.ts`
   - 1 `.css`
 - Frontend tests: 76 focused test files under `frontend/tests`.
-  - 33 `.mjs`
-  - 43 `.ts`
+  - 23 `.mjs`
+  - 53 `.ts`
 - Backend source: 87 files under `backend/src`.
   - 83 `.js`
   - 1 `.sql`
@@ -1079,7 +1079,7 @@ Decision rule:
     `frontend/src/utils/mediaUpload.ts`, while
     `frontend/src/utils/mediaUpload.js` remains as the compatibility wrapper for
     catalog, settings, product form, and focused test imports. Added the
-    existing `frontend/tests/mediaUploadHelpers.test.mjs` to the frontend utility
+    existing `frontend/tests/mediaUploadHelpers.test.ts` to the frontend utility
     suite and fixed cache-busting so explicit upload versions replace an
     existing `v` query parameter instead of appending a duplicate. Added
     `frontend/src/utils/publicAssetUrls.d.ts` for the JS public-asset boundary.
@@ -3473,6 +3473,16 @@ Decision rule:
     explicit menu-item and filter-section guards, and keeps intentionally
     malformed normalization fixtures behind `unknown` casts instead of
     weakening TypeScript settings.
+434. Convert import, CSV, export, and refresh tests to TypeScript. Done:
+    Ten more focused tests now run as `.ts`: `csvImport`,
+    `contactImportWorker`, `inventoryImportWorker`, `salesImportWorker`,
+    `productImportWorkerFallback`, `mediaUploadHelpers`,
+    `productImportPlanner`, `exportPackages`, `importJobRefresh`, and
+    `appRefresh`. The batch targets the high-resource import/export paths,
+    points tests at TypeScript implementations where wrappers already exist,
+    keeps worker fallback assertions intact, narrows fake browser events, and
+    leaves malformed product-import fixtures behind explicit `unknown` casts
+    so strict TypeScript checks prove the harness without hiding edge cases.
 
 ## Safety Gates
 

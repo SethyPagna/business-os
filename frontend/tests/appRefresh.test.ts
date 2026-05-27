@@ -1,28 +1,36 @@
 import assert from 'node:assert/strict'
 
-import { normalizeRefreshChannels, refreshAppData } from '../src/utils/appRefresh.js'
+import { normalizeRefreshChannels, refreshAppData } from '../src/utils/appRefresh.ts'
 
-function testNormalizeRefreshChannels() {
+interface CapturedRefreshEvent {
+  type: string
+  detail: Record<string, unknown>
+}
+
+function testNormalizeRefreshChannels(): void {
   assert.deepEqual(
     normalizeRefreshChannels([' settings ', 'products', 'settings', '', null, 'products']),
     ['settings', 'products'],
   )
 }
 
-function testRefreshAppDataDispatchesMergedDetail() {
-  const events = []
+function testRefreshAppDataDispatchesMergedDetail(): void {
+  const events: CapturedRefreshEvent[] = []
   globalThis.CustomEvent = class CustomEvent {
-    constructor(type, init = {}) {
+    type: string
+    detail: Record<string, unknown>
+
+    constructor(type: string, init: CustomEventInit = {}) {
       this.type = type
-      this.detail = init.detail
+      this.detail = (init.detail || {}) as Record<string, unknown>
     }
-  }
+  } as typeof CustomEvent
   globalThis.window = {
-    dispatchEvent(event) {
-      events.push(event)
+    dispatchEvent(event: Event) {
+      events.push(event as unknown as CapturedRefreshEvent)
       return true
     },
-  }
+  } as Window & typeof globalThis
 
   refreshAppData(['settings', 'units', 'settings'], {
     reason: 'settings-saved',
@@ -38,8 +46,8 @@ function testRefreshAppDataDispatchesMergedDetail() {
   assert.equal(events[0].detail.source, 'test-suite')
   assert.equal(typeof events[0].detail.ts, 'number')
 
-  delete globalThis.window
-  delete globalThis.CustomEvent
+  Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'CustomEvent')
 }
 
 testNormalizeRefreshChannels()

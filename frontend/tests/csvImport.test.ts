@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { decodeTextBuffer, normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../src/utils/csvImport.js'
+import { decodeTextBuffer, normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../src/utils/csvImport.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -34,9 +36,9 @@ await runTest('parseCsvNumber falls back for invalid numbers', () => {
 await runTest('parseCsvRows preserves Khmer text and TSV delimiter input', () => {
   const rows = parseCsvRows('\uFEFFName\tDescription\tPrice\n\u1780\u17d2\u179a\u17c2\u1798\u179b\u17b6\u1794\u1798\u17bb\u1781\t\u17a2\u178f\u17d2\u1790\u1794\u1791\u1781\u17d2\u1798\u17c2\u179a\t\u17e1\u17e2\u17e3\u17e4.\u17e5\u17e6\u17e7')
   assert.equal(rows.length, 1)
-  assert.equal(rows[0].name, '\u1780\u17d2\u179a\u17c2\u1798\u179b\u17b6\u1794\u1798\u17bb\u1781')
-  assert.equal(rows[0].description, '\u17a2\u178f\u17d2\u1790\u1794\u1791\u1781\u17d2\u1798\u17c2\u179a')
-  assert.equal(normalizeCsvMoney(rows[0].price), 1234.57)
+  assert.equal(rows[0]?.name, '\u1780\u17d2\u179a\u17c2\u1798\u179b\u17b6\u1794\u1798\u17bb\u1781')
+  assert.equal(rows[0]?.description, '\u17a2\u178f\u17d2\u1790\u1794\u1791\u1781\u17d2\u1798\u17c2\u179a')
+  assert.equal(normalizeCsvMoney(rows[0]?.price), 1234.57)
 })
 
 await runTest('normalizeCsvMoney rounds messy currency and decimal formats upward', () => {

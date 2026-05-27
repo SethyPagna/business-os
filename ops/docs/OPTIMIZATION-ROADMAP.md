@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 443.
+- Latest completed implementation move in this roadmap: Move 444.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2097,7 +2097,7 @@ Cleanup checkpoint:
   `frontend/src/utils/mediaUpload.ts` owns upload-state reduction, temporary
   preview sanitization, and cache-busted media paths, while `mediaUpload.js`
   remains as the compatibility wrapper for existing imports. The conversion
-  added `mediaUploadHelpers.test.mjs` to the utility suite and fixed duplicate
+  added `mediaUploadHelpers.test.ts` to the utility suite and fixed duplicate
   `v` query parameters when an explicit upload cache version replaces the
   frontend build hash.
 - The pricing helper slice is now complete:
@@ -3442,7 +3442,7 @@ Cleanup checkpoint:
   `frontend/src/components/products/import/BulkImportModal.jsx` now builds the
   review filter counts with one `conflictGroups` accumulator loop. The import
   review surface no longer filters the same conflict list separately for each
-  badge count, and `productImportPlanner.test.mjs` guards the single-pass shape.
+  badge count, and `productImportPlanner.test.ts` guards the single-pass shape.
 - Move 317 precomputes Inventory visible product IDs:
   `frontend/src/components/inventory/Inventory.jsx` now builds one memoized
   `visibleInventoryProductIds` list from `visibleInventoryProducts` and reuses
@@ -4960,3 +4960,13 @@ Move 443 status:
   image barcode scanning. Frontend tests now stand at 33 `.mjs` and 43 `.ts`,
   and the batch keeps fake DOM/scanner fixtures typed without relaxing strict
   compiler checks.
+
+Move 444 status:
+- Move 444 converts the import, CSV, export, and refresh test cluster to
+  TypeScript in one session. The converted `.ts` tests cover CSV decoding and
+  Khmer preservation, product import planning and worker fallback, contact,
+  inventory, and sales import row-count workers, media upload reducer state,
+  export package/zip fallback behavior, import-completion refresh channels,
+  and app refresh events. Frontend tests now stand at 23 `.mjs` and 53 `.ts`,
+  and the batch keeps fake browser-event globals and intentionally malformed
+  import fixtures typed without relaxing strict compiler checks.

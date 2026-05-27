@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { buildCacheBustedMediaPath, createInitialUploadState, reduceUploadState } from '../src/utils/mediaUpload.js'
+import { buildCacheBustedMediaPath, createInitialUploadState, reduceUploadState } from '../src/utils/mediaUpload.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -20,14 +22,14 @@ await runTest('cache busted media path appends upload version without duplicatin
 })
 
 await runTest('upload reducer tracks per-field progress and cancellation', () => {
-  const initial = createInitialUploadState()
+  const initial = { logo: createInitialUploadState() }
   const started = reduceUploadState(initial, { type: 'start', key: 'logo', previewUrl: 'blob:logo' })
   const progressed = reduceUploadState(started, { type: 'progress', key: 'logo', progress: 55 })
   const cancelled = reduceUploadState(progressed, { type: 'cancel', key: 'logo' })
 
-  assert.equal(progressed.logo.status, 'uploading')
-  assert.equal(progressed.logo.progress, 55)
-  assert.equal(cancelled.logo.status, 'cancelled')
+  assert.equal(progressed.logo?.status, 'uploading')
+  assert.equal(progressed.logo?.progress, 55)
+  assert.equal(cancelled.logo?.status, 'cancelled')
 })
 
 if (failed > 0) {

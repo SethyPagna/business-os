@@ -178,8 +178,8 @@ const FOCUSED_TEST_COVERAGE = [
     track: 'Completed TypeScript utility conversion',
     candidate: 'frontend/src/utils/csvImport.ts',
     tests: [
-      'frontend/tests/csvImport.test.mjs',
-      'frontend/tests/productImportPlanner.test.mjs',
+      'frontend/tests/csvImport.test.ts',
+      'frontend/tests/productImportPlanner.test.ts',
     ],
     command: 'npm.cmd --prefix frontend run test:utils',
     reason: 'CSV parser and product import planner exercise Khmer/number/header behavior before helper conversion.',
@@ -188,7 +188,7 @@ const FOCUSED_TEST_COVERAGE = [
     track: 'Web Worker extraction',
     candidate: 'frontend/src/components/contacts/ContactImportModal.jsx',
     tests: [
-      'frontend/tests/contactImportWorker.test.mjs',
+      'frontend/tests/contactImportWorker.test.ts',
       'frontend/tests/actionStability.test.mjs',
       'frontend/tests/performanceLoadingUx.test.mjs',
     ],
@@ -199,7 +199,7 @@ const FOCUSED_TEST_COVERAGE = [
     track: 'Completed Web Worker extraction',
     candidate: 'frontend/src/components/inventory/InventoryImportModal.jsx',
     tests: [
-      'frontend/tests/inventoryImportWorker.test.mjs',
+      'frontend/tests/inventoryImportWorker.test.ts',
       'frontend/tests/actionStability.test.mjs',
       'frontend/tests/performanceLoadingUx.test.mjs',
     ],
@@ -210,7 +210,7 @@ const FOCUSED_TEST_COVERAGE = [
     track: 'Completed Web Worker extraction',
     candidate: 'frontend/src/components/sales/SalesImportModal.jsx',
     tests: [
-      'frontend/tests/salesImportWorker.test.mjs',
+      'frontend/tests/salesImportWorker.test.ts',
       'frontend/tests/actionStability.test.mjs',
       'frontend/tests/performanceLoadingUx.test.mjs',
     ],
@@ -332,8 +332,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/utils/pricing.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\csvImport.test.mjs',
-      'node frontend\\tests\\productImportPlanner.test.mjs',
+      'node frontend\\tests\\csvImport.test.ts',
+      'node frontend\\tests\\productImportPlanner.test.ts',
     ],
   },
   {
@@ -343,8 +343,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\inventoryImportWorker.test.mjs',
-      'node frontend\\tests\\salesImportWorker.test.mjs',
+      'node frontend\\tests\\inventoryImportWorker.test.ts',
+      'node frontend\\tests\\salesImportWorker.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -386,7 +386,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/utils/publicAssetUrls.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\mediaUploadHelpers.test.mjs',
+      'node frontend\\tests\\mediaUploadHelpers.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -540,7 +540,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\productImportPlanner.test.mjs',
+      'node frontend\\tests\\productImportPlanner.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -551,7 +551,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\productImportPlanner.test.mjs',
+      'node frontend\\tests\\productImportPlanner.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -695,7 +695,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/utils/csv.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\exportPackages.test.mjs',
+      'node frontend\\tests\\exportPackages.test.ts',
       'node frontend\\tests\\dashboardDataReliability.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
@@ -717,7 +717,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\importJobRefresh.test.mjs',
+      'node frontend\\tests\\importJobRefresh.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -772,7 +772,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\settingsRefresh.test.ts',
-      'node frontend\\tests\\appRefresh.test.mjs',
+      'node frontend\\tests\\appRefresh.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -797,8 +797,8 @@ const COMPLETED_WEB_WORKER_SLICES = [
     fallback: 'frontend/src/components/products/import/productImportPlanner.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\productImportWorkerFallback.test.mjs',
-      'node frontend\\tests\\productImportPlanner.test.mjs',
+      'node frontend\\tests\\productImportWorkerFallback.test.ts',
+      'node frontend\\tests\\productImportPlanner.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'npm.cmd --prefix frontend run build',
       'focused Playwright product import modal flow',
@@ -811,7 +811,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     fallback: 'frontend/src/utils/csvRowCounter.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\contactImportWorker.test.mjs',
+      'node frontend\\tests\\contactImportWorker.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'node frontend\\tests\\actionStability.test.mjs',
       'npm.cmd --prefix frontend run build',
@@ -825,7 +825,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     fallback: 'frontend/src/utils/csvRowCounter.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\inventoryImportWorker.test.mjs',
+      'node frontend\\tests\\inventoryImportWorker.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'node frontend\\tests\\actionStability.test.mjs',
       'npm.cmd --prefix frontend run build',
@@ -839,7 +839,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     fallback: 'frontend/src/utils/csvRowCounter.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\salesImportWorker.test.mjs',
+      'node frontend\\tests\\salesImportWorker.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'node frontend\\tests\\actionStability.test.mjs',
       'npm.cmd --prefix frontend run build',
@@ -853,7 +853,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     fallback: 'frontend/src/utils/csv.js',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\exportPackages.test.mjs',
+      'node frontend\\tests\\exportPackages.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'npm.cmd --prefix frontend run build',
       'focused Playwright dashboard/inventory/contact export flow',
