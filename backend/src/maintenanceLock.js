@@ -43,12 +43,12 @@ function withMaintenanceLock(input, worker) {
     })
 }
 
-function maintenanceWriteGuard(req, res, next) {
-  if (!activeLock) return next()
-  const method = String(req.method || 'GET').toUpperCase()
-  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return next()
-  const path = String(req.originalUrl || req.url || '')
-  const allowed = [
+function isReadOnlyMethod(method) {
+  return method === 'GET' || method === 'HEAD' || method === 'OPTIONS'
+}
+
+function isMaintenanceWriteAllowed(path) {
+  const allowedPrefixes = [
     '/api/auth/logout',
     '/api/system/jobs/',
     '/api/system/debug',
@@ -56,8 +56,19 @@ function maintenanceWriteGuard(req, res, next) {
     '/api/system/drive-sync/status',
     '/api/backups',
     '/api/system/backups',
-  ].some((prefix) => path.startsWith(prefix))
-  if (allowed) return next()
+  ]
+  for (const prefix of allowedPrefixes) {
+    if (path.startsWith(prefix)) return true
+  }
+  return false
+}
+
+function maintenanceWriteGuard(req, res, next) {
+  if (!activeLock) return next()
+  const method = String(req.method || 'GET').toUpperCase()
+  if (isReadOnlyMethod(method)) return next()
+  const path = String(req.originalUrl || req.url || '')
+  if (isMaintenanceWriteAllowed(path)) return next()
   return res.status(423).json({
     success: false,
     code: 'system_busy',

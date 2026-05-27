@@ -32,19 +32,33 @@ function normalizeFieldRule(value, fallback) {
 }
 
 function splitUniqueImportValues(value) {
-  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean)
+  if (Array.isArray(value)) return collectImportListValues(value)
   const raw = String(value ?? '').trim()
   if (!raw) return []
   if ((raw.startsWith('[') && raw.endsWith(']')) || (raw.startsWith('{') && raw.endsWith('}'))) {
     try {
       const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed)) return parsed.map((item) => String(item || '').trim()).filter(Boolean)
+      if (Array.isArray(parsed)) return collectImportListValues(parsed)
     } catch (_) {}
   }
-  return raw
-    .split(/[|;\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+  return collectImportListValues(raw.split(/[|;\n]/))
+}
+
+function collectImportListValues(values = []) {
+  const items = []
+  for (const item of Array.isArray(values) ? values : []) {
+    const value = String(item || '').trim()
+    if (value) items.push(value)
+  }
+  return items
+}
+
+function buildLowercaseSet(values = []) {
+  const seen = new Set()
+  for (const value of values || []) {
+    seen.add(value.toLowerCase())
+  }
+  return seen
 }
 
 function appendUniqueImportValue(existingValue, incomingValue, hasIncomingValue) {
@@ -53,14 +67,14 @@ function appendUniqueImportValue(existingValue, incomingValue, hasIncomingValue)
   const incomingItems = splitUniqueImportValues(incomingValue)
   if (!incomingItems.length) return existingValue
   if (!existingItems.length) return incomingItems.join(' | ')
-  const seen = new Set(existingItems.map((item) => item.toLowerCase()))
+  const seen = buildLowercaseSet(existingItems)
   const merged = [...existingItems]
-  incomingItems.forEach((item) => {
+  for (const item of incomingItems) {
     const key = item.toLowerCase()
-    if (seen.has(key)) return
+    if (seen.has(key)) continue
     seen.add(key)
     merged.push(item)
-  })
+  }
   return merged.join(' | ')
 }
 

@@ -49,8 +49,49 @@ function getProductById(productId) {
   return db.prepare('SELECT * FROM products WHERE id = ? LIMIT 1').get(numericId) || null
 }
 
+function rowsToIds(rows = []) {
+  const ids = []
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id != null) ids.push(row.id)
+  }
+  return ids
+}
+
+function normalizePositiveIds(values = []) {
+  const ids = []
+  const seen = new Set()
+  for (const value of Array.isArray(values) ? values : []) {
+    const id = Number.parseInt(value, 10)
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+  }
+  return ids
+}
+
+function buildPlaceholders(values = []) {
+  const placeholders = []
+  for (const _ of values) placeholders.push('?')
+  return placeholders.join(',')
+}
+
+function sumQuantities(rows = []) {
+  let total = 0
+  for (const row of Array.isArray(rows) ? rows : []) {
+    total += Number(row?.quantity || 0)
+  }
+  return total
+}
+
+function hasTrackedBatch(rows = []) {
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (Number(row?.synthetic || 0) === 0) return true
+  }
+  return false
+}
+
 function getProductBatchIds(productId) {
-  return db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(productId).map((row) => row.id)
+  return rowsToIds(db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(productId))
 }
 
 function getBatchRowsForProduct(productId) {
@@ -64,7 +105,7 @@ function getBatchRowsForProduct(productId) {
 
 function getLegacyBatchBackfillCandidates(limit = LEGACY_BACKFILL_CHUNK_SIZE) {
   const safeLimit = Math.max(1, Math.min(1000, Number(limit || LEGACY_BACKFILL_CHUNK_SIZE) || LEGACY_BACKFILL_CHUNK_SIZE))
-  return db.prepare(`
+  return rowsToIds(db.prepare(`
     SELECT p.id
     FROM products p
     LEFT JOIN product_batches pb ON pb.variant_product_id = p.id
@@ -72,7 +113,7 @@ function getLegacyBatchBackfillCandidates(limit = LEGACY_BACKFILL_CHUNK_SIZE) {
       AND pb.id IS NULL
     ORDER BY p.id ASC
     LIMIT ?
-  `).all(safeLimit).map((row) => row.id)
+  `).all(safeLimit))
 }
 
 function createOrFindProductBatch(productId, options = {}) {
@@ -194,9 +235,9 @@ function getBatchStockRows(productId, { branchId = null, batchId = null, include
 }
 
 function listProductBatches(productIds = [], { branchId = null } = {}) {
-  const ids = Array.from(new Set((productIds || []).map((id) => Number.parseInt(id, 10)).filter((id) => Number.isFinite(id) && id > 0)))
+  const ids = normalizePositiveIds(productIds)
   if (!ids.length) return new Map()
-  const placeholders = ids.map(() => '?').join(',')
+  const placeholders = buildPlaceholders(ids)
   const params = [...ids]
   let branchJoin = ''
   if (branchId) {
@@ -242,7 +283,7 @@ function listProductBatches(productIds = [], { branchId = null } = {}) {
   `).all(...params)
 
   const map = new Map()
-  rows.forEach((row) => {
+  for (const row of rows) {
     if (!map.has(row.variant_product_id)) map.set(row.variant_product_id, [])
     let branchStock = []
     try {
@@ -260,24 +301,30 @@ function listProductBatches(productIds = [], { branchId = null } = {}) {
       quantity: Number(row.quantity || 0),
       branch_stock: branchStock,
     })
-  })
+  }
   return map
 }
 
 function syncProductBatchRollups(productIds = []) {
-  const ids = Array.from(new Set((productIds || []).map((id) => Number.parseInt(id, 10)).filter((id) => Number.isFinite(id) && id > 0)))
+  const ids = normalizePositiveIds(productIds)
   if (!ids.length) return
 
   for (const productId of ids) {
-    const aggregateRows = db.prepare(`
+    const aggregateRows = []
+    for (const row of db.prepare(`
       SELECT bbs.branch_id, COALESCE(SUM(bbs.quantity), 0) AS quantity
       FROM product_batches pb
       LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
       WHERE pb.variant_product_id = ?
       GROUP BY bbs.branch_id
-    `).all(productId).filter((row) => row.branch_id)
+    `).all(productId)) {
+      if (row.branch_id) aggregateRows.push(row)
+    }
 
-    const nextByBranch = new Map(aggregateRows.map((row) => [Number(row.branch_id), Number(row.quantity || 0)]))
+    const nextByBranch = new Map()
+    for (const row of aggregateRows) {
+      nextByBranch.set(Number(row.branch_id), Number(row.quantity || 0))
+    }
     const branchRows = db.prepare('SELECT branch_id FROM branch_stock WHERE product_id = ?').all(productId)
     const seen = new Set()
     for (const [branchId, quantity] of nextByBranch.entries()) {
@@ -294,7 +341,7 @@ function syncProductBatchRollups(productIds = []) {
       db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ? AND branch_id = ?').run(productId, row.branch_id)
     }
 
-    const totalQuantity = aggregateRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0)
+    const totalQuantity = sumQuantities(aggregateRows)
     db.prepare(`
       UPDATE products
       SET stock_quantity = ?, updated_at = CURRENT_TIMESTAMP
@@ -308,7 +355,7 @@ function migrateLegacyProductToBatches(productId, { force = false } = {}) {
   if (!product || !isSellableProduct(product)) return []
 
   const existingBatches = getBatchRowsForProduct(product.id)
-  const hasTrackedBatches = existingBatches.some((batch) => Number(batch.synthetic || 0) === 0)
+  const hasTrackedBatches = hasTrackedBatch(existingBatches)
   if (hasTrackedBatches && !force) {
     syncProductBatchRollups([product.id])
     return existingBatches
@@ -329,9 +376,9 @@ function migrateLegacyProductToBatches(productId, { force = false } = {}) {
   `).all(product.id)
 
   if (!force) {
-    const legacyBatchIds = existingBatches.length ? existingBatches.map((row) => row.id) : [batch.id]
+    const legacyBatchIds = existingBatches.length ? rowsToIds(existingBatches) : [batch.id]
     if (legacyBatchIds.length) {
-      const placeholders = legacyBatchIds.map(() => '?').join(',')
+      const placeholders = buildPlaceholders(legacyBatchIds)
       db.prepare(`
         UPDATE branch_batch_stock
         SET quantity = 0, updated_at = CURRENT_TIMESTAMP
@@ -340,20 +387,20 @@ function migrateLegacyProductToBatches(productId, { force = false } = {}) {
     }
   }
 
-  branchRows.forEach((row) => {
+  for (const row of branchRows) {
     setBranchBatchQuantity(batch.id, row.branch_id, row.quantity || 0)
-  })
+  }
   syncProductBatchRollups([product.id])
   return getBatchRowsForProduct(product.id)
 }
 
 function migrateAllLegacyProductsToBatches({ force = false } = {}) {
   const productIds = force
-    ? db.prepare(`
+    ? rowsToIds(db.prepare(`
       SELECT id
       FROM products
       WHERE NOT (COALESCE(is_group, 0) = 1 AND COALESCE(parent_id, 0) = 0)
-    `).all().map((row) => row.id)
+    `).all())
     : getLegacyBatchBackfillCandidates()
   for (const productId of productIds) migrateLegacyProductToBatches(productId, { force })
   return productIds.length
@@ -406,7 +453,7 @@ function getLegacyBatchBackfillStatus() {
 
 function getAvailableProductQuantity(productId, branchId = null) {
   const rows = getBatchStockRows(productId, { branchId })
-  return rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0)
+  return sumQuantities(rows)
 }
 
 function allocateProductBatches(productId, branchId, quantity, options = {}) {
@@ -420,7 +467,7 @@ function allocateProductBatches(productId, branchId, quantity, options = {}) {
     branchId: branchId || null,
     batchId: options.batchId || options.batch_id || null,
   })
-  const available = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0)
+  const available = sumQuantities(rows)
   if (available + 0.0000001 < numericQty) {
     throw new Error(`Insufficient stock for ${product.name || 'product'}: requested ${numericQty}, available ${available}`)
   }

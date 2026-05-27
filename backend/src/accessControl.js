@@ -107,7 +107,10 @@ function isPublicRemoteRequest(req) {
 function isPublicApiRequest(req) {
   const method = String(req?.method || 'GET').toUpperCase()
   const path = String(req?.originalUrl || req?.path || '').split('?')[0]
-  return PUBLIC_API_ALLOWLIST.some((entry) => entry.method === method && entry.pattern.test(path))
+  for (const entry of PUBLIC_API_ALLOWLIST) {
+    if (entry.method === method && entry.pattern.test(path)) return true
+  }
+  return false
 }
 
 function classifyRequestAccess(req) {

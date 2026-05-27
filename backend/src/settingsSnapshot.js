@@ -103,9 +103,9 @@ async function sanitizeSettingValueAsync(value, existenceCache = null) {
 
 function sanitizeSettingsSnapshot(snapshot = {}) {
   const next = { ...snapshot }
-  Object.keys(next).forEach((key) => {
+  for (const key of Object.keys(next)) {
     next[key] = sanitizeSettingValue(next[key])
-  })
+  }
   return next
 }
 

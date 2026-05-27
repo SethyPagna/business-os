@@ -214,9 +214,14 @@ function requirePermission(key) {
 }
 
 function requireAnyPermission(keys = []) {
-  const requiredKeys = Array.isArray(keys) ? keys.filter(Boolean) : [keys].filter(Boolean)
+  const requiredKeys = []
+  for (const key of Array.isArray(keys) ? keys : [keys]) {
+    if (key) requiredKeys.push(key)
+  }
   return (req, res, next) => {
-    if (requiredKeys.some((key) => hasPermission(req.user, key))) return next()
+    for (const key of requiredKeys) {
+      if (hasPermission(req.user, key)) return next()
+    }
     return res.status(403).json({
       success: false,
       error: 'No permission',
@@ -226,16 +231,54 @@ function requireAnyPermission(keys = []) {
   }
 }
 
+function readAuditTextValue(value, maxLen = 255) {
+  const normalized = String(value || '').trim()
+  if (!normalized) return null
+  return normalized.slice(0, maxLen)
+}
+
+function getAuditRequestMeta(req, fallback = {}) {
+  const body = req?.body || {}
+  return {
+    deviceName: readAuditTextValue(
+      body.deviceName
+      || body.device_name
+      || fallback.deviceName
+      || fallback.device_name
+      || req?.headers?.['x-device-name']
+    ),
+    deviceTz: readAuditTextValue(
+      body.deviceTz
+      || body.device_tz
+      || fallback.deviceTz
+      || fallback.device_tz
+      || req?.headers?.['x-device-tz'],
+      120
+    ),
+    clientTime: readAuditTextValue(
+      body.clientTime
+      || body.client_time
+      || fallback.clientTime
+      || fallback.client_time
+      || req?.headers?.['x-client-time'],
+      64
+    ),
+  }
+}
+
 function getAuditActor(req, fallback = {}) {
+  const requestMeta = getAuditRequestMeta(req, fallback)
   if (req?.user?.id) {
     return {
       userId: req.user.id,
       userName: req.user.name || req.user.username || null,
+      ...requestMeta,
     }
   }
   return {
     userId: fallback.userId || null,
     userName: fallback.userName || null,
+    ...requestMeta,
   }
 }
 

@@ -32,6 +32,7 @@ runTest('product router registers required paged search routes', () => {
   assert.ok(paths.indexOf('/search') < paths.indexOf('/'), '/search must be registered before root route')
   assert.match(source, /COALESCE\(p\.name,\s*''\)/, 'initial search must use a SQL string literal fallback')
   assert.doesNotMatch(source, /COALESCE\(p\.name,\s*""\)/, 'initial search must not use double-quoted identifiers')
+  assert.match(source, /\['brand', 'category', 'unit', 'supplier'\]/, 'product search should support unit lookup filtering')
 })
 
 runTest('inventory router registers required paged product search route', () => {
@@ -109,6 +110,95 @@ runTest('system router exposes paged audit logs and retention cleanup', () => {
   assert.match(source, /olderThanDays/)
 })
 
+runTest('system settings writes reuse prepared statements inside transactions', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.js'), 'utf8')
+  assert.match(source, /const upsert = db\.prepare\(`[\s\S]*INSERT INTO settings/)
+  assert.match(source, /const deleteSetting = db\.prepare\('DELETE FROM settings WHERE key = \?'\)/)
+  assert.match(source, /if \(value == null\) deleteSetting\.run\(key\)/)
+  assert.doesNotMatch(source, /if \(value == null\) db\.prepare\('DELETE FROM settings WHERE key = \?'\)\.run\(key\)/)
+})
+
+runTest('settings route caches updated_at schema metadata', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/settings.js'), 'utf8')
+  assert.match(source, /const \{ hasColumn \} = require\('\.\.\/schemaMetadata'\)/)
+  assert.match(source, /return hasColumn\('settings', 'updated_at'\)/)
+  assert.doesNotMatch(source, /information_schema\.columns/)
+})
+
+runTest('branch and inventory routes cache stock transfer note metadata', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const branchesSource = fs.readFileSync(path.join(__dirname, '../src/routes/branches.js'), 'utf8')
+  const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
+  assert.match(branchesSource, /const \{ firstExistingColumn \} = require\('\.\.\/schemaMetadata'\)/)
+  assert.match(branchesSource, /return firstExistingColumn\('stock_transfers', \['notes', 'note'\]\)/)
+  assert.match(inventorySource, /const \{ firstExistingColumn \} = require\('\.\.\/schemaMetadata'\)/)
+  assert.match(inventorySource, /return firstExistingColumn\('stock_transfers', \['note', 'notes', 'reason'\]\)/)
+  assert.doesNotMatch(branchesSource, /information_schema\.columns/)
+  assert.doesNotMatch(inventorySource, /information_schema\.columns/)
+})
+
+runTest('inventory stock writes index active branches per request', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
+  assert.match(source, /function buildActiveBranchIndex\(rows = \[\]\)/)
+  assert.match(source, /const activeBranchIndex = buildActiveBranchIndex\(activeBranches\)/)
+  assert.match(source, /activeBranchIndex\.byId\.get\(Number\(targetBranchId\)\)/)
+  assert.match(source, /activeBranchIndex\.byId\.get\(Number\(requestedBranchId\)\)/)
+  assert.doesNotMatch(source, /activeBranches\.find\(\(branch\) => branch\.id === targetBranchId\)/)
+  assert.doesNotMatch(source, /activeBranches\.find\(\(entry\) => Number\(entry\.id\) === Number\(requestedBranchId\)\)/)
+})
+
+runTest('product import route caches settings updated_at schema metadata', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/products.js'), 'utf8')
+  assert.match(source, /const \{ hasColumn \} = require\('\.\.\/schemaMetadata'\)/)
+  assert.match(source, /function settingsHasUpdatedAt\(\)/)
+  assert.match(source, /return hasColumn\('settings', 'updated_at'\)/)
+  assert.match(source, /const upsertSetting = settingsHasUpdatedAt\(\)/)
+  assert.doesNotMatch(source, /information_schema\.columns/)
+})
+
+runTest('custom tables route caches managed column metadata', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/customTables.js'), 'utf8')
+  assert.match(source, /const \{ hasColumn, markColumnPresent \} = require\('\.\.\/schemaMetadata'\)/)
+  assert.match(source, /return hasColumn\(tableName, columnName\)/)
+  assert.match(source, /markColumnPresent\(tableName, 'updated_at'\)/)
+  assert.doesNotMatch(source, /information_schema\.columns/)
+})
+
+runTest('shared schema metadata helper caches column probes', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const source = fs.readFileSync(path.join(__dirname, '../src/schemaMetadata.js'), 'utf8')
+  assert.match(source, /const columnPresenceCache = new Map\(\)/)
+  assert.match(source, /const firstColumnCache = new Map\(\)/)
+  assert.match(source, /function hasColumn\(tableName, columnName\)/)
+  assert.match(source, /function firstExistingColumn\(tableName, columnNames = \[\]\)/)
+  assert.match(source, /function markColumnPresent\(tableName, columnName\)/)
+  assert.match(source, /FROM information_schema\.columns/)
+})
+
+runTest('production routes do not bypass shared schema metadata cache', () => {
+  const routesDir = path.join(__dirname, '../src/routes')
+  const offenders = []
+  for (const entry of fs.readdirSync(routesDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.js')) continue
+    const routePath = path.join(routesDir, entry.name)
+    const source = fs.readFileSync(routePath, 'utf8')
+    if (/information_schema\.columns/.test(source)) offenders.push(entry.name)
+  }
+  assert.deepEqual(offenders, [], `routes should use schemaMetadata.js for column probes: ${offenders.join(', ')}`)
+})
+
 runTest('activity routes include admin-only user filters for attribution review', () => {
   const fs = require('fs')
   const path = require('path')
@@ -140,6 +230,14 @@ runTest('sales search uses joined customer membership data instead of a missing 
   assert.match(salesSource, /MAX\(c\.membership_number\)\s+AS customer_membership_number/)
   assert.match(salesSource, /lower\(COALESCE\(c\.membership_number, ''\)\) LIKE \?/)
   assert.doesNotMatch(salesSource, /lower\(COALESCE\(s\.customer_membership_number, ''\)\) LIKE \?/)
+})
+
+runTest('sales export product summary groups every selected product identity column', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.js'), 'utf8')
+  assert.match(salesSource, /SELECT si\.product_name,\s*si\.product_id,[\s\S]*GROUP BY si\.product_name,\s*si\.product_id ORDER BY revenue_usd DESC/)
+  assert.doesNotMatch(salesSource, /SELECT si\.product_name,\s*si\.product_id,[\s\S]*GROUP BY si\.product_name ORDER BY revenue_usd DESC/)
 })
 
 runTest('server health route exposes runtime driver diagnostics', () => {

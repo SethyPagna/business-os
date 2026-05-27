@@ -26,13 +26,24 @@ runTest('portal membership lookup builds customer match clauses without nullable
   assert.match(source, /const salesWhere = \[\]/, 'membership route should build sales clauses dynamically')
   assert.match(source, /const returnsWhere = \[\]/, 'membership route should build return clauses dynamically')
   assert.match(source, /const submissionWhere = \[\]/, 'membership route should build submission clauses dynamically')
-  assert.match(source, /const salesWhereSql = salesWhere\.length \? salesWhere\.map\(\(clause\) => `\(\$\{clause\}\)`\)\.join\(' OR '\) : 'FALSE'/, 'membership route should guard empty sales clauses')
-  assert.match(source, /const returnsWhereSql = returnsWhere\.length \? returnsWhere\.map\(\(clause\) => `\(\$\{clause\}\)`\)\.join\(' OR '\) : 'FALSE'/, 'membership route should guard empty return clauses')
-  assert.match(source, /const submissionWhereSql = submissionWhere\.length \? submissionWhere\.map\(\(clause\) => `\(\$\{clause\}\)`\)\.join\(' OR '\) : 'FALSE'/, 'membership route should guard empty submission clauses')
+  assert.match(source, /function joinWrappedClauses\(clauses\) \{[\s\S]*if \(!clauses\.length\) return 'FALSE'[\s\S]*wrapped\.push\(`\(\$\{clause\}\)`\)/, 'membership route should guard empty clauses through a shared direct-loop helper')
+  assert.match(source, /const salesWhereSql = joinWrappedClauses\(salesWhere\)/, 'membership route should guard empty sales clauses')
+  assert.match(source, /const returnsWhereSql = joinWrappedClauses\(returnsWhere\)/, 'membership route should guard empty return clauses')
+  assert.match(source, /const submissionWhereSql = joinWrappedClauses\(submissionWhere\)/, 'membership route should guard empty submission clauses')
   assert.match(source, /salesWhere\.push\('s\.customer_id = @customerId'\)/, 'membership route should still prefer customer_id matching')
   assert.match(source, /submissionWhere\.push\("lower\(trim\(COALESCE\(membership_number, ''\)\)\) = lower\(trim\(@membershipNumber\)\)"\)/, 'membership route should still fall back to membership number matching')
   assert.doesNotMatch(source, /@customerId IS NOT NULL AND s\.customer_id = @customerId/, 'membership route must not use nullable parameter type guards in SQL')
   assert.doesNotMatch(source, /@customerId IS NOT NULL AND r\.customer_id = @customerId/, 'returns lookup must not use nullable parameter type guards in SQL')
+})
+
+runTest('portal catalog product payloads share image and branch-stock materialization', () => {
+  const source = readSource('src/routes/portal.js')
+  assert.match(source, /function getPortalProductAssets\(productIds\) \{/, 'portal route should centralize product asset queries')
+  assert.match(source, /function buildPortalProductPayload\(product, signals, assets\) \{/, 'portal route should centralize product payload decoration')
+  assert.match(source, /function buildPortalProductPayloads\(products, signals, assets\) \{[\s\S]*buildPortalProductPayload\(product, signals, assets\)/, 'portal route should share direct-loop payload list decoration')
+  assert.match(source, /const assets = getPortalProductAssets\(ids\)[\s\S]*return buildPortalProductPayloads\(products, signals, assets\)/, 'full portal product list should use shared payload builder')
+  assert.match(source, /const assets = getPortalProductAssets\(ids\)[\s\S]*const items = buildPortalProductPayloads\(products, signals, assets\)/, 'paged portal product search should use shared payload builder')
+  assert.equal((source.match(/function getPortalProductAssets\(productIds\) \{/g) || []).length, 1, 'portal asset materialization should have one implementation')
 })
 
 runTest('inventory movements accept large page sizes and use text-safe created_at ordering', () => {

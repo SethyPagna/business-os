@@ -34,27 +34,29 @@ function repairMissingUploadReferences(db) {
     SET value = ?, updated_at = CURRENT_TIMESTAMP
     WHERE key = ?
   `)
-  db.prepare('SELECT key, value FROM settings').all().forEach((row) => {
+  const settingRows = db.prepare('SELECT key, value FROM settings').all()
+  for (const row of settingRows) {
     const nextValue = sanitizeSettingValue(row.value)
-    if (nextValue === row.value) return
+    if (nextValue === row.value) continue
     updateSetting.run(nextValue, row.key)
     summary.settings += 1
-  })
+  }
 
   const deleteProductImage = db.prepare('DELETE FROM product_images WHERE id = ?')
   const updateProductImage = db.prepare('UPDATE product_images SET image_path = ? WHERE id = ?')
-  db.prepare('SELECT id, image_path FROM product_images').all().forEach((row) => {
+  const productImageRows = db.prepare('SELECT id, image_path FROM product_images').all()
+  for (const row of productImageRows) {
     const nextValue = sanitizeMediaPath(row.image_path, null)
     if (!nextValue) {
       deleteProductImage.run(row.id)
       summary.productImages += 1
-      return
+      continue
     }
     if (nextValue !== row.image_path) {
       updateProductImage.run(nextValue, row.id)
       summary.productImages += 1
     }
-  })
+  }
 
   const firstGalleryImage = db.prepare(`
     SELECT image_path
@@ -68,26 +70,28 @@ function repairMissingUploadReferences(db) {
     SET image_path = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `)
-  db.prepare('SELECT id, image_path FROM products').all().forEach((row) => {
+  const productRows = db.prepare('SELECT id, image_path FROM products').all()
+  for (const row of productRows) {
     const galleryPrimary = sanitizeMediaPath(firstGalleryImage.get(row.id)?.image_path, null)
     const currentPrimary = sanitizeMediaPath(row.image_path, null)
     const nextValue = galleryPrimary || currentPrimary || null
-    if ((row.image_path || null) === nextValue) return
+    if ((row.image_path || null) === nextValue) continue
     updateProduct.run(nextValue, row.id)
     summary.products += 1
-  })
+  }
 
   const updateUserAvatar = db.prepare(`
     UPDATE users
     SET avatar_path = ?
     WHERE id = ?
   `)
-  db.prepare('SELECT id, avatar_path FROM users WHERE avatar_path IS NOT NULL AND trim(avatar_path) != \'\'').all().forEach((row) => {
+  const userRows = db.prepare('SELECT id, avatar_path FROM users WHERE avatar_path IS NOT NULL AND trim(avatar_path) != \'\'').all()
+  for (const row of userRows) {
     const nextValue = sanitizeMediaPath(row.avatar_path, null)
-    if ((row.avatar_path || null) === nextValue) return
+    if ((row.avatar_path || null) === nextValue) continue
     updateUserAvatar.run(nextValue, row.id)
     summary.users += 1
-  })
+  }
 
   const deleteFileAsset = db.prepare('DELETE FROM file_assets WHERE id = ?')
   const updateFileAsset = db.prepare(`
@@ -95,32 +99,34 @@ function repairMissingUploadReferences(db) {
     SET public_path = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `)
-  db.prepare('SELECT id, public_path FROM file_assets').all().forEach((row) => {
-    if (!isUploadPublicPath(row.public_path)) return
+  const fileAssetRows = db.prepare('SELECT id, public_path FROM file_assets').all()
+  for (const row of fileAssetRows) {
+    if (!isUploadPublicPath(row.public_path)) continue
     const nextValue = sanitizeMediaPath(row.public_path, null)
     if (!nextValue) {
       deleteFileAsset.run(row.id)
       summary.fileAssets += 1
-      return
+      continue
     }
     if (nextValue !== row.public_path) {
       updateFileAsset.run(nextValue, row.id)
       summary.fileAssets += 1
     }
-  })
+  }
 
   const updateSubmissionScreenshots = db.prepare(`
     UPDATE customer_share_submissions
     SET screenshots_json = ?
     WHERE id = ?
   `)
-  db.prepare('SELECT id, screenshots_json FROM customer_share_submissions WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != \'\'').all().forEach((row) => {
+  const submissionRows = db.prepare('SELECT id, screenshots_json FROM customer_share_submissions WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != \'\'').all()
+  for (const row of submissionRows) {
     const currentList = safeJsonArray(row.screenshots_json)
     const nextList = sanitizeMediaList(currentList)
-    if (JSON.stringify(currentList) === JSON.stringify(nextList)) return
+    if (JSON.stringify(currentList) === JSON.stringify(nextList)) continue
     updateSubmissionScreenshots.run(JSON.stringify(nextList), row.id)
     summary.portalSubmissions += 1
-  })
+  }
 
   return summary
 }

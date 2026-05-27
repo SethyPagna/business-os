@@ -1,6 +1,6 @@
 'use strict'
 /**
- * helpers.js â€” Shared utility functions for route handlers.
+ * helpers.js — Shared utility functions for route handlers.
  *
  * Keeping these here (rather than inlining in routes) means:
  *  - One audit() signature change propagates everywhere.
@@ -11,7 +11,7 @@
 const { db } = require('./database')
 const { getRequestMeta } = require('./requestContext')
 
-// â”€â”€ Server-side operation log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Server-side operation log ─────────────────────────────────────────────────
 const serverLog = []
 const MAX_LOG   = 500
 
@@ -25,7 +25,7 @@ function logOp(channel, ms, ok = true) {
 
 function getServerLog() { return serverLog }
 
-// â”€â”€ HTTP response helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── HTTP response helpers ─────────────────────────────────────────────────────
 /** Send a successful JSON response, merging `data` into `{ success: true }`. */
 function ok(res, data = {}) {
   return res.json({ success: true, ...data })
@@ -36,7 +36,7 @@ function err(res, msg, status = 400) {
   return res.status(status).json({ success: false, error: msg })
 }
 
-// â”€â”€ Audit log writer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Audit log writer ──────────────────────────────────────────────────────────
 /**
  * Write a row to audit_logs.
  * @param {number|null} userId
@@ -152,7 +152,7 @@ function recordActionHistory({
   }
 }
 
-// â”€â”€ WebSocket broadcast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── WebSocket broadcast ───────────────────────────────────────────────────────
 // wss_clients is shared across middleware and routes via this module.
 const wss_clients = new Set()
 
@@ -176,7 +176,7 @@ function broadcast(channel, data = {}) {
   } catch (_) {}
 }
 
-// â”€â”€ Data helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Data helpers ──────────────────────────────────────────────────────────────
 /** Safely parse JSON; return `fallback` on any error. */
 function tryParse(str, fallback) {
   try { return JSON.parse(str) } catch { return fallback }
@@ -187,17 +187,56 @@ function today() {
   return new Date().toISOString().split('T')[0]
 }
 
-// â”€â”€ CSV bulk import â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function nonEmptyCsvLines(csvText) {
+  const lines = []
+  for (const line of String(csvText).trim().split('\n')) {
+    if (line) lines.push(line)
+  }
+  return lines
+}
+
+function normalizeCsvHeaders(line = '') {
+  const headers = []
+  for (const header of String(line).split(',')) {
+    headers.push(header.trim().replace(/"/g, '').toLowerCase())
+  }
+  return headers
+}
+
+function normalizeCsvCell(value) {
+  return String(value || '').trim().replace(/^"|"$/g, '')
+}
+
+function buildCsvRow(headers, values) {
+  const row = {}
+  for (let index = 0; index < headers.length; index += 1) {
+    row[headers[index]] = normalizeCsvCell(values[index])
+  }
+  return row
+}
+
+function buildParsedCsvRows(lines, headers) {
+  const rows = []
+  for (let index = 1; index < lines.length; index += 1) {
+    rows.push({
+      row: buildCsvRow(headers, parseCSVLine(lines[index])),
+      rowNumber: index + 1,
+    })
+  }
+  return rows
+}
+
+// ── CSV bulk import ───────────────────────────────────────────────────────────
 /**
  * Generic CSV import runner.
  * @param {string}   csvText      Full CSV string (header row required)
- * @param {string[]} _expectedCols Reserved for documentation only â€” not used at runtime
+ * @param {string[]} _expectedCols Reserved for documentation only — not used at runtime
  * @param {Function} insertFn     Called once per data row with a `{header: value}` object
  * @returns {{ imported: number, errors: string[] }}
  */
 function parseCSVRows(csvText) {
   if (!csvText) return { headers: [], rows: [], errors: ['No CSV data'] }
-  const lines = String(csvText).trim().split('\n').filter(Boolean)
+  const lines = nonEmptyCsvLines(csvText)
   if (lines.length < 2) {
     return {
       headers: [],
@@ -206,15 +245,8 @@ function parseCSVRows(csvText) {
     }
   }
 
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/"/g, '').toLowerCase())
-  const rows = lines.slice(1).map((line, index) => {
-    const vals = parseCSVLine(line)
-    const row = {}
-    headers.forEach((header, colIndex) => {
-      row[header] = vals[colIndex]?.trim().replace(/^"|"$/g, '') || ''
-    })
-    return { row, rowNumber: index + 2 }
-  })
+  const headers = normalizeCsvHeaders(lines[0])
+  const rows = buildParsedCsvRows(lines, headers)
 
   return { headers, rows, errors: [] }
 }
@@ -259,6 +291,20 @@ function parseCSVLine(line) {
   return result
 }
 
+function buildPlaceholders(cols = []) {
+  const placeholders = []
+  for (const _ of cols) placeholders.push('?')
+  return placeholders.join(',')
+}
+
+function rowValuesForColumns(row = {}, cols = []) {
+  const values = []
+  for (const col of cols) {
+    values.push(row[col] ?? null)
+  }
+  return values
+}
+
 /**
  * INSERT OR IGNORE rows from a backup array into a named table.
  * @param {string}   table  Target table name
@@ -267,14 +313,14 @@ function parseCSVLine(line) {
  */
 function importRows(table, rows = [], cols) {
   if (!rows.length) return
-  const placeholders = cols.map(() => '?').join(',')
+  const placeholders = buildPlaceholders(cols)
   const stmt = db.prepare(`INSERT OR IGNORE INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`)
-  rows.forEach(row => {
-    try { stmt.run(cols.map(c => row[c] ?? null)) } catch (_) {}
-  })
+  for (const row of rows) {
+    try { stmt.run(rowValuesForColumns(row, cols)) } catch (_) {}
+  }
 }
 
-// â”€â”€ Data Integrity & Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Data Integrity & Validation ──────────────────────────────────────────────
 /**
  * Verify and repair stock quantities based on inventory movements.
  * Rebuilds product.stock_quantity and branch_stock from movement history.
@@ -333,6 +379,21 @@ function verifyAndRepairStockQuantities() {
   }
 }
 
+function mapReturnedQuantities(returnedItems = []) {
+  const returnedMap = {}
+  for (const row of returnedItems) {
+    returnedMap[row.product_id] = row.total_qty
+  }
+  return returnedMap
+}
+
+function areAllSaleItemsReturned(saleItems = [], returnedMap = {}) {
+  for (const item of saleItems) {
+    if (returnedMap[item.product_id] < item.total_qty) return false
+  }
+  return true
+}
+
 /**
  * Verify sale status consistency with associated returns.
  * Fixes sales that should be partial_return/returned based on return records.
@@ -366,11 +427,10 @@ function verifyAndRepairSaleStatuses() {
           GROUP BY ri.product_id
         `).all(sale.id)
 
-        const returnedMap = {}
-        returnedItems.forEach(r => { returnedMap[r.product_id] = r.total_qty })
+        const returnedMap = mapReturnedQuantities(returnedItems)
 
         // Determine correct status
-        const fullyReturned = saleItems.every(si => returnedMap[si.product_id] >= si.total_qty)
+        const fullyReturned = areAllSaleItemsReturned(saleItems, returnedMap)
         const hasPartialReturn = returnedItems.length > 0 && !fullyReturned
         const correctStatus = fullyReturned ? 'returned' : hasPartialReturn ? 'partial_return' : sale.sale_status
 
@@ -492,7 +552,7 @@ function runDataIntegrityCheck() {
   totalRepairs = stockCheck.repairs + statusCheck.repairs + costCheck.repairs
 
   return {
-    success: allErrors.length === 0 || allErrors.some(e => !e.includes('error')),
+    success: allErrors.length === 0 || hasRepairMessages(allErrors),
     errors: allErrors,
     repairs: totalRepairs,
     details: {
@@ -502,6 +562,13 @@ function runDataIntegrityCheck() {
     },
     timestamp: new Date().toISOString()
   }
+}
+
+function hasRepairMessages(messages = []) {
+  for (const message of messages) {
+    if (!String(message || '').includes('error')) return true
+  }
+  return false
 }
 
 /**
@@ -525,10 +592,10 @@ function calculateSaleProfit(sale, items = []) {
   let cogsKhr = 0
 
   if (Array.isArray(items)) {
-    items.forEach(item => {
+    for (const item of items) {
       cogsUsd += (item.cost_price_usd || 0) * (item.quantity || 0)
       cogsKhr += (item.cost_price_khr || 0) * (item.quantity || 0)
-    })
+    }
   }
 
   return {

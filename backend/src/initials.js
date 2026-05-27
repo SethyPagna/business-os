@@ -1,16 +1,24 @@
 'use strict'
 
 const KHMER_INITIALS = [
-  'ក', 'ខ', 'គ', 'ឃ', 'ង',
-  'ច', 'ឆ', 'ជ', 'ឈ', 'ញ',
-  'ដ', 'ឋ', 'ឌ', 'ឍ', 'ណ',
-  'ត', 'ថ', 'ទ', 'ធ', 'ន',
-  'ប', 'ផ', 'ព', 'ភ', 'ម',
-  'យ', 'រ', 'ល', 'វ',
-  'ស', 'ហ', 'ឡ', 'អ',
+  '\u1780', '\u1781', '\u1782', '\u1783', '\u1784',
+  '\u1785', '\u1786', '\u1787', '\u1788', '\u1789',
+  '\u178A', '\u178B', '\u178C', '\u178D', '\u178E',
+  '\u178F', '\u1790', '\u1791', '\u1792', '\u1793',
+  '\u1794', '\u1795', '\u1796', '\u1797', '\u1798',
+  '\u1799', '\u179A', '\u179B', '\u179C',
+  '\u179F', '\u17A0', '\u17A1', '\u17A2',
 ]
 
-const KHMER_ORDER = new Map(KHMER_INITIALS.map((letter, index) => [letter, index]))
+function buildKhmerOrder() {
+  const order = new Map()
+  for (let index = 0; index < KHMER_INITIALS.length; index += 1) {
+    order.set(KHMER_INITIALS[index], index)
+  }
+  return order
+}
+
+const KHMER_ORDER = buildKhmerOrder()
 const khmerCollator = new Intl.Collator('km', { sensitivity: 'base' })
 
 function normalizeInitialText(value) {
@@ -63,20 +71,26 @@ function compareInitialKeys(left, right) {
 
 function aggregateInitialRows(rows = []) {
   const map = new Map()
-  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+  for (const row of Array.isArray(rows) ? rows : []) {
     const key = getInitialKey(row?.value)
     const count = Number(row?.count || 0)
-    if (!key || count <= 0) return
+    if (!key || count <= 0) continue
     map.set(key, (map.get(key) || 0) + count)
-  })
-  return [...map.entries()]
-    .sort(([left], [right]) => compareInitialKeys(left, right))
-    .map(([key, count]) => ({
+  }
+
+  const entries = [...map.entries()]
+  entries.sort(([left], [right]) => compareInitialKeys(left, right))
+
+  const aggregates = []
+  for (const [key, count] of entries) {
+    aggregates.push({
       key,
       label: key,
       count,
       type: getInitialType(key),
-    }))
+    })
+  }
+  return aggregates
 }
 
 module.exports = {

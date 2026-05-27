@@ -157,11 +157,11 @@ function getOrganizationFilesystemLayout(organization) {
 function ensureOrganizationFilesystemLayout(organization) {
   const layout = getOrganizationFilesystemLayout(organization)
   if (!layout) return null
-  Object.values(layout).forEach((folderPath) => {
+  for (const folderPath of Object.values(layout)) {
     if (folderPath === layout.orgRoot || String(folderPath).startsWith(layout.orgRoot + path.sep)) {
       fs.mkdirSync(folderPath, { recursive: true })
     }
-  })
+  }
   const metaFile = path.join(layout.metaRoot, 'organization.json')
   const readmeFile = path.join(layout.metaRoot, 'README.txt')
   const payload = {

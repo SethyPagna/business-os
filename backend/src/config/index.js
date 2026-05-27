@@ -16,11 +16,19 @@ const RUNTIME_DIR = trim(process.env.BUSINESS_OS_RUNTIME_DIR)
 
 const SOURCE_ENV_FILE = path.join(RUNTIME_DIR, 'backend', '.env')
 const RUNTIME_ENV_FILE = path.join(RUNTIME_DIR, '.env')
-const ENV_CANDIDATES = [
+const ENV_CANDIDATES = buildEnvCandidates([
   process.env.DOTENV_PATH || '',
   SOURCE_ENV_FILE,
   RUNTIME_ENV_FILE,
-].filter(Boolean)
+])
+
+function buildEnvCandidates(values = []) {
+  const candidates = []
+  for (const value of values) {
+    if (value) candidates.push(value)
+  }
+  return candidates
+}
 
 let ACTIVE_ENV_FILE = ''
 for (const envPath of ENV_CANDIDATES) {
@@ -111,9 +119,10 @@ function readSecretFileValue(filePath) {
 }
 
 function ensureOrganizationRuntimeLayout(runtimeRoot) {
-  ;['uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta', 'snapshots'].forEach((folder) => {
+  const folders = ['uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta', 'snapshots']
+  for (const folder of folders) {
     ensureDirectory(path.join(runtimeRoot, folder))
-  })
+  }
 }
 
 function normalizeOrganizationSeed(seed = {}) {

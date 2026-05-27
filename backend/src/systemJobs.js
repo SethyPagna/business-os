@@ -89,14 +89,15 @@ function ensureTable() {
     CREATE INDEX IF NOT EXISTS idx_system_jobs_created_pg ON system_jobs(created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_system_jobs_status_pg ON system_jobs(status, updated_at DESC);
   `)
-  ;[
+  const migrationStatements = [
     'ALTER TABLE system_jobs ADD COLUMN IF NOT EXISTS metrics_json TEXT',
     'ALTER TABLE system_jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0',
     'ALTER TABLE system_jobs ADD COLUMN IF NOT EXISTS cancellable INTEGER DEFAULT 0',
     'ALTER TABLE system_jobs ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ',
-  ].forEach((statement) => {
+  ]
+  for (const statement of migrationStatements) {
     try { getDb().exec(statement) } catch (_) {}
-  })
+  }
   if (!staleRecoveryApplied) {
     try {
       getDb().prepare(`
@@ -167,11 +168,44 @@ function persistJob(job) {
   })
 }
 
+function collectFinishedJobs() {
+  const finished = []
+  for (const job of jobs.values()) {
+    if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+      finished.push(job)
+    }
+  }
+  finished.sort((a, b) => String(b.finished_at || b.updated_at).localeCompare(String(a.finished_at || a.updated_at)))
+  return finished
+}
+
+function removeOldFinishedJobs(finished = []) {
+  for (let index = MAX_COMPLETED_JOBS; index < finished.length; index += 1) {
+    jobs.delete(finished[index].id)
+  }
+}
+
+function serializeJobRows(rows = [], limit = rows.length) {
+  const items = []
+  const max = Math.min(limit, rows.length)
+  for (let index = 0; index < max; index += 1) {
+    const item = publicJob(rows[index])
+    if (item) items.push(item)
+  }
+  return items
+}
+
+function listActiveJobs(limit) {
+  const rows = []
+  for (const job of jobs.values()) {
+    rows.push(job)
+  }
+  rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+  return serializeJobRows(rows, limit)
+}
+
 function cleanupJobs() {
-  const finished = Array.from(jobs.values())
-    .filter((job) => ['completed', 'failed', 'cancelled'].includes(job.status))
-    .sort((a, b) => String(b.finished_at || b.updated_at).localeCompare(String(a.finished_at || a.updated_at)))
-  finished.slice(MAX_COMPLETED_JOBS).forEach((job) => jobs.delete(job.id))
+  removeOldFinishedJobs(collectFinishedJobs())
   try {
     ensureTable()
     getDb().prepare(`
@@ -411,17 +445,15 @@ function listSystemJobs({ limit = 25 } = {}) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit || 25)))
   try {
     ensureTable()
-    return getDb().prepare(`
+    const rows = getDb().prepare(`
       SELECT *
       FROM system_jobs
       ORDER BY created_at DESC, id DESC
       LIMIT @limit
-    `).all({ limit: safeLimit }).map(publicJob)
+    `).all({ limit: safeLimit })
+    return serializeJobRows(rows, safeLimit)
   } catch (_) {
-    return Array.from(jobs.values())
-      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-      .slice(0, safeLimit)
-      .map(publicJob)
+    return listActiveJobs(safeLimit)
   }
 }
 

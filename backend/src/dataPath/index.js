@@ -22,9 +22,10 @@ function isSubPath(parent, child) {
 }
 
 function ensureDataRootLayout(root) {
-  ;[UPLOADS_FOLDER_NAME, BACKUPS_FOLDER_NAME, 'imports', 'exports', 'logs', 'tmp', 'meta', 'snapshots'].forEach((folder) => {
+  const folders = [UPLOADS_FOLDER_NAME, BACKUPS_FOLDER_NAME, 'imports', 'exports', 'logs', 'tmp', 'meta', 'snapshots']
+  for (const folder of folders) {
     fs.mkdirSync(path.join(root, folder), { recursive: true })
-  })
+  }
 }
 
 function walkFiles(root, visitor) {

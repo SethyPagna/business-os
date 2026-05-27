@@ -33,14 +33,12 @@ function extractOrganizationPublicId(folderName) {
 function findOrganizationFolderByPublicId(organizationsRoot, publicId) {
   const stableId = trim(publicId)
   if (!stableId || !fs.existsSync(organizationsRoot)) return null
-  const entries = fs.readdirSync(organizationsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-
-  const exact = entries.find((name) => name === stableId)
-  if (exact) return path.join(organizationsRoot, exact)
-
-  const canonical = entries.find((name) => name.startsWith(`${stableId} (`))
+  let canonical = ''
+  for (const entry of fs.readdirSync(organizationsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    if (entry.name === stableId) return path.join(organizationsRoot, entry.name)
+    if (!canonical && entry.name.startsWith(`${stableId} (`)) canonical = entry.name
+  }
   if (canonical) return path.join(organizationsRoot, canonical)
 
   return null

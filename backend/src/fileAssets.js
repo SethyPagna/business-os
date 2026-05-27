@@ -60,10 +60,15 @@ function getDb() {
   return require('./database').db
 }
 
-const ASSET_EXT_TO_MIME = Object.entries(MIME_TO_EXT).reduce((map, [mime, ext]) => {
-  map[ext] = mime
+function buildAssetExtToMime() {
+  const map = {}
+  for (const mime of Object.keys(MIME_TO_EXT)) {
+    map[MIME_TO_EXT[mime]] = mime
+  }
   return map
-}, {})
+}
+
+const ASSET_EXT_TO_MIME = buildAssetExtToMime()
 
 function ensureUploadsDirectory() {
   fs.mkdirSync(UPLOADS_PATH, { recursive: true })
@@ -538,11 +543,15 @@ async function ensureStoredAssetAvailableLocally(storedName) {
 function collectUploadPathsFromValue(value, referenced) {
   if (value == null) return
   if (Array.isArray(value)) {
-    value.forEach((entry) => collectUploadPathsFromValue(entry, referenced))
+    for (const entry of value) {
+      collectUploadPathsFromValue(entry, referenced)
+    }
     return
   }
   if (typeof value === 'object') {
-    Object.values(value).forEach((entry) => collectUploadPathsFromValue(entry, referenced))
+    for (const entry of Object.values(value)) {
+      collectUploadPathsFromValue(entry, referenced)
+    }
     return
   }
   const raw = String(value || '').trim()
@@ -571,11 +580,11 @@ function collectReferencedUploadPaths() {
   const referenced = new Set()
   const add = (value) => collectUploadPathsFromValue(value, referenced)
 
-  getDb().prepare('SELECT value FROM settings WHERE value IS NOT NULL AND trim(value) != \'\'').all().forEach((row) => add(row.value))
-  getDb().prepare('SELECT image_path FROM products WHERE image_path IS NOT NULL AND trim(image_path) != \'\'').all().forEach((row) => add(row.image_path))
-  getDb().prepare('SELECT image_path FROM product_images WHERE image_path IS NOT NULL AND trim(image_path) != \'\'').all().forEach((row) => add(row.image_path))
-  getDb().prepare('SELECT avatar_path FROM users WHERE avatar_path IS NOT NULL AND trim(avatar_path) != \'\'').all().forEach((row) => add(row.avatar_path))
-  getDb().prepare('SELECT screenshots_json FROM customer_share_submissions WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != \'\'').all().forEach((row) => add(row.screenshots_json))
+  for (const row of getDb().prepare('SELECT value FROM settings WHERE value IS NOT NULL AND trim(value) != \'\'').all()) add(row.value)
+  for (const row of getDb().prepare('SELECT image_path FROM products WHERE image_path IS NOT NULL AND trim(image_path) != \'\'').all()) add(row.image_path)
+  for (const row of getDb().prepare('SELECT image_path FROM product_images WHERE image_path IS NOT NULL AND trim(image_path) != \'\'').all()) add(row.image_path)
+  for (const row of getDb().prepare('SELECT avatar_path FROM users WHERE avatar_path IS NOT NULL AND trim(avatar_path) != \'\'').all()) add(row.avatar_path)
+  for (const row of getDb().prepare('SELECT screenshots_json FROM customer_share_submissions WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != \'\'').all()) add(row.screenshots_json)
 
   return [...referenced]
 }
@@ -583,7 +592,7 @@ function collectReferencedUploadPaths() {
 function ensureReferencedAssetsRegistered() {
   const refs = collectReferencedUploadPaths()
   if (!refs.length) return
-  refs.forEach((publicPath) => {
+  for (const publicPath of refs) {
     if (getFileAssetByPublicPath(publicPath)) return
     const storedName = String(publicPath || '').replace(/^\/uploads\//, '').trim()
     if (!storedName) return
@@ -610,7 +619,7 @@ function ensureReferencedAssetsRegistered() {
       created_by_id: null,
       created_by_name: null,
     })
-  })
+  }
 }
 
 function getUploadFilePath(publicPath = '') {
@@ -625,13 +634,21 @@ function toUploadPublicPathFromObjectKey(key = '') {
 }
 
 function findUploadStorageOrphans(objectKeys = [], trackedPublicPaths = []) {
-  const tracked = new Set((Array.isArray(trackedPublicPaths) ? trackedPublicPaths : [])
-    .map((value) => String(value || '').trim())
-    .filter(Boolean))
-  return (Array.isArray(objectKeys) ? objectKeys : [])
-    .map((key) => ({ key: String(key || '').trim(), publicPath: toUploadPublicPathFromObjectKey(key) }))
-    .filter((entry) => entry.key && entry.publicPath && !tracked.has(entry.publicPath))
-    .map((entry) => entry.key)
+  const tracked = new Set()
+  for (const value of Array.isArray(trackedPublicPaths) ? trackedPublicPaths : []) {
+    const publicPath = String(value || '').trim()
+    if (publicPath) tracked.add(publicPath)
+  }
+
+  const orphanKeys = []
+  for (const value of Array.isArray(objectKeys) ? objectKeys : []) {
+    const key = String(value || '').trim()
+    const publicPath = toUploadPublicPathFromObjectKey(key)
+    if (key && publicPath && !tracked.has(publicPath)) {
+      orphanKeys.push(key)
+    }
+  }
+  return orphanKeys
 }
 
 function collectTrackedUploadPublicPaths() {
@@ -640,13 +657,34 @@ function collectTrackedUploadPublicPaths() {
     const normalized = normalizeUploadPublicPath(value)
     if (isUploadPublicPath(normalized)) tracked.add(normalized)
   }
-  getDb().prepare(`
+  for (const row of getDb().prepare(`
     SELECT public_path
     FROM file_assets
     WHERE public_path LIKE '/uploads/%'
-  `).all().forEach((row) => add(row.public_path))
-  collectReferencedUploadPaths().forEach(add)
+  `).all()) {
+    add(row.public_path)
+  }
+  for (const publicPath of collectReferencedUploadPaths()) {
+    add(publicPath)
+  }
   return [...tracked]
+}
+
+function collectObjectKeys(objects = []) {
+  const keys = []
+  for (const item of Array.isArray(objects) ? objects : []) {
+    const key = String(item?.key || '').trim()
+    if (key) keys.push(key)
+  }
+  return keys
+}
+
+function listLocalUploadFiles() {
+  const files = []
+  for (const entry of fs.readdirSync(UPLOADS_PATH, { withFileTypes: true })) {
+    if (entry.isFile()) files.push(entry.name)
+  }
+  return files
 }
 
 async function reconcileUploadStorage({ force = false } = {}) {
@@ -673,26 +711,24 @@ async function reconcileUploadStorage({ force = false } = {}) {
 
     if (isObjectStorageEnabled()) {
       const objects = await listObjects('uploads/', { maxKeys: 1000 })
-      const orphanKeys = findUploadStorageOrphans(objects.map((item) => item.key), trackedPublicPaths)
+      const orphanKeys = findUploadStorageOrphans(collectObjectKeys(objects), trackedPublicPaths)
       scanned = objects.length
       if (orphanKeys.length) {
         deleted += await deleteObjects(orphanKeys)
       }
     } else {
       ensureUploadsDirectory()
-      const files = fs.readdirSync(UPLOADS_PATH, { withFileTypes: true })
-        .filter((entry) => entry.isFile())
-        .map((entry) => entry.name)
+      const files = listLocalUploadFiles()
       const tracked = new Set(trackedPublicPaths)
       scanned = files.length
-      files.forEach((storedName) => {
+      for (const storedName of files) {
         const publicPath = `/uploads/${storedName}`
         if (tracked.has(publicPath)) return
         try {
           fs.unlinkSync(path.join(UPLOADS_PATH, storedName))
           deleted += 1
         } catch (_) {}
-      })
+      }
     }
 
     lastUploadStorageReconcileAt = Date.now()
@@ -749,7 +785,7 @@ async function deleteAllStoredUploads() {
   if (isObjectStorageEnabled()) {
     const objects = await listObjects('uploads/', { maxKeys: 1000 })
     if (objects.length) {
-      deleted = await deleteObjects(objects.map((item) => item.key))
+      deleted = await deleteObjects(collectObjectKeys(objects))
     }
     return { deleted, storage: 'object' }
   }
@@ -766,7 +802,39 @@ async function deleteAllStoredUploads() {
 }
 
 function buildInClausePlaceholders(values = []) {
-  return values.map(() => '?').join(', ')
+  const placeholders = []
+  for (const _ of values) placeholders.push('?')
+  return placeholders.join(', ')
+}
+
+function normalizeUniquePublicPaths(publicPaths = []) {
+  const uniquePaths = []
+  const seen = new Set()
+  for (const value of Array.isArray(publicPaths) ? publicPaths : []) {
+    const publicPath = String(value || '').trim()
+    if (!publicPath || seen.has(publicPath)) continue
+    seen.add(publicPath)
+    uniquePaths.push(publicPath)
+  }
+  return uniquePaths
+}
+
+function createUsageMap(publicPaths = []) {
+  const usageMap = new Map()
+  for (const publicPath of publicPaths) {
+    usageMap.set(publicPath, [])
+  }
+  return usageMap
+}
+
+function addReferencedRowUsages({ row, value, requestedPaths, addUsage, buildUsage }) {
+  const referenced = new Set()
+  collectUploadPathsFromValue(value, referenced)
+  for (const publicPath of referenced) {
+    if (requestedPaths.has(publicPath)) {
+      addUsage(publicPath, buildUsage(row))
+    }
+  }
 }
 
 function buildUploadReferenceUsageMap(rows = [], {
@@ -841,10 +909,8 @@ function mergeUsageReferences(targetMap, requestedPaths, sourceMap) {
 }
 
 function collectUsagesByPublicPath(publicPaths = [], { useCache = true } = {}) {
-  const uniquePaths = [...new Set((Array.isArray(publicPaths) ? publicPaths : [])
-    .map((value) => String(value || '').trim())
-    .filter(Boolean))]
-  const usageMap = new Map(uniquePaths.map((publicPath) => [publicPath, []]))
+  const uniquePaths = normalizeUniquePublicPaths(publicPaths)
+  const usageMap = createUsageMap(uniquePaths)
   if (!uniquePaths.length) return usageMap
   const requestedPaths = new Set(uniquePaths)
 
@@ -861,59 +927,59 @@ function collectUsagesByPublicPath(publicPaths = [], { useCache = true } = {}) {
     mergeUsageReferences(usageMap, requestedPaths, getCachedSettingsUsageReferences())
     mergeUsageReferences(usageMap, requestedPaths, getCachedSubmissionUsageReferences())
   } else {
-    db.prepare(`
+    for (const row of db.prepare(`
       SELECT key, value
       FROM settings
       WHERE value IS NOT NULL AND trim(value) != '' AND value LIKE '%/uploads/%'
-    `).all().forEach((row) => {
-      const referenced = new Set()
-      collectUploadPathsFromValue(row?.value, referenced)
-      referenced.forEach((publicPath) => {
-        if (requestedPaths.has(publicPath)) {
-          addUsage(publicPath, { type: 'settings', label: row.key })
-        }
+    `).all()) {
+      addReferencedRowUsages({
+        row,
+        value: row?.value,
+        requestedPaths,
+        addUsage,
+        buildUsage: (currentRow) => ({ type: 'settings', label: currentRow.key }),
       })
-    })
+    }
 
-    db.prepare(`
+    for (const row of db.prepare(`
       SELECT id, screenshots_json
       FROM customer_share_submissions
       WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != '' AND screenshots_json LIKE '%/uploads/%'
-    `).all().forEach((row) => {
-      const referenced = new Set()
-      collectUploadPathsFromValue(row?.screenshots_json, referenced)
-      referenced.forEach((publicPath) => {
-        if (requestedPaths.has(publicPath)) {
-          addUsage(publicPath, { type: 'submission', label: `Submission #${row.id}` })
-        }
+    `).all()) {
+      addReferencedRowUsages({
+        row,
+        value: row?.screenshots_json,
+        requestedPaths,
+        addUsage,
+        buildUsage: (currentRow) => ({ type: 'submission', label: `Submission #${currentRow.id}` }),
       })
-    })
+    }
   }
 
-  db.prepare(`
+  for (const row of db.prepare(`
     SELECT id, name, image_path
     FROM products
     WHERE image_path IN (${placeholders})
-  `).all(...uniquePaths).forEach((row) => {
+  `).all(...uniquePaths)) {
     addUsage(row.image_path, { type: 'product', label: row.name || `Product #${row.id}` })
-  })
+  }
 
-  db.prepare(`
+  for (const row of db.prepare(`
     SELECT p.id, p.name, pi.image_path
     FROM product_images pi
     LEFT JOIN products p ON p.id = pi.product_id
     WHERE pi.image_path IN (${placeholders})
-  `).all(...uniquePaths).forEach((row) => {
+  `).all(...uniquePaths)) {
     addUsage(row.image_path, { type: 'product_gallery', label: row.name || `Product #${row.id}` })
-  })
+  }
 
-  db.prepare(`
+  for (const row of db.prepare(`
     SELECT id, name, username, avatar_path
     FROM users
     WHERE avatar_path IN (${placeholders})
-  `).all(...uniquePaths).forEach((row) => {
+  `).all(...uniquePaths)) {
     addUsage(row.avatar_path, { type: 'user_avatar', label: row.name || row.username || `User #${row.id}` })
-  })
+  }
 
   return usageMap
 }
@@ -945,8 +1011,16 @@ function serializeAssetRow(row = {}, usageMap = null, options = {}) {
 
 function serializeAssetRows(rows = [], options = {}) {
   const safeRows = Array.isArray(rows) ? rows : []
-  const usageMap = collectUsagesByPublicPath(safeRows.map((row) => row?.public_path), options)
-  return safeRows.map((row) => serializeAssetRow(row, usageMap, options))
+  const publicPaths = []
+  for (const row of safeRows) {
+    publicPaths.push(row?.public_path)
+  }
+  const usageMap = collectUsagesByPublicPath(publicPaths, options)
+  const serializedRows = []
+  for (const row of safeRows) {
+    serializedRows.push(serializeAssetRow(row, usageMap, options))
+  }
+  return serializedRows
 }
 
 async function registerStoredAsset({
@@ -1101,9 +1175,7 @@ async function storeDataUrlAsset({ dataUrl, fileName, createdById = null, create
 async function backfillUploadAssets() {
   if (isObjectStorageEnabled()) return
   ensureUploadsDirectory()
-  const files = fs.readdirSync(UPLOADS_PATH, { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
+  const files = listLocalUploadFiles()
   for (const storedName of files) {
     const publicPath = `/uploads/${storedName}`
     const exists = getDb().prepare('SELECT id FROM file_assets WHERE public_path = ? LIMIT 1').get(publicPath)

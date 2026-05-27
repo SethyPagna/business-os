@@ -32,8 +32,13 @@ function normalizeHostname(hostname) {
 }
 
 function isPrivateIpv4(hostname) {
-  const parts = normalizeHostname(hostname).split('.').map((part) => Number(part))
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  const parts = []
+  for (const part of normalizeHostname(hostname).split('.')) {
+    const value = Number(part)
+    if (!Number.isInteger(value) || value < 0 || value > 255) return false
+    parts.push(value)
+  }
+  if (parts.length !== 4) return false
   if (parts[0] === 10) return true
   if (parts[0] === 127) return true
   if (parts[0] === 0) return true
@@ -59,7 +64,9 @@ function isBlockedHostname(hostname) {
   const normalized = normalizeHostname(hostname)
   if (!normalized) return true
   if (BLOCKED_HOSTS.has(normalized)) return true
-  if (BLOCKED_SUFFIXES.some((suffix) => normalized.endsWith(suffix))) return true
+  for (const suffix of BLOCKED_SUFFIXES) {
+    if (normalized.endsWith(suffix)) return true
+  }
   const ipType = net.isIP(normalized)
   if (ipType === 4) return isPrivateIpv4(normalized)
   if (ipType === 6) return isPrivateIpv6(normalized)

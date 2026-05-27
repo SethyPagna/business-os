@@ -34,14 +34,18 @@ function normalizeAboutBlocks(value) {
 
   if (!Array.isArray(source)) return []
 
-  return source
-    .map((item, index) => createAboutBlock(item && item.type, {
+  const blocks = []
+  for (let index = 0; index < source.length; index += 1) {
+    const item = source[index]
+    const block = createAboutBlock(item && item.type, {
       id: item && item.id ? item.id : `about-${index + 1}`,
       title: item && item.title,
       body: item && item.body,
       mediaUrl: item && item.mediaUrl,
-    }))
-    .filter((item) => item.title || item.body || item.mediaUrl)
+    })
+    if (block.title || block.body || block.mediaUrl) blocks.push(block)
+  }
+  return blocks
 }
 
 function extractGoogleMapsEmbedUrl(value) {

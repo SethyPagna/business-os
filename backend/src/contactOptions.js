@@ -22,7 +22,39 @@ function hasContactOptionData(option = {}, { mode = 'address' } = {}) {
   const keys = mode === 'area'
     ? ['label', 'name', 'phone', 'area']
     : ['label', 'name', 'phone', 'email', 'address']
-  return keys.some((key) => cleanText(option?.[key]))
+  for (const key of keys) {
+    if (cleanText(option?.[key])) return true
+  }
+  return false
+}
+
+function collectNormalizedContactOptions(entries = [], { mode = 'address' } = {}) {
+  const options = []
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const option = normalizeContactOption(entry, { mode })
+    if (hasContactOptionData(option, { mode })) {
+      options.push(option)
+      if (options.length >= CONTACT_OPTION_LIMIT) break
+    }
+  }
+  return options
+}
+
+function collectLegacyContactOptions(entries = [], { mode = 'address' } = {}) {
+  const options = []
+  const legacyKey = mode === 'area' ? 'area' : 'address'
+  const values = Array.isArray(entries) ? entries : []
+  for (let index = 0; index < values.length; index += 1) {
+    const option = normalizeContactOption({
+      label: index === 0 ? 'Default' : `Option ${index + 1}`,
+      [legacyKey]: values[index],
+    }, { mode })
+    if (hasContactOptionData(option, { mode })) {
+      options.push(option)
+      if (options.length >= CONTACT_OPTION_LIMIT) break
+    }
+  }
+  return options
 }
 
 function parseStoredContactOptions(raw, { mode = 'address' } = {}) {
@@ -31,26 +63,17 @@ function parseStoredContactOptions(raw, { mode = 'address' } = {}) {
     const parsed = JSON.parse(raw)
     if (Array.isArray(parsed)) {
       if (typeof parsed[0] === 'object' && parsed[0] !== null) {
-        return parsed
-          .map((entry) => normalizeContactOption(entry, { mode }))
-          .filter((entry) => hasContactOptionData(entry, { mode }))
-          .slice(0, CONTACT_OPTION_LIMIT)
+        return collectNormalizedContactOptions(parsed, { mode })
       }
-      const legacyKey = mode === 'area' ? 'area' : 'address'
-      return parsed
-        .map((entry, index) => normalizeContactOption({
-          label: index === 0 ? 'Default' : `Option ${index + 1}`,
-          [legacyKey]: entry,
-        }, { mode }))
-        .filter((entry) => hasContactOptionData(entry, { mode }))
-        .slice(0, CONTACT_OPTION_LIMIT)
+      return collectLegacyContactOptions(parsed, { mode })
     }
   } catch (_) {}
   const legacyKey = mode === 'area' ? 'area' : 'address'
-  return [normalizeContactOption({
+  const fallback = normalizeContactOption({
     label: 'Default',
     [legacyKey]: raw,
-  }, { mode })].filter((entry) => hasContactOptionData(entry, { mode }))
+  }, { mode })
+  return hasContactOptionData(fallback, { mode }) ? [fallback] : []
 }
 
 function parseImportContactOptions(row = {}, { mode = 'address' } = {}) {
@@ -70,16 +93,15 @@ function parseImportContactOptions(row = {}, { mode = 'address' } = {}) {
 }
 
 function serializeContactOptions(options = [], { mode = 'address' } = {}) {
-  const clean = (Array.isArray(options) ? options : [])
-    .map((entry) => normalizeContactOption(entry, { mode }))
-    .filter((entry) => hasContactOptionData(entry, { mode }))
-    .slice(0, CONTACT_OPTION_LIMIT)
+  const clean = collectNormalizedContactOptions(options, { mode })
   return clean.length ? JSON.stringify(clean) : null
 }
 
 function getPrimaryContactOption(options = [], { mode = 'address' } = {}) {
-  const found = (Array.isArray(options) ? options : []).find((entry) => hasContactOptionData(entry, { mode }))
-  return found ? normalizeContactOption(found, { mode }) : normalizeContactOption({}, { mode })
+  for (const entry of Array.isArray(options) ? options : []) {
+    if (hasContactOptionData(entry, { mode })) return normalizeContactOption(entry, { mode })
+  }
+  return normalizeContactOption({}, { mode })
 }
 
 function buildImportedContactState(source = {}, { mode = 'address' } = {}) {

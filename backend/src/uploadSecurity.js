@@ -10,7 +10,10 @@ const MAX_IMAGE_PIXELS = 40_000_000
 const MAX_IMAGE_FRAMES = 120
 
 function bufferStartsWith(buffer, bytes = []) {
-  return bytes.every((value, index) => buffer[index] === value)
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (buffer[index] !== bytes[index]) return false
+  }
+  return true
 }
 
 function isLikelyCsvBuffer(buffer) {

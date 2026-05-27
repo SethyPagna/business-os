@@ -26,10 +26,14 @@ function hasSuspiciousCatalogText(value) {
 }
 
 function listSuspiciousCatalogFields(record = {}, fields = []) {
-  return (Array.isArray(fields) ? fields : [])
-    .map((field) => String(field || '').trim())
-    .filter(Boolean)
-    .filter((field) => hasSuspiciousCatalogText(record?.[field]))
+  const suspiciousFields = []
+  for (const value of Array.isArray(fields) ? fields : []) {
+    const field = String(value || '').trim()
+    if (field && hasSuspiciousCatalogText(record?.[field])) {
+      suspiciousFields.push(field)
+    }
+  }
+  return suspiciousFields
 }
 
 function assertCatalogTextIntegrity(record = {}, fields = [], label = 'catalog text') {
@@ -40,14 +44,18 @@ function assertCatalogTextIntegrity(record = {}, fields = [], label = 'catalog t
 
 function normalizeOptionList(values = []) {
   const canonical = new Map()
-  ;(Array.isArray(values) ? values : [])
-    .map((value) => normalizeCatalogText(value))
-    .filter(Boolean)
-    .forEach((value) => {
-      const key = value.toLocaleLowerCase()
-      if (!canonical.has(key)) canonical.set(key, value)
-    })
-  return Array.from(canonical.values()).sort((left, right) => left.localeCompare(right))
+  for (const rawValue of Array.isArray(values) ? values : []) {
+    const value = normalizeCatalogText(rawValue)
+    if (!value) continue
+    const key = value.toLocaleLowerCase()
+    if (!canonical.has(key)) canonical.set(key, value)
+  }
+  const normalized = []
+  for (const value of canonical.values()) {
+    normalized.push(value)
+  }
+  normalized.sort((left, right) => left.localeCompare(right))
+  return normalized
 }
 
 module.exports = {

@@ -67,13 +67,21 @@ function decryptSecret(cipherText) {
 function pruneRateBucket(bucket, nowMs, windowMs) {
   const cutoff = nowMs - windowMs
   for (const [key, timestamps] of bucket.entries()) {
-    const kept = timestamps.filter((ts) => ts > cutoff)
+    const kept = keepRecentTimestamps(timestamps, cutoff)
     if (kept.length === 0) {
       bucket.delete(key)
     } else {
       bucket.set(key, kept)
     }
   }
+}
+
+function keepRecentTimestamps(timestamps = [], cutoff) {
+  const kept = []
+  for (const timestamp of Array.isArray(timestamps) ? timestamps : []) {
+    if (timestamp > cutoff) kept.push(timestamp)
+  }
+  return kept
 }
 
 function checkRateLimit(name, key, maxAttempts, windowMs) {
@@ -135,7 +143,7 @@ function getAbuseBucket(name) {
 
 function pruneAbuseBucket(bucket, nowMs, windowMs) {
   for (const [key, state] of bucket.entries()) {
-    const attempts = Array.isArray(state?.attempts) ? state.attempts.filter((ts) => ts > (nowMs - windowMs)) : []
+    const attempts = keepRecentTimestamps(state?.attempts, nowMs - windowMs)
     const lockUntil = Number(state?.lockUntil || 0)
     if (attempts.length === 0 && lockUntil <= nowMs) {
       bucket.delete(key)
@@ -172,7 +180,7 @@ function recordAbuseFailure(name, key, options = {}) {
   pruneAbuseBucket(bucket, nowMs, windowMs)
 
   const current = bucket.get(identity) || { attempts: [], lockUntil: 0 }
-  const attempts = Array.isArray(current.attempts) ? current.attempts.filter((ts) => ts > (nowMs - windowMs)) : []
+  const attempts = keepRecentTimestamps(current.attempts, nowMs - windowMs)
   attempts.push(nowMs)
   let lockUntil = Number(current.lockUntil || 0)
   if (attempts.length >= threshold) {

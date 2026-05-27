@@ -46,9 +46,17 @@ function countDelimiter(line, delimiter) {
 
 function detectCsvDelimiter(text) {
   const firstLine = stripBom(text).split(/\r?\n/, 1)[0] || ''
-  return [',', '\t', ';']
-    .map((delimiter) => ({ delimiter, count: countDelimiter(firstLine, delimiter) }))
-    .sort((left, right) => right.count - left.count)[0]?.delimiter || ','
+  const delimiters = [',', '\t', ';']
+  let bestDelimiter = ','
+  let bestCount = -1
+  for (const delimiter of delimiters) {
+    const count = countDelimiter(firstLine, delimiter)
+    if (count > bestCount) {
+      bestDelimiter = delimiter
+      bestCount = count
+    }
+  }
+  return bestDelimiter
 }
 
 function parseDelimitedRows(text, { delimiter = detectCsvDelimiter(text) } = {}) {
@@ -82,7 +90,7 @@ function parseDelimitedRows(text, { delimiter = detectCsvDelimiter(text) } = {})
     if ((char === '\n' || char === '\r') && !inQuotes) {
       if (char === '\r' && nextChar === '\n') index += 1
       row.push(current)
-      if (row.some((value) => String(value || '').trim() !== '')) rows.push(row)
+      if (hasDelimitedRowContent(row)) rows.push(row)
       row = []
       current = ''
       continue
@@ -92,8 +100,15 @@ function parseDelimitedRows(text, { delimiter = detectCsvDelimiter(text) } = {})
   }
 
   row.push(current)
-  if (row.some((value) => String(value || '').trim() !== '')) rows.push(row)
+  if (hasDelimitedRowContent(row)) rows.push(row)
   return rows
+}
+
+function hasDelimitedRowContent(row = []) {
+  for (const value of row) {
+    if (String(value || '').trim() !== '') return true
+  }
+  return false
 }
 
 function normalizeCsvKey(value) {
@@ -104,23 +119,43 @@ function normalizeCsvKey(value) {
     .toLowerCase()
 }
 
+function normalizeCsvHeaders(values = []) {
+  const headers = []
+  for (const value of values || []) {
+    headers.push(normalizeCsvKey(value))
+  }
+  return headers
+}
+
+function hasDelimitedRowContent(values = []) {
+  for (const value of values || []) {
+    if (String(value || '').trim() !== '') return true
+  }
+  return false
+}
+
+function hasParsedCsvRowContent(row = {}) {
+  for (const [key, value] of Object.entries(row || {})) {
+    if (key !== '_rowNumber' && String(value || '').trim() !== '') return true
+  }
+  return false
+}
+
+function buildParsedCsvRows(rows = []) {
+  const parsedRows = []
+  const headers = normalizeCsvHeaders(rows[0] || [])
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = csvValuesToRow(rows[index], headers, index + 1)
+    if (hasParsedCsvRowContent(row)) parsedRows.push(row)
+  }
+  return parsedRows
+}
+
 function parseCsvRows(text, options = {}) {
   const delimiter = options.delimiter || detectCsvDelimiter(text)
   const rows = parseDelimitedRows(text, { delimiter })
   if (rows.length < 2) return []
-  const headers = rows[0].map((value) => normalizeCsvKey(value))
-  return rows
-    .slice(1)
-    .map((values, index) => {
-      const row = { _rowNumber: index + 2 }
-      headers.forEach((header, headerIndex) => {
-        if (!header) return
-        const value = values[headerIndex]
-        row[header] = typeof value === 'string' ? value.normalize('NFC').trim() : value
-      })
-      return row
-    })
-    .filter((row) => Object.entries(row).some(([key, value]) => key !== '_rowNumber' && String(value || '').trim() !== ''))
+  return buildParsedCsvRows(rows)
 }
 
 async function detectCsvDelimiterFromFile(filePath) {
@@ -136,16 +171,17 @@ async function detectCsvDelimiterFromFile(filePath) {
 
 function csvValuesToRow(values, headers, rowNumber) {
   const row = { _rowNumber: rowNumber }
-  headers.forEach((header, headerIndex) => {
-    if (!header) return
+  for (let headerIndex = 0; headerIndex < headers.length; headerIndex += 1) {
+    const header = headers[headerIndex]
+    if (!header) continue
     const value = values[headerIndex]
     row[header] = typeof value === 'string' ? value.normalize('NFC').trim() : value
-  })
+  }
   return row
 }
 
 function hasCsvContent(values) {
-  return Array.isArray(values) && values.some((value) => String(value || '').trim() !== '')
+  return Array.isArray(values) && hasDelimitedRowContent(values)
 }
 
 async function* parseCsvRowBatchesFromFile(filePath, options = {}) {
@@ -168,7 +204,7 @@ async function* parseCsvRowBatchesFromFile(filePath, options = {}) {
     if (hasCsvContent(row)) {
       recordNumber += 1
       if (!headers) {
-        headers = row.map((value) => normalizeCsvKey(value))
+        headers = normalizeCsvHeaders(row)
       } else {
         batch.push(csvValuesToRow(row, headers, recordNumber))
         if (batch.length >= batchSize) {
@@ -240,7 +276,7 @@ async function* parseCsvRowBatchesFromFile(filePath, options = {}) {
   if (hasCsvContent(row)) {
     recordNumber += 1
     if (!headers) {
-      headers = row.map((value) => normalizeCsvKey(value))
+      headers = normalizeCsvHeaders(row)
     } else {
       batch.push(csvValuesToRow(row, headers, recordNumber))
     }

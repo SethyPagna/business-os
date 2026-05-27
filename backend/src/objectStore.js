@@ -76,10 +76,10 @@ function buildR2ApiObjectUrl(key = '', query = {}) {
   const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${bucket}/objects`
   const url = normalizedKey ? `${base}/${encodeURIComponent(normalizedKey)}` : base
   const params = new URLSearchParams()
-  Object.entries(query || {}).forEach(([name, value]) => {
-    if (value === undefined || value === null || value === '') return
+  for (const [name, value] of Object.entries(query || {})) {
+    if (value === undefined || value === null || value === '') continue
     params.set(name, String(value))
-  })
+  }
   const suffix = params.toString()
   return suffix ? `${url}?${suffix}` : url
 }
@@ -163,6 +163,52 @@ function getS3Client() {
 
 function normalizeObjectKey(key = '') {
   return String(key || '').replace(/^\/+/, '').replace(/\\/g, '/')
+}
+
+function normalizeUniqueObjectKeys(keys = []) {
+  const normalizedKeys = []
+  const seen = new Set()
+  for (const key of Array.isArray(keys) ? keys : []) {
+    const normalized = normalizeObjectKey(key)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    normalizedKeys.push(normalized)
+  }
+  return normalizedKeys
+}
+
+function buildDeleteObjectRefs(keys = []) {
+  const objects = []
+  for (const key of keys) {
+    objects.push({ Key: key })
+  }
+  return objects
+}
+
+function serializeCloudflareObjectList(items = []) {
+  const objects = []
+  for (const item of Array.isArray(items) ? items : []) {
+    objects.push({
+      key: item.key,
+      size: Number(item.size || 0) || 0,
+      lastModified: item.last_modified || null,
+      etag: item.etag || '',
+    })
+  }
+  return objects
+}
+
+function serializeS3ObjectList(items = []) {
+  const objects = []
+  for (const item of Array.isArray(items) ? items : []) {
+    objects.push({
+      key: item.Key,
+      size: item.Size || 0,
+      lastModified: item.LastModified ? item.LastModified.toISOString() : null,
+      etag: item.ETag || '',
+    })
+  }
+  return objects
 }
 
 async function ensureBucket() {
@@ -317,9 +363,7 @@ async function deleteObject(key) {
 
 async function deleteObjects(keys = []) {
   if (!isObjectStorageEnabled()) return 0
-  const normalizedKeys = Array.from(new Set((Array.isArray(keys) ? keys : [])
-    .map((key) => normalizeObjectKey(key))
-    .filter(Boolean)))
+  const normalizedKeys = normalizeUniqueObjectKeys(keys)
   if (!normalizedKeys.length) return 0
   if (canUseCloudflareR2Api()) {
     for (const key of normalizedKeys) {
@@ -335,7 +379,7 @@ async function deleteObjects(keys = []) {
       await getS3Client().send(new DeleteObjectsCommand({
         Bucket: S3_BUCKET,
         Delete: {
-          Objects: chunk.map((key) => ({ Key: key })),
+          Objects: buildDeleteObjectRefs(chunk),
           Quiet: true,
         },
       }))
@@ -363,12 +407,7 @@ async function listObjects(prefix = '', options = {}) {
       timeoutMs: options.timeoutMs || 8000,
     })
     const payload = await response.json()
-    return (payload.result || []).map((item) => ({
-      key: item.key,
-      size: Number(item.size || 0) || 0,
-      lastModified: item.last_modified || null,
-      etag: item.etag || '',
-    }))
+    return serializeCloudflareObjectList(payload.result || [])
   }
   try {
     const result = await sendWithTimeout(new ListObjectsV2Command({
@@ -376,12 +415,7 @@ async function listObjects(prefix = '', options = {}) {
       Prefix: normalizeObjectKey(prefix),
       MaxKeys: maxKeys,
     }), { timeoutMs: options.timeoutMs || 8000 })
-    return (result.Contents || []).map((item) => ({
-      key: item.Key,
-      size: item.Size || 0,
-      lastModified: item.LastModified ? item.LastModified.toISOString() : null,
-      etag: item.ETag || '',
-    }))
+    return serializeS3ObjectList(result.Contents || [])
   } catch (error) {
     if (!shouldFallbackToR2Api(error)) throw error
     const response = await cloudflareR2ApiRequest('GET', '', {
@@ -392,12 +426,7 @@ async function listObjects(prefix = '', options = {}) {
       timeoutMs: options.timeoutMs || 8000,
     })
     const payload = await response.json()
-    return (payload.result || []).map((item) => ({
-      key: item.key,
-      size: Number(item.size || 0) || 0,
-      lastModified: item.last_modified || null,
-      etag: item.etag || '',
-    }))
+    return serializeCloudflareObjectList(payload.result || [])
   }
 }
 

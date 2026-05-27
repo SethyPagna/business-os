@@ -9,7 +9,19 @@ const BACKEND_ROOT = path.resolve(__dirname, '..')
 const PROJECT_ROOT = path.resolve(BACKEND_ROOT, '..')
 
 function firstExistingDir(candidates = []) {
-  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || ''
+  for (const candidate of candidates || []) {
+    if (candidate && fs.existsSync(candidate)) return candidate
+  }
+  return ''
+}
+
+function collectExistingFiles(files = []) {
+  const existing = []
+  for (const file of files || []) {
+    if (fs.existsSync(file)) existing.push(file)
+  }
+  existing.sort()
+  return existing
 }
 
 function readGitRevision() {
@@ -50,11 +62,10 @@ function computeSourceHash() {
       path.join(BACKEND_ROOT, 'package.json'),
       ...collectFiles(path.join(BACKEND_ROOT, 'src')),
     ]
-      .filter((file) => fs.existsSync(file))
-      .sort()
+    const existingFiles = collectExistingFiles(files)
 
-    if (!files.length) return ''
-    for (const file of files) {
+    if (!existingFiles.length) return ''
+    for (const file of existingFiles) {
       hash.update(path.relative(BACKEND_ROOT, file).replace(/\\/g, '/'))
       hash.update('\0')
       hash.update(fs.readFileSync(file))
@@ -110,7 +121,10 @@ const runtimeVersion = {
 }
 
 function getRuntimeVersion() {
-  return { ...runtimeVersion }
+  return {
+    ...runtimeVersion,
+    frontend: readFrontendBuildInfoFromRoot(PROJECT_ROOT),
+  }
 }
 
 module.exports = {

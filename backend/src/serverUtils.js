@@ -44,16 +44,24 @@ function normalizeConfiguredHost(value) {
 function getConfiguredPublicHosts() {
   const hosts = [CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL, PUBLIC_BASE_URL]
   if (REMOTE_ACCESS_PROVIDER === 'tailscale') hosts.push(TAILSCALE_URL)
-  return hosts
-    .map(normalizeConfiguredHost)
-    .filter(Boolean)
+  const configuredHosts = []
+  for (const value of hosts) {
+    const host = normalizeConfiguredHost(value)
+    if (host) configuredHosts.push(host)
+  }
+  return configuredHosts
 }
 
 function getConfiguredCustomerPortalHosts() {
-  return [CLOUDFLARE_PUBLIC_URL, PUBLIC_BASE_URL]
-    .map(normalizeConfiguredHost)
-    .filter(Boolean)
-    .filter((host, index, list) => list.indexOf(host) === index)
+  const hosts = []
+  const seen = new Set()
+  for (const value of [CLOUDFLARE_PUBLIC_URL, PUBLIC_BASE_URL]) {
+    const host = normalizeConfiguredHost(value)
+    if (!host || seen.has(host)) continue
+    seen.add(host)
+    hosts.push(host)
+  }
+  return hosts
 }
 
 function isConfiguredCustomerPortalHost(req) {
@@ -186,7 +194,11 @@ function sanitizeObjectKeys(value, depth = 0, maxDepth = 20) {
   if (depth > maxDepth) return value
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeObjectKeys(item, depth + 1, maxDepth))
+    const sanitized = []
+    for (const item of value) {
+      sanitized.push(sanitizeObjectKeys(item, depth + 1, maxDepth))
+    }
+    return sanitized
   }
 
   for (const key of Object.keys(value)) {
@@ -356,7 +368,8 @@ function setFrontendStaticHeaders(res, filePath) {
 function setUploadStaticHeaders(res, filePath) {
   const safeName = String(filePath || '').split(/[\\/]/).pop() || 'file'
   res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
   res.setHeader('Content-Disposition', `inline; filename="${safeName.replace(/"/g, '')}"`)
   res.removeHeader?.('Pragma')
   res.removeHeader?.('Expires')

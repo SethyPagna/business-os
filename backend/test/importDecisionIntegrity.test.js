@@ -19,6 +19,46 @@ assert.match(
 )
 assert.match(
   source,
+  /productRowsByName:\s*new Map\(\)/,
+  'product imports should cache same-name product lookups per job',
+)
+assert.match(
+  source,
+  /function getProductsByNameForImport[\s\S]*ctx\.productRowsByName\.set/,
+  'product import same-name cache should populate from the database only once per normalized name',
+)
+assert.match(
+  source,
+  /function rememberProductForImport[\s\S]*insertProductImportRow/,
+  'product import cache should be updated when rows create or update products',
+)
+assert.match(
+  source,
+  /const supplierMap = buildLookupMap/,
+  'product imports should cache supplier lookups instead of querying for every row',
+)
+assert.match(
+  source,
+  /const branchesByName = buildLookupMap\(activeBranches\)/,
+  'product imports should index active branches by normalized name once per job',
+)
+assert.match(
+  source,
+  /ctx\.branchesByName\.get\(branchKey\)/,
+  'product import branch resolution should use the per-job branch-name index',
+)
+assert.match(
+  source,
+  /ctx\.branchesByName\.set\(branchKey, branch\)/,
+  'product import branch-name index should stay current when an import creates a branch',
+)
+assert.doesNotMatch(
+  source,
+  /ctx\.activeBranches\.find\(\(item\) => normalizeLookup\(item\.name\) === normalizeLookup\(name\)\)/,
+  'product import branch resolution should not scan active branches for each row',
+)
+assert.match(
+  source,
   /sameName\.length \|\| importedParent/,
   'same-name rows imported earlier in the same job should create variants instead of duplicate-name failures',
 )
@@ -81,6 +121,16 @@ assert.match(
   routeSource,
   /resetImportJobForRetry/,
   'retry route must reset cancelled jobs before requeueing analysis',
+)
+assert.match(
+  source,
+  /function listImportJobs\(\{ limit = 50, types = null \} = \{\}\)[\s\S]*WHERE type IN/,
+  'import job list queries should support SQL-side type filtering for permission-scoped reads',
+)
+assert.match(
+  routeSource,
+  /types:\s*getPermittedImportTypes\(req\.user\)/,
+  'import job list route should pass permitted import types into the service query',
 )
 assert.match(
   routeSource,

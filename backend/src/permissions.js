@@ -38,9 +38,17 @@ const PERMISSION_SECTIONS = [
   },
 ]
 
-const PERMISSION_DEFS = PERMISSION_SECTIONS.flatMap((section) => (
-  section.items.map((item) => ({ ...item, section: section.key, sectionLabel: section.label }))
-))
+function buildPermissionDefinitions(sections = []) {
+  const definitions = []
+  for (const section of sections) {
+    for (const item of section.items || []) {
+      definitions.push({ ...item, section: section.key, sectionLabel: section.label })
+    }
+  }
+  return definitions
+}
+
+const PERMISSION_DEFS = buildPermissionDefinitions(PERMISSION_SECTIONS)
 
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: { all: true },
@@ -130,7 +138,10 @@ function normalizeKey(value) {
 
 function getPermissionDefinition(key) {
   const normalized = normalizeKey(key)
-  return PERMISSION_DEFS.find((permission) => permission.key === normalized) || null
+  for (const permission of PERMISSION_DEFS) {
+    if (permission.key === normalized) return permission
+  }
+  return null
 }
 
 function isSensitivePermissionKey(key) {
