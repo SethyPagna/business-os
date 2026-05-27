@@ -22,11 +22,15 @@ function toNumber(value, fallback = 0) {
 }
 
 function tokenize(value) {
-  return trim(value)
+  const tokens = trim(value)
     .toLowerCase()
     .split(/[^a-z0-9]+/i)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 2)
+  const normalized = []
+  for (const token of tokens) {
+    const next = token.trim()
+    if (next.length >= 2) normalized.push(next)
+  }
+  return normalized
 }
 
 function nowMs() {
@@ -81,13 +85,21 @@ function getRuntimeState(providerId) {
 
 function pruneProviderState(providerId, currentMs = nowMs()) {
   const state = getRuntimeState(providerId)
-  state.requestTimestamps = state.requestTimestamps.filter((ts) => currentMs - ts < ONE_MINUTE_MS)
+  state.requestTimestamps = keepRecentTimestamps(state.requestTimestamps, currentMs, ONE_MINUTE_MS)
   return state
+}
+
+function keepRecentTimestamps(timestamps = [], currentMs = nowMs(), windowMs = ONE_MINUTE_MS) {
+  const kept = []
+  for (const ts of timestamps) {
+    if (currentMs - ts < windowMs) kept.push(ts)
+  }
+  return kept
 }
 
 function pruneVisitorActivity(currentMs = nowMs()) {
   for (const [fingerprint, timestamps] of VISITOR_ACTIVITY.entries()) {
-    const kept = timestamps.filter((ts) => currentMs - ts < ACTIVE_VISITOR_WINDOW_MS)
+    const kept = keepRecentTimestamps(timestamps, currentMs, ACTIVE_VISITOR_WINDOW_MS)
     if (!kept.length) VISITOR_ACTIVITY.delete(fingerprint)
     else VISITOR_ACTIVITY.set(fingerprint, kept)
   }
@@ -96,7 +108,7 @@ function pruneVisitorActivity(currentMs = nowMs()) {
 function registerVisitorActivity(fingerprint, currentMs = nowMs()) {
   const key = trim(fingerprint || 'anonymous')
   const existing = VISITOR_ACTIVITY.get(key) || []
-  const next = existing.filter((ts) => currentMs - ts < ACTIVE_VISITOR_WINDOW_MS)
+  const next = keepRecentTimestamps(existing, currentMs, ACTIVE_VISITOR_WINDOW_MS)
   next.push(currentMs)
   VISITOR_ACTIVITY.set(key, next)
   pruneVisitorActivity(currentMs)
@@ -110,7 +122,7 @@ function countActiveVisitors(currentMs = nowMs()) {
 
 function getVisitorMinuteCount(fingerprint, currentMs = nowMs()) {
   const key = trim(fingerprint || 'anonymous')
-  const timestamps = (VISITOR_ACTIVITY.get(key) || []).filter((ts) => currentMs - ts < ONE_MINUTE_MS)
+  const timestamps = keepRecentTimestamps(VISITOR_ACTIVITY.get(key) || [], currentMs, ONE_MINUTE_MS)
   VISITOR_ACTIVITY.set(key, timestamps)
   return timestamps.length
 }
@@ -139,18 +151,18 @@ function scoreProduct(product, profile = {}, question = '') {
   ].join(' ').toLowerCase()
 
   let score = 0
-  const queryTerms = new Set([
-    ...tokenize(question),
-    ...tokenize(profile.brand),
-    ...tokenize(profile.skinType),
-    ...tokenize(profile.concerns),
-    ...tokenize(profile.goal),
-    ...tokenize(profile.shoppingFor),
+  const queryTerms = buildQueryTermSet([
+    question,
+    profile.brand,
+    profile.skinType,
+    profile.concerns,
+    profile.goal,
+    profile.shoppingFor,
   ])
 
-  queryTerms.forEach((term) => {
+  for (const term of queryTerms) {
     if (haystack.includes(term)) score += 8
-  })
+  }
 
   if (profile.brand && trim(product.brand).toLowerCase() === trim(profile.brand).toLowerCase()) score += 28
   if (profile.shoppingFor && haystack.includes(trim(profile.shoppingFor).toLowerCase())) score += 12
@@ -161,44 +173,73 @@ function scoreProduct(product, profile = {}, question = '') {
   return score
 }
 
+function buildQueryTermSet(values = []) {
+  const queryTerms = new Set()
+  for (const value of values) {
+    const terms = tokenize(value)
+    for (const term of terms) queryTerms.add(term)
+  }
+  return queryTerms
+}
+
+function productMatchesPreference(product, preferredBrand, preferredCategory) {
+  if (preferredBrand && trim(product.brand).toLowerCase() !== preferredBrand) return false
+  if (!preferredCategory) return true
+  const fields = [product.category, product.name, product.description]
+  for (const value of fields) {
+    if (trim(value).toLowerCase().includes(preferredCategory)) return true
+  }
+  return false
+}
+
+function toPromptCandidate(product, score) {
+  return {
+    id: product.id,
+    name: product.name,
+    brand: product.brand || '',
+    category: product.category || '',
+    unit: product.unit || '',
+    description: product.description || '',
+    selling_price_usd: product.selling_price_usd,
+    selling_price_khr: product.selling_price_khr,
+    stock_quantity: product.stock_quantity,
+    image_path: product.image_path || '',
+    image_gallery: Array.isArray(product.image_gallery) ? product.image_gallery : [],
+    score,
+  }
+}
+
 function selectCandidateProducts(products, profile = {}, question = '') {
   const preferredBrand = trim(profile.brand).toLowerCase()
   const preferredCategory = trim(profile.shoppingFor).toLowerCase()
-  const filtered = products.filter((product) => {
-    if (preferredBrand && trim(product.brand).toLowerCase() !== preferredBrand) return false
-    if (preferredCategory && ![product.category, product.name, product.description].some((value) => trim(value).toLowerCase().includes(preferredCategory))) {
-      return false
-    }
-    return true
-  })
+  const filtered = []
+  for (const product of products) {
+    if (productMatchesPreference(product, preferredBrand, preferredCategory)) filtered.push(product)
+  }
 
   const pool = filtered.length ? filtered : products
-  return [...pool]
-    .map((product) => ({ product, score: scoreProduct(product, profile, question) }))
-    .sort((left, right) => right.score - left.score || String(left.product.name).localeCompare(String(right.product.name)))
-    .slice(0, MAX_PRODUCTS_IN_PROMPT)
-    .map((entry) => ({
-      id: entry.product.id,
-      name: entry.product.name,
-      brand: entry.product.brand || '',
-      category: entry.product.category || '',
-      unit: entry.product.unit || '',
-      description: entry.product.description || '',
-      selling_price_usd: entry.product.selling_price_usd,
-      selling_price_khr: entry.product.selling_price_khr,
-      stock_quantity: entry.product.stock_quantity,
-      image_path: entry.product.image_path || '',
-      image_gallery: Array.isArray(entry.product.image_gallery) ? entry.product.image_gallery : [],
-      score: entry.score,
-    }))
+  const scored = []
+  for (const product of pool) {
+    scored.push({ product, score: scoreProduct(product, profile, question) })
+  }
+  scored.sort((left, right) => right.score - left.score || String(left.product.name).localeCompare(String(right.product.name)))
+
+  const candidates = []
+  const limit = Math.min(scored.length, MAX_PRODUCTS_IN_PROMPT)
+  for (let index = 0; index < limit; index += 1) {
+    const entry = scored[index]
+    candidates.push(toPromptCandidate(entry.product, entry.score))
+  }
+  return candidates
 }
 
 function buildPrompt({ businessName, profile, question, candidates, disclaimer, extraInstructions }) {
-  const candidateLines = candidates.map((product) => (
-    `- [${product.id}] ${product.name} | brand=${product.brand || 'n/a'} | category=${product.category || 'n/a'} | stock=${product.stock_quantity} | price_usd=${product.selling_price_usd} | price_khr=${product.selling_price_khr} | description=${product.description || 'n/a'}`
-  )).join('\n')
+  const candidateLines = []
+  for (const product of candidates) {
+    candidateLines.push(`- [${product.id}] ${product.name} | brand=${product.brand || 'n/a'} | category=${product.category || 'n/a'} | stock=${product.stock_quantity} | price_usd=${product.selling_price_usd} | price_khr=${product.selling_price_khr} | description=${product.description || 'n/a'}`)
+  }
 
-  return [
+  const promptParts = [
     'You are a cosmetic retail assistant for a beauty store.',
     `Store name: ${businessName || 'Leang Cosmetics'}.`,
     'Use only the product catalog provided below for recommendations. Never invent store products.',
@@ -214,8 +255,68 @@ function buildPrompt({ businessName, profile, question, candidates, disclaimer, 
     `Customer profile: ${JSON.stringify(profile)}`,
     `Customer question: ${question}`,
     'Catalog candidates:',
-    candidateLines || '- none',
-  ].filter(Boolean).join('\n')
+    candidateLines.length ? candidateLines.join('\n') : '- none',
+  ]
+  if (extraInstructions) {
+    promptParts.splice(9, 0, `Extra merchant instructions: ${extraInstructions}`)
+  }
+  return promptParts.join('\n')
+}
+
+function takeTrimmedStrings(values = [], limit = 4) {
+  const items = []
+  for (const value of values) {
+    const next = trim(value)
+    if (!next) continue
+    items.push(next)
+    if (items.length >= limit) break
+  }
+  return items
+}
+
+function normalizeCitations(citations = []) {
+  const items = []
+  for (const citation of citations) {
+    const item = {
+      title: trim(citation?.title),
+      source: trim(citation?.source),
+      url: trim(citation?.url),
+      note: trim(citation?.note),
+    }
+    if (!item.title && !item.source && !item.url && !item.note) continue
+    items.push(item)
+    if (items.length >= 4) break
+  }
+  return items
+}
+
+function buildRecommendationPayloads(recommendations = [], candidatesById) {
+  const items = []
+  for (const item of recommendations) {
+    const productId = Number(item?.product_id || 0) || 0
+    const product = candidatesById.get(productId)
+    if (!product) continue
+    items.push({
+      product_id: product.id,
+      name: product.name,
+      brand: product.brand || '',
+      category: product.category || '',
+      image_path: product.image_path || '',
+      image_gallery: product.image_gallery || [],
+      selling_price_usd: product.selling_price_usd,
+      selling_price_khr: product.selling_price_khr,
+      stock_quantity: product.stock_quantity,
+      reason: trim(item?.reason),
+      fit_summary: trim(item?.fit_summary),
+      how_to_use: trim(item?.how_to_use),
+      cautions: trim(item?.cautions),
+      ingredients_focus: Array.isArray(item?.ingredients_focus) ? takeTrimmedStrings(item.ingredients_focus, 8) : [],
+      online_review_summary: trim(item?.online_review_summary),
+      citations: Array.isArray(item?.citations) ? normalizeCitations(item.citations) : [],
+    })
+    if (items.length >= MAX_RECOMMENDATIONS) break
+  }
+  return items
 }
 
 function parseAssistantPayload(text, candidatesById, disclaimer) {
@@ -242,45 +343,8 @@ function parseAssistantPayload(text, candidatesById, disclaimer) {
     summary: trim(parsed.summary) || fallback.summary,
     notice: trim(parsed.notice) || disclaimer,
     contact_note: trim(parsed.contact_note) || fallback.contact_note,
-    follow_up_questions: Array.isArray(parsed.follow_up_questions)
-      ? parsed.follow_up_questions.map((entry) => trim(entry)).filter(Boolean).slice(0, 4)
-      : [],
-    recommendations: recommendations
-      .map((item) => {
-        const productId = Number(item?.product_id || 0) || 0
-        const product = candidatesById.get(productId)
-        if (!product) return null
-        const citations = Array.isArray(item?.citations)
-          ? item.citations.map((citation) => ({
-              title: trim(citation?.title),
-              source: trim(citation?.source),
-              url: trim(citation?.url),
-              note: trim(citation?.note),
-            })).filter((citation) => citation.title || citation.source || citation.url || citation.note).slice(0, 4)
-          : []
-        return {
-          product_id: product.id,
-          name: product.name,
-          brand: product.brand || '',
-          category: product.category || '',
-          image_path: product.image_path || '',
-          image_gallery: product.image_gallery || [],
-          selling_price_usd: product.selling_price_usd,
-          selling_price_khr: product.selling_price_khr,
-          stock_quantity: product.stock_quantity,
-          reason: trim(item?.reason),
-          fit_summary: trim(item?.fit_summary),
-          how_to_use: trim(item?.how_to_use),
-          cautions: trim(item?.cautions),
-          ingredients_focus: Array.isArray(item?.ingredients_focus)
-            ? item.ingredients_focus.map((entry) => trim(entry)).filter(Boolean).slice(0, 8)
-            : [],
-          online_review_summary: trim(item?.online_review_summary),
-          citations,
-        }
-      })
-      .filter(Boolean)
-      .slice(0, MAX_RECOMMENDATIONS),
+    follow_up_questions: Array.isArray(parsed.follow_up_questions) ? takeTrimmedStrings(parsed.follow_up_questions, 4) : [],
+    recommendations: buildRecommendationPayloads(recommendations, candidatesById),
   }
 }
 
@@ -295,33 +359,37 @@ function listEnabledChatProviders(preferredProviderId) {
   `).all()
 
   const preferred = []
+  const ordered = []
   const others = []
-  rows.forEach((row) => {
+  for (const row of rows) {
     if (preferredId && row.id === preferredId) preferred.push(row)
     else others.push(row)
-  })
-  return [...preferred, ...others]
+  }
+  for (const row of preferred) ordered.push(row)
+  for (const row of others) ordered.push(row)
+  return ordered
 }
 
 function chooseProviderForAttempt(providers, currentMs = nowMs()) {
-  return providers
-    .map((provider) => {
-      const state = pruneProviderState(provider.id, currentMs)
-      return {
-        provider,
-        state,
-        priority: getProviderPriority(provider),
-        remaining: Math.max(0, getProviderCapacity(provider) - state.requestTimestamps.length),
-      }
+  const candidates = []
+  for (const provider of providers) {
+    const state = pruneProviderState(provider.id, currentMs)
+    const remaining = Math.max(0, getProviderCapacity(provider) - state.requestTimestamps.length)
+    if (state.cooldownUntil > currentMs || remaining <= 0) continue
+    candidates.push({
+      provider,
+      state,
+      priority: getProviderPriority(provider),
+      remaining,
     })
-    .filter((entry) => entry.state.cooldownUntil <= currentMs)
-    .filter((entry) => entry.remaining > 0)
-    .sort((left, right) => (
+  }
+  candidates.sort((left, right) => (
       left.priority - right.priority
       || left.state.activeRequests - right.state.activeRequests
       || left.state.failureCount - right.state.failureCount
       || left.state.lastUsedAt - right.state.lastUsedAt
-    ))[0] || null
+    ))
+  return candidates[0] || null
 }
 
 function markProviderStart(providerRow, currentMs = nowMs()) {
@@ -347,10 +415,37 @@ function markProviderFailure(providerRow, errorMessage, currentMs = nowMs()) {
   state.cooldownUntil = currentMs + getProviderCooldownMs(providerRow) * Math.min(3, state.failureCount)
 }
 
+function sumProviderCapacity(providers = []) {
+  let total = 0
+  for (const provider of providers) {
+    total += getProviderCapacity(provider)
+  }
+  return total
+}
+
+function buildProviderUsageItems(providers = [], currentMs = nowMs()) {
+  const items = []
+  for (const provider of providers) {
+    const state = pruneProviderState(provider.id, currentMs)
+    items.push({
+      id: provider.id,
+      name: provider.name,
+      provider: provider.provider,
+      model: provider.default_model || '',
+      priority: getProviderPriority(provider),
+      requestsPerMinute: getProviderCapacity(provider),
+      remainingThisMinute: Math.max(0, getProviderCapacity(provider) - state.requestTimestamps.length),
+      cooldownUntil: state.cooldownUntil || 0,
+      lastFailure: state.lastFailure || '',
+    })
+  }
+  return items
+}
+
 function getPortalAiUsageStatus(config, preferredProviderId) {
   const providers = listEnabledChatProviders(preferredProviderId || config?.aiProviderId)
   const activeVisitors = countActiveVisitors()
-  const totalCapacity = providers.reduce((sum, provider) => sum + getProviderCapacity(provider), 0)
+  const totalCapacity = sumProviderCapacity(providers)
   const safeGlobalPerMinute = Math.max(1, Math.floor(totalCapacity * 0.8))
   const perUserPerMinute = Math.max(1, Math.min(6, Math.floor(safeGlobalPerMinute / Math.max(1, activeVisitors))))
 
@@ -358,21 +453,39 @@ function getPortalAiUsageStatus(config, preferredProviderId) {
     activeVisitors,
     safeGlobalPerMinute,
     perUserPerMinute,
-    providers: providers.map((provider) => {
-      const state = pruneProviderState(provider.id)
-      return {
-        id: provider.id,
-        name: provider.name,
-        provider: provider.provider,
-        model: provider.default_model || '',
-        priority: getProviderPriority(provider),
-        requestsPerMinute: getProviderCapacity(provider),
-        remainingThisMinute: Math.max(0, getProviderCapacity(provider) - state.requestTimestamps.length),
-        cooldownUntil: state.cooldownUntil || 0,
-        lastFailure: state.lastFailure || '',
-      }
-    }),
+    providers: buildProviderUsageItems(providers),
   }
+}
+
+function minProviderInputChars(providers = [], fallback = MAX_QUESTION_CHARS) {
+  let minChars = fallback
+  for (const provider of providers) {
+    minChars = Math.min(minChars, getProviderMaxInputChars(provider))
+  }
+  return minChars
+}
+
+function hasAnyProfileValue(profile = {}) {
+  for (const value of Object.values(profile)) {
+    if (value) return true
+  }
+  return false
+}
+
+function productsById(products = []) {
+  const map = new Map()
+  for (const product of products) {
+    map.set(product.id, product)
+  }
+  return map
+}
+
+function remainingProviders(providers = [], attemptedProviderIds) {
+  const remaining = []
+  for (const provider of providers) {
+    if (!attemptedProviderIds.has(provider.id)) remaining.push(provider)
+  }
+  return remaining
 }
 
 async function generatePortalAiResponse({ config, profile, question, products, visitorFingerprint = 'anonymous' }) {
@@ -392,10 +505,7 @@ async function generatePortalAiResponse({ config, profile, question, products, v
   const primaryProvider = providers[0]
   const maxInputChars = Math.max(
     200,
-    providers.reduce(
-      (minChars, provider) => Math.min(minChars, getProviderMaxInputChars(provider)),
-      MAX_QUESTION_CHARS,
-    ),
+    minProviderInputChars(providers),
   )
   const sanitizedProfile = summarizeProfile(profile)
   const profileCharBudget = Object.values(sanitizedProfile).join(' ').length
@@ -403,7 +513,7 @@ async function generatePortalAiResponse({ config, profile, question, products, v
     throw new Error(`Please keep the profile details under ${MAX_PROFILE_TOTAL_CHARS} characters total.`)
   }
   const sanitizedQuestion = sanitizeQuestion(question, maxInputChars)
-  if (!sanitizedQuestion && !Object.values(sanitizedProfile).some(Boolean)) {
+  if (!sanitizedQuestion && !hasAnyProfileValue(sanitizedProfile)) {
     throw new Error('Add a question or at least one shopping preference first')
   }
 
@@ -439,12 +549,12 @@ async function generatePortalAiResponse({ config, profile, question, products, v
 
   const failovers = []
   let lastError = null
-  const candidatesById = new Map(candidates.map((product) => [product.id, product]))
+  const candidatesById = productsById(candidates)
   const attemptedProviderIds = new Set()
 
   while (attemptedProviderIds.size < providers.length) {
     const picked = chooseProviderForAttempt(
-      providers.filter((provider) => !attemptedProviderIds.has(provider.id)),
+      remainingProviders(providers, attemptedProviderIds),
       currentMs,
     )
     if (!picked) break

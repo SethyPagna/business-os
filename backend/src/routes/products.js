@@ -13,6 +13,7 @@ const { sanitizeMediaList } = require('../settingsSnapshot')
 const { normalizeClientRequestId } = require('../idempotency')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
+const { hasColumn } = require('../schemaMetadata')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 const { getStockMetrics } = require('../businessMetrics')
 const {
@@ -53,13 +54,40 @@ function getActiveBranches() {
   return db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
 }
 
+function settingsHasUpdatedAt() {
+  return hasColumn('settings', 'updated_at')
+}
+
 function getDefaultBranch(activeBranches = getActiveBranches()) {
-  return activeBranches.find(branch => branch.is_default) || activeBranches[0] || null
+  let fallback = null
+  for (const branch of activeBranches || []) {
+    if (!fallback) fallback = branch
+    if (branch?.is_default) return branch
+  }
+  return fallback
+}
+
+function getBranchById(activeBranches = [], branchId) {
+  for (const branch of activeBranches || []) {
+    if (branch?.id === branchId) return branch
+  }
+  return null
+}
+
+function findBranchByName(activeBranches = [], branchName = '') {
+  const normalizedBranchName = String(branchName || '').trim().toLowerCase()
+  if (!normalizedBranchName) return null
+  for (const branch of activeBranches || []) {
+    if (String(branch?.name || '').trim().toLowerCase() === normalizedBranchName) return branch
+  }
+  return null
 }
 
 function seedBranchRows(productId, activeBranches = getActiveBranches()) {
   const insertBS = db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)')
-  activeBranches.forEach(branch => insertBS.run(productId, branch.id))
+  for (const branch of activeBranches) {
+    insertBS.run(productId, branch.id)
+  }
 }
 
 function recalcProductStock(productId) {
@@ -84,41 +112,51 @@ function syncProductImageGallery(productId, gallery) {
     INSERT INTO product_images (product_id, image_path, sort_order)
     VALUES (?, ?, ?)
   `)
-  normalized.forEach((imagePath, index) => {
+  for (let index = 0; index < normalized.length; index += 1) {
+    const imagePath = normalized[index]
     insert.run(productId, imagePath, index)
-  })
+  }
   db.prepare("UPDATE products SET image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(normalized[0], productId)
   return normalized
 }
 
 function loadProductImageMap(productIds = []) {
-  const ids = Array.from(new Set((productIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)))
+  const ids = collectUniquePositiveIds(productIds)
   if (!ids.length) return new Map()
-  const placeholders = ids.map(() => '?').join(',')
+  const placeholders = []
+  for (let index = 0; index < ids.length; index += 1) {
+    placeholders.push('?')
+  }
   const rows = db.prepare(`
     SELECT product_id, image_path
     FROM product_images
-    WHERE product_id IN (${placeholders})
+    WHERE product_id IN (${placeholders.join(',')})
     ORDER BY sort_order ASC, id ASC
   `).all(...ids)
   const map = new Map()
-  rows.forEach((row) => {
+  for (const row of rows) {
     if (!map.has(row.product_id)) map.set(row.product_id, [])
     map.get(row.product_id).push(row.image_path)
-  })
+  }
   return map
 }
 
 function attachImageGallery(products = []) {
-  const map = loadProductImageMap(products.map((product) => product.id))
-  return products.map((product) => {
+  const productIds = []
+  for (const product of products) {
+    productIds.push(product.id)
+  }
+  const map = loadProductImageMap(productIds)
+  const withGallery = []
+  for (const product of products) {
     const gallery = normalizeImageGallery(map.get(product.id) || [], product.image_path)
-    return {
+    withGallery.push({
       ...product,
       image_gallery: gallery,
       image_path: gallery[0] || null,
-    }
-  })
+    })
+  }
+  return withGallery
 }
 
 function findProductByClientRequestId(clientRequestId) {
@@ -215,6 +253,58 @@ function normalizeLookup(value) {
   return normalizeCatalogText(value).toLowerCase()
 }
 
+function collectUniquePositiveIds(values = [], { limit = Infinity, selector = (value) => value } = {}) {
+  const ids = []
+  const seen = new Set()
+  for (const value of values || []) {
+    const id = Number(selector(value))
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+    if (ids.length >= limit) break
+  }
+  return ids
+}
+
+function collectNormalizedTokens(value = '', { limit = Infinity, separator = ',' } = {}) {
+  const tokens = []
+  const seen = new Set()
+  const parts = String(value || '').split(separator)
+  for (const part of parts) {
+    const token = part.trim().toLowerCase()
+    if (!token || seen.has(token)) continue
+    seen.add(token)
+    tokens.push(token)
+    if (tokens.length >= limit) break
+  }
+  return tokens
+}
+
+function collectBoundedValues(values = [], limit = Infinity) {
+  const result = []
+  for (const value of values || []) {
+    result.push(value)
+    if (result.length >= limit) break
+  }
+  return result
+}
+
+function collectSortedMapValues(map, compare) {
+  const values = []
+  for (const value of map.values()) {
+    insertSortedValue(values, value, compare)
+  }
+  return values
+}
+
+function insertSortedValue(values, value, compare) {
+  let index = 0
+  while (index < values.length && compare(values[index], value) <= 0) {
+    index += 1
+  }
+  values.splice(index, 0, value)
+}
+
 function normalizeImportFlagValue(value, fallback = 0) {
   const text = normalizeImportLookup(value)
   if (!text) return Number(fallback || 0) ? 1 : 0
@@ -249,28 +339,53 @@ const IMPORT_MONEY_FIELDS = new Set([
 const IMPORT_NUMERIC_FIELDS = new Set(['discount_percent', 'low_stock_threshold', 'expiry_alert_days'])
 
 function getProductImportDetailSignature(source = {}) {
-  return IMPORT_DETAIL_FIELDS.map((field) => {
+  const parts = []
+  for (const field of IMPORT_DETAIL_FIELDS) {
     const value = source?.[field]
-    if (IMPORT_MONEY_FIELDS.has(field)) return `${field}:${normalizePriceValue(value || 0)}`
-    if (IMPORT_NUMERIC_FIELDS.has(field)) return `${field}:${normalizePriceValue(value || 0)}`
-    if (field === 'discount_enabled') return `${field}:${normalizeImportFlagValue(value, 0)}`
-    return `${field}:${normalizeImportLookup(value)}`
-  }).join('|')
+    if (IMPORT_MONEY_FIELDS.has(field)) {
+      parts.push(`${field}:${normalizePriceValue(value || 0)}`)
+      continue
+    }
+    if (IMPORT_NUMERIC_FIELDS.has(field)) {
+      parts.push(`${field}:${normalizePriceValue(value || 0)}`)
+      continue
+    }
+    if (field === 'discount_enabled') {
+      parts.push(`${field}:${normalizeImportFlagValue(value, 0)}`)
+      continue
+    }
+    parts.push(`${field}:${normalizeImportLookup(value)}`)
+  }
+  return parts.join('|')
 }
 
 function chooseImportParentProduct(rows = []) {
-  return [...rows].sort((left, right) => {
-    const leftGroup = Number(left?.is_group || 0) ? 0 : 1
-    const rightGroup = Number(right?.is_group || 0) ? 0 : 1
-    if (leftGroup !== rightGroup) return leftGroup - rightGroup
-    const leftChild = Number(left?.parent_id || 0) ? 1 : 0
-    const rightChild = Number(right?.parent_id || 0) ? 1 : 0
-    if (leftChild !== rightChild) return leftChild - rightChild
-    const leftCreated = String(left?.created_at || '')
-    const rightCreated = String(right?.created_at || '')
-    if (leftCreated !== rightCreated) return leftCreated.localeCompare(rightCreated)
-    return Number(left?.id || 0) - Number(right?.id || 0)
-  })[0] || null
+  let selected = null
+  for (const row of rows || []) {
+    if (!selected || compareImportParentProduct(row, selected) < 0) selected = row
+  }
+  return selected
+}
+
+function compareImportParentProduct(left, right) {
+  const leftGroup = Number(left?.is_group || 0) ? 0 : 1
+  const rightGroup = Number(right?.is_group || 0) ? 0 : 1
+  if (leftGroup !== rightGroup) return leftGroup - rightGroup
+  const leftChild = Number(left?.parent_id || 0) ? 1 : 0
+  const rightChild = Number(right?.parent_id || 0) ? 1 : 0
+  if (leftChild !== rightChild) return leftChild - rightChild
+  const leftCreated = String(left?.created_at || '')
+  const rightCreated = String(right?.created_at || '')
+  if (leftCreated !== rightCreated) return leftCreated.localeCompare(rightCreated)
+  return Number(left?.id || 0) - Number(right?.id || 0)
+}
+
+function findImportProductWithSignature(products = [], signature) {
+  if (!signature) return null
+  for (const product of products || []) {
+    if (getProductImportDetailSignature(product) === signature) return product
+  }
+  return null
 }
 
 function normalizeImportAction(value) {
@@ -347,15 +462,11 @@ function normalizePositiveInt(value, fallback, { min = 1, max = 500 } = {}) {
 }
 
 function parseInclude(value = '') {
-  return new Set(String(value || '').split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean))
+  return new Set(collectNormalizedTokens(value))
 }
 
 function splitSearchTerms(value = '') {
-  return normalizeCatalogText(value)
-    .split(',')
-    .map((term) => term.trim().toLowerCase())
-    .filter(Boolean)
-    .slice(0, 8)
+  return collectNormalizedTokens(normalizeCatalogText(value), { limit: 8 })
 }
 
 function getProductCatalogSnapshotVersion() {
@@ -374,7 +485,11 @@ function getProductCatalogSnapshotVersion() {
 function parseBrandOptionsSetting(rawValue) {
   const parsed = tryParse(rawValue, [])
   if (!Array.isArray(parsed)) return []
-  return normalizeOptionList(parsed.filter((value) => !hasSuspiciousCatalogText(value)))
+  const safeValues = []
+  for (const value of parsed) {
+    if (!hasSuspiciousCatalogText(value)) safeValues.push(value)
+  }
+  return normalizeOptionList(safeValues)
 }
 
 function sanitizeProductLookupPayload(source = {}, fallback = {}) {
@@ -392,10 +507,11 @@ function sanitizeProductLookupPayload(source = {}, fallback = {}) {
 
 function buildLookupUsageEntries({ libraryRows = [], productRows = [], type = 'lookup' } = {}) {
   const libraryMap = new Map()
-  ;(Array.isArray(libraryRows) ? libraryRows : []).forEach((row) => {
+  const safeLibraryRows = Array.isArray(libraryRows) ? libraryRows : []
+  for (const row of safeLibraryRows) {
     const sourceName = typeof row === 'string' ? row : row?.name
     const name = normalizeCatalogText(sourceName)
-    if (!name || hasSuspiciousCatalogText(name)) return
+    if (!name || hasSuspiciousCatalogText(name)) continue
     const key = normalizeLookup(name)
     if (!libraryMap.has(key)) {
       libraryMap.set(key, {
@@ -407,10 +523,11 @@ function buildLookupUsageEntries({ libraryRows = [], productRows = [], type = 'l
         sample_products: [],
       })
     }
-  })
+  }
 
   const usageMap = new Map(libraryMap)
-  ;(Array.isArray(productRows) ? productRows : []).forEach((row) => {
+  const safeProductRows = Array.isArray(productRows) ? productRows : []
+  for (const row of safeProductRows) {
     const rawValue = String(row?.value || '')
     const normalizedValue = normalizeCatalogText(rawValue)
     const isSuspicious = hasSuspiciousCatalogText(rawValue)
@@ -437,11 +554,12 @@ function buildLookupUsageEntries({ libraryRows = [], productRows = [], type = 'l
         name: normalizeCatalogText(row?.product_name),
       })
     }
-  })
+  }
 
-  return Array.from(usageMap.values())
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((entry) => ({
+  const entries = collectSortedMapValues(usageMap, (left, right) => left.name.localeCompare(right.name))
+  const payload = []
+  for (const entry of entries) {
+    payload.push({
       type,
       key: entry.key,
       name: entry.name,
@@ -449,7 +567,9 @@ function buildLookupUsageEntries({ libraryRows = [], productRows = [], type = 'l
       usage_count: entry.usage_count,
       unresolved_count: entry.unresolved_count,
       sample_products: entry.sample_products,
-    }))
+    })
+  }
+  return payload
 }
 
 function buildLookupUsageSummary() {
@@ -458,12 +578,14 @@ function buildLookupUsageSummary() {
     FROM products
     WHERE is_active = 1
   `).all()
-  const brandRows = productRows
-    .map((row) => ({ id: row.id, product_name: row.product_name, value: row.brand }))
-  const categoryRows = productRows
-    .map((row) => ({ id: row.id, product_name: row.product_name, value: row.category }))
-  const unitRows = productRows
-    .map((row) => ({ id: row.id, product_name: row.product_name, value: row.unit }))
+  const brandRows = []
+  const categoryRows = []
+  const unitRows = []
+  for (const row of productRows) {
+    brandRows.push({ id: row.id, product_name: row.product_name, value: row.brand })
+    categoryRows.push({ id: row.id, product_name: row.product_name, value: row.category })
+    unitRows.push({ id: row.id, product_name: row.product_name, value: row.unit })
+  }
 
   const categoryLibrary = db.prepare('SELECT id, name, color FROM categories ORDER BY name COLLATE NOCASE ASC').all()
   const unitLibrary = db.prepare('SELECT id, name, color FROM units ORDER BY name COLLATE NOCASE ASC').all()
@@ -485,18 +607,18 @@ function appendProductSearchFilters(query = {}) {
   const joins = []
   const rawIds = String(query.ids || query.productIds || query.product_ids || '').trim()
   if (rawIds) {
-    const ids = Array.from(new Set(
-      rawIds
-        .split(',')
-        .map((value) => Number.parseInt(String(value || '').trim(), 10))
-        .filter((value) => Number.isInteger(value) && value > 0),
-    )).slice(0, 100)
+    const ids = collectUniquePositiveIds(rawIds.split(','), {
+      limit: 100,
+      selector: (value) => Number.parseInt(String(value || '').trim(), 10),
+    })
     if (ids.length) {
-      const idKeys = ids.map((id, index) => {
+      const idKeys = []
+      for (let index = 0; index < ids.length; index += 1) {
+        const id = ids[index]
         const key = `productId${index}`
         params[key] = id
-        return `@${key}`
-      })
+        idKeys.push(`@${key}`)
+      }
       where.push(`p.id IN (${idKeys.join(',')})`)
     }
   }
@@ -508,27 +630,29 @@ function appendProductSearchFilters(query = {}) {
   const searchTerms = splitSearchTerms(query.query || query.q || '')
   if (searchTerms.length) {
     const searchMode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-    const termClauses = searchTerms.map((term, index) => {
+    const termClauses = []
+    for (let index = 0; index < searchTerms.length; index += 1) {
+      const term = searchTerms[index]
       const key = `search${index}`
       params[key] = `%${term}%`
-      return `(
+      termClauses.push(`(
         lower(COALESCE(p.name, '')) LIKE @${key}
         OR lower(COALESCE(p.sku, '')) LIKE @${key}
         OR lower(COALESCE(p.barcode, '')) LIKE @${key}
         OR lower(COALESCE(p.brand, '')) LIKE @${key}
         OR lower(COALESCE(p.category, '')) LIKE @${key}
         OR lower(COALESCE(p.supplier, '')) LIKE @${key}
-      )`
-    })
+      )`)
+    }
     where.push(`(${termClauses.join(searchMode === 'OR' ? ' OR ' : ' AND ')})`)
   }
-  ;['brand', 'category', 'supplier'].forEach((field) => {
+  for (const field of ['brand', 'category', 'unit', 'supplier']) {
     const raw = String(query[field] || '').normalize('NFC').trim()
     if (raw && raw.toLowerCase() !== 'all') {
       params[field] = raw
       where.push(`p.${field} = @${field}`)
     }
-  })
+  }
   const groupState = String(query.groupState || query.group_state || 'all').toLowerCase()
   if (groupState === 'parent') where.push('COALESCE(p.is_group, 0) = 1')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
@@ -559,14 +683,21 @@ function getProductSearchMetadata(query = {}) {
   const { where, joins, params } = appendProductSearchFilters(metadataQuery)
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
   const joinSql = joins.join('\n')
-  const distinctField = (field) => db.prepare(`
-    SELECT DISTINCT p.${field} AS value
-    FROM products p
-    ${joinSql}
-    ${whereSql}
-      AND COALESCE(trim(p.${field}), '') != ''
-    ORDER BY p.${field} COLLATE NOCASE ASC
-  `).all(params).map((row) => row.value)
+  const distinctField = (field) => {
+    const rows = db.prepare(`
+      SELECT DISTINCT p.${field} AS value
+      FROM products p
+      ${joinSql}
+      ${whereSql}
+        AND COALESCE(trim(p.${field}), '') != ''
+      ORDER BY p.${field} COLLATE NOCASE ASC
+    `).all(params)
+    const values = []
+    for (const row of rows) {
+      values.push(row.value)
+    }
+    return values
+  }
   const initials = aggregateInitialRows(db.prepare(`
     SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count
     FROM products p
@@ -584,40 +715,55 @@ function getProductSearchMetadata(query = {}) {
 }
 
 function attachBranchStock(products = []) {
-  const ids = Array.from(new Set((products || []).map((product) => Number(product?.id || 0)).filter((id) => id > 0)))
+  const ids = collectUniquePositiveIds(products, { selector: (product) => product?.id })
   if (!ids.length) return products
-  const placeholders = ids.map(() => '?').join(',')
+  const placeholders = []
+  for (let index = 0; index < ids.length; index += 1) {
+    placeholders.push('?')
+  }
   const rows = db.prepare(`
     SELECT bs.product_id, b.id AS branch_id, b.name AS branch_name, COALESCE(bs.quantity, 0) AS quantity
     FROM branches b
-    LEFT JOIN branch_stock bs ON bs.branch_id = b.id AND bs.product_id IN (${placeholders})
+    LEFT JOIN branch_stock bs ON bs.branch_id = b.id AND bs.product_id IN (${placeholders.join(',')})
     WHERE b.is_active = 1
     ORDER BY b.is_default DESC, b.id ASC
   `).all(...ids)
-  const byProduct = new Map(ids.map((id) => [id, []]))
-  rows.forEach((row) => {
-    if (!row.product_id) return
+  const byProduct = new Map()
+  for (const id of ids) {
+    byProduct.set(id, [])
+  }
+  for (const row of rows) {
+    if (!row.product_id) continue
     if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, [])
     byProduct.get(row.product_id).push({
       branch_id: row.branch_id,
       branch_name: row.branch_name,
       quantity: row.quantity,
     })
-  })
-  return products.map((product) => ({
-    ...product,
-    branch_stock: byProduct.get(Number(product.id)) || [],
-  }))
+  }
+  const withBranchStock = []
+  for (const product of products) {
+    withBranchStock.push({
+      ...product,
+      branch_stock: byProduct.get(Number(product.id)) || [],
+    })
+  }
+  return withBranchStock
 }
 
 function expandProductFamilyRows(rows = []) {
-  const source = Array.isArray(rows) ? rows.filter(Boolean) : []
+  const source = []
+  if (Array.isArray(rows)) {
+    for (const row of rows) {
+      if (row) source.push(row)
+    }
+  }
   if (!source.length) return source
 
   const ids = new Set()
   const rootIds = new Set()
   const names = new Set()
-  source.forEach((product) => {
+  for (const product of source) {
     const id = Number(product?.id || 0)
     const parentId = Number(product?.parent_id || 0)
     if (id > 0) ids.add(id)
@@ -625,16 +771,20 @@ function expandProductFamilyRows(rows = []) {
     else if (Number(product?.is_group || 0) && id > 0) rootIds.add(id)
     const name = String(product?.name || '').trim().toLowerCase()
     if (name) names.add(name)
-  })
+  }
 
   const conditions = []
   const params = {}
-  const bindList = (prefix, values) => {
-    return [...values].slice(0, 100).map((value, index) => {
+    const bindList = (prefix, values) => {
+      const keys = []
+      const boundedValues = collectBoundedValues(values, 100)
+      for (let index = 0; index < boundedValues.length; index += 1) {
+        const value = boundedValues[index]
       const key = `${prefix}${index}`
       params[key] = value
-      return `@${key}`
-    })
+      keys.push(`@${key}`)
+    }
+    return keys
   }
 
   const idKeys = bindList('familyId', ids)
@@ -653,18 +803,20 @@ function expandProductFamilyRows(rows = []) {
     WHERE p.is_active = 1
       AND (${conditions.join(' OR ')})
     ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
-  `).all(params).map((product) => ({
-    ...product,
-    custom_fields: tryParse(product.custom_fields, {}),
-  }))
+  `).all(params)
 
   const seen = new Set()
-  return expanded.filter((product) => {
+  const uniqueProducts = []
+  for (const product of expanded) {
     const id = Number(product?.id || 0)
-    if (!id || seen.has(id)) return false
+    if (!id || seen.has(id)) continue
     seen.add(id)
-    return true
-  })
+    uniqueProducts.push({
+      ...product,
+      custom_fields: tryParse(product.custom_fields, {}),
+    })
+  }
+  return uniqueProducts
 }
 
 // GET /api/products/search - paged catalog read for large datasets
@@ -692,28 +844,40 @@ router.get('/search', authToken, (req, res) => {
       ${joinSql}
       ${whereSql}
     `).get(params)?.count || 0
-    const rows = db.prepare(`
+    const rawRows = db.prepare(`
       SELECT p.*, ${stockExpr} AS selected_branch_quantity
       FROM products p
       ${joinSql}
       ${whereSql}
       ORDER BY ${orderSql}
       LIMIT @pageSize OFFSET @offset
-    `).all({ ...params, pageSize, offset }).map((product) => ({
-      ...product,
-      custom_fields: tryParse(product.custom_fields, {}),
-    }))
+    `).all({ ...params, pageSize, offset })
+    const rows = []
+    for (const product of rawRows) {
+      rows.push({
+        ...product,
+        custom_fields: tryParse(product.custom_fields, {}),
+      })
+    }
     let items = include.has('family') ? expandProductFamilyRows(rows) : rows
     if (include.has('branch_stock')) items = attachBranchStock(items)
     if (include.has('images') || include.has('gallery')) items = attachImageGallery(items)
     if (include.has('batches') || include.has('family')) {
-      const batchMap = listProductBatches(items.map((product) => product.id), {
+      const itemIds = []
+      for (const product of items) {
+        itemIds.push(product.id)
+      }
+      const batchMap = listProductBatches(itemIds, {
         branchId: Number.isFinite(Number(params.branchId)) ? Number(params.branchId) : null,
       })
-      items = items.map((product) => ({
-        ...product,
-        batches: batchMap.get(product.id) || [],
-      }))
+      const withBatches = []
+      for (const product of items) {
+        withBatches.push({
+          ...product,
+          batches: batchMap.get(product.id) || [],
+        })
+      }
+      items = withBatches
     }
     const filters = getProductSearchMetadata(req.query)
     ok(res, {
@@ -763,10 +927,18 @@ router.post('/lookups/replace', authToken, requirePermission('products'), (req, 
   if (!field) return err(res, 'Invalid lookup type')
 
   const rawFrom = Array.isArray(req.body?.from) ? req.body.from : [req.body?.from]
-  const sourceEntries = rawFrom
-    .map((value) => normalizeCatalogText(value))
-    .filter(Boolean)
-  const fromLookups = Array.from(new Set(sourceEntries.map((value) => normalizeLookup(value)).filter(Boolean)))
+  const sourceEntries = []
+  const fromLookups = []
+  const seenLookups = new Set()
+  for (const value of rawFrom) {
+    const normalized = normalizeCatalogText(value)
+    if (!normalized) continue
+    sourceEntries.push(normalized)
+    const lookup = normalizeLookup(normalized)
+    if (!lookup || seenLookups.has(lookup)) continue
+    seenLookups.add(lookup)
+    fromLookups.push(lookup)
+  }
   if (!fromLookups.length) return err(res, 'At least one source value is required')
 
   const normalizedTarget = normalizeCatalogText(req.body?.to, { preserveNull: true })
@@ -775,13 +947,16 @@ router.post('/lookups/replace', authToken, requirePermission('products'), (req, 
   }
 
   try {
-    const placeholders = fromLookups.map(() => '?').join(',')
+    const placeholders = []
+    for (let index = 0; index < fromLookups.length; index += 1) {
+      placeholders.push('?')
+    }
     const params = normalizedTarget ? [normalizedTarget, ...fromLookups] : [...fromLookups]
     const targetPlaceholder = normalizedTarget ? '?' : 'NULL'
     const result = db.prepare(`
       UPDATE products
       SET ${field} = ${targetPlaceholder}, updated_at = CURRENT_TIMESTAMP
-      WHERE lower(trim(COALESCE(${field}, ''))) IN (${placeholders})
+      WHERE lower(trim(COALESCE(${field}, ''))) IN (${placeholders.join(',')})
         AND is_active = 1
     `).run(...params)
 
@@ -825,18 +1000,29 @@ router.get('/', authToken, (req, res) => {
     ORDER BY p.name
   `).all()
 
-  const parsed = products.map(p => ({
-    ...p,
-    custom_fields: tryParse(p.custom_fields, {}),
-    branch_stock_json: undefined,  // Remove raw JSON column
-    branch_stock: tryParse(p.branch_stock_json, []),  // Parse branch stock from JSON
-  }))
+  const parsed = []
+  for (const product of products) {
+    parsed.push({
+      ...product,
+      custom_fields: tryParse(product.custom_fields, {}),
+      branch_stock_json: undefined,  // Remove raw JSON column
+      branch_stock: tryParse(product.branch_stock_json, []),  // Parse branch stock from JSON
+    })
+  }
   const withImages = attachImageGallery(parsed)
-  const batchMap = listProductBatches(withImages.map((product) => product.id))
-  res.json(withImages.map((product) => ({
-    ...product,
-    batches: batchMap.get(product.id) || [],
-  })))
+  const productIds = []
+  for (const product of withImages) {
+    productIds.push(product.id)
+  }
+  const batchMap = listProductBatches(productIds)
+  const payload = []
+  for (const product of withImages) {
+    payload.push({
+      ...product,
+      batches: batchMap.get(product.id) || [],
+    })
+  }
+  res.json(payload)
 })
 
 // ?€?€ POST /api/products/variant ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1154,7 +1340,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
             movement_type: 'add',
             quantity: delta,
             branch_id: targetBranchId,
-            branch_name: activeBranches.find((branch) => branch.id === targetBranchId)?.name || null,
+            branch_name: getBranchById(activeBranches, targetBranchId)?.name || null,
             batch_id: addition.batch_id,
             lot_code: addition.lot_code,
             expiry_date: addition.expiry_date,
@@ -1170,7 +1356,8 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
               WHERE pb.variant_product_id = ? AND bbs.branch_id = ?
             `).get(productId, requestedBranchId)?.quantity || 0
             if (remaining > available) throw new Error(`Cannot remove ${remaining} - only ${available} available in this branch`)
-            allocateProductBatches(productId, requestedBranchId, remaining).forEach((allocation) => {
+            const allocations = allocateProductBatches(productId, requestedBranchId, remaining)
+            for (const allocation of allocations) {
               movementEntries.push({
                 movement_type: 'remove',
                 quantity: allocation.quantity,
@@ -1180,7 +1367,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
                 lot_code: allocation.lot_code,
                 expiry_date: allocation.expiry_date,
               })
-            })
+            }
           } else {
             const totalAvailable = db.prepare(`
               SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
@@ -1189,7 +1376,8 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
               WHERE pb.variant_product_id = ?
             `).get(productId)?.quantity || 0
             if (remaining > totalAvailable) throw new Error(`Cannot remove ${remaining} - only ${totalAvailable} available`)
-            allocateProductBatches(productId, null, remaining).forEach((allocation) => {
+            const allocations = allocateProductBatches(productId, null, remaining)
+            for (const allocation of allocations) {
               movementEntries.push({
                 movement_type: 'remove',
                 quantity: allocation.quantity,
@@ -1199,7 +1387,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
                 lot_code: allocation.lot_code,
                 expiry_date: allocation.expiry_date,
               })
-            })
+            }
           }
         }
 
@@ -1211,18 +1399,21 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
              batch_id, lot_code, expiry_date)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `)
-        movementEntries.forEach((entry) => {
+        const purchasePriceUsd = merged.purchase_price_usd || 0
+        const purchasePriceKhr = merged.purchase_price_khr || 0
+        const productName = String(merged.name || '').trim()
+        for (const entry of movementEntries) {
           insertMovement.run(
             productId,
-            String(merged.name || '').trim(),
+            productName,
             entry.branch_id || null,
             entry.branch_name || null,
             entry.movement_type,
             entry.quantity,
-            merged.purchase_price_usd || 0,
-            merged.purchase_price_khr || 0,
-            entry.quantity * (merged.purchase_price_usd || 0),
-            entry.quantity * (merged.purchase_price_khr || 0),
+            purchasePriceUsd,
+            purchasePriceKhr,
+            entry.quantity * purchasePriceUsd,
+            entry.quantity * purchasePriceKhr,
             'Product edit (manual stock change)',
             actor.userId,
             actor.userName,
@@ -1230,7 +1421,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
             entry.lot_code || null,
             entry.expiry_date || null,
           )
-        })
+        }
       } else {
         recalcProductStock(productId)
       }
@@ -1319,9 +1510,11 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   const normalizeLookup = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
   const legacyProductCount = Array.isArray(products) ? products.length : 0
   const legacyImageEntries = imageFiles && typeof imageFiles === 'object' ? Object.entries(imageFiles) : []
-  const legacyBase64ImageBytes = legacyImageEntries.reduce((sum, [, value]) => (
-    sum + (/^data:image\//i.test(String(value || '')) ? String(value || '').length : 0)
-  ), 0)
+  let legacyBase64ImageBytes = 0
+  for (const [, value] of legacyImageEntries) {
+    const sourceValue = String(value || '')
+    if (/^data:image\//i.test(sourceValue)) legacyBase64ImageBytes += sourceValue.length
+  }
   if (
     legacyProductCount > 500
     || legacyImageEntries.length > 100
@@ -1334,13 +1527,17 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   if (imageOnly) {
     if (!imageFiles || typeof imageFiles !== 'object') return err(res, 'No images provided')
     const allProducts = db.prepare('SELECT id, name FROM products WHERE is_active = 1').all()
-    const imgEntries  = Object.entries(imageFiles)
+    const productsByImageBaseName = new Map()
+    for (const product of allProducts) {
+      const key = String(product?.name || '').trim().toLowerCase()
+      if (key && !productsByImageBaseName.has(key)) productsByImageBaseName.set(key, product)
+    }
 
     // Process async (compression), then write DB in a transaction
     const resolved = []
-    for (const [filename, dataUrl] of imgEntries) {
+    for (const [filename, dataUrl] of Object.entries(imageFiles)) {
       const baseName = filename.replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim().toLowerCase()
-      const match = allProducts.find((p) => String(p?.name || '').trim().toLowerCase() === baseName)
+      const match = productsByImageBaseName.get(baseName)
       if (!match) { errors.push(`No product matched for "${filename}"`); continue }
       try {
         const sourceValue = String(dataUrl || '').trim()
@@ -1380,23 +1577,13 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 
   const activeBranches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
   const defaultImportBranch = getDefaultBranch(activeBranches)
-  const categoryMap = new Map(
-    db.prepare('SELECT id, name FROM categories ORDER BY name COLLATE NOCASE ASC').all()
-      .map((row) => [normalizeLookup(row.name), row])
-  )
-  const unitMap = new Map(
-    db.prepare('SELECT id, name FROM units ORDER BY name COLLATE NOCASE ASC').all()
-      .map((row) => [normalizeLookup(row.name), row])
-  )
-  const settingsSupportsUpdatedAt = db.prepare(`
-    SELECT 1 AS exists
-    FROM information_schema.columns
-    WHERE table_schema = current_schema()
-      AND table_name = ?
-      AND column_name = ?
-    LIMIT 1
-  `).get('settings', 'updated_at')?.exists === 1
-  const upsertSetting = settingsSupportsUpdatedAt
+  const categoryMap = new Map()
+  const categoryRows = db.prepare('SELECT id, name FROM categories ORDER BY name COLLATE NOCASE ASC').all()
+  for (const row of categoryRows) categoryMap.set(normalizeLookup(row.name), row)
+  const unitMap = new Map()
+  const unitRows = db.prepare('SELECT id, name FROM units ORDER BY name COLLATE NOCASE ASC').all()
+  for (const row of unitRows) unitMap.set(normalizeLookup(row.name), row)
+  const upsertSetting = settingsHasUpdatedAt()
     ? db.prepare(`
       INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
@@ -1408,12 +1595,11 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   const brandSettingValue = db.prepare("SELECT value FROM settings WHERE key = 'product_brand_options'").get()?.value
   const parsedBrandOptions = tryParse(brandSettingValue, [])
   const brandOptions = Array.isArray(parsedBrandOptions) ? parsedBrandOptions : []
-  const brandMap = new Map(
-    brandOptions
-      .map((value) => String(value || '').trim())
-      .filter(Boolean)
-      .map((value) => [normalizeLookup(value), value])
-  )
+  const brandMap = new Map()
+  for (const option of brandOptions) {
+    const value = String(option || '').trim()
+    if (value) brandMap.set(normalizeLookup(value), value)
+  }
   let categoriesChanged = false
   let unitsChanged = false
   let brandsChanged = false
@@ -1505,8 +1691,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   const determineBranch = (branchName) => {
     let mb = null
     if (branchName?.trim()) {
-      const normalizedBranchName = String(branchName || '').trim().toLowerCase()
-      mb = activeBranches.find((b) => String(b?.name || '').trim().toLowerCase() === normalizedBranchName)
+      mb = findBranchByName(activeBranches, branchName)
       if (!mb) {
         const nb  = db.prepare('INSERT OR IGNORE INTO branches (name,is_default,is_active) VALUES (?,0,1)').run(branchName.trim())
         const nid = nb.lastInsertRowid || db.prepare('SELECT id FROM branches WHERE name=?').get(branchName.trim())?.id
@@ -1525,14 +1710,22 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   const handleBranch = (pid, branchName, qty, replace, batchOptions = {}) => {
     const mb = determineBranch(branchName)
 
+    const resetBatchStock = () => {
+      const rows = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(pid)
+      if (!rows.length) return
+      const batchIds = []
+      const placeholders = []
+      for (const row of rows) {
+        batchIds.push(row.id)
+        placeholders.push('?')
+      }
+      db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders.join(',')})`).run(...batchIds)
+    }
+
     if (!mb) {
       if (qty > 0) throw new Error('A branch is required to import stock')
       if (replace) {
-        const batchIds = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(pid).map((row) => row.id)
-        if (batchIds.length) {
-          const placeholders = batchIds.map(() => '?').join(',')
-          db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders})`).run(...batchIds)
-        }
+        resetBatchStock()
       }
       recalcProductStock(pid)
       return null
@@ -1540,11 +1733,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 
     migrateLegacyProductToBatches(pid)
     if (replace) {
-      const batchIds = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(pid).map((row) => row.id)
-      if (batchIds.length) {
-        const placeholders = batchIds.map(() => '?').join(',')
-        db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders})`).run(...batchIds)
-      }
+      resetBatchStock()
     }
     let addition = null
     if (qty > 0) addition = increaseProductBatchStock(pid, mb.id, qty, batchOptions)
@@ -1584,15 +1773,18 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
       'image_1', 'image_2', 'image_3', 'image_4', 'image_5',
       'image_url_1', 'image_url_2', 'image_url_3', 'image_url_4', 'image_url_5',
     ]
-    directKeys.forEach((key) => {
+    for (const key of directKeys) {
       const value = String(row?.[key] || '').trim()
       if (value) candidates.push(value)
-    })
-    ;['image_filenames', 'image_urls'].forEach((key) => {
+    }
+    for (const key of ['image_filenames', 'image_urls']) {
       const listField = String(row?.[key] || '').trim()
-      if (!listField) return
-      listField.split(/[|;\n]/).map((item) => item.trim()).filter(Boolean).forEach((item) => candidates.push(item))
-    })
+      if (!listField) continue
+      for (const item of listField.split(/[|;\n]/)) {
+        const value = item.trim()
+        if (value) candidates.push(value)
+      }
+    }
     const seen = new Set()
     const unique = []
     for (const value of candidates) {
@@ -1611,16 +1803,17 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 
   const loadCurrentGallery = (productId, fallbackPrimary = null) => {
     const rows = db.prepare('SELECT image_path FROM product_images WHERE product_id = ? ORDER BY sort_order ASC, id ASC').all(productId)
-    const gallery = rows.map((row) => row.image_path)
+    const gallery = []
+    for (const row of rows) gallery.push(row.image_path)
     return normalizeImageGallery(gallery, fallbackPrimary)
   }
 
   const resolvedImages = {}
   const allImageFilenames = new Set()
   for (const p of products) {
-    parseIncomingImageRefs(p).forEach((ref) => {
+    for (const ref of parseIncomingImageRefs(p)) {
       if (!isDirectImageRef(ref)) allImageFilenames.add(ref)
-    })
+    }
   }
   for (const filename of allImageFilenames) {
     resolvedImages[filename] = await resolveImage(filename)
@@ -1666,12 +1859,12 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         const normalizedUnit = ensureUnit(p.unit || 'pcs') || 'pcs'
         const normalizedBrand = ensureBrand(p.brand)
         const normalizedSupplier = ensureSupplier(p.supplier)
-        const incomingImageGallery = normalizeImageGallery(
-          parseIncomingImageRefs(p)
-            .map((ref) => (isDirectImageRef(ref) ? ref : (resolvedImages[ref] || null)))
-            .filter(Boolean),
-          null,
-        )
+        const incomingImageRefs = []
+        for (const ref of parseIncomingImageRefs(p)) {
+          const resolvedRef = isDirectImageRef(ref) ? ref : (resolvedImages[ref] || null)
+          if (resolvedRef) incomingImageRefs.push(resolvedRef)
+        }
+        const incomingImageGallery = normalizeImageGallery(incomingImageRefs, null)
         const sameNameProducts = db.prepare("SELECT * FROM products WHERE lower(trim(name)) = lower(trim(?)) ORDER BY is_group DESC, parent_id ASC, created_at ASC, id ASC").all(p.name.trim())
         const nameKey = normalizeLookup(p.name)
         const importedParent = nameKey ? importParentsByName.get(nameKey) || null : null
@@ -1703,7 +1896,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           expiry_date: importExpiry.expiry_date,
           expiry_alert_days: importExpiry.expiry_alert_days,
         })
-        const matchingSameNameProduct = sameNameProducts.find((product) => getProductImportDetailSignature(product) === importSignature) || null
+        const matchingSameNameProduct = findImportProductWithSignature(sameNameProducts, importSignature)
         const selectedParent = chooseImportParentProduct(candidateParents)
         if (!importActionLabel || importActionLabel === 'ask') {
           if (matchingSameNameProduct) {
@@ -1772,7 +1965,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
             importParentsByName.set(nameKey, { ...p, id: pid, is_group: importActionLabel === 'create_variant' ? 1 : isGroup, parent_id: null, created_at: new Date().toISOString() })
             if (importActionLabel === 'create_variant') markParentProductAsGroup(pid)
           }
-          activeBranches.forEach(b => insertBS.run(pid, b.id, 0))
+          for (const branch of activeBranches) insertBS.run(pid, branch.id, 0)
           const branch = determineBranch(p.branch)
           if (qty > 0) {
             logMove.run(pid, p.name.trim(), branch?.id || null, branch?.name || null, 'purchase', qty, buyUsd, buyKhr, qty * buyUsd, qty * buyKhr,
@@ -1996,14 +2189,13 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     }
     if (brandsChanged) {
       const cleanBrandMap = new Map()
-      brandOptions
-        .map((value) => String(value || '').trim().replace(/\s+/g, ' '))
-        .filter(Boolean)
-        .forEach((value) => {
-          const lookup = normalizeLookup(value)
-          if (!cleanBrandMap.has(lookup)) cleanBrandMap.set(lookup, value)
-        })
-      const cleanBrands = Array.from(cleanBrandMap.values()).sort((left, right) => left.localeCompare(right))
+      for (const option of brandOptions) {
+        const value = String(option || '').trim().replace(/\s+/g, ' ')
+        if (!value) continue
+        const lookup = normalizeLookup(value)
+        if (!cleanBrandMap.has(lookup)) cleanBrandMap.set(lookup, value)
+      }
+      const cleanBrands = collectSortedMapValues(cleanBrandMap, (left, right) => left.localeCompare(right))
       upsertSetting.run('product_brand_options', JSON.stringify(cleanBrands))
     }
   })()

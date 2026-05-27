@@ -83,10 +83,170 @@ const { deleteAllStoredUploads, requestUploadStorageReconcile } = require('../..
 
 const router = express.Router()
 const BACKUP_VERSION_LIST_ROUTE_TIMEOUT_MS = 500
+
+function auditWithActorMeta(actor = {}, action, entity, entityId, detail = {}, opts = {}) {
+  return audit(
+    actor?.userId || null,
+    actor?.userName || null,
+    action,
+    entity,
+    entityId,
+    detail,
+    {
+      ...opts,
+      deviceName: opts.deviceName || actor?.deviceName || null,
+      deviceTz: opts.deviceTz || actor?.deviceTz || null,
+      clientTime: opts.clientTime || actor?.clientTime || null,
+    }
+  )
+}
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
 
 function q(name) {
   return `"${String(name).replace(/"/g, '""')}"`
+}
+
+function buildSqlPlaceholders(count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) {
+    placeholders.push('?')
+  }
+  return placeholders.join(', ')
+}
+
+function joinRemainingImportJobIds(jobs = []) {
+  const ids = []
+  for (const job of jobs || []) {
+    if (job?.id) ids.push(job.id)
+  }
+  return ids.join(', ')
+}
+
+function collectSystemSettingKeys(keys = []) {
+  const safeKeys = []
+  for (const key of Array.isArray(keys) ? keys : []) {
+    if (key) safeKeys.push(key)
+  }
+  return safeKeys
+}
+
+function buildSettingsMap(rows = []) {
+  const settings = {}
+  for (const row of rows || []) {
+    settings[row.key] = row.value
+  }
+  return settings
+}
+
+function buildSystemSettingEntries(updates = {}) {
+  const entries = []
+  for (const [key, value] of Object.entries(updates || {})) {
+    if (key) entries.push([key, value])
+  }
+  return entries
+}
+
+function sumNumericValues(values = []) {
+  let total = 0
+  for (const value of values || []) {
+    total += Number(value) || 0
+  }
+  return total
+}
+
+function getCustomTableNames(rows = []) {
+  const names = []
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const name = String(row?.name || '').trim()
+    if (name.startsWith('ct_')) names.push(name)
+  }
+  return names
+}
+
+function broadcastMany(channels = []) {
+  for (const channel of channels || []) {
+    broadcast(channel)
+  }
+}
+
+function dropCustomTables(rows = []) {
+  const tableNames = getCustomTableNames(rows)
+  for (const tableName of tableNames) {
+    try { db.exec(`DROP TABLE IF EXISTS "${tableName}"`) } catch (_) {}
+  }
+}
+
+function clearTables(tables = []) {
+  for (const table of tables || []) {
+    try { db.prepare(`DELETE FROM "${table}"`).run() } catch (_) {}
+  }
+}
+
+function collectAppliedOperationIds(operations = []) {
+  const ids = []
+  for (const operation of Array.isArray(operations) ? operations : []) {
+    if (operation?.id) ids.push(operation.id)
+  }
+  return ids
+}
+
+function collectSortedSetValues(values) {
+  const items = []
+  for (const value of values || []) {
+    items.push(value)
+  }
+  items.sort((a, b) => a.localeCompare(b))
+  return items
+}
+
+function buildFolderEntries(paths = [], kind = 'folder') {
+  const entries = []
+  for (const fullPath of paths || []) {
+    entries.push({
+      name: fullPath === '/' ? 'Root' : fullPath,
+      fullPath,
+      kind,
+    })
+  }
+  return entries
+}
+
+function buildExistingFavoriteFolders(favorites = []) {
+  const entries = []
+  for (const entry of favorites || []) {
+    try {
+      if (entry.fullPath && fs.existsSync(entry.fullPath)) {
+        entries.push({ ...entry, kind: 'folder' })
+      }
+    } catch (_) {}
+  }
+  return entries
+}
+
+function listVisibleDirectories(base) {
+  const entries = fs.readdirSync(base, { withFileTypes: true })
+  const dirs = []
+  for (const entry of entries || []) {
+    if (entry.isDirectory() && !entry.name.startsWith('.')) {
+      dirs.push({ name: entry.name, fullPath: path.join(base, entry.name), kind: 'folder' })
+    }
+  }
+  return dirs
+}
+
+function buildPickerScript(escapedPath) {
+  const lines = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
+    "$dialog.Description = 'Select Business OS data folder'",
+    '$dialog.ShowNewFolderButton = $true',
+  ]
+  if (escapedPath) {
+    lines.push(`if (Test-Path -LiteralPath '${escapedPath}') { $dialog.SelectedPath = '${escapedPath}' }`)
+  }
+  lines.push('$result = $dialog.ShowDialog()')
+  lines.push("if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }")
+  return lines.join('; ')
 }
 
 function getClientKey(req, suffix = '') {
@@ -113,7 +273,7 @@ async function stopImportsBeforeDestructiveAction(actionLabel) {
     waitMs: 20_000,
   })
   if (summary.remaining?.length) {
-    const ids = summary.remaining.map((job) => job.id).join(', ')
+    const ids = joinRemainingImportJobIds(summary.remaining)
     const error = new Error(`Background imports are still stopping (${ids}). Try again after the top import tracker shows cancelled.`)
     error.code = 'background_imports_still_stopping'
     error.summary = summary
@@ -211,9 +371,9 @@ function getSafeTableCount(table) {
 
 function buildMigrationTableCounts() {
   const counts = {}
-  BACKUP_TABLES.forEach((table) => {
+  for (const table of BACKUP_TABLES) {
     counts[table] = getSafeTableCount(table)
-  })
+  }
   return counts
 }
 
@@ -239,28 +399,26 @@ function safeJsonParse(value, fallback = null) {
 }
 
 function readSystemSettings(keys = []) {
-  const safeKeys = (Array.isArray(keys) ? keys : []).filter(Boolean)
+  const safeKeys = collectSystemSettingKeys(keys)
   if (!safeKeys.length) return {}
-  const placeholders = safeKeys.map(() => '?').join(', ')
-  return db.prepare(`SELECT key, value FROM settings WHERE key IN (${placeholders})`).all(...safeKeys)
-    .reduce((acc, row) => {
-      acc[row.key] = row.value
-      return acc
-    }, {})
+  const placeholders = buildSqlPlaceholders(safeKeys.length)
+  const rows = db.prepare(`SELECT key, value FROM settings WHERE key IN (${placeholders})`).all(...safeKeys)
+  return buildSettingsMap(rows)
 }
 
 function writeSystemSettings(updates = {}) {
-  const entries = Object.entries(updates || {}).filter(([key]) => key)
+  const entries = buildSystemSettingEntries(updates)
   if (!entries.length) return
   const upsert = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `)
+  const deleteSetting = db.prepare('DELETE FROM settings WHERE key = ?')
   db.transaction(() => {
-    entries.forEach(([key, value]) => {
-      if (value == null) db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+    for (const [key, value] of entries) {
+      if (value == null) deleteSetting.run(key)
       else upsert.run(key, String(value))
-    })
+    }
   })()
 }
 
@@ -365,7 +523,7 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
   const organizationStorage = organization ? ensureOrganizationFilesystemLayout(organization) : null
   const queue = queueStatus || getQueueStatus()
   const tableCounts = buildMigrationTableCounts()
-  const totalRows = Object.values(tableCounts).reduce((sum, value) => sum + (Number(value) || 0), 0)
+  const totalRows = sumNumericValues(Object.values(tableCounts))
   const queueReady = queue?.available === true || (queue?.driver === 'bullmq' && queue?.reason === 'ready')
   const cutoverReadiness = analyzePostgresCutoverReadiness()
   const migrationEngineReady = cutoverReadiness.ready
@@ -433,12 +591,6 @@ async function readFinalBackupManifest(sourceRoot) {
   return validateLocalBackupPackage(sourceRoot)
 }
 
-function getCustomTableNames(rows = []) {
-  return (Array.isArray(rows) ? rows : [])
-    .map((row) => String(row?.name || '').trim())
-    .filter((name) => name.startsWith('ct_'))
-}
-
 function getDefaultBackupDestinationDir() {
   const configured = String(process.env.BUSINESS_OS_BACKUP_DIR || '').trim()
   if (configured) return path.resolve(configured)
@@ -464,7 +616,7 @@ async function createFolderBackup({ destinationDir, actor = {}, progress = null,
         filesTotal: reusable.objectsCopied || 0,
       },
     })
-    audit(actor.userId, actor.userName, 'backup_export_reused', 'system', null, {
+    auditWithActorMeta(actor, 'backup_export_reused', 'system', null, {
       packageId: reusable.packageId,
       objectPrefix: reusable.objectPrefix,
       localPath: reusable.localPath,
@@ -473,7 +625,7 @@ async function createFolderBackup({ destinationDir, actor = {}, progress = null,
     return reusable
   }
   const result = await createFinalBackupPackage({ destinationDir: resolvedDestination, actor, progress, signal, throwIfCancelled })
-  audit(actor.userId, actor.userName, 'backup_export', 'system', null, {
+  auditWithActorMeta(actor, 'backup_export', 'system', null, {
     packageId: result.packageId,
     objectPrefix: result.objectPrefix,
     localPath: result.localPath,
@@ -509,7 +661,7 @@ async function restoreFolderBackup({ sourceDir, actor = {}, progress = null, thr
       message: 'Validated final package. Confirm restore before replacing live data.',
       metrics: { currentStep: 'validated', sourceDir: snapshot.root },
     })
-    audit(actor.userId, actor.userName, 'backup_restore_validated', 'system', null, {
+    auditWithActorMeta(actor, 'backup_restore_validated', 'system', null, {
       sourceDir: snapshot.root,
       backupFormat: snapshot.manifest?.format || '',
       backupCreatedAt: snapshot.manifest?.created_at || snapshot.manifest?.createdAt || '',
@@ -793,12 +945,12 @@ router.post('/drive-sync/jobs', authToken, requireAnyPermission(['backup', 'sett
       const job = startSystemJob('google_drive_sync', async ({ progress, signal, throwIfCancelled }) => {
       progress({ phase: 'starting', progress: 5, message: 'Preparing Google Drive sync' })
         const summary = await runDriveSync('manual', { progress, signal, throwIfCancelled })
-        audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
+        auditWithActorMeta(actor, 'drive_sync', 'system', null, {
           reason: 'manual',
-        uploaded: summary?.uploaded || 0,
-        updated: summary?.updated || 0,
-        skipped: summary?.skipped || 0,
-      })
+          uploaded: summary?.uploaded || 0,
+          updated: summary?.updated || 0,
+          skipped: summary?.skipped || 0,
+        })
       return {
         summary,
         item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
@@ -823,12 +975,12 @@ router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', '
       const job = startSystemJob('google_drive_sync', async ({ progress, signal, throwIfCancelled }) => {
       progress({ phase: 'starting', progress: 5, message: 'Preparing Google Drive sync' })
         const summary = await runDriveSync('manual', { progress, signal, throwIfCancelled })
-        audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
+        auditWithActorMeta(actor, 'drive_sync', 'system', null, {
           reason: 'manual',
-        uploaded: summary?.uploaded || 0,
-        updated: summary?.updated || 0,
-        skipped: summary?.skipped || 0,
-      })
+          uploaded: summary?.uploaded || 0,
+          updated: summary?.updated || 0,
+          skipped: summary?.skipped || 0,
+        })
       return {
         summary,
         item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
@@ -1019,18 +1171,18 @@ router.post('/reset-data', authToken, requirePermission('backup'), async (req, r
     }
 
     const label = mode === 'all'
-      ? 'Full data reset ??sales, returns, products, contacts cleared'
-      : 'Sales reset ??sales, returns, and stock cleared'
+      ? 'Full data reset - sales, returns, products, and contacts cleared'
+      : 'Sales reset - sales, returns, and stock cleared'
     bumpStorageVersion(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
     audit(actor.userId, actor.userName, 'reset_data', 'system', null, {
       label,
       cancelledImportJobs: importStopSummary.cancelled || 0,
     })
-    ;['sales', 'returns', 'products', 'inventory', 'customers', 'dashboard', 'actionHistory', 'runtime'].forEach(broadcast)
+    broadcastMany(['sales', 'returns', 'products', 'inventory', 'customers', 'dashboard', 'actionHistory', 'runtime'])
     ok(res, {
       message: mode === 'all'
-        ? 'Reset complete ??sales, returns, products, and contacts deleted. Settings, users, and branches kept.'
-        : 'Sales reset ??sales, returns, and stock cleared. Products and contacts kept.',
+        ? 'Reset complete - sales, returns, products, and contacts deleted. Settings, users, and branches kept.'
+        : 'Sales reset - sales, returns, and stock cleared. Products and contacts kept.',
     })
   } catch (e) { err(res, e.message) }
 })
@@ -1044,9 +1196,7 @@ router.post('/factory-reset', authToken, requirePermission('backup'), async (req
     db.transaction(() => {
       // FK-safe deletion order ??returns and return_items included
       const existingCustomTables = db.prepare(`SELECT * FROM ${q('custom_tables')}`).all()
-      getCustomTableNames(existingCustomTables).forEach((tableName) => {
-        try { db.exec(`DROP TABLE IF EXISTS "${tableName}"`) } catch (_) {}
-      })
+      dropCustomTables(existingCustomTables)
 
       const tables = [
         'verification_codes', 'user_sessions',
@@ -1063,7 +1213,7 @@ router.post('/factory-reset', authToken, requirePermission('backup'), async (req
         'action_history',
         'roles', 'audit_logs', 'settings', 'users',
       ]
-      tables.forEach(t => { try { db.prepare(`DELETE FROM "${t}"`).run() } catch (_) {} })
+      clearTables(tables)
       ensureCoreDataInvariants()
     })()
 
@@ -1077,7 +1227,7 @@ router.post('/factory-reset', authToken, requirePermission('backup'), async (req
       cancelledImportJobs: importStopSummary.cancelled || 0,
     })
 
-    ;['products', 'sales', 'returns', 'customers', 'inventory', 'dashboard', 'settings', 'users', 'roles', 'files', 'customTables', 'actionHistory', 'runtime'].forEach(broadcast)
+    broadcastMany(['products', 'sales', 'returns', 'customers', 'inventory', 'dashboard', 'settings', 'users', 'roles', 'files', 'customTables', 'actionHistory', 'runtime'])
     ok(res, { message: 'Factory reset complete. All data and images wiped. Admin account and defaults restored.' })
   } catch (e) { err(res, e.message) }
 })
@@ -1085,7 +1235,7 @@ router.post('/factory-reset', authToken, requirePermission('backup'), async (req
 // ?€?€ Offline sync push ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.post('/sync/push', authToken, (req, res) => {
   const { operations = [] } = req.body || {}
-  res.json({ applied: operations.map(op => op.id).filter(Boolean) })
+  res.json({ applied: collectAppliedOperationIds(operations) })
 })
 
 // ?€?€ Data Integrity Check & Repair ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1128,7 +1278,7 @@ router.post('/repair-integrity', authToken, requireAnyPermission(['backup', 'set
     
     if (result.repairs > 0) {
       // Broadcast updates since we made changes
-      ;['products', 'sales', 'inventory', 'dashboard'].forEach(broadcast)
+      broadcastMany(['products', 'sales', 'inventory', 'dashboard'])
       
       // Log the repair action
       audit(req.user?.id, req.user?.name, 'repair', 'data-integrity', null,
@@ -1369,19 +1519,15 @@ router.post('/browse-dir', authToken, requireAnyPermission(['backup', 'settings'
 
     if (!roots.size) roots.add(process.env.SystemDrive ? `${process.env.SystemDrive}\\` : 'C:\\')
 
-    return Array.from(roots)
-      .sort((a, b) => a.localeCompare(b))
-      .map((fullPath) => ({ name: fullPath, fullPath, kind: 'drive' }))
+    return buildFolderEntries(collectSortedSetValues(roots), 'drive')
   }
 
   const listDriveRoots = () => {
     if (process.platform !== 'win32') {
-      const roots = ['/', process.env.HOME].filter(Boolean)
-      return Array.from(new Set(roots)).map((fullPath) => ({
-        name: fullPath === '/' ? 'Root' : fullPath,
-        fullPath,
-        kind: 'folder',
-      }))
+      const roots = new Set()
+      roots.add('/')
+      if (process.env.HOME) roots.add(process.env.HOME)
+      return buildFolderEntries(collectSortedSetValues(roots))
     }
     const favorites = [
       { name: 'Desktop', fullPath: path.join(process.env.USERPROFILE || 'C:\\Users\\Public', 'Desktop') },
@@ -1390,12 +1536,9 @@ router.post('/browse-dir', authToken, requireAnyPermission(['backup', 'settings'
       { name: 'Business OS data', fullPath: DATA_ROOT },
       { name: 'Business OS folder', fullPath: path.resolve(RUNTIME_DIR, '..') },
     ]
-      .filter((entry) => {
-        try { return entry.fullPath && fs.existsSync(entry.fullPath) } catch (_) { return false }
-      })
-      .map((entry) => ({ ...entry, kind: 'folder' }))
+    const existingFavorites = buildExistingFavoriteFolders(favorites)
 
-    return [...favorites, ...listWindowsFsRoots()]
+    return [...existingFavorites, ...listWindowsFsRoots()]
   }
 
   if (!requested || requested === '__ROOTS__') {
@@ -1409,10 +1552,7 @@ router.post('/browse-dir', authToken, requireAnyPermission(['backup', 'settings'
 
   const base = requested
   try {
-    const entries = fs.readdirSync(base, { withFileTypes: true })
-    const dirs = entries
-      .filter(e => e.isDirectory() && !e.name.startsWith('.'))
-      .map(e => ({ name: e.name, fullPath: path.join(base, e.name), kind: 'folder' }))
+    const dirs = listVisibleDirectories(base)
     const parent = path.dirname(base)
     const isDriveRoot = process.platform === 'win32' && /^[A-Za-z]:\\?$/.test(base)
     res.json({ base, parent: isDriveRoot ? '__ROOTS__' : (parent !== base ? parent : null), dirs, isRootList: false })
@@ -1470,15 +1610,7 @@ router.post('/pick-folder', authToken, requireAnyPermission(['backup', 'settings
   const initialPath = initialPathRaw && fs.existsSync(initialPathRaw) ? initialPathRaw : DATA_ROOT
   const escapedPath = String(initialPath || '').replace(/'/g, "''")
 
-  const script = [
-    'Add-Type -AssemblyName System.Windows.Forms',
-    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
-    "$dialog.Description = 'Select Business OS data folder'",
-    '$dialog.ShowNewFolderButton = $true',
-    escapedPath ? `if (Test-Path -LiteralPath '${escapedPath}') { $dialog.SelectedPath = '${escapedPath}' }` : '',
-    '$result = $dialog.ShowDialog()',
-    "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }",
-  ].filter(Boolean).join('; ')
+  const script = buildPickerScript(escapedPath)
 
   const picker = spawn('powershell.exe', ['-NoProfile', '-STA', '-Command', script], {
     windowsHide: true,

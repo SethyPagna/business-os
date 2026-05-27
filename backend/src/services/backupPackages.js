@@ -7,13 +7,16 @@ const { Writable } = require('stream')
 const { pipeline } = require('stream/promises')
 const { BACKUP_TABLES, BACKUP_VERSION, buildBackupSummaryFromCounts } = require('../backupSchema')
 const { DATA_ROOT, S3_BUCKET, OBJECT_STORAGE_DRIVER } = require('../config')
-const { putObject, listObjects, getObjectStorageDriver, getObjectStream } = require('../objectStore')
+const { putObject, listObjects, deleteObjects, getObjectStorageDriver, getObjectStream } = require('../objectStore')
 
 const OBJECT_COPY_CONCURRENCY = 2
 const PROGRESS_MIN_INTERVAL_MS = 350
 const PROGRESS_PERCENT_STEP = 2
+const BACKUP_TABLE_CHUNK_SIZE = 500
 const BACKUP_REMOTE_LIST_TIMEOUT_MS = 1200
 const BACKUP_REMOTE_LIST_CACHE_MS = 30 * 1000
+const DEFAULT_LOCAL_BACKUP_KEEP_LATEST = Math.max(1, Math.min(25, Number.parseInt(process.env.BUSINESS_OS_LOCAL_BACKUP_KEEP_LATEST || '3', 10) || 3))
+const DEFAULT_REMOTE_BACKUP_KEEP_LATEST = Math.max(1, Math.min(25, Number.parseInt(process.env.BUSINESS_OS_R2_BACKUP_KEEP_LATEST || '1', 10) || 1))
 let remoteBackupVersionCache = {
   at: 0,
   objects: [],
@@ -34,11 +37,22 @@ function readCachedBackupVersions(limit) {
 }
 
 function writeCachedBackupVersions(limit, versions) {
+  const cachedVersions = []
+  if (Array.isArray(versions)) {
+    for (const entry of versions) {
+      cachedVersions.push({ ...entry })
+    }
+  }
   backupVersionListCache = {
     at: Date.now(),
     limit: Math.max(1, Math.min(100, Number(limit || 50))),
-    versions: Array.isArray(versions) ? versions.map((entry) => ({ ...entry })) : [],
+    versions: cachedVersions,
   }
+}
+
+function clearBackupVersionCaches() {
+  remoteBackupVersionCache = { at: 0, objects: [] }
+  backupVersionListCache = { at: 0, limit: 0, versions: [] }
 }
 
 function getDb() {
@@ -71,7 +85,12 @@ function sha256File(filePath) {
   })
 }
 
-function readTableRows(tableName, { limit = 500, offset = 0 } = {}) {
+function readTableRows(tableName, { limit = BACKUP_TABLE_CHUNK_SIZE, offset = 0, lastId = null } = {}) {
+  if (lastId !== null && lastId !== undefined) {
+    try {
+      return getDb().prepare(`SELECT * FROM ${q(tableName)} WHERE id > ? ORDER BY id ASC LIMIT ?`).all(lastId, limit)
+    } catch (_) {}
+  }
   try {
     return getDb().prepare(`SELECT * FROM ${q(tableName)} ORDER BY id ASC LIMIT ? OFFSET ?`).all(limit, offset)
   } catch (_) {
@@ -95,6 +114,22 @@ function throwIfAborted(signal) {
   }
 }
 
+function collectSetValues(values) {
+  const items = []
+  for (const value of values || []) {
+    items.push(value)
+  }
+  return items
+}
+
+function startWorkerPromises(count, worker) {
+  const promises = []
+  for (let index = 0; index < count; index += 1) {
+    promises.push(worker())
+  }
+  return promises
+}
+
 function getManagedWritableState(stream) {
   if (!stream) return null
   if (stream.__businessOsManagedWritableState) return stream.__businessOsManagedWritableState
@@ -104,18 +139,18 @@ function getManagedWritableState(stream) {
   }
   stream.on('error', (error) => {
     state.error = error || new Error('Writable stream failed')
-    const waiters = Array.from(state.drainWaiters)
+    const waiters = collectSetValues(state.drainWaiters)
     state.drainWaiters.clear()
-    waiters.forEach(({ reject }) => {
+    for (const { reject } of waiters) {
       try { reject(state.error) } catch (_) {}
-    })
+    }
   })
   stream.on('drain', () => {
-    const waiters = Array.from(state.drainWaiters)
+    const waiters = collectSetValues(state.drainWaiters)
     state.drainWaiters.clear()
-    waiters.forEach(({ resolve }) => {
+    for (const { resolve } of waiters) {
       try { resolve() } catch (_) {}
-    })
+    }
   })
   Object.defineProperty(stream, '__businessOsManagedWritableState', {
     value: state,
@@ -216,7 +251,6 @@ async function streamBackupDataFile(filePath, { progress, signal, throwIfCancell
   const stream = fs.createWriteStream(filePath, { encoding: 'utf8' })
   const tableCounts = {}
   const fileAssets = []
-  const chunkSize = 500
   const totalTables = Math.max(1, BACKUP_TABLES.length)
   let rowsProcessed = 0
   await writeStream(stream, hash, '{"tables":{')
@@ -230,10 +264,11 @@ async function streamBackupDataFile(filePath, { progress, signal, throwIfCancell
     await writeStream(stream, hash, `${JSON.stringify(tableName)}:[`)
     let written = 0
     let offset = 0
+    let lastId = null
     while (offset < totalRows || (totalRows === 0 && offset === 0)) {
       throwIfAborted(signal)
       throwIfCancelled?.()
-      const rows = totalRows > 0 ? readTableRows(tableName, { limit: chunkSize, offset }) : []
+      const rows = totalRows > 0 ? readTableRows(tableName, { limit: BACKUP_TABLE_CHUNK_SIZE, offset, lastId }) : []
       if (!rows.length) break
       for (const row of rows) {
         if (written > 0) await writeStream(stream, hash, ',')
@@ -242,6 +277,8 @@ async function streamBackupDataFile(filePath, { progress, signal, throwIfCancell
         written += 1
         rowsProcessed += 1
       }
+      const nextLastId = rows[rows.length - 1]?.id
+      lastId = nextLastId !== undefined && nextLastId !== null ? nextLastId : null
       offset += rows.length
       reportProgress({
         phase: 'database',
@@ -269,20 +306,21 @@ async function streamBackupDataFile(filePath, { progress, signal, throwIfCancell
 }
 
 function buildObjectManifest(fileAssets = []) {
-  return (Array.isArray(fileAssets) ? fileAssets : [])
-    .filter((asset) => asset?.public_path)
-    .map((asset) => {
-      const objectKey = String(asset.public_path || '').replace(/^\/+/, '')
-      return {
-        public_path: asset.public_path,
-        object_key: objectKey,
-        stored_name: asset.stored_name || '',
-        original_name: asset.original_name || '',
-        media_type: asset.media_type || '',
-        mime_type: asset.mime_type || '',
-        byte_size: asset.byte_size || null,
-      }
+  const manifest = []
+  for (const asset of Array.isArray(fileAssets) ? fileAssets : []) {
+    if (!asset?.public_path) continue
+    const objectKey = String(asset.public_path || '').replace(/^\/+/, '')
+    manifest.push({
+      public_path: asset.public_path,
+      object_key: objectKey,
+      stored_name: asset.stored_name || '',
+      original_name: asset.original_name || '',
+      media_type: asset.media_type || '',
+      mime_type: asset.mime_type || '',
+      byte_size: asset.byte_size || null,
     })
+  }
+  return manifest
 }
 
 function buildPackageMetadata({ packageId, actor = {}, summary = {}, objectManifest = [], dataChecksum = '', objectsChecksum = '', restorePlanChecksum = '' } = {}) {
@@ -533,7 +571,7 @@ async function copyPackageObjects({ objectManifest = [], packageId, localPath, p
       }
     }
   }
-  await Promise.all(Array.from({ length: OBJECT_COPY_CONCURRENCY }, () => worker()))
+  await Promise.all(startWorkerPromises(OBJECT_COPY_CONCURRENCY, worker))
   if (errors.length) {
     fs.writeFileSync(
       path.join(localPath, 'objects-errors.json'),
@@ -637,6 +675,13 @@ async function createFinalBackupPackage({ destinationDir = '', actor = {}, progr
       remoteMirrorFailed: remoteUploadErrors.length,
     },
   }, { force: true })
+  pruneBackupVersions({
+    rootDir: destinationDir || '',
+    keepLatest: DEFAULT_LOCAL_BACKUP_KEEP_LATEST,
+    remoteKeepLatest: DEFAULT_REMOTE_BACKUP_KEEP_LATEST,
+  }).catch((error) => {
+    console.warn(`[Backup] Retention cleanup skipped: ${error?.message || error}`)
+  })
   return {
     packageId,
     manifest: payload.manifest,
@@ -681,24 +726,210 @@ function getLocalBackupRoot(rootDir = '') {
   return customRoot ? path.resolve(customRoot) : path.join(DATA_ROOT, 'backups')
 }
 
+function isDockerReleaseBackupRoot(backupRoot = '') {
+  const normalized = path.resolve(String(backupRoot || '')).replace(/\\/g, '/').toLowerCase()
+  return normalized.endsWith('/ops/runtime/docker-release/backups')
+}
+
+function isLocalBackupDirectoryName(name = '', backupRoot = '') {
+  const value = String(name || '').trim()
+  if (/^datasync-/i.test(value)) return true
+  return isDockerReleaseBackupRoot(backupRoot) && /^20\d{6}-?\d{6}$/.test(value)
+}
+
 function listLocalBackupDirectories({ rootDir = '' } = {}) {
   const backupRoot = getLocalBackupRoot(rootDir)
   if (!fs.existsSync(backupRoot)) return []
-  return fs.readdirSync(backupRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && /^datasync-/i.test(String(entry.name || '')))
-    .map((entry) => {
-      const absolutePath = path.join(backupRoot, entry.name)
-      let stats = null
-      try {
-        stats = fs.statSync(absolutePath)
-      } catch (_) {}
-      return {
-        packageId: entry.name,
-        absolutePath,
-        mtimeMs: Number(stats?.mtimeMs || 0) || 0,
-      }
+  const directories = []
+  for (const entry of fs.readdirSync(backupRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !isLocalBackupDirectoryName(entry.name, backupRoot)) continue
+    const absolutePath = path.join(backupRoot, entry.name)
+    let stats = null
+    try {
+      stats = fs.statSync(absolutePath)
+    } catch (_) {}
+    directories.push({
+      packageId: entry.name,
+      absolutePath,
+      mtimeMs: Number(stats?.mtimeMs || 0) || 0,
     })
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+  }
+  directories.sort((a, b) => b.mtimeMs - a.mtimeMs)
+  return directories
+}
+
+function getDirectoryBytes(directoryPath) {
+  let total = 0
+  const stack = [directoryPath]
+  while (stack.length) {
+    const current = stack.pop()
+    let entries = []
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true })
+    } catch (_) {
+      continue
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name)
+      if (entry.isDirectory()) {
+        stack.push(entryPath)
+        continue
+      }
+      if (!entry.isFile()) continue
+      try {
+        total += Number(fs.statSync(entryPath).size || 0) || 0
+      } catch (_) {}
+    }
+  }
+  return total
+}
+
+function planBackupPackageRetention(packages = [], { keepLatest = 3 } = {}) {
+  const safeKeep = Math.max(1, Math.min(100, Number(keepLatest || 1) || 1))
+  const sorted = []
+  for (const entry of Array.isArray(packages) ? packages : []) {
+    const packageId = String(entry?.packageId || '').trim()
+    if (!packageId) continue
+    sorted.push({ ...entry, packageId })
+  }
+  sorted.sort((a, b) => {
+    const timeDelta = Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0)
+    if (timeDelta !== 0) return timeDelta
+    return String(b.packageId).localeCompare(String(a.packageId))
+  })
+  return {
+    keepLatest: safeKeep,
+    keep: sorted.slice(0, safeKeep),
+    remove: sorted.slice(safeKeep),
+  }
+}
+
+async function pruneLocalBackupVersions({ rootDir = '', keepLatest = DEFAULT_LOCAL_BACKUP_KEEP_LATEST, dryRun = false } = {}) {
+  const plan = planBackupPackageRetention(listLocalBackupDirectories({ rootDir }), { keepLatest })
+  const removed = []
+  let bytesRemoved = 0
+  for (const entry of plan.remove) {
+    const bytes = getDirectoryBytes(entry.absolutePath)
+    if (!dryRun) fs.rmSync(entry.absolutePath, { recursive: true, force: true })
+    bytesRemoved += bytes
+    removed.push({
+      packageId: entry.packageId,
+      localPath: entry.absolutePath,
+      bytes,
+    })
+  }
+  if (removed.length && !dryRun) clearBackupVersionCaches()
+  return {
+    source: 'local',
+    rootDir: getLocalBackupRoot(rootDir),
+    keepLatest: plan.keepLatest,
+    kept: packageIds(plan.keep),
+    removed,
+    bytesRemoved,
+    dryRun: !!dryRun,
+  }
+}
+
+function groupRemoteBackupObjects(objects = []) {
+  const grouped = new Map()
+  for (const object of Array.isArray(objects) ? objects : []) {
+    const key = String(object?.key || '')
+    const match = key.match(/^backups\/([^/]+)\//)
+    if (!match) continue
+    const packageId = match[1]
+    const current = grouped.get(packageId) || {
+      packageId,
+      keys: [],
+      bytes: 0,
+      mtimeMs: 0,
+    }
+    current.keys.push(key)
+    current.bytes += Number(object?.size || 0) || 0
+    const mtimeMs = object?.lastModified ? Date.parse(object.lastModified) : 0
+    current.mtimeMs = Math.max(current.mtimeMs, Number.isFinite(mtimeMs) ? mtimeMs : 0)
+    grouped.set(packageId, current)
+  }
+  return collectSetValues(grouped.values())
+}
+
+function packageIds(entries = []) {
+  const ids = []
+  for (const entry of entries) {
+    ids.push(entry.packageId)
+  }
+  return ids
+}
+
+function summarizeRemovedRemotePackages(entries = []) {
+  const removed = []
+  let bytesRemoved = 0
+  for (const entry of entries) {
+    const bytes = Number(entry.bytes || 0) || 0
+    bytesRemoved += bytes
+    removed.push({
+      packageId: entry.packageId,
+      objects: (entry.keys || []).length,
+      bytes,
+    })
+  }
+  return { removed, bytesRemoved }
+}
+
+function collectRemoteDeleteKeys(entries = []) {
+  const keys = []
+  for (const entry of entries) {
+    for (const key of entry.keys || []) {
+      keys.push(key)
+    }
+  }
+  return keys
+}
+
+function sortBackupVersionsByPackageId(entries = [], limit = 50) {
+  const versions = collectSetValues(entries)
+  versions.sort((a, b) => String(b.packageId).localeCompare(String(a.packageId)))
+  return versions.slice(0, limit)
+}
+
+async function pruneRemoteBackupVersions({ remoteKeepLatest = DEFAULT_REMOTE_BACKUP_KEEP_LATEST, dryRun = false, timeoutMs = 8000 } = {}) {
+  const objects = await listObjects('backups/', {
+    maxKeys: 5000,
+    timeoutMs: Math.max(1000, Math.min(30000, Number(timeoutMs || 8000) || 8000)),
+  })
+  const plan = planBackupPackageRetention(groupRemoteBackupObjects(objects), { keepLatest: remoteKeepLatest })
+  const keysToDelete = collectRemoteDeleteKeys(plan.remove)
+  let deletedObjects = 0
+  if (!dryRun && keysToDelete.length) {
+    deletedObjects = await deleteObjects(keysToDelete)
+    clearBackupVersionCaches()
+  }
+  const removalSummary = summarizeRemovedRemotePackages(plan.remove)
+  return {
+    source: 'r2',
+    keepLatest: plan.keepLatest,
+    kept: packageIds(plan.keep),
+    removed: removalSummary.removed,
+    deletedObjects,
+    bytesRemoved: removalSummary.bytesRemoved,
+    dryRun: !!dryRun,
+  }
+}
+
+async function pruneBackupVersions(options = {}) {
+  const result = { local: null, remote: null, errors: [] }
+  try {
+    result.local = await pruneLocalBackupVersions(options)
+  } catch (error) {
+    result.errors.push({ source: 'local', error: error?.message || String(error) })
+  }
+  if (options.remote !== false) {
+    try {
+      result.remote = await pruneRemoteBackupVersions(options)
+    } catch (error) {
+      result.errors.push({ source: 'r2', error: error?.message || String(error) })
+    }
+  }
+  return result
 }
 
 function readReusableLocalBackupPackage(absolutePath) {
@@ -739,32 +970,34 @@ function findReusableLocalBackupPackage({ maxAgeMs = 10 * 60 * 1000, rootDir = '
 
 function listLocalBackupVersions({ limit = 50 } = {}) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)))
-  return listLocalBackupDirectories()
-    .slice(0, safeLimit)
-    .map((candidate) => {
-      const reusable = readReusableLocalBackupPackage(candidate.absolutePath)
-      if (reusable?.packageId) {
-        return {
-          packageId: reusable.packageId,
-          objectPrefix: reusable.objectPrefix,
-          localPath: reusable.localPath,
-          objects: Number(reusable.objectsCopied || 0) || 0,
-          bytes: Number(reusable?.manifest?.summary?.totals?.bytes || 0) || 0,
-          updatedAt: reusable?.manifest?.created_at || reusable?.manifest?.createdAt || new Date(candidate.mtimeMs).toISOString(),
-          storageDriver: reusable.storageDriver,
-          source: 'local',
-        }
-      }
-      return {
-        packageId: candidate.packageId,
-        objectPrefix: `backups/${candidate.packageId}`,
-        localPath: candidate.absolutePath,
-        objects: 0,
-        bytes: 0,
-        updatedAt: new Date(candidate.mtimeMs).toISOString(),
+  const versions = []
+  for (const candidate of listLocalBackupDirectories()) {
+    if (versions.length >= safeLimit) break
+    const reusable = readReusableLocalBackupPackage(candidate.absolutePath)
+    if (reusable?.packageId) {
+      versions.push({
+        packageId: reusable.packageId,
+        objectPrefix: reusable.objectPrefix,
+        localPath: reusable.localPath,
+        objects: Number(reusable.objectsCopied || 0) || 0,
+        bytes: Number(reusable?.manifest?.summary?.totals?.bytes || 0) || 0,
+        updatedAt: reusable?.manifest?.created_at || reusable?.manifest?.createdAt || new Date(candidate.mtimeMs).toISOString(),
+        storageDriver: reusable.storageDriver,
         source: 'local',
-      }
+      })
+      continue
+    }
+    versions.push({
+      packageId: candidate.packageId,
+      objectPrefix: `backups/${candidate.packageId}`,
+      localPath: candidate.absolutePath,
+      objects: 0,
+      bytes: 0,
+      updatedAt: new Date(candidate.mtimeMs).toISOString(),
+      source: 'local',
     })
+  }
+  return versions
 }
 
 async function listBackupVersions({ limit = 50, timeoutMs = 8000 } = {}) {
@@ -793,15 +1026,13 @@ async function listBackupVersions({ limit = 50, timeoutMs = 8000 } = {}) {
     }
   } catch (error) {
     console.warn(`[Backup] R2 backup version listing unavailable: ${error?.message || error}`)
-    const localOnlyVersions = Array.from(versions.values())
-      .sort((a, b) => String(b.packageId).localeCompare(String(a.packageId)))
-      .slice(0, safeLimit)
+    const localOnlyVersions = sortBackupVersionsByPackageId(versions.values(), safeLimit)
     writeCachedBackupVersions(safeLimit, localOnlyVersions)
     return localOnlyVersions
   }
-  objects.forEach((object) => {
+  for (const object of objects) {
     const match = String(object.key || '').match(/^backups\/([^/]+)\//)
-    if (!match) return
+    if (!match) continue
     const packageId = match[1]
     const current = versions.get(packageId) || { packageId, objectPrefix: `backups/${packageId}`, objects: 0, bytes: 0, updatedAt: object.lastModified || null }
     current.source = current.source === 'local' ? 'local+r2' : 'r2'
@@ -809,10 +1040,8 @@ async function listBackupVersions({ limit = 50, timeoutMs = 8000 } = {}) {
     current.bytes += Number(object.size || 0)
     current.updatedAt = object.lastModified || current.updatedAt
     versions.set(packageId, current)
-  })
-  const finalVersions = Array.from(versions.values())
-    .sort((a, b) => String(b.packageId).localeCompare(String(a.packageId)))
-    .slice(0, safeLimit)
+  }
+  const finalVersions = sortBackupVersionsByPackageId(versions.values(), safeLimit)
   writeCachedBackupVersions(safeLimit, finalVersions)
   return finalVersions
 }
@@ -822,5 +1051,9 @@ module.exports = {
   findReusableLocalBackupPackage,
   listLocalBackupVersions,
   listBackupVersions,
+  planBackupPackageRetention,
+  pruneBackupVersions,
+  pruneLocalBackupVersions,
+  pruneRemoteBackupVersions,
   validateLocalBackupPackage,
 }

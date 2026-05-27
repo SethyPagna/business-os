@@ -103,31 +103,44 @@ function escapeDriveQueryValue(value) {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
 
+function buildPlaceholders(count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) {
+    placeholders.push('?')
+  }
+  return placeholders.join(', ')
+}
+
 function readSettingsMap(keys = Object.values(SETTINGS_KEYS)) {
   if (!Array.isArray(keys) || keys.length === 0) return {}
-  const placeholders = keys.map(() => '?').join(', ')
+  const placeholders = buildPlaceholders(keys.length)
   const rows = db.prepare(`SELECT key, value FROM settings WHERE key IN (${placeholders})`).all(...keys)
-  return rows.reduce((acc, row) => {
-    acc[row.key] = row.value
-    return acc
-  }, {})
+  const settings = {}
+  for (const row of rows) {
+    settings[row.key] = row.value
+  }
+  return settings
 }
 
 function writeSettingsMap(updates = {}) {
-  const entries = Object.entries(updates || {}).filter(([key]) => trim(key))
+  const entries = []
+  for (const [key, value] of Object.entries(updates || {})) {
+    if (trim(key)) entries.push([key, value])
+  }
   if (!entries.length) return
   const upsert = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `)
+  const remove = db.prepare('DELETE FROM settings WHERE key = ?')
   db.transaction(() => {
-    entries.forEach(([key, value]) => {
+    for (const [key, value] of entries) {
       if (value == null) {
-        db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+        remove.run(key)
       } else {
         upsert.run(key, String(value))
       }
-    })
+    }
   })()
 }
 
@@ -187,10 +200,19 @@ function getDriveSyncEntriesMap() {
       upload_session_url, upload_offset, content_sha256, last_error, retry_count
     FROM google_drive_sync_entries
   `).all()
-  return rows.reduce((acc, row) => {
-    acc[row.relative_path] = row
-    return acc
-  }, {})
+  const entries = {}
+  for (const row of rows) {
+    entries[row.relative_path] = row
+  }
+  return entries
+}
+
+function hasCanonicalDriveLayout(mappings = {}, canonicalRootRelative = '') {
+  if (mappings[canonicalRootRelative]) return true
+  for (const relativePath of Object.keys(mappings)) {
+    if (relativePath === canonicalRootRelative || relativePath.startsWith(`${canonicalRootRelative}/`)) return true
+  }
+  return false
 }
 
 function upsertDriveSyncEntry(entry) {
@@ -268,20 +290,24 @@ function hashFile(filePath, algorithm = 'md5') {
 
 function hashFileMany(filePath, algorithms = ['md5', 'sha256']) {
   return new Promise((resolve, reject) => {
-    const hashes = algorithms.reduce((acc, algorithm) => {
-      acc[algorithm] = crypto.createHash(algorithm)
-      return acc
-    }, {})
+    const hashEntries = []
+    for (const algorithm of algorithms) {
+      const hash = crypto.createHash(algorithm)
+      hashEntries.push([algorithm, hash])
+    }
     const stream = fs.createReadStream(filePath)
     stream.on('data', (chunk) => {
-      Object.values(hashes).forEach((hash) => hash.update(chunk))
+      for (const [, hash] of hashEntries) {
+        hash.update(chunk)
+      }
     })
     stream.on('error', reject)
     stream.on('end', () => {
-      resolve(Object.entries(hashes).reduce((acc, [algorithm, hash]) => {
-        acc[algorithm] = hash.digest('hex')
-        return acc
-      }, {}))
+      const digests = {}
+      for (const [algorithm, hash] of hashEntries) {
+        digests[algorithm] = hash.digest('hex')
+      }
+      resolve(digests)
     })
   })
 }
@@ -313,13 +339,21 @@ function describeFetchFailure(error, label, timedOut = false) {
     return `${label} timed out. Check the server network connection and try again.`
   }
   const cause = error?.cause || {}
-  const detail = [
+  const detail = joinNonEmptyParts([
     cause.code,
     cause.errno,
     cause.message,
     error?.message,
-  ].filter(Boolean).join(' - ')
+  ], ' - ')
   return detail ? `${label} failed: ${detail}` : `${label} failed.`
+}
+
+function joinNonEmptyParts(parts = [], separator = ' ') {
+  const values = []
+  for (const part of parts) {
+    if (part) values.push(part)
+  }
+  return values.join(separator)
 }
 
 async function fetchWithTimeout(requestUrl, options = {}, { label = 'Network request', timeoutMs = DRIVE_FETCH_TIMEOUT_MS, retries = 2 } = {}) {
@@ -513,6 +547,52 @@ async function removeDuplicateDriveItems(config, items, keepId = '') {
     removed += 1
   }
   return removed
+}
+
+function buildSortedDirectoryList(directories) {
+  const list = []
+  for (const directory of directories) {
+    if (directory) list.push(directory)
+  }
+  list.sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b))
+  return list
+}
+
+function getNonFolderDriveItems(items = []) {
+  const nonFolders = []
+  for (const item of items) {
+    if (trim(item?.mimeType) !== 'application/vnd.google-apps.folder') {
+      nonFolders.push(item)
+    }
+  }
+  return nonFolders
+}
+
+function getFirstNonFolderDriveItem(items = []) {
+  for (const item of items || []) {
+    if (trim(item?.mimeType) !== 'application/vnd.google-apps.folder') return item
+  }
+  return null
+}
+
+function buildLiveSyncPathSet(items = {}) {
+  const livePaths = new Set([''])
+  for (const directory of items.directories || []) {
+    livePaths.add(directory)
+  }
+  for (const file of items.files || []) {
+    livePaths.add(file.relativePath)
+  }
+  return livePaths
+}
+
+function selectStaleDriveMappings(mappings = {}, livePaths) {
+  const staleEntries = []
+  for (const [relativePath, entry] of Object.entries(mappings)) {
+    if (!livePaths.has(relativePath)) staleEntries.push([relativePath, entry])
+  }
+  staleEntries.sort((a, b) => b[0].split('/').length - a[0].split('/').length)
+  return staleEntries
 }
 
 async function createDriveFolder(config, parentId, name) {
@@ -731,7 +811,7 @@ async function collectSnapshotItems(snapshotRoot, progress = null) {
   })
   await yieldToEventLoop()
   return {
-    directories: Array.from(directories).filter(Boolean).sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b)),
+    directories: buildSortedDirectoryList(directories),
     files,
   }
 }
@@ -1074,11 +1154,7 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
     const manifest = writeSnapshotManifest(snapshot.snapshotRoot, versionState)
     const items = await collectSnapshotItems(snapshot.snapshotRoot, progress)
     const canonicalRootRelative = `${DATA_FOLDER_NAME}/organizations/${ORGANIZATION_FOLDER_NAME}`
-    const hasCanonicalLayout = !!mappings[canonicalRootRelative]
-      || Object.keys(mappings).some((relativePath) => (
-        relativePath === canonicalRootRelative
-        || relativePath.startsWith(`${canonicalRootRelative}/`)
-      ))
+    const hasCanonicalLayout = hasCanonicalDriveLayout(mappings, canonicalRootRelative)
     const legacyFlatLayout = !hasCanonicalLayout && Object.keys(mappings).length > 0
     if (legacyFlatLayout) {
       clearDriveSyncMappings()
@@ -1136,7 +1212,7 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
 
       let remote = null
       const siblingMatches = await findDriveItems(config, parentRemoteId, path.posix.basename(file.relativePath), null)
-      const reusable = siblingMatches.find((item) => trim(item?.mimeType) !== 'application/vnd.google-apps.folder')
+      const reusable = getFirstNonFolderDriveItem(siblingMatches)
       if (existing?.remote_file_id) {
         try {
           remote = await updateDriveFile(config, existing.remote_file_id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
@@ -1173,7 +1249,7 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
 
       await removeDuplicateDriveItems(
         config,
-        siblingMatches.filter((item) => trim(item?.mimeType) !== 'application/vnd.google-apps.folder'),
+        getNonFolderDriveItems(siblingMatches),
         trim(remote?.id) || existing?.remote_file_id || reusable?.id || '',
       )
 
@@ -1201,10 +1277,8 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
     }
 
     if (config.deleteMissing) {
-      const livePaths = new Set(['', ...items.directories, ...items.files.map((file) => file.relativePath)])
-      const staleEntries = Object.entries(mappings)
-        .filter(([relativePath]) => !livePaths.has(relativePath))
-        .sort((a, b) => b[0].split('/').length - a[0].split('/').length)
+      const livePaths = buildLiveSyncPathSet(items)
+      const staleEntries = selectStaleDriveMappings(mappings, livePaths)
 
       for (const [relativePath, entry] of staleEntries) {
         if (!trim(entry?.remote_file_id)) {

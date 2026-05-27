@@ -21,13 +21,33 @@ const STATIC_ORIGINS = [
   'https://leangcosmetics.dpdns.org',
   LOCAL_ORIGIN,
 ]
+const DEFAULT_LOGIN_RETURN_PATH = '/login?auth_mode=login&auth_provider=google'
+const DEFAULT_LINK_RETURN_PATH = '/?auth_mode=link&auth_provider=google'
 
 function trim(value) {
   return String(value || '').trim()
 }
 
 function unique(values = []) {
-  return Array.from(new Set(values.map((value) => trim(value).replace(/\/$/, '')).filter(Boolean)))
+  const seen = new Set()
+  const normalized = []
+  for (const value of values) {
+    const cleanValue = trim(value).replace(/\/$/, '')
+    if (!cleanValue || seen.has(cleanValue)) continue
+    seen.add(cleanValue)
+    normalized.push(cleanValue)
+  }
+  return normalized
+}
+
+function appendCallbackPath(origins = [], callbackPath = CALLBACK_PATH) {
+  const callbacks = []
+  for (const origin of origins) {
+    const cleanOrigin = trim(origin).replace(/\/$/, '')
+    if (!cleanOrigin) continue
+    callbacks.push(`${cleanOrigin}${callbackPath}`)
+  }
+  return callbacks
 }
 
 function getGoogleLoginOrigins() {
@@ -43,12 +63,55 @@ function getGoogleLoginRedirectUris() {
   const configured = trim(GOOGLE_LOGIN_REDIRECT_URI)
   return unique([
     configured,
-    ...getGoogleLoginOrigins().map((origin) => `${origin}${CALLBACK_PATH}`),
+    ...appendCallbackPath(getGoogleLoginOrigins()),
   ])
 }
 
 function getPrimaryRedirectUri() {
   return trim(GOOGLE_LOGIN_REDIRECT_URI) || getGoogleLoginRedirectUris()[0] || `${LOCAL_ORIGIN}${CALLBACK_PATH}`
+}
+
+function getDefaultReturnPath(mode = 'login') {
+  return String(mode).trim().toLowerCase() === 'link'
+    ? DEFAULT_LINK_RETURN_PATH
+    : DEFAULT_LOGIN_RETURN_PATH
+}
+
+function normalizeReturnTarget(input, mode = 'login') {
+  const fallbackOrigin = getGoogleLoginOrigins()[0] || LOCAL_ORIGIN
+  const fallbackPath = getDefaultReturnPath(mode)
+  const raw = trim(input)
+  if (!raw) {
+    return {
+      origin: fallbackOrigin,
+      path: fallbackPath,
+      url: `${fallbackOrigin}${fallbackPath}`,
+    }
+  }
+
+  try {
+    const parsed = new URL(raw)
+    const allowedOrigins = new Set(getGoogleLoginOrigins())
+    if (!allowedOrigins.has(parsed.origin)) {
+      return {
+        origin: fallbackOrigin,
+        path: fallbackPath,
+        url: `${fallbackOrigin}${fallbackPath}`,
+      }
+    }
+    const path = `${parsed.pathname || '/'}${parsed.search || ''}${parsed.hash || ''}` || fallbackPath
+    return {
+      origin: parsed.origin,
+      path,
+      url: `${parsed.origin}${path}`,
+    }
+  } catch (_) {
+    return {
+      origin: fallbackOrigin,
+      path: fallbackPath,
+      url: `${fallbackOrigin}${fallbackPath}`,
+    }
+  }
 }
 
 function base64url(input) {
@@ -105,11 +168,14 @@ function buildGoogleOauthStartUrl(options = {}) {
   const mode = trim(options.mode).toLowerCase() === 'link' ? 'link' : 'login'
   const codeVerifier = trim(options.codeVerifier) || crypto.randomBytes(32).toString('base64url')
   const redirectUri = trim(options.redirectUri) || getPrimaryRedirectUri()
+  const returnTarget = normalizeReturnTarget(options.returnTo, mode)
   const state = signState({
     provider: 'google',
     mode,
     organization: trim(options.organization),
     currentUserId: Number(options.currentUserId || 0) || null,
+    returnOrigin: returnTarget.origin,
+    returnPath: returnTarget.path,
     codeVerifier,
     nonce: trim(options.stateNonce) || crypto.randomBytes(16).toString('base64url'),
     createdAt: Date.now(),
@@ -173,11 +239,13 @@ async function getGoogleUserFromTokens(tokens = {}) {
 
 module.exports = {
   CALLBACK_PATH,
+  appendCallbackPath,
   buildGoogleOauthStartUrl,
   exchangeGoogleOauthCode,
   getGoogleLoginOrigins,
   getGoogleLoginPublicConfig,
   getGoogleLoginRedirectUris,
   getGoogleUserFromTokens,
+  normalizeReturnTarget,
   verifyState,
 }

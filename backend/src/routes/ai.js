@@ -22,7 +22,11 @@ function listProviders() {
     FROM ai_provider_configs
     ORDER BY enabled DESC, priority ASC, updated_at DESC, id DESC
   `).all()
-  return rows.map(serializeProviderRow)
+  const providers = []
+  for (const row of rows) {
+    providers.push(serializeProviderRow(row))
+  }
+  return providers
 }
 
 function getProviderRow(id) {
@@ -233,7 +237,14 @@ router.get('/responses', authToken, requirePermission('settings'), (req, res) =>
   `).all(limit)
 
   ok(res, {
-    items: rows.map((row) => ({
+    items: serializeResponseRows(rows),
+  })
+})
+
+function serializeResponseRows(rows = []) {
+  const items = []
+  for (const row of rows) {
+    items.push({
       id: row.id,
       surface: row.surface,
       provider_config_id: row.provider_config_id,
@@ -250,8 +261,9 @@ router.get('/responses', authToken, requirePermission('settings'), (req, res) =>
       recommendations: parseJsonSafe(row.recommendations_json || '[]', []),
       citations: parseJsonSafe(row.citations_json || '[]', []),
       created_at: row.created_at || '',
-    })),
-  })
-})
+    })
+  }
+  return items
+}
 
 module.exports = router

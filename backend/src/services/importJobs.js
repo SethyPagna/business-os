@@ -40,6 +40,12 @@ const {
   normalizeLotCode,
   syncProductBatchRollups,
 } = require('../productBatches')
+const {
+  assertCatalogTextIntegrity,
+  hasSuspiciousCatalogText,
+  normalizeCatalogText,
+  normalizeOptionList,
+} = require('../catalogTextIntegrity')
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
 const MAX_ZIP_IMAGES = 25_000
@@ -156,12 +162,78 @@ function stringify(value) {
   try { return JSON.stringify(value ?? {}) } catch (_) { return '{}' }
 }
 
+function cleanAuditActorText(value, maxLen = 255) {
+  const normalized = String(value || '').trim()
+  if (!normalized) return null
+  return normalized.slice(0, maxLen)
+}
+
+function normalizeAuditActor(actor = {}) {
+  return {
+    userId: actor?.userId || null,
+    userName: cleanAuditActorText(actor?.userName),
+    deviceName: cleanAuditActorText(actor?.deviceName || actor?.device_name),
+    deviceTz: cleanAuditActorText(actor?.deviceTz || actor?.device_tz, 120),
+    clientTime: cleanAuditActorText(actor?.clientTime || actor?.client_time, 64),
+  }
+}
+
+function attachInternalPolicyMetadata(policy = {}, actor = {}) {
+  const normalizedActor = normalizeAuditActor(actor)
+  const nextPolicy = (policy && typeof policy === 'object' && !Array.isArray(policy))
+    ? { ...policy }
+    : {}
+  if (normalizedActor.userId || normalizedActor.userName || normalizedActor.deviceName || normalizedActor.deviceTz || normalizedActor.clientTime) {
+    nextPolicy.__audit_actor = normalizedActor
+  }
+  return nextPolicy
+}
+
+function stripInternalPolicyMetadata(policy = {}) {
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) return {}
+  const { __audit_actor: _auditActor, ...publicPolicy } = policy
+  return publicPolicy
+}
+
+function getPersistedAuditActor(job = {}) {
+  const rawPolicy = job?.policy_json ? safeJson(job.policy_json, {}) : (job?.policy || {})
+  return normalizeAuditActor(rawPolicy?.__audit_actor || {})
+}
+
+function mergeAuditActors(primary = {}, secondary = {}) {
+  return normalizeAuditActor({
+    userId: primary?.userId || secondary?.userId || null,
+    userName: primary?.userName || secondary?.userName || null,
+    deviceName: primary?.deviceName || secondary?.deviceName || null,
+    deviceTz: primary?.deviceTz || secondary?.deviceTz || null,
+    clientTime: primary?.clientTime || secondary?.clientTime || null,
+  })
+}
+
+function auditWithActor(actor, action, entity, entityId, detail = {}, opts = {}) {
+  const normalizedActor = normalizeAuditActor(actor)
+  return audit(
+    normalizedActor.userId,
+    normalizedActor.userName,
+    action,
+    entity,
+    entityId,
+    detail,
+    {
+      ...opts,
+      deviceName: opts.deviceName || normalizedActor.deviceName || null,
+      deviceTz: opts.deviceTz || normalizedActor.deviceTz || null,
+      clientTime: opts.clientTime || normalizedActor.clientTime || null,
+    }
+  )
+}
+
 function decorateImportJobRow(row) {
   if (!row) return null
   return {
     ...row,
     cancel_requested: isCancelRequested(row.cancel_requested) ? 1 : 0,
-    policy: safeJson(row.policy_json, {}),
+    policy: stripInternalPolicyMetadata(safeJson(row.policy_json, {})),
     summary: safeJson(row.summary_json, {}),
   }
 }
@@ -274,7 +346,7 @@ function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriv
     id,
     String(type || 'products').trim().toLowerCase(),
     queueDriver,
-    stringify(policy),
+    stringify(attachInternalPolicyMetadata(policy, actor)),
     actor.userId || null,
     actor.userName || null,
   )
@@ -288,21 +360,65 @@ function getImportJob(id) {
   return decorateImportJobRow(reconcileImportJobRow(row))
 }
 
-function listImportJobs({ limit = 50 } = {}) {
+function buildSqlPlaceholders(count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) {
+    placeholders.push('?')
+  }
+  return placeholders.join(', ')
+}
+
+function collectRowIds(rows = []) {
+  const ids = []
+  for (const row of rows || []) {
+    if (row?.id != null) ids.push(row.id)
+  }
+  return ids
+}
+
+function decorateImportJobRows(rows) {
+  const jobs = []
+  for (const row of rows) {
+    const job = decorateImportJobRow(reconcileImportJobRow(row))
+    if (job) jobs.push(job)
+  }
+  return jobs
+}
+
+function listImportJobs({ limit = 50, types = null } = {}) {
   const safeLimit = normalizeImportJobListLimit(limit)
-  const cached = readCachedImportJobList(safeLimit)
-  if (cached) return cached
-  const jobs = db.prepare(`
+  const normalizedTypes = []
+  if (Array.isArray(types)) {
+    const seenTypes = new Set()
+    for (const type of types) {
+      const normalized = normalizeText(type).toLowerCase()
+      if (!normalized || seenTypes.has(normalized)) continue
+      seenTypes.add(normalized)
+      normalizedTypes.push(normalized)
+    }
+  }
+  if (Array.isArray(types) && !normalizedTypes.length) return []
+  if (!normalizedTypes.length) {
+    const cached = readCachedImportJobList(safeLimit)
+    if (cached) return cached
+  }
+
+  const where = normalizedTypes.length
+    ? `WHERE type IN (${buildSqlPlaceholders(normalizedTypes.length)})`
+    : ''
+  const rows = db.prepare(`
     SELECT *
     FROM import_jobs
+    ${where}
     ORDER BY created_at DESC, id DESC
     LIMIT ?
-  `).all(safeLimit).map((row) => decorateImportJobRow(reconcileImportJobRow(row))).filter(Boolean)
-  return writeCachedImportJobList(safeLimit, jobs)
+  `).all(...normalizedTypes, safeLimit)
+  const jobs = decorateImportJobRows(rows)
+  return normalizedTypes.length ? jobs : writeCachedImportJobList(safeLimit, jobs)
 }
 
 function updateJob(id, patch = {}) {
-  const allowed = [
+  const allowed = new Set([
     'status',
     'phase',
     'queue_driver',
@@ -319,11 +435,20 @@ function updateJob(id, patch = {}) {
     'last_error',
     'started_at',
     'finished_at',
-  ]
-  const entries = Object.entries(patch).filter(([key]) => allowed.includes(key))
+  ])
+  const entries = []
+  const params = { id }
+  for (const [key, value] of Object.entries(patch)) {
+    if (!allowed.has(key)) continue
+    entries.push([key, value])
+    params[key] = value
+  }
   if (!entries.length) return getImportJob(id)
-  const assignments = entries.map(([key]) => `${key} = @${key}`).join(', ')
-  db.prepare(`UPDATE import_jobs SET ${assignments}, updated_at = CURRENT_TIMESTAMP::text WHERE id = @id`).run({ id, ...Object.fromEntries(entries) })
+  const assignments = []
+  for (const [key] of entries) {
+    assignments.push(`${key} = @${key}`)
+  }
+  db.prepare(`UPDATE import_jobs SET ${assignments.join(', ')}, updated_at = CURRENT_TIMESTAMP::text WHERE id = @id`).run(params)
   clearImportJobListCache()
   return getImportJob(id)
 }
@@ -391,7 +516,13 @@ async function buildProductImportReviewState(csvFile) {
     }
     await yieldImportWorker()
   }
-  const duplicateGroupCount = (map) => Array.from(map.values()).filter((rows) => rows.length > 1).length
+  const duplicateGroupCount = (map) => {
+    let count = 0
+    for (const rows of map.values()) {
+      if (rows.length > 1) count += 1
+    }
+    return count
+  }
   return {
     byBarcode,
     bySku,
@@ -434,8 +565,98 @@ function matchesReviewFilter(conflict = {}, filter = 'all') {
   if (filter === 'all') return true
   if (filter === 'errors' || filter === 'issues') return !!conflict.issue
   if (filter === 'same_name') return String(conflict.type || '').includes('same_name')
-  if (filter === 'identifier') return (conflict.fields || []).some((field) => ['sku', 'barcode'].includes(field))
+  if (filter === 'identifier') return hasAnyIdentifierField(conflict.fields)
   return (conflict.fields || []).includes(filter) || String(conflict.type || '').includes(filter)
+}
+
+function hasAnyIdentifierField(fields = []) {
+  for (const field of fields || []) {
+    if (field === 'sku' || field === 'barcode') return true
+  }
+  return false
+}
+
+function buildProductReviewLabels({
+  sameName,
+  hasImportedSameName,
+  fields,
+  issueTypes,
+  matching,
+  hasSameNameConflict,
+}) {
+  const labels = []
+  if (sameName.length) labels.push('same name')
+  if (!sameName.length && hasImportedSameName) labels.push('same name in file')
+  if (fields.includes('sku')) labels.push('same sku')
+  if (fields.includes('barcode')) labels.push('same barcode')
+  if (issueTypes.includes('missing_name')) labels.push('missing name')
+  if (issueTypes.includes('invalid_barcode')) labels.push('invalid barcode')
+  if (issueTypes.includes('barcode_too_long')) labels.push('barcode too long')
+  if (issueTypes.includes('barcode_text')) labels.push('barcode text')
+  if (issueTypes.includes('barcode_scientific_notation')) labels.push('barcode looks scientific')
+  if (issueTypes.includes('duplicate_barcode')) labels.push('duplicate barcode in file')
+  if (issueTypes.includes('duplicate_sku')) labels.push('duplicate sku in file')
+  if (!matching && hasSameNameConflict) labels.push('different details')
+  return labels
+}
+
+function buildContactReviewLabels({ sameName, sameMembership, samePhone, sameEmail }) {
+  const labels = []
+  if (sameName) labels.push('same name')
+  if (sameMembership) labels.push('same membership')
+  if (samePhone) labels.push('same phone')
+  if (sameEmail) labels.push('same email')
+  return labels
+}
+
+function hasMeaningfulImportRowValue(row = {}) {
+  for (const key in row) {
+    if (!Object.prototype.hasOwnProperty.call(row, key) || key === '_rowNumber') continue
+    if (String(row[key] || '').trim()) return true
+  }
+  return false
+}
+
+function addReviewConflictCounts(counts, conflict = {}) {
+  counts.total += 1
+  if (String(conflict.type || '').includes('same_name')) counts.same_name += 1
+  if (hasAnyIdentifierField(conflict.fields)) counts.identifier += 1
+  for (const field of REVIEW_FIELD_COUNT_KEYS) {
+    if ((conflict.fields || []).includes(field)) counts[field] += 1
+  }
+  if (conflict.issue) counts.issues += 1
+  for (const issueType of conflict.issueTypes || []) {
+    if (Object.prototype.hasOwnProperty.call(counts, issueType)) counts[issueType] += 1
+  }
+  if (conflict.type === 'new') counts.new += 1
+}
+
+function normalizeGroupDecisions(groups = {}) {
+  const normalizedGroups = {}
+  for (const [key, value] of Object.entries(groups || {})) {
+    const normalizedKey = normalizeReviewIdentifier(String(key || '').replace(/^name:/i, ''))
+    if (!normalizedKey || !value || typeof value !== 'object') continue
+    normalizedGroups[normalizedKey] = value
+  }
+  return normalizedGroups
+}
+
+function addSetValues(target, values = []) {
+  for (const value of values || []) {
+    target.add(value)
+  }
+}
+
+function setValuesToArray(values) {
+  const output = []
+  for (const value of values || []) {
+    output.push(value)
+  }
+  return output
+}
+
+function firstRowNumber(entry) {
+  return Math.min(...entry.rowNumbers)
 }
 
 function buildProductReviewIndex() {
@@ -485,7 +706,8 @@ function getProductConflictForReview(row = {}, index, importState = null) {
   if (skuRows.length > 1) issueTypes.push('duplicate_sku')
   if ((barcodeIssue || barcodeRows.length > 1) && !fields.includes('barcode')) fields.push('barcode')
   if (skuRows.length > 1 && !fields.includes('sku')) fields.push('sku')
-  const matching = sameName.find((product) => normalizeProductSignature(product) === normalizeProductSignature(normalized)) || null
+  const normalizedSignature = normalizeProductSignature(normalized)
+  const matching = findProductWithSignature(sameName, normalizedSignature)
   const selectedParent = chooseParentProduct(sameName)
   const hasIdentifier = fields.length > 0
   const hasImportedSameName = nameRows.length > 1
@@ -510,20 +732,14 @@ function getProductConflictForReview(row = {}, index, importState = null) {
     issueTypes,
     type,
     fields,
-    labels: [
-      sameName.length ? 'same name' : '',
-      !sameName.length && hasImportedSameName ? 'same name in file' : '',
-      fields.includes('sku') ? 'same sku' : '',
-      fields.includes('barcode') ? 'same barcode' : '',
-      issueTypes.includes('missing_name') ? 'missing name' : '',
-      issueTypes.includes('invalid_barcode') ? 'invalid barcode' : '',
-      issueTypes.includes('barcode_too_long') ? 'barcode too long' : '',
-      issueTypes.includes('barcode_text') ? 'barcode text' : '',
-      issueTypes.includes('barcode_scientific_notation') ? 'barcode looks scientific' : '',
-      issueTypes.includes('duplicate_barcode') ? 'duplicate barcode in file' : '',
-      issueTypes.includes('duplicate_sku') ? 'duplicate sku in file' : '',
-      !matching && hasSameNameConflict ? 'different details' : '',
-    ].filter(Boolean),
+    labels: buildProductReviewLabels({
+      sameName,
+      hasImportedSameName,
+      fields,
+      issueTypes,
+      matching,
+      hasSameNameConflict,
+    }),
     plannedAction,
     target_product_id: matching?.id || conflictTarget?.id || null,
     parent_id: plannedAction === 'create_variant' ? (selectedParent?.parent_id || selectedParent?.id || null) : null,
@@ -602,10 +818,11 @@ function addProductReviewGroup(groupsByName, row = {}, conflict = {}) {
     signature = `row-error:${rowNumber || group.rows.length}`
   }
   if (rowNumber) group.rowNumbers.push(rowNumber)
-  ;(conflict.fields || []).forEach((field) => group.fields.add(field))
-  ;(conflict.issueTypes || []).forEach((issueType) => group.issueTypes.add(issueType))
+  addSetValues(group.fields, conflict.fields)
+  addSetValues(group.issueTypes, conflict.issueTypes)
   if (conflict.existing?.id) group.existingMatches.set(Number(conflict.existing.id), conflict.existing)
-  group.rows.push(summarizeImportReviewRow(row, conflict))
+  const rowSummary = summarizeImportReviewRow(row, conflict)
+  group.rows.push(rowSummary)
   if (!group.subgroupsBySignature.has(signature)) {
     group.subgroupsBySignature.set(signature, {
       signature,
@@ -617,43 +834,56 @@ function addProductReviewGroup(groupsByName, row = {}, conflict = {}) {
   }
   const subgroup = group.subgroupsBySignature.get(signature)
   if (rowNumber) subgroup.rowNumbers.push(rowNumber)
-  ;(conflict.fields || []).forEach((field) => subgroup.fields.add(field))
-  ;(conflict.issueTypes || []).forEach((issueType) => subgroup.issueTypes.add(issueType))
-  subgroup.rows.push(summarizeImportReviewRow(row, conflict))
+  addSetValues(subgroup.fields, conflict.fields)
+  addSetValues(subgroup.issueTypes, conflict.issueTypes)
+  subgroup.rows.push(rowSummary)
+}
+
+function finalizeProductReviewSubgroups(group) {
+  const entries = []
+  for (const subgroup of group.subgroupsBySignature.values()) {
+    entries.push(subgroup)
+  }
+  entries.sort((left, right) => firstRowNumber(left) - firstRowNumber(right))
+  const subgroups = []
+  for (let index = 0; index < entries.length; index += 1) {
+    const subgroup = entries[index]
+    subgroups.push({
+      signature: subgroup.signature,
+      rowNumbers: subgroup.rowNumbers,
+      fields: setValuesToArray(subgroup.fields),
+      issueTypes: setValuesToArray(subgroup.issueTypes),
+      suggestedAction: subgroup.rowNumbers.length > 1
+        ? 'merge_stock'
+        : entries.length > 1 || index > 0
+          ? 'create_variant'
+          : 'new',
+      rows: subgroup.rows,
+    })
+  }
+  return subgroups
 }
 
 function finalizeProductReviewGroups(groupsByName) {
-  return Array.from(groupsByName.values())
-    .filter((group) => group.rowNumbers.length > 1)
-    .map((group) => {
-      const subgroups = Array.from(group.subgroupsBySignature.values())
-        .sort((left, right) => Math.min(...left.rowNumbers) - Math.min(...right.rowNumbers))
-        .map((subgroup, index, all) => ({
-          signature: subgroup.signature,
-          rowNumbers: subgroup.rowNumbers,
-          fields: Array.from(subgroup.fields),
-          issueTypes: Array.from(subgroup.issueTypes),
-          suggestedAction: subgroup.rowNumbers.length > 1
-            ? 'merge_stock'
-            : all.length > 1 || index > 0
-              ? 'create_variant'
-              : 'new',
-          rows: subgroup.rows,
-        }))
-      return {
-        key: group.key,
-        groupId: `name:${group.key}`,
-        title: group.title,
-        issueTypes: Array.from(group.issueTypes),
-        fields: Array.from(group.fields),
-        rowNumbers: group.rowNumbers,
-        rows: group.rows,
-        subgroups,
-        suggestedAction: subgroups.length > 1 ? 'create_variant' : 'merge_stock',
-        existing: Array.from(group.existingMatches.values()),
-      }
+  const groups = []
+  for (const group of groupsByName.values()) {
+    if (group.rowNumbers.length <= 1) continue
+    const subgroups = finalizeProductReviewSubgroups(group)
+    groups.push({
+      key: group.key,
+      groupId: `name:${group.key}`,
+      title: group.title,
+      issueTypes: setValuesToArray(group.issueTypes),
+      fields: setValuesToArray(group.fields),
+      rowNumbers: group.rowNumbers,
+      rows: group.rows,
+      subgroups,
+      suggestedAction: subgroups.length > 1 ? 'create_variant' : 'merge_stock',
+      existing: setValuesToArray(group.existingMatches.values()),
     })
-    .sort((left, right) => Math.min(...left.rowNumbers) - Math.min(...right.rowNumbers))
+  }
+  groups.sort((left, right) => firstRowNumber(left) - firstRowNumber(right))
+  return groups
 }
 
 function buildContactReviewIndex(type) {
@@ -706,12 +936,7 @@ function getContactConflictForReview(row = {}, type, index) {
     issue: !incoming.name && type !== 'delivery_contacts',
     type: typeName,
     fields,
-    labels: [
-      sameName ? 'same name' : '',
-      sameMembership ? 'same membership' : '',
-      samePhone ? 'same phone' : '',
-      sameEmail ? 'same email' : '',
-    ].filter(Boolean),
+    labels: buildContactReviewLabels({ sameName, sameMembership, samePhone, sameEmail }),
     plannedAction: target ? 'merge' : 'new',
     existing: target ? {
       id: target.id,
@@ -728,7 +953,7 @@ function getContactConflictForReview(row = {}, type, index) {
 }
 
 function getGenericImportConflictForReview(row = {}, type) {
-  const issue = !Object.entries(row).some(([key, value]) => key !== '_rowNumber' && String(value || '').trim())
+  const issue = !hasMeaningfulImportRowValue(row)
   return {
     issue,
     type: issue ? 'empty_row' : type || 'row',
@@ -754,14 +979,14 @@ function applyImportDecisionToRow(row = {}, decisionsByRow = {}) {
     ? { ...groupDecision, ...rowDecision }
     : decision
   const next = { ...row }
-  ;['_action', '_target_product_id', '_parent_id', '_identifier_conflict_mode', 'image_conflict_mode', '_conflict_mode'].forEach((key) => {
+  for (const key of IMPORT_DECISION_COPY_KEYS) {
     if (mergedDecision[key] != null) next[key] = mergedDecision[key]
-  })
+  }
   const fieldOverrides = mergedDecision.field_overrides || mergedDecision.overrides || mergedDecision.fields || null
   if (fieldOverrides && typeof fieldOverrides === 'object' && !Array.isArray(fieldOverrides)) {
-    ;['name', 'sku', 'barcode', 'category', 'brand', 'unit', 'description', 'supplier', 'branch'].forEach((key) => {
+    for (const key of PRODUCT_FIELD_OVERRIDE_KEYS) {
       if (fieldOverrides[key] != null) next[key] = fieldOverrides[key]
-    })
+    }
   }
   if (mergedDecision.field_rules || mergedDecision._field_rules) {
     next._field_rules = typeof (mergedDecision.field_rules || mergedDecision._field_rules) === 'string'
@@ -888,17 +1113,7 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
           error: error?.message || 'Unable to review row',
         }
       }
-      counts.total += 1
-      if (String(conflict.type || '').includes('same_name')) counts.same_name += 1
-      if ((conflict.fields || []).some((field) => ['sku', 'barcode'].includes(field))) counts.identifier += 1
-      ;['barcode', 'sku', 'membership', 'phone', 'email'].forEach((field) => {
-        if ((conflict.fields || []).includes(field)) counts[field] += 1
-      })
-      if (conflict.issue) counts.issues += 1
-      ;(conflict.issueTypes || []).forEach((issueType) => {
-        if (Object.prototype.hasOwnProperty.call(counts, issueType)) counts[issueType] += 1
-      })
-      if (conflict.type === 'new') counts.new += 1
+      addReviewConflictCounts(counts, conflict)
       if (productGroupsByName && normalizeReviewIdentifier(row.name)) {
         addProductReviewGroup(productGroupsByName, row, conflict)
       }
@@ -948,12 +1163,7 @@ function updateImportJobDecisions(jobId, decisions = {}) {
   const currentGroups = policy.groupDecisionsByKey && typeof policy.groupDecisionsByKey === 'object'
     ? policy.groupDecisionsByKey
     : {}
-  const normalizedGroups = {}
-  Object.entries(incomingGroups).forEach(([key, value]) => {
-    const normalizedKey = normalizeReviewIdentifier(String(key || '').replace(/^name:/i, ''))
-    if (!normalizedKey || !value || typeof value !== 'object') return
-    normalizedGroups[normalizedKey] = value
-  })
+  const normalizedGroups = normalizeGroupDecisions(incomingGroups)
   policy.decisionsByRowNumber = { ...current, ...incomingRows }
   policy.groupDecisionsByKey = { ...currentGroups, ...normalizedGroups }
   updateJob(jobId, { policy_json: stringify(policy) })
@@ -1044,7 +1254,7 @@ function normalizeLookup(value) {
 }
 
 function normalizeText(value) {
-  return String(value ?? '').normalize('NFC').trim().replace(/\s+/g, ' ')
+  return normalizeCatalogText(value)
 }
 
 function getMimeTypeFromName(fileName = '') {
@@ -1083,26 +1293,76 @@ const MONEY_FIELDS = new Set([
   'low_stock_threshold',
 ])
 
+const DIRECT_IMAGE_REF_KEYS = [
+  'image_filename',
+  'image_filename_1', 'image_filename_2', 'image_filename_3', 'image_filename_4', 'image_filename_5',
+  'image_1', 'image_2', 'image_3', 'image_4', 'image_5',
+  'image_url_1', 'image_url_2', 'image_url_3', 'image_url_4', 'image_url_5',
+]
+
+const LIST_IMAGE_REF_KEYS = ['image_filenames', 'image_urls']
+
+const IMPORT_DECISION_COPY_KEYS = [
+  '_action',
+  '_target_product_id',
+  '_parent_id',
+  '_identifier_conflict_mode',
+  'image_conflict_mode',
+  '_conflict_mode',
+]
+
+const PRODUCT_FIELD_OVERRIDE_KEYS = [
+  'name',
+  'sku',
+  'barcode',
+  'category',
+  'brand',
+  'unit',
+  'description',
+  'supplier',
+  'branch',
+]
+
+const REVIEW_FIELD_COUNT_KEYS = ['barcode', 'sku', 'membership', 'phone', 'email']
+
 function normalizeProductSignature(source = {}) {
-  return DETAIL_FIELDS.map((field) => {
+  const parts = []
+  for (const field of DETAIL_FIELDS) {
     const value = source?.[field]
-    if (MONEY_FIELDS.has(field)) return `${field}:${normalizePriceValue(Number(value || 0))}`
-    return `${field}:${normalizeLookup(value)}`
-  }).join('|')
+    parts.push(MONEY_FIELDS.has(field)
+      ? `${field}:${normalizePriceValue(Number(value || 0))}`
+      : `${field}:${normalizeLookup(value)}`)
+  }
+  return parts.join('|')
+}
+
+function findProductWithSignature(products = [], signature) {
+  if (!signature) return null
+  for (const product of products || []) {
+    if (normalizeProductSignature(product) === signature) return product
+  }
+  return null
 }
 
 function chooseParentProduct(rows = []) {
-  return [...(Array.isArray(rows) ? rows : [])].sort((left, right) => {
-    const leftGroup = Number(left?.is_group || 0) ? 0 : 1
-    const rightGroup = Number(right?.is_group || 0) ? 0 : 1
-    if (leftGroup !== rightGroup) return leftGroup - rightGroup
-    const leftRoot = Number(left?.parent_id || 0) ? 1 : 0
-    const rightRoot = Number(right?.parent_id || 0) ? 1 : 0
-    if (leftRoot !== rightRoot) return leftRoot - rightRoot
-    const byCreated = String(left?.created_at || '').localeCompare(String(right?.created_at || ''))
-    if (byCreated) return byCreated
-    return Number(left?.id || 0) - Number(right?.id || 0)
-  })[0] || null
+  const candidates = Array.isArray(rows) ? rows : []
+  let selected = null
+  for (const candidate of candidates) {
+    if (!selected || compareParentProductCandidate(candidate, selected) < 0) selected = candidate
+  }
+  return selected
+}
+
+function compareParentProductCandidate(left, right) {
+  const leftGroup = Number(left?.is_group || 0) ? 0 : 1
+  const rightGroup = Number(right?.is_group || 0) ? 0 : 1
+  if (leftGroup !== rightGroup) return leftGroup - rightGroup
+  const leftRoot = Number(left?.parent_id || 0) ? 1 : 0
+  const rightRoot = Number(right?.parent_id || 0) ? 1 : 0
+  if (leftRoot !== rightRoot) return leftRoot - rightRoot
+  const byCreated = String(left?.created_at || '').localeCompare(String(right?.created_at || ''))
+  if (byCreated) return byCreated
+  return Number(left?.id || 0) - Number(right?.id || 0)
 }
 
 function normalizeImportAction(value) {
@@ -1120,21 +1380,18 @@ function parseOptionalImportId(row, field) {
 
 function parseIncomingImageRefs(row = {}) {
   const candidates = []
-  const directKeys = [
-    'image_filename',
-    'image_filename_1', 'image_filename_2', 'image_filename_3', 'image_filename_4', 'image_filename_5',
-    'image_1', 'image_2', 'image_3', 'image_4', 'image_5',
-    'image_url_1', 'image_url_2', 'image_url_3', 'image_url_4', 'image_url_5',
-  ]
-  directKeys.forEach((key) => {
+  for (const key of DIRECT_IMAGE_REF_KEYS) {
     const value = String(row?.[key] || '').trim()
     if (value) candidates.push(value)
-  })
-  ;['image_filenames', 'image_urls'].forEach((key) => {
+  }
+  for (const key of LIST_IMAGE_REF_KEYS) {
     const listField = String(row?.[key] || '').trim()
-    if (!listField) return
-    listField.split(/[|;\n]/).map((item) => item.trim()).filter(Boolean).forEach((item) => candidates.push(item))
-  })
+    if (!listField) continue
+    for (const item of listField.split(/[|;\n]/)) {
+      const value = item.trim()
+      if (value) candidates.push(value)
+    }
+  }
   const seen = new Set()
   const unique = []
   for (const value of candidates) {
@@ -1155,31 +1412,39 @@ function parseIncomingImageRefs(row = {}) {
 function syncProductImageGallery(productId, gallery = []) {
   const clean = []
   const seen = new Set()
-  ;(Array.isArray(gallery) ? gallery : []).forEach((item) => {
+  const items = Array.isArray(gallery) ? gallery : []
+  for (const item of items) {
     const value = String(item || '').trim()
-    if (!value) return
+    if (!value) continue
     const key = value.toLowerCase()
-    if (seen.has(key)) return
+    if (seen.has(key)) continue
     seen.add(key)
     clean.push(value)
-  })
-  const normalized = clean.slice(0, 5)
+    if (clean.length >= 5) break
+  }
   db.prepare('DELETE FROM product_images WHERE product_id = ?').run(productId)
-  if (!normalized.length) {
+  if (!clean.length) {
     db.prepare("UPDATE products SET image_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(productId)
     return []
   }
   const insert = db.prepare('INSERT INTO product_images (product_id, image_path, sort_order) VALUES (?, ?, ?)')
-  normalized.forEach((imagePath, index) => insert.run(productId, imagePath, index))
-  db.prepare("UPDATE products SET image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(normalized[0], productId)
-  return normalized
+  for (let index = 0; index < clean.length; index += 1) {
+    insert.run(productId, clean[index], index)
+  }
+  db.prepare("UPDATE products SET image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(clean[0], productId)
+  return clean
 }
 
 function loadCurrentGallery(productId, fallbackPrimary = null) {
   const rows = db.prepare('SELECT image_path FROM product_images WHERE product_id = ? ORDER BY sort_order ASC, id ASC').all(productId)
-  const gallery = rows.map((row) => row.image_path).filter(Boolean)
+  const gallery = []
+  for (const row of rows) {
+    if (!row.image_path) continue
+    gallery.push(row.image_path)
+    if (gallery.length >= 5) break
+  }
   if (!gallery.length && fallbackPrimary) gallery.push(fallbackPrimary)
-  return gallery.slice(0, 5)
+  return gallery
 }
 
 function ensureParentProductExists(parentId, { childId = null } = {}) {
@@ -1407,11 +1672,37 @@ async function resolveImageGallery(row, imageLookup, actor, jobId, imageAssetCac
 function ensureSettingOptionMap(key) {
   const value = db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value
   const parsed = safeJson(value, [])
-  const options = Array.isArray(parsed) ? parsed.map((item) => String(item || '').trim()).filter(Boolean) : []
+  const options = []
+  const map = new Map()
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      const value = String(item || '').trim()
+      if (!value) continue
+      options.push(value)
+      map.set(normalizeLookup(value), value)
+    }
+  }
   return {
     options,
-    map: new Map(options.map((value) => [normalizeLookup(value), value])),
+    map,
   }
+}
+
+function buildLookupMap(rows = [], key = 'name') {
+  const map = new Map()
+  for (const row of rows || []) {
+    map.set(normalizeLookup(row?.[key]), row)
+  }
+  return map
+}
+
+function getDefaultBranch(activeBranches = []) {
+  let fallback = null
+  for (const branch of activeBranches) {
+    if (!fallback) fallback = branch
+    if (branch.is_default) return branch
+  }
+  return fallback
 }
 
 function upsertSettingJson(key, value) {
@@ -1471,14 +1762,19 @@ function normalizeRowForProduct(row = {}) {
 
 function createProductContext() {
   const activeBranches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
-  const categoryMap = new Map(db.prepare('SELECT id, name FROM categories ORDER BY name COLLATE NOCASE ASC').all().map((row) => [normalizeLookup(row.name), row]))
-  const unitMap = new Map(db.prepare('SELECT id, name FROM units ORDER BY name COLLATE NOCASE ASC').all().map((row) => [normalizeLookup(row.name), row]))
+  const branchesByName = buildLookupMap(activeBranches)
+  const categoryMap = buildLookupMap(db.prepare('SELECT id, name FROM categories ORDER BY name COLLATE NOCASE ASC').all())
+  const unitMap = buildLookupMap(db.prepare('SELECT id, name FROM units ORDER BY name COLLATE NOCASE ASC').all())
+  const supplierMap = buildLookupMap(db.prepare('SELECT id, name FROM suppliers ORDER BY name COLLATE NOCASE ASC').all())
   const brandState = ensureSettingOptionMap('product_brand_options')
   return {
     activeBranches,
-    defaultBranch: activeBranches.find((branch) => branch.is_default) || activeBranches[0] || null,
+    defaultBranch: getDefaultBranch(activeBranches),
+    branchesByName,
     categoryMap,
     unitMap,
+    supplierMap,
+    productRowsByName: new Map(),
     brandOptions: brandState.options,
     brandMap: brandState.map,
     changed: {
@@ -1493,6 +1789,63 @@ function createProductContext() {
   }
 }
 
+function sortProductImportRows(rows = []) {
+  const sorted = []
+  for (const row of rows || []) {
+    insertProductImportRow(sorted, row)
+  }
+  return sorted
+}
+
+function compareProductImportRows(left, right) {
+  const groupDelta = Number(right?.is_group || 0) - Number(left?.is_group || 0)
+  if (groupDelta !== 0) return groupDelta
+  const parentDelta = Number(left?.parent_id || 0) - Number(right?.parent_id || 0)
+  if (parentDelta !== 0) return parentDelta
+  const createdDelta = String(left?.created_at || '').localeCompare(String(right?.created_at || ''))
+  if (createdDelta !== 0) return createdDelta
+  return Number(left?.id || 0) - Number(right?.id || 0)
+}
+
+function insertProductImportRow(rows, product = {}) {
+  const nextRow = { ...product }
+  for (let index = 0; index < rows.length; index += 1) {
+    if (Number(rows[index]?.id || 0) === Number(product.id)) {
+      rows.splice(index, 1)
+      index -= 1
+      continue
+    }
+    if (compareProductImportRows(nextRow, rows[index]) < 0) {
+      rows.splice(index, 0, nextRow)
+      return rows
+    }
+  }
+  rows.push(nextRow)
+  return rows
+}
+
+function getProductsByNameForImport(ctx, productName) {
+  const nameKey = normalizeLookup(productName)
+  if (!nameKey) return []
+  if (!ctx.productRowsByName.has(nameKey)) {
+    const rows = db.prepare(`
+      SELECT *
+      FROM products
+      WHERE lower(trim(name)) = lower(trim(?))
+      ORDER BY is_group DESC, parent_id ASC, created_at ASC, id ASC
+    `).all(productName)
+    ctx.productRowsByName.set(nameKey, rows)
+  }
+  return ctx.productRowsByName.get(nameKey) || []
+}
+
+function rememberProductForImport(ctx, product = {}) {
+  const nameKey = normalizeLookup(product?.name)
+  if (!nameKey || !product?.id) return
+  const rows = ctx.productRowsByName.get(nameKey) || []
+  ctx.productRowsByName.set(nameKey, insertProductImportRow([...rows], product))
+}
+
 function buildImportSignatureKey(nameKey, signature) {
   const safeName = String(nameKey || '').trim()
   const safeSignature = String(signature || '').trim()
@@ -1502,6 +1855,7 @@ function buildImportSignatureKey(nameKey, signature) {
 function ensureCategory(ctx, value) {
   const trimmed = normalizeText(value)
   if (!trimmed) return null
+  assertCatalogTextIntegrity({ category: trimmed }, ['category'], 'Imported category')
   const lookup = normalizeLookup(trimmed)
   const existing = ctx.categoryMap.get(lookup)
   if (existing?.name) return existing.name
@@ -1513,6 +1867,7 @@ function ensureCategory(ctx, value) {
 
 function ensureUnit(ctx, value) {
   const trimmed = normalizeText(value || 'pcs') || 'pcs'
+  assertCatalogTextIntegrity({ unit: trimmed }, ['unit'], 'Imported unit')
   const lookup = normalizeLookup(trimmed)
   const existing = ctx.unitMap.get(lookup)
   if (existing?.name) return existing.name
@@ -1525,6 +1880,7 @@ function ensureUnit(ctx, value) {
 function ensureBrand(ctx, value) {
   const trimmed = normalizeText(value)
   if (!trimmed) return null
+  assertCatalogTextIntegrity({ brand: trimmed }, ['brand'], 'Imported brand')
   const lookup = normalizeLookup(trimmed)
   const existing = ctx.brandMap.get(lookup)
   if (existing) return existing
@@ -1537,9 +1893,12 @@ function ensureBrand(ctx, value) {
 function ensureSupplier(ctx, value) {
   const trimmed = normalizeText(value)
   if (!trimmed) return null
-  const existing = db.prepare('SELECT id FROM suppliers WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1').get(trimmed)
+  assertCatalogTextIntegrity({ supplier: trimmed }, ['supplier'], 'Imported supplier')
+  const lookup = normalizeLookup(trimmed)
+  const existing = ctx.supplierMap.get(lookup)
   if (!existing) {
-    db.prepare('INSERT OR IGNORE INTO suppliers (name) VALUES (?)').run(trimmed)
+    const result = db.prepare('INSERT OR IGNORE INTO suppliers (name) VALUES (?)').run(trimmed)
+    ctx.supplierMap.set(lookup, { id: result.lastInsertRowid || null, name: trimmed })
     ctx.changed.suppliers = true
   }
   return trimmed
@@ -1548,40 +1907,41 @@ function ensureSupplier(ctx, value) {
 function determineBranch(ctx, branchName) {
   const name = normalizeText(branchName)
   if (!name) return ctx.defaultBranch
-  let branch = ctx.activeBranches.find((item) => normalizeLookup(item.name) === normalizeLookup(name))
+  const branchKey = normalizeLookup(name)
+  let branch = ctx.branchesByName.get(branchKey)
   if (branch) return branch
   const result = db.prepare('INSERT OR IGNORE INTO branches (name, is_default, is_active) VALUES (?, 0, 1)').run(name)
   const id = result.lastInsertRowid || db.prepare('SELECT id FROM branches WHERE name = ?').get(name)?.id
   branch = id ? { id, name } : null
   if (branch) {
     ctx.activeBranches.push(branch)
+    ctx.branchesByName.set(branchKey, branch)
     ctx.changed.branches = true
   }
   return branch || ctx.defaultBranch
+}
+
+function clearBranchBatchStockForProduct(productId) {
+  const batchIds = collectRowIds(db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(productId))
+  if (!batchIds.length) return
+  db.prepare(`
+    UPDATE branch_batch_stock
+    SET quantity = 0,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE batch_id IN (${buildSqlPlaceholders(batchIds.length)})
+  `).run(...batchIds)
 }
 
 function handleBranchStock(ctx, productId, branchName, qty, replace, batchOptions = {}) {
   const branch = determineBranch(ctx, branchName)
   if (!branch) {
     if (qty > 0) throw new Error('A branch is required to import stock')
-    if (replace) {
-      const batchIds = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(productId).map((row) => row.id)
-      if (batchIds.length) {
-        const placeholders = batchIds.map(() => '?').join(',')
-        db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders})`).run(...batchIds)
-      }
-    }
+    if (replace) clearBranchBatchStockForProduct(productId)
     recalcProductStock(productId)
     return null
   }
   migrateLegacyProductToBatches(productId)
-  if (replace) {
-    const batchIds = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(productId).map((row) => row.id)
-    if (batchIds.length) {
-      const placeholders = batchIds.map(() => '?').join(',')
-      db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders})`).run(...batchIds)
-    }
-  }
+  if (replace) clearBranchBatchStockForProduct(productId)
   if (qty > 0) {
     increaseProductBatchStock(productId, branch.id, qty, batchOptions)
   }
@@ -1634,6 +1994,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
   }
   const normalized = normalizeRowForProduct(row)
   if (!normalized.name) throw new Error('Product name required')
+  assertCatalogTextIntegrity(normalized, ['name', 'brand', 'category', 'unit', 'description', 'supplier'], 'Imported product text')
   const barcodeIssue = getBarcodeReviewIssue(normalized.barcode)
   if (isBlockingBarcodeIssue(barcodeIssue)) {
     throw new Error(`Invalid barcode "${normalized.barcode}". Clear it or change it in import review.`)
@@ -1644,20 +2005,15 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
   normalized.supplier = ensureSupplier(ctx, normalized.supplier)
 
   const incomingGallery = await resolveImageGallery(row, imageLookup, actor, jobId, imageAssetCache)
-  const sameName = db.prepare(`
-    SELECT *
-    FROM products
-    WHERE lower(trim(name)) = lower(trim(?))
-    ORDER BY is_group DESC, parent_id ASC, created_at ASC, id ASC
-  `).all(normalized.name)
   const nameKey = normalizeLookup(normalized.name)
+  const sameName = getProductsByNameForImport(ctx, normalized.name)
   const importedParent = nameKey ? ctx.importParentsByName.get(nameKey) || null : null
   const signature = normalizeProductSignature(normalized)
   const importedSignatureMatch = ctx.importProductsBySignature.get(buildImportSignatureKey(nameKey, signature)) || null
   const candidateParents = importedParent
     ? [...sameName, importedParent]
     : sameName
-  const matching = sameName.find((product) => normalizeProductSignature(product) === signature) || importedSignatureMatch || null
+  const matching = findProductWithSignature(sameName, signature) || importedSignatureMatch || null
   const selectedParent = chooseParentProduct(candidateParents)
 
   let importActionLabel = normalizeLookup(row._action || '')
@@ -1750,6 +2106,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         parent_id: normalizedParentId,
         created_at: nowIso(),
       }
+      rememberProductForImport(ctx, insertedRecord)
       const signatureKey = buildImportSignatureKey(nameKey, signature)
       if (signatureKey) ctx.importProductsBySignature.set(signatureKey, insertedRecord)
       syncProductImageGallery(productId, incomingGallery)
@@ -1883,6 +2240,19 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
       normalizedParentId,
       existing.id,
     )
+    rememberProductForImport(ctx, {
+      ...existing,
+      ...resolved,
+      ...resolvedDiscount,
+      id: existing.id,
+      name: existing.name,
+      sku: existing.sku,
+      barcode: existing.barcode,
+      image_path: nextGallery[0] || null,
+      is_group: normalizedIsGroup ? 1 : 0,
+      parent_id: normalizedParentId,
+      updated_at: nowIso(),
+    })
     syncProductImageGallery(existing.id, nextGallery)
 
     const replaceStock = action === 'override_replace'
@@ -2010,7 +2380,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
   }
 
   if (ctx.changed.brands) {
-    const clean = Array.from(new Map(ctx.brandOptions.map((value) => [normalizeLookup(value), normalizeText(value)])).values()).filter(Boolean).sort((a, b) => a.localeCompare(b))
+    const clean = normalizeOptionList(buildSafeCatalogOptionList(ctx.brandOptions))
     upsertSettingJson('product_brand_options', clean)
   }
   if (ctx.changed.categories) broadcast('categories')
@@ -2029,6 +2399,15 @@ async function processProductRows({ jobId, rows, imageLookup, actor }) {
     imageLookup,
     actor,
   })
+}
+
+function buildSafeCatalogOptionList(values = []) {
+  const safeValues = []
+  for (const value of values || []) {
+    const normalized = normalizeText(value)
+    if (normalized && !hasSuspiciousCatalogText(normalized)) safeValues.push(normalized)
+  }
+  return safeValues
 }
 
 async function preflightImportJob(jobId) {
@@ -2071,6 +2450,7 @@ async function preflightImportJob(jobId) {
       let normalized = null
       try {
         normalized = normalizeRowForProduct(row)
+        assertCatalogTextIntegrity(normalized, ['name', 'brand', 'category', 'unit', 'description', 'supplier'], 'Imported product text')
         conflict = getProductConflictForReview(row, productIndex, productImportState)
         addProductReviewGroup(groupsByName, row, conflict)
       } catch (error) {
@@ -2096,7 +2476,7 @@ async function preflightImportJob(jobId) {
       const nameKey = normalizeReviewIdentifier(normalized.name)
       const signature = normalizeProductSignature(normalized)
       const sameName = productIndex.byName.get(nameKey) || []
-      const matchingExisting = sameName.find((product) => normalizeProductSignature(product) === signature) || null
+      const matchingExisting = findProductWithSignature(sameName, signature)
       const knownSignatures = simulatedSignaturesByName.get(nameKey) || new Set()
       const normalizedAction = normalizeImportAction(actionLabel) || (conflict?.plannedAction ? normalizeImportAction(conflict.plannedAction) : 'new') || 'new'
       const wantsMerge = normalizedAction === 'merge'
@@ -2139,17 +2519,17 @@ async function preflightImportJob(jobId) {
 
 function buildImageLookup(files = []) {
   const map = new Map()
-  files.forEach((file) => {
-    const candidates = [
-      file.original_name,
-      file.relative_path,
-      path.basename(file.stored_path || ''),
-    ].map((value) => path.basename(String(value || '')).toLowerCase()).filter(Boolean)
-    candidates.forEach((name) => {
-      if (!map.has(name)) map.set(name, file)
-    })
-  })
+  for (const file of files || []) {
+    addImageLookupCandidate(map, file, file.original_name)
+    addImageLookupCandidate(map, file, file.relative_path)
+    addImageLookupCandidate(map, file, path.basename(file.stored_path || ''))
+  }
   return map
+}
+
+function addImageLookupCandidate(map, file, value) {
+  const name = path.basename(String(value || '')).toLowerCase()
+  if (name && !map.has(name)) map.set(name, file)
 }
 
 function normalizeImageMatchKey(value) {
@@ -2165,12 +2545,11 @@ function normalizeImageMatchKey(value) {
 async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
   const products = db.prepare('SELECT id, name, sku, barcode, image_path FROM products WHERE is_active = 1').all()
   const byKey = new Map()
-  products.forEach((product) => {
-    ;[product.name, product.sku, product.barcode].forEach((value) => {
-      const key = normalizeImageMatchKey(value)
-      if (key && !byKey.has(key)) byKey.set(key, product)
-    })
-  })
+  for (const product of products) {
+    addImageProductKey(byKey, product, product.name)
+    addImageProductKey(byKey, product, product.sku)
+    addImageProductKey(byKey, product, product.barcode)
+  }
   let imagesMatched = 0
   let failed = 0
   for (const file of imageFiles) {
@@ -2222,6 +2601,11 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
     await yieldImportWorker()
   }
   return { imported: 0, updated: 0, images_matched: imagesMatched, failed, cancelled: false }
+}
+
+function addImageProductKey(map, product, value) {
+  const key = normalizeImageMatchKey(value)
+  if (key && !map.has(key)) map.set(key, product)
 }
 
 function normalizeContactMode(value) {
@@ -2429,7 +2813,7 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
     await yieldImportWorker()
   }
 
-  audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type, imported, updated, failed })
+  auditWithActor(actor, 'import_job_completed', 'import_job', null, { jobId, type, imported, updated, failed })
   broadcast(isCustomer ? 'customers' : isSupplier ? 'suppliers' : 'deliveryContacts')
   return { imported, updated, failed, cancelled: false }
 }
@@ -2451,25 +2835,39 @@ function normalizeInventoryAction(value) {
   return 'add'
 }
 
+function addCsvLookupValue(map, value, row, { overwrite = false } = {}) {
+  const key = normalizeCsvKey(value)
+  if (!key) return
+  if (overwrite || !map.has(key)) map.set(key, row)
+}
+
+function buildProductCsvLookupMap(products = []) {
+  const map = new Map()
+  for (const product of products || []) {
+    addCsvLookupValue(map, product?.sku, product)
+    addCsvLookupValue(map, product?.barcode, product)
+    addCsvLookupValue(map, product?.name, product)
+    addCsvLookupValue(map, product?.id, product)
+  }
+  return map
+}
+
+function buildBranchCsvLookupMap(branches = []) {
+  const map = new Map()
+  for (const branch of branches || []) {
+    addCsvLookupValue(map, branch?.name, branch, { overwrite: true })
+    addCsvLookupValue(map, branch?.id, branch, { overwrite: true })
+  }
+  return map
+}
+
 async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null, actor }) {
   const products = db.prepare('SELECT * FROM products WHERE is_active = 1').all()
   const branches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
-  const defaultBranch = branches.find((branch) => branch.is_default) || branches[0] || null
+  const defaultBranch = getDefaultBranch(branches)
   const decisionsByRow = getImportDecisionMap(jobId)
-  const productMap = new Map()
-  products.forEach((product) => {
-    ;[product.sku, product.barcode, product.name, product.id].forEach((value) => {
-      const key = normalizeCsvKey(value)
-      if (key && !productMap.has(key)) productMap.set(key, product)
-    })
-  })
-  const branchMap = new Map()
-  branches.forEach((branch) => {
-    ;[branch.name, branch.id].forEach((value) => {
-      const key = normalizeCsvKey(value)
-      if (key) branchMap.set(key, branch)
-    })
-  })
+  const productMap = buildProductCsvLookupMap(products)
+  const branchMap = buildBranchCsvLookupMap(branches)
 
   let imported = 0
   let failed = 0
@@ -2547,7 +2945,7 @@ async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null,
     })
     await yieldImportWorker()
   }
-  audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: 'inventory', imported, failed })
+  auditWithActor(actor, 'import_job_completed', 'import_job', null, { jobId, type: 'inventory', imported, failed })
   broadcast('products')
   broadcast('inventory')
   return { imported, updated: 0, failed, cancelled: false }
@@ -2565,22 +2963,10 @@ async function processInventoryRows({ jobId, rows, actor }) {
 async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, actor }) {
   const products = db.prepare('SELECT * FROM products WHERE is_active = 1').all()
   const branches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
-  const defaultBranch = branches.find((branch) => branch.is_default) || branches[0] || null
+  const defaultBranch = getDefaultBranch(branches)
   const decisionsByRow = getImportDecisionMap(jobId)
-  const productMap = new Map()
-  products.forEach((product) => {
-    ;[product.sku, product.barcode, product.name, product.id].forEach((value) => {
-      const key = normalizeCsvKey(value)
-      if (key && !productMap.has(key)) productMap.set(key, product)
-    })
-  })
-  const branchMap = new Map()
-  branches.forEach((branch) => {
-    ;[branch.name, branch.id].forEach((value) => {
-      const key = normalizeCsvKey(value)
-      if (key) branchMap.set(key, branch)
-    })
-  })
+  const productMap = buildProductCsvLookupMap(products)
+  const branchMap = buildBranchCsvLookupMap(branches)
 
   const grouped = new Map()
   let failed = 0
@@ -2751,7 +3137,7 @@ async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, act
             actor.userName || null,
           )
         }
-        audit(actor.userId, actor.userName, 'create', 'sale', saleId, { receiptNumber: sale.receiptNumber, source: 'import_job' })
+        auditWithActor(actor, 'create', 'sale', saleId, { receiptNumber: sale.receiptNumber, source: 'import_job' })
         imported += 1
       })()
       saleRowsApplied += sale.items.length
@@ -2770,7 +3156,7 @@ async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, act
     })
     await yieldImportWorker()
   }
-  audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: 'sales', imported, duplicates, failed })
+  auditWithActor(actor, 'import_job_completed', 'import_job', null, { jobId, type: 'sales', imported, duplicates, failed })
   broadcast('sales')
   broadcast('products')
   broadcast('inventory')
@@ -2876,12 +3262,15 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
     started_at: job.started_at || nowIso(),
     last_error: null,
   })
-  const actor = { userId: job.created_by_id || null, userName: job.created_by_name || null }
+  const actor = mergeAuditActors(
+    { userId: job.created_by_id || null, userName: job.created_by_name || null },
+    getPersistedAuditActor(job)
+  )
   try {
     const csvFile = getJobFiles(jobId, 'csv')[0]
     if (!csvFile?.stored_path || !fs.existsSync(csvFile.stored_path)) throw new Error('CSV file is required before starting import')
     updateJob(jobId, { phase: normalizedMode === 'apply' ? 'preparing_files' : 'analyzing_files' })
-    const zipFiles = getJobFiles(jobId, 'zip').filter((file) => file.status !== 'processed')
+    const zipFiles = getUnprocessedJobFiles(jobId, 'zip')
     for (const zipFile of zipFiles) {
       await extractZipImages(jobId, zipFile)
       await yieldImportWorker(2)
@@ -2910,7 +3299,7 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
         cancel_requested: 0,
         finished_at: null,
       })
-      audit(actor.userId, actor.userName, 'import_job_analyzed', 'import_job', null, { jobId, type: job.type, rows: totalRows, images: imageFiles.length })
+      auditWithActor(actor, 'import_job_analyzed', 'import_job', null, { jobId, type: job.type, rows: totalRows, images: imageFiles.length })
       return getImportJob(jobId)
     }
 
@@ -2973,7 +3362,7 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
       finished_at: nowIso(),
       cancel_requested: 0,
     })
-    audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: job.type, ...result })
+    auditWithActor(actor, 'import_job_completed', 'import_job', null, { jobId, type: job.type, ...result })
     if (job.type === 'products') {
       broadcast('products')
       broadcast('inventory')
@@ -3254,17 +3643,24 @@ function listCancellableImportJobs() {
   return db.prepare(`
     SELECT *
     FROM import_jobs
-    WHERE lower(status) IN (${CANCELLABLE_IMPORT_STATUSES.map(() => '?').join(',')})
+    WHERE lower(status) IN (${buildSqlPlaceholders(CANCELLABLE_IMPORT_STATUSES.length)})
     ORDER BY created_at ASC, id ASC
   `).all(...CANCELLABLE_IMPORT_STATUSES)
 }
 
 async function waitForImportJobsToStop(jobIds = [], timeoutMs = 15_000) {
-  const ids = Array.from(new Set((jobIds || []).map((id) => String(id || '').trim()).filter(Boolean)))
+  const ids = []
+  const seenIds = new Set()
+  for (const jobId of jobIds || []) {
+    const id = String(jobId || '').trim()
+    if (!id || seenIds.has(id)) continue
+    seenIds.add(id)
+    ids.push(id)
+  }
   if (!ids.length) return []
   const deadline = Date.now() + Math.max(0, Number(timeoutMs || 0))
+  const placeholders = buildSqlPlaceholders(ids.length)
   while (Date.now() <= deadline) {
-    const placeholders = ids.map(() => '?').join(',')
     const active = db.prepare(`
       SELECT id, status, phase
       FROM import_jobs
@@ -3273,7 +3669,6 @@ async function waitForImportJobsToStop(jobIds = [], timeoutMs = 15_000) {
     if (!active.length) return []
     await wait(250)
   }
-  const placeholders = ids.map(() => '?').join(',')
   return db.prepare(`
     SELECT id, status, phase
     FROM import_jobs
@@ -3286,11 +3681,11 @@ async function cancelAllImportJobs({ reason = 'Background import cancelled by sy
   if (!jobs.length) {
     return { cancelled: 0, remaining: [], jobIds: [] }
   }
-  const jobIds = jobs.map((job) => job.id)
+  const jobIds = collectRowIds(jobs)
   for (const jobId of jobIds) {
     await removeQueuedBullJobsForImport(jobId)
   }
-  const placeholders = jobIds.map(() => '?').join(',')
+  const placeholders = buildSqlPlaceholders(jobIds.length)
   db.prepare(`
     UPDATE import_jobs
     SET cancel_requested = 1,
@@ -3345,7 +3740,7 @@ async function deleteImportJob(jobId, { force = false } = {}) {
 }
 
 async function deleteAllImportJobs({ removeFiles = true } = {}) {
-  const ids = db.prepare('SELECT id FROM import_jobs').all().map((row) => row.id)
+  const ids = collectRowIds(db.prepare('SELECT id FROM import_jobs').all())
   for (const jobId of ids) {
     await removeQueuedBullJobsForImport(jobId)
   }
@@ -3407,6 +3802,14 @@ async function recoverImportJobs({ forceQueue = false } = {}) {
   }
 }
 
+function getUnprocessedJobFiles(jobId, type) {
+  const files = []
+  for (const file of getJobFiles(jobId, type)) {
+    if (file.status !== 'processed') files.push(file)
+  }
+  return files
+}
+
 function getQueueStatus() {
   return {
     ...bullStatus,
@@ -3427,15 +3830,24 @@ function getQueueStatus() {
 function buildErrorsCsv(jobId) {
   const errors = getJobErrors(jobId, { limit: 5000 })
   const escape = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`
-  return [
-    `\uFEFF${['row_number', 'file_name', 'code', 'message'].map(escape).join(',')}`,
-    ...errors.map((error) => [
+  const lines = [`\uFEFF${joinEscapedCsvRow(['row_number', 'file_name', 'code', 'message'], escape)}`]
+  for (const error of errors) {
+    lines.push(joinEscapedCsvRow([
       error.row_number || '',
       error.file_name || '',
       error.code || '',
       error.message || '',
-    ].map(escape).join(',')),
-  ].join('\n')
+    ], escape))
+  }
+  return lines.join('\n')
+}
+
+function joinEscapedCsvRow(values, escape) {
+  const escaped = []
+  for (const value of values) {
+    escaped.push(escape(value))
+  }
+  return escaped.join(',')
 }
 
 module.exports = {

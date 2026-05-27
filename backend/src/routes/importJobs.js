@@ -53,7 +53,19 @@ function requireImportPermission(req, res, next) {
 }
 
 function hasAnyImportPermission(user) {
-  return ['products', 'contacts', 'inventory', 'sales'].some((permission) => hasPermission(user, permission))
+  const permissions = ['products', 'contacts', 'inventory', 'sales']
+  for (const permission of permissions) {
+    if (hasPermission(user, permission)) return true
+  }
+  return false
+}
+
+function getPermittedImportTypes(user) {
+  const types = []
+  for (const type of ALLOWED_TYPES) {
+    if (hasPermission(user, permissionForImportType(type))) types.push(type)
+  }
+  return types
 }
 
 function requireAnyImportPermission(req, res, next) {
@@ -82,6 +94,36 @@ function getJobOr404(req, res) {
     return null
   }
   return job
+}
+
+function serializeJobFile(file) {
+  return {
+    id: file.id,
+    kind: file.kind,
+    original_name: file.original_name,
+    relative_path: file.relative_path,
+    byte_size: file.byte_size,
+    status: file.status,
+    error_message: file.error_message,
+  }
+}
+
+function serializeJobFiles(jobId) {
+  const files = getJobFiles(jobId)
+  const serialized = []
+  for (const file of files) {
+    serialized.push(serializeJobFile(file))
+  }
+  return serialized
+}
+
+function saveImageJobFiles(jobId, files, relativePaths) {
+  const saved = []
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index]
+    saved.push(addJobFile(jobId, file, 'image', relativePaths[index] || file.originalname))
+  }
+  return saved
 }
 
 const storage = multer.diskStorage({
@@ -178,6 +220,9 @@ function auditImportJobEvent(req, action, beforeJob, afterJob, extra = {}) {
       recordId: job.id,
       oldValue: beforeJob ? { status: beforeJob.status, phase: beforeJob.phase, cancel_requested: beforeJob.cancel_requested } : null,
       newValue: afterJob ? { status: afterJob.status, phase: afterJob.phase, cancel_requested: afterJob.cancel_requested } : null,
+      deviceName: actor.deviceName || null,
+      deviceTz: actor.deviceTz || null,
+      clientTime: actor.clientTime || null,
     },
   )
 }
@@ -187,8 +232,10 @@ router.get('/queue/status', authToken, requireAnyImportPermission, (_req, res) =
 })
 
 router.get('/', authToken, requireAnyImportPermission, (req, res) => {
-  const jobs = listImportJobs({ limit: req.query?.limit || 50 })
-    .filter((job) => hasPermission(req.user, permissionForImportType(job.type)))
+  const jobs = listImportJobs({
+    limit: req.query?.limit || 50,
+    types: getPermittedImportTypes(req.user),
+  })
   ok(res, { jobs })
 })
 
@@ -217,15 +264,7 @@ router.get('/:id', authToken, requireImportPermission, (req, res) => {
   if (!job) return
   ok(res, {
     job,
-    files: getJobFiles(job.id).map((file) => ({
-      id: file.id,
-      kind: file.kind,
-      original_name: file.original_name,
-      relative_path: file.relative_path,
-      byte_size: file.byte_size,
-      status: file.status,
-      error_message: file.error_message,
-    })),
+    files: serializeJobFiles(job.id),
     errors: getJobErrors(job.id, { limit: 200 }),
   })
 })
@@ -251,7 +290,12 @@ router.patch('/:id/decisions', authToken, requireImportPermission, (req, res) =>
     const job = getJobOr404(req, res)
     if (!job) return
     const decisions = req.body?.decisions || req.body?.rows || {}
-    ok(res, { job: updateImportJobDecisions(job.id, decisions) })
+    const updated = updateImportJobDecisions(job.id, decisions)
+    auditImportJobEvent(req, 'import_job_decisions', job, updated, {
+      source: req.body?.source || 'api',
+      mode: 'review',
+    })
+    ok(res, { job: updated })
   } catch (error) {
     err(res, error?.message || 'Failed to save import decisions')
   }
@@ -261,7 +305,12 @@ router.post('/:id/preflight', authToken, requireImportPermission, async (req, re
   try {
     const job = getJobOr404(req, res)
     if (!job) return
-    ok(res, await preflightImportJob(job.id))
+    const result = await preflightImportJob(job.id)
+    auditImportJobEvent(req, 'import_job_preflight', job, getImportJob(job.id) || job, {
+      source: req.body?.source || 'api',
+      mode: 'preflight',
+    })
+    ok(res, result)
   } catch (error) {
     err(res, error?.message || 'Failed to preflight import job')
   }
@@ -315,7 +364,7 @@ router.post('/:id/images', authToken, requireImportPermission, importUpload.arra
     if (job.type !== 'products') return err(res, 'Image imports are only supported for products')
     const files = Array.isArray(req.files) ? req.files : []
     const relativePaths = parseRelativePaths(req)
-    const saved = files.map((file, index) => addJobFile(job.id, file, 'image', relativePaths[index] || file.originalname))
+    const saved = saveImageJobFiles(job.id, files, relativePaths)
     const after = getImportJob(job.id)
     if (saved.length) {
       auditImportJobEvent(req, 'import_job_upload', job, after, {

@@ -128,7 +128,7 @@ function assertReturnableItems(saleId, items = [], excludeReturnId = null) {
           `).get(saleId, item.sale_item_id)?.qty || 0
 
       const remaining = Math.max(0, (saleItem.quantity || 0) - returned)
-      if (qty > remaining) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} â€” only ${remaining} remaining`)
+      if (qty > remaining) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} — only ${remaining} remaining`)
       continue
     }
 
@@ -156,7 +156,7 @@ function assertReturnableItems(saleId, items = [], excludeReturnId = null) {
           `).get(saleId, item.product_id)?.qty || 0
 
       const remaining = Math.max(0, soldQty - returned)
-      if (qty > remaining) throw new Error(`Cannot return ${qty} of this product â€” only ${remaining} remaining`)
+      if (qty > remaining) throw new Error(`Cannot return ${qty} of this product — only ${remaining} remaining`)
     }
   }
 }
@@ -183,7 +183,10 @@ router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
     params.push(type)
   }
   if (search) {
-    const terms = search.split(/\s+/).filter(Boolean)
+    const terms = []
+    for (const part of search.split(/\s+/)) {
+      if (part) terms.push(part)
+    }
     for (const term of terms) {
       const like = `%${term}%`
       q += ` AND (
@@ -210,7 +213,11 @@ router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
   }
 
   const getItems = db.prepare('SELECT * FROM return_items WHERE return_id = ?')
-  res.json(returns.map(r => ({ ...r, items: getItems.all(r.id) })))
+  const payload = []
+  for (const returnRow of returns) {
+    payload.push({ ...returnRow, items: getItems.all(returnRow.id) })
+  }
+  res.json(payload)
 })
 
 // GET /api/returns/:id
@@ -224,7 +231,7 @@ router.get('/returns/:id', authToken, requirePermission('sales'), (req, res) => 
 // POST /api/returns
 router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
   const d = req.body || {}
-  const actor = getAuditActor(req)
+  const actor = getAuditActor(req, d)
   const clientRequestId = normalizeClientRequestId(d.client_request_id)
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Return items required')
   if (!d.reason) return err(res, 'Reason is required')
@@ -291,8 +298,8 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         d.total_refund_khr || 0,
         d.exchange_rate || saleMeta.exchange_rate || 4100,
         'completed',
-        d.device_name || null,
-        d.device_tz || null,
+        actor.deviceName || null,
+        actor.deviceTz || null,
       ).lastInsertRowid
 
       const insertItem = db.prepare(`
@@ -304,12 +311,21 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
     `)
 
     // Pre-fetch product data for cost price defaults
-    const productIds = d.items.map(it => it.product_id).filter(Boolean)
+    const productIds = []
+    const seenProductIds = new Set()
+    for (const item of d.items) {
+      const productId = Number(item?.product_id || 0)
+      if (!Number.isFinite(productId) || productId <= 0 || seenProductIds.has(productId)) continue
+      seenProductIds.add(productId)
+      productIds.push(productId)
+    }
     const productMap = new Map()
     if (productIds.length > 0) {
-      db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr FROM products WHERE id IN (${productIds.map(() => '?').join(',')})`)
+      const placeholders = []
+      for (let index = 0; index < productIds.length; index += 1) placeholders.push('?')
+      const productRows = db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr FROM products WHERE id IN (${placeholders.join(',')})`)
         .all(...productIds)
-        .forEach(p => productMap.set(p.id, p))
+      for (const product of productRows) productMap.set(product.id, product)
     }
 
     const touchedProductIds = new Set()
@@ -422,7 +438,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
           })
         }
         touchedProductIds.add(item.product_id)
-        restoredAllocations.forEach((allocation) => {
+        for (const allocation of restoredAllocations) {
           movementStatement.run(
             item.product_id, safeProductName,
             allocation.branch_id || itemBranchId,
@@ -439,7 +455,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
             allocation.lot_code || null,
             allocation.expiry_date || null,
           )
-        })
+        }
       }
     }
 
@@ -460,12 +476,16 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
       `).all(d.sale_id)
 
       const returnedMap = {}
-      allReturnedQtys.forEach(r => { returnedMap[r.product_id] = r.total_qty })
+      for (const row of allReturnedQtys) returnedMap[row.product_id] = row.total_qty
 
-      const fullyReturned = saleItems.every(si => {
-        const returned = returnedMap[si.product_id] || 0
-        return returned >= si.quantity
-      })
+      let fullyReturned = true
+      for (const saleItem of saleItems) {
+        const returned = returnedMap[saleItem.product_id] || 0
+        if (returned < saleItem.quantity) {
+          fullyReturned = false
+          break
+        }
+      }
 
       const newStatus = fullyReturned ? 'returned' : 'partial_return'
       db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, d.sale_id)
@@ -475,8 +495,9 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
       { returnNumber, total: d.total_refund_usd }, {
         tableName: 'returns', recordId: rid,
         newValue: { returnNumber, saleId: d.sale_id, reason: d.reason },
-        deviceName: d.device_name || null,
-        deviceTz:   d.device_tz   || null,
+        deviceName: actor.deviceName || null,
+        deviceTz:   actor.deviceTz   || null,
+        clientTime: actor.clientTime || null,
       })
       recordActionHistory({
         entity: 'return',
@@ -530,7 +551,7 @@ function assertSupplierReturnableStock(items = [], fallbackBranchId = null) {
 // POST /api/returns/supplier
 router.post('/returns/supplier', authToken, requirePermission('sales'), (req, res) => {
   const d = req.body || {}
-  const actor = getAuditActor(req)
+  const actor = getAuditActor(req, d)
   const clientRequestId = normalizeClientRequestId(d.client_request_id)
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Return items required')
   if (!d.reason) return err(res, 'Reason is required')
@@ -559,12 +580,13 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       ? db.prepare('SELECT name FROM branches WHERE id = ?').get(d.branch_id)?.name
       : null
 
-    const totalCostUsd = d.items.reduce((sum, item) => (
-      sum + toNumber(item.quantity, 0) * toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
-    ), 0)
-    const totalCostKhr = d.items.reduce((sum, item) => (
-      sum + toNumber(item.quantity, 0) * toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
-    ), 0)
+    let totalCostUsd = 0
+    let totalCostKhr = 0
+    for (const item of d.items) {
+      const quantity = toNumber(item.quantity, 0)
+      totalCostUsd += quantity * toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
+      totalCostKhr += quantity * toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
+    }
 
     const defaultCompensationUsd = ['refund', 'credit'].includes(settlement) ? totalCostUsd : 0
     const defaultCompensationKhr = ['refund', 'credit'].includes(settlement) ? totalCostKhr : 0
@@ -608,8 +630,8 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       supplierLossUsd,
       supplierLossKhr,
       'completed',
-      d.device_name || null,
-      d.device_tz || null,
+      actor.deviceName || null,
+      actor.deviceTz || null,
     ).lastInsertRowid
 
     const insertItem = db.prepare(`
@@ -620,12 +642,21 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `)
     const touchedProductIds = new Set()
-    const productIds = d.items.map((item) => Number(item.product_id)).filter((id) => Number.isFinite(id) && id > 0)
+    const productIds = []
+    const seenProductIds = new Set()
+    for (const item of d.items) {
+      const id = Number(item.product_id)
+      if (!Number.isFinite(id) || id <= 0 || seenProductIds.has(id)) continue
+      seenProductIds.add(id)
+      productIds.push(id)
+    }
     const productNameMap = new Map()
     if (productIds.length) {
-      db.prepare(`SELECT id, name FROM products WHERE id IN (${productIds.map(() => '?').join(',')})`)
+      const placeholders = []
+      for (let index = 0; index < productIds.length; index += 1) placeholders.push('?')
+      const productRows = db.prepare(`SELECT id, name FROM products WHERE id IN (${placeholders.join(',')})`)
         .all(...productIds)
-        .forEach((product) => productNameMap.set(Number(product.id), product.name))
+      for (const product of productRows) productNameMap.set(Number(product.id), product.name)
     }
     const insertReturnAllocation = db.prepare(`
       INSERT INTO return_item_batch_allocations
@@ -672,7 +703,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       const allocations = allocateProductBatches(item.product_id, itemBranchId, qty, {
         batchId: Number.parseInt(item.batch_id || item.batchId, 10) || null,
       })
-      allocations.forEach((allocation) => {
+      for (const allocation of allocations) {
         insertReturnAllocation.run(
           returnItemId,
           null,
@@ -682,10 +713,10 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
           allocation.lot_code || null,
           allocation.expiry_date || null,
         )
-      })
+      }
       touchedProductIds.add(item.product_id)
 
-      allocations.forEach((allocation) => {
+      for (const allocation of allocations) {
         movementStatement.run(
           item.product_id,
           safeProductName,
@@ -705,7 +736,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
           allocation.lot_code || null,
           allocation.expiry_date || null,
         )
-      })
+      }
     }
 
     refreshProductStockQuantities(touchedProductIds)
@@ -720,8 +751,9 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
           supplier_settlement: settlement,
           supplier_loss_usd: supplierLossUsd,
         },
-        deviceName: d.device_name || null,
-        deviceTz: d.device_tz || null,
+        deviceName: actor.deviceName || null,
+        deviceTz: actor.deviceTz || null,
+        clientTime: actor.clientTime || null,
       })
       recordActionHistory({
         entity: 'supplier_return',
@@ -760,7 +792,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
 router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) => {
   const { id } = req.params
   const d = req.body || {}
-  const actor = getAuditActor(req)
+  const actor = getAuditActor(req, d)
 
   const existing = db.prepare('SELECT * FROM returns WHERE id = ?').get(id)
   if (!existing) return err(res, 'Return not found', 404)
@@ -809,7 +841,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
         if (!item.return_to_stock || !item.product_id) continue
         migrateLegacyProductToBatches(item.product_id)
         const allocations = getReturnItemAllocations(item.id, { activeOnly: true })
-        allocations.forEach((allocation) => {
+        for (const allocation of allocations) {
           allocateProductBatches(item.product_id, allocation.branch_id || item.branch_id || null, allocation.quantity, {
             batchId: allocation.batch_id,
           })
@@ -832,7 +864,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
             allocation.lot_code || null,
             allocation.expiry_date || null,
           )
-        })
+        }
         markReturnItemAllocationsReversed(item.id)
         touchedProductIds.add(item.product_id)
       }
@@ -922,7 +954,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
             })
           }
           touchedProductIds.add(item.product_id)
-          restoredAllocations.forEach((allocation) => {
+          for (const allocation of restoredAllocations) {
             movementStatement.run(
               item.product_id,
               item.product_name,
@@ -942,7 +974,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
               allocation.lot_code || null,
               allocation.expiry_date || null,
             )
-          })
+          }
         }
       }
 
@@ -977,8 +1009,14 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
           GROUP BY ri.product_id
         `).all(existing.sale_id)
         const map = {}
-        allReturned.forEach((row) => { map[row.product_id] = row.total_qty })
-        const fullyReturned = saleItems.every((saleItem) => (map[saleItem.product_id] || 0) >= saleItem.quantity)
+        for (const row of allReturned) map[row.product_id] = row.total_qty
+        let fullyReturned = true
+        for (const saleItem of saleItems) {
+          if ((map[saleItem.product_id] || 0) < saleItem.quantity) {
+            fullyReturned = false
+            break
+          }
+        }
         const hasAny = allReturned.length > 0
         const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : 'completed'
         db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, existing.sale_id)
@@ -990,9 +1028,9 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
           recordId: parseInt(id, 10),
           oldValue: { reason: existing.reason, return_type: existing.return_type },
           newValue: { reason: d.reason, return_type: d.return_type },
-          deviceName: d.device_name || null,
-          deviceTz: d.device_tz || null,
-          clientTime: d.client_time || null,
+          deviceName: actor.deviceName || null,
+          deviceTz: actor.deviceTz || null,
+          clientTime: actor.clientTime || null,
         })
     })()
   } catch (e) {

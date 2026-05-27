@@ -4,17 +4,18 @@ const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { hasColumn, markColumnPresent } = require('../schemaMetadata')
 
 const router = express.Router()
 const CUSTOM_TABLE_COLUMN_TYPES = new Set(['text', 'long_text', 'number', 'decimal', 'boolean', 'date', 'timestamp', 'dropdown'])
+const CUSTOM_TABLE_SYSTEM_FIELDS = new Set(['id', 'created_at', 'updated_at', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt'])
 
 function humanizeTableName(tableName = '') {
-  return String(tableName || '')
-    .replace(/^ct_/, '')
-    .split('_')
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || 'Custom Table'
+  const parts = []
+  for (const part of String(tableName || '').replace(/^ct_/, '').split('_')) {
+    if (part) parts.push(part.charAt(0).toUpperCase() + part.slice(1))
+  }
+  return parts.join(' ') || 'Custom Table'
 }
 
 function serializeCustomTable(row = {}) {
@@ -49,7 +50,8 @@ function normalizeCustomTableSchema(schema = []) {
     throw new Error('At least one column is required')
   }
   const seenNames = new Set()
-  return schema.map((column) => {
+  const normalized = []
+  for (const column of schema) {
     const name = String(column?.name || '').trim()
     const type = String(column?.type || 'text').trim().toLowerCase()
     if (!name) throw new Error('Every column needs a name')
@@ -57,23 +59,17 @@ function normalizeCustomTableSchema(schema = []) {
     if (seenNames.has(normalizedName)) throw new Error(`Duplicate column name: ${name}`)
     seenNames.add(normalizedName)
     if (!CUSTOM_TABLE_COLUMN_TYPES.has(type)) throw new Error(`Unsupported column type: ${type}`)
-    return {
+    normalized.push({
       name,
       type,
       required: !!column?.required,
-    }
-  })
+    })
+  }
+  return normalized
 }
 
 function tableHasColumn(tableName, columnName) {
-  const columns = db.prepare(`
-    SELECT column_name AS name
-    FROM information_schema.columns
-    WHERE table_schema = current_schema()
-      AND table_name = ?
-    ORDER BY ordinal_position
-  `).all(tableName)
-  return columns.some((column) => String(column?.name || '').trim().toLowerCase() === String(columnName || '').trim().toLowerCase())
+  return hasColumn(tableName, columnName)
 }
 
 function ensureCustomTableRowVersioning(tableName) {
@@ -89,12 +85,25 @@ function ensureCustomTableRowVersioning(tableName) {
       )
       WHERE updated_at IS NULL
     `)
+    markColumnPresent(tableName, 'updated_at')
   }
+}
+
+function getWritableCustomTableKeys(data = {}) {
+  const keys = []
+  for (const key in data) {
+    if (!Object.prototype.hasOwnProperty.call(data, key)) continue
+    if (CUSTOM_TABLE_SYSTEM_FIELDS.has(key)) continue
+    keys.push(key)
+  }
+  return keys
 }
 
 router.get('/', authToken, requirePermission('settings'), (req, res) => {
   const rows = db.prepare('SELECT * FROM custom_tables ORDER BY name').all()
-  res.json(rows.map(serializeCustomTable))
+  const payload = []
+  for (const row of rows) payload.push(serializeCustomTable(row))
+  res.json(payload)
 })
 
 router.post('/', authToken, requirePermission('settings'), (req, res) => {
@@ -123,12 +132,15 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
     return err(res, error.message || 'Invalid custom table schema')
   }
 
-  const columns = normalizedSchema
-    .map((col) => `"${escapeIdentifier(col.name)}" ${typeMap[col.type] || 'TEXT'}`)
-    .join(', ')
+  const columnParts = []
+  for (const column of normalizedSchema) {
+    columnParts.push(`"${escapeIdentifier(column.name)}" ${typeMap[column.type] || 'TEXT'}`)
+  }
+  const columns = columnParts.join(', ')
 
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS "${tableName}" (id SERIAL PRIMARY KEY, ${columns}, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)` )
+    markColumnPresent(tableName, 'updated_at')
     const now = new Date().toISOString()
     const r = db.prepare('INSERT INTO custom_tables (name, columns, updated_at) VALUES (?,?,?)')
       .run(tableName, JSON.stringify(normalizedSchema), now)
@@ -166,12 +178,20 @@ router.post('/:name/rows', authToken, requirePermission('settings'), (req, res) 
   try {
     const table = resolveCustomTableRow(req.params.name)
     if (!table) return err(res, 'Custom table not found', 404)
-    const keys = Object.keys(data).filter((k) => !['id', 'created_at', 'updated_at', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt'].includes(k))
-    const cols = [...keys, 'updated_at'].map((k) => `"${escapeIdentifier(k)}"`).join(', ')
-    const vals = keys.map(() => '?').join(', ')
+    const keys = getWritableCustomTableKeys(data)
+    const columns = []
+    const placeholders = []
+    const values = []
+    for (const key of keys) {
+      columns.push(`"${escapeIdentifier(key)}"`)
+      placeholders.push('?')
+      values.push(data[key])
+    }
     const now = new Date().toISOString()
-    const placeholders = [...keys.map(() => '?'), '?'].join(', ')
-    const r = db.prepare(`INSERT INTO "${table.name}" (${cols}) VALUES (${placeholders})`).run(...keys.map((k) => data[k]), now)
+    columns.push('"updated_at"')
+    placeholders.push('?')
+    values.push(now)
+    const r = db.prepare(`INSERT INTO "${table.name}" (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`).run(...values)
     audit(actor.userId, actor.userName, 'create', 'custom_table_row', r.lastInsertRowid, {
       table_name: table.name,
     })
@@ -192,10 +212,18 @@ router.put('/:name/rows/:id', authToken, requirePermission('settings'), (req, re
     const current = db.prepare(`SELECT * FROM "${table.name}" WHERE id = ?`).get(req.params.id)
     if (!current) return err(res, 'Custom table row not found', 404)
     assertUpdatedAtMatch('custom table row', current, getExpectedUpdatedAt({ ...(req.body || {}), ...(data || {}) }))
-    const keys = Object.keys(data).filter((k) => !['id', 'created_at', 'updated_at', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt'].includes(k))
-    const sets = [...keys.map((k) => `"${escapeIdentifier(k)}" = ?`), '"updated_at" = ?'].join(', ')
+    const keys = getWritableCustomTableKeys(data)
+    const sets = []
+    const values = []
+    for (const key of keys) {
+      sets.push(`"${escapeIdentifier(key)}" = ?`)
+      values.push(data[key])
+    }
+    sets.push('"updated_at" = ?')
+    values.push(new Date().toISOString())
+    values.push(req.params.id)
     db.prepare(`UPDATE "${table.name}" SET ${sets} WHERE id = ?`)
-      .run(...keys.map((k) => data[k]), new Date().toISOString(), req.params.id)
+      .run(...values)
     audit(actor.userId, actor.userName, 'update', 'custom_table_row', req.params.id, {
       table_name: table.name,
     })

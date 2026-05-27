@@ -131,12 +131,19 @@ function assertSaleStockAvailable(items, fallbackBranchId = null) {
     const available = getAvailableProductQuantity(productId, branchId)
 
     if (requiredQty > available) {
-      const sample = (items || []).find(item => (item.product_id || item.id) === productId)
+      const sample = findSaleItemForProduct(items, productId)
       const name = sample?.product_name || sample?.name || `product #${productId}`
       const scope = branchId ? ' in the selected branch' : ''
       throw new Error(`Insufficient stock for ${name}${scope}: requested ${requiredQty}, available ${available}`)
     }
   }
+}
+
+function findSaleItemForProduct(items = [], productId) {
+  for (const item of items || []) {
+    if ((item.product_id || item.id) === productId) return item
+  }
+  return null
 }
 
 function findCustomerForSaleAssignment({ customerId, membershipNumber }) {
@@ -173,10 +180,17 @@ function getActiveBranchContext() {
     ORDER BY is_default DESC, id ASC
   `).all()
 
+  const branchMap = new Map()
+  let defaultBranch = null
+  for (const branch of branches) {
+    branchMap.set(branch.id, branch)
+    if (!defaultBranch && branch.is_default) defaultBranch = branch
+  }
+
   return {
     branches,
-    branchMap: new Map(branches.map((branch) => [branch.id, branch])),
-    defaultBranch: branches.find((branch) => branch.is_default) || branches[0] || null,
+    branchMap,
+    defaultBranch: defaultBranch || branches[0] || null,
   }
 }
 
@@ -199,7 +213,10 @@ function resolveSaleItemBranchId(item, fallbackBranchId, branchContext) {
 }
 
 function normalizeSaleItems(items, fallbackBranchId, branchContext) {
-  return (items || []).map((item, index) => {
+  const normalizedItems = []
+  const sourceItems = Array.isArray(items) ? items : []
+  for (let index = 0; index < sourceItems.length; index += 1) {
+    const item = sourceItems[index]
     const productId = parseInt(item?.product_id || item?.id, 10)
     if (!productId) throw new Error(`Sale item #${index + 1} is missing a product`)
 
@@ -215,7 +232,7 @@ function normalizeSaleItems(items, fallbackBranchId, branchContext) {
 
     const branch = branchId ? requireActiveBranch(branchId, branchContext.branchMap) : null
 
-    return {
+    normalizedItems.push({
       ...item,
       product_id: productId,
       id: productId,
@@ -224,12 +241,21 @@ function normalizeSaleItems(items, fallbackBranchId, branchContext) {
       quantity,
       branch_id: branch?.id || null,
       branch_name: branch?.name || null,
-    }
-  })
+    })
+  }
+  return normalizedItems
 }
 
 function summarizeSaleBranch(items, branchContext) {
-  const branchIds = [...new Set((items || []).map((item) => parseBranchId(item.branch_id)).filter(Boolean))]
+  const branchIds = []
+  const seen = new Set()
+  const sourceItems = Array.isArray(items) ? items : []
+  for (const item of sourceItems) {
+    const branchId = parseBranchId(item.branch_id)
+    if (!branchId || seen.has(branchId)) continue
+    seen.add(branchId)
+    branchIds.push(branchId)
+  }
   if (branchIds.length === 1) {
     const branch = branchContext.branchMap.get(branchIds[0])
     return {
@@ -302,7 +328,7 @@ function findSaleByClientRequestId(clientRequestId) {
 router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
-  const actor = getAuditActor(req)
+  const actor = getAuditActor(req, d)
   const saleCreatedAt = normalizeImportedTimestamp(d.created_at ?? d.sale_date ?? d.date)
   const cashierId = Number.isFinite(parseInt(d.cashier_id, 10)) ? parseInt(d.cashier_id, 10) : actor.userId
   const cashierName = String(d.cashier_name || actor.userName || '').trim() || actor.userName
@@ -365,7 +391,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
         d.delivery_fee_paid_by || 'customer',
         saleStatus,
         d.notes || null,
-        d.device_tz || null, d.device_name || null,
+        actor.deviceTz || null, actor.deviceName || null,
       ).lastInsertRowid
 
       if (saleCreatedAt) {
@@ -382,13 +408,22 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
       `)
 
       // Pre-fetch all product data for cost price defaults
-      const productIdSet = new Set(d.items.map(it => it.id || it.product_id).filter(Boolean))
+      const productIds = []
+      const productIdSet = new Set()
+      for (const item of normalizedItems) {
+        const productId = Number(item?.id || item?.product_id || 0)
+        if (!Number.isFinite(productId) || productId <= 0 || productIdSet.has(productId)) continue
+        productIdSet.add(productId)
+        productIds.push(productId)
+      }
       const productMap = new Map()
-      if (productIdSet.size > 0) {
-        db.prepare(`SELECT id, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr FROM products WHERE id IN (${Array.from(productIdSet).map(() => '?').join(',')})`)
-          .all(...Array.from(productIdSet))
-          .forEach(p => productMap.set(p.id, p))
-        Array.from(productIdSet).forEach((id) => migrateLegacyProductToBatches(id))
+      if (productIds.length > 0) {
+        const placeholders = []
+        for (let index = 0; index < productIds.length; index += 1) placeholders.push('?')
+        const productRows = db.prepare(`SELECT id, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr FROM products WHERE id IN (${placeholders.join(',')})`)
+          .all(...productIds)
+        for (const product of productRows) productMap.set(product.id, product)
+        for (const productId of productIds) migrateLegacyProductToBatches(productId)
       }
 
       const touchedProductIds = new Set()
@@ -397,6 +432,16 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
           (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
         VALUES (?,?,?,?,?,?)
       `)
+      const insertSaleMovement = db.prepare(`
+        INSERT INTO inventory_movements
+          (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+           unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name,
+           batch_id, lot_code, expiry_date)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `)
+      const updateSaleMovementCreatedAt = saleCreatedAt
+        ? db.prepare('UPDATE inventory_movements SET created_at = ? WHERE id = ?')
+        : null
 
       for (const item of normalizedItems) {
         const productId = item.product_id
@@ -419,7 +464,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
 
         if (shouldDeductStock) {
           const allocations = allocateProductBatches(productId, item.branch_id || null, item.quantity)
-          allocations.forEach((allocation) => {
+          for (const allocation of allocations) {
             insertAllocation.run(
               saleItemId,
               allocation.batch_id,
@@ -428,18 +473,11 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
               allocation.lot_code || null,
               allocation.expiry_date || null,
             )
-          })
+          }
           touchedProductIds.add(productId)
 
-          const movementStatement = db.prepare(`
-            INSERT INTO inventory_movements
-              (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name,
-               batch_id, lot_code, expiry_date)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-          `)
-          allocations.forEach((allocation) => {
-            const movementId = movementStatement.run(
+          for (const allocation of allocations) {
+            const movementId = insertSaleMovement.run(
               productId || null,
               item.name,
               allocation.branch_id || null,
@@ -459,11 +497,8 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
               allocation.expiry_date || null,
             ).lastInsertRowid
 
-            if (saleCreatedAt) {
-              db.prepare('UPDATE inventory_movements SET created_at = ? WHERE id = ?')
-                .run(saleCreatedAt, movementId)
-            }
-          })
+            if (updateSaleMovementCreatedAt) updateSaleMovementCreatedAt.run(saleCreatedAt, movementId)
+          }
         }
       }
 
@@ -475,9 +510,9 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
         { receiptNumber, total: d.total_usd, status: saleStatus, branch: saleBranch.branchName }, {
           tableName: 'sales', recordId: sid,
           newValue: { receiptNumber, total: d.total_usd, status: saleStatus, branch: saleBranch.branchName },
-          deviceName: d.device_name || null,
-          deviceTz:   d.device_tz   || null,
-          clientTime: d.client_time  || null,
+          deviceName: actor.deviceName || null,
+          deviceTz:   actor.deviceTz   || null,
+          clientTime: actor.clientTime || null,
         })
       recordActionHistory({
         entity: 'sale',
@@ -516,12 +551,12 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
   ok(res, { id: saleId, receiptNumber })
 })
 
-// PATCH /api/sales/:id/status  â€” update sale status
+// PATCH /api/sales/:id/status  — update sale status
 router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, res) => {
   const { id } = req.params
   const payload = req.body || {}
-  const actor = getAuditActor(req)
-  const { sale_status, notes, device_name, device_tz, client_time } = payload
+  const actor = getAuditActor(req, payload)
+  const { sale_status, notes } = payload
 
   const validStatuses = ['completed', 'awaiting_payment', 'awaiting_delivery', 'cancelled', 'partial_return', 'returned']
   if (!sale_status || !validStatuses.includes(sale_status)) {
@@ -558,7 +593,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
 
       // Handle stock adjustments based on transition
       if (!wasStockDeducted && willStockBeDeducted) {
-        // Transition: awaiting_payment â†’ {completed, awaiting_delivery}
+        // Transition: awaiting_payment → {completed, awaiting_delivery}
         // Stock needs to be deducted now (it was held, not deducted)
         assertSaleStockAvailable(items, sale.branch_id || null)
 
@@ -578,7 +613,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
         for (const item of items) {
           migrateLegacyProductToBatches(item.product_id)
           const allocations = allocateProductBatches(item.product_id, item.branch_id || null, item.quantity)
-          allocations.forEach((allocation) => {
+          for (const allocation of allocations) {
             insertAllocation.run(
               item.id,
               allocation.batch_id,
@@ -587,10 +622,10 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
               allocation.lot_code || null,
               allocation.expiry_date || null,
             )
-          })
+          }
           touchedProductIds.add(item.product_id)
 
-          allocations.forEach((allocation) => {
+          for (const allocation of allocations) {
             movementStatement.run(
               item.product_id,
               item.product_name,
@@ -610,11 +645,11 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
               allocation.lot_code || null,
               allocation.expiry_date || null,
             )
-          })
+          }
         }
         refreshProductStockQuantities(touchedProductIds)
       } else if (wasStockDeducted && !willStockBeDeducted && sale_status !== 'partial_return' && sale_status !== 'returned') {
-        // Transition: {completed, awaiting_delivery} â†’ awaiting_payment / cancelled / other
+        // Transition: {completed, awaiting_delivery} → awaiting_payment / cancelled / other
         // Stock was deducted, now needs to be restored
         const touchedProductIds = new Set()
         const movementStatement = db.prepare(`
@@ -630,7 +665,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
           markSaleItemAllocationsReleased(item.id)
           touchedProductIds.add(item.product_id)
 
-          allocations.forEach((allocation) => {
+          for (const allocation of allocations) {
             movementStatement.run(
               item.product_id,
               item.product_name,
@@ -650,7 +685,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
               allocation.lot_code || null,
               allocation.expiry_date || null,
             )
-          })
+          }
         }
         refreshProductStockQuantities(touchedProductIds)
       }
@@ -660,9 +695,9 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
           tableName: 'sales', recordId: parseInt(id),
           oldValue: { sale_status: oldStatus },
           newValue: { sale_status },
-          deviceName: device_name || null,
-          deviceTz:   device_tz   || null,
-          clientTime: client_time || null,
+          deviceName: actor.deviceName || null,
+          deviceTz:   actor.deviceTz   || null,
+          clientTime: actor.clientTime || null,
         })
     })()
   } catch (e) {
@@ -681,13 +716,11 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
 router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req, res) => {
   const saleId = parseInt(req.params.id, 10)
   const payload = req.body || {}
-  const actor = getAuditActor(req)
+  const actor = getAuditActor(req, payload)
   const {
     customerId,
     membershipNumber,
     clearAssignment,
-    device_name,
-    device_tz,
   } = payload
 
   if (!saleId) return err(res, 'Invalid sale id')
@@ -747,8 +780,9 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
             customer_name: customer?.name || null,
             membership_number: customer?.membership_number || null,
           },
-          deviceName: device_name || null,
-          deviceTz: device_tz || null,
+          deviceName: actor.deviceName || null,
+          deviceTz: actor.deviceTz || null,
+          clientTime: actor.clientTime || null,
         }
       )
     })()
@@ -829,7 +863,10 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   }
   if (status)    { q += ' AND s.sale_status = ?';       params.push(status) }
   if (search) {
-    const terms = search.split(/\s+/).filter(Boolean)
+    const terms = []
+    for (const part of search.split(/\s+/)) {
+      if (part) terms.push(part)
+    }
     for (const term of terms) {
       const like = `%${term}%`
       q += ` AND (
@@ -855,18 +892,22 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   params.push(Math.min(parseInt(limit) || 100, 500))  // Cap limit at 500
 
   const sales = db.prepare(q).all(...params)
-  res.json(sales.map(s => ({
-    ...s,
-    items_json: undefined,  // Remove raw JSON column
-    items: tryParse(s.items_json, []),  // Parse items from JSON
-    total_discount_usd: (s.discount_usd || 0) + (s.membership_discount_usd || 0),
-    total_discount_khr: (s.discount_khr || 0) + (s.membership_discount_khr || 0),
-    net_total_usd: (s.total_usd || 0) - (s.refund_usd || 0),
-    net_total_khr: (s.total_khr || 0) - (s.refund_khr || 0),
-  })))
+  const payload = []
+  for (const sale of sales) {
+    payload.push({
+      ...sale,
+      items_json: undefined,  // Remove raw JSON column
+      items: tryParse(sale.items_json, []),  // Parse items from JSON
+      total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
+      total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
+      net_total_usd: (sale.total_usd || 0) - (sale.refund_usd || 0),
+      net_total_khr: (sale.total_khr || 0) - (sale.refund_khr || 0),
+    })
+  }
+  res.json(payload)
 })
 
-// GET /api/sales/export  â€” enriched export with accounting summary
+// GET /api/sales/export  — enriched export with accounting summary
 router.get('/sales/export', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, period, format = 'json' } = req.query
 
@@ -896,11 +937,32 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
 
   const getItems = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?')
 
-  const rows = sales.map(s => {
-    const items = getItems.all(s.id)
-    const cogs = items.reduce((sum, i) => sum + ((i.cost_price_usd || 0) * i.quantity), 0)
-    return { ...s, items, cogs_usd: cogs }
-  })
+  const rows = []
+  let revenue = 0
+  let revenueKhr = 0
+  let totalCogs = 0
+  let totalDiscount = 0
+  let totalTax = 0
+  let totalDelivery = 0
+  let txCount = 0
+  for (const sale of sales) {
+    const items = getItems.all(sale.id)
+    let cogs = 0
+    for (const item of items) {
+      cogs += (item.cost_price_usd || 0) * item.quantity
+    }
+    const row = { ...sale, items, cogs_usd: cogs }
+    rows.push(row)
+    if (['completed','partial_return','returned'].includes(row.sale_status || 'completed')) {
+      txCount += 1
+      revenue += row.subtotal_usd || 0
+      revenueKhr += row.subtotal_khr || 0
+      totalCogs += row.cogs_usd || 0
+      totalDiscount += (row.discount_usd || 0) + (row.membership_discount_usd || 0)
+      totalTax += row.tax_usd || 0
+      totalDelivery += row.delivery_fee_usd || 0
+    }
+  }
 
   // Returns summary
   const returnsData = db.prepare(`
@@ -918,17 +980,9 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
   `).get(start, end)
 
   // Accounting summary
-  const completedSales = rows.filter(s => ['completed','partial_return','returned'].includes(s.sale_status || 'completed'))
-  const revenue      = completedSales.reduce((s, r) => s + (r.subtotal_usd || 0), 0)
-  const revenueKhr   = completedSales.reduce((s, r) => s + (r.subtotal_khr || 0), 0)
-  const totalCogs    = completedSales.reduce((s, r) => s + (r.cogs_usd || 0), 0)
-  const totalDiscount= completedSales.reduce((s, r) => s + (r.discount_usd || 0) + (r.membership_discount_usd || 0), 0)
-  const totalTax     = completedSales.reduce((s, r) => s + (r.tax_usd || 0), 0)
-  const totalDelivery= completedSales.reduce((s, r) => s + (r.delivery_fee_usd || 0), 0)
   const totalReturns = totalRefunds.total || 0
   const netRevenue   = revenue - totalDiscount - totalReturns
   const grossProfit  = netRevenue - totalCogs
-  const txCount      = completedSales.length
   const avgOrder     = txCount > 0 ? netRevenue / txCount : 0
 
   // By payment method
@@ -943,13 +997,13 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
   const byProduct = db.prepare(`
     SELECT si.product_name, si.product_id,
       SUM(si.quantity) AS qty_sold,
-      SUM(si.total_usd) AS revenue_usd,
-      SUM(si.quantity * si.cost_price_usd) AS cogs_usd
+      COALESCE(SUM(si.total_usd),0) AS revenue_usd,
+      COALESCE(SUM(si.quantity * COALESCE(si.cost_price_usd,0)),0) AS cogs_usd
     FROM sale_items si
     JOIN sales s ON s.id = si.sale_id
     WHERE date(s.created_at) BETWEEN ? AND ?
     AND COALESCE(s.sale_status,'completed') NOT IN ('cancelled', 'awaiting_payment')
-    GROUP BY si.product_name ORDER BY revenue_usd DESC
+    GROUP BY si.product_name, si.product_id ORDER BY revenue_usd DESC
   `).all(start, end)
 
   // By status
@@ -959,6 +1013,31 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
     FROM sales WHERE date(created_at) BETWEEN ? AND ?
     GROUP BY status
   `).all(start, end)
+
+  const salesDetail = []
+  for (const sale of rows) {
+    salesDetail.push({
+      receipt_number:  sale.receipt_number,
+      date:            sale.created_at,
+      cashier:         sale.cashier_name || '',
+      branch:          sale.branch_name || '',
+      customer:        sale.customer_name || '',
+      payment_method:  sale.payment_method || '',
+      sale_status:     sale.sale_status || 'completed',
+      subtotal_usd:    sale.subtotal_usd || 0,
+      discount_usd:    (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
+      membership_discount_usd: sale.membership_discount_usd || 0,
+      membership_points_redeemed: sale.membership_points_redeemed || 0,
+      tax_usd:         sale.tax_usd || 0,
+      delivery_fee_usd: sale.delivery_fee_usd || 0,
+      total_usd:       sale.total_usd || 0,
+      total_khr:       sale.total_khr || 0,
+      cogs_usd:        sale.cogs_usd || 0,
+      profit_usd:      (sale.subtotal_usd || 0) - ((sale.discount_usd || 0) + (sale.membership_discount_usd || 0)) - (sale.cogs_usd || 0),
+      items_count:     sale.items.length,
+      notes:           sale.notes || '',
+    })
+  }
 
   const result = {
     period: { start, end },
@@ -981,27 +1060,7 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
     by_product:  byProduct,
     by_status:   byStatus,
     returns_count: returnsData.length,
-    sales:  rows.map(s => ({
-      receipt_number:  s.receipt_number,
-      date:            s.created_at,
-      cashier:         s.cashier_name || '',
-      branch:          s.branch_name || '',
-      customer:        s.customer_name || '',
-      payment_method:  s.payment_method || '',
-      sale_status:     s.sale_status || 'completed',
-      subtotal_usd:    s.subtotal_usd || 0,
-      discount_usd:    (s.discount_usd || 0) + (s.membership_discount_usd || 0),
-      membership_discount_usd: s.membership_discount_usd || 0,
-      membership_points_redeemed: s.membership_points_redeemed || 0,
-      tax_usd:         s.tax_usd || 0,
-      delivery_fee_usd: s.delivery_fee_usd || 0,
-      total_usd:       s.total_usd || 0,
-      total_khr:       s.total_khr || 0,
-      cogs_usd:        s.cogs_usd || 0,
-      profit_usd:      (s.subtotal_usd || 0) - ((s.discount_usd || 0) + (s.membership_discount_usd || 0)) - (s.cogs_usd || 0),
-      items_count:     s.items.length,
-      notes:           s.notes || '',
-    })),
+    sales:  salesDetail,
   }
 
   if (format === 'csv') {
@@ -1012,7 +1071,15 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
       return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s
     }
     const headers = Object.keys(result.sales[0] || {})
-    const csvRows = [headers.join(','), ...result.sales.map(r => headers.map(h => escape(r[h])).join(','))].join('\n')
+    const csvLines = [headers.join(',')]
+    for (const row of result.sales) {
+      const values = []
+      for (const header of headers) {
+        values.push(escape(row[header]))
+      }
+      csvLines.push(values.join(','))
+    }
+    const csvRows = csvLines.join('\n')
 
     // Prepend summary
     const summaryLines = [
@@ -1020,15 +1087,16 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
       `Period: ${start} to ${end}`,
       '',
       'SUMMARY',
-      ...Object.entries(result.summary).map(([k,v]) => `${k},${v}`),
-      '',
-      'SALES DETAIL',
-      csvRows,
-    ].join('\n')
+    ]
+    for (const [key, value] of Object.entries(result.summary)) {
+      summaryLines.push(`${key},${value}`)
+    }
+    summaryLines.push('', 'SALES DETAIL', csvRows)
+    const csvReport = summaryLines.join('\n')
 
     res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', `attachment; filename="sales-export-${start}-${end}.csv"`)
-    return res.send(summaryLines)
+    return res.send(csvReport)
   }
 
   res.json(result)
@@ -1070,7 +1138,7 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
       AND COALESCE(r.return_scope,'customer') = 'customer'
   `).get()
 
-  // Returns stats â€” all-time and today
+  // Returns stats — all-time and today
   const allReturns = db.prepare(`
     SELECT COUNT(*) AS return_count,
       COALESCE(SUM(total_refund_usd), 0) AS total_refund_usd,

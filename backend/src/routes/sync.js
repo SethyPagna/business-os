@@ -46,8 +46,20 @@ const OUTBOX_OPERATION_MAP = {
 
 function stableStringify(value) {
   if (value == null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+  if (Array.isArray(value)) {
+    const parts = []
+    for (const item of value) {
+      parts.push(stableStringify(item))
+    }
+    return `[${parts.join(',')}]`
+  }
+
+  const parts = []
+  const keys = Object.keys(value).sort()
+  for (const key of keys) {
+    parts.push(`${JSON.stringify(key)}:${stableStringify(value[key])}`)
+  }
+  return `{${parts.join(',')}}`
 }
 
 function sha256(value) {
@@ -74,11 +86,35 @@ function normalizeOperation(raw = {}) {
   }
 }
 
+function normalizeOperations(rawOperations) {
+  if (!Array.isArray(rawOperations)) return []
+  const operations = []
+  for (const rawOperation of rawOperations) {
+    operations.push(normalizeOperation(rawOperation))
+  }
+  return operations
+}
+
 function hasWriteConflict(operation = {}) {
   const base = String(operation.base_updated_at || '').trim()
   const server = String(operation.server_updated_at || operation.payload?.server_updated_at || '').trim()
   if (!base || !server) return false
   return base !== server
+}
+
+function hasResultCode(results = [], code) {
+  for (const result of results) {
+    if (result.code === code) return true
+  }
+  return false
+}
+
+function hasBlockingReplayResult(results = []) {
+  const blockingStatuses = new Set(['failed', 'rejected', 'conflict'])
+  for (const result of results) {
+    if (blockingStatuses.has(result.status)) return true
+  }
+  return false
 }
 
 function buildReplayUrl(routePath) {
@@ -129,7 +165,7 @@ router.post('/outbox', authToken, routeRateLimit({
   windowMs: 60_000,
   message: 'Too many offline sync attempts.',
 }), async (req, res) => {
-  const operations = Array.isArray(req.body?.operations) ? req.body.operations.map(normalizeOperation) : []
+  const operations = normalizeOperations(req.body?.operations)
   const maxOperations = MAX_SYNC_OPERATIONS
   if (!operations.length) {
     return res.json({ success: true, results: [], maxOperations, cloudflareAccess: getCloudflareAccessDiagnostics(req) })
@@ -170,9 +206,9 @@ router.post('/outbox', authToken, routeRateLimit({
     }
   }
 
-  const hasConflict = results.some((result) => result.code === 'write_conflict')
+  const hasConflict = hasResultCode(results, 'write_conflict')
   return res.status(hasConflict ? 409 : 200).json({
-    success: !results.some((result) => ['failed', 'rejected', 'conflict'].includes(result.status)),
+    success: !hasBlockingReplayResult(results),
     results,
     maxOperations,
     cloudflareAccess: getCloudflareAccessDiagnostics(req),

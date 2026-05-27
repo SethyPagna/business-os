@@ -303,6 +303,14 @@ function sanitizeUserRow(row) {
   }
 }
 
+function sanitizeUserRows(rows = []) {
+  const users = []
+  for (const row of rows) {
+    users.push(sanitizeUserRow(row))
+  }
+  return users
+}
+
 function isValidEmail(value) {
   if (!value) return true
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim())
@@ -323,8 +331,22 @@ function resolveAuthIdentityUuid(identity) {
     identity?.identity_id,
     identity?.id,
   ]
-  const match = candidates.find((value) => isUuid(value))
-  return match ? String(match).trim() : ''
+  return findFirstUuid(candidates)
+}
+
+function findFirstUuid(candidates = []) {
+  for (const value of candidates) {
+    if (isUuid(value)) return String(value).trim()
+  }
+  return ''
+}
+
+function findProviderIdentity(identities = [], provider) {
+  for (const identity of identities || []) {
+    const identityProvider = String(identity?.provider || identity?.identity_data?.provider || '').trim().toLowerCase()
+    if (identityProvider === provider) return identity
+  }
+  return null
 }
 
 function buildAuthMethodsPayload(user, authUser, providerConfig) {
@@ -377,7 +399,7 @@ router.get('/users', authToken, (req, res) => {
     ORDER BY u.name, u.username
   `).all()
 
-  res.json(rows.map(sanitizeUserRow))
+  res.json(sanitizeUserRows(rows))
 })
 
 router.get('/users/:id/profile', authToken, (req, res) => {
@@ -484,7 +506,7 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
   }
 
   const identitiesBefore = getAuthIdentityList(authResult.user)
-  const providerIdentity = identitiesBefore.find((identity) => String(identity?.provider || identity?.identity_data?.provider || '').trim().toLowerCase() === provider)
+  const providerIdentity = findProviderIdentity(identitiesBefore, provider)
   const providerIdentityId = resolveAuthIdentityUuid(providerIdentity)
   if (!providerIdentityId) {
     return err(res, 'That provider is not currently linked to this account.', 400)

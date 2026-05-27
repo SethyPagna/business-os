@@ -4,6 +4,7 @@ const { db }  = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { assertCatalogTextIntegrity, normalizeCatalogText } = require('../catalogTextIntegrity')
 
 const router = express.Router()
 const DEFAULT_CATEGORY_COLOR = '#6366f1'
@@ -24,9 +25,10 @@ router.get('/', authToken, requirePermission('products'), (req, res) => {
 router.post('/', authToken, requirePermission('products'), (req, res) => {
   const { name, color } = req.body || {}
   const actor = getAuditActor(req)
-  const trimmedName = String(name || '').trim().replace(/\s+/g, ' ')
+  const trimmedName = normalizeCatalogText(name)
   if (!trimmedName) return err(res, 'Name required')
   try {
+    assertCatalogTextIntegrity({ name: trimmedName }, ['name'], 'Category name')
     const duplicate = db.prepare(`
       SELECT id
       FROM categories
@@ -48,10 +50,11 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
 router.put('/:id', authToken, requirePermission('products'), (req, res) => {
   const { name, color } = req.body || {}
   const actor = getAuditActor(req)
-  const trimmedName = String(name || '').trim().replace(/\s+/g, ' ')
+  const trimmedName = normalizeCatalogText(name)
   const normalizedName = normalizeLookup(trimmedName)
   if (!trimmedName) return err(res, 'Name required')
   try {
+    assertCatalogTextIntegrity({ name: trimmedName }, ['name'], 'Category name')
     const current = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Category not found', 404)
     assertUpdatedAtMatch('category', current, getExpectedUpdatedAt(req.body || {}))
@@ -123,9 +126,16 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
     const current = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Category not found', 404)
     assertUpdatedAtMatch('category', current, getExpectedUpdatedAt(req.body || req.query || {}))
+    const normalizedCurrent = normalizeLookup(current.name)
+    db.prepare(`
+      UPDATE products
+      SET category = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE lower(trim(category)) = ?
+    `).run(normalizedCurrent)
     db.prepare('DELETE FROM categories WHERE id = ?').run(req.params.id)
-    audit(actor.userId, actor.userName, 'delete', 'category', req.params.id)
+    audit(actor.userId, actor.userName, 'delete', 'category', req.params.id, { name: current.name, cleared_products: true })
     broadcast('categories')
+    broadcast('products')
     ok(res, {})
   } catch (e) {
     if (e instanceof WriteConflictError) return sendWriteConflict(res, e)

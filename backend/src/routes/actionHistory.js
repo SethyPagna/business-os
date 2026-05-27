@@ -100,6 +100,14 @@ function mapRow(row) {
   }
 }
 
+function mapHistoryRows(rows = []) {
+  const items = []
+  for (const row of rows) {
+    items.push(mapRow(row))
+  }
+  return items
+}
+
 router.get('/', authToken, (req, res) => {
   try {
     const scope = normalizeText(req.query.scope, 'global', 80) || 'global'
@@ -131,7 +139,7 @@ router.get('/', authToken, (req, res) => {
         LIMIT ?
       `).all(scope, req.user?.id || 0, limit)
     }
-    ok(res, { items: rows.map(mapRow) })
+    ok(res, { items: mapHistoryRows(rows) })
   } catch (error) {
     err(res, error.message || 'Failed to load action history')
   }

@@ -5,6 +5,7 @@ const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { assertCatalogTextIntegrity, normalizeCatalogText } = require('../catalogTextIntegrity')
 
 const unitsRouter = express.Router()
 const DEFAULT_UNIT_COLOR = '#6366f1'
@@ -26,10 +27,11 @@ unitsRouter.post('/', authToken, requirePermission('products'), (req, res) => {
   const body = req.body || {}
   const { name, color } = typeof body === 'string' ? { name: body } : body
   const actor = getAuditActor(req)
-  const trimmedName = String(name || '').trim().replace(/\s+/g, ' ')
+  const trimmedName = normalizeCatalogText(name)
   if (!trimmedName) return err(res, 'Name required')
 
   try {
+    assertCatalogTextIntegrity({ name: trimmedName }, ['name'], 'Unit name')
     const duplicate = db.prepare(`
       SELECT id
       FROM units
@@ -50,12 +52,13 @@ unitsRouter.post('/', authToken, requirePermission('products'), (req, res) => {
 function updateUnitHandler(req, res) {
   const actor = getAuditActor(req)
   const unitId = Number(req.params.id || 0)
-  const trimmedName = String(req.body?.name || '').trim().replace(/\s+/g, ' ')
+  const trimmedName = normalizeCatalogText(req.body?.name)
   const normalizedName = normalizeLookup(trimmedName)
   if (!unitId) return err(res, 'Invalid unit')
   if (!trimmedName) return err(res, 'Name required')
 
   try {
+    assertCatalogTextIntegrity({ name: trimmedName }, ['name'], 'Unit name')
     const current = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId)
     if (!current) return err(res, 'Unit not found', 404)
     assertUpdatedAtMatch('unit', current, getExpectedUpdatedAt(req.body || {}))
@@ -127,9 +130,16 @@ unitsRouter.delete('/:id', authToken, requirePermission('products'), (req, res) 
     const current = db.prepare('SELECT * FROM units WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Unit not found', 404)
     assertUpdatedAtMatch('unit', current, getExpectedUpdatedAt(req.body || req.query || {}))
+    const normalizedCurrent = normalizeLookup(current.name)
+    db.prepare(`
+      UPDATE products
+      SET unit = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE lower(trim(unit)) = ?
+    `).run(normalizedCurrent)
     db.prepare('DELETE FROM units WHERE id = ?').run(req.params.id)
-    audit(actor.userId, actor.userName, 'delete', 'unit', req.params.id)
+    audit(actor.userId, actor.userName, 'delete', 'unit', req.params.id, { name: current.name, cleared_products: true })
     broadcast('units')
+    broadcast('products')
     ok(res, {})
   } catch (error) {
     if (error instanceof WriteConflictError) return sendWriteConflict(res, error)

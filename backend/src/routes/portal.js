@@ -93,14 +93,18 @@ function normalizeHexColor(value, fallback) {
 function normalizeFaqItems(value) {
   const input = Array.isArray(value) ? value : tryParse(value, [])
   if (!Array.isArray(input)) return []
-  return input
-    .map((item, index) => ({
-      id: String(item?.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
+  const items = []
+  for (let index = 0; index < input.length && items.length < 24; index += 1) {
+    const item = input[index]
+    const fallbackId = `faq-${index + 1}`
+    const normalized = {
+      id: String(item?.id || fallbackId).trim() || fallbackId,
       question: String(item?.question || '').trim(),
       answer: String(item?.answer || '').trim(),
-    }))
-    .filter((item) => item.question && item.answer)
-    .slice(0, 24)
+    }
+    if (normalized.question && normalized.answer) items.push(normalized)
+  }
+  return items
 }
 
 /** Sanitize optional per-language public portal dynamic content overrides. */
@@ -110,11 +114,11 @@ function normalizePortalTranslations(value) {
     : tryParse(value, {})
   if (!input || typeof input !== 'object' || Array.isArray(input)) return {}
   const normalized = {}
-  Object.entries(input).forEach(([language, block]) => {
+  for (const [language, block] of Object.entries(input)) {
     const languageKey = String(language || '').trim()
-    if (!languageKey || !block || typeof block !== 'object' || Array.isArray(block)) return
+    if (!languageKey || !block || typeof block !== 'object' || Array.isArray(block)) continue
     normalized[languageKey] = block
-  })
+  }
   return normalized
 }
 
@@ -123,12 +127,12 @@ function normalizeProductIdList(value) {
   if (!Array.isArray(input)) return []
   const seen = new Set()
   const ids = []
-  input.forEach((entry) => {
+  for (const entry of input) {
     const id = Number(entry)
-    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) return
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
     seen.add(id)
     ids.push(id)
-  })
+  }
   return ids
 }
 
@@ -136,7 +140,9 @@ function normalizeProductIdList(value) {
 async function loadSettingsMap() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const map = {}
-  rows.forEach((row) => { map[row.key] = row.value })
+  for (const row of rows) {
+    map[row.key] = row.value
+  }
   return sanitizeSettingsSnapshotAsync(map)
 }
 
@@ -268,21 +274,65 @@ async function buildPortalConfig() {
 }
 
 function buildRankMap(rows, scoreKey) {
-  const ranked = rows
-    .map((row) => ({
+  const ranked = []
+  for (const row of rows) {
+    const rankedRow = {
       productId: Number(row?.product_id || 0),
       score: Number(row?.[scoreKey] || 0),
-    }))
-    .filter((row) => row.productId > 0 && row.score > 0)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score
-      return a.productId - b.productId
-    })
+    }
+    if (rankedRow.productId > 0 && rankedRow.score > 0) ranked.push(rankedRow)
+  }
+  ranked.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    return a.productId - b.productId
+  })
 
   const rankMap = new Map()
-  ranked.forEach((row, index) => {
-    rankMap.set(row.productId, index + 1)
-  })
+  for (let index = 0; index < ranked.length; index += 1) {
+    rankMap.set(ranked[index].productId, index + 1)
+  }
+  return rankMap
+}
+
+function buildEmptyPortalMetric(productId) {
+  return {
+    product_id: productId,
+    sold_quantity: 0,
+    revenue_usd: 0,
+    revenue_khr: 0,
+    returned_quantity: 0,
+    refunded_usd: 0,
+    refunded_khr: 0,
+  }
+}
+
+function collectPortalSignalRows(metrics) {
+  const rows = []
+  for (const row of metrics.values()) {
+    rows.push({
+      product_id: row.product_id,
+      net_quantity: Math.max(0, row.sold_quantity - row.returned_quantity),
+      net_revenue_usd: Math.max(0, row.revenue_usd - row.refunded_usd),
+      net_revenue_khr: Math.max(0, row.revenue_khr - row.refunded_khr),
+    })
+  }
+  return rows
+}
+
+function buildIdRankMap(rows, idField) {
+  const rankMap = new Map()
+  for (let index = 0; index < rows.length; index += 1) {
+    const productId = Number(rows[index]?.[idField] || 0)
+    if (productId) rankMap.set(productId, index + 1)
+  }
+  return rankMap
+}
+
+function buildRecommendedRankMap(productIds) {
+  const rankMap = new Map()
+  for (let index = 0; index < productIds.length; index += 1) {
+    rankMap.set(productIds[index], index + 1)
+  }
   return rankMap
 }
 
@@ -316,9 +366,9 @@ function getPortalProductSignals(config) {
   `).all()
 
   const metrics = new Map()
-  saleRows.forEach((row) => {
+  for (const row of saleRows) {
     const productId = Number(row.product_id || 0)
-    if (!productId) return
+    if (!productId) continue
     metrics.set(productId, {
       product_id: productId,
       sold_quantity: Number(row.sold_quantity || 0),
@@ -328,52 +378,31 @@ function getPortalProductSignals(config) {
       refunded_usd: 0,
       refunded_khr: 0,
     })
-  })
+  }
 
-  returnRows.forEach((row) => {
+  for (const row of returnRows) {
     const productId = Number(row.product_id || 0)
-    if (!productId) return
-    const current = metrics.get(productId) || {
-      product_id: productId,
-      sold_quantity: 0,
-      revenue_usd: 0,
-      revenue_khr: 0,
-      returned_quantity: 0,
-      refunded_usd: 0,
-      refunded_khr: 0,
-    }
+    if (!productId) continue
+    const current = metrics.get(productId) || buildEmptyPortalMetric(productId)
     current.returned_quantity = Number(row.returned_quantity || 0)
     current.refunded_usd = Number(row.refunded_usd || 0)
     current.refunded_khr = Number(row.refunded_khr || 0)
     metrics.set(productId, current)
-  })
+  }
 
-  const rankedRows = Array.from(metrics.values()).map((row) => ({
-    product_id: row.product_id,
-    net_quantity: Math.max(0, row.sold_quantity - row.returned_quantity),
-    net_revenue_usd: Math.max(0, row.revenue_usd - row.refunded_usd),
-    net_revenue_khr: Math.max(0, row.revenue_khr - row.refunded_khr),
-  }))
+  const rankedRows = collectPortalSignalRows(metrics)
 
   const topSellerRank = buildRankMap(rankedRows, 'net_quantity')
   const topProductRank = buildRankMap(rankedRows, 'net_revenue_usd')
 
-  const newArrivalRank = new Map()
-  db.prepare(`
+  const newArrivalRank = buildIdRankMap(db.prepare(`
     SELECT id
     FROM products
     WHERE is_active = 1
     ORDER BY COALESCE(created_at, updated_at) DESC, id DESC
-  `).all().forEach((row, index) => {
-    const productId = Number(row.id || 0)
-    if (!productId) return
-    newArrivalRank.set(productId, index + 1)
-  })
+  `).all(), 'id')
 
-  const recommendedRank = new Map()
-  normalizeProductIdList(config?.recommendedProductIds || []).forEach((productId, index) => {
-    recommendedRank.set(productId, index + 1)
-  })
+  const recommendedRank = buildRecommendedRankMap(normalizeProductIdList(config?.recommendedProductIds || []))
 
   return {
     topSellerRank,
@@ -381,6 +410,83 @@ function getPortalProductSignals(config) {
     newArrivalRank,
     recommendedRank,
   }
+}
+
+function buildPlaceholders(count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) placeholders.push('?')
+  return placeholders.join(',')
+}
+
+function collectProductIds(products) {
+  const ids = []
+  for (const product of products) ids.push(product.id)
+  return ids
+}
+
+function getPortalProductAssets(productIds) {
+  if (!productIds.length) {
+    return { imageMap: new Map(), branchStockMap: new Map() }
+  }
+  const placeholders = buildPlaceholders(productIds.length)
+  const imageRows = db.prepare(`
+      SELECT product_id, image_path
+      FROM product_images
+      WHERE product_id IN (${placeholders})
+      ORDER BY sort_order ASC, id ASC
+    `).all(...productIds)
+  const branchRows = db.prepare(`
+      SELECT
+        bs.product_id,
+        b.id AS branch_id,
+        b.name AS branch_name,
+        COALESCE(bs.quantity, 0) AS quantity
+      FROM branch_stock bs
+      JOIN branches b ON b.id = bs.branch_id
+      WHERE bs.product_id IN (${placeholders})
+        AND b.is_active = 1
+      ORDER BY bs.product_id ASC, b.is_default DESC, b.name ASC
+    `).all(...productIds)
+  const imageMap = new Map()
+  for (const row of imageRows) {
+    if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
+    imageMap.get(row.product_id).push(row.image_path)
+  }
+  const branchStockMap = new Map()
+  for (const row of branchRows) {
+    if (!branchStockMap.has(row.product_id)) branchStockMap.set(row.product_id, [])
+    branchStockMap.get(row.product_id).push({
+      branch_id: row.branch_id,
+      branch_name: row.branch_name,
+      quantity: row.quantity,
+    })
+  }
+  return { imageMap, branchStockMap }
+}
+
+function buildPortalProductPayload(product, signals, assets) {
+  const gallery = sanitizeMediaList(assets.imageMap.get(product.id) || []).slice(0, 5)
+  const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
+  if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
+  return {
+    ...product,
+    image_path: gallery[0] || null,
+    image_gallery: gallery,
+    branch_stock: assets.branchStockMap.get(product.id) || [],
+    top_seller_rank: signals.topSellerRank.get(product.id) || 0,
+    top_product_rank: signals.topProductRank.get(product.id) || 0,
+    new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
+    portal_recommended: signals.recommendedRank.has(product.id),
+    recommended_rank: signals.recommendedRank.get(product.id) || 0,
+  }
+}
+
+function buildPortalProductPayloads(products, signals, assets) {
+  const items = []
+  for (const product of products) {
+    items.push(buildPortalProductPayload(product, signals, assets))
+  }
+  return items
 }
 
 /** Convert sale/return amounts into points based on selected points basis. */
@@ -395,25 +501,26 @@ function calculatePointsValue(amountUsd, amountKhr, config) {
 
 /** Aggregate earned/deducted/redeemed/rewarded points and redemption summary. */
 function summarizePoints(sales, returns, submissions, config) {
-  const eligibleSales = sales.filter((sale) => !['cancelled', 'awaiting_payment'].includes(sale.sale_status || 'completed'))
-  const activeReturns = returns.filter((ret) => (ret.status || 'completed') !== 'cancelled')
-  const approvedRewards = submissions.filter((submission) => submission.status === 'approved')
+  let earned = 0
+  let deducted = 0
+  let redeemed = 0
+  let rewarded = 0
 
-  const earned = eligibleSales.reduce((sum, sale) => (
-    sum + calculatePointsValue(toNumber(sale.total_usd), toNumber(sale.total_khr), config)
-  ), 0)
+  for (const sale of sales) {
+    const status = sale.sale_status || 'completed'
+    if (status === 'cancelled' || status === 'awaiting_payment') continue
+    earned += calculatePointsValue(toNumber(sale.total_usd), toNumber(sale.total_khr), config)
+    redeemed += toNumber(sale.membership_points_redeemed)
+  }
 
-  const deducted = activeReturns.reduce((sum, ret) => (
-    sum + calculatePointsValue(toNumber(ret.total_refund_usd), toNumber(ret.total_refund_khr), config)
-  ), 0)
+  for (const ret of returns) {
+    if ((ret.status || 'completed') === 'cancelled') continue
+    deducted += calculatePointsValue(toNumber(ret.total_refund_usd), toNumber(ret.total_refund_khr), config)
+  }
 
-  const redeemed = eligibleSales.reduce((sum, sale) => (
-    sum + toNumber(sale.membership_points_redeemed)
-  ), 0)
-
-  const rewarded = approvedRewards.reduce((sum, submission) => (
-    sum + toNumber(submission.reward_points)
-  ), 0)
+  for (const submission of submissions) {
+    if (submission.status === 'approved') rewarded += toNumber(submission.reward_points)
+  }
 
   const balance = Math.max(0, earned - deducted - redeemed + rewarded)
   const redeemableUnits = Math.floor(balance / Math.max(1, config.redeemPoints))
@@ -430,6 +537,55 @@ function summarizePoints(sales, returns, submissions, config) {
     nextRedeemNeeded: Math.max(0, Number((config.redeemPoints - (balance % config.redeemPoints || 0)).toFixed(2)) % config.redeemPoints),
     redeemValueUsd: Number((redeemableUnits * config.redeemValueUsd).toFixed(2)),
     redeemValueKhr: Number((redeemableUnits * config.redeemValueKhr).toFixed(0)),
+  }
+}
+
+function joinWrappedClauses(clauses) {
+  if (!clauses.length) return 'FALSE'
+  const wrapped = []
+  for (const clause of clauses) wrapped.push(`(${clause})`)
+  return wrapped.join(' OR ')
+}
+
+function normalizePortalSubmissionRows(rows) {
+  const submissions = []
+  for (const row of rows) {
+    const { screenshots_json, ...entry } = row
+    submissions.push({
+      ...entry,
+      screenshots: tryParse(screenshots_json, []),
+    })
+  }
+  return submissions
+}
+
+function summarizeMembershipTotals(sales, returns) {
+  let totalSalesUsd = 0
+  let totalSalesKhr = 0
+  let totalReturnsUsd = 0
+  let totalReturnsKhr = 0
+  let membershipDiscountUsd = 0
+  let membershipDiscountKhr = 0
+
+  for (const sale of sales) {
+    totalSalesUsd += toNumber(sale.total_usd)
+    totalSalesKhr += toNumber(sale.total_khr)
+    membershipDiscountUsd += toNumber(sale.membership_discount_usd)
+    membershipDiscountKhr += toNumber(sale.membership_discount_khr)
+  }
+
+  for (const ret of returns) {
+    totalReturnsUsd += toNumber(ret.total_refund_usd)
+    totalReturnsKhr += toNumber(ret.total_refund_khr)
+  }
+
+  return {
+    totalSalesUsd: Number(totalSalesUsd.toFixed(2)),
+    totalSalesKhr: Number(totalSalesKhr.toFixed(0)),
+    totalReturnsUsd: Number(totalReturnsUsd.toFixed(2)),
+    totalReturnsKhr: Number(totalReturnsKhr.toFixed(0)),
+    membershipDiscountUsd: Number(membershipDiscountUsd.toFixed(2)),
+    membershipDiscountKhr: Number(membershipDiscountKhr.toFixed(0)),
   }
 }
 
@@ -468,60 +624,9 @@ function getPortalProducts(config = {}) {
     LIMIT 500
   `).all()
 
-  const ids = products.map((product) => product.id)
-  const imageRows = ids.length
-    ? db.prepare(`
-      SELECT product_id, image_path
-      FROM product_images
-      WHERE product_id IN (${ids.map(() => '?').join(',')})
-      ORDER BY sort_order ASC, id ASC
-    `).all(...ids)
-    : []
-  const imageMap = new Map()
-  imageRows.forEach((row) => {
-    if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
-    imageMap.get(row.product_id).push(row.image_path)
-  })
-  const branchRows = ids.length
-    ? db.prepare(`
-      SELECT
-        bs.product_id,
-        b.id AS branch_id,
-        b.name AS branch_name,
-        COALESCE(bs.quantity, 0) AS quantity
-      FROM branch_stock bs
-      JOIN branches b ON b.id = bs.branch_id
-      WHERE bs.product_id IN (${ids.map(() => '?').join(',')})
-        AND b.is_active = 1
-      ORDER BY bs.product_id ASC, b.is_default DESC, b.name ASC
-    `).all(...ids)
-    : []
-  const branchStockMap = new Map()
-  branchRows.forEach((row) => {
-    if (!branchStockMap.has(row.product_id)) branchStockMap.set(row.product_id, [])
-    branchStockMap.get(row.product_id).push({
-      branch_id: row.branch_id,
-      branch_name: row.branch_name,
-      quantity: row.quantity,
-    })
-  })
-
-  return products.map((product) => {
-    const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
-    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
-    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
-    return {
-      ...product,
-      image_path: gallery[0] || null,
-      image_gallery: gallery,
-      branch_stock: branchStockMap.get(product.id) || [],
-      top_seller_rank: signals.topSellerRank.get(product.id) || 0,
-      top_product_rank: signals.topProductRank.get(product.id) || 0,
-      new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
-      portal_recommended: signals.recommendedRank.has(product.id),
-      recommended_rank: signals.recommendedRank.get(product.id) || 0,
-    }
-  })
+  const ids = collectProductIds(products)
+  const assets = getPortalProductAssets(ids)
+  return buildPortalProductPayloads(products, signals, assets)
 }
 
 function cacheTtl(seconds = 20) {
@@ -535,71 +640,102 @@ function normalizePositiveInt(value, fallback, { min = 1, max = 100 } = {}) {
 }
 
 function splitSearchTerms(value = '') {
-  return String(value || '')
-    .normalize('NFC')
-    .split(',')
-    .map((term) => term.trim().toLowerCase())
-    .filter(Boolean)
-    .slice(0, 8)
+  const terms = []
+  const entries = String(value || '').normalize('NFC').split(',')
+  for (const entry of entries) {
+    if (terms.length >= 8) break
+    const term = entry.trim().toLowerCase()
+    if (term) terms.push(term)
+  }
+  return terms
 }
 
 function splitFilterValues(value = '') {
-  return String(value || '')
-    .normalize('NFC')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry && entry.toLowerCase() !== 'all')
-    .slice(0, 40)
+  const values = []
+  const entries = String(value || '').normalize('NFC').split(',')
+  for (const entry of entries) {
+    if (values.length >= 40) break
+    const trimmed = entry.trim()
+    if (trimmed && trimmed.toLowerCase() !== 'all') values.push(trimmed)
+  }
+  return values
+}
+
+function parsePositiveIds(values) {
+  const ids = []
+  for (const value of values) {
+    const id = Number.parseInt(value, 10)
+    if (Number.isFinite(id) && id > 0) ids.push(id)
+  }
+  return ids
+}
+
+function buildNamedPlaceholders(prefix, count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) {
+    placeholders.push(`@${prefix}${index}`)
+  }
+  return placeholders.join(',')
+}
+
+function appendSearchTermFilters(searchTerms, params, where) {
+  if (!searchTerms.length) return
+  const clauses = []
+  for (let index = 0; index < searchTerms.length; index += 1) {
+    const key = `search${index}`
+    params[key] = `%${searchTerms[index]}%`
+    clauses.push(`(
+        lower(COALESCE(p.name, '')) LIKE @${key}
+        OR lower(COALESCE(p.category, '')) LIKE @${key}
+        OR lower(COALESCE(p.brand, '')) LIKE @${key}
+        OR lower(COALESCE(p.description, '')) LIKE @${key}
+      )`)
+  }
+  where.push(`(${clauses.join(' AND ')})`)
+}
+
+function appendNamedFilter(field, values, params, where) {
+  if (values.length === 1) {
+    params[field] = values[0]
+    where.push(`p.${field} = @${field}`)
+    return
+  }
+  if (values.length <= 1) return
+  const keys = []
+  for (let index = 0; index < values.length; index += 1) {
+    const key = `${field}${index}`
+    params[key] = values[index]
+    keys.push(`@${key}`)
+  }
+  where.push(`p.${field} IN (${keys.join(',')})`)
+}
+
+function normalizeLowerValues(values) {
+  const lowered = []
+  for (const value of values) lowered.push(value.toLowerCase())
+  return lowered
 }
 
 function appendPortalProductSearchFilters(query = {}, config = {}) {
   const joins = []
   const params = {}
   const where = ['p.is_active = 1']
-  const branchIds = splitFilterValues(query.branchId || query.branch_id || '')
-    .map((entry) => Number.parseInt(entry, 10))
-    .filter((entry) => Number.isFinite(entry) && entry > 0)
-  if (branchIds.length) {
-    branchIds.forEach((id, index) => {
-      params[`branchId${index}`] = id
-    })
+  const branchIds = parsePositiveIds(splitFilterValues(query.branchId || query.branch_id || ''))
+  for (let index = 0; index < branchIds.length; index += 1) {
+    params[`branchId${index}`] = branchIds[index]
   }
   const searchTerms = splitSearchTerms(query.query || query.q || '')
-  if (searchTerms.length) {
-    const clauses = searchTerms.map((term, index) => {
-      const key = `search${index}`
-      params[key] = `%${term}%`
-      return `(
-        lower(COALESCE(p.name, '')) LIKE @${key}
-        OR lower(COALESCE(p.category, '')) LIKE @${key}
-        OR lower(COALESCE(p.brand, '')) LIKE @${key}
-        OR lower(COALESCE(p.description, '')) LIKE @${key}
-      )`
-    })
-    where.push(`(${clauses.join(' AND ')})`)
-  }
-  ;['brand', 'category'].forEach((field) => {
-    const values = splitFilterValues(query[field] || '')
-    if (values.length === 1) {
-      params[field] = values[0]
-      where.push(`p.${field} = @${field}`)
-    } else if (values.length > 1) {
-      const keys = values.map((value, index) => {
-        const key = `${field}${index}`
-        params[key] = value
-        return `@${key}`
-      })
-      where.push(`p.${field} IN (${keys.join(',')})`)
-    }
-  })
-  const branchIdPlaceholders = branchIds.map((_, index) => `@branchId${index}`).join(',')
+  appendSearchTermFilters(searchTerms, params, where)
+  appendNamedFilter('brand', splitFilterValues(query.brand || ''), params, where)
+  appendNamedFilter('category', splitFilterValues(query.category || ''), params, where)
+  const branchIdPlaceholders = buildNamedPlaceholders('branchId', branchIds.length)
   const stockExpr = branchIds.length
     ? `(SELECT COALESCE(SUM(quantity), 0) FROM branch_stock selected_bs WHERE selected_bs.product_id = p.id AND selected_bs.branch_id IN (${branchIdPlaceholders}))`
     : 'COALESCE(p.stock_quantity, 0)'
   if (branchIds.length) {
     where.push(`${stockExpr} > 0`)
   }
-  const stockStates = splitFilterValues(query.stockState || query.stock_state || '').map((entry) => entry.toLowerCase())
+  const stockStates = normalizeLowerValues(splitFilterValues(query.stockState || query.stock_state || ''))
   if (stockStates.length) {
     const stockClauses = []
     if (stockStates.includes('in_stock') || stockStates.includes('positive')) stockClauses.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
@@ -620,6 +756,37 @@ function appendPortalProductSearchFilters(query = {}, config = {}) {
   return { joins, where, params, stockExpr }
 }
 
+function collectRowValues(rows, field) {
+  const values = []
+  for (const row of rows) values.push(row[field])
+  return values
+}
+
+function normalizeStringList(value) {
+  const input = Array.isArray(value) ? value : tryParse(value, [])
+  if (!Array.isArray(input)) return []
+  const values = []
+  for (const entry of input) {
+    const trimmed = String(entry || '').trim()
+    if (trimmed) values.push(trimmed)
+  }
+  return values
+}
+
+function uniqueSortedStrings(primary, secondary) {
+  const seen = new Set()
+  const values = []
+  for (const list of [primary, secondary]) {
+    for (const value of list) {
+      if (seen.has(value)) continue
+      seen.add(value)
+      values.push(value)
+    }
+  }
+  values.sort((a, b) => a.localeCompare(b))
+  return values
+}
+
 function getPortalCatalogSearchMetadata(query = {}, config = {}) {
   const metadataQuery = { ...query, initial: 'all' }
   const { joins, where, params } = appendPortalProductSearchFilters(metadataQuery, config)
@@ -633,7 +800,7 @@ function getPortalCatalogSearchMetadata(query = {}, config = {}) {
       AND COALESCE(trim(p.${field}), '') != ''
     ORDER BY p.${field} COLLATE NOCASE ASC
     LIMIT 500
-  `).all(params).map((row) => row.value)
+  `).all(params)
   const initials = aggregateInitialRows(db.prepare(`
     SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count
     FROM products p
@@ -643,8 +810,8 @@ function getPortalCatalogSearchMetadata(query = {}, config = {}) {
     GROUP BY value
   `).all(params))
   return {
-    brands: distinctField('brand'),
-    categories: distinctField('category'),
+    brands: collectRowValues(distinctField('brand'), 'value'),
+    categories: collectRowValues(distinctField('category'), 'value'),
     initials,
   }
 }
@@ -697,60 +864,9 @@ function getPortalCatalogProductPage(config = {}, query = {}) {
     LIMIT @pageSize OFFSET @offset
   `).all({ ...params, pageSize, offset })
 
-  const ids = products.map((product) => product.id)
-  const imageRows = ids.length
-    ? db.prepare(`
-      SELECT product_id, image_path
-      FROM product_images
-      WHERE product_id IN (${ids.map(() => '?').join(',')})
-      ORDER BY sort_order ASC, id ASC
-    `).all(...ids)
-    : []
-  const branchRows = ids.length
-    ? db.prepare(`
-      SELECT
-        bs.product_id,
-        b.id AS branch_id,
-        b.name AS branch_name,
-        COALESCE(bs.quantity, 0) AS quantity
-      FROM branch_stock bs
-      JOIN branches b ON b.id = bs.branch_id
-      WHERE bs.product_id IN (${ids.map(() => '?').join(',')})
-        AND b.is_active = 1
-      ORDER BY bs.product_id ASC, b.is_default DESC, b.name ASC
-    `).all(...ids)
-    : []
-  const imageMap = new Map()
-  imageRows.forEach((row) => {
-    if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
-    imageMap.get(row.product_id).push(row.image_path)
-  })
-  const branchStockMap = new Map()
-  branchRows.forEach((row) => {
-    if (!branchStockMap.has(row.product_id)) branchStockMap.set(row.product_id, [])
-    branchStockMap.get(row.product_id).push({
-      branch_id: row.branch_id,
-      branch_name: row.branch_name,
-      quantity: row.quantity,
-    })
-  })
-
-  const items = products.map((product) => {
-    const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
-    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
-    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
-    return {
-      ...product,
-      image_path: gallery[0] || null,
-      image_gallery: gallery,
-      branch_stock: branchStockMap.get(product.id) || [],
-      top_seller_rank: signals.topSellerRank.get(product.id) || 0,
-      top_product_rank: signals.topProductRank.get(product.id) || 0,
-      new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
-      portal_recommended: signals.recommendedRank.has(product.id),
-      recommended_rank: signals.recommendedRank.get(product.id) || 0,
-    }
-  })
+  const ids = collectProductIds(products)
+  const assets = getPortalProductAssets(ids)
+  const items = buildPortalProductPayloads(products, signals, assets)
   const filters = getPortalCatalogSearchMetadata(query, config)
   return {
     items,
@@ -790,7 +906,7 @@ function getPortalCatalogMeta() {
       AND brand IS NOT NULL
       AND trim(brand) != ''
     ORDER BY brand COLLATE NOCASE ASC
-  `).all().map((row) => row.brand)
+  `).all()
 
   let libraryBrands = []
   try {
@@ -800,16 +916,10 @@ function getPortalCatalogMeta() {
       WHERE key = 'product_brand_options'
       LIMIT 1
     `).get()?.value
-    const parsed = JSON.parse(rawValue || '[]')
-    if (Array.isArray(parsed)) {
-      libraryBrands = parsed
-        .map((entry) => String(entry || '').trim())
-        .filter(Boolean)
-    }
+    libraryBrands = normalizeStringList(rawValue)
   } catch (_) {}
 
-  const brands = Array.from(new Set([...productBrands, ...libraryBrands]))
-    .sort((a, b) => a.localeCompare(b))
+  const brands = uniqueSortedStrings(collectRowValues(productBrands, 'brand'), libraryBrands)
 
   const branches = db.prepare(`
     SELECT id, name, is_default
@@ -834,11 +944,15 @@ function findCustomerByMembership(membershipNumber) {
 /** Sanitize screenshot payload to supported URL/data-image entries with limits. */
 function sanitizeScreenshots(value) {
   const screenshots = Array.isArray(value) ? value : []
-  return screenshots
-    .map((entry) => String(entry || '').trim())
-    .filter((entry) => entry && entry.length <= 2_000_000)
-    .filter((entry) => isSafeExternalImageReference(entry))
-    .slice(0, 8)
+  const safeScreenshots = []
+  for (const entry of screenshots) {
+    if (safeScreenshots.length >= 8) break
+    const normalized = String(entry || '').trim()
+    if (!normalized || normalized.length > 2_000_000) continue
+    if (!isSafeExternalImageReference(normalized)) continue
+    safeScreenshots.push(normalized)
+  }
+  return safeScreenshots
 }
 
 async function materializePortalScreenshots(screenshots = []) {
@@ -870,6 +984,13 @@ function sanitizeAiProfile(value) {
   }
 }
 
+function hasAiProfilePreference(profile = {}) {
+  for (const key of Object.keys(profile)) {
+    if (profile[key]) return true
+  }
+  return false
+}
+
 /** Build a lightweight visitor fingerprint for AI throttling/fairness only. */
 function getVisitorFingerprint(req) {
   const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim().slice(0, 120)
@@ -888,6 +1009,15 @@ function applyPortalRateLimit(req, res, { name, max, windowMs, key = '' }) {
   res.setHeader('Retry-After', String(result.retryAfterSeconds))
   res.status(429).json({ error: `Too many requests. Try again in ${result.retryAfterSeconds} seconds.` })
   return false
+}
+
+function collectRecommendationCitations(recommendations) {
+  const citations = []
+  for (const recommendation of Array.isArray(recommendations) ? recommendations : []) {
+    if (!Array.isArray(recommendation?.citations)) continue
+    for (const citation of recommendation.citations) citations.push(citation)
+  }
+  return citations
 }
 
 router.get('/config', asyncRoute(async (_req, res) => {
@@ -941,7 +1071,7 @@ router.post('/ai/chat', async (req, res) => {
 
     const question = String(req.body?.question || '').trim().slice(0, 2000)
     const profile = sanitizeAiProfile(req.body?.profile)
-    if (!question && !Object.values(profile).some(Boolean)) {
+    if (!question && !hasAiProfilePreference(profile)) {
       return res.status(400).json({ error: 'Add a question or at least one shopping preference first' })
     }
 
@@ -954,7 +1084,7 @@ router.post('/ai/chat', async (req, res) => {
       visitorFingerprint: getVisitorFingerprint(req),
     })
 
-    const citations = response.recommendations.flatMap((item) => Array.isArray(item?.citations) ? item.citations : [])
+    const citations = collectRecommendationCitations(response.recommendations)
     try {
       db.prepare(`
         INSERT INTO ai_response_logs (
@@ -1049,9 +1179,9 @@ router.get('/membership/:membershipNumber', asyncRoute(async (req, res) => {
     if (params.membershipNumber) {
       submissionWhere.push("lower(trim(COALESCE(membership_number, ''))) = lower(trim(@membershipNumber))")
     }
-    const salesWhereSql = salesWhere.length ? salesWhere.map((clause) => `(${clause})`).join(' OR ') : 'FALSE'
-    const returnsWhereSql = returnsWhere.length ? returnsWhere.map((clause) => `(${clause})`).join(' OR ') : 'FALSE'
-    const submissionWhereSql = submissionWhere.length ? submissionWhere.map((clause) => `(${clause})`).join(' OR ') : 'FALSE'
+    const salesWhereSql = joinWrappedClauses(salesWhere)
+    const returnsWhereSql = joinWrappedClauses(returnsWhere)
+    const submissionWhereSql = joinWrappedClauses(submissionWhere)
 
     const sales = db.prepare(`
     SELECT
@@ -1102,7 +1232,7 @@ router.get('/membership/:membershipNumber', asyncRoute(async (req, res) => {
     LIMIT 100
     `).all(params)
 
-    const submissions = db.prepare(`
+    const submissions = normalizePortalSubmissionRows(db.prepare(`
     SELECT
       id,
       membership_number,
@@ -1120,22 +1250,11 @@ router.get('/membership/:membershipNumber', asyncRoute(async (req, res) => {
     WHERE ${submissionWhereSql}
     ORDER BY created_at DESC
     LIMIT 100
-    `).all(params).map((entry) => ({
-      ...entry,
-      screenshots: tryParse(entry.screenshots_json, []),
-    })).map(({ screenshots_json, ...entry }) => entry)
+    `).all(params))
 
     const config = await buildPortalConfig()
     const points = summarizePoints(sales, returns, submissions, config)
-
-    const totals = {
-      totalSalesUsd: Number(sales.reduce((sum, sale) => sum + toNumber(sale.total_usd), 0).toFixed(2)),
-      totalSalesKhr: Number(sales.reduce((sum, sale) => sum + toNumber(sale.total_khr), 0).toFixed(0)),
-      totalReturnsUsd: Number(returns.reduce((sum, ret) => sum + toNumber(ret.total_refund_usd), 0).toFixed(2)),
-      totalReturnsKhr: Number(returns.reduce((sum, ret) => sum + toNumber(ret.total_refund_khr), 0).toFixed(0)),
-      membershipDiscountUsd: Number(sales.reduce((sum, sale) => sum + toNumber(sale.membership_discount_usd), 0).toFixed(2)),
-      membershipDiscountKhr: Number(sales.reduce((sum, sale) => sum + toNumber(sale.membership_discount_khr), 0).toFixed(0)),
-    }
+    const totals = summarizeMembershipTotals(sales, returns)
 
     res.json({
       customer,
@@ -1218,7 +1337,7 @@ router.post('/submissions', async (req, res) => {
 })
 
 router.get('/submissions/review', authToken, (_req, res) => {
-  const rows = db.prepare(`
+  const rows = normalizePortalSubmissionRows(db.prepare(`
     SELECT
       id,
       customer_id,
@@ -1242,10 +1361,7 @@ router.get('/submissions/review', authToken, (_req, res) => {
         ELSE 2
       END,
       created_at DESC
-  `).all().map((row) => ({
-    ...row,
-    screenshots: tryParse(row.screenshots_json, []),
-  })).map(({ screenshots_json, ...row }) => row)
+  `).all())
 
   res.json(rows)
 })

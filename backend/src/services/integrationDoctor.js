@@ -31,7 +31,12 @@ const {
 } = require('../config')
 const { getDuckDbRuntimeStatus } = require('../analytics/duckdbRuntime')
 const { getDriveSyncStatus } = require('./googleDriveSync')
-const { getGoogleLoginPublicConfig } = require('./googleOauth')
+const {
+  CALLBACK_PATH,
+  appendCallbackPath,
+  getGoogleLoginOrigins,
+  getGoogleLoginPublicConfig,
+} = require('./googleOauth')
 const { initializeBullQueue, getQueueStatus } = require('./importJobs')
 const { listBackupVersions } = require('./backupPackages')
 const { testObjectStore } = require('../objectStore')
@@ -59,23 +64,43 @@ function status(ok, message = '') {
   }
 }
 
+function allCriticalChecksOk(checks = {}) {
+  const criticalChecks = [
+    checks.database,
+    checks.objectStorage,
+    checks.queue,
+    checks.analytics,
+  ]
+  for (const check of criticalChecks) {
+    if (!check?.ok) return false
+  }
+  return true
+}
+
 function unique(values = []) {
-  return Array.from(new Set(values.map((value) => trim(value).replace(/\/$/, '')).filter(Boolean)))
+  const seen = new Set()
+  const normalized = []
+  for (const value of values) {
+    const cleanValue = trim(value).replace(/\/$/, '')
+    if (!cleanValue || seen.has(cleanValue)) continue
+    seen.add(cleanValue)
+    normalized.push(cleanValue)
+  }
+  return normalized
 }
 
 function buildExpectedOauthChecklist(driveRedirectUri = '') {
-  const appOrigins = unique([
-    CLOUDFLARE_ADMIN_URL,
-    CLOUDFLARE_PUBLIC_URL,
-    PUBLIC_BASE_URL,
-    'https://admin.leangcosmetics.dpdns.org',
-    'https://leangcosmetics.dpdns.org',
-    'http://localhost:4000',
-  ])
+  const appOrigins = getGoogleLoginOrigins()
   const loginCallbacks = unique([
     GOOGLE_LOGIN_REDIRECT_URI,
-    ...appOrigins.map((origin) => `${origin}/api/auth/oauth/callback`),
+    ...appendCallbackPath(appOrigins, CALLBACK_PATH),
   ])
+  const driveCallbacks = [
+    driveRedirectUri,
+    CLOUDFLARE_ADMIN_URL ? `${CLOUDFLARE_ADMIN_URL.replace(/\/$/, '')}/api/system/drive-sync/oauth/callback` : '',
+    CLOUDFLARE_PUBLIC_URL ? `${CLOUDFLARE_PUBLIC_URL.replace(/\/$/, '')}/api/system/drive-sync/oauth/callback` : '',
+    'http://localhost:4000/api/system/drive-sync/oauth/callback',
+  ]
   return {
     googleLoginClient: {
       name: 'Business OS Google login',
@@ -86,12 +111,7 @@ function buildExpectedOauthChecklist(driveRedirectUri = '') {
     googleDriveClient: {
       name: 'Business OS Drive',
       authorizedJavaScriptOrigins: appOrigins,
-      authorizedRedirectUris: unique([
-        driveRedirectUri,
-        CLOUDFLARE_ADMIN_URL ? `${CLOUDFLARE_ADMIN_URL.replace(/\/$/, '')}/api/system/drive-sync/oauth/callback` : '',
-        CLOUDFLARE_PUBLIC_URL ? `${CLOUDFLARE_PUBLIC_URL.replace(/\/$/, '')}/api/system/drive-sync/oauth/callback` : '',
-        'http://localhost:4000/api/system/drive-sync/oauth/callback',
-      ]),
+      authorizedRedirectUris: unique(driveCallbacks),
       note: 'This separate Google OAuth client belongs to Business OS Google Drive backup sync.',
     },
   }
@@ -134,10 +154,11 @@ function findLatestVerifiedReleaseBackup() {
   const backupRoot = path.resolve(RUNTIME_DIR, 'ops/runtime/docker-release/backups')
   try {
     if (!fs.existsSync(backupRoot)) return null
-    const directories = fs.readdirSync(backupRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort((a, b) => b.localeCompare(a))
+    const directories = []
+    for (const entry of fs.readdirSync(backupRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) directories.push(entry.name)
+    }
+    directories.sort((a, b) => b.localeCompare(a))
     for (const directory of directories) {
       const manifestPath = path.join(backupRoot, directory, 'manifest.json')
       if (!fs.existsSync(manifestPath)) continue
@@ -301,12 +322,7 @@ async function buildIntegrationDoctor(options = {}) {
     },
   }
 
-  const criticalOk = [
-    checks.database.ok,
-    checks.objectStorage.ok,
-    checks.queue.ok,
-    checks.analytics.ok,
-  ].every(Boolean)
+  const criticalOk = allCriticalChecksOk(checks)
 
   return {
     ok: criticalOk,

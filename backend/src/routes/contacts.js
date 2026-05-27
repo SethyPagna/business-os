@@ -93,11 +93,20 @@ function resolveFieldValue(existingValue, incomingValue, rule, { defaultRule = '
 function buildImportRows(payload = {}) {
   if (Array.isArray(payload.rows)) {
     return {
-      rows: payload.rows.map((row, index) => ({ row, rowNumber: Number(row?._rowNumber) || index + 2 })),
+      rows: buildProvidedImportRows(payload.rows),
       errors: [],
     }
   }
   return parseCSVRows(payload.csvText)
+}
+
+function buildProvidedImportRows(rows = []) {
+  const parsedRows = []
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]
+    parsedRows.push({ row, rowNumber: Number(row?._rowNumber) || index + 2 })
+  }
+  return parsedRows
 }
 
 function normalizeConflictMode(value) {
@@ -108,6 +117,12 @@ function normalizeConflictMode(value) {
 function toNumber(value, fallback = 0) {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
+}
+
+function normalizePositiveInt(value, fallback, { min = 1, max = 100 } = {}) {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, parsed))
 }
 
 function parseDateFilterParams(query = {}) {
@@ -151,13 +166,60 @@ function buildContactListFilters(query = {}, {
     params.push(endDate)
   }
   if (search) {
-    const haystack = searchableFields.length
-      ? searchableFields.map((field) => `coalesce(${alias}.${field}, '')`).join(` || ' ' || `)
-      : `coalesce(${alias}.name, '')`
+    const haystack = buildSearchHaystack(alias, searchableFields)
     where.push(`lower(${haystack}) LIKE ?`)
     params.push(`%${search}%`)
   }
   return { whereSql: `WHERE ${where.join(' AND ')}`, params }
+}
+
+function buildSearchHaystack(alias, searchableFields = []) {
+  if (!searchableFields.length) return `coalesce(${alias}.name, '')`
+  const parts = []
+  for (const field of searchableFields) {
+    parts.push(`coalesce(${alias}.${field}, '')`)
+  }
+  return parts.join(` || ' ' || `)
+}
+
+function parseScopedIds(value) {
+  const rawValues = Array.isArray(value) ? value : [value]
+  const ids = []
+  const seen = new Set()
+  for (const rawValue of rawValues) {
+    const parts = String(rawValue || '').split(',')
+    for (const part of parts) {
+      const id = Number.parseInt(String(part || '').trim(), 10)
+      if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
+      seen.add(id)
+      ids.push(id)
+    }
+  }
+  return ids
+}
+
+function addPositiveId(ids, seen, value) {
+  const id = Number(value)
+  if (!Number.isFinite(id) || id <= 0 || seen.has(id)) return
+  seen.add(id)
+  ids.push(id)
+}
+
+function collectPositiveIds(values = [], selector = (value) => value) {
+  const ids = []
+  const seen = new Set()
+  for (const value of values || []) {
+    addPositiveId(ids, seen, selector(value))
+  }
+  return ids
+}
+
+function buildSqlPlaceholders(count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) {
+    placeholders.push('?')
+  }
+  return placeholders.join(', ')
 }
 
 function loadPointPolicy() {
@@ -173,7 +235,9 @@ function loadPointPolicy() {
   `).all()
 
   const map = {}
-  rows.forEach((row) => { map[row.key] = row.value })
+  for (const row of rows) {
+    map[row.key] = row.value
+  }
 
   const basis = String(map.customer_portal_points_basis || 'usd').trim().toLowerCase() === 'khr'
     ? 'khr'
@@ -191,22 +255,20 @@ function calculatePolicyPoints(amountUsd, amountKhr, policy) {
   return toNumber(amountUsd, 0) * Math.max(0, policy.pointsPerUsd)
 }
 
-// â”€â”€ Customers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-router.get('/customers', authToken, requirePermission('contacts'), (req, res) => {
-  const { whereSql, params } = buildContactListFilters(req.query, {
-    alias: 'c',
-    searchableFields: ['name', 'membership_number', 'phone', 'email', 'company', 'notes'],
-  })
-  const customers = db.prepare(`
-    SELECT c.*,
-      COALESCE(NULLIF(c.created_at::text, ''), CURRENT_TIMESTAMP::text) AS created_at
-    FROM customers c
-    ${whereSql}
-    ORDER BY c.name
-  `).all(...params)
-  if (!customers.length) return res.json([])
+function wantsExpandedPoints(query = {}) {
+  const value = String(query.includePoints ?? query.include_points ?? '1').trim().toLowerCase()
+  return !['0', 'false', 'no', 'off'].includes(value)
+}
 
+function buildCustomerPointSummaries(customerIds = null) {
+  const normalizedIds = Array.isArray(customerIds) ? collectPositiveIds(customerIds) : null
+  const hasScopedIds = Array.isArray(normalizedIds) && normalizedIds.length > 0
+  const scopeClause = hasScopedIds
+    ? ` AND customer_id IN (${buildSqlPlaceholders(normalizedIds.length)})`
+    : ''
+  const scopeParams = hasScopedIds ? normalizedIds : []
   const pointsPolicy = loadPointPolicy()
+
   const salesRows = db.prepare(`
     SELECT
       customer_id,
@@ -216,8 +278,9 @@ router.get('/customers', authToken, requirePermission('contacts'), (req, res) =>
     FROM sales
     WHERE customer_id IS NOT NULL
       AND COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment')
+      ${scopeClause}
     GROUP BY customer_id
-  `).all()
+  `).all(...scopeParams)
 
   const returnRows = db.prepare(`
     SELECT
@@ -228,8 +291,9 @@ router.get('/customers', authToken, requirePermission('contacts'), (req, res) =>
     WHERE customer_id IS NOT NULL
       AND COALESCE(status, 'completed') != 'cancelled'
       AND COALESCE(return_scope, 'customer') != 'supplier'
+      ${scopeClause}
     GROUP BY customer_id
-  `).all()
+  `).all(...scopeParams)
 
   const rewardRows = db.prepare(`
     SELECT
@@ -238,36 +302,165 @@ router.get('/customers', authToken, requirePermission('contacts'), (req, res) =>
     FROM customer_share_submissions
     WHERE customer_id IS NOT NULL
       AND status = 'approved'
+      ${scopeClause}
     GROUP BY customer_id
-  `).all()
+  `).all(...scopeParams)
 
-  const salesMap = new Map(salesRows.map((row) => [Number(row.customer_id), row]))
-  const returnsMap = new Map(returnRows.map((row) => [Number(row.customer_id), row]))
-  const rewardsMap = new Map(rewardRows.map((row) => [Number(row.customer_id), row]))
+  const salesMap = buildCustomerRowMap(salesRows)
+  const returnsMap = buildCustomerRowMap(returnRows)
+  const rewardsMap = buildCustomerRowMap(rewardRows)
+  const sourceIds = hasScopedIds ? normalizedIds : collectPointSummarySourceIds(salesRows, returnRows, rewardRows)
 
-  const enriched = customers.map((customer) => {
-    const customerId = Number(customer.id)
+  const summaryById = new Map()
+  for (const customerId of sourceIds) {
     const sales = salesMap.get(customerId) || {}
     const refunds = returnsMap.get(customerId) || {}
     const rewards = rewardsMap.get(customerId) || {}
-
     const earned = calculatePolicyPoints(sales.sales_usd, sales.sales_khr, pointsPolicy)
     const deducted = calculatePolicyPoints(refunds.refunds_usd, refunds.refunds_khr, pointsPolicy)
     const redeemed = toNumber(sales.redeemed, 0)
     const rewarded = toNumber(rewards.rewarded, 0)
     const balance = Math.max(0, earned - deducted - redeemed + rewarded)
-
-    return {
-      ...customer,
+    summaryById.set(customerId, {
+      customer_id: customerId,
       points_earned: Number(earned.toFixed(2)),
       points_deducted: Number(deducted.toFixed(2)),
       points_redeemed: Number(redeemed.toFixed(2)),
       points_rewarded: Number(rewarded.toFixed(2)),
       points_balance: Number(balance.toFixed(2)),
-    }
-  })
+    })
+  }
+  return summaryById
+}
 
-  res.json(enriched)
+function buildCustomerRowMap(rows = []) {
+  const map = new Map()
+  for (const row of rows || []) {
+    const id = Number(row?.customer_id)
+    if (Number.isFinite(id) && id > 0) map.set(id, row)
+  }
+  return map
+}
+
+function collectPointSummarySourceIds(...rowGroups) {
+  const ids = []
+  const seen = new Set()
+  for (const rows of rowGroups) {
+    for (const row of rows || []) {
+      addPositiveId(ids, seen, row?.customer_id)
+    }
+  }
+  return ids
+}
+
+function defaultPointSummary(customerId) {
+  return {
+    customer_id: customerId,
+    points_earned: 0,
+    points_deducted: 0,
+    points_redeemed: 0,
+    points_rewarded: 0,
+    points_balance: 0,
+  }
+}
+
+function buildPointSummaryList(customerIds, summaryById) {
+  const items = []
+  for (const customerId of customerIds || []) {
+    items.push(summaryById.get(customerId) || defaultPointSummary(customerId))
+  }
+  return items
+}
+
+function attachPointSummaries(customers = [], summaryById) {
+  const items = []
+  for (const customer of customers || []) {
+    const customerId = Number(customer?.id)
+    items.push({
+      ...customer,
+      ...(summaryById.get(customerId) || defaultPointSummary(customerId)),
+    })
+  }
+  return items
+}
+
+function collectCustomerIdsFromRows(rows = []) {
+  return collectPositiveIds(rows, (row) => row?.id)
+}
+
+// ── Customers ─────────────────────────────────────────────────────────────────
+router.get('/customers', authToken, requirePermission('contacts'), (req, res) => {
+  const { whereSql, params } = buildContactListFilters(req.query, {
+    alias: 'c',
+    searchableFields: ['name', 'membership_number', 'phone', 'email', 'company', 'notes'],
+  })
+  const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
+  const pageSize = normalizePositiveInt(req.query.pageSize || req.query.page_size, 50, { min: 1, max: 100 })
+  const wantsPagination = Object.prototype.hasOwnProperty.call(req.query || {}, 'page')
+    || Object.prototype.hasOwnProperty.call(req.query || {}, 'pageSize')
+    || Object.prototype.hasOwnProperty.call(req.query || {}, 'page_size')
+  const total = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM customers c
+    ${whereSql}
+  `).get(...params)?.count || 0
+  const customers = db.prepare(`
+    SELECT c.*,
+      COALESCE(NULLIF(c.created_at::text, ''), CURRENT_TIMESTAMP::text) AS created_at
+    FROM customers c
+    ${whereSql}
+    ORDER BY c.name
+    ${wantsPagination ? 'LIMIT ? OFFSET ?' : ''}
+  `).all(...(wantsPagination ? [...params, pageSize, (page - 1) * pageSize] : params))
+  if (!customers.length) {
+    return wantsPagination
+      ? res.json({ items: [], total: Number(total || 0), page, pageSize, totalPages: Math.max(1, Math.ceil(Number(total || 0) / pageSize)) })
+      : res.json([])
+  }
+  if (!wantsExpandedPoints(req.query)) {
+    return wantsPagination
+      ? res.json({
+          items: customers,
+          total: Number(total || 0),
+          page,
+          pageSize,
+          totalPages: Math.max(1, Math.ceil(Number(total || 0) / pageSize)),
+        })
+      : res.json(customers)
+  }
+
+  const summaryById = buildCustomerPointSummaries(collectPositiveIds(customers, (customer) => customer.id))
+  const items = attachPointSummaries(customers, summaryById)
+  res.json(wantsPagination
+    ? {
+        items,
+        total: Number(total || 0),
+        page,
+        pageSize,
+        totalPages: Math.max(1, Math.ceil(Number(total || 0) / pageSize)),
+      }
+    : items)
+})
+
+router.get('/customers/points-summary', authToken, requirePermission('contacts'), (req, res) => {
+  const scopedIds = parseScopedIds(req.query.ids || req.query.customerIds || req.query.customer_ids || [])
+  if (scopedIds.length) {
+    const summaryById = buildCustomerPointSummaries(scopedIds)
+    return res.json(buildPointSummaryList(scopedIds, summaryById))
+  }
+  const { whereSql, params } = buildContactListFilters(req.query, {
+    alias: 'c',
+    searchableFields: ['name', 'membership_number', 'phone', 'email', 'company', 'notes'],
+  })
+  const customerRows = db.prepare(`
+    SELECT c.id
+    FROM customers c
+    ${whereSql}
+  `).all(...params)
+  const customerIds = collectCustomerIdsFromRows(customerRows)
+  if (!customerIds.length) return res.json([])
+  const summaryById = buildCustomerPointSummaries(customerIds)
+  res.json(buildPointSummaryList(customerIds, summaryById))
 })
 
 router.post('/customers', authToken, requirePermission('contacts'), (req, res) => {
@@ -473,7 +666,7 @@ router.post('/customers/bulk-import', authToken, requirePermission('contacts'), 
   ok(res, { imported, errors })
 })
 
-// â”€â”€ Suppliers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Suppliers ─────────────────────────────────────────────────────────────────
 router.get('/suppliers', authToken, requirePermission('contacts'), (req, res) => {
   const { whereSql, params } = buildContactListFilters(req.query, {
     alias: 's',
@@ -675,7 +868,7 @@ router.post('/suppliers/bulk-import', authToken, requirePermission('contacts'), 
   ok(res, { imported, errors })
 })
 
-// â”€â”€ Delivery contacts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Delivery contacts ─────────────────────────────────────────────────────────
 router.get('/delivery-contacts', authToken, requirePermission('contacts'), (req, res) => {
   const { whereSql, params } = buildContactListFilters(req.query, {
     alias: 'd',

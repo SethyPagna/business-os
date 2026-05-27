@@ -7,6 +7,48 @@ const { sanitizeMediaList } = require('../settingsSnapshot')
 
 const router = express.Router()
 
+function collectProductIds(products = []) {
+  const ids = []
+  for (const product of products) {
+    ids.push(product.id)
+  }
+  return ids
+}
+
+function buildPlaceholders(count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) {
+    placeholders.push('?')
+  }
+  return placeholders.join(',')
+}
+
+function buildImageMap(rows = []) {
+  const imageMap = new Map()
+  for (const row of rows) {
+    if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
+    imageMap.get(row.product_id).push(row.image_path)
+  }
+  return imageMap
+}
+
+function buildCatalogProductPayloads(products = [], imageMap = new Map()) {
+  const payloads = []
+  for (const product of products) {
+    const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
+    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
+    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
+    payloads.push({
+      ...product,
+      image_path: gallery[0] || null,
+      image_gallery: gallery,
+      branch_stock: tryParse(product.branch_stock_json, []),
+      branch_stock_json: undefined,
+    })
+  }
+  return payloads
+}
+
 router.get('/meta', (_req, res) => {
   const categories = db.prepare(`
     SELECT id, name
@@ -51,34 +93,17 @@ router.get('/products', (_req, res) => {
     ORDER BY p.name COLLATE NOCASE ASC
   `).all()
 
-  const ids = products.map((product) => product.id)
+  const ids = collectProductIds(products)
   const imageRows = ids.length
     ? db.prepare(`
       SELECT product_id, image_path
       FROM product_images
-      WHERE product_id IN (${ids.map(() => '?').join(',')})
+      WHERE product_id IN (${buildPlaceholders(ids.length)})
       ORDER BY sort_order ASC, id ASC
     `).all(...ids)
     : []
 
-  const imageMap = new Map()
-  imageRows.forEach((row) => {
-    if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
-    imageMap.get(row.product_id).push(row.image_path)
-  })
-
-  res.json(products.map((product) => {
-    const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
-    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
-    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
-    return {
-      ...product,
-      image_path: gallery[0] || null,
-      image_gallery: gallery,
-      branch_stock: tryParse(product.branch_stock_json, []),
-      branch_stock_json: undefined,
-    }
-  }))
+  res.json(buildCatalogProductPayloads(products, buildImageMap(imageRows)))
 })
 
 module.exports = router

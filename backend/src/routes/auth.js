@@ -37,6 +37,7 @@ const {
   exchangeGoogleOauthCode,
   getGoogleLoginPublicConfig,
   getGoogleUserFromTokens,
+  normalizeReturnTarget,
   verifyState,
 } = require('../services/googleOauth')
 const {
@@ -161,7 +162,14 @@ function resolvePasswordResetRedirect(req, redirectTo) {
     buildPublicBaseUrl(req),
     'http://localhost:4000',
   ]
-  return candidates.find((value) => isHttpUrl(value)) || ''
+  return findFirstHttpUrl(candidates)
+}
+
+function findFirstHttpUrl(candidates = []) {
+  for (const value of candidates) {
+    if (isHttpUrl(value)) return value
+  }
+  return ''
 }
 
 /**
@@ -366,9 +374,9 @@ function getUserById(userId) {
 async function getSettingsSnapshot() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const settings = {}
-  rows.forEach((row) => {
+  for (const row of rows) {
     settings[row.key] = row.value
-  })
+  }
   return sanitizeSettingsSnapshotAsync(settings)
 }
 
@@ -576,7 +584,7 @@ router.post('/login', async (req, res) => {
 
 // POST /api/auth/oauth/start
 router.post('/oauth/start', (req, res) => {
-  const { provider, mode, organization } = req.body || {}
+  const { provider, mode, organization, redirectTo } = req.body || {}
   if (String(provider || 'google').trim().toLowerCase() !== 'google') {
     return err(res, 'Only Google login is supported.', 400)
   }
@@ -591,6 +599,7 @@ router.post('/oauth/start', (req, res) => {
     mode: oauthMode,
     organization,
     currentUserId,
+    returnTo: redirectTo,
   })
   if (!result.success) return err(res, result.error || 'Failed to start OAuth flow', 400)
   ok(res, { url: result.url, mode: oauthMode })
@@ -682,19 +691,152 @@ async function completeGoogleLogin(req, res, googleUser, statePayload = {}, deta
   })
 }
 
+function buildOauthCallbackHtml({ payload, targetUrl, title, message }) {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <style>
+      body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
+      .card{max-width:460px;width:100%;background:#111827;border:1px solid rgba(148,163,184,.24);border-radius:18px;padding:24px;box-shadow:0 18px 60px rgba(15,23,42,.28)}
+      h1{font-size:20px;line-height:1.25;margin:0 0 10px}
+      p{margin:0;color:#cbd5e1;font-size:14px;line-height:1.55}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>${title}</h1>
+      <p>${message}</p>
+    </div>
+    <script>
+      (function () {
+        const payload = ${JSON.stringify(payload)};
+        const targetUrl = ${JSON.stringify(targetUrl)};
+        try {
+          localStorage.setItem('businessos_oauth_callback_result', JSON.stringify(payload));
+        } catch (_) {}
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: 'business-os-oauth', payload }, '*');
+            window.close();
+            return;
+          }
+        } catch (_) {}
+        window.location.replace(targetUrl);
+      })();
+    </script>
+  </body>
+</html>`
+}
+
 router.get('/oauth/callback', async (req, res) => {
   const { code, state } = req.query || {}
   const stateResult = verifyState(state)
-  if (!stateResult.success) return err(res, stateResult.error, 400)
+  const oauthMode = String(stateResult?.payload?.mode || '').trim().toLowerCase() === 'link' ? 'link' : 'login'
+  const returnTarget = normalizeReturnTarget(
+    `${String(stateResult?.payload?.returnOrigin || '').replace(/\/$/, '')}${String(stateResult?.payload?.returnPath || '')}`,
+    oauthMode,
+  )
+  const basePayload = {
+    type: 'business-os-oauth',
+    provider: 'google',
+    mode: oauthMode,
+    ts: Date.now(),
+  }
+
+  if (!stateResult.success) {
+    res.status(400).send(buildOauthCallbackHtml({
+      payload: {
+        ...basePayload,
+        status: 'error',
+        error: stateResult.error || 'Google sign-in failed.',
+      },
+      targetUrl: returnTarget.url,
+      title: 'Google sign-in failed',
+      message: stateResult.error || 'Please return to Business OS and try again.',
+    }))
+    return
+  }
+
   const tokenResult = await exchangeGoogleOauthCode(code, stateResult.payload)
-  if (!tokenResult.success) return err(res, tokenResult.error || 'Google login failed.', 401)
+  if (!tokenResult.success) {
+    res.status(401).send(buildOauthCallbackHtml({
+      payload: {
+        ...basePayload,
+        status: 'error',
+        error: tokenResult.error || 'Google sign-in failed.',
+      },
+      targetUrl: returnTarget.url,
+      title: 'Google sign-in failed',
+      message: tokenResult.error || 'Please return to Business OS and try again.',
+    }))
+    return
+  }
+
   const userResult = await getGoogleUserFromTokens(tokenResult.tokens)
-  if (!userResult.success) return err(res, userResult.error || 'Google profile lookup failed.', 401)
-  return completeGoogleLogin(req, res, userResult.user, stateResult.payload, {
-    sessionDuration: 'session',
-    deviceName: 'Google OAuth',
-    userAgent: String(req.headers['user-agent'] || ''),
-  })
+  if (!userResult.success) {
+    res.status(401).send(buildOauthCallbackHtml({
+      payload: {
+        ...basePayload,
+        status: 'error',
+        error: userResult.error || 'Google profile lookup failed.',
+      },
+      targetUrl: returnTarget.url,
+      title: 'Google sign-in failed',
+      message: userResult.error || 'Please return to Business OS and try again.',
+    }))
+    return
+  }
+
+  try {
+    const originalJson = res.json.bind(res)
+    let callbackPayload = null
+    res.json = (payload) => {
+      callbackPayload = payload
+      return res
+    }
+    await completeGoogleLogin(req, res, userResult.user, stateResult.payload, {
+      sessionDuration: 'session',
+      deviceName: 'Google OAuth',
+      userAgent: String(req.headers['user-agent'] || ''),
+    })
+    res.json = originalJson
+
+    const successPayload = {
+      ...basePayload,
+      status: callbackPayload?.success === false ? 'error' : 'success',
+      ...callbackPayload,
+    }
+    const title = successPayload.status === 'success'
+      ? (oauthMode === 'link' ? 'Google account connected' : 'Google sign-in complete')
+      : 'Google sign-in failed'
+    const message = successPayload.status === 'success'
+      ? (oauthMode === 'link'
+          ? 'Returning to your profile now.'
+          : successPayload.otpRequired
+            ? 'Finish the sign-in in Business OS now.'
+            : 'Returning to Business OS now.')
+      : (successPayload.error || 'Please return to Business OS and try again.')
+    res.status(callbackPayload?.success === false ? 400 : 200).send(buildOauthCallbackHtml({
+      payload: successPayload,
+      targetUrl: returnTarget.url,
+      title,
+      message,
+    }))
+  } catch (error) {
+    res.status(500).send(buildOauthCallbackHtml({
+      payload: {
+        ...basePayload,
+        status: 'error',
+        error: error?.message || 'Google sign-in failed.',
+      },
+      targetUrl: returnTarget.url,
+      title: 'Google sign-in failed',
+      message: error?.message || 'Please return to Business OS and try again.',
+    }))
+  }
 })
 
 // POST /api/auth/oauth/complete

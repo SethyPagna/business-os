@@ -7,7 +7,9 @@ const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 const { getStockMetrics } = require('../businessMetrics')
+const { normalizeCatalogText } = require('../catalogTextIntegrity')
 const { normalizeClientRequestId } = require('../idempotency')
+const { firstExistingColumn } = require('../schemaMetadata')
 const {
   allocateProductBatches,
   cloneAllocationsToProduct,
@@ -49,6 +51,57 @@ function findTransferByClientRequestId(clientRequestId) {
   }
 }
 
+function getStockTransferNoteColumn() {
+  return firstExistingColumn('stock_transfers', ['note', 'notes', 'reason'])
+}
+
+function buildActiveBranchIndex(rows = []) {
+  const byId = new Map()
+  let defaultBranch = null
+  for (const branch of rows) {
+    const id = Number(branch?.id)
+    if (!Number.isFinite(id)) continue
+    byId.set(id, branch)
+    if (!defaultBranch && branch.is_default) defaultBranch = branch
+  }
+  return {
+    byId,
+    defaultBranch: defaultBranch || rows[0] || null,
+  }
+}
+
+function collectSetValues(values = []) {
+  const collected = []
+  for (const value of values || []) {
+    collected.push(value)
+  }
+  return collected
+}
+
+function compareInventoryProductRows(left, right) {
+  const leftName = String(left?.name || '')
+  const rightName = String(right?.name || '')
+  const nameDelta = leftName.localeCompare(rightName, undefined, { sensitivity: 'base' })
+  if (nameDelta !== 0) return nameDelta
+  return Number(left?.id || 0) - Number(right?.id || 0)
+}
+
+function insertInventoryProductRowSorted(rows, row) {
+  let index = 0
+  while (index < rows.length && compareInventoryProductRows(rows[index], row) <= 0) {
+    index += 1
+  }
+  rows.splice(index, 0, row)
+}
+
+function collectSortedInventoryProductRows(rowMap) {
+  const rows = []
+  for (const row of rowMap.values()) {
+    insertInventoryProductRowSorted(rows, row)
+  }
+  return rows
+}
+
 function cleanMoveReason(value) {
   const raw = String(value || '').trim()
   if (!raw) return 'Stock moved to another product row'
@@ -59,6 +112,14 @@ function normalizePositiveInt(value, fallback, { min = 1, max = 100 } = {}) {
   const parsed = Number.parseInt(value, 10)
   if (!Number.isFinite(parsed)) return fallback
   return Math.max(min, Math.min(max, parsed))
+}
+
+function hasInventoryStatsFilter(query = {}) {
+  const filterKeys = ['query', 'q', 'brand', 'stockState', 'stock_state', 'groupState', 'group_state', 'initial']
+  for (const key of filterKeys) {
+    if (String(query[key] || '').trim()) return true
+  }
+  return false
 }
 
 function cleanInventoryReasonEntry(entry = {}, fallbackType = 'adjust') {
@@ -75,30 +136,41 @@ function cleanInventoryReasonEntry(entry = {}, fallbackType = 'adjust') {
   }
 }
 
+function normalizeInventoryReasonList(reasons = [], { dedupe = false } = {}) {
+  const normalized = []
+  const seen = dedupe ? new Set() : null
+  for (const entry of Array.isArray(reasons) ? reasons : []) {
+    const clean = cleanInventoryReasonEntry(entry, entry?.type || 'adjust')
+    if (!clean) continue
+    if (seen) {
+      const key = `${clean.type}:${String(clean.label || '').toLowerCase()}`
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+    normalized.push(clean)
+  }
+  if (dedupe) {
+    normalized.sort((left, right) => {
+      if (left.type !== right.type) return left.type.localeCompare(right.type)
+      return left.label.localeCompare(right.label)
+    })
+  }
+  return normalized
+}
+
 function loadSavedInventoryReasons() {
   const raw = db.prepare('SELECT value FROM settings WHERE key = ? LIMIT 1').get('inventory_saved_reasons')?.value
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((entry) => cleanInventoryReasonEntry(entry, entry?.type || 'adjust'))
-      .filter(Boolean)
+    return normalizeInventoryReasonList(parsed)
   } catch (_) {
     return []
   }
 }
 
 function persistSavedInventoryReasons(reasons = []) {
-  const normalized = Array.from(new Map(
-    (Array.isArray(reasons) ? reasons : [])
-      .map((entry) => cleanInventoryReasonEntry(entry, entry?.type || 'adjust'))
-      .filter(Boolean)
-      .map((entry) => [`${entry.type}:${String(entry.label || '').toLowerCase()}`, entry]),
-  ).values()).sort((left, right) => {
-    if (left.type !== right.type) return left.type.localeCompare(right.type)
-    return left.label.localeCompare(right.label)
-  })
+  const normalized = normalizeInventoryReasonList(reasons, { dedupe: true })
   db.prepare(`
     INSERT INTO settings (key, value, updated_at)
     VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -113,10 +185,14 @@ function splitSearchTerms(value = '') {
   const parts = normalized.includes(',')
     ? normalized.split(',')
     : normalized.split(/\s+/)
-  return parts
-    .map((term) => term.trim().toLowerCase())
-    .filter(Boolean)
-    .slice(0, 8)
+  const terms = []
+  for (const part of parts) {
+    const term = part.trim().toLowerCase()
+    if (!term) continue
+    terms.push(term)
+    if (terms.length >= 8) break
+  }
+  return terms
 }
 
 function normalizeMovementDisplayText(...values) {
@@ -128,6 +204,19 @@ function normalizeMovementDisplayText(...values) {
     return raw
   }
   return ''
+}
+
+function sanitizeInventoryResponseProduct(row = {}) {
+  return {
+    ...row,
+    name: normalizeCatalogText(row?.name),
+    brand: normalizeCatalogText(row?.brand, { preserveNull: true }),
+    category: normalizeCatalogText(row?.category, { preserveNull: true }),
+    unit: normalizeCatalogText(row?.unit, { defaultValue: 'pcs' }),
+    supplier: normalizeCatalogText(row?.supplier, { preserveNull: true }),
+    barcode: normalizeCatalogText(row?.barcode, { preserveNull: true }),
+    sku: normalizeCatalogText(row?.sku, { preserveNull: true }),
+  }
 }
 
 function appendInventoryProductFilters(query = {}) {
@@ -142,10 +231,12 @@ function appendInventoryProductFilters(query = {}) {
   const terms = splitSearchTerms(query.query || query.q || '')
   if (terms.length) {
     const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-    where.push(`(${terms.map((term, index) => {
+    const clauses = []
+    for (let index = 0; index < terms.length; index += 1) {
+      const term = terms[index]
       const key = `search${index}`
       params[key] = `%${term}%`
-      return `(
+      clauses.push(`(
         lower(COALESCE(p.name, '')) LIKE @${key}
         OR lower(COALESCE(p.sku, '')) LIKE @${key}
         OR lower(COALESCE(p.barcode, '')) LIKE @${key}
@@ -153,8 +244,9 @@ function appendInventoryProductFilters(query = {}) {
         OR lower(COALESCE(p.category, '')) LIKE @${key}
         OR lower(COALESCE(p.supplier, '')) LIKE @${key}
         OR lower(COALESCE(p.unit, '')) LIKE @${key}
-      )`
-    }).join(` ${mode} `)})`)
+      )`)
+    }
+    where.push(`(${clauses.join(` ${mode} `)})`)
   }
   const brand = String(query.brand || '').normalize('NFC').trim()
   if (brand && brand.toLowerCase() !== 'all') {
@@ -184,7 +276,9 @@ function appendInventoryProductFilters(query = {}) {
 }
 
 function hydrateInventoryProducts(rows = [], branchId = null) {
-  const normalizedRows = (Array.isArray(rows) ? rows : []).map((product) => {
+  const normalizedRows = []
+  const productIds = []
+  for (const product of Array.isArray(rows) ? rows : []) {
     const next = { ...product }
     try {
       next.branch_stock = JSON.parse(next.branch_stock_json || '[]')
@@ -192,15 +286,44 @@ function hydrateInventoryProducts(rows = [], branchId = null) {
       next.branch_stock = []
     }
     delete next.branch_stock_json
-    return next
-  })
-  const batchMap = listProductBatches(normalizedRows.map((product) => product.id), {
+    normalizedRows.push(next)
+    productIds.push(next.id)
+  }
+  const batchMap = listProductBatches(productIds, {
     branchId: Number.isFinite(Number(branchId)) ? Number(branchId) : null,
   })
-  normalizedRows.forEach((product) => {
+  for (const product of normalizedRows) {
     product.batches = batchMap.get(product.id) || []
-  })
+  }
   return normalizedRows
+}
+
+function appendAllocationMovementEntries(targetEntries, allocations, movementType, reason) {
+  for (const allocation of allocations || []) {
+    targetEntries.push({
+      movement_type: movementType,
+      quantity: allocation.quantity,
+      branch_id: allocation.branch_id || null,
+      branch_name: allocation.branch_name || null,
+      batch_id: allocation.batch_id,
+      lot_code: allocation.lot_code,
+      expiry_date: allocation.expiry_date,
+      reason: reason || null,
+    })
+  }
+}
+
+function buildInsertColumnSql(columns = []) {
+  const quotedColumns = []
+  const placeholders = []
+  for (const column of columns) {
+    quotedColumns.push(`"${column}"`)
+    placeholders.push('?')
+  }
+  return {
+    quotedColumns: quotedColumns.join(', '),
+    placeholders: placeholders.join(','),
+  }
 }
 
 function buildInventoryFinancialJoinSql({ branchScoped = false } = {}) {
@@ -401,7 +524,8 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
   const movementProductName = normalizeMovementDisplayText(productName, product.name) || `product #${productId}`
 
   const activeBranches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
-  const defaultBranch = activeBranches.find((branch) => branch.is_default) || activeBranches[0] || null
+  const activeBranchIndex = buildActiveBranchIndex(activeBranches)
+  const defaultBranch = activeBranchIndex.defaultBranch
   const requestedBranchId = branchId ? parseInt(branchId, 10) : null
 
   try {
@@ -420,7 +544,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
           movement_type: 'add',
           quantity: qty,
           branch_id: targetBranchId,
-          branch_name: activeBranches.find((branch) => branch.id === targetBranchId)?.name || null,
+          branch_name: activeBranchIndex.byId.get(Number(targetBranchId))?.name || null,
           batch_id: addition.batch_id,
           lot_code: addition.lot_code,
           expiry_date: addition.expiry_date,
@@ -432,18 +556,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
         const allocations = allocateProductBatches(productId, requestedBranchId || null, qty, {
           batchId: requestedBatchId,
         })
-        allocations.forEach((allocation) => {
-          movementEntries.push({
-            movement_type: 'remove',
-            quantity: allocation.quantity,
-            branch_id: allocation.branch_id || null,
-            branch_name: allocation.branch_name || null,
-            batch_id: allocation.batch_id,
-            lot_code: allocation.lot_code,
-            expiry_date: allocation.expiry_date,
-            reason: reason || null,
-          })
-        })
+        appendAllocationMovementEntries(movementEntries, allocations, 'remove', reason)
       }
 
       if (type === 'set') {
@@ -467,27 +580,17 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
               movement_type: 'set',
               quantity: delta,
               branch_id: requestedBranchId,
-              branch_name: activeBranches.find((branch) => branch.id === requestedBranchId)?.name || null,
+              branch_name: activeBranchIndex.byId.get(Number(requestedBranchId))?.name || null,
               batch_id: addition.batch_id,
               lot_code: addition.lot_code,
               expiry_date: addition.expiry_date,
               reason: reason || null,
             })
           } else if (delta < 0) {
-            allocateProductBatches(productId, requestedBranchId, Math.abs(delta), {
+            const allocations = allocateProductBatches(productId, requestedBranchId, Math.abs(delta), {
               batchId: requestedBatchId,
-            }).forEach((allocation) => {
-              movementEntries.push({
-                movement_type: 'set',
-                quantity: allocation.quantity,
-                branch_id: allocation.branch_id || null,
-                branch_name: allocation.branch_name || null,
-                batch_id: allocation.batch_id,
-                lot_code: allocation.lot_code,
-                expiry_date: allocation.expiry_date,
-                reason: reason || null,
-              })
             })
+            appendAllocationMovementEntries(movementEntries, allocations, 'set', reason)
           }
         } else {
           if (!defaultBranch) throw new Error('An active branch is required before stock can be set')
@@ -516,26 +619,16 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
               reason: reason || null,
             })
           } else if (delta < 0) {
-            allocateProductBatches(productId, null, Math.abs(delta), {
+            const allocations = allocateProductBatches(productId, null, Math.abs(delta), {
               batchId: requestedBatchId,
-            }).forEach((allocation) => {
-              movementEntries.push({
-                movement_type: 'set',
-                quantity: allocation.quantity,
-                branch_id: allocation.branch_id || null,
-                branch_name: allocation.branch_name || null,
-                batch_id: allocation.batch_id,
-                lot_code: allocation.lot_code,
-                expiry_date: allocation.expiry_date,
-                reason: reason || null,
-              })
             })
+            appendAllocationMovementEntries(movementEntries, allocations, 'set', reason)
           }
         }
       }
 
       syncProductBatchRollups([productId])
-      movementEntries.forEach((entry) => {
+      for (const entry of movementEntries) {
         const movementId = db.prepare(`
           INSERT INTO inventory_movements
             (product_id, product_name, branch_id, branch_name, movement_type, quantity,
@@ -564,7 +657,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
           db.prepare('UPDATE inventory_movements SET created_at = ? WHERE id = ?')
             .run(movementCreatedAt, movementId)
         }
-      })
+      }
     })()
 
     audit(actor.userId, actor.userName, type === 'remove' ? 'stock_remove' : type === 'set' ? 'stock_set' : 'stock_add', 'product', productId,
@@ -648,9 +741,9 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
       const allocations = allocateProductBatches(productId, fromBranchId, qty, {
         batchId: requestedBatchId,
       })
-      allocations.forEach((allocation) => {
+      for (const allocation of allocations) {
         incrementBranchBatchQuantity(allocation.batch_id, toBranchId, allocation.quantity)
-      })
+      }
 
       const note = reason
       const transferColumns = ['product_id', 'product_name', 'from_branch_id', 'to_branch_id', 'quantity', 'user_id', 'user_name']
@@ -659,23 +752,12 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
         transferColumns.push('client_request_id')
         transferValues.push(clientRequestId)
       }
-      try {
-        const noteColumn = db.prepare(`
-          SELECT column_name
-          FROM information_schema.columns
-          WHERE table_schema = current_schema()
-            AND table_name = 'stock_transfers'
-            AND column_name IN ('note', 'notes', 'reason')
-          ORDER BY CASE column_name WHEN 'note' THEN 0 WHEN 'notes' THEN 1 ELSE 2 END
-          LIMIT 1
-        `).get()?.column_name
-        if (noteColumn) {
-          transferColumns.splice(5, 0, noteColumn)
-          transferValues.splice(5, 0, note)
-        }
-      } catch (_) {}
-      const placeholders = transferColumns.map(() => '?').join(',')
-      const quotedColumns = transferColumns.map((column) => `"${column}"`).join(', ')
+      const noteColumn = getStockTransferNoteColumn()
+      if (noteColumn) {
+        transferColumns.splice(5, 0, noteColumn)
+        transferValues.splice(5, 0, note)
+      }
+      const { quotedColumns, placeholders } = buildInsertColumnSql(transferColumns)
       const transferId = db.prepare(`INSERT INTO stock_transfers (${quotedColumns}) VALUES (${placeholders})`)
         .run(...transferValues).lastInsertRowid
       const referenceId = Number(transferId)
@@ -690,7 +772,7 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
            reason, reference_id, user_id, user_name, batch_id, lot_code, expiry_date)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `)
-      allocations.forEach((allocation) => {
+      for (const allocation of allocations) {
         insertMovement.run(
           productId,
           product.name,
@@ -729,7 +811,7 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
           allocation.lot_code || null,
           allocation.expiry_date || null,
         )
-      })
+      }
       syncProductBatchRollups([productId])
       audit(actor.userId, actor.userName, 'transfer', 'stock', transferId, {
         productId,
@@ -821,9 +903,10 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
 
       const activeBranches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
       if (!activeBranches.length) throw new Error('An active branch is required before stock can be moved')
+      const activeBranchIndex = buildActiveBranchIndex(activeBranches)
 
       let branch = requestedBranchId
-        ? activeBranches.find((entry) => Number(entry.id) === Number(requestedBranchId))
+        ? activeBranchIndex.byId.get(Number(requestedBranchId))
         : null
       if (!branch) {
         const branchRows = db.prepare(`
@@ -835,7 +918,7 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
         `).all(sourceProductId)
         branch = branchRows[0]
           ? { id: branchRows[0].branch_id, name: branchRows[0].name, is_default: branchRows[0].is_default }
-          : activeBranches.find((entry) => entry.is_default) || activeBranches[0]
+          : activeBranchIndex.defaultBranch
       }
       if (!branch) throw new Error('Selected branch is no longer active')
 
@@ -944,32 +1027,36 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
            batch_id, lot_code, expiry_date)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `)
-      movedAllocations.forEach((allocation) => {
+      const sourceUnitCostUsd = source.cost_price_usd || source.purchase_price_usd || 0
+      const sourceUnitCostKhr = source.cost_price_khr || source.purchase_price_khr || 0
+      const destinationUnitCostUsd = destination.cost_price_usd || destination.purchase_price_usd || sourceUnitCostUsd
+      const destinationUnitCostKhr = destination.cost_price_khr || destination.purchase_price_khr || sourceUnitCostKhr
+      for (const allocation of movedAllocations) {
         insertMovement.run(
           sourceProductId, source.name, branch.id, branch.name, 'row_move_out', allocation.quantity,
-          source.cost_price_usd || source.purchase_price_usd || 0,
-          source.cost_price_khr || source.purchase_price_khr || 0,
-          allocation.quantity * (source.cost_price_usd || source.purchase_price_usd || 0),
-          allocation.quantity * (source.cost_price_khr || source.purchase_price_khr || 0),
+          sourceUnitCostUsd,
+          sourceUnitCostKhr,
+          allocation.quantity * sourceUnitCostUsd,
+          allocation.quantity * sourceUnitCostKhr,
           reason, moveId, actor.userId, actor.userName,
           allocation.batch_id || null,
           allocation.lot_code || null,
           allocation.expiry_date || null,
         )
-      })
-      destinationAllocations.forEach((allocation) => {
+      }
+      for (const allocation of destinationAllocations) {
         insertMovement.run(
           destinationProductId, destination.name, branch.id, branch.name, 'row_move_in', allocation.quantity,
-          destination.cost_price_usd || destination.purchase_price_usd || source.cost_price_usd || source.purchase_price_usd || 0,
-          destination.cost_price_khr || destination.purchase_price_khr || source.cost_price_khr || source.purchase_price_khr || 0,
-          allocation.quantity * (destination.cost_price_usd || destination.purchase_price_usd || source.cost_price_usd || source.purchase_price_usd || 0),
-          allocation.quantity * (destination.cost_price_khr || destination.purchase_price_khr || source.cost_price_khr || source.purchase_price_khr || 0),
+          destinationUnitCostUsd,
+          destinationUnitCostKhr,
+          allocation.quantity * destinationUnitCostUsd,
+          allocation.quantity * destinationUnitCostKhr,
           reason, moveId, actor.userId, actor.userName,
           allocation.batch_id || null,
           allocation.lot_code || null,
           allocation.expiry_date || null,
         )
-      })
+      }
 
       syncProductBatchRollups([sourceProductId, destinationProductId])
       audit(actor.userId, actor.userName, 'stock_row_move', 'product', sourceProductId, {
@@ -1050,13 +1137,17 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
       ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
       LIMIT @pageSize OFFSET @offset
     `).all({ ...params, pageSize, offset })
-    const familyRootIds = [...new Set(baseRows.flatMap((product) => {
+    const familyRootIdSet = new Set()
+    for (const product of baseRows) {
       const productId = Number(product?.id || 0)
       const parentId = Number(product?.parent_id || 0)
-      if (parentId > 0) return [parentId]
-      if (Number(product?.is_group || 0) && productId > 0) return [productId]
-      return []
-    }).filter((id) => Number.isFinite(id) && id > 0))]
+      if (parentId > 0) {
+        familyRootIdSet.add(parentId)
+      } else if (Number(product?.is_group || 0) && productId > 0) {
+        familyRootIdSet.add(productId)
+      }
+    }
+    const familyRootIds = collectSetValues(familyRootIdSet)
     let rows = baseRows
     if (familyRootIds.length) {
       const familyIdSql = familyRootIds.join(',')
@@ -1084,23 +1175,24 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
         ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
       `).all(params)
       const merged = new Map()
-      ;[...familyRows, ...baseRows].forEach((product) => {
+      for (const product of familyRows) {
         merged.set(Number(product.id), product)
-      })
-      rows = [...merged.values()].sort((left, right) => {
-        const leftName = String(left?.name || '')
-        const rightName = String(right?.name || '')
-        const nameDelta = leftName.localeCompare(rightName, undefined, { sensitivity: 'base' })
-        if (nameDelta !== 0) return nameDelta
-        return Number(left?.id || 0) - Number(right?.id || 0)
-      })
+      }
+      for (const product of baseRows) {
+        merged.set(Number(product.id), product)
+      }
+      rows = collectSortedInventoryProductRows(merged)
     }
-    rows = hydrateInventoryProducts(rows, params.branchId)
+    const hydratedRows = hydrateInventoryProducts(rows, params.branchId)
+    rows = []
+    for (const row of hydratedRows) {
+      rows.push(sanitizeInventoryResponseProduct(row))
+    }
     const metadataQuery = { ...req.query, initial: 'all' }
     const metaFilters = appendInventoryProductFilters(metadataQuery)
     const metaJoinSql = metaFilters.joins.join('\n')
     const metaWhereSql = `WHERE ${metaFilters.where.join(' AND ')}`
-    const brands = db.prepare(`
+    const brandRows = db.prepare(`
       SELECT DISTINCT p.brand AS value
       FROM products p
       ${metaJoinSql}
@@ -1108,7 +1200,11 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
         AND COALESCE(trim(p.brand), '') != ''
       ORDER BY p.brand COLLATE NOCASE ASC
       LIMIT 500
-    `).all(metaFilters.params).map((row) => row.value)
+    `).all(metaFilters.params)
+    const brands = []
+    for (const row of brandRows) {
+      brands.push(row.value)
+    }
     const initials = aggregateInitialRows(db.prepare(`
       SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count
       FROM products p
@@ -1234,6 +1330,7 @@ function recordRfidEvent(session, event = {}) {
     INSERT INTO rfid_events
       (session_id, epc_id, tid, product_id, branch_id, event_type, antenna, rssi, raw_json, dedupe_key)
     VALUES (?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL AND dedupe_key <> '' DO NOTHING
   `).run(
     session.id,
     epcId,
@@ -1379,7 +1476,14 @@ router.post('/rfid/sessions/:id/events', authToken, requirePermission('inventory
     if (!session) return err(res, 'RFID session not found', 404)
     if (String(session.status || '').toLowerCase() !== 'active') return err(res, 'RFID session is not active', 409)
     const events = Array.isArray(req.body?.events) ? req.body.events : [req.body || {}]
-    const items = db.transaction(() => events.map((event) => recordRfidEvent(session, event)).filter(Boolean))()
+    const items = db.transaction(() => {
+      const recorded = []
+      for (const event of events) {
+        const item = recordRfidEvent(session, event)
+        if (item) recorded.push(item)
+      }
+      return recorded
+    })()
     const updated = refreshRfidSessionCounts(sessionId)
     ok(res, { items, session: updated })
   } catch (error) {
@@ -1415,6 +1519,7 @@ router.post('/rfid/sessions/:id/apply', authToken, requirePermission('inventory'
     if (!session) return err(res, 'RFID session not found', 404)
     const branchId = Number.parseInt(req.body?.branchId || req.body?.branch_id || session.branch_id, 10)
     if (Number(branchId) !== Number(session.branch_id)) return err(res, 'Branch mismatch: this RFID scan cannot update another branch.', 409)
+    const branch = db.prepare('SELECT id, name FROM branches WHERE id = ?').get(branchId) || { id: branchId, name: '' }
     const presentRows = db.prepare(`
       SELECT product_id, COUNT(*) AS confirmed_qty
       FROM rfid_session_items
@@ -1423,37 +1528,47 @@ router.post('/rfid/sessions/:id/apply', authToken, requirePermission('inventory'
     `).all(sessionId)
     const applyMaster = req.body?.applyMaster !== false && req.body?.updateMasterStock !== false
     const movements = []
+    const productById = db.prepare('SELECT id, name, purchase_price_usd, purchase_price_khr FROM products WHERE id = ?')
+    const ensureBranchStock = db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)')
+    const branchStockByProduct = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?')
+    const updateRfidConfirmedQty = db.prepare('UPDATE branch_stock SET rfid_confirmed_qty = ? WHERE product_id = ? AND branch_id = ?')
+    const updateBranchQuantity = db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?')
+    const insertRfidMovement = db.prepare(`
+      INSERT INTO inventory_movements
+        (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+         unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `)
+    const updateProductRfidConfirmedQty = db.prepare('UPDATE products SET rfid_confirmed_qty = (SELECT COALESCE(SUM(rfid_confirmed_qty), 0) FROM branch_stock WHERE product_id = ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    const markRfidSessionApplied = db.prepare("UPDATE rfid_scan_sessions SET status = 'applied', applied_at = CURRENT_TIMESTAMP, finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP) WHERE id = ?")
     db.transaction(() => {
-      presentRows.forEach((row) => {
+      for (const row of presentRows) {
         const productId = Number(row.product_id)
         const confirmedQty = Number(row.confirmed_qty || 0)
-        const product = db.prepare('SELECT id, name, purchase_price_usd, purchase_price_khr FROM products WHERE id = ?').get(productId)
-        if (!product) return
-        db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)').run(productId, branchId)
-        const branchStock = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get(productId, branchId) || { quantity: 0 }
-        db.prepare('UPDATE branch_stock SET rfid_confirmed_qty = ? WHERE product_id = ? AND branch_id = ?').run(confirmedQty, productId, branchId)
+        const product = productById.get(productId)
+        if (!product) continue
+        const purchasePriceUsd = Number(product.purchase_price_usd || 0)
+        const purchasePriceKhr = Number(product.purchase_price_khr || 0)
+        ensureBranchStock.run(productId, branchId)
+        const branchStock = branchStockByProduct.get(productId, branchId) || { quantity: 0 }
+        updateRfidConfirmedQty.run(confirmedQty, productId, branchId)
         if (applyMaster) {
           const previousQty = Number(branchStock.quantity || 0)
           const delta = confirmedQty - previousQty
-          db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?').run(confirmedQty, productId, branchId)
+          updateBranchQuantity.run(confirmedQty, productId, branchId)
           if (delta !== 0) {
             const movement_type = 'rfid_count_adjustment'
-            db.prepare(`
-              INSERT INTO inventory_movements
-                (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-                 unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            `).run(
+            insertRfidMovement.run(
               productId,
               product.name,
               branchId,
-              db.prepare('SELECT name FROM branches WHERE id = ?').get(branchId)?.name || '',
+              branch.name || '',
               movement_type,
               delta,
-              Number(product.purchase_price_usd || 0),
-              Number(product.purchase_price_khr || 0),
-              Math.abs(delta) * Number(product.purchase_price_usd || 0),
-              Math.abs(delta) * Number(product.purchase_price_khr || 0),
+              purchasePriceUsd,
+              purchasePriceKhr,
+              Math.abs(delta) * purchasePriceUsd,
+              Math.abs(delta) * purchasePriceKhr,
               'RFID manual stock count apply',
               `rfid-session:${sessionId}`,
               actor.userId,
@@ -1463,9 +1578,9 @@ router.post('/rfid/sessions/:id/apply', authToken, requirePermission('inventory'
           }
           recalcProductStock(productId)
         }
-        db.prepare('UPDATE products SET rfid_confirmed_qty = (SELECT COALESCE(SUM(rfid_confirmed_qty), 0) FROM branch_stock WHERE product_id = ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(productId, productId)
-      })
-      db.prepare("UPDATE rfid_scan_sessions SET status = 'applied', applied_at = CURRENT_TIMESTAMP, finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP) WHERE id = ?").run(sessionId)
+        updateProductRfidConfirmedQty.run(productId, productId)
+      }
+      markRfidSessionApplied.run(sessionId)
       audit(actor.userId, actor.userName, 'rfid_stock_apply', 'rfid_scan_session', sessionId, {
         branchId,
         applyMaster,
@@ -1482,8 +1597,7 @@ router.post('/rfid/sessions/:id/apply', authToken, requirePermission('inventory'
 router.get('/stats', authToken, requirePermission('inventory'), (req, res) => {
   try {
     const branchId = req.query.branchId ? Number.parseInt(req.query.branchId, 10) : null
-    const hasFilterQuery = ['query', 'q', 'brand', 'stockState', 'stock_state', 'groupState', 'group_state', 'initial']
-      .some((key) => String(req.query[key] || '').trim())
+    const hasFilterQuery = hasInventoryStatsFilter(req.query)
     const item = hasFilterQuery
       ? getFilteredInventoryStats(req.query)
       : getStockMetrics({ branchId })
@@ -1499,7 +1613,7 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
   const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
   let products
 
-  // Detect whether parent_id column exists (added via migration â€” may be absent on older DBs)
+  // Detect whether parent_id column exists (added via migration — may be absent on older DBs)
   if (branchId) {
     products = db.prepare(`
       SELECT p.*,
@@ -1646,13 +1760,12 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
       ORDER BY p.name
     `).all()
 
-    products = products.map(p => {
+    for (const product of products) {
       try {
-        p.branch_stock = JSON.parse(p.branch_stock_json || '[]')
-      } catch { p.branch_stock = [] }
-      delete p.branch_stock_json
-      return p
-    })
+        product.branch_stock = JSON.parse(product.branch_stock_json || '[]')
+      } catch { product.branch_stock = [] }
+      delete product.branch_stock_json
+    }
   }
 
   res.json(products)
@@ -1697,10 +1810,12 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
       params.endDate = endDate
     }
     if (searchTerms.length) {
-      const clauses = searchTerms.map((term, index) => {
+      const clauses = []
+      for (let index = 0; index < searchTerms.length; index += 1) {
+        const term = searchTerms[index]
         const key = `search${index}`
         params[key] = `%${term}%`
-        return `(
+        clauses.push(`(
           lower(COALESCE(im.product_name::text, '')) LIKE @${key}
           OR lower(COALESCE(p.name, '')) LIKE @${key}
           OR lower(COALESCE(im.branch_name::text, '')) LIKE @${key}
@@ -1712,8 +1827,8 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
           OR lower(COALESCE(im.lot_code::text, '')) LIKE @${key}
           OR lower(COALESCE(im.expiry_date::text, '')) LIKE @${key}
           OR lower(COALESCE(im.created_at::text, '')) LIKE @${key}
-        )`
-      })
+        )`)
+      }
       where.push(`(${clauses.join(` ${searchMode} `)})`)
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''

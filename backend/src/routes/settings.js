@@ -1,14 +1,22 @@
 'use strict'
 const express = require('express')
 const { db }  = require('../database')
-const { ok, err, broadcast, logOp } = require('../helpers')
-const { authToken, requirePermission } = require('../middleware')
+const { ok, err, broadcast, logOp, audit } = require('../helpers')
+const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl')
 const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
 const { requestUploadStorageReconcile } = require('../fileAssets')
+const { hasColumn } = require('../schemaMetadata')
+const {
+  assertCatalogTextIntegrity,
+  hasSuspiciousCatalogText,
+  normalizeCatalogText,
+  normalizeOptionList,
+} = require('../catalogTextIntegrity')
 
 const router = express.Router()
 const SETTINGS_CONFLICT_CODE = 'settings_conflict'
+const SETTINGS_METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'])
 
 function normalizeLookup(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
@@ -25,39 +33,74 @@ function normalizeBrandOptionsValue(rawValue) {
     }
   }
   if (!Array.isArray(parsed)) return rawValue
-  const normalized = new Map()
-  parsed
-    .map((entry) => String(entry || '').trim().replace(/\s+/g, ' '))
-    .filter(Boolean)
-    .forEach((entry) => {
-      const key = normalizeLookup(entry)
-      if (!normalized.has(key)) normalized.set(key, entry)
-    })
-  return JSON.stringify(
-    Array.from(normalized.values()).sort((left, right) => left.localeCompare(right)),
-  )
+  const cleanValues = []
+  for (const entry of parsed) {
+    const value = normalizeCatalogText(entry)
+    if (value) cleanValues.push(value)
+  }
+  if (hasSuspiciousCatalogValue(cleanValues)) {
+    throw new Error('Brand library contains corrupted text. Fix or remove the damaged entries before saving.')
+  }
+  return JSON.stringify(normalizeOptionList(cleanValues))
+}
+
+function hasSuspiciousCatalogValue(values = []) {
+  for (const value of values) {
+    if (hasSuspiciousCatalogText(value)) return true
+  }
+  return false
+}
+
+function normalizeBrandColorMapValue(rawValue, normalizedBrandOptions = []) {
+  if (rawValue === undefined || rawValue === null) return rawValue
+  let parsed = rawValue
+  if (typeof rawValue === 'string') {
+    try {
+      parsed = JSON.parse(rawValue)
+    } catch (_) {
+      return rawValue
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return rawValue
+  const allowedKeys = new Set()
+  for (const value of normalizedBrandOptions || []) {
+    allowedKeys.add(normalizeLookup(value))
+  }
+  const next = {}
+  for (const rawKey in parsed) {
+    if (!Object.prototype.hasOwnProperty.call(parsed, rawKey)) continue
+    const rawColor = parsed[rawKey]
+    const key = normalizeLookup(rawKey)
+    if (!key || !allowedKeys.has(key)) continue
+    const normalizedKey = normalizeCatalogText(rawKey)
+    if (hasSuspiciousCatalogText(normalizedKey)) continue
+    const color = String(rawColor || '').trim()
+    if (/^#[0-9a-fA-F]{6}$/.test(color)) next[key] = color.toLowerCase()
+  }
+  return JSON.stringify(next)
 }
 
 function settingsHasUpdatedAt() {
-  try {
-    return db.prepare(`
-      SELECT 1 AS exists
-      FROM information_schema.columns
-      WHERE table_schema = current_schema()
-        AND table_name = ?
-        AND column_name = ?
-      LIMIT 1
-    `).get('settings', 'updated_at')?.exists === 1
-  } catch (_) {
-    return false
-  }
+  return hasColumn('settings', 'updated_at')
 }
 
 async function getSettingsSnapshot() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const obj  = {}
-  rows.forEach(r => { obj[r.key] = r.value })
+  for (const row of rows) obj[row.key] = row.value
   return sanitizeSettingsSnapshotAsync(obj)
+}
+
+function collectAttemptedSettings(updates = {}) {
+  const attempted = {}
+  const keys = []
+  for (const key in updates) {
+    if (!Object.prototype.hasOwnProperty.call(updates, key)) continue
+    if (SETTINGS_METADATA_KEYS.has(key)) continue
+    attempted[key] = updates[key]
+    keys.push(key)
+  }
+  return { attempted, keys }
 }
 
 function getSettingsUpdatedAt() {
@@ -90,10 +133,8 @@ router.get('/meta', authToken, (req, res) => {
 router.post('/', authToken, requirePermission('settings'), async (req, res) => {
   const t0      = Date.now()
   const updates = req.body || {}
-  const attempted = Object.fromEntries(
-    Object.entries(updates)
-      .filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
-  )
+  const actor = getAuditActor(req, updates)
+  const { attempted, keys: attemptedKeys } = collectAttemptedSettings(updates)
   const expectedUpdatedAt = getExpectedUpdatedAt(updates)
   const hasUpdatedAt = settingsHasUpdatedAt()
   const upsert  = hasUpdatedAt
@@ -112,17 +153,43 @@ router.post('/', authToken, requirePermission('settings'), async (req, res) => {
         throw new WriteConflictError('settings', { updated_at: currentUpdatedAt }, expectedUpdatedAt, 'updated')
       }
 
-      Object.entries(attempted)
-        .forEach(([k, v]) => {
-          const normalizedValue = k === 'product_brand_options'
-            ? normalizeBrandOptionsValue(v)
-            : v
-          upsert.run(k, String(normalizedValue))
-        })
+      let normalizedBrandOptions = null
+      for (const key of attemptedKeys) {
+        const value = attempted[key]
+        if (key === 'product_brand_options') {
+          normalizedBrandOptions = JSON.parse(normalizeBrandOptionsValue(value) || '[]')
+        }
+      }
+      for (const k of attemptedKeys) {
+        const v = attempted[k]
+        let normalizedValue = v
+        if (k === 'product_brand_options') {
+          normalizedValue = JSON.stringify(normalizedBrandOptions || [])
+        } else if (k === 'product_brand_color_map') {
+          normalizedValue = normalizeBrandColorMapValue(v, normalizedBrandOptions || [])
+        } else if (k === 'default_product_brand' || k === 'receipt_brand_name') {
+          const candidate = normalizeCatalogText(v, { defaultValue: '' })
+          assertCatalogTextIntegrity({ value: candidate }, ['value'], k)
+          normalizedValue = candidate
+        }
+        upsert.run(k, String(normalizedValue))
+      }
     })()
     const updatedAt = getSettingsUpdatedAt()
     logOp('settings:set', Date.now() - t0)
     broadcast('settings')
+    audit(actor.userId, actor.userName, 'update', 'settings', null, {
+      keys: attemptedKeys,
+      count: attemptedKeys.length,
+    }, {
+      tableName: 'settings',
+      recordId: null,
+      deviceName: actor.deviceName || null,
+      deviceTz: actor.deviceTz || null,
+      clientTime: actor.clientTime || null,
+      oldValue: { updatedAt: expectedUpdatedAt || null },
+      newValue: { updatedAt },
+    })
     setImmediate(() => {
       requestUploadStorageReconcile({ force: true }).catch(() => {})
     })

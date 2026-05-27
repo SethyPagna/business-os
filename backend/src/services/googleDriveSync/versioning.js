@@ -58,22 +58,45 @@ function parseVersionName(name) {
   return match ? Number.parseInt(match[1], 10) : 0
 }
 
+function buildDriveSyncVersionRows(items = []) {
+  const versions = []
+  let rowsWithVersionTime = 0
+  for (const item of Array.isArray(items) ? items : []) {
+    const versionNumber = parseVersionName(item?.name)
+    if (versionNumber <= 0) continue
+    const versionTime = toSafeDate(item?.modifiedTime || item?.createdTime || item?.created_at || item?.modified_at)
+    if (versionTime) rowsWithVersionTime += 1
+    versions.push({
+      ...item,
+      versionNumber,
+      versionTime,
+    })
+  }
+  return {
+    versions,
+    allVersionsHaveTime: versions.length === rowsWithVersionTime,
+  }
+}
+
+function selectDateExpiredVersions(versions = [], cutoffMs) {
+  const expired = []
+  for (const item of versions) {
+    if (item.versionTime && item.versionTime.getTime() < cutoffMs) {
+      expired.push(item)
+    }
+  }
+  expired.sort((a, b) => a.versionTime.getTime() - b.versionTime.getTime())
+  return expired
+}
+
 function selectExpiredDriveSyncVersions(items = [], retentionDays = DRIVE_SYNC_DEFAULT_RETENTION_DAYS, now = new Date()) {
   const safeRetentionDays = Math.max(1, Number.parseInt(retentionDays, 10) || DRIVE_SYNC_DEFAULT_RETENTION_DAYS)
   const nowDate = now instanceof Date ? now : toSafeDate(now)
   const cutoffMs = (nowDate || new Date()).getTime() - (safeRetentionDays * DRIVE_SYNC_VERSION_MS)
-  const versions = (Array.isArray(items) ? items : [])
-    .map((item) => ({
-      ...item,
-      versionNumber: parseVersionName(item?.name),
-      versionTime: toSafeDate(item?.modifiedTime || item?.createdTime || item?.created_at || item?.modified_at),
-    }))
-    .filter((item) => item.versionNumber > 0)
+  const { versions, allVersionsHaveTime } = buildDriveSyncVersionRows(items)
 
-  const dateExpired = versions
-    .filter((item) => item.versionTime && item.versionTime.getTime() < cutoffMs)
-    .sort((a, b) => a.versionTime.getTime() - b.versionTime.getTime())
-  if (dateExpired.length || versions.every((item) => item.versionTime)) return dateExpired
+  const dateExpired = selectDateExpiredVersions(versions, cutoffMs)
+  if (dateExpired.length || allVersionsHaveTime) return dateExpired
 
   return versions
     .sort((a, b) => b.versionNumber - a.versionNumber)

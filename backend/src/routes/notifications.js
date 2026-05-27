@@ -21,6 +21,7 @@ const NOTIFICATION_SETTING_KEYS = [
   'notifications_loyalty_threshold',
   'notifications_realert_minutes',
 ]
+const NOTIFICATION_SUMMARY_SEPARATOR = ' • '
 
 function normalizeBoolean(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback
@@ -76,18 +77,39 @@ function setCachedNotificationSummary(key, payload, now = Date.now()) {
   })
 }
 
+function buildPlaceholders(count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) {
+    placeholders.push('?')
+  }
+  return placeholders.join(',')
+}
+
+function rowsToSettingMap(rows = []) {
+  const map = {}
+  for (const row of rows) {
+    map[row.key] = row.value
+  }
+  return map
+}
+
+function joinNotificationSummary(parts = []) {
+  const summaryParts = []
+  for (const part of parts) {
+    if (part) summaryParts.push(part)
+  }
+  return summaryParts.join(NOTIFICATION_SUMMARY_SEPARATOR)
+}
+
 function loadNotificationPreferences() {
-  const placeholders = NOTIFICATION_SETTING_KEYS.map(() => '?').join(',')
+  const placeholders = buildPlaceholders(NOTIFICATION_SETTING_KEYS.length)
   const rows = db.prepare(`
     SELECT key, value
     FROM settings
     WHERE key IN (${placeholders})
   `).all(...NOTIFICATION_SETTING_KEYS)
 
-  const map = {}
-  rows.forEach((row) => {
-    map[row.key] = row.value
-  })
+  const map = rowsToSettingMap(rows)
 
   return {
     inventoryEnabled: normalizeBoolean(map.notifications_inventory_enabled, true),
@@ -114,8 +136,7 @@ function loadPointPolicy() {
     )
   `).all()
 
-  const map = {}
-  rows.forEach((row) => { map[row.key] = row.value })
+  const map = rowsToSettingMap(rows)
 
   const basis = String(map.customer_portal_points_basis || 'usd').trim().toLowerCase() === 'khr'
     ? 'khr'
@@ -133,11 +154,10 @@ function calculatePolicyPoints(amountUsd, amountKhr, policy) {
   return toNumber(amountUsd, 0) * Math.max(0, policy.pointsPerUsd)
 }
 
-function buildInventorySection() {
-  const { lowStock, outOfStock, countLow, countOut } = getStockAlertProducts({ limit: 5000 })
-
-  const items = [
-    ...outOfStock.map((product) => ({
+function buildInventoryItems(outOfStock = [], lowStock = []) {
+  const items = []
+  for (const product of outOfStock) {
+    items.push({
       id: `out-${product.id}`,
       tone: 'danger',
       label: product.name,
@@ -146,8 +166,10 @@ function buildInventorySection() {
       metaKey: 'notification_inventory_out_of_stock',
       metaParams: {},
       pageId: 'inventory',
-    })),
-    ...lowStock.map((product) => ({
+    })
+  }
+  for (const product of lowStock) {
+    items.push({
       id: `low-${product.id}`,
       tone: 'warning',
       label: product.name,
@@ -156,8 +178,15 @@ function buildInventorySection() {
       metaKey: 'notification_inventory_low_stock',
       metaParams: { quantity: Number(product.stock_quantity || 0) },
       pageId: 'inventory',
-    })),
-  ]
+    })
+  }
+  return items
+}
+
+function buildInventorySection() {
+  const { lowStock, outOfStock, countLow, countOut } = getStockAlertProducts({ limit: 5000 })
+
+  const items = buildInventoryItems(outOfStock, lowStock)
 
   if (!items.length && !countLow && !countOut) return null
 
@@ -169,18 +198,38 @@ function buildInventorySection() {
     count: Number(countLow || 0) + Number(countOut || 0),
     summaryKey: 'notification_inventory_summary',
     summaryParams: { outCount: Number(countOut || 0), lowCount: Number(countLow || 0) },
-    summary: [
+    summary: joinNotificationSummary([
       countOut ? `${countOut} out of stock` : null,
       countLow ? `${countLow} low stock` : null,
-    ].filter(Boolean).join(' • '),
+    ]),
     items,
   }
+}
+
+function buildExpiryItems(products = []) {
+  const items = []
+  let expiredCount = 0
+  for (const product of products) {
+    const daysLeft = Number(product.days_until_expiry || 0)
+    if (daysLeft < 0) expiredCount += 1
+    items.push({
+      id: `expiry-${product.id}`,
+      label: product.name,
+      meta: daysLeft < 0 ? `Expired ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} ago` : `Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
+      kind: daysLeft < 0 ? 'product_expired' : 'product_expiring',
+      tone: daysLeft < 0 ? 'danger' : 'warning',
+      metaKey: daysLeft < 0 ? 'notification_product_expired' : 'notification_product_expiring',
+      metaParams: { days: Math.abs(daysLeft), expiryDate: product.expiry_date || '' },
+      pageId: 'products',
+    })
+  }
+  return { items, expiredCount }
 }
 
 function buildExpirySection(days = 30) {
   const products = getExpiringProducts({ limit: 50, days })
   if (!products.length) return null
-  const expiredCount = products.filter((product) => Number(product.days_until_expiry || 0) < 0).length
+  const { items, expiredCount } = buildExpiryItems(products)
   const expiringCount = products.length - expiredCount
   return {
     id: 'expiry',
@@ -191,24 +240,41 @@ function buildExpirySection(days = 30) {
     count: products.length,
     summaryKey: 'notification_expiry_summary',
     summaryParams: { expiredCount, expiringCount, days },
-    summary: [
+    summary: joinNotificationSummary([
       expiredCount ? `${expiredCount} expired` : null,
       expiringCount ? `${expiringCount} expiring within ${days} days` : null,
-    ].filter(Boolean).join(' • '),
-    items: products.map((product) => {
-      const daysLeft = Number(product.days_until_expiry || 0)
-      return {
-        id: `expiry-${product.id}`,
-        label: product.name,
-        meta: daysLeft < 0 ? `Expired ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} ago` : `Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
-        kind: daysLeft < 0 ? 'product_expired' : 'product_expiring',
-        tone: daysLeft < 0 ? 'danger' : 'warning',
-        metaKey: daysLeft < 0 ? 'notification_product_expired' : 'notification_product_expiring',
-        metaParams: { days: Math.abs(daysLeft), expiryDate: product.expiry_date || '' },
-        pageId: 'products',
-      }
-    }),
+    ]),
+    items,
   }
+}
+
+function buildSalesItems(awaitingPayment = [], awaitingDelivery = []) {
+  const items = []
+  for (const sale of awaitingPayment) {
+    items.push({
+      id: `pay-${sale.id}`,
+      tone: 'warning',
+      label: sale.receipt_number || `Sale #${sale.id}`,
+      meta: `Awaiting payment${NOTIFICATION_SUMMARY_SEPARATOR}$${Number(sale.total_usd || 0).toFixed(2)}`,
+      kind: 'sales_awaiting_payment',
+      metaKey: 'notification_sales_awaiting_payment',
+      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
+      pageId: 'sales',
+    })
+  }
+  for (const sale of awaitingDelivery) {
+    items.push({
+      id: `delivery-${sale.id}`,
+      tone: 'info',
+      label: sale.receipt_number || `Sale #${sale.id}`,
+      meta: `Awaiting delivery${NOTIFICATION_SUMMARY_SEPARATOR}$${Number(sale.total_usd || 0).toFixed(2)}`,
+      kind: 'sales_awaiting_delivery',
+      metaKey: 'notification_sales_awaiting_delivery',
+      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
+      pageId: 'sales',
+    })
+  }
+  return items
 }
 
 function buildSalesSection() {
@@ -235,28 +301,7 @@ function buildSalesSection() {
     FROM sales
   `).get() || {}
 
-  const items = [
-    ...awaitingPayment.map((sale) => ({
-      id: `pay-${sale.id}`,
-      tone: 'warning',
-      label: sale.receipt_number || `Sale #${sale.id}`,
-      meta: `Awaiting payment • $${Number(sale.total_usd || 0).toFixed(2)}`,
-      kind: 'sales_awaiting_payment',
-      metaKey: 'notification_sales_awaiting_payment',
-      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
-      pageId: 'sales',
-    })),
-    ...awaitingDelivery.map((sale) => ({
-      id: `delivery-${sale.id}`,
-      tone: 'info',
-      label: sale.receipt_number || `Sale #${sale.id}`,
-      meta: `Awaiting delivery • $${Number(sale.total_usd || 0).toFixed(2)}`,
-      kind: 'sales_awaiting_delivery',
-      metaKey: 'notification_sales_awaiting_delivery',
-      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
-      pageId: 'sales',
-    })),
-  ]
+  const items = buildSalesItems(awaitingPayment, awaitingDelivery)
 
   const awaitingPaymentCount = Number(counts.awaiting_payment || 0)
   const awaitingDeliveryCount = Number(counts.awaiting_delivery || 0)
@@ -270,12 +315,62 @@ function buildSalesSection() {
     count: awaitingPaymentCount + awaitingDeliveryCount,
     summaryKey: 'notification_sales_summary',
     summaryParams: { awaitingPaymentCount, awaitingDeliveryCount },
-    summary: [
+    summary: joinNotificationSummary([
       awaitingPaymentCount ? `${awaitingPaymentCount} awaiting payment` : null,
       awaitingDeliveryCount ? `${awaitingDeliveryCount} awaiting delivery` : null,
-    ].filter(Boolean).join(' • '),
+    ]),
     items,
   }
+}
+
+function rowsByCustomerId(rows = []) {
+  const map = new Map()
+  for (const row of rows) {
+    map.set(Number(row.customer_id), row)
+  }
+  return map
+}
+
+function buildLoyaltyMatches(customers = [], salesMap, returnsMap, rewardsMap, pointsPolicy, threshold) {
+  const matches = []
+  for (const customer of customers) {
+    const customerId = Number(customer.id)
+    const sales = salesMap.get(customerId) || {}
+    const refunds = returnsMap.get(customerId) || {}
+    const rewards = rewardsMap.get(customerId) || {}
+    const earned = calculatePolicyPoints(sales.sales_usd, sales.sales_khr, pointsPolicy)
+    const deducted = calculatePolicyPoints(refunds.refunds_usd, refunds.refunds_khr, pointsPolicy)
+    const redeemed = toNumber(sales.redeemed, 0)
+    const rewarded = toNumber(rewards.rewarded, 0)
+    const balance = Math.max(0, earned - deducted - redeemed + rewarded)
+    if (balance < threshold) continue
+    matches.push({
+      id: customerId,
+      name: customer.name || `Customer #${customerId}`,
+      balance: Number(balance.toFixed(2)),
+    })
+  }
+  matches.sort((left, right) => right.balance - left.balance)
+  return matches
+}
+
+function buildLoyaltyItems(matches = []) {
+  const items = []
+  const limit = Math.min(matches.length, 50)
+  for (let index = 0; index < limit; index += 1) {
+    const customer = matches[index]
+    items.push({
+      id: `loyalty-${customer.id}`,
+      tone: 'success',
+      label: customer.name,
+      meta: `${customer.balance} points`,
+      kind: 'loyalty_points_balance',
+      metaKey: 'notification_loyalty_points_balance',
+      metaParams: { balance: customer.balance },
+      pageId: 'loyalty_points',
+    })
+  }
+  return items
 }
 
 function buildLoyaltySection(threshold) {
@@ -317,29 +412,10 @@ function buildLoyaltySection(threshold) {
     GROUP BY customer_id
   `).all()
 
-  const salesMap = new Map(salesRows.map((row) => [Number(row.customer_id), row]))
-  const returnsMap = new Map(returnRows.map((row) => [Number(row.customer_id), row]))
-  const rewardsMap = new Map(rewardRows.map((row) => [Number(row.customer_id), row]))
-
-  const matches = customers
-    .map((customer) => {
-      const customerId = Number(customer.id)
-      const sales = salesMap.get(customerId) || {}
-      const refunds = returnsMap.get(customerId) || {}
-      const rewards = rewardsMap.get(customerId) || {}
-      const earned = calculatePolicyPoints(sales.sales_usd, sales.sales_khr, pointsPolicy)
-      const deducted = calculatePolicyPoints(refunds.refunds_usd, refunds.refunds_khr, pointsPolicy)
-      const redeemed = toNumber(sales.redeemed, 0)
-      const rewarded = toNumber(rewards.rewarded, 0)
-      const balance = Math.max(0, earned - deducted - redeemed + rewarded)
-      return {
-        id: customerId,
-        name: customer.name || `Customer #${customerId}`,
-        balance: Number(balance.toFixed(2)),
-      }
-    })
-    .filter((customer) => customer.balance >= threshold)
-    .sort((left, right) => right.balance - left.balance)
+  const salesMap = rowsByCustomerId(salesRows)
+  const returnsMap = rowsByCustomerId(returnRows)
+  const rewardsMap = rowsByCustomerId(rewardRows)
+  const matches = buildLoyaltyMatches(customers, salesMap, returnsMap, rewardsMap, pointsPolicy, threshold)
 
   if (!matches.length) return null
 
@@ -352,17 +428,25 @@ function buildLoyaltySection(threshold) {
     summaryKey: 'notification_loyalty_summary',
     summaryParams: { count: matches.length, threshold },
     summary: `${matches.length} customer${matches.length === 1 ? '' : 's'} reached ${threshold}+ points`,
-    items: matches.slice(0, 50).map((customer) => ({
-      id: `loyalty-${customer.id}`,
-      tone: 'success',
-      label: customer.name,
-      meta: `${customer.balance} points`,
-      kind: 'loyalty_points_balance',
-      metaKey: 'notification_loyalty_points_balance',
-      metaParams: { balance: customer.balance },
-      pageId: 'loyalty_points',
-    })),
+    items: buildLoyaltyItems(matches),
   }
+}
+
+function buildPortalItems(pendingRows = []) {
+  const items = []
+  for (const entry of pendingRows) {
+    items.push({
+      id: `portal-${entry.id}`,
+      tone: 'info',
+      label: entry.customer_name || entry.membership_number || `Submission #${entry.id}`,
+      meta: entry.platform ? `Pending review${NOTIFICATION_SUMMARY_SEPARATOR}${entry.platform}` : 'Pending review',
+      kind: 'portal_pending_review',
+      metaKey: entry.platform ? 'notification_portal_pending_review_platform' : 'notification_portal_pending_review',
+      metaParams: { platform: entry.platform || '' },
+      pageId: 'catalog',
+    })
+  }
+  return items
 }
 
 function buildPortalSection() {
@@ -389,16 +473,7 @@ function buildPortalSection() {
     summaryKey: 'notification_portal_summary',
     summaryParams: { count: pendingCount },
     summary: `${pendingCount} pending customer submission${pendingCount === 1 ? '' : 's'}`,
-    items: pendingRows.map((entry) => ({
-      id: `portal-${entry.id}`,
-      tone: 'info',
-      label: entry.customer_name || entry.membership_number || `Submission #${entry.id}`,
-      meta: entry.platform ? `Pending review • ${entry.platform}` : 'Pending review',
-      kind: 'portal_pending_review',
-      metaKey: entry.platform ? 'notification_portal_pending_review_platform' : 'notification_portal_pending_review',
-      metaParams: { platform: entry.platform || '' },
-      pageId: 'catalog',
-    })),
+    items: buildPortalItems(pendingRows),
   }
 }
 
@@ -430,6 +505,14 @@ function buildSystemSection() {
       },
     ],
   }
+}
+
+function sumSectionCounts(sections = []) {
+  let total = 0
+  for (const section of sections) {
+    total += Number(section.count || 0)
+  }
+  return total
 }
 
 router.get('/summary', authToken, (req, res) => {
@@ -474,7 +557,7 @@ router.get('/summary', authToken, (req, res) => {
     if (systemSection) sections.push(systemSection)
   }
 
-  const unreadCount = sections.reduce((sum, section) => sum + Number(section.count || 0), 0)
+  const unreadCount = sumSectionCounts(sections)
 
   const payload = {
     unreadCount,

@@ -5,8 +5,10 @@ const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { getStockMetrics } = require('../businessMetrics')
+const { firstExistingColumn } = require('../schemaMetadata')
 
 const router = express.Router()
+const PAGED_STOCK_QUERY_KEYS = ['page', 'pageSize', 'page_size', 'query', 'q', 'stockState', 'stock_state']
 
 function toDbBool(value, fallback = 1) {
   if (value == null || value === '') return fallback ? 1 : 0
@@ -17,18 +19,7 @@ function toDbBool(value, fallback = 1) {
 }
 
 function getStockTransferNoteColumn() {
-  try {
-    const columns = db.prepare(`
-      SELECT column_name AS name
-      FROM information_schema.columns
-      WHERE table_schema = current_schema()
-        AND table_name = ?
-      ORDER BY ordinal_position
-    `).all('stock_transfers')
-    if (columns.some((column) => String(column?.name || '').toLowerCase() === 'notes')) return 'notes'
-    if (columns.some((column) => String(column?.name || '').toLowerCase() === 'note')) return 'note'
-  } catch (_) {}
-  return null
+  return firstExistingColumn('stock_transfers', ['notes', 'note'])
 }
 
 function normalizePositiveInt(value, fallback, { min = 1, max = 500 } = {}) {
@@ -45,6 +36,34 @@ function getSellableProductWhere() {
   return [
     'p.is_active = 1',
   ]
+}
+
+function buildStockIntegrityPreview(rows = [], defaultBranchId) {
+  const payloadRows = []
+  let totalQuantity = 0
+  for (const row of rows) {
+    payloadRows.push([row.product_id, row.branch_id, row.quantity])
+    totalQuantity += Number(row.quantity || 0)
+  }
+  const previewPayload = JSON.stringify(payloadRows)
+  const previewToken = require('crypto').createHash('sha256').update(`${defaultBranchId}:${previewPayload}`).digest('hex')
+  return { previewPayload, previewToken, totalQuantity }
+}
+
+function buildSqlPlaceholders(count) {
+  const placeholders = []
+  for (let index = 0; index < count; index += 1) {
+    placeholders.push('?')
+  }
+  return placeholders.join(',')
+}
+
+function quoteSqlColumns(columns = []) {
+  const quoted = []
+  for (const column of columns) {
+    quoted.push(`"${column}"`)
+  }
+  return quoted.join(', ')
 }
 
 function buildBranchStockWhere(req, { includeStockState = true } = {}) {
@@ -69,6 +88,14 @@ function buildBranchStockWhere(req, { includeStockState = true } = {}) {
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
   }
   return { where, params, stockState }
+}
+
+function hasPagedStockQuery(query = {}) {
+  if (!query) return false
+  for (const key of PAGED_STOCK_QUERY_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(query, key)) return true
+  }
+  return false
 }
 
 // GET /api/branches
@@ -102,16 +129,15 @@ router.get('/stock-integrity', authToken, requirePermission('inventory'), (_req,
     ORDER BY b.name COLLATE NOCASE ASC, p.name COLLATE NOCASE ASC
     LIMIT 5000
   `).all(defaultBranch.id, defaultBranch.id)
-  const previewPayload = JSON.stringify(rows.map((row) => [row.product_id, row.branch_id, row.quantity]))
-  const previewToken = require('crypto').createHash('sha256').update(`${defaultBranch.id}:${previewPayload}`).digest('hex')
+  const preview = buildStockIntegrityPreview(rows, defaultBranch.id)
   ok(res, {
     defaultBranch,
     issues: rows,
     summary: {
       misplacedRows: rows.length,
-      totalQuantity: rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0),
+      totalQuantity: preview.totalQuantity,
     },
-    preview_token: previewToken,
+    preview_token: preview.previewToken,
   })
 })
 
@@ -129,9 +155,8 @@ router.post('/stock-integrity/repair', authToken, requirePermission('inventory')
       AND p.is_active = 1
     ORDER BY bs.product_id ASC, bs.branch_id ASC
   `).all(defaultBranch.id)
-  const previewPayload = JSON.stringify(rows.map((row) => [row.product_id, row.branch_id, row.quantity]))
-  const previewToken = require('crypto').createHash('sha256').update(`${defaultBranch.id}:${previewPayload}`).digest('hex')
-  if (!req.body?.confirm || req.body?.preview_token !== previewToken) {
+  const preview = buildStockIntegrityPreview(rows, defaultBranch.id)
+  if (!req.body?.confirm || req.body?.preview_token !== preview.previewToken) {
     return err(res, 'Run stock integrity check first, then confirm the matching preview token.')
   }
   const repaired = db.transaction(() => {
@@ -148,12 +173,14 @@ router.post('/stock-integrity/repair', authToken, requirePermission('inventory')
       WHERE id = ?
     `)
     const touched = new Set()
-    rows.forEach((row) => {
+    for (const row of rows) {
       insertDefault.run(row.product_id, defaultBranch.id, Number(row.quantity || 0))
       clearSource.run(row.product_id, row.branch_id)
       touched.add(row.product_id)
-    })
-    touched.forEach((productId) => recalc.run(productId, productId))
+    }
+    for (const productId of touched) {
+      recalc.run(productId, productId)
+    }
     audit(actor.userId, actor.userName, 'repair', 'branch_stock_integrity', defaultBranch.id, {
       movedRows: rows.length,
       defaultBranchId: defaultBranch.id,
@@ -168,7 +195,7 @@ router.post('/stock-integrity/repair', authToken, requirePermission('inventory')
 
 // POST /api/branches
 router.post('/', authToken, requirePermission('inventory'), (req, res) => {
-  const { name, location, phone, manager, notes, is_default, is_active, deviceName, deviceTz, clientTime } = req.body || {}
+  const { name, location, phone, manager, notes, is_default, is_active } = req.body || {}
   const actor = getAuditActor(req, req.body || {})
   if (!name?.trim()) return err(res, 'Name required')
   const id = db.transaction(() => {
@@ -180,7 +207,7 @@ router.post('/', authToken, requirePermission('inventory'), (req, res) => {
     ).run(name.trim(), location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag)
     audit(actor.userId, actor.userName, 'create', 'branch', r.lastInsertRowid, { name }, {
       tableName: 'branches', recordId: r.lastInsertRowid,
-      deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
+      deviceName: actor.deviceName || null, deviceTz: actor.deviceTz || null, clientTime: actor.clientTime || null,
     })
     return r.lastInsertRowid
   })()
@@ -190,7 +217,7 @@ router.post('/', authToken, requirePermission('inventory'), (req, res) => {
 
 // PUT /api/branches/:id
 router.put('/:id', authToken, requirePermission('inventory'), (req, res) => {
-  const { name, location, phone, manager, notes, is_default, is_active, deviceName, deviceTz, clientTime } = req.body || {}
+  const { name, location, phone, manager, notes, is_default, is_active } = req.body || {}
   const actor = getAuditActor(req, req.body || {})
   try {
     db.transaction(() => {
@@ -205,7 +232,7 @@ router.put('/:id', authToken, requirePermission('inventory'), (req, res) => {
       ).run(name, location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag, req.params.id)
       audit(actor.userId, actor.userName, 'update', 'branch', req.params.id, { name }, {
         tableName: 'branches', recordId: req.params.id,
-        deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
+        deviceName: actor.deviceName || null, deviceTz: actor.deviceTz || null, clientTime: actor.clientTime || null,
       })
     })()
     broadcast('branches')
@@ -229,12 +256,16 @@ router.delete('/:id', authToken, requirePermission('inventory'), (req, res) => {
       SELECT SUM(quantity) as total FROM branch_stock WHERE branch_id = ? AND quantity > 0
     `).get(req.params.id)
     if (stockCheck && stockCheck.total > 0) {
-      return err(res, `Cannot delete branch â€” it still contains ${Math.round(stockCheck.total)} unit(s) of stock. Transfer all stock to another branch first.`)
+      return err(res, `Cannot delete branch - it still contains ${Math.round(stockCheck.total)} unit(s) of stock. Transfer all stock to another branch first.`)
     }
 
     db.prepare('DELETE FROM branch_stock WHERE branch_id = ?').run(req.params.id)
     db.prepare('DELETE FROM branches WHERE id = ?').run(req.params.id)
-    audit(actor.userId, actor.userName, 'delete', 'branch', req.params.id, { name: branch.name })
+    audit(actor.userId, actor.userName, 'delete', 'branch', req.params.id, { name: branch.name }, {
+      deviceName: actor.deviceName || null,
+      deviceTz: actor.deviceTz || null,
+      clientTime: actor.clientTime || null,
+    })
     broadcast('branches')
     ok(res, {})
   } catch (e) {
@@ -245,7 +276,7 @@ router.delete('/:id', authToken, requirePermission('inventory'), (req, res) => {
 
 // GET /api/branches/:id/stock
 router.get('/:id/stock', authToken, (req, res) => {
-  const wantsPaged = req.query && Object.keys(req.query).some((key) => ['page', 'pageSize', 'page_size', 'query', 'q', 'stockState', 'stock_state'].includes(key))
+  const wantsPaged = hasPagedStockQuery(req.query)
   if (!wantsPaged) {
     const rows = db.prepare(`
     SELECT p.id, p.name, p.sku, p.unit, p.selling_price_usd, p.selling_price_khr,
@@ -324,7 +355,7 @@ router.get('/transfers/list', authToken, (req, res) => {
 
 // POST /api/branches/transfer
 router.post('/transfer', authToken, requirePermission('inventory'), (req, res) => {
-  const { fromBranchId, toBranchId, productId, productName, quantity, note, deviceName, deviceTz, clientTime } = req.body || {}
+  const { fromBranchId, toBranchId, productId, productName, quantity, note } = req.body || {}
   const actor = getAuditActor(req, req.body || {})
   if (!fromBranchId || !toBranchId || !productId || !quantity) return err(res, 'Missing required fields')
   if (parseInt(fromBranchId, 10) === parseInt(toBranchId, 10)) return err(res, 'Source and destination cannot be the same')
@@ -359,8 +390,8 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
         transferColumns.splice(5, 0, noteColumn)
         transferValues.splice(5, 0, note || null)
       }
-      const placeholders = transferColumns.map(() => '?').join(',')
-      const quotedColumns = transferColumns.map((column) => `"${column}"`).join(', ')
+      const placeholders = buildSqlPlaceholders(transferColumns.length)
+      const quotedColumns = quoteSqlColumns(transferColumns)
       const r = db.prepare(
         `INSERT INTO stock_transfers (${quotedColumns}) VALUES (${placeholders})`
       ).run(...transferValues)
@@ -407,7 +438,7 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
       )
 
       audit(actor.userId, actor.userName, 'transfer', 'stock', transferId, { productName, quantity: qty, fromBranchId, toBranchId }, {
-        deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
+        deviceName: actor.deviceName || null, deviceTz: actor.deviceTz || null, clientTime: actor.clientTime || null,
       })
     })()
     broadcast('branches')

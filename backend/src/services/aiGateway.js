@@ -30,6 +30,16 @@ function maskApiKey(value) {
   return `${key.slice(0, 4)}...${key.slice(-4)}`
 }
 
+function normalizeTextList(value, { separator = '\n' } = {}) {
+  const source = Array.isArray(value) ? value : String(value || '').split(separator)
+  const items = []
+  for (const entry of source) {
+    const item = trim(entry)
+    if (item) items.push(item)
+  }
+  return items
+}
+
 const PROVIDER_META = {
   groq: {
     label: 'Groq',
@@ -111,12 +121,7 @@ function normalizeProviderPayload(payload = {}) {
     projectName: trim(payload.project_name || payload.projectName),
     apiKey,
     defaultModel: trim(payload.default_model || payload.defaultModel || meta?.defaultModel || ''),
-    supportedModels: Array.isArray(payload.supported_models || payload.supportedModels)
-      ? (payload.supported_models || payload.supportedModels).map((entry) => trim(entry)).filter(Boolean)
-      : String(payload.supported_models || payload.supportedModels || '')
-        .split('\n')
-        .map((entry) => trim(entry))
-        .filter(Boolean),
+    supportedModels: normalizeTextList(payload.supported_models || payload.supportedModels),
     endpointOverride: trim(payload.endpoint_override || payload.endpointOverride),
     notes: trim(payload.notes),
     enabled: payload.enabled == null ? true : !!payload.enabled,
@@ -190,6 +195,26 @@ function buildProviderHttpError(provider, endpoint, response, json, fallbackMess
   return new Error(upstreamMessage || fallbackMessage || `AI request failed (${response?.status || 'unknown'})`)
 }
 
+function buildGoogleMessageContents(messages = []) {
+  const contents = []
+  for (const message of messages) {
+    contents.push({
+      role: message.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: trim(message.content) }],
+    })
+  }
+  return contents
+}
+
+function joinGoogleTextParts(parts = []) {
+  const lines = []
+  for (const part of parts) {
+    const text = trim(part?.text)
+    if (text) lines.push(text)
+  }
+  return lines.join('\n')
+}
+
 async function callChatProvider(providerConfig, messages, options = {}) {
   const provider = trim(providerConfig?.provider).toLowerCase()
   const meta = getProviderMeta(provider)
@@ -260,10 +285,7 @@ async function callChatProvider(providerConfig, messages, options = {}) {
       },
       signal: requestSignal,
       body: JSON.stringify({
-        contents: messages.map((message) => ({
-          role: message.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: trim(message.content) }],
-        })),
+        contents: buildGoogleMessageContents(messages),
         generationConfig: {
           temperature: typeof options.temperature === 'number' ? options.temperature : 0.45,
           topP: typeof options.topP === 'number' ? options.topP : 0.95,
@@ -274,7 +296,7 @@ async function callChatProvider(providerConfig, messages, options = {}) {
     const json = await response.json().catch(() => ({}))
     if (!response.ok) throw buildProviderHttpError(provider, endpoint, response, json, `Google AI request failed (${response.status})`)
     return {
-      text: trim(json?.candidates?.[0]?.content?.parts?.map((part) => trim(part?.text)).filter(Boolean).join('\n') || ''),
+      text: trim(joinGoogleTextParts(json?.candidates?.[0]?.content?.parts || [])),
       raw: json,
     }
   }
