@@ -424,8 +424,8 @@ Code files scanned: **540**
 | 412 | `frontend/tests/appShellUtils.test.ts` | 1 |
 | 413 | `frontend/tests/assetCompression.test.ts` | 1 |
 | 414 | `frontend/tests/backupJobs.test.mjs` | 0 |
-| 415 | `frontend/tests/barcodeImageScanner.test.mjs` | 1 |
-| 416 | `frontend/tests/barcodeScannerState.test.mjs` | 1 |
+| 415 | `frontend/tests/barcodeImageScanner.test.ts` | 2 |
+| 416 | `frontend/tests/barcodeScannerState.test.ts` | 1 |
 | 417 | `frontend/tests/bulkOps.test.ts` | 1 |
 | 418 | `frontend/tests/contactImportWorker.test.mjs` | 1 |
 | 419 | `frontend/tests/csvImport.test.mjs` | 1 |
@@ -462,30 +462,30 @@ Code files scanned: **540**
 | 450 | `frontend/tests/portalFaqVocabulary.test.ts` | 0 |
 | 451 | `frontend/tests/portalLanguagePacks.test.ts` | 0 |
 | 452 | `frontend/tests/portalTranslateController.test.ts` | 3 |
-| 453 | `frontend/tests/posCore.test.mjs` | 1 |
+| 453 | `frontend/tests/posCore.test.ts` | 1 |
 | 454 | `frontend/tests/pricingContacts.test.mjs` | 1 |
 | 455 | `frontend/tests/productBatches.test.ts` | 0 |
 | 456 | `frontend/tests/productDiscountUx.test.mjs` | 1 |
-| 457 | `frontend/tests/productDisplayHelpers.test.mjs` | 0 |
-| 458 | `frontend/tests/productFilterHelpers.test.mjs` | 0 |
+| 457 | `frontend/tests/productDisplayHelpers.test.ts` | 0 |
+| 458 | `frontend/tests/productFilterHelpers.test.ts` | 0 |
 | 459 | `frontend/tests/productGalleryHelpers.test.ts` | 0 |
 | 460 | `frontend/tests/productGrouping.test.ts` | 1 |
-| 461 | `frontend/tests/productGroupViewHelpers.test.mjs` | 2 |
-| 462 | `frontend/tests/productHistoryHelpers.test.mjs` | 1 |
+| 461 | `frontend/tests/productGroupViewHelpers.test.ts` | 2 |
+| 462 | `frontend/tests/productHistoryHelpers.test.ts` | 1 |
 | 463 | `frontend/tests/productImportPlanner.test.mjs` | 1 |
 | 464 | `frontend/tests/productImportWorkerFallback.test.mjs` | 1 |
-| 465 | `frontend/tests/productMenuHelpers.test.mjs` | 3 |
-| 466 | `frontend/tests/productPageHelpers.test.mjs` | 0 |
+| 465 | `frontend/tests/productMenuHelpers.test.ts` | 5 |
+| 466 | `frontend/tests/productPageHelpers.test.ts` | 0 |
 | 467 | `frontend/tests/productSearchPagination.test.mjs` | 0 |
-| 468 | `frontend/tests/productSelectionHelpers.test.mjs` | 0 |
-| 469 | `frontend/tests/productWriteHelpers.test.mjs` | 0 |
+| 468 | `frontend/tests/productSelectionHelpers.test.ts` | 0 |
+| 469 | `frontend/tests/productWriteHelpers.test.ts` | 0 |
 | 470 | `frontend/tests/publicErrorRecovery.test.ts` | 1 |
 | 471 | `frontend/tests/receiptSettingsSync.test.mjs` | 0 |
 | 472 | `frontend/tests/receiptTemplate.test.mjs` | 1 |
 | 473 | `frontend/tests/returnsLayout.test.mjs` | 0 |
 | 474 | `frontend/tests/runtimeErrorClassifier.test.ts` | 0 |
 | 475 | `frontend/tests/salesImportWorker.test.mjs` | 1 |
-| 476 | `frontend/tests/scanbotScanner.test.mjs` | 2 |
+| 476 | `frontend/tests/scanbotScanner.test.ts` | 2 |
 | 477 | `frontend/tests/scriptTypography.test.ts` | 0 |
 | 478 | `frontend/tests/sectionNavigation.test.ts` | 0 |
 | 479 | `frontend/tests/settingsConflictHelpers.test.ts` | 1 |
@@ -6041,17 +6041,18 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.415 `frontend/tests/barcodeImageScanner.test.mjs`
+### 3.415 `frontend/tests/barcodeImageScanner.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `createLoadedImage` | function | 13 |
+| 2 | `runTest` | function | 29 |
 
-### 3.416 `frontend/tests/barcodeScannerState.test.mjs`
+### 3.416 `frontend/tests/barcodeScannerState.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
 ### 3.417 `frontend/tests/bulkOps.test.ts`
 
@@ -6254,11 +6255,11 @@ Code files scanned: **540**
 | 2 | `createDocument` | function | 61 |
 | 3 | `TestEvent` | class | 132 |
 
-### 3.453 `frontend/tests/posCore.test.mjs`
+### 3.453 `frontend/tests/posCore.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 16 |
+| 1 | `runTest` | function | 18 |
 
 ### 3.454 `frontend/tests/pricingContacts.test.mjs`
 
@@ -6276,11 +6277,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.457 `frontend/tests/productDisplayHelpers.test.mjs`
+### 3.457 `frontend/tests/productDisplayHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.458 `frontend/tests/productFilterHelpers.test.mjs`
+### 3.458 `frontend/tests/productFilterHelpers.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6294,18 +6295,18 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.461 `frontend/tests/productGroupViewHelpers.test.mjs`
+### 3.461 `frontend/tests/productGroupViewHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `fmtUSD` | const arrow | 7 |
 | 2 | `t` | const arrow | 8 |
 
-### 3.462 `frontend/tests/productHistoryHelpers.test.mjs`
+### 3.462 `frontend/tests/productHistoryHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
 ### 3.463 `frontend/tests/productImportPlanner.test.mjs`
 
@@ -6319,15 +6320,17 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.465 `frontend/tests/productMenuHelpers.test.mjs`
+### 3.465 `frontend/tests/productMenuHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `exportProductsCsv` | const arrow | 10 |
-| 2 | `tr` | const arrow | 11 |
-| 3 | `action` | const arrow | 88 |
+| 1 | `exportProductsCsv` | const arrow | 16 |
+| 2 | `tr` | const arrow | 19 |
+| 3 | `asActionItem` | function | 21 |
+| 4 | `requireSection` | function | 27 |
+| 5 | `action` | const arrow | 108 |
 
-### 3.466 `frontend/tests/productPageHelpers.test.mjs`
+### 3.466 `frontend/tests/productPageHelpers.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6335,11 +6338,11 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.468 `frontend/tests/productSelectionHelpers.test.mjs`
+### 3.468 `frontend/tests/productSelectionHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.469 `frontend/tests/productWriteHelpers.test.mjs`
+### 3.469 `frontend/tests/productWriteHelpers.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6373,12 +6376,12 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.476 `frontend/tests/scanbotScanner.test.mjs`
+### 3.476 `frontend/tests/scanbotScanner.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `setNavigator` | function | 8 |
-| 2 | `run` | function | 16 |
+| 1 | `setNavigator` | function | 18 |
+| 2 | `run` | function | 26 |
 
 ### 3.477 `frontend/tests/scriptTypography.test.ts`
 

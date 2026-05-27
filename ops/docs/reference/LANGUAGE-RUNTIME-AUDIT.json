@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T23:29:01.006Z",
+  "generatedAt": "2026-05-27T23:42:48.374Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -25,7 +25,7 @@
     ],
     [
       "TypeScript",
-      115
+      127
     ],
     [
       "React JSX",
@@ -33,7 +33,7 @@
     ],
     [
       "JavaScript modules",
-      82
+      70
     ],
     [
       "Windows batch",
@@ -67,7 +67,7 @@
     ],
     [
       ".ts",
-      115
+      127
     ],
     [
       ".jsx",
@@ -75,7 +75,7 @@
     ],
     [
       ".mjs",
-      82
+      70
     ],
     [
       ".bat",
@@ -643,11 +643,11 @@
     },
     {
       "implementation": "frontend/src/components/pos/posCore.ts",
-      "compatibilityWrapper": "frontend/src/components/pos/posCore.mjs",
+      "compatibilityWrapper": "frontend/src/components/pos/posCore.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\posCore.test.mjs",
+        "node frontend\\tests\\posCore.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -773,7 +773,7 @@
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\productGrouping.test.ts",
-        "node frontend\\tests\\posCore.test.mjs",
+        "node frontend\\tests\\posCore.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -784,12 +784,12 @@
     },
     {
       "implementation": "frontend/src/components/products/helpers/productDisplayHelpers.ts",
-      "compatibilityWrapper": "frontend/src/components/products/helpers/productDisplayHelpers.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/helpers/productDisplayHelpers.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productDisplayHelpers.test.mjs",
-        "node frontend\\tests\\productPageHelpers.test.mjs",
+        "node frontend\\tests\\productDisplayHelpers.test.ts",
+        "node frontend\\tests\\productPageHelpers.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -800,11 +800,11 @@
     },
     {
       "implementation": "frontend/src/components/products/helpers/productFilterHelpers.ts",
-      "compatibilityWrapper": "frontend/src/components/products/helpers/productFilterHelpers.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/helpers/productFilterHelpers.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productFilterHelpers.test.mjs",
+        "node frontend\\tests\\productFilterHelpers.test.ts",
         "node frontend\\tests\\productSearchPagination.test.mjs",
         "npm.cmd --prefix frontend run build"
       ],
@@ -816,11 +816,11 @@
     },
     {
       "implementation": "frontend/src/components/products/helpers/productMenuHelpers.ts",
-      "compatibilityWrapper": "frontend/src/components/products/helpers/productMenuHelpers.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/helpers/productMenuHelpers.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productMenuHelpers.test.mjs",
+        "node frontend\\tests\\productMenuHelpers.test.ts",
         "node frontend\\tests\\productSearchPagination.test.mjs",
         "npm.cmd --prefix frontend run build"
       ],
@@ -832,11 +832,11 @@
     },
     {
       "implementation": "frontend/src/components/products/helpers/productWriteHelpers.ts",
-      "compatibilityWrapper": "frontend/src/components/products/helpers/productWriteHelpers.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/helpers/productWriteHelpers.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productWriteHelpers.test.mjs",
+        "node frontend\\tests\\productWriteHelpers.test.ts",
         "node frontend\\tests\\actionStability.test.mjs",
         "npm.cmd --prefix frontend run build"
       ],
@@ -854,7 +854,7 @@
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\productGalleryHelpers.test.ts",
-        "node frontend\\tests\\productWriteHelpers.test.mjs",
+        "node frontend\\tests\\productWriteHelpers.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -865,12 +865,12 @@
     },
     {
       "implementation": "frontend/src/components/products/helpers/productGroupViewHelpers.ts",
-      "compatibilityWrapper": "frontend/src/components/products/helpers/productGroupViewHelpers.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/helpers/productGroupViewHelpers.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productGroupViewHelpers.test.mjs",
-        "node frontend\\tests\\productPageHelpers.test.mjs",
+        "node frontend\\tests\\productGroupViewHelpers.test.ts",
+        "node frontend\\tests\\productPageHelpers.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -881,11 +881,11 @@
     },
     {
       "implementation": "frontend/src/components/products/helpers/productSelectionHelpers.ts",
-      "compatibilityWrapper": "frontend/src/components/products/helpers/productSelectionHelpers.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/helpers/productSelectionHelpers.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productSelectionHelpers.test.mjs",
+        "node frontend\\tests\\productSelectionHelpers.test.ts",
         "node frontend\\tests\\productSearchPagination.test.mjs",
         "npm.cmd --prefix frontend run build"
       ],
@@ -897,11 +897,11 @@
     },
     {
       "implementation": "frontend/src/components/products/history/productHistoryHelpers.ts",
-      "compatibilityWrapper": "frontend/src/components/products/history/productHistoryHelpers.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/history/productHistoryHelpers.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productHistoryHelpers.test.mjs",
+        "node frontend\\tests\\productHistoryHelpers.test.ts",
         "node frontend\\tests\\historyHelpers.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
@@ -913,12 +913,12 @@
     },
     {
       "implementation": "frontend/src/components/products/scanning/barcodeImageScanner.ts",
-      "compatibilityWrapper": "frontend/src/components/products/scanning/barcodeImageScanner.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/scanning/barcodeImageScanner.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\barcodeImageScanner.test.mjs",
-        "node frontend\\tests\\scanbotScanner.test.mjs",
+        "node frontend\\tests\\barcodeImageScanner.test.ts",
+        "node frontend\\tests\\scanbotScanner.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -929,12 +929,12 @@
     },
     {
       "implementation": "frontend/src/components/products/scanning/barcodeScannerState.ts",
-      "compatibilityWrapper": "frontend/src/components/products/scanning/barcodeScannerState.mjs",
+      "compatibilityWrapper": "frontend/src/components/products/scanning/barcodeScannerState.ts",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\barcodeScannerState.test.mjs",
-        "node frontend\\tests\\scanbotScanner.test.mjs",
+        "node frontend\\tests\\barcodeScannerState.test.ts",
+        "node frontend\\tests\\scanbotScanner.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -1142,7 +1142,7 @@
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
-        "node frontend\\tests\\productPageHelpers.test.mjs",
+        "node frontend\\tests\\productPageHelpers.test.ts",
         "node frontend\\tests\\productSearchPagination.test.mjs",
         "npm.cmd --prefix frontend run build"
       ],
@@ -1207,7 +1207,7 @@
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\historyHelpers.test.ts",
-        "node frontend\\tests\\productHistoryHelpers.test.mjs",
+        "node frontend\\tests\\productHistoryHelpers.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
@@ -1270,7 +1270,7 @@
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\productBatches.test.ts",
-        "node frontend\\tests\\productPageHelpers.test.mjs",
+        "node frontend\\tests\\productPageHelpers.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,

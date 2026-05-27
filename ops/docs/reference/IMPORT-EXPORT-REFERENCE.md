@@ -254,8 +254,8 @@ Code files documented: **540**
 | 242 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 0 | 10 | 0 | 0 |
 | 243 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | 0 | 0 | 0 | 0 |
 | 244 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 2 | 15 | 2 | 0 |
-| 245 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 | 0 | 0 | 2 |
-| 246 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 0 | 2 | 0 | 0 |
+| 245 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 | 0 | 0 | 1 |
+| 246 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 0 | 2 | 0 | 1 |
 | 247 | `frontend/src/components/products/import/BulkImportModal.jsx` | 6 | 1 | 4 | 1 |
 | 248 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 | 0 | 0 | 2 |
 | 249 | `frontend/src/components/products/import/productImportPlanner.ts` | 0 | 11 | 0 | 1 |
@@ -267,13 +267,13 @@ Code files documented: **540**
 | 255 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | 0 | 0 | 0 | 0 |
 | 256 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 1 | 3 | 1 | 0 |
 | 257 | `frontend/src/components/products/Products.jsx` | 32 | 1 | 30 | 1 |
-| 258 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | 0 | 0 | 0 | 2 |
-| 259 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 1 | 1 | 0 | 0 |
+| 258 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | 0 | 0 | 0 | 1 |
+| 259 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 1 | 1 | 0 | 1 |
 | 260 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 7 | 1 | 4 | 1 |
-| 261 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | 0 | 0 | 0 | 2 |
-| 262 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 | 1 | 0 | 0 |
-| 263 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | 0 | 0 | 0 | 2 |
-| 264 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 0 | 3 | 0 | 0 |
+| 261 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | 0 | 0 | 0 | 1 |
+| 262 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 | 1 | 0 | 1 |
+| 263 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | 0 | 0 | 0 | 1 |
+| 264 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 0 | 3 | 0 | 1 |
 | 265 | `frontend/src/components/products/shared/primitives.jsx` | 3 | 0 | 1 | 9 |
 | 266 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 | 1 | 2 | 1 |
 | 267 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 5 | 1 | 4 | 1 |
@@ -424,8 +424,8 @@ Code files documented: **540**
 | 412 | `frontend/tests/appShellUtils.test.ts` | 3 | 0 | 1 | 0 |
 | 413 | `frontend/tests/assetCompression.test.ts` | 4 | 0 | 0 | 0 |
 | 414 | `frontend/tests/backupJobs.test.mjs` | 2 | 0 | 0 | 0 |
-| 415 | `frontend/tests/barcodeImageScanner.test.mjs` | 2 | 0 | 1 | 0 |
-| 416 | `frontend/tests/barcodeScannerState.test.mjs` | 2 | 0 | 1 | 0 |
+| 415 | `frontend/tests/barcodeImageScanner.test.ts` | 2 | 0 | 1 | 0 |
+| 416 | `frontend/tests/barcodeScannerState.test.ts` | 2 | 0 | 1 | 0 |
 | 417 | `frontend/tests/bulkOps.test.ts` | 2 | 0 | 1 | 0 |
 | 418 | `frontend/tests/contactImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
 | 419 | `frontend/tests/csvImport.test.mjs` | 3 | 0 | 1 | 0 |
@@ -462,30 +462,30 @@ Code files documented: **540**
 | 450 | `frontend/tests/portalFaqVocabulary.test.ts` | 1 | 0 | 0 | 0 |
 | 451 | `frontend/tests/portalLanguagePacks.test.ts` | 1 | 0 | 0 | 0 |
 | 452 | `frontend/tests/portalTranslateController.test.ts` | 1 | 0 | 0 | 0 |
-| 453 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
+| 453 | `frontend/tests/posCore.test.ts` | 1 | 0 | 0 | 0 |
 | 454 | `frontend/tests/pricingContacts.test.mjs` | 3 | 0 | 1 | 0 |
 | 455 | `frontend/tests/productBatches.test.ts` | 2 | 0 | 1 | 0 |
 | 456 | `frontend/tests/productDiscountUx.test.mjs` | 2 | 0 | 0 | 0 |
-| 457 | `frontend/tests/productDisplayHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 458 | `frontend/tests/productFilterHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 457 | `frontend/tests/productDisplayHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 458 | `frontend/tests/productFilterHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 459 | `frontend/tests/productGalleryHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 460 | `frontend/tests/productGrouping.test.ts` | 2 | 0 | 1 | 0 |
-| 461 | `frontend/tests/productGroupViewHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 462 | `frontend/tests/productHistoryHelpers.test.mjs` | 2 | 0 | 1 | 0 |
+| 461 | `frontend/tests/productGroupViewHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 462 | `frontend/tests/productHistoryHelpers.test.ts` | 2 | 0 | 1 | 0 |
 | 463 | `frontend/tests/productImportPlanner.test.mjs` | 3 | 0 | 1 | 0 |
 | 464 | `frontend/tests/productImportWorkerFallback.test.mjs` | 3 | 0 | 1 | 0 |
-| 465 | `frontend/tests/productMenuHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 466 | `frontend/tests/productPageHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 465 | `frontend/tests/productMenuHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 466 | `frontend/tests/productPageHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 467 | `frontend/tests/productSearchPagination.test.mjs` | 2 | 0 | 0 | 0 |
-| 468 | `frontend/tests/productSelectionHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 469 | `frontend/tests/productWriteHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 468 | `frontend/tests/productSelectionHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 469 | `frontend/tests/productWriteHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 470 | `frontend/tests/publicErrorRecovery.test.ts` | 1 | 0 | 0 | 0 |
 | 471 | `frontend/tests/receiptSettingsSync.test.mjs` | 2 | 0 | 0 | 0 |
 | 472 | `frontend/tests/receiptTemplate.test.mjs` | 4 | 0 | 2 | 0 |
 | 473 | `frontend/tests/returnsLayout.test.mjs` | 2 | 0 | 0 | 0 |
 | 474 | `frontend/tests/runtimeErrorClassifier.test.ts` | 1 | 0 | 0 | 0 |
 | 475 | `frontend/tests/salesImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
-| 476 | `frontend/tests/scanbotScanner.test.mjs` | 2 | 0 | 1 | 0 |
+| 476 | `frontend/tests/scanbotScanner.test.ts` | 2 | 0 | 1 | 0 |
 | 477 | `frontend/tests/scriptTypography.test.ts` | 2 | 0 | 1 | 0 |
 | 478 | `frontend/tests/sectionNavigation.test.ts` | 2 | 0 | 0 | 0 |
 | 479 | `frontend/tests/settingsConflictHelpers.test.ts` | 2 | 0 | 1 | 0 |
@@ -4657,9 +4657,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/tests/productHistoryHelpers.test.mjs`
 
 ### 3.246 `frontend/src/components/products/history/productHistoryHelpers.ts`
 
@@ -4668,8 +4667,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/productHistoryHelpers.test.ts`
 
 ### 3.247 `frontend/src/components/products/import/BulkImportModal.jsx`
 
@@ -4884,9 +4883,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (1)
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
-  - `frontend/tests/barcodeImageScanner.test.mjs`
 
 ### 3.259 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
@@ -4895,8 +4893,8 @@ Code files documented: **540**
   - `@zxing/browser`
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/barcodeImageScanner.test.ts`
 
 ### 3.260 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
 
@@ -4924,9 +4922,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (1)
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
-  - `frontend/tests/barcodeScannerState.test.mjs`
 
 ### 3.262 `frontend/src/components/products/scanning/barcodeScannerState.ts`
 
@@ -4935,8 +4932,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/barcodeScannerState.test.ts`
 
 ### 3.263 `frontend/src/components/products/scanning/scanbotScanner.mjs`
 
@@ -4945,9 +4942,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (1)
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
-  - `frontend/tests/scanbotScanner.test.mjs`
 
 ### 3.264 `frontend/src/components/products/scanning/scanbotScanner.ts`
 
@@ -4956,8 +4952,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/scanbotScanner.test.ts`
 
 ### 3.265 `frontend/src/components/products/shared/primitives.jsx`
 
@@ -7115,25 +7111,25 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.415 `frontend/tests/barcodeImageScanner.test.mjs`
+### 3.415 `frontend/tests/barcodeImageScanner.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/components/products/scanning/barcodeImageScanner.mjs`
+  - `../src/components/products/scanning/barcodeImageScanner.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/components/products/scanning/barcodeImageScanner.mjs`
+  - `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 - Referenced by (0)
   - none
 
-### 3.416 `frontend/tests/barcodeScannerState.test.mjs`
+### 3.416 `frontend/tests/barcodeScannerState.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/components/products/scanning/barcodeScannerState.mjs`
+  - `../src/components/products/scanning/barcodeScannerState.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/components/products/scanning/barcodeScannerState.mjs`
+  - `frontend/src/components/products/scanning/barcodeScannerState.ts`
 - Referenced by (0)
   - none
 
@@ -7533,7 +7529,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.453 `frontend/tests/posCore.test.mjs`
+### 3.453 `frontend/tests/posCore.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7577,7 +7573,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.457 `frontend/tests/productDisplayHelpers.test.mjs`
+### 3.457 `frontend/tests/productDisplayHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7587,7 +7583,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.458 `frontend/tests/productFilterHelpers.test.mjs`
+### 3.458 `frontend/tests/productFilterHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7618,7 +7614,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.461 `frontend/tests/productGroupViewHelpers.test.mjs`
+### 3.461 `frontend/tests/productGroupViewHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7628,14 +7624,14 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.462 `frontend/tests/productHistoryHelpers.test.mjs`
+### 3.462 `frontend/tests/productHistoryHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/components/products/history/productHistoryHelpers.mjs`
+  - `../src/components/products/history/productHistoryHelpers.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/components/products/history/productHistoryHelpers.mjs`
+  - `frontend/src/components/products/history/productHistoryHelpers.ts`
 - Referenced by (0)
   - none
 
@@ -7663,7 +7659,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.465 `frontend/tests/productMenuHelpers.test.mjs`
+### 3.465 `frontend/tests/productMenuHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7673,7 +7669,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.466 `frontend/tests/productPageHelpers.test.mjs`
+### 3.466 `frontend/tests/productPageHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7694,7 +7690,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.468 `frontend/tests/productSelectionHelpers.test.mjs`
+### 3.468 `frontend/tests/productSelectionHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7704,7 +7700,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.469 `frontend/tests/productWriteHelpers.test.mjs`
+### 3.469 `frontend/tests/productWriteHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7782,14 +7778,14 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.476 `frontend/tests/scanbotScanner.test.mjs`
+### 3.476 `frontend/tests/scanbotScanner.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/components/products/scanning/scanbotScanner.mjs`
+  - `../src/components/products/scanning/scanbotScanner.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/components/products/scanning/scanbotScanner.mjs`
+  - `frontend/src/components/products/scanning/scanbotScanner.ts`
 - Referenced by (0)
   - none
 
