@@ -14,7 +14,7 @@ const sourceFiles = {
   runtimeSchema: 'backend/src/postgresDatabase.js',
   systemJobs: 'backend/src/systemJobs.js',
   backupSchema: 'backend/src/backupSchema.js',
-  dexieSchema: 'frontend/src/api/localDb.js',
+  dexieSchema: 'frontend/src/api/localDb.ts',
   relationshipDoc: 'ops/docs/SCHEMA-RELATIONSHIPS.md',
 }
 

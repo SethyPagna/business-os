@@ -5,7 +5,7 @@ const indexSource = readFileSync(new URL('../index.html', import.meta.url), 'utf
 const swSource = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 const runtimeSource = readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
 const webApiSource = readFileSync(new URL('../src/web-api.js', import.meta.url), 'utf8')
-const localDbSource = readFileSync(new URL('../src/api/localDb.js', import.meta.url), 'utf8')
+const localDbSource = readFileSync(new URL('../src/api/localDb.ts', import.meta.url), 'utf8')
 const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
 const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
 const faviconSource = readFileSync(new URL('../src/utils/favicon.ts', import.meta.url), 'utf8')
@@ -85,7 +85,7 @@ assert.doesNotMatch(
 
 assert.match(
   localDbSource,
-  /export async function clearLocalMirrorTables\(tableNames = \[\]\)[\s\S]*const names = \[\][\s\S]*const seenNames = new Set\(\)[\s\S]*for \(const value of Array\.isArray\(tableNames\) \? tableNames : \[\]\)[\s\S]*const tables = \[\][\s\S]*for \(const name of names\)/,
+  /export async function clearLocalMirrorTables\(tableNames: unknown\[\] = \[\]\): Promise<void>[\s\S]*const names: string\[\] = \[\][\s\S]*const seenNames = new Set<string>\(\)[\s\S]*for \(const value of Array\.isArray\(tableNames\) \? tableNames : \[\]\)[\s\S]*const tables: LocalTable\[\] = \[\][\s\S]*for \(const name of names\)/,
   'Local mirror table cleanup should normalize and resolve table names with direct loops',
 )
 

@@ -15,7 +15,7 @@ async function runTest(name, fn) {
 }
 
 const httpSource = fs.readFileSync(new URL('../src/api/http.js', import.meta.url), 'utf8')
-const localDbSource = fs.readFileSync(new URL('../src/api/localDb.js', import.meta.url), 'utf8')
+const localDbSource = fs.readFileSync(new URL('../src/api/localDb.ts', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.js', import.meta.url), 'utf8')
 const swSource = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
