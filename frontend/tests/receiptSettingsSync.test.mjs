@@ -6,7 +6,7 @@ const receiptSettingsSource = fs.readFileSync(new URL('../src/components/receipt
 const printSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/PrintSettings.jsx', import.meta.url), 'utf8')
 const receiptPreviewSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.jsx', import.meta.url), 'utf8')
 const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.jsx', import.meta.url), 'utf8')
-const printUtilSource = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+const printUtilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
 const receiptConfigSource = fs.readFileSync(new URL('../src/utils/receiptAppliedConfig.ts', import.meta.url), 'utf8')
 const settingsWriteOptionsSource = fs.readFileSync(new URL('../src/utils/settingsWriteOptions.ts', import.meta.url), 'utf8')
 

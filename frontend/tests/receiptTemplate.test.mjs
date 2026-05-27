@@ -37,7 +37,7 @@ await runTest('serializeReceiptTemplate keeps default fields available for previ
 })
 
 await runTest('receipt preview remains strict-CSP compatible and binds buttons outside markup', () => {
-  const source = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /onclick\s*=/i)
   assert.doesNotMatch(source, /<script[\s>]/i)
   assert.match(source, /data-receipt-action="print"/)
@@ -46,7 +46,7 @@ await runTest('receipt preview remains strict-CSP compatible and binds buttons o
 })
 
 await runTest('print export normalizes receipt root width inside paper frame', () => {
-  const source = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.match(source, /function normalizeReceiptContentWidth/)
   assert.match(source, /data-receipt-export-root="true"/)
   assert.match(source, /node\.style\.maxWidth = '100%'/)
@@ -54,7 +54,7 @@ await runTest('print export normalizes receipt root width inside paper frame', (
 })
 
 await runTest('receipt export supports PNG image download from the same rendered receipt', () => {
-  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.jsx', import.meta.url), 'utf8')
   assert.match(utilSource, /export async function createReceiptImageBlob/)
   assert.match(utilSource, /type:\s*'image\/png'/)
@@ -65,7 +65,7 @@ await runTest('receipt export supports PNG image download from the same rendered
 })
 
 await runTest('receipt asset inlining uses bounded workers', () => {
-  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.match(utilSource, /const RECEIPT_ASSET_INLINE_CONCURRENCY = 3/)
   assert.match(utilSource, /async function mapReceiptAssets/)
   assert.match(utilSource, /Math\.min\(RECEIPT_ASSET_INLINE_CONCURRENCY, list\.length\)/)
