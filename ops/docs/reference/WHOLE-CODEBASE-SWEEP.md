@@ -543,8 +543,8 @@ wrapper for API methods and focused storage-policy tests.
 
 Move 161 completes the first Web Worker extraction slice. Contact import row
 count analysis now runs through `contactImportWorker.ts` when Worker support is
-available, falls back to `contactImportParser.ts` when it is not, and keeps the
-server-side background import job upload/start flow unchanged.
+available, falls back to the shared `csvRowCounter.ts` parser when it is not,
+and keeps the server-side background import job upload/start flow unchanged.
 
 Move 162 completes the inventory import Web Worker extraction slice. Inventory
 row-count analysis now runs through `inventoryImportWorker.ts`, falls back to

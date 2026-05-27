@@ -39,7 +39,7 @@ Total folders documented: **81**
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
 | 28 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
 | 29 | `frontend/src/components/catalog` | UI pages/components domain | 19 | 0 |
-| 30 | `frontend/src/components/contacts` | UI pages/components domain | 15 | 0 |
+| 30 | `frontend/src/components/contacts` | UI pages/components domain | 13 | 0 |
 | 31 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
 | 32 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
 | 33 | `frontend/src/components/dashboard/charts` | UI pages/components domain | 6 | 0 |
@@ -73,7 +73,7 @@ Total folders documented: **81**
 | 61 | `frontend/src/runtime` | Project folder | 1 | 0 |
 | 62 | `frontend/src/styles` | Project folder | 1 | 0 |
 | 63 | `frontend/src/types` | Project folder | 5 | 0 |
-| 64 | `frontend/src/utils` | Project folder | 69 | 0 |
+| 64 | `frontend/src/utils` | Project folder | 68 | 0 |
 | 65 | `frontend/tests` | Project folder | 76 | 0 |
 | 66 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
 | 67 | `ops/scripts/architecture` | Project folder | 4 | 0 |
@@ -764,7 +764,7 @@ Total folders documented: **81**
 ### 3.30 Folder: `frontend/src/components/contacts`
 
 - Purpose: UI pages/components domain
-- Direct files: **15**
+- Direct files: **13**
 - Direct subfolders: **0**
 
 #### 3.30.2 Files
@@ -772,20 +772,18 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `ContactImportModal.jsx` | UI component/page |
-| 2 | `contactImportParser.mjs` | UI component/page |
-| 3 | `contactImportParser.ts` | UI component/page |
-| 4 | `contactImportWorker.mjs` | UI component/page |
-| 5 | `contactImportWorker.ts` | UI component/page |
-| 6 | `contactOptionUtils.js` | UI component/page |
-| 7 | `contactOptionUtils.ts` | UI component/page |
-| 8 | `Contacts.jsx` | UI component/page |
-| 9 | `CustomerFormModal.jsx` | UI component/page |
-| 10 | `customerMembershipNumber.js` | UI component/page |
-| 11 | `customerMembershipNumber.ts` | UI component/page |
-| 12 | `CustomersTab.jsx` | UI component/page |
-| 13 | `DeliveryTab.jsx` | UI component/page |
-| 14 | `shared.jsx` | UI component/page |
-| 15 | `SuppliersTab.jsx` | UI component/page |
+| 2 | `contactImportWorker.mjs` | UI component/page |
+| 3 | `contactImportWorker.ts` | UI component/page |
+| 4 | `contactOptionUtils.js` | UI component/page |
+| 5 | `contactOptionUtils.ts` | UI component/page |
+| 6 | `Contacts.jsx` | UI component/page |
+| 7 | `CustomerFormModal.jsx` | UI component/page |
+| 8 | `customerMembershipNumber.js` | UI component/page |
+| 9 | `customerMembershipNumber.ts` | UI component/page |
+| 10 | `CustomersTab.jsx` | UI component/page |
+| 11 | `DeliveryTab.jsx` | UI component/page |
+| 12 | `shared.jsx` | UI component/page |
+| 13 | `SuppliersTab.jsx` | UI component/page |
 
 
 ### 3.31 Folder: `frontend/src/components/custom-tables`
@@ -1363,7 +1361,7 @@ Total folders documented: **81**
 ### 3.64 Folder: `frontend/src/utils`
 
 - Purpose: Project folder
-- Direct files: **69**
+- Direct files: **68**
 - Direct subfolders: **0**
 
 #### 3.64.2 Files
@@ -1389,56 +1387,55 @@ Total folders documented: **81**
 | 17 | `csvImport.js` | Utility helper |
 | 18 | `csvImport.ts` | Utility helper |
 | 19 | `csvRowCounter.d.mts` | Utility helper |
-| 20 | `csvRowCounter.mjs` | Utility helper |
-| 21 | `csvRowCounter.ts` | Utility helper |
-| 22 | `dateHelpers.js` | Utility helper |
-| 23 | `dateHelpers.ts` | Utility helper |
-| 24 | `deviceInfo.js` | Utility helper |
-| 25 | `deviceInfo.ts` | Utility helper |
-| 26 | `exportPackage.js` | Utility helper |
-| 27 | `exportPackage.ts` | Utility helper |
-| 28 | `exportReports.jsx` | Utility helper |
-| 29 | `favicon.js` | Utility helper |
-| 30 | `favicon.ts` | Utility helper |
-| 31 | `formatters.js` | Utility helper |
-| 32 | `formatters.ts` | Utility helper |
-| 33 | `groupedRecords.d.mts` | Utility helper |
-| 34 | `groupedRecords.mjs` | Utility helper |
-| 35 | `groupedRecords.ts` | Utility helper |
-| 36 | `historyHelpers.mjs` | Utility helper |
-| 37 | `historyHelpers.ts` | Utility helper |
-| 38 | `importJobRefresh.js` | Utility helper |
-| 39 | `importJobRefresh.ts` | Utility helper |
-| 40 | `index.js` | Utility helper |
-| 41 | `index.ts` | Utility helper |
-| 42 | `initials.d.mts` | Utility helper |
-| 43 | `initials.mjs` | Utility helper |
-| 44 | `initials.ts` | Utility helper |
-| 45 | `loaders.mjs` | Utility helper |
-| 46 | `loaders.ts` | Utility helper |
-| 47 | `mediaUpload.js` | Utility helper |
-| 48 | `mediaUpload.ts` | Utility helper |
-| 49 | `permissions.js` | Utility helper |
-| 50 | `permissions.ts` | Utility helper |
-| 51 | `pricing.d.ts` | Utility helper |
-| 52 | `pricing.js` | Utility helper |
-| 53 | `pricing.ts` | Utility helper |
-| 54 | `printReceipt.js` | Utility helper |
-| 55 | `printReceipt.ts` | Utility helper |
-| 56 | `productBatches.mjs` | Utility helper |
-| 57 | `productBatches.ts` | Utility helper |
-| 58 | `productGrouping.d.mts` | Utility helper |
-| 59 | `productGrouping.mjs` | Utility helper |
-| 60 | `productGrouping.ts` | Utility helper |
-| 61 | `publicAssetUrls.d.ts` | Utility helper |
-| 62 | `publicAssetUrls.js` | Utility helper |
-| 63 | `publicAssetUrls.ts` | Utility helper |
-| 64 | `receiptAppliedConfig.ts` | Utility helper |
-| 65 | `scriptTypography.js` | Utility helper |
-| 66 | `scriptTypography.ts` | Utility helper |
-| 67 | `settingsRefresh.js` | Utility helper |
-| 68 | `settingsRefresh.ts` | Utility helper |
-| 69 | `settingsWriteOptions.ts` | Utility helper |
+| 20 | `csvRowCounter.ts` | Utility helper |
+| 21 | `dateHelpers.js` | Utility helper |
+| 22 | `dateHelpers.ts` | Utility helper |
+| 23 | `deviceInfo.js` | Utility helper |
+| 24 | `deviceInfo.ts` | Utility helper |
+| 25 | `exportPackage.js` | Utility helper |
+| 26 | `exportPackage.ts` | Utility helper |
+| 27 | `exportReports.jsx` | Utility helper |
+| 28 | `favicon.js` | Utility helper |
+| 29 | `favicon.ts` | Utility helper |
+| 30 | `formatters.js` | Utility helper |
+| 31 | `formatters.ts` | Utility helper |
+| 32 | `groupedRecords.d.mts` | Utility helper |
+| 33 | `groupedRecords.mjs` | Utility helper |
+| 34 | `groupedRecords.ts` | Utility helper |
+| 35 | `historyHelpers.mjs` | Utility helper |
+| 36 | `historyHelpers.ts` | Utility helper |
+| 37 | `importJobRefresh.js` | Utility helper |
+| 38 | `importJobRefresh.ts` | Utility helper |
+| 39 | `index.js` | Utility helper |
+| 40 | `index.ts` | Utility helper |
+| 41 | `initials.d.mts` | Utility helper |
+| 42 | `initials.mjs` | Utility helper |
+| 43 | `initials.ts` | Utility helper |
+| 44 | `loaders.mjs` | Utility helper |
+| 45 | `loaders.ts` | Utility helper |
+| 46 | `mediaUpload.js` | Utility helper |
+| 47 | `mediaUpload.ts` | Utility helper |
+| 48 | `permissions.js` | Utility helper |
+| 49 | `permissions.ts` | Utility helper |
+| 50 | `pricing.d.ts` | Utility helper |
+| 51 | `pricing.js` | Utility helper |
+| 52 | `pricing.ts` | Utility helper |
+| 53 | `printReceipt.js` | Utility helper |
+| 54 | `printReceipt.ts` | Utility helper |
+| 55 | `productBatches.mjs` | Utility helper |
+| 56 | `productBatches.ts` | Utility helper |
+| 57 | `productGrouping.d.mts` | Utility helper |
+| 58 | `productGrouping.mjs` | Utility helper |
+| 59 | `productGrouping.ts` | Utility helper |
+| 60 | `publicAssetUrls.d.ts` | Utility helper |
+| 61 | `publicAssetUrls.js` | Utility helper |
+| 62 | `publicAssetUrls.ts` | Utility helper |
+| 63 | `receiptAppliedConfig.ts` | Utility helper |
+| 64 | `scriptTypography.js` | Utility helper |
+| 65 | `scriptTypography.ts` | Utility helper |
+| 66 | `settingsRefresh.js` | Utility helper |
+| 67 | `settingsRefresh.ts` | Utility helper |
+| 68 | `settingsWriteOptions.ts` | Utility helper |
 
 
 ### 3.65 Folder: `frontend/tests`

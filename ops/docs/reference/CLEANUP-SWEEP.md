@@ -487,14 +487,13 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   compatibility wrapper. Cleanup must keep that wrapper until API imports and
   focused storage tests intentionally move to the typed path.
 - Move 161 adds `frontend/src/components/contacts/contactImportWorker.mjs` as
-  the stable Vite worker wrapper for `contactImportWorker.ts`. Cleanup must keep
-  both the worker wrapper and `contactImportParser.mjs` until bundler and test
-  imports intentionally move to direct typed paths.
+  the stable Vite worker wrapper for `contactImportWorker.ts`. The
+  contact-specific parser shim has been deleted after modal, worker, and tests
+  moved to the shared typed CSV row counter.
 - Move 162 adds `frontend/src/components/inventory/inventoryImportWorker.mjs`
-  as the stable Vite worker wrapper for `inventoryImportWorker.ts` and
-  `frontend/src/utils/csvRowCounter.mjs` as the shared row-counter wrapper.
-  Cleanup must keep both wrappers until bundler and test imports intentionally
-  move to direct typed paths.
+  as the stable Vite worker wrapper for `inventoryImportWorker.ts`. The shared
+  row-counter wrapper has been deleted after inventory, sales, contact, and
+  focused tests moved to direct typed paths.
 - Move 163 records the product import worker cluster as an active completed
   worker slice: `BulkImportModal.jsx` depends on `productImportWorker.mjs` for
   the Vite module-worker entrypoint, while `productImportPlanner.ts` remains
@@ -503,8 +502,8 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   a passing build and focused product import flow.
 - Move 164 adds `frontend/src/components/sales/salesImportWorker.mjs` as the
   stable Vite worker wrapper for `salesImportWorker.ts`. Cleanup must keep this
-  wrapper and the shared `csvRowCounter.mjs` parser wrapper until bundler and
-  test imports intentionally move to direct typed paths.
+  worker wrapper until bundler imports intentionally move to a different typed
+  worker-entry strategy.
 - Move 165 marks `frontend/src/components/shared/BackgroundImportTracker.jsx`
   as an intentional non-worker UI orchestration file. Cleanup and language
   conversion sweeps should keep it in the React path unless future evidence

@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-27T21:29:05.928Z
+Generated: 2026-05-27T22:23:11.629Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 528
+- Files scanned: 525
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -23,9 +23,9 @@ Generated: 2026-05-27T21:29:05.928Z
 | Language | Files |
 | --- | --- |
 | JavaScript | 184 |
-| JavaScript modules | 120 |
+| JavaScript modules | 118 |
 | React JSX | 107 |
-| TypeScript | 85 |
+| TypeScript | 84 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |
@@ -97,6 +97,7 @@ Generated: 2026-05-27T21:29:05.928Z
 | `frontend/src/components/inventory/movementGroups.ts` | yes | `frontend/src/components/inventory/movementGroups.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryMovementGroups.test.mjs`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/pos/posCore.ts` | yes | `frontend/src/components/pos/posCore.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\posCore.test.mjs`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/csvImport.ts` | yes | `frontend/src/utils/csvImport.js` | yes | `frontend/src/utils/pricing.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\csvImport.test.mjs`<br>`node frontend\tests\productImportPlanner.test.mjs` |
+| `frontend/src/utils/csvRowCounter.ts` | yes | retired after import modals and workers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryImportWorker.test.mjs`<br>`node frontend\tests\salesImportWorker.test.mjs`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/formatters.ts` | yes | `frontend/src/utils/formatters.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\formatters.test.mjs`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/groupedRecords.ts` | yes | `frontend/src/utils/groupedRecords.mjs` | yes | `frontend/src/utils/initials.d.mts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\groupedRecords.test.mjs`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/initials.ts` | yes | `frontend/src/utils/initials.mjs` | yes | `frontend/src/utils/initials.d.mts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\initials.test.mjs`<br>`npm.cmd --prefix frontend run build` |
@@ -143,7 +144,7 @@ Generated: 2026-05-27T21:29:05.928Z
 | Surface | Exists | Worker | Worker exists | Fallback | Fallback exists | Proof |
 | --- | --- | --- | --- | --- | --- | --- |
 | `frontend/src/components/products/import/BulkImportModal.jsx` | yes | `frontend/src/components/products/import/productImportWorker.ts` | yes | `frontend/src/components/products/import/productImportPlanner.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportWorkerFallback.test.mjs`<br>`node frontend\tests\productImportPlanner.test.mjs`<br>`node frontend\tests\performanceLoadingUx.test.mjs`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright product import modal flow` |
-| `frontend/src/components/contacts/ContactImportModal.jsx` | yes | `frontend/src/components/contacts/contactImportWorker.ts` | yes | `frontend/src/components/contacts/contactImportParser.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\contactImportWorker.test.mjs`<br>`node frontend\tests\performanceLoadingUx.test.mjs`<br>`node frontend\tests\actionStability.test.mjs`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright contact import modal flow` |
+| `frontend/src/components/contacts/ContactImportModal.jsx` | yes | `frontend/src/components/contacts/contactImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\contactImportWorker.test.mjs`<br>`node frontend\tests\performanceLoadingUx.test.mjs`<br>`node frontend\tests\actionStability.test.mjs`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright contact import modal flow` |
 | `frontend/src/components/inventory/InventoryImportModal.jsx` | yes | `frontend/src/components/inventory/inventoryImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryImportWorker.test.mjs`<br>`node frontend\tests\performanceLoadingUx.test.mjs`<br>`node frontend\tests\actionStability.test.mjs`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright inventory import modal flow` |
 | `frontend/src/components/sales/SalesImportModal.jsx` | yes | `frontend/src/components/sales/salesImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\salesImportWorker.test.mjs`<br>`node frontend\tests\performanceLoadingUx.test.mjs`<br>`node frontend\tests\actionStability.test.mjs`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright sales import modal flow` |
 | `frontend/src/utils/csv.js` | yes | `frontend/src/utils/csvExportWorker.ts` | yes | `frontend/src/utils/csv.js` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\exportPackages.test.mjs`<br>`node frontend\tests\performanceLoadingUx.test.mjs`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright dashboard/inventory/contact export flow` |

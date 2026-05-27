@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T21:29:05.928Z",
+  "generatedAt": "2026-05-27T22:23:11.629Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 528,
+  "sourceFiles": 525,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -25,7 +25,7 @@
     ],
     [
       "JavaScript modules",
-      120
+      118
     ],
     [
       "React JSX",
@@ -33,7 +33,7 @@
     ],
     [
       "TypeScript",
-      85
+      84
     ],
     [
       "Windows batch",
@@ -67,7 +67,7 @@
     ],
     [
       ".mjs",
-      120
+      118
     ],
     [
       ".jsx",
@@ -75,7 +75,7 @@
     ],
     [
       ".ts",
-      85
+      84
     ],
     [
       ".bat",
@@ -666,6 +666,23 @@
       ],
       "implementationExists": true,
       "wrapperRequired": true,
+      "compatibilityWrapperExists": true,
+      "declarationSupportExists": true,
+      "covered": true
+    },
+    {
+      "implementation": "frontend/src/utils/csvRowCounter.ts",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after import modals and workers moved to TypeScript source",
+      "declarationSupport": "",
+      "proof": [
+        "npm.cmd --prefix frontend run typecheck",
+        "node frontend\\tests\\inventoryImportWorker.test.mjs",
+        "node frontend\\tests\\salesImportWorker.test.mjs",
+        "npm.cmd --prefix frontend run build"
+      ],
+      "implementationExists": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1331,7 +1348,7 @@
       "surface": "frontend/src/components/contacts/ContactImportModal.jsx",
       "worker": "frontend/src/components/contacts/contactImportWorker.ts",
       "compatibilityWrapper": "frontend/src/components/contacts/contactImportWorker.mjs",
-      "fallback": "frontend/src/components/contacts/contactImportParser.ts",
+      "fallback": "frontend/src/utils/csvRowCounter.ts",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\contactImportWorker.test.mjs",

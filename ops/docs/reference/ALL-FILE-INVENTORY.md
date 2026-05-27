@@ -4,7 +4,7 @@ Auto-generated file-level commentary for all first-party project files (frontend
 
 ## 1. Coverage Summary
 
-Total files documented: **616**
+Total files documented: **613**
 
 ## 2. File Commentary Matrix
 
@@ -213,416 +213,413 @@ Total files documented: **616**
 | 201 | `frontend/src/components/catalog/portalTranslateController.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
 | 202 | `frontend/src/components/catalog/portalTranslateController.ts` | frontend-ui | 224 | 9.0 | UI component/page |
 | 203 | `frontend/src/components/contacts/ContactImportModal.jsx` | frontend-ui | 326 | 13.0 | UI component/page |
-| 204 | `frontend/src/components/contacts/contactImportParser.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 205 | `frontend/src/components/contacts/contactImportParser.ts` | frontend-ui | 2 | 0.1 | UI component/page |
-| 206 | `frontend/src/components/contacts/contactImportWorker.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 207 | `frontend/src/components/contacts/contactImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
-| 208 | `frontend/src/components/contacts/contactOptionUtils.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 209 | `frontend/src/components/contacts/contactOptionUtils.ts` | frontend-ui | 131 | 4.9 | UI component/page |
-| 210 | `frontend/src/components/contacts/Contacts.jsx` | frontend-ui | 322 | 13.1 | UI component/page |
-| 211 | `frontend/src/components/contacts/CustomerFormModal.jsx` | frontend-ui | 201 | 9.7 | UI component/page |
-| 212 | `frontend/src/components/contacts/customerMembershipNumber.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 213 | `frontend/src/components/contacts/customerMembershipNumber.ts` | frontend-ui | 11 | 0.4 | UI component/page |
-| 214 | `frontend/src/components/contacts/CustomersTab.jsx` | frontend-ui | 796 | 39.4 | UI component/page |
-| 215 | `frontend/src/components/contacts/DeliveryTab.jsx` | frontend-ui | 819 | 42.8 | UI component/page |
-| 216 | `frontend/src/components/contacts/shared.jsx` | frontend-ui | 378 | 14.5 | UI component/page |
-| 217 | `frontend/src/components/contacts/SuppliersTab.jsx` | frontend-ui | 836 | 43.1 | UI component/page |
-| 218 | `frontend/src/components/custom-tables/CustomTables.jsx` | frontend-ui | 589 | 26.5 | UI component/page |
-| 219 | `frontend/src/components/dashboard/charts/BarChart.jsx` | frontend-ui | 149 | 6.5 | UI component/page |
-| 220 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | frontend-ui | 93 | 4.2 | UI component/page |
-| 221 | `frontend/src/components/dashboard/charts/index.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 222 | `frontend/src/components/dashboard/charts/index.ts` | frontend-ui | 5 | 0.2 | UI component/page |
-| 223 | `frontend/src/components/dashboard/charts/LineChart.jsx` | frontend-ui | 197 | 9.1 | UI component/page |
-| 224 | `frontend/src/components/dashboard/charts/NoData.jsx` | frontend-ui | 15 | 0.6 | UI component/page |
-| 225 | `frontend/src/components/dashboard/Dashboard.jsx` | frontend-ui | 2063 | 107.5 | UI component/page |
-| 226 | `frontend/src/components/dashboard/MiniStat.jsx` | frontend-ui | 36 | 1.7 | UI component/page |
-| 227 | `frontend/src/components/files/FilePickerModal.jsx` | frontend-ui | 270 | 11.5 | UI component/page |
-| 228 | `frontend/src/components/files/FilesPage.jsx` | frontend-ui | 990 | 47.4 | UI component/page |
-| 229 | `frontend/src/components/files/FilesProvidersTab.jsx` | frontend-ui | 222 | 16.6 | UI component/page |
-| 230 | `frontend/src/components/files/FilesResponsesTab.jsx` | frontend-ui | 142 | 9.5 | UI component/page |
-| 231 | `frontend/src/components/inventory/DualMoney.jsx` | frontend-ui | 14 | 0.6 | UI component/page |
-| 232 | `frontend/src/components/inventory/Inventory.jsx` | frontend-ui | 4123 | 209.0 | UI component/page |
-| 233 | `frontend/src/components/inventory/InventoryImportModal.jsx` | frontend-ui | 228 | 10.5 | UI component/page |
-| 234 | `frontend/src/components/inventory/inventoryImportWorker.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 235 | `frontend/src/components/inventory/inventoryImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
-| 236 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | frontend-ui | 540 | 34.3 | UI component/page |
-| 237 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | frontend-ui | 467 | 31.6 | UI component/page |
-| 238 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | frontend-ui | 126 | 8.4 | UI component/page |
-| 239 | `frontend/src/components/inventory/movementGroups.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 240 | `frontend/src/components/inventory/movementGroups.ts` | frontend-ui | 287 | 12.9 | UI component/page |
-| 241 | `frontend/src/components/inventory/ProductDetailModal.jsx` | frontend-ui | 202 | 13.4 | UI component/page |
-| 242 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | frontend-ui | 625 | 35.7 | UI component/page |
-| 243 | `frontend/src/components/navigation/Sidebar.jsx` | frontend-ui | 335 | 15.3 | UI component/page |
-| 244 | `frontend/src/components/pos/CartItem.jsx` | frontend-ui | 106 | 5.2 | UI component/page |
-| 245 | `frontend/src/components/pos/FilterPanel.jsx` | frontend-ui | 237 | 8.3 | UI component/page |
-| 246 | `frontend/src/components/pos/POS.jsx` | frontend-ui | 1919 | 107.6 | UI component/page |
-| 247 | `frontend/src/components/pos/posCore.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 248 | `frontend/src/components/pos/posCore.ts` | frontend-ui | 167 | 6.4 | UI component/page |
-| 249 | `frontend/src/components/pos/ProductImage.jsx` | frontend-ui | 6 | 0.2 | UI component/page |
-| 250 | `frontend/src/components/pos/QuickAddModal.jsx` | frontend-ui | 38 | 1.6 | UI component/page |
-| 251 | `frontend/src/components/products/config/productPageConfig.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 252 | `frontend/src/components/products/config/productPageConfig.ts` | frontend-ui | 24 | 0.7 | UI component/page |
-| 253 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | frontend-ui | 119 | 5.0 | UI component/page |
-| 254 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | frontend-ui | 91 | 4.3 | UI component/page |
-| 255 | `frontend/src/components/products/forms/ProductForm.jsx` | frontend-ui | 940 | 46.9 | UI component/page |
-| 256 | `frontend/src/components/products/forms/VariantFormModal.jsx` | frontend-ui | 274 | 13.4 | UI component/page |
-| 257 | `frontend/src/components/products/helpers/productDisplayHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 258 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | frontend-ui | 156 | 5.8 | UI component/page |
-| 259 | `frontend/src/components/products/helpers/productFilterHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 260 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | frontend-ui | 214 | 8.9 | UI component/page |
-| 261 | `frontend/src/components/products/helpers/productGalleryHelpers.d.mts` | frontend-ui | 25 | 1.0 | UI component/page |
-| 262 | `frontend/src/components/products/helpers/productGalleryHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 263 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | frontend-ui | 101 | 3.1 | UI component/page |
-| 264 | `frontend/src/components/products/helpers/productGroupViewHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 265 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | frontend-ui | 46 | 1.6 | UI component/page |
-| 266 | `frontend/src/components/products/helpers/productMenuHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 267 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | frontend-ui | 292 | 11.0 | UI component/page |
-| 268 | `frontend/src/components/products/helpers/productPageHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 269 | `frontend/src/components/products/helpers/productPageHelpers.ts` | frontend-ui | 32 | 1.0 | UI component/page |
-| 270 | `frontend/src/components/products/helpers/productSelectionHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 271 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | frontend-ui | 139 | 4.2 | UI component/page |
-| 272 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 273 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | frontend-ui | 372 | 12.7 | UI component/page |
-| 274 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 275 | `frontend/src/components/products/history/productHistoryHelpers.ts` | frontend-ui | 46 | 1.4 | UI component/page |
-| 276 | `frontend/src/components/products/import/BulkImportModal.jsx` | frontend-ui | 1907 | 91.8 | UI component/page |
-| 277 | `frontend/src/components/products/import/productImportPlanner.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 278 | `frontend/src/components/products/import/productImportPlanner.ts` | frontend-ui | 634 | 25.3 | UI component/page |
-| 279 | `frontend/src/components/products/import/productImportWorker.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 280 | `frontend/src/components/products/import/productImportWorker.ts` | frontend-ui | 68 | 1.9 | UI component/page |
-| 281 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | frontend-ui | 680 | 28.5 | UI component/page |
-| 282 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | frontend-ui | 502 | 21.7 | UI component/page |
-| 283 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | frontend-ui | 494 | 21.0 | UI component/page |
-| 284 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 285 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
-| 286 | `frontend/src/components/products/Products.jsx` | frontend-ui | 2006 | 96.4 | UI component/page |
-| 287 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 288 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | frontend-ui | 125 | 4.1 | UI component/page |
-| 289 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | frontend-ui | 581 | 28.0 | UI component/page |
-| 290 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 291 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | frontend-ui | 82 | 2.5 | UI component/page |
-| 292 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 293 | `frontend/src/components/products/scanning/scanbotScanner.ts` | frontend-ui | 180 | 6.0 | UI component/page |
-| 294 | `frontend/src/components/products/shared/primitives.jsx` | frontend-ui | 207 | 7.2 | UI component/page |
-| 295 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | frontend-ui | 140 | 5.9 | UI component/page |
-| 296 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | frontend-ui | 241 | 12.2 | UI component/page |
-| 297 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | frontend-ui | 84 | 4.5 | UI component/page |
-| 298 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | frontend-ui | 334 | 18.7 | UI component/page |
-| 299 | `frontend/src/components/README.md` | frontend-ui | 37 | 1.9 | UI component/page |
-| 300 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | frontend-ui | 95 | 3.8 | UI component/page |
-| 301 | `frontend/src/components/receipt-settings/constants.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 302 | `frontend/src/components/receipt-settings/constants.ts` | frontend-ui | 156 | 7.9 | UI component/page |
-| 303 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | frontend-ui | 28 | 0.9 | UI component/page |
-| 304 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | frontend-ui | 190 | 9.4 | UI component/page |
-| 305 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | frontend-ui | 245 | 11.0 | UI component/page |
-| 306 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | frontend-ui | 104 | 3.6 | UI component/page |
-| 307 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | frontend-ui | 443 | 26.3 | UI component/page |
-| 308 | `frontend/src/components/receipt-settings/template.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 309 | `frontend/src/components/receipt-settings/template.ts` | frontend-ui | 33 | 0.9 | UI component/page |
-| 310 | `frontend/src/components/receipt/Receipt.jsx` | frontend-ui | 470 | 22.3 | UI component/page |
-| 311 | `frontend/src/components/returns/EditReturnModal.jsx` | frontend-ui | 241 | 12.9 | UI component/page |
-| 312 | `frontend/src/components/returns/NewReturnModal.jsx` | frontend-ui | 492 | 27.9 | UI component/page |
-| 313 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | frontend-ui | 394 | 20.8 | UI component/page |
-| 314 | `frontend/src/components/returns/ReturnDetailModal.jsx` | frontend-ui | 132 | 6.8 | UI component/page |
-| 315 | `frontend/src/components/returns/Returns.jsx` | frontend-ui | 888 | 38.8 | UI component/page |
-| 316 | `frontend/src/components/returns/ReturnsListSurface.jsx` | frontend-ui | 328 | 17.6 | UI component/page |
-| 317 | `frontend/src/components/sales/ExportModal.jsx` | frontend-ui | 250 | 11.2 | UI component/page |
-| 318 | `frontend/src/components/sales/SaleDetailModal.jsx` | frontend-ui | 332 | 15.7 | UI component/page |
-| 319 | `frontend/src/components/sales/Sales.jsx` | frontend-ui | 908 | 40.2 | UI component/page |
-| 320 | `frontend/src/components/sales/SalesImportModal.jsx` | frontend-ui | 228 | 10.4 | UI component/page |
-| 321 | `frontend/src/components/sales/salesImportWorker.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
-| 322 | `frontend/src/components/sales/salesImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
-| 323 | `frontend/src/components/sales/SalesListSurface.jsx` | frontend-ui | 318 | 19.2 | UI component/page |
-| 324 | `frontend/src/components/sales/StatusBadge.jsx` | frontend-ui | 47 | 1.6 | UI component/page |
-| 325 | `frontend/src/components/server/ServerPage.jsx` | frontend-ui | 781 | 38.6 | UI component/page |
-| 326 | `frontend/src/components/shared/ActionHistoryBar.jsx` | frontend-ui | 151 | 8.1 | UI component/page |
-| 327 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | frontend-ui | 546 | 24.4 | UI component/page |
-| 328 | `frontend/src/components/shared/ExportMenu.jsx` | frontend-ui | 36 | 1.5 | UI component/page |
-| 329 | `frontend/src/components/shared/FilterMenu.jsx` | frontend-ui | 113 | 4.8 | UI component/page |
-| 330 | `frontend/src/components/shared/globalScroll.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 331 | `frontend/src/components/shared/globalScroll.ts` | frontend-ui | 72 | 2.7 | UI component/page |
-| 332 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | frontend-ui | 119 | 4.9 | UI component/page |
-| 333 | `frontend/src/components/shared/LoadingWatchdog.jsx` | frontend-ui | 63 | 2.0 | UI component/page |
-| 334 | `frontend/src/components/shared/Modal.jsx` | frontend-ui | 34 | 1.8 | UI component/page |
-| 335 | `frontend/src/components/shared/navigationConfig.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 336 | `frontend/src/components/shared/navigationConfig.ts` | frontend-ui | 66 | 2.3 | UI component/page |
-| 337 | `frontend/src/components/shared/NotificationCenter.jsx` | frontend-ui | 594 | 30.3 | UI component/page |
-| 338 | `frontend/src/components/shared/pageActivity.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 339 | `frontend/src/components/shared/pageActivity.ts` | frontend-ui | 9 | 0.3 | UI component/page |
-| 340 | `frontend/src/components/shared/PageHeader.jsx` | frontend-ui | 55 | 2.2 | UI component/page |
-| 341 | `frontend/src/components/shared/PaginationControls.jsx` | frontend-ui | 202 | 9.6 | UI component/page |
-| 342 | `frontend/src/components/shared/PortalMenu.jsx` | frontend-ui | 221 | 7.3 | UI component/page |
-| 343 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | frontend-ui | 56 | 2.0 | UI component/page |
-| 344 | `frontend/src/components/shared/SectionSwitcher.jsx` | frontend-ui | 72 | 2.8 | UI component/page |
-| 345 | `frontend/src/components/shared/WriteConflictModal.jsx` | frontend-ui | 266 | 11.0 | UI component/page |
-| 346 | `frontend/src/components/users/PermissionEditor.jsx` | frontend-ui | 152 | 7.3 | UI component/page |
-| 347 | `frontend/src/components/users/UserDetailSheet.jsx` | frontend-ui | 103 | 5.0 | UI component/page |
-| 348 | `frontend/src/components/users/UserProfileModal.jsx` | frontend-ui | 1158 | 62.4 | UI component/page |
-| 349 | `frontend/src/components/users/Users.jsx` | frontend-ui | 1036 | 50.4 | UI component/page |
-| 350 | `frontend/src/components/utils-settings/AuditLog.jsx` | frontend-ui | 1198 | 56.2 | UI component/page |
-| 351 | `frontend/src/components/utils-settings/Backup.jsx` | frontend-ui | 1490 | 70.6 | UI component/page |
-| 352 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | frontend-ui | 58 | 3.0 | UI component/page |
-| 353 | `frontend/src/components/utils-settings/index.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 354 | `frontend/src/components/utils-settings/index.ts` | frontend-ui | 7 | 0.3 | UI component/page |
-| 355 | `frontend/src/components/utils-settings/OtpModal.jsx` | frontend-ui | 258 | 10.2 | UI component/page |
-| 356 | `frontend/src/components/utils-settings/ResetData.jsx` | frontend-ui | 297 | 13.5 | UI component/page |
-| 357 | `frontend/src/components/utils-settings/Settings.jsx` | frontend-ui | 1730 | 80.6 | UI component/page |
-| 358 | `frontend/src/components/utils-settings/settingsConflict.js` | frontend-ui | 2 | 0.0 | UI component/page |
-| 359 | `frontend/src/components/utils-settings/settingsConflict.ts` | frontend-ui | 64 | 1.8 | UI component/page |
-| 360 | `frontend/src/constants.js` | frontend-core | 2 | 0.0 | Project source/support file |
-| 361 | `frontend/src/constants.ts` | frontend-core | 185 | 4.6 | Project source/support file |
-| 362 | `frontend/src/index.jsx` | frontend-core | 194 | 6.4 | Project source/support file |
-| 363 | `frontend/src/lang/en.json` | frontend-i18n | 2721 | 134.5 | Localization dictionary |
-| 364 | `frontend/src/lang/km.json` | frontend-i18n | 2715 | 244.9 | Localization dictionary |
-| 365 | `frontend/src/platform/runtime/clientRuntime.js` | frontend-core | 2 | 0.0 | Project source/support file |
-| 366 | `frontend/src/platform/runtime/clientRuntime.ts` | frontend-core | 249 | 9.1 | Project source/support file |
-| 367 | `frontend/src/platform/storage/storagePolicy.mjs` | frontend-core | 2 | 0.0 | Project source/support file |
-| 368 | `frontend/src/platform/storage/storagePolicy.ts` | frontend-core | 40 | 1.3 | Project source/support file |
-| 369 | `frontend/src/README.md` | frontend-core | 37 | 1.5 | Documentation |
-| 370 | `frontend/src/runtime/runtimeErrorClassifier.ts` | frontend-core | 154 | 5.4 | Project source/support file |
-| 371 | `frontend/src/styles/main.css` | frontend-style | 741 | 29.9 | Project source/support file |
-| 372 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 7 | 0.2 | Project source/support file |
-| 373 | `frontend/src/types/mjs-modules.d.ts` | frontend-core | 7 | 0.2 | Project source/support file |
-| 374 | `frontend/src/types/react.d.ts` | frontend-core | 13 | 0.6 | Project source/support file |
-| 375 | `frontend/src/types/receiptContracts.ts` | frontend-core | 67 | 1.6 | Project source/support file |
-| 376 | `frontend/src/types/settingsContracts.ts` | frontend-core | 27 | 0.5 | Project source/support file |
-| 377 | `frontend/src/utils/actionGuards.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 378 | `frontend/src/utils/actionGuards.ts` | frontend-utils | 76 | 2.2 | Utility helper |
-| 379 | `frontend/src/utils/actionHistory.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 380 | `frontend/src/utils/actionHistory.ts` | frontend-utils | 282 | 10.5 | Utility helper |
-| 381 | `frontend/src/utils/appRefresh.d.ts` | frontend-utils | 4 | 0.2 | Utility helper |
-| 382 | `frontend/src/utils/appRefresh.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 383 | `frontend/src/utils/appRefresh.ts` | frontend-utils | 38 | 1.0 | Utility helper |
-| 384 | `frontend/src/utils/bulkOps.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 385 | `frontend/src/utils/bulkOps.ts` | frontend-utils | 69 | 1.9 | Utility helper |
-| 386 | `frontend/src/utils/color.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 387 | `frontend/src/utils/color.ts` | frontend-utils | 34 | 1.0 | Utility helper |
-| 388 | `frontend/src/utils/csv.d.ts` | frontend-utils | 8 | 0.8 | Utility helper |
-| 389 | `frontend/src/utils/csv.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 390 | `frontend/src/utils/csv.ts` | frontend-utils | 234 | 7.6 | Utility helper |
-| 391 | `frontend/src/utils/csvExportWorker.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 392 | `frontend/src/utils/csvExportWorker.ts` | frontend-utils | 35 | 1.0 | Utility helper |
-| 393 | `frontend/src/utils/csvImport.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 394 | `frontend/src/utils/csvImport.ts` | frontend-utils | 306 | 10.1 | Utility helper |
-| 395 | `frontend/src/utils/csvRowCounter.d.mts` | frontend-utils | 2 | 0.1 | Utility helper |
-| 396 | `frontend/src/utils/csvRowCounter.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 397 | `frontend/src/utils/csvRowCounter.ts` | frontend-utils | 40 | 0.9 | Utility helper |
-| 398 | `frontend/src/utils/dateHelpers.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 399 | `frontend/src/utils/dateHelpers.ts` | frontend-utils | 18 | 0.6 | Utility helper |
-| 400 | `frontend/src/utils/deviceInfo.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 401 | `frontend/src/utils/deviceInfo.ts` | frontend-utils | 54 | 1.5 | Utility helper |
-| 402 | `frontend/src/utils/exportPackage.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 403 | `frontend/src/utils/exportPackage.ts` | frontend-utils | 61 | 1.4 | Utility helper |
-| 404 | `frontend/src/utils/exportReports.jsx` | frontend-utils | 366 | 9.9 | Utility helper |
-| 405 | `frontend/src/utils/favicon.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 406 | `frontend/src/utils/favicon.ts` | frontend-utils | 101 | 3.1 | Utility helper |
-| 407 | `frontend/src/utils/formatters.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 408 | `frontend/src/utils/formatters.ts` | frontend-utils | 89 | 2.7 | Utility helper |
-| 409 | `frontend/src/utils/groupedRecords.d.mts` | frontend-utils | 66 | 1.8 | Utility helper |
-| 410 | `frontend/src/utils/groupedRecords.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 411 | `frontend/src/utils/groupedRecords.ts` | frontend-utils | 330 | 11.2 | Utility helper |
-| 412 | `frontend/src/utils/historyHelpers.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 413 | `frontend/src/utils/historyHelpers.ts` | frontend-utils | 61 | 1.8 | Utility helper |
-| 414 | `frontend/src/utils/importJobRefresh.js` | frontend-utils | 6 | 0.2 | Utility helper |
-| 415 | `frontend/src/utils/importJobRefresh.ts` | frontend-utils | 106 | 3.1 | Utility helper |
-| 416 | `frontend/src/utils/index.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 417 | `frontend/src/utils/index.ts` | frontend-utils | 6 | 0.2 | Utility helper |
-| 418 | `frontend/src/utils/initials.d.mts` | frontend-utils | 27 | 0.8 | Utility helper |
-| 419 | `frontend/src/utils/initials.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 420 | `frontend/src/utils/initials.ts` | frontend-utils | 105 | 3.5 | Utility helper |
-| 421 | `frontend/src/utils/loaders.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 422 | `frontend/src/utils/loaders.ts` | frontend-utils | 101 | 3.1 | Utility helper |
-| 423 | `frontend/src/utils/mediaUpload.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 424 | `frontend/src/utils/mediaUpload.ts` | frontend-utils | 145 | 4.1 | Utility helper |
-| 425 | `frontend/src/utils/permissions.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 426 | `frontend/src/utils/permissions.ts` | frontend-utils | 22 | 0.6 | Utility helper |
-| 427 | `frontend/src/utils/pricing.d.ts` | frontend-utils | 16 | 0.8 | Utility helper |
-| 428 | `frontend/src/utils/pricing.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 429 | `frontend/src/utils/pricing.ts` | frontend-utils | 102 | 4.0 | Utility helper |
-| 430 | `frontend/src/utils/printReceipt.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 431 | `frontend/src/utils/printReceipt.ts` | frontend-utils | 1016 | 36.0 | Utility helper |
-| 432 | `frontend/src/utils/productBatches.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 433 | `frontend/src/utils/productBatches.ts` | frontend-utils | 61 | 1.8 | Utility helper |
-| 434 | `frontend/src/utils/productGrouping.d.mts` | frontend-utils | 55 | 1.4 | Utility helper |
-| 435 | `frontend/src/utils/productGrouping.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
-| 436 | `frontend/src/utils/productGrouping.ts` | frontend-utils | 315 | 11.3 | Utility helper |
-| 437 | `frontend/src/utils/publicAssetUrls.d.ts` | frontend-utils | 2 | 0.1 | Utility helper |
-| 438 | `frontend/src/utils/publicAssetUrls.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 439 | `frontend/src/utils/publicAssetUrls.ts` | frontend-utils | 80 | 3.1 | Utility helper |
-| 440 | `frontend/src/utils/receiptAppliedConfig.ts` | frontend-utils | 147 | 4.5 | Utility helper |
-| 441 | `frontend/src/utils/scriptTypography.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 442 | `frontend/src/utils/scriptTypography.ts` | frontend-utils | 27 | 0.7 | Utility helper |
-| 443 | `frontend/src/utils/settingsRefresh.js` | frontend-utils | 2 | 0.0 | Utility helper |
-| 444 | `frontend/src/utils/settingsRefresh.ts` | frontend-utils | 84 | 2.5 | Utility helper |
-| 445 | `frontend/src/utils/settingsWriteOptions.ts` | frontend-utils | 13 | 0.5 | Utility helper |
-| 446 | `frontend/src/web-api.js` | frontend-core | 2 | 0.0 | Project source/support file |
-| 447 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
-| 448 | `frontend/tailwind.config.mjs` | frontend-root | 17 | 0.4 | Project source/support file |
-| 449 | `frontend/tests/actionGuards.test.mjs` | frontend-root | 72 | 2.2 | Project source/support file |
-| 450 | `frontend/tests/actionStability.test.mjs` | frontend-root | 729 | 58.7 | Project source/support file |
-| 451 | `frontend/tests/adminShellMediaGuards.test.mjs` | frontend-root | 147 | 5.5 | Project source/support file |
-| 452 | `frontend/tests/apiHttp.test.mjs` | frontend-root | 433 | 18.4 | Project source/support file |
-| 453 | `frontend/tests/appRefresh.test.mjs` | frontend-root | 47 | 1.2 | Project source/support file |
-| 454 | `frontend/tests/appShellUtils.test.mjs` | frontend-root | 114 | 5.0 | Project source/support file |
-| 455 | `frontend/tests/assetCompression.test.mjs` | frontend-root | 35 | 1.5 | Project source/support file |
-| 456 | `frontend/tests/backupJobs.test.mjs` | frontend-root | 136 | 9.0 | Project source/support file |
-| 457 | `frontend/tests/barcodeImageScanner.test.mjs` | frontend-root | 120 | 3.1 | Project source/support file |
-| 458 | `frontend/tests/barcodeScannerState.test.mjs` | frontend-root | 62 | 2.5 | Project source/support file |
-| 459 | `frontend/tests/bulkOps.test.mjs` | frontend-root | 58 | 1.9 | Project source/support file |
-| 460 | `frontend/tests/contactImportWorker.test.mjs` | frontend-root | 39 | 1.6 | Project source/support file |
-| 461 | `frontend/tests/csvImport.test.mjs` | frontend-root | 84 | 3.4 | Project source/support file |
-| 462 | `frontend/tests/dashboardDataReliability.test.mjs` | frontend-root | 31 | 3.2 | Project source/support file |
-| 463 | `frontend/tests/dateHelpers.test.mjs` | frontend-root | 39 | 1.0 | Project source/support file |
-| 464 | `frontend/tests/deviceInfo.test.mjs` | frontend-root | 61 | 1.8 | Project source/support file |
-| 465 | `frontend/tests/exportPackages.test.mjs` | frontend-root | 103 | 3.9 | Project source/support file |
-| 466 | `frontend/tests/formatters.test.mjs` | frontend-root | 36 | 0.9 | Project source/support file |
-| 467 | `frontend/tests/globalScroll.test.mjs` | frontend-root | 25 | 0.7 | Project source/support file |
-| 468 | `frontend/tests/globalScrollControls.test.mjs` | frontend-root | 32 | 1.1 | Project source/support file |
-| 469 | `frontend/tests/groupedRecords.test.mjs` | frontend-root | 115 | 3.7 | Project source/support file |
-| 470 | `frontend/tests/historyHelpers.test.mjs` | frontend-root | 72 | 2.1 | Project source/support file |
-| 471 | `frontend/tests/importJobRefresh.test.mjs` | frontend-root | 87 | 2.4 | Project source/support file |
-| 472 | `frontend/tests/initials.test.mjs` | frontend-root | 66 | 2.1 | Project source/support file |
-| 473 | `frontend/tests/inventoryImportWorker.test.mjs` | frontend-root | 39 | 1.7 | Project source/support file |
-| 474 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | frontend-root | 43 | 2.3 | Project source/support file |
-| 475 | `frontend/tests/inventoryMovementGroups.test.mjs` | frontend-root | 64 | 2.3 | Project source/support file |
-| 476 | `frontend/tests/inventoryRfidSection.test.mjs` | frontend-root | 23 | 1.1 | Project source/support file |
-| 477 | `frontend/tests/jsxSyntaxCheck.mjs` | frontend-root | 36 | 1.2 | Project source/support file |
-| 478 | `frontend/tests/loaders.test.mjs` | frontend-root | 82 | 2.4 | Project source/support file |
-| 479 | `frontend/tests/mediaUploadHelpers.test.mjs` | frontend-root | 36 | 1.3 | Project source/support file |
-| 480 | `frontend/tests/navigationConfig.test.mjs` | frontend-root | 41 | 1.3 | Project source/support file |
-| 481 | `frontend/tests/notificationBadge.test.mjs` | frontend-root | 16 | 0.7 | Project source/support file |
-| 482 | `frontend/tests/offlineSalesQueue.test.mjs` | frontend-root | 78 | 3.5 | Project source/support file |
-| 483 | `frontend/tests/offlineSecurityHardening.test.mjs` | frontend-root | 93 | 4.1 | Project source/support file |
-| 484 | `frontend/tests/offlineSyncArchitecture.test.mjs` | frontend-root | 92 | 4.5 | Project source/support file |
-| 485 | `frontend/tests/ownedGoogleAuth.test.mjs` | frontend-root | 56 | 2.5 | Project source/support file |
-| 486 | `frontend/tests/performanceLoadingUx.test.mjs` | frontend-root | 2077 | 92.7 | Project source/support file |
-| 487 | `frontend/tests/permissionEditor.test.mjs` | frontend-root | 36 | 1.3 | Project source/support file |
-| 488 | `frontend/tests/permissions.test.mjs` | frontend-root | 18 | 0.6 | Project source/support file |
-| 489 | `frontend/tests/portalCatalogDisplay.test.mjs` | frontend-root | 124 | 4.5 | Project source/support file |
-| 490 | `frontend/tests/portalContentI18n.test.mjs` | frontend-root | 94 | 3.3 | Project source/support file |
-| 491 | `frontend/tests/portalEditorUtils.test.mjs` | frontend-root | 57 | 1.9 | Project source/support file |
-| 492 | `frontend/tests/portalFaqVocabulary.test.mjs` | frontend-root | 104 | 4.9 | Project source/support file |
-| 493 | `frontend/tests/portalLanguagePacks.test.mjs` | frontend-root | 50 | 3.1 | Project source/support file |
-| 494 | `frontend/tests/portalTranslateController.test.mjs` | frontend-root | 145 | 4.5 | Project source/support file |
-| 495 | `frontend/tests/posCore.test.mjs` | frontend-root | 167 | 6.2 | Project source/support file |
-| 496 | `frontend/tests/pricingContacts.test.mjs` | frontend-root | 108 | 3.9 | Project source/support file |
-| 497 | `frontend/tests/productBatches.test.mjs` | frontend-root | 55 | 1.3 | Project source/support file |
-| 498 | `frontend/tests/productDiscountUx.test.mjs` | frontend-root | 52 | 2.4 | Project source/support file |
-| 499 | `frontend/tests/productDisplayHelpers.test.mjs` | frontend-root | 107 | 3.5 | Project source/support file |
-| 500 | `frontend/tests/productFilterHelpers.test.mjs` | frontend-root | 108 | 3.1 | Project source/support file |
-| 501 | `frontend/tests/productGalleryHelpers.test.mjs` | frontend-root | 141 | 4.3 | Project source/support file |
-| 502 | `frontend/tests/productGrouping.test.mjs` | frontend-root | 112 | 4.8 | Project source/support file |
-| 503 | `frontend/tests/productGroupViewHelpers.test.mjs` | frontend-root | 53 | 1.4 | Project source/support file |
-| 504 | `frontend/tests/productHistoryHelpers.test.mjs` | frontend-root | 44 | 1.4 | Project source/support file |
-| 505 | `frontend/tests/productImportPlanner.test.mjs` | frontend-root | 279 | 13.6 | Project source/support file |
-| 506 | `frontend/tests/productImportWorkerFallback.test.mjs` | frontend-root | 41 | 1.9 | Project source/support file |
-| 507 | `frontend/tests/productMenuHelpers.test.mjs` | frontend-root | 168 | 5.3 | Project source/support file |
-| 508 | `frontend/tests/productPageHelpers.test.mjs` | frontend-root | 23 | 0.8 | Project source/support file |
-| 509 | `frontend/tests/productSearchPagination.test.mjs` | frontend-root | 140 | 5.4 | Project source/support file |
-| 510 | `frontend/tests/productSelectionHelpers.test.mjs` | frontend-root | 73 | 2.8 | Project source/support file |
-| 511 | `frontend/tests/productWriteHelpers.test.mjs` | frontend-root | 517 | 12.9 | Project source/support file |
-| 512 | `frontend/tests/publicErrorRecovery.test.mjs` | frontend-root | 35 | 1.2 | Project source/support file |
-| 513 | `frontend/tests/receiptSettingsSync.test.mjs` | frontend-root | 43 | 3.1 | Project source/support file |
-| 514 | `frontend/tests/receiptTemplate.test.mjs` | frontend-root | 81 | 3.6 | Project source/support file |
-| 515 | `frontend/tests/returnsLayout.test.mjs` | frontend-root | 23 | 1.6 | Project source/support file |
-| 516 | `frontend/tests/runtimeErrorClassifier.test.mjs` | frontend-root | 63 | 2.5 | Project source/support file |
-| 517 | `frontend/tests/salesImportWorker.test.mjs` | frontend-root | 39 | 1.7 | Project source/support file |
-| 518 | `frontend/tests/scanbotScanner.test.mjs` | frontend-root | 111 | 3.0 | Project source/support file |
-| 519 | `frontend/tests/scriptTypography.test.mjs` | frontend-root | 17 | 0.8 | Project source/support file |
-| 520 | `frontend/tests/sectionNavigation.test.mjs` | frontend-root | 48 | 2.4 | Project source/support file |
-| 521 | `frontend/tests/settingsConflictHelpers.test.mjs` | frontend-root | 43 | 1.4 | Project source/support file |
-| 522 | `frontend/tests/settingsRefresh.test.mjs` | frontend-root | 73 | 1.6 | Project source/support file |
-| 523 | `frontend/tests/storagePolicy.test.mjs` | frontend-root | 42 | 1.3 | Project source/support file |
-| 524 | `frontend/tests/utilsSettingsBarrel.test.mjs` | frontend-root | 19 | 1.1 | Project source/support file |
-| 525 | `frontend/tsconfig.json` | frontend-root | 41 | 1.1 | Configuration/data manifest |
-| 526 | `frontend/vite.config.mjs` | frontend-root | 234 | 9.1 | Project source/support file |
-| 527 | `ops/scripts/architecture/generated-bulk-audit.mjs` | project-scripts | 607 | 23.0 | Project source/support file |
-| 528 | `ops/scripts/architecture/language-runtime-audit.mjs` | project-scripts | 1549 | 67.3 | Project source/support file |
-| 529 | `ops/scripts/architecture/organization-audit.mjs` | project-scripts | 385 | 17.1 | Project source/support file |
-| 530 | `ops/scripts/architecture/phase29-audit.mjs` | project-scripts | 576 | 20.1 | Project source/support file |
-| 531 | `ops/scripts/backend/schema-audit.js` | project-scripts | 496 | 16.9 | Project source/support file |
-| 532 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | project-scripts | 196 | 7.8 | Project source/support file |
-| 533 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |
-| 534 | `ops/scripts/backend/verify-data-integrity.js` | project-scripts | 689 | 29.0 | Project source/support file |
-| 535 | `ops/scripts/frontend/verify-i18n.js` | project-scripts | 145 | 4.3 | Project source/support file |
-| 536 | `ops/scripts/frontend/verify-performance.js` | project-scripts | 144 | 9.6 | Project source/support file |
-| 537 | `ops/scripts/frontend/verify-ui.js` | project-scripts | 243 | 8.7 | Project source/support file |
-| 538 | `ops/scripts/lib/fs-utils.js` | project-scripts | 214 | 5.3 | Project source/support file |
-| 539 | `ops/scripts/lib/report-utils.js` | project-scripts | 57 | 1.5 | Project source/support file |
-| 540 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 265 | 7.9 | Project source/support file |
-| 541 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | project-scripts | 92 | 2.8 | Project source/support file |
-| 542 | `ops/scripts/powershell/docker-release.ps1` | project-scripts | 1011 | 48.0 | Project source/support file |
-| 543 | `ops/scripts/powershell/full-automation.ps1` | project-scripts | 214 | 8.1 | Project source/support file |
-| 544 | `ops/scripts/powershell/npm-install-mode.ps1` | project-scripts | 28 | 0.8 | Project source/support file |
-| 545 | `ops/scripts/powershell/runtime-bootstrap.ps1` | project-scripts | 592 | 21.6 | Project source/support file |
-| 546 | `ops/scripts/powershell/start-runtime.ps1` | project-scripts | 377 | 16.3 | Project source/support file |
-| 547 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | project-scripts | 240 | 7.8 | Project source/support file |
-| 548 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | project-scripts | 162 | 6.2 | Project source/support file |
-| 549 | `ops/scripts/runtime/audits/audit-auth.mjs` | project-scripts | 127 | 4.5 | Project source/support file |
-| 550 | `ops/scripts/runtime/audits/audit-manifest.mjs` | project-scripts | 253 | 7.6 | Project source/support file |
-| 551 | `ops/scripts/runtime/audits/audit-report-html.mjs` | project-scripts | 356 | 14.0 | Project source/support file |
-| 552 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | project-scripts | 1425 | 53.8 | Project source/support file |
-| 553 | `ops/scripts/runtime/audits/full-app-audit.mjs` | project-scripts | 621 | 27.5 | Project source/support file |
-| 554 | `ops/scripts/runtime/browser-action-smoke.mjs` | project-scripts | 775 | 28.5 | Project source/support file |
-| 555 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | project-scripts | 244 | 10.8 | Project source/support file |
-| 556 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | project-scripts | 144 | 6.1 | Project source/support file |
-| 557 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | project-scripts | 288 | 12.1 | Project source/support file |
-| 558 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | project-scripts | 157 | 6.1 | Project source/support file |
-| 559 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | project-scripts | 67 | 2.4 | Project source/support file |
-| 560 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | project-scripts | 129 | 6.2 | Project source/support file |
-| 561 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | project-scripts | 126 | 5.7 | Project source/support file |
-| 562 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | project-scripts | 125 | 5.9 | Project source/support file |
-| 563 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | project-scripts | 154 | 7.8 | Project source/support file |
-| 564 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | project-scripts | 198 | 6.4 | Project source/support file |
-| 565 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | project-scripts | 125 | 6.2 | Project source/support file |
-| 566 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | project-scripts | 119 | 5.8 | Project source/support file |
-| 567 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | project-scripts | 132 | 6.1 | Project source/support file |
-| 568 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | project-scripts | 117 | 5.7 | Project source/support file |
-| 569 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | project-scripts | 129 | 6.4 | Project source/support file |
-| 570 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | project-scripts | 119 | 5.7 | Project source/support file |
-| 571 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | project-scripts | 128 | 5.6 | Project source/support file |
-| 572 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | project-scripts | 133 | 6.3 | Project source/support file |
-| 573 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | project-scripts | 122 | 5.7 | Project source/support file |
-| 574 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | project-scripts | 855 | 56.5 | Project source/support file |
-| 575 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | project-scripts | 150 | 7.5 | Project source/support file |
-| 576 | `ops/scripts/runtime/smoke/check-public-url.mjs` | project-scripts | 239 | 8.2 | Project source/support file |
-| 577 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | project-scripts | 78 | 3.7 | Project source/support file |
-| 578 | `ops/scripts/runtime/smoke/live-smoke.mjs` | project-scripts | 319 | 13.5 | Project source/support file |
-| 579 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | project-scripts | 175 | 5.8 | Project source/support file |
-| 580 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | project-scripts | 231 | 9.7 | Project source/support file |
-| 581 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | project-scripts | 431 | 18.8 | Project source/support file |
-| 582 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | project-scripts | 108 | 4.2 | Project source/support file |
-| 583 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | project-scripts | 212 | 6.8 | Project source/support file |
-| 584 | `ops/scripts/runtime/storage/prune-storage.mjs` | project-scripts | 466 | 15.8 | Project source/support file |
-| 585 | `ops/scripts/runtime/storage/restore-candidates.mjs` | project-scripts | 189 | 6.9 | Project source/support file |
-| 586 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | project-scripts | 204 | 7.3 | Project source/support file |
-| 587 | `ops/scripts/verification/verify-backup-reliability.js` | project-scripts | 140 | 5.0 | Project source/support file |
-| 588 | `ops/scripts/verification/verify-docker-release.js` | project-scripts | 651 | 30.7 | Project source/support file |
-| 589 | `ops/scripts/verification/verify-hardening-policy.js` | project-scripts | 140 | 5.5 | Project source/support file |
-| 590 | `ops/scripts/verification/verify-runtime-deps.js` | project-scripts | 351 | 14.8 | Project source/support file |
-| 591 | `ops/scripts/verification/verify-scale-services.js` | project-scripts | 175 | 6.5 | Project source/support file |
-| 592 | `ops/scripts/verification/verify-secret-hygiene.js` | project-scripts | 56 | 2.0 | Project source/support file |
-| 593 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
-| 594 | `README.md` | project-root | 159 | 11.5 | Project documentation entrypoint |
-| 595 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
-| 596 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
-| 597 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |
-| 598 | `run/docker/backup.bat` | project-scripts | 15 | 0.6 | Project source/support file |
-| 599 | `run/docker/doctor.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 600 | `run/docker/install.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 601 | `run/docker/README.md` | project-scripts | 44 | 3.1 | Documentation |
-| 602 | `run/docker/release.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 603 | `run/docker/restore.bat` | project-scripts | 29 | 1.0 | Project source/support file |
-| 604 | `run/docker/rotate-cloudflare.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 605 | `run/docker/start.bat` | project-scripts | 15 | 0.6 | Project source/support file |
-| 606 | `run/docker/update.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 607 | `run/full-automation.bat` | project-scripts | 22 | 0.6 | Project source/support file |
-| 608 | `run/README.md` | project-scripts | 47 | 2.9 | Documentation |
-| 609 | `run/setup.bat` | project-scripts | 349 | 16.2 | Project source/support file |
-| 610 | `run/sh/setup.sh` | project-scripts | 116 | 3.3 | Project source/support file |
-| 611 | `run/sh/start-server.sh` | project-scripts | 147 | 5.6 | Project source/support file |
-| 612 | `run/sh/stop-server.sh` | project-scripts | 62 | 1.6 | Project source/support file |
-| 613 | `run/start-server.bat` | project-scripts | 570 | 29.3 | Project source/support file |
-| 614 | `run/stop-server.bat` | project-scripts | 183 | 8.4 | Project source/support file |
-| 615 | `run/verify-local.bat` | project-scripts | 148 | 4.9 | Project source/support file |
-| 616 | `Start Business OS.bat` | project-root | 38 | 1.3 | Project source/support file |
+| 204 | `frontend/src/components/contacts/contactImportWorker.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 205 | `frontend/src/components/contacts/contactImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
+| 206 | `frontend/src/components/contacts/contactOptionUtils.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 207 | `frontend/src/components/contacts/contactOptionUtils.ts` | frontend-ui | 131 | 4.9 | UI component/page |
+| 208 | `frontend/src/components/contacts/Contacts.jsx` | frontend-ui | 322 | 13.1 | UI component/page |
+| 209 | `frontend/src/components/contacts/CustomerFormModal.jsx` | frontend-ui | 201 | 9.7 | UI component/page |
+| 210 | `frontend/src/components/contacts/customerMembershipNumber.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 211 | `frontend/src/components/contacts/customerMembershipNumber.ts` | frontend-ui | 11 | 0.4 | UI component/page |
+| 212 | `frontend/src/components/contacts/CustomersTab.jsx` | frontend-ui | 796 | 39.4 | UI component/page |
+| 213 | `frontend/src/components/contacts/DeliveryTab.jsx` | frontend-ui | 819 | 42.8 | UI component/page |
+| 214 | `frontend/src/components/contacts/shared.jsx` | frontend-ui | 378 | 14.5 | UI component/page |
+| 215 | `frontend/src/components/contacts/SuppliersTab.jsx` | frontend-ui | 836 | 43.1 | UI component/page |
+| 216 | `frontend/src/components/custom-tables/CustomTables.jsx` | frontend-ui | 589 | 26.5 | UI component/page |
+| 217 | `frontend/src/components/dashboard/charts/BarChart.jsx` | frontend-ui | 149 | 6.5 | UI component/page |
+| 218 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | frontend-ui | 93 | 4.2 | UI component/page |
+| 219 | `frontend/src/components/dashboard/charts/index.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 220 | `frontend/src/components/dashboard/charts/index.ts` | frontend-ui | 5 | 0.2 | UI component/page |
+| 221 | `frontend/src/components/dashboard/charts/LineChart.jsx` | frontend-ui | 197 | 9.1 | UI component/page |
+| 222 | `frontend/src/components/dashboard/charts/NoData.jsx` | frontend-ui | 15 | 0.6 | UI component/page |
+| 223 | `frontend/src/components/dashboard/Dashboard.jsx` | frontend-ui | 2063 | 107.5 | UI component/page |
+| 224 | `frontend/src/components/dashboard/MiniStat.jsx` | frontend-ui | 36 | 1.7 | UI component/page |
+| 225 | `frontend/src/components/files/FilePickerModal.jsx` | frontend-ui | 270 | 11.5 | UI component/page |
+| 226 | `frontend/src/components/files/FilesPage.jsx` | frontend-ui | 990 | 47.4 | UI component/page |
+| 227 | `frontend/src/components/files/FilesProvidersTab.jsx` | frontend-ui | 222 | 16.6 | UI component/page |
+| 228 | `frontend/src/components/files/FilesResponsesTab.jsx` | frontend-ui | 142 | 9.5 | UI component/page |
+| 229 | `frontend/src/components/inventory/DualMoney.jsx` | frontend-ui | 14 | 0.6 | UI component/page |
+| 230 | `frontend/src/components/inventory/Inventory.jsx` | frontend-ui | 4123 | 209.0 | UI component/page |
+| 231 | `frontend/src/components/inventory/InventoryImportModal.jsx` | frontend-ui | 228 | 10.5 | UI component/page |
+| 232 | `frontend/src/components/inventory/inventoryImportWorker.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 233 | `frontend/src/components/inventory/inventoryImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
+| 234 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | frontend-ui | 540 | 34.3 | UI component/page |
+| 235 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | frontend-ui | 467 | 31.6 | UI component/page |
+| 236 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | frontend-ui | 126 | 8.4 | UI component/page |
+| 237 | `frontend/src/components/inventory/movementGroups.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 238 | `frontend/src/components/inventory/movementGroups.ts` | frontend-ui | 287 | 12.9 | UI component/page |
+| 239 | `frontend/src/components/inventory/ProductDetailModal.jsx` | frontend-ui | 202 | 13.4 | UI component/page |
+| 240 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | frontend-ui | 625 | 35.7 | UI component/page |
+| 241 | `frontend/src/components/navigation/Sidebar.jsx` | frontend-ui | 335 | 15.3 | UI component/page |
+| 242 | `frontend/src/components/pos/CartItem.jsx` | frontend-ui | 106 | 5.2 | UI component/page |
+| 243 | `frontend/src/components/pos/FilterPanel.jsx` | frontend-ui | 237 | 8.3 | UI component/page |
+| 244 | `frontend/src/components/pos/POS.jsx` | frontend-ui | 1919 | 107.6 | UI component/page |
+| 245 | `frontend/src/components/pos/posCore.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 246 | `frontend/src/components/pos/posCore.ts` | frontend-ui | 167 | 6.4 | UI component/page |
+| 247 | `frontend/src/components/pos/ProductImage.jsx` | frontend-ui | 6 | 0.2 | UI component/page |
+| 248 | `frontend/src/components/pos/QuickAddModal.jsx` | frontend-ui | 38 | 1.6 | UI component/page |
+| 249 | `frontend/src/components/products/config/productPageConfig.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 250 | `frontend/src/components/products/config/productPageConfig.ts` | frontend-ui | 24 | 0.7 | UI component/page |
+| 251 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | frontend-ui | 119 | 5.0 | UI component/page |
+| 252 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | frontend-ui | 91 | 4.3 | UI component/page |
+| 253 | `frontend/src/components/products/forms/ProductForm.jsx` | frontend-ui | 940 | 46.9 | UI component/page |
+| 254 | `frontend/src/components/products/forms/VariantFormModal.jsx` | frontend-ui | 274 | 13.4 | UI component/page |
+| 255 | `frontend/src/components/products/helpers/productDisplayHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 256 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | frontend-ui | 156 | 5.8 | UI component/page |
+| 257 | `frontend/src/components/products/helpers/productFilterHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 258 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | frontend-ui | 214 | 8.9 | UI component/page |
+| 259 | `frontend/src/components/products/helpers/productGalleryHelpers.d.mts` | frontend-ui | 25 | 1.0 | UI component/page |
+| 260 | `frontend/src/components/products/helpers/productGalleryHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 261 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | frontend-ui | 101 | 3.1 | UI component/page |
+| 262 | `frontend/src/components/products/helpers/productGroupViewHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 263 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | frontend-ui | 46 | 1.6 | UI component/page |
+| 264 | `frontend/src/components/products/helpers/productMenuHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 265 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | frontend-ui | 292 | 11.0 | UI component/page |
+| 266 | `frontend/src/components/products/helpers/productPageHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 267 | `frontend/src/components/products/helpers/productPageHelpers.ts` | frontend-ui | 32 | 1.0 | UI component/page |
+| 268 | `frontend/src/components/products/helpers/productSelectionHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 269 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | frontend-ui | 139 | 4.2 | UI component/page |
+| 270 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 271 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | frontend-ui | 372 | 12.7 | UI component/page |
+| 272 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 273 | `frontend/src/components/products/history/productHistoryHelpers.ts` | frontend-ui | 46 | 1.4 | UI component/page |
+| 274 | `frontend/src/components/products/import/BulkImportModal.jsx` | frontend-ui | 1907 | 91.8 | UI component/page |
+| 275 | `frontend/src/components/products/import/productImportPlanner.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 276 | `frontend/src/components/products/import/productImportPlanner.ts` | frontend-ui | 634 | 25.3 | UI component/page |
+| 277 | `frontend/src/components/products/import/productImportWorker.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 278 | `frontend/src/components/products/import/productImportWorker.ts` | frontend-ui | 68 | 1.9 | UI component/page |
+| 279 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | frontend-ui | 680 | 28.5 | UI component/page |
+| 280 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | frontend-ui | 502 | 21.7 | UI component/page |
+| 281 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | frontend-ui | 494 | 21.0 | UI component/page |
+| 282 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 283 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
+| 284 | `frontend/src/components/products/Products.jsx` | frontend-ui | 2006 | 96.4 | UI component/page |
+| 285 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 286 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | frontend-ui | 125 | 4.1 | UI component/page |
+| 287 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | frontend-ui | 581 | 28.0 | UI component/page |
+| 288 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 289 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | frontend-ui | 82 | 2.5 | UI component/page |
+| 290 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 291 | `frontend/src/components/products/scanning/scanbotScanner.ts` | frontend-ui | 180 | 6.0 | UI component/page |
+| 292 | `frontend/src/components/products/shared/primitives.jsx` | frontend-ui | 207 | 7.2 | UI component/page |
+| 293 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | frontend-ui | 140 | 5.9 | UI component/page |
+| 294 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | frontend-ui | 241 | 12.2 | UI component/page |
+| 295 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | frontend-ui | 84 | 4.5 | UI component/page |
+| 296 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | frontend-ui | 334 | 18.7 | UI component/page |
+| 297 | `frontend/src/components/README.md` | frontend-ui | 37 | 1.9 | UI component/page |
+| 298 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | frontend-ui | 95 | 3.8 | UI component/page |
+| 299 | `frontend/src/components/receipt-settings/constants.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 300 | `frontend/src/components/receipt-settings/constants.ts` | frontend-ui | 156 | 7.9 | UI component/page |
+| 301 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | frontend-ui | 28 | 0.9 | UI component/page |
+| 302 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | frontend-ui | 190 | 9.4 | UI component/page |
+| 303 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | frontend-ui | 245 | 11.0 | UI component/page |
+| 304 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | frontend-ui | 104 | 3.6 | UI component/page |
+| 305 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | frontend-ui | 443 | 26.3 | UI component/page |
+| 306 | `frontend/src/components/receipt-settings/template.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 307 | `frontend/src/components/receipt-settings/template.ts` | frontend-ui | 33 | 0.9 | UI component/page |
+| 308 | `frontend/src/components/receipt/Receipt.jsx` | frontend-ui | 470 | 22.3 | UI component/page |
+| 309 | `frontend/src/components/returns/EditReturnModal.jsx` | frontend-ui | 241 | 12.9 | UI component/page |
+| 310 | `frontend/src/components/returns/NewReturnModal.jsx` | frontend-ui | 492 | 27.9 | UI component/page |
+| 311 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | frontend-ui | 394 | 20.8 | UI component/page |
+| 312 | `frontend/src/components/returns/ReturnDetailModal.jsx` | frontend-ui | 132 | 6.8 | UI component/page |
+| 313 | `frontend/src/components/returns/Returns.jsx` | frontend-ui | 888 | 38.8 | UI component/page |
+| 314 | `frontend/src/components/returns/ReturnsListSurface.jsx` | frontend-ui | 328 | 17.6 | UI component/page |
+| 315 | `frontend/src/components/sales/ExportModal.jsx` | frontend-ui | 250 | 11.2 | UI component/page |
+| 316 | `frontend/src/components/sales/SaleDetailModal.jsx` | frontend-ui | 332 | 15.7 | UI component/page |
+| 317 | `frontend/src/components/sales/Sales.jsx` | frontend-ui | 908 | 40.2 | UI component/page |
+| 318 | `frontend/src/components/sales/SalesImportModal.jsx` | frontend-ui | 228 | 10.4 | UI component/page |
+| 319 | `frontend/src/components/sales/salesImportWorker.mjs` | frontend-ui | 2 | 0.0 | UI component/page |
+| 320 | `frontend/src/components/sales/salesImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
+| 321 | `frontend/src/components/sales/SalesListSurface.jsx` | frontend-ui | 318 | 19.2 | UI component/page |
+| 322 | `frontend/src/components/sales/StatusBadge.jsx` | frontend-ui | 47 | 1.6 | UI component/page |
+| 323 | `frontend/src/components/server/ServerPage.jsx` | frontend-ui | 781 | 38.6 | UI component/page |
+| 324 | `frontend/src/components/shared/ActionHistoryBar.jsx` | frontend-ui | 151 | 8.1 | UI component/page |
+| 325 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | frontend-ui | 546 | 24.4 | UI component/page |
+| 326 | `frontend/src/components/shared/ExportMenu.jsx` | frontend-ui | 36 | 1.5 | UI component/page |
+| 327 | `frontend/src/components/shared/FilterMenu.jsx` | frontend-ui | 113 | 4.8 | UI component/page |
+| 328 | `frontend/src/components/shared/globalScroll.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 329 | `frontend/src/components/shared/globalScroll.ts` | frontend-ui | 72 | 2.7 | UI component/page |
+| 330 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | frontend-ui | 119 | 4.9 | UI component/page |
+| 331 | `frontend/src/components/shared/LoadingWatchdog.jsx` | frontend-ui | 63 | 2.0 | UI component/page |
+| 332 | `frontend/src/components/shared/Modal.jsx` | frontend-ui | 34 | 1.8 | UI component/page |
+| 333 | `frontend/src/components/shared/navigationConfig.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 334 | `frontend/src/components/shared/navigationConfig.ts` | frontend-ui | 66 | 2.3 | UI component/page |
+| 335 | `frontend/src/components/shared/NotificationCenter.jsx` | frontend-ui | 594 | 30.3 | UI component/page |
+| 336 | `frontend/src/components/shared/pageActivity.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 337 | `frontend/src/components/shared/pageActivity.ts` | frontend-ui | 9 | 0.3 | UI component/page |
+| 338 | `frontend/src/components/shared/PageHeader.jsx` | frontend-ui | 55 | 2.2 | UI component/page |
+| 339 | `frontend/src/components/shared/PaginationControls.jsx` | frontend-ui | 202 | 9.6 | UI component/page |
+| 340 | `frontend/src/components/shared/PortalMenu.jsx` | frontend-ui | 221 | 7.3 | UI component/page |
+| 341 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | frontend-ui | 56 | 2.0 | UI component/page |
+| 342 | `frontend/src/components/shared/SectionSwitcher.jsx` | frontend-ui | 72 | 2.8 | UI component/page |
+| 343 | `frontend/src/components/shared/WriteConflictModal.jsx` | frontend-ui | 266 | 11.0 | UI component/page |
+| 344 | `frontend/src/components/users/PermissionEditor.jsx` | frontend-ui | 152 | 7.3 | UI component/page |
+| 345 | `frontend/src/components/users/UserDetailSheet.jsx` | frontend-ui | 103 | 5.0 | UI component/page |
+| 346 | `frontend/src/components/users/UserProfileModal.jsx` | frontend-ui | 1158 | 62.4 | UI component/page |
+| 347 | `frontend/src/components/users/Users.jsx` | frontend-ui | 1036 | 50.4 | UI component/page |
+| 348 | `frontend/src/components/utils-settings/AuditLog.jsx` | frontend-ui | 1198 | 56.2 | UI component/page |
+| 349 | `frontend/src/components/utils-settings/Backup.jsx` | frontend-ui | 1490 | 70.6 | UI component/page |
+| 350 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | frontend-ui | 58 | 3.0 | UI component/page |
+| 351 | `frontend/src/components/utils-settings/index.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 352 | `frontend/src/components/utils-settings/index.ts` | frontend-ui | 7 | 0.3 | UI component/page |
+| 353 | `frontend/src/components/utils-settings/OtpModal.jsx` | frontend-ui | 258 | 10.2 | UI component/page |
+| 354 | `frontend/src/components/utils-settings/ResetData.jsx` | frontend-ui | 297 | 13.5 | UI component/page |
+| 355 | `frontend/src/components/utils-settings/Settings.jsx` | frontend-ui | 1730 | 80.6 | UI component/page |
+| 356 | `frontend/src/components/utils-settings/settingsConflict.js` | frontend-ui | 2 | 0.0 | UI component/page |
+| 357 | `frontend/src/components/utils-settings/settingsConflict.ts` | frontend-ui | 64 | 1.8 | UI component/page |
+| 358 | `frontend/src/constants.js` | frontend-core | 2 | 0.0 | Project source/support file |
+| 359 | `frontend/src/constants.ts` | frontend-core | 185 | 4.6 | Project source/support file |
+| 360 | `frontend/src/index.jsx` | frontend-core | 194 | 6.4 | Project source/support file |
+| 361 | `frontend/src/lang/en.json` | frontend-i18n | 2721 | 134.5 | Localization dictionary |
+| 362 | `frontend/src/lang/km.json` | frontend-i18n | 2715 | 244.9 | Localization dictionary |
+| 363 | `frontend/src/platform/runtime/clientRuntime.js` | frontend-core | 2 | 0.0 | Project source/support file |
+| 364 | `frontend/src/platform/runtime/clientRuntime.ts` | frontend-core | 249 | 9.1 | Project source/support file |
+| 365 | `frontend/src/platform/storage/storagePolicy.mjs` | frontend-core | 2 | 0.0 | Project source/support file |
+| 366 | `frontend/src/platform/storage/storagePolicy.ts` | frontend-core | 40 | 1.3 | Project source/support file |
+| 367 | `frontend/src/README.md` | frontend-core | 37 | 1.5 | Documentation |
+| 368 | `frontend/src/runtime/runtimeErrorClassifier.ts` | frontend-core | 154 | 5.4 | Project source/support file |
+| 369 | `frontend/src/styles/main.css` | frontend-style | 741 | 29.9 | Project source/support file |
+| 370 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 7 | 0.2 | Project source/support file |
+| 371 | `frontend/src/types/mjs-modules.d.ts` | frontend-core | 7 | 0.2 | Project source/support file |
+| 372 | `frontend/src/types/react.d.ts` | frontend-core | 13 | 0.6 | Project source/support file |
+| 373 | `frontend/src/types/receiptContracts.ts` | frontend-core | 67 | 1.6 | Project source/support file |
+| 374 | `frontend/src/types/settingsContracts.ts` | frontend-core | 27 | 0.5 | Project source/support file |
+| 375 | `frontend/src/utils/actionGuards.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 376 | `frontend/src/utils/actionGuards.ts` | frontend-utils | 76 | 2.2 | Utility helper |
+| 377 | `frontend/src/utils/actionHistory.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 378 | `frontend/src/utils/actionHistory.ts` | frontend-utils | 282 | 10.5 | Utility helper |
+| 379 | `frontend/src/utils/appRefresh.d.ts` | frontend-utils | 4 | 0.2 | Utility helper |
+| 380 | `frontend/src/utils/appRefresh.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 381 | `frontend/src/utils/appRefresh.ts` | frontend-utils | 38 | 1.0 | Utility helper |
+| 382 | `frontend/src/utils/bulkOps.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 383 | `frontend/src/utils/bulkOps.ts` | frontend-utils | 69 | 1.9 | Utility helper |
+| 384 | `frontend/src/utils/color.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 385 | `frontend/src/utils/color.ts` | frontend-utils | 34 | 1.0 | Utility helper |
+| 386 | `frontend/src/utils/csv.d.ts` | frontend-utils | 8 | 0.8 | Utility helper |
+| 387 | `frontend/src/utils/csv.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 388 | `frontend/src/utils/csv.ts` | frontend-utils | 234 | 7.6 | Utility helper |
+| 389 | `frontend/src/utils/csvExportWorker.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 390 | `frontend/src/utils/csvExportWorker.ts` | frontend-utils | 35 | 1.0 | Utility helper |
+| 391 | `frontend/src/utils/csvImport.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 392 | `frontend/src/utils/csvImport.ts` | frontend-utils | 306 | 10.1 | Utility helper |
+| 393 | `frontend/src/utils/csvRowCounter.d.mts` | frontend-utils | 2 | 0.1 | Utility helper |
+| 394 | `frontend/src/utils/csvRowCounter.ts` | frontend-utils | 40 | 0.9 | Utility helper |
+| 395 | `frontend/src/utils/dateHelpers.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 396 | `frontend/src/utils/dateHelpers.ts` | frontend-utils | 18 | 0.6 | Utility helper |
+| 397 | `frontend/src/utils/deviceInfo.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 398 | `frontend/src/utils/deviceInfo.ts` | frontend-utils | 54 | 1.5 | Utility helper |
+| 399 | `frontend/src/utils/exportPackage.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 400 | `frontend/src/utils/exportPackage.ts` | frontend-utils | 61 | 1.4 | Utility helper |
+| 401 | `frontend/src/utils/exportReports.jsx` | frontend-utils | 366 | 9.9 | Utility helper |
+| 402 | `frontend/src/utils/favicon.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 403 | `frontend/src/utils/favicon.ts` | frontend-utils | 101 | 3.1 | Utility helper |
+| 404 | `frontend/src/utils/formatters.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 405 | `frontend/src/utils/formatters.ts` | frontend-utils | 89 | 2.7 | Utility helper |
+| 406 | `frontend/src/utils/groupedRecords.d.mts` | frontend-utils | 66 | 1.8 | Utility helper |
+| 407 | `frontend/src/utils/groupedRecords.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 408 | `frontend/src/utils/groupedRecords.ts` | frontend-utils | 330 | 11.2 | Utility helper |
+| 409 | `frontend/src/utils/historyHelpers.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 410 | `frontend/src/utils/historyHelpers.ts` | frontend-utils | 61 | 1.8 | Utility helper |
+| 411 | `frontend/src/utils/importJobRefresh.js` | frontend-utils | 6 | 0.2 | Utility helper |
+| 412 | `frontend/src/utils/importJobRefresh.ts` | frontend-utils | 106 | 3.1 | Utility helper |
+| 413 | `frontend/src/utils/index.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 414 | `frontend/src/utils/index.ts` | frontend-utils | 6 | 0.2 | Utility helper |
+| 415 | `frontend/src/utils/initials.d.mts` | frontend-utils | 27 | 0.8 | Utility helper |
+| 416 | `frontend/src/utils/initials.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 417 | `frontend/src/utils/initials.ts` | frontend-utils | 105 | 3.5 | Utility helper |
+| 418 | `frontend/src/utils/loaders.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 419 | `frontend/src/utils/loaders.ts` | frontend-utils | 101 | 3.1 | Utility helper |
+| 420 | `frontend/src/utils/mediaUpload.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 421 | `frontend/src/utils/mediaUpload.ts` | frontend-utils | 145 | 4.1 | Utility helper |
+| 422 | `frontend/src/utils/permissions.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 423 | `frontend/src/utils/permissions.ts` | frontend-utils | 22 | 0.6 | Utility helper |
+| 424 | `frontend/src/utils/pricing.d.ts` | frontend-utils | 16 | 0.8 | Utility helper |
+| 425 | `frontend/src/utils/pricing.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 426 | `frontend/src/utils/pricing.ts` | frontend-utils | 102 | 4.0 | Utility helper |
+| 427 | `frontend/src/utils/printReceipt.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 428 | `frontend/src/utils/printReceipt.ts` | frontend-utils | 1016 | 36.0 | Utility helper |
+| 429 | `frontend/src/utils/productBatches.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 430 | `frontend/src/utils/productBatches.ts` | frontend-utils | 61 | 1.8 | Utility helper |
+| 431 | `frontend/src/utils/productGrouping.d.mts` | frontend-utils | 55 | 1.4 | Utility helper |
+| 432 | `frontend/src/utils/productGrouping.mjs` | frontend-utils | 2 | 0.0 | Utility helper |
+| 433 | `frontend/src/utils/productGrouping.ts` | frontend-utils | 315 | 11.3 | Utility helper |
+| 434 | `frontend/src/utils/publicAssetUrls.d.ts` | frontend-utils | 2 | 0.1 | Utility helper |
+| 435 | `frontend/src/utils/publicAssetUrls.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 436 | `frontend/src/utils/publicAssetUrls.ts` | frontend-utils | 80 | 3.1 | Utility helper |
+| 437 | `frontend/src/utils/receiptAppliedConfig.ts` | frontend-utils | 147 | 4.5 | Utility helper |
+| 438 | `frontend/src/utils/scriptTypography.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 439 | `frontend/src/utils/scriptTypography.ts` | frontend-utils | 27 | 0.7 | Utility helper |
+| 440 | `frontend/src/utils/settingsRefresh.js` | frontend-utils | 2 | 0.0 | Utility helper |
+| 441 | `frontend/src/utils/settingsRefresh.ts` | frontend-utils | 84 | 2.5 | Utility helper |
+| 442 | `frontend/src/utils/settingsWriteOptions.ts` | frontend-utils | 13 | 0.5 | Utility helper |
+| 443 | `frontend/src/web-api.js` | frontend-core | 2 | 0.0 | Project source/support file |
+| 444 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
+| 445 | `frontend/tailwind.config.mjs` | frontend-root | 17 | 0.4 | Project source/support file |
+| 446 | `frontend/tests/actionGuards.test.mjs` | frontend-root | 72 | 2.2 | Project source/support file |
+| 447 | `frontend/tests/actionStability.test.mjs` | frontend-root | 729 | 58.7 | Project source/support file |
+| 448 | `frontend/tests/adminShellMediaGuards.test.mjs` | frontend-root | 147 | 5.5 | Project source/support file |
+| 449 | `frontend/tests/apiHttp.test.mjs` | frontend-root | 433 | 18.4 | Project source/support file |
+| 450 | `frontend/tests/appRefresh.test.mjs` | frontend-root | 47 | 1.2 | Project source/support file |
+| 451 | `frontend/tests/appShellUtils.test.mjs` | frontend-root | 114 | 5.0 | Project source/support file |
+| 452 | `frontend/tests/assetCompression.test.mjs` | frontend-root | 35 | 1.5 | Project source/support file |
+| 453 | `frontend/tests/backupJobs.test.mjs` | frontend-root | 136 | 9.0 | Project source/support file |
+| 454 | `frontend/tests/barcodeImageScanner.test.mjs` | frontend-root | 120 | 3.1 | Project source/support file |
+| 455 | `frontend/tests/barcodeScannerState.test.mjs` | frontend-root | 62 | 2.5 | Project source/support file |
+| 456 | `frontend/tests/bulkOps.test.mjs` | frontend-root | 58 | 1.9 | Project source/support file |
+| 457 | `frontend/tests/contactImportWorker.test.mjs` | frontend-root | 39 | 1.6 | Project source/support file |
+| 458 | `frontend/tests/csvImport.test.mjs` | frontend-root | 84 | 3.4 | Project source/support file |
+| 459 | `frontend/tests/dashboardDataReliability.test.mjs` | frontend-root | 31 | 3.2 | Project source/support file |
+| 460 | `frontend/tests/dateHelpers.test.mjs` | frontend-root | 39 | 1.0 | Project source/support file |
+| 461 | `frontend/tests/deviceInfo.test.mjs` | frontend-root | 61 | 1.8 | Project source/support file |
+| 462 | `frontend/tests/exportPackages.test.mjs` | frontend-root | 103 | 3.9 | Project source/support file |
+| 463 | `frontend/tests/formatters.test.mjs` | frontend-root | 36 | 0.9 | Project source/support file |
+| 464 | `frontend/tests/globalScroll.test.mjs` | frontend-root | 25 | 0.7 | Project source/support file |
+| 465 | `frontend/tests/globalScrollControls.test.mjs` | frontend-root | 32 | 1.1 | Project source/support file |
+| 466 | `frontend/tests/groupedRecords.test.mjs` | frontend-root | 115 | 3.7 | Project source/support file |
+| 467 | `frontend/tests/historyHelpers.test.mjs` | frontend-root | 72 | 2.1 | Project source/support file |
+| 468 | `frontend/tests/importJobRefresh.test.mjs` | frontend-root | 87 | 2.4 | Project source/support file |
+| 469 | `frontend/tests/initials.test.mjs` | frontend-root | 66 | 2.1 | Project source/support file |
+| 470 | `frontend/tests/inventoryImportWorker.test.mjs` | frontend-root | 39 | 1.7 | Project source/support file |
+| 471 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | frontend-root | 43 | 2.3 | Project source/support file |
+| 472 | `frontend/tests/inventoryMovementGroups.test.mjs` | frontend-root | 64 | 2.3 | Project source/support file |
+| 473 | `frontend/tests/inventoryRfidSection.test.mjs` | frontend-root | 23 | 1.1 | Project source/support file |
+| 474 | `frontend/tests/jsxSyntaxCheck.mjs` | frontend-root | 36 | 1.2 | Project source/support file |
+| 475 | `frontend/tests/loaders.test.mjs` | frontend-root | 82 | 2.4 | Project source/support file |
+| 476 | `frontend/tests/mediaUploadHelpers.test.mjs` | frontend-root | 36 | 1.3 | Project source/support file |
+| 477 | `frontend/tests/navigationConfig.test.mjs` | frontend-root | 41 | 1.3 | Project source/support file |
+| 478 | `frontend/tests/notificationBadge.test.mjs` | frontend-root | 16 | 0.7 | Project source/support file |
+| 479 | `frontend/tests/offlineSalesQueue.test.mjs` | frontend-root | 78 | 3.5 | Project source/support file |
+| 480 | `frontend/tests/offlineSecurityHardening.test.mjs` | frontend-root | 93 | 4.1 | Project source/support file |
+| 481 | `frontend/tests/offlineSyncArchitecture.test.mjs` | frontend-root | 92 | 4.5 | Project source/support file |
+| 482 | `frontend/tests/ownedGoogleAuth.test.mjs` | frontend-root | 56 | 2.5 | Project source/support file |
+| 483 | `frontend/tests/performanceLoadingUx.test.mjs` | frontend-root | 2077 | 92.7 | Project source/support file |
+| 484 | `frontend/tests/permissionEditor.test.mjs` | frontend-root | 36 | 1.3 | Project source/support file |
+| 485 | `frontend/tests/permissions.test.mjs` | frontend-root | 18 | 0.6 | Project source/support file |
+| 486 | `frontend/tests/portalCatalogDisplay.test.mjs` | frontend-root | 124 | 4.5 | Project source/support file |
+| 487 | `frontend/tests/portalContentI18n.test.mjs` | frontend-root | 94 | 3.3 | Project source/support file |
+| 488 | `frontend/tests/portalEditorUtils.test.mjs` | frontend-root | 57 | 1.9 | Project source/support file |
+| 489 | `frontend/tests/portalFaqVocabulary.test.mjs` | frontend-root | 104 | 4.9 | Project source/support file |
+| 490 | `frontend/tests/portalLanguagePacks.test.mjs` | frontend-root | 50 | 3.1 | Project source/support file |
+| 491 | `frontend/tests/portalTranslateController.test.mjs` | frontend-root | 145 | 4.5 | Project source/support file |
+| 492 | `frontend/tests/posCore.test.mjs` | frontend-root | 167 | 6.2 | Project source/support file |
+| 493 | `frontend/tests/pricingContacts.test.mjs` | frontend-root | 108 | 3.9 | Project source/support file |
+| 494 | `frontend/tests/productBatches.test.mjs` | frontend-root | 55 | 1.3 | Project source/support file |
+| 495 | `frontend/tests/productDiscountUx.test.mjs` | frontend-root | 52 | 2.4 | Project source/support file |
+| 496 | `frontend/tests/productDisplayHelpers.test.mjs` | frontend-root | 107 | 3.5 | Project source/support file |
+| 497 | `frontend/tests/productFilterHelpers.test.mjs` | frontend-root | 108 | 3.1 | Project source/support file |
+| 498 | `frontend/tests/productGalleryHelpers.test.mjs` | frontend-root | 141 | 4.3 | Project source/support file |
+| 499 | `frontend/tests/productGrouping.test.mjs` | frontend-root | 112 | 4.8 | Project source/support file |
+| 500 | `frontend/tests/productGroupViewHelpers.test.mjs` | frontend-root | 53 | 1.4 | Project source/support file |
+| 501 | `frontend/tests/productHistoryHelpers.test.mjs` | frontend-root | 44 | 1.4 | Project source/support file |
+| 502 | `frontend/tests/productImportPlanner.test.mjs` | frontend-root | 279 | 13.6 | Project source/support file |
+| 503 | `frontend/tests/productImportWorkerFallback.test.mjs` | frontend-root | 41 | 1.9 | Project source/support file |
+| 504 | `frontend/tests/productMenuHelpers.test.mjs` | frontend-root | 168 | 5.3 | Project source/support file |
+| 505 | `frontend/tests/productPageHelpers.test.mjs` | frontend-root | 23 | 0.8 | Project source/support file |
+| 506 | `frontend/tests/productSearchPagination.test.mjs` | frontend-root | 140 | 5.4 | Project source/support file |
+| 507 | `frontend/tests/productSelectionHelpers.test.mjs` | frontend-root | 73 | 2.8 | Project source/support file |
+| 508 | `frontend/tests/productWriteHelpers.test.mjs` | frontend-root | 517 | 12.9 | Project source/support file |
+| 509 | `frontend/tests/publicErrorRecovery.test.mjs` | frontend-root | 35 | 1.2 | Project source/support file |
+| 510 | `frontend/tests/receiptSettingsSync.test.mjs` | frontend-root | 43 | 3.1 | Project source/support file |
+| 511 | `frontend/tests/receiptTemplate.test.mjs` | frontend-root | 81 | 3.6 | Project source/support file |
+| 512 | `frontend/tests/returnsLayout.test.mjs` | frontend-root | 23 | 1.6 | Project source/support file |
+| 513 | `frontend/tests/runtimeErrorClassifier.test.mjs` | frontend-root | 63 | 2.5 | Project source/support file |
+| 514 | `frontend/tests/salesImportWorker.test.mjs` | frontend-root | 39 | 1.7 | Project source/support file |
+| 515 | `frontend/tests/scanbotScanner.test.mjs` | frontend-root | 111 | 3.0 | Project source/support file |
+| 516 | `frontend/tests/scriptTypography.test.mjs` | frontend-root | 17 | 0.8 | Project source/support file |
+| 517 | `frontend/tests/sectionNavigation.test.mjs` | frontend-root | 48 | 2.4 | Project source/support file |
+| 518 | `frontend/tests/settingsConflictHelpers.test.mjs` | frontend-root | 43 | 1.4 | Project source/support file |
+| 519 | `frontend/tests/settingsRefresh.test.mjs` | frontend-root | 73 | 1.6 | Project source/support file |
+| 520 | `frontend/tests/storagePolicy.test.mjs` | frontend-root | 42 | 1.3 | Project source/support file |
+| 521 | `frontend/tests/utilsSettingsBarrel.test.mjs` | frontend-root | 19 | 1.1 | Project source/support file |
+| 522 | `frontend/tsconfig.json` | frontend-root | 41 | 1.1 | Configuration/data manifest |
+| 523 | `frontend/vite.config.mjs` | frontend-root | 234 | 9.1 | Project source/support file |
+| 524 | `ops/scripts/architecture/generated-bulk-audit.mjs` | project-scripts | 607 | 23.0 | Project source/support file |
+| 525 | `ops/scripts/architecture/language-runtime-audit.mjs` | project-scripts | 1561 | 67.7 | Project source/support file |
+| 526 | `ops/scripts/architecture/organization-audit.mjs` | project-scripts | 385 | 17.1 | Project source/support file |
+| 527 | `ops/scripts/architecture/phase29-audit.mjs` | project-scripts | 576 | 20.1 | Project source/support file |
+| 528 | `ops/scripts/backend/schema-audit.js` | project-scripts | 496 | 16.9 | Project source/support file |
+| 529 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | project-scripts | 196 | 7.8 | Project source/support file |
+| 530 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |
+| 531 | `ops/scripts/backend/verify-data-integrity.js` | project-scripts | 689 | 29.0 | Project source/support file |
+| 532 | `ops/scripts/frontend/verify-i18n.js` | project-scripts | 145 | 4.3 | Project source/support file |
+| 533 | `ops/scripts/frontend/verify-performance.js` | project-scripts | 144 | 9.6 | Project source/support file |
+| 534 | `ops/scripts/frontend/verify-ui.js` | project-scripts | 243 | 8.7 | Project source/support file |
+| 535 | `ops/scripts/lib/fs-utils.js` | project-scripts | 214 | 5.3 | Project source/support file |
+| 536 | `ops/scripts/lib/report-utils.js` | project-scripts | 57 | 1.5 | Project source/support file |
+| 537 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 265 | 7.9 | Project source/support file |
+| 538 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | project-scripts | 92 | 2.8 | Project source/support file |
+| 539 | `ops/scripts/powershell/docker-release.ps1` | project-scripts | 1011 | 48.0 | Project source/support file |
+| 540 | `ops/scripts/powershell/full-automation.ps1` | project-scripts | 214 | 8.1 | Project source/support file |
+| 541 | `ops/scripts/powershell/npm-install-mode.ps1` | project-scripts | 28 | 0.8 | Project source/support file |
+| 542 | `ops/scripts/powershell/runtime-bootstrap.ps1` | project-scripts | 592 | 21.6 | Project source/support file |
+| 543 | `ops/scripts/powershell/start-runtime.ps1` | project-scripts | 377 | 16.3 | Project source/support file |
+| 544 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | project-scripts | 240 | 7.8 | Project source/support file |
+| 545 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | project-scripts | 162 | 6.2 | Project source/support file |
+| 546 | `ops/scripts/runtime/audits/audit-auth.mjs` | project-scripts | 127 | 4.5 | Project source/support file |
+| 547 | `ops/scripts/runtime/audits/audit-manifest.mjs` | project-scripts | 253 | 7.6 | Project source/support file |
+| 548 | `ops/scripts/runtime/audits/audit-report-html.mjs` | project-scripts | 356 | 14.0 | Project source/support file |
+| 549 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | project-scripts | 1425 | 53.8 | Project source/support file |
+| 550 | `ops/scripts/runtime/audits/full-app-audit.mjs` | project-scripts | 621 | 27.5 | Project source/support file |
+| 551 | `ops/scripts/runtime/browser-action-smoke.mjs` | project-scripts | 775 | 28.5 | Project source/support file |
+| 552 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | project-scripts | 244 | 10.8 | Project source/support file |
+| 553 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | project-scripts | 144 | 6.1 | Project source/support file |
+| 554 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | project-scripts | 288 | 12.1 | Project source/support file |
+| 555 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | project-scripts | 157 | 6.1 | Project source/support file |
+| 556 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | project-scripts | 67 | 2.4 | Project source/support file |
+| 557 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | project-scripts | 129 | 6.2 | Project source/support file |
+| 558 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | project-scripts | 126 | 5.7 | Project source/support file |
+| 559 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | project-scripts | 125 | 5.9 | Project source/support file |
+| 560 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | project-scripts | 154 | 7.8 | Project source/support file |
+| 561 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | project-scripts | 198 | 6.4 | Project source/support file |
+| 562 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | project-scripts | 125 | 6.2 | Project source/support file |
+| 563 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | project-scripts | 119 | 5.8 | Project source/support file |
+| 564 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | project-scripts | 132 | 6.1 | Project source/support file |
+| 565 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | project-scripts | 117 | 5.7 | Project source/support file |
+| 566 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | project-scripts | 129 | 6.4 | Project source/support file |
+| 567 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | project-scripts | 119 | 5.7 | Project source/support file |
+| 568 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | project-scripts | 128 | 5.6 | Project source/support file |
+| 569 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | project-scripts | 133 | 6.3 | Project source/support file |
+| 570 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | project-scripts | 122 | 5.7 | Project source/support file |
+| 571 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | project-scripts | 855 | 56.5 | Project source/support file |
+| 572 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | project-scripts | 150 | 7.5 | Project source/support file |
+| 573 | `ops/scripts/runtime/smoke/check-public-url.mjs` | project-scripts | 239 | 8.2 | Project source/support file |
+| 574 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | project-scripts | 78 | 3.7 | Project source/support file |
+| 575 | `ops/scripts/runtime/smoke/live-smoke.mjs` | project-scripts | 319 | 13.5 | Project source/support file |
+| 576 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | project-scripts | 175 | 5.8 | Project source/support file |
+| 577 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | project-scripts | 231 | 9.7 | Project source/support file |
+| 578 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | project-scripts | 431 | 18.8 | Project source/support file |
+| 579 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | project-scripts | 108 | 4.2 | Project source/support file |
+| 580 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | project-scripts | 212 | 6.8 | Project source/support file |
+| 581 | `ops/scripts/runtime/storage/prune-storage.mjs` | project-scripts | 466 | 15.8 | Project source/support file |
+| 582 | `ops/scripts/runtime/storage/restore-candidates.mjs` | project-scripts | 189 | 6.9 | Project source/support file |
+| 583 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | project-scripts | 204 | 7.3 | Project source/support file |
+| 584 | `ops/scripts/verification/verify-backup-reliability.js` | project-scripts | 140 | 5.0 | Project source/support file |
+| 585 | `ops/scripts/verification/verify-docker-release.js` | project-scripts | 651 | 30.7 | Project source/support file |
+| 586 | `ops/scripts/verification/verify-hardening-policy.js` | project-scripts | 140 | 5.5 | Project source/support file |
+| 587 | `ops/scripts/verification/verify-runtime-deps.js` | project-scripts | 351 | 14.8 | Project source/support file |
+| 588 | `ops/scripts/verification/verify-scale-services.js` | project-scripts | 175 | 6.5 | Project source/support file |
+| 589 | `ops/scripts/verification/verify-secret-hygiene.js` | project-scripts | 56 | 2.0 | Project source/support file |
+| 590 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
+| 591 | `README.md` | project-root | 159 | 11.5 | Project documentation entrypoint |
+| 592 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
+| 593 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
+| 594 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |
+| 595 | `run/docker/backup.bat` | project-scripts | 15 | 0.6 | Project source/support file |
+| 596 | `run/docker/doctor.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 597 | `run/docker/install.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 598 | `run/docker/README.md` | project-scripts | 44 | 3.1 | Documentation |
+| 599 | `run/docker/release.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 600 | `run/docker/restore.bat` | project-scripts | 29 | 1.0 | Project source/support file |
+| 601 | `run/docker/rotate-cloudflare.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 602 | `run/docker/start.bat` | project-scripts | 15 | 0.6 | Project source/support file |
+| 603 | `run/docker/update.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 604 | `run/full-automation.bat` | project-scripts | 22 | 0.6 | Project source/support file |
+| 605 | `run/README.md` | project-scripts | 47 | 2.9 | Documentation |
+| 606 | `run/setup.bat` | project-scripts | 349 | 16.2 | Project source/support file |
+| 607 | `run/sh/setup.sh` | project-scripts | 116 | 3.3 | Project source/support file |
+| 608 | `run/sh/start-server.sh` | project-scripts | 147 | 5.6 | Project source/support file |
+| 609 | `run/sh/stop-server.sh` | project-scripts | 62 | 1.6 | Project source/support file |
+| 610 | `run/start-server.bat` | project-scripts | 570 | 29.3 | Project source/support file |
+| 611 | `run/stop-server.bat` | project-scripts | 183 | 8.4 | Project source/support file |
+| 612 | `run/verify-local.bat` | project-scripts | 148 | 4.9 | Project source/support file |
+| 613 | `Start Business OS.bat` | project-root | 38 | 1.3 | Project source/support file |

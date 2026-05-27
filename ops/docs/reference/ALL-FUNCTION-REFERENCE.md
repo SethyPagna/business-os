@@ -4,7 +4,7 @@ Auto-generated function/class symbol commentary for all first-party code files (
 
 ## 1. Coverage Summary
 
-Code files scanned: **548**
+Code files scanned: **545**
 
 ## 2. Symbol Count by File
 
@@ -189,375 +189,372 @@ Code files scanned: **548**
 | 177 | `frontend/src/components/catalog/portalTranslateController.mjs` | 0 |
 | 178 | `frontend/src/components/catalog/portalTranslateController.ts` | 17 |
 | 179 | `frontend/src/components/contacts/ContactImportModal.jsx` | 10 |
-| 180 | `frontend/src/components/contacts/contactImportParser.mjs` | 0 |
-| 181 | `frontend/src/components/contacts/contactImportParser.ts` | 0 |
-| 182 | `frontend/src/components/contacts/contactImportWorker.mjs` | 0 |
-| 183 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
-| 184 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 |
-| 185 | `frontend/src/components/contacts/contactOptionUtils.ts` | 10 |
-| 186 | `frontend/src/components/contacts/Contacts.jsx` | 13 |
-| 187 | `frontend/src/components/contacts/CustomerFormModal.jsx` | 11 |
-| 188 | `frontend/src/components/contacts/customerMembershipNumber.js` | 0 |
-| 189 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
-| 190 | `frontend/src/components/contacts/CustomersTab.jsx` | 12 |
-| 191 | `frontend/src/components/contacts/DeliveryTab.jsx` | 23 |
-| 192 | `frontend/src/components/contacts/shared.jsx` | 9 |
-| 193 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
-| 194 | `frontend/src/components/custom-tables/CustomTables.jsx` | 11 |
-| 195 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 5 |
-| 196 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 1 |
-| 197 | `frontend/src/components/dashboard/charts/index.js` | 0 |
-| 198 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
-| 199 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 7 |
-| 200 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 |
-| 201 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
-| 202 | `frontend/src/components/dashboard/MiniStat.jsx` | 1 |
-| 203 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
-| 204 | `frontend/src/components/files/FilesPage.jsx` | 25 |
-| 205 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
-| 206 | `frontend/src/components/files/FilesResponsesTab.jsx` | 1 |
-| 207 | `frontend/src/components/inventory/DualMoney.jsx` | 1 |
-| 208 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
-| 209 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 10 |
-| 210 | `frontend/src/components/inventory/inventoryImportWorker.mjs` | 0 |
-| 211 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
-| 212 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
-| 213 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
-| 214 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 1 |
-| 215 | `frontend/src/components/inventory/movementGroups.js` | 0 |
-| 216 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
-| 217 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
-| 218 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
-| 219 | `frontend/src/components/navigation/Sidebar.jsx` | 7 |
-| 220 | `frontend/src/components/pos/CartItem.jsx` | 1 |
-| 221 | `frontend/src/components/pos/FilterPanel.jsx` | 6 |
-| 222 | `frontend/src/components/pos/POS.jsx` | 22 |
-| 223 | `frontend/src/components/pos/posCore.mjs` | 0 |
-| 224 | `frontend/src/components/pos/posCore.ts` | 10 |
-| 225 | `frontend/src/components/pos/ProductImage.jsx` | 1 |
-| 226 | `frontend/src/components/pos/QuickAddModal.jsx` | 2 |
-| 227 | `frontend/src/components/products/config/productPageConfig.mjs` | 0 |
-| 228 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
-| 229 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 4 |
-| 230 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 2 |
-| 231 | `frontend/src/components/products/forms/ProductForm.jsx` | 17 |
-| 232 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 5 |
-| 233 | `frontend/src/components/products/helpers/productDisplayHelpers.mjs` | 0 |
-| 234 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 6 |
-| 235 | `frontend/src/components/products/helpers/productFilterHelpers.mjs` | 0 |
-| 236 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 9 |
-| 237 | `frontend/src/components/products/helpers/productGalleryHelpers.mjs` | 0 |
-| 238 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 8 |
-| 239 | `frontend/src/components/products/helpers/productGroupViewHelpers.mjs` | 0 |
-| 240 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 2 |
-| 241 | `frontend/src/components/products/helpers/productMenuHelpers.mjs` | 0 |
-| 242 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 5 |
-| 243 | `frontend/src/components/products/helpers/productPageHelpers.mjs` | 0 |
-| 244 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 3 |
-| 245 | `frontend/src/components/products/helpers/productSelectionHelpers.mjs` | 0 |
-| 246 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 7 |
-| 247 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | 0 |
-| 248 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 18 |
-| 249 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 |
-| 250 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 1 |
-| 251 | `frontend/src/components/products/import/BulkImportModal.jsx` | 63 |
-| 252 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 |
-| 253 | `frontend/src/components/products/import/productImportPlanner.ts` | 18 |
-| 254 | `frontend/src/components/products/import/productImportWorker.mjs` | 0 |
-| 255 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
-| 256 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 16 |
-| 257 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 8 |
-| 258 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | 8 |
-| 259 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | 0 |
-| 260 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
-| 261 | `frontend/src/components/products/Products.jsx` | 15 |
-| 262 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | 0 |
-| 263 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
-| 264 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 5 |
-| 265 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | 0 |
-| 266 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
-| 267 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | 0 |
-| 268 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 9 |
-| 269 | `frontend/src/components/products/shared/primitives.jsx` | 11 |
-| 270 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 |
-| 271 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
-| 272 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 5 |
-| 273 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
-| 274 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 4 |
-| 275 | `frontend/src/components/receipt-settings/constants.js` | 0 |
-| 276 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
-| 277 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 0 |
-| 278 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 9 |
-| 279 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 9 |
-| 280 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 |
-| 281 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
-| 282 | `frontend/src/components/receipt-settings/template.js` | 0 |
-| 283 | `frontend/src/components/receipt-settings/template.ts` | 4 |
-| 284 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
-| 285 | `frontend/src/components/returns/EditReturnModal.jsx` | 5 |
-| 286 | `frontend/src/components/returns/NewReturnModal.jsx` | 10 |
-| 287 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 6 |
-| 288 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 3 |
-| 289 | `frontend/src/components/returns/Returns.jsx` | 13 |
-| 290 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 5 |
-| 291 | `frontend/src/components/sales/ExportModal.jsx` | 9 |
-| 292 | `frontend/src/components/sales/SaleDetailModal.jsx` | 6 |
-| 293 | `frontend/src/components/sales/Sales.jsx` | 14 |
-| 294 | `frontend/src/components/sales/SalesImportModal.jsx` | 10 |
-| 295 | `frontend/src/components/sales/salesImportWorker.mjs` | 0 |
-| 296 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
-| 297 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
-| 298 | `frontend/src/components/sales/StatusBadge.jsx` | 2 |
-| 299 | `frontend/src/components/server/ServerPage.jsx` | 16 |
-| 300 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 4 |
-| 301 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
-| 302 | `frontend/src/components/shared/ExportMenu.jsx` | 1 |
-| 303 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
-| 304 | `frontend/src/components/shared/globalScroll.js` | 0 |
-| 305 | `frontend/src/components/shared/globalScroll.ts` | 5 |
-| 306 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
-| 307 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 |
-| 308 | `frontend/src/components/shared/Modal.jsx` | 1 |
-| 309 | `frontend/src/components/shared/navigationConfig.js` | 0 |
-| 310 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
-| 311 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
-| 312 | `frontend/src/components/shared/pageActivity.js` | 0 |
-| 313 | `frontend/src/components/shared/pageActivity.ts` | 1 |
-| 314 | `frontend/src/components/shared/PageHeader.jsx` | 1 |
-| 315 | `frontend/src/components/shared/PaginationControls.jsx` | 5 |
-| 316 | `frontend/src/components/shared/PortalMenu.jsx` | 6 |
-| 317 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 3 |
-| 318 | `frontend/src/components/shared/SectionSwitcher.jsx` | 3 |
-| 319 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
-| 320 | `frontend/src/components/users/PermissionEditor.jsx` | 5 |
-| 321 | `frontend/src/components/users/UserDetailSheet.jsx` | 3 |
-| 322 | `frontend/src/components/users/UserProfileModal.jsx` | 21 |
-| 323 | `frontend/src/components/users/Users.jsx` | 18 |
-| 324 | `frontend/src/components/utils-settings/AuditLog.jsx` | 16 |
-| 325 | `frontend/src/components/utils-settings/Backup.jsx` | 30 |
-| 326 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 |
-| 327 | `frontend/src/components/utils-settings/index.js` | 0 |
-| 328 | `frontend/src/components/utils-settings/index.ts` | 0 |
-| 329 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 |
-| 330 | `frontend/src/components/utils-settings/ResetData.jsx` | 8 |
-| 331 | `frontend/src/components/utils-settings/Settings.jsx` | 21 |
-| 332 | `frontend/src/components/utils-settings/settingsConflict.js` | 0 |
-| 333 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
-| 334 | `frontend/src/constants.js` | 0 |
-| 335 | `frontend/src/constants.ts` | 3 |
-| 336 | `frontend/src/index.jsx` | 10 |
-| 337 | `frontend/src/platform/runtime/clientRuntime.js` | 0 |
-| 338 | `frontend/src/platform/runtime/clientRuntime.ts` | 17 |
-| 339 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 |
-| 340 | `frontend/src/platform/storage/storagePolicy.ts` | 3 |
-| 341 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 13 |
-| 342 | `frontend/src/types/jsx-modules.d.ts` | 0 |
-| 343 | `frontend/src/types/mjs-modules.d.ts` | 0 |
-| 344 | `frontend/src/types/react.d.ts` | 1 |
-| 345 | `frontend/src/types/receiptContracts.ts` | 0 |
-| 346 | `frontend/src/types/settingsContracts.ts` | 0 |
-| 347 | `frontend/src/utils/actionGuards.mjs` | 0 |
-| 348 | `frontend/src/utils/actionGuards.ts` | 5 |
-| 349 | `frontend/src/utils/actionHistory.mjs` | 0 |
-| 350 | `frontend/src/utils/actionHistory.ts` | 5 |
-| 351 | `frontend/src/utils/appRefresh.d.ts` | 2 |
-| 352 | `frontend/src/utils/appRefresh.js` | 0 |
-| 353 | `frontend/src/utils/appRefresh.ts` | 2 |
-| 354 | `frontend/src/utils/bulkOps.mjs` | 0 |
-| 355 | `frontend/src/utils/bulkOps.ts` | 1 |
-| 356 | `frontend/src/utils/color.js` | 0 |
-| 357 | `frontend/src/utils/color.ts` | 3 |
-| 358 | `frontend/src/utils/csv.d.ts` | 7 |
-| 359 | `frontend/src/utils/csv.js` | 0 |
-| 360 | `frontend/src/utils/csv.ts` | 15 |
-| 361 | `frontend/src/utils/csvExportWorker.mjs` | 0 |
-| 362 | `frontend/src/utils/csvExportWorker.ts` | 1 |
-| 363 | `frontend/src/utils/csvImport.js` | 0 |
-| 364 | `frontend/src/utils/csvImport.ts` | 19 |
-| 365 | `frontend/src/utils/csvRowCounter.mjs` | 0 |
-| 366 | `frontend/src/utils/csvRowCounter.ts` | 2 |
-| 367 | `frontend/src/utils/dateHelpers.js` | 0 |
-| 368 | `frontend/src/utils/dateHelpers.ts` | 3 |
-| 369 | `frontend/src/utils/deviceInfo.js` | 0 |
-| 370 | `frontend/src/utils/deviceInfo.ts` | 4 |
-| 371 | `frontend/src/utils/exportPackage.js` | 0 |
-| 372 | `frontend/src/utils/exportPackage.ts` | 2 |
-| 373 | `frontend/src/utils/exportReports.jsx` | 9 |
-| 374 | `frontend/src/utils/favicon.js` | 0 |
-| 375 | `frontend/src/utils/favicon.ts` | 4 |
-| 376 | `frontend/src/utils/formatters.js` | 0 |
-| 377 | `frontend/src/utils/formatters.ts` | 5 |
-| 378 | `frontend/src/utils/groupedRecords.mjs` | 0 |
-| 379 | `frontend/src/utils/groupedRecords.ts` | 8 |
-| 380 | `frontend/src/utils/historyHelpers.mjs` | 0 |
-| 381 | `frontend/src/utils/historyHelpers.ts` | 2 |
-| 382 | `frontend/src/utils/importJobRefresh.js` | 0 |
-| 383 | `frontend/src/utils/importJobRefresh.ts` | 7 |
-| 384 | `frontend/src/utils/index.js` | 0 |
-| 385 | `frontend/src/utils/index.ts` | 0 |
-| 386 | `frontend/src/utils/initials.mjs` | 0 |
-| 387 | `frontend/src/utils/initials.ts` | 7 |
-| 388 | `frontend/src/utils/loaders.mjs` | 0 |
-| 389 | `frontend/src/utils/loaders.ts` | 7 |
-| 390 | `frontend/src/utils/mediaUpload.js` | 0 |
-| 391 | `frontend/src/utils/mediaUpload.ts` | 5 |
-| 392 | `frontend/src/utils/permissions.js` | 0 |
-| 393 | `frontend/src/utils/permissions.ts` | 2 |
-| 394 | `frontend/src/utils/pricing.d.ts` | 8 |
-| 395 | `frontend/src/utils/pricing.js` | 0 |
-| 396 | `frontend/src/utils/pricing.ts` | 8 |
-| 397 | `frontend/src/utils/printReceipt.js` | 0 |
-| 398 | `frontend/src/utils/printReceipt.ts` | 40 |
-| 399 | `frontend/src/utils/productBatches.mjs` | 0 |
-| 400 | `frontend/src/utils/productBatches.ts` | 3 |
-| 401 | `frontend/src/utils/productGrouping.mjs` | 0 |
-| 402 | `frontend/src/utils/productGrouping.ts` | 13 |
-| 403 | `frontend/src/utils/publicAssetUrls.d.ts` | 1 |
-| 404 | `frontend/src/utils/publicAssetUrls.js` | 0 |
-| 405 | `frontend/src/utils/publicAssetUrls.ts` | 8 |
-| 406 | `frontend/src/utils/receiptAppliedConfig.ts` | 7 |
-| 407 | `frontend/src/utils/scriptTypography.js` | 0 |
-| 408 | `frontend/src/utils/scriptTypography.ts` | 3 |
-| 409 | `frontend/src/utils/settingsRefresh.js` | 0 |
-| 410 | `frontend/src/utils/settingsRefresh.ts` | 2 |
-| 411 | `frontend/src/utils/settingsWriteOptions.ts` | 1 |
-| 412 | `frontend/src/web-api.js` | 0 |
-| 413 | `frontend/src/web-api.ts` | 33 |
-| 414 | `frontend/tailwind.config.mjs` | 0 |
-| 415 | `frontend/tests/actionGuards.test.mjs` | 1 |
-| 416 | `frontend/tests/actionStability.test.mjs` | 3 |
-| 417 | `frontend/tests/adminShellMediaGuards.test.mjs` | 0 |
-| 418 | `frontend/tests/apiHttp.test.mjs` | 3 |
-| 419 | `frontend/tests/appRefresh.test.mjs` | 2 |
-| 420 | `frontend/tests/appShellUtils.test.mjs` | 1 |
-| 421 | `frontend/tests/assetCompression.test.mjs` | 1 |
-| 422 | `frontend/tests/backupJobs.test.mjs` | 0 |
-| 423 | `frontend/tests/barcodeImageScanner.test.mjs` | 1 |
-| 424 | `frontend/tests/barcodeScannerState.test.mjs` | 1 |
-| 425 | `frontend/tests/bulkOps.test.mjs` | 1 |
-| 426 | `frontend/tests/contactImportWorker.test.mjs` | 1 |
-| 427 | `frontend/tests/csvImport.test.mjs` | 1 |
-| 428 | `frontend/tests/dashboardDataReliability.test.mjs` | 0 |
-| 429 | `frontend/tests/dateHelpers.test.mjs` | 2 |
-| 430 | `frontend/tests/deviceInfo.test.mjs` | 2 |
-| 431 | `frontend/tests/exportPackages.test.mjs` | 1 |
-| 432 | `frontend/tests/formatters.test.mjs` | 1 |
-| 433 | `frontend/tests/globalScroll.test.mjs` | 0 |
-| 434 | `frontend/tests/globalScrollControls.test.mjs` | 1 |
-| 435 | `frontend/tests/groupedRecords.test.mjs` | 1 |
-| 436 | `frontend/tests/historyHelpers.test.mjs` | 1 |
-| 437 | `frontend/tests/importJobRefresh.test.mjs` | 4 |
-| 438 | `frontend/tests/initials.test.mjs` | 1 |
-| 439 | `frontend/tests/inventoryImportWorker.test.mjs` | 1 |
-| 440 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 0 |
-| 441 | `frontend/tests/inventoryMovementGroups.test.mjs` | 1 |
-| 442 | `frontend/tests/inventoryRfidSection.test.mjs` | 0 |
-| 443 | `frontend/tests/jsxSyntaxCheck.mjs` | 1 |
-| 444 | `frontend/tests/loaders.test.mjs` | 1 |
-| 445 | `frontend/tests/mediaUploadHelpers.test.mjs` | 1 |
-| 446 | `frontend/tests/navigationConfig.test.mjs` | 1 |
-| 447 | `frontend/tests/notificationBadge.test.mjs` | 0 |
-| 448 | `frontend/tests/offlineSalesQueue.test.mjs` | 1 |
-| 449 | `frontend/tests/offlineSecurityHardening.test.mjs` | 1 |
-| 450 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 1 |
-| 451 | `frontend/tests/ownedGoogleAuth.test.mjs` | 1 |
-| 452 | `frontend/tests/performanceLoadingUx.test.mjs` | 0 |
-| 453 | `frontend/tests/permissionEditor.test.mjs` | 0 |
-| 454 | `frontend/tests/permissions.test.mjs` | 0 |
-| 455 | `frontend/tests/portalCatalogDisplay.test.mjs` | 3 |
-| 456 | `frontend/tests/portalContentI18n.test.mjs` | 0 |
-| 457 | `frontend/tests/portalEditorUtils.test.mjs` | 1 |
-| 458 | `frontend/tests/portalFaqVocabulary.test.mjs` | 0 |
-| 459 | `frontend/tests/portalLanguagePacks.test.mjs` | 0 |
-| 460 | `frontend/tests/portalTranslateController.test.mjs` | 2 |
-| 461 | `frontend/tests/posCore.test.mjs` | 1 |
-| 462 | `frontend/tests/pricingContacts.test.mjs` | 1 |
-| 463 | `frontend/tests/productBatches.test.mjs` | 0 |
-| 464 | `frontend/tests/productDiscountUx.test.mjs` | 1 |
-| 465 | `frontend/tests/productDisplayHelpers.test.mjs` | 0 |
-| 466 | `frontend/tests/productFilterHelpers.test.mjs` | 0 |
-| 467 | `frontend/tests/productGalleryHelpers.test.mjs` | 0 |
-| 468 | `frontend/tests/productGrouping.test.mjs` | 1 |
-| 469 | `frontend/tests/productGroupViewHelpers.test.mjs` | 2 |
-| 470 | `frontend/tests/productHistoryHelpers.test.mjs` | 1 |
-| 471 | `frontend/tests/productImportPlanner.test.mjs` | 1 |
-| 472 | `frontend/tests/productImportWorkerFallback.test.mjs` | 1 |
-| 473 | `frontend/tests/productMenuHelpers.test.mjs` | 3 |
-| 474 | `frontend/tests/productPageHelpers.test.mjs` | 0 |
-| 475 | `frontend/tests/productSearchPagination.test.mjs` | 0 |
-| 476 | `frontend/tests/productSelectionHelpers.test.mjs` | 0 |
-| 477 | `frontend/tests/productWriteHelpers.test.mjs` | 0 |
-| 478 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 |
-| 479 | `frontend/tests/receiptSettingsSync.test.mjs` | 0 |
-| 480 | `frontend/tests/receiptTemplate.test.mjs` | 1 |
-| 481 | `frontend/tests/returnsLayout.test.mjs` | 0 |
-| 482 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 0 |
-| 483 | `frontend/tests/salesImportWorker.test.mjs` | 1 |
-| 484 | `frontend/tests/scanbotScanner.test.mjs` | 2 |
-| 485 | `frontend/tests/scriptTypography.test.mjs` | 0 |
-| 486 | `frontend/tests/sectionNavigation.test.mjs` | 0 |
-| 487 | `frontend/tests/settingsConflictHelpers.test.mjs` | 1 |
-| 488 | `frontend/tests/settingsRefresh.test.mjs` | 0 |
-| 489 | `frontend/tests/storagePolicy.test.mjs` | 1 |
-| 490 | `frontend/tests/utilsSettingsBarrel.test.mjs` | 0 |
-| 491 | `frontend/vite.config.mjs` | 5 |
-| 492 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 18 |
-| 493 | `ops/scripts/architecture/language-runtime-audit.mjs` | 20 |
-| 494 | `ops/scripts/architecture/organization-audit.mjs` | 15 |
-| 495 | `ops/scripts/architecture/phase29-audit.mjs` | 13 |
-| 496 | `ops/scripts/backend/schema-audit.js` | 25 |
-| 497 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | 5 |
-| 498 | `ops/scripts/backend/verify-data-integrity.js` | 27 |
-| 499 | `ops/scripts/frontend/verify-i18n.js` | 6 |
-| 500 | `ops/scripts/frontend/verify-performance.js` | 4 |
-| 501 | `ops/scripts/frontend/verify-ui.js` | 11 |
-| 502 | `ops/scripts/lib/fs-utils.js` | 16 |
-| 503 | `ops/scripts/lib/report-utils.js` | 5 |
-| 504 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | 5 |
-| 505 | `ops/scripts/runtime/audits/audit-auth.mjs` | 6 |
-| 506 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 3 |
-| 507 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 11 |
-| 508 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 43 |
-| 509 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 22 |
-| 510 | `ops/scripts/runtime/browser-action-smoke.mjs` | 32 |
-| 511 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | 16 |
-| 512 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | 6 |
-| 513 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | 16 |
-| 514 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | 8 |
-| 515 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 8 |
-| 516 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 2 |
-| 517 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 2 |
-| 518 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
-| 519 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 3 |
-| 520 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | 11 |
-| 521 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 3 |
-| 522 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 2 |
-| 523 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 3 |
-| 524 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | 2 |
-| 525 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 2 |
-| 526 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 2 |
-| 527 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 3 |
-| 528 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | 5 |
-| 529 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
-| 530 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
-| 531 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 2 |
-| 532 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 11 |
-| 533 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | 3 |
-| 534 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 |
-| 535 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | 6 |
-| 536 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 8 |
-| 537 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 21 |
-| 538 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | 5 |
-| 539 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | 11 |
-| 540 | `ops/scripts/runtime/storage/prune-storage.mjs` | 17 |
-| 541 | `ops/scripts/runtime/storage/restore-candidates.mjs` | 8 |
-| 542 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | 14 |
-| 543 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
-| 544 | `ops/scripts/verification/verify-docker-release.js` | 11 |
-| 545 | `ops/scripts/verification/verify-hardening-policy.js` | 9 |
-| 546 | `ops/scripts/verification/verify-runtime-deps.js` | 13 |
-| 547 | `ops/scripts/verification/verify-scale-services.js` | 8 |
-| 548 | `ops/scripts/verification/verify-secret-hygiene.js` | 0 |
+| 180 | `frontend/src/components/contacts/contactImportWorker.mjs` | 0 |
+| 181 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
+| 182 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 |
+| 183 | `frontend/src/components/contacts/contactOptionUtils.ts` | 10 |
+| 184 | `frontend/src/components/contacts/Contacts.jsx` | 13 |
+| 185 | `frontend/src/components/contacts/CustomerFormModal.jsx` | 11 |
+| 186 | `frontend/src/components/contacts/customerMembershipNumber.js` | 0 |
+| 187 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
+| 188 | `frontend/src/components/contacts/CustomersTab.jsx` | 12 |
+| 189 | `frontend/src/components/contacts/DeliveryTab.jsx` | 23 |
+| 190 | `frontend/src/components/contacts/shared.jsx` | 9 |
+| 191 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
+| 192 | `frontend/src/components/custom-tables/CustomTables.jsx` | 11 |
+| 193 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 5 |
+| 194 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 1 |
+| 195 | `frontend/src/components/dashboard/charts/index.js` | 0 |
+| 196 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
+| 197 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 7 |
+| 198 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 |
+| 199 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
+| 200 | `frontend/src/components/dashboard/MiniStat.jsx` | 1 |
+| 201 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
+| 202 | `frontend/src/components/files/FilesPage.jsx` | 25 |
+| 203 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
+| 204 | `frontend/src/components/files/FilesResponsesTab.jsx` | 1 |
+| 205 | `frontend/src/components/inventory/DualMoney.jsx` | 1 |
+| 206 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
+| 207 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 10 |
+| 208 | `frontend/src/components/inventory/inventoryImportWorker.mjs` | 0 |
+| 209 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
+| 210 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
+| 211 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
+| 212 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 1 |
+| 213 | `frontend/src/components/inventory/movementGroups.js` | 0 |
+| 214 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
+| 215 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
+| 216 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
+| 217 | `frontend/src/components/navigation/Sidebar.jsx` | 7 |
+| 218 | `frontend/src/components/pos/CartItem.jsx` | 1 |
+| 219 | `frontend/src/components/pos/FilterPanel.jsx` | 6 |
+| 220 | `frontend/src/components/pos/POS.jsx` | 22 |
+| 221 | `frontend/src/components/pos/posCore.mjs` | 0 |
+| 222 | `frontend/src/components/pos/posCore.ts` | 10 |
+| 223 | `frontend/src/components/pos/ProductImage.jsx` | 1 |
+| 224 | `frontend/src/components/pos/QuickAddModal.jsx` | 2 |
+| 225 | `frontend/src/components/products/config/productPageConfig.mjs` | 0 |
+| 226 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
+| 227 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 4 |
+| 228 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 2 |
+| 229 | `frontend/src/components/products/forms/ProductForm.jsx` | 17 |
+| 230 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 5 |
+| 231 | `frontend/src/components/products/helpers/productDisplayHelpers.mjs` | 0 |
+| 232 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 6 |
+| 233 | `frontend/src/components/products/helpers/productFilterHelpers.mjs` | 0 |
+| 234 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 9 |
+| 235 | `frontend/src/components/products/helpers/productGalleryHelpers.mjs` | 0 |
+| 236 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 8 |
+| 237 | `frontend/src/components/products/helpers/productGroupViewHelpers.mjs` | 0 |
+| 238 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 2 |
+| 239 | `frontend/src/components/products/helpers/productMenuHelpers.mjs` | 0 |
+| 240 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 5 |
+| 241 | `frontend/src/components/products/helpers/productPageHelpers.mjs` | 0 |
+| 242 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 3 |
+| 243 | `frontend/src/components/products/helpers/productSelectionHelpers.mjs` | 0 |
+| 244 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 7 |
+| 245 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | 0 |
+| 246 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 18 |
+| 247 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 |
+| 248 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 1 |
+| 249 | `frontend/src/components/products/import/BulkImportModal.jsx` | 63 |
+| 250 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 |
+| 251 | `frontend/src/components/products/import/productImportPlanner.ts` | 18 |
+| 252 | `frontend/src/components/products/import/productImportWorker.mjs` | 0 |
+| 253 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
+| 254 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 16 |
+| 255 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 8 |
+| 256 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | 8 |
+| 257 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | 0 |
+| 258 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
+| 259 | `frontend/src/components/products/Products.jsx` | 15 |
+| 260 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | 0 |
+| 261 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
+| 262 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 5 |
+| 263 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | 0 |
+| 264 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
+| 265 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | 0 |
+| 266 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 9 |
+| 267 | `frontend/src/components/products/shared/primitives.jsx` | 11 |
+| 268 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 |
+| 269 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
+| 270 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 5 |
+| 271 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
+| 272 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 4 |
+| 273 | `frontend/src/components/receipt-settings/constants.js` | 0 |
+| 274 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
+| 275 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 0 |
+| 276 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 9 |
+| 277 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 9 |
+| 278 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 |
+| 279 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
+| 280 | `frontend/src/components/receipt-settings/template.js` | 0 |
+| 281 | `frontend/src/components/receipt-settings/template.ts` | 4 |
+| 282 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
+| 283 | `frontend/src/components/returns/EditReturnModal.jsx` | 5 |
+| 284 | `frontend/src/components/returns/NewReturnModal.jsx` | 10 |
+| 285 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 6 |
+| 286 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 3 |
+| 287 | `frontend/src/components/returns/Returns.jsx` | 13 |
+| 288 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 5 |
+| 289 | `frontend/src/components/sales/ExportModal.jsx` | 9 |
+| 290 | `frontend/src/components/sales/SaleDetailModal.jsx` | 6 |
+| 291 | `frontend/src/components/sales/Sales.jsx` | 14 |
+| 292 | `frontend/src/components/sales/SalesImportModal.jsx` | 10 |
+| 293 | `frontend/src/components/sales/salesImportWorker.mjs` | 0 |
+| 294 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
+| 295 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
+| 296 | `frontend/src/components/sales/StatusBadge.jsx` | 2 |
+| 297 | `frontend/src/components/server/ServerPage.jsx` | 16 |
+| 298 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 4 |
+| 299 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
+| 300 | `frontend/src/components/shared/ExportMenu.jsx` | 1 |
+| 301 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
+| 302 | `frontend/src/components/shared/globalScroll.js` | 0 |
+| 303 | `frontend/src/components/shared/globalScroll.ts` | 5 |
+| 304 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
+| 305 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 |
+| 306 | `frontend/src/components/shared/Modal.jsx` | 1 |
+| 307 | `frontend/src/components/shared/navigationConfig.js` | 0 |
+| 308 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
+| 309 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
+| 310 | `frontend/src/components/shared/pageActivity.js` | 0 |
+| 311 | `frontend/src/components/shared/pageActivity.ts` | 1 |
+| 312 | `frontend/src/components/shared/PageHeader.jsx` | 1 |
+| 313 | `frontend/src/components/shared/PaginationControls.jsx` | 5 |
+| 314 | `frontend/src/components/shared/PortalMenu.jsx` | 6 |
+| 315 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 3 |
+| 316 | `frontend/src/components/shared/SectionSwitcher.jsx` | 3 |
+| 317 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
+| 318 | `frontend/src/components/users/PermissionEditor.jsx` | 5 |
+| 319 | `frontend/src/components/users/UserDetailSheet.jsx` | 3 |
+| 320 | `frontend/src/components/users/UserProfileModal.jsx` | 21 |
+| 321 | `frontend/src/components/users/Users.jsx` | 18 |
+| 322 | `frontend/src/components/utils-settings/AuditLog.jsx` | 16 |
+| 323 | `frontend/src/components/utils-settings/Backup.jsx` | 30 |
+| 324 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 |
+| 325 | `frontend/src/components/utils-settings/index.js` | 0 |
+| 326 | `frontend/src/components/utils-settings/index.ts` | 0 |
+| 327 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 |
+| 328 | `frontend/src/components/utils-settings/ResetData.jsx` | 8 |
+| 329 | `frontend/src/components/utils-settings/Settings.jsx` | 21 |
+| 330 | `frontend/src/components/utils-settings/settingsConflict.js` | 0 |
+| 331 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
+| 332 | `frontend/src/constants.js` | 0 |
+| 333 | `frontend/src/constants.ts` | 3 |
+| 334 | `frontend/src/index.jsx` | 10 |
+| 335 | `frontend/src/platform/runtime/clientRuntime.js` | 0 |
+| 336 | `frontend/src/platform/runtime/clientRuntime.ts` | 17 |
+| 337 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 |
+| 338 | `frontend/src/platform/storage/storagePolicy.ts` | 3 |
+| 339 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 13 |
+| 340 | `frontend/src/types/jsx-modules.d.ts` | 0 |
+| 341 | `frontend/src/types/mjs-modules.d.ts` | 0 |
+| 342 | `frontend/src/types/react.d.ts` | 1 |
+| 343 | `frontend/src/types/receiptContracts.ts` | 0 |
+| 344 | `frontend/src/types/settingsContracts.ts` | 0 |
+| 345 | `frontend/src/utils/actionGuards.mjs` | 0 |
+| 346 | `frontend/src/utils/actionGuards.ts` | 5 |
+| 347 | `frontend/src/utils/actionHistory.mjs` | 0 |
+| 348 | `frontend/src/utils/actionHistory.ts` | 5 |
+| 349 | `frontend/src/utils/appRefresh.d.ts` | 2 |
+| 350 | `frontend/src/utils/appRefresh.js` | 0 |
+| 351 | `frontend/src/utils/appRefresh.ts` | 2 |
+| 352 | `frontend/src/utils/bulkOps.mjs` | 0 |
+| 353 | `frontend/src/utils/bulkOps.ts` | 1 |
+| 354 | `frontend/src/utils/color.js` | 0 |
+| 355 | `frontend/src/utils/color.ts` | 3 |
+| 356 | `frontend/src/utils/csv.d.ts` | 7 |
+| 357 | `frontend/src/utils/csv.js` | 0 |
+| 358 | `frontend/src/utils/csv.ts` | 15 |
+| 359 | `frontend/src/utils/csvExportWorker.mjs` | 0 |
+| 360 | `frontend/src/utils/csvExportWorker.ts` | 1 |
+| 361 | `frontend/src/utils/csvImport.js` | 0 |
+| 362 | `frontend/src/utils/csvImport.ts` | 19 |
+| 363 | `frontend/src/utils/csvRowCounter.ts` | 2 |
+| 364 | `frontend/src/utils/dateHelpers.js` | 0 |
+| 365 | `frontend/src/utils/dateHelpers.ts` | 3 |
+| 366 | `frontend/src/utils/deviceInfo.js` | 0 |
+| 367 | `frontend/src/utils/deviceInfo.ts` | 4 |
+| 368 | `frontend/src/utils/exportPackage.js` | 0 |
+| 369 | `frontend/src/utils/exportPackage.ts` | 2 |
+| 370 | `frontend/src/utils/exportReports.jsx` | 9 |
+| 371 | `frontend/src/utils/favicon.js` | 0 |
+| 372 | `frontend/src/utils/favicon.ts` | 4 |
+| 373 | `frontend/src/utils/formatters.js` | 0 |
+| 374 | `frontend/src/utils/formatters.ts` | 5 |
+| 375 | `frontend/src/utils/groupedRecords.mjs` | 0 |
+| 376 | `frontend/src/utils/groupedRecords.ts` | 8 |
+| 377 | `frontend/src/utils/historyHelpers.mjs` | 0 |
+| 378 | `frontend/src/utils/historyHelpers.ts` | 2 |
+| 379 | `frontend/src/utils/importJobRefresh.js` | 0 |
+| 380 | `frontend/src/utils/importJobRefresh.ts` | 7 |
+| 381 | `frontend/src/utils/index.js` | 0 |
+| 382 | `frontend/src/utils/index.ts` | 0 |
+| 383 | `frontend/src/utils/initials.mjs` | 0 |
+| 384 | `frontend/src/utils/initials.ts` | 7 |
+| 385 | `frontend/src/utils/loaders.mjs` | 0 |
+| 386 | `frontend/src/utils/loaders.ts` | 7 |
+| 387 | `frontend/src/utils/mediaUpload.js` | 0 |
+| 388 | `frontend/src/utils/mediaUpload.ts` | 5 |
+| 389 | `frontend/src/utils/permissions.js` | 0 |
+| 390 | `frontend/src/utils/permissions.ts` | 2 |
+| 391 | `frontend/src/utils/pricing.d.ts` | 8 |
+| 392 | `frontend/src/utils/pricing.js` | 0 |
+| 393 | `frontend/src/utils/pricing.ts` | 8 |
+| 394 | `frontend/src/utils/printReceipt.js` | 0 |
+| 395 | `frontend/src/utils/printReceipt.ts` | 40 |
+| 396 | `frontend/src/utils/productBatches.mjs` | 0 |
+| 397 | `frontend/src/utils/productBatches.ts` | 3 |
+| 398 | `frontend/src/utils/productGrouping.mjs` | 0 |
+| 399 | `frontend/src/utils/productGrouping.ts` | 13 |
+| 400 | `frontend/src/utils/publicAssetUrls.d.ts` | 1 |
+| 401 | `frontend/src/utils/publicAssetUrls.js` | 0 |
+| 402 | `frontend/src/utils/publicAssetUrls.ts` | 8 |
+| 403 | `frontend/src/utils/receiptAppliedConfig.ts` | 7 |
+| 404 | `frontend/src/utils/scriptTypography.js` | 0 |
+| 405 | `frontend/src/utils/scriptTypography.ts` | 3 |
+| 406 | `frontend/src/utils/settingsRefresh.js` | 0 |
+| 407 | `frontend/src/utils/settingsRefresh.ts` | 2 |
+| 408 | `frontend/src/utils/settingsWriteOptions.ts` | 1 |
+| 409 | `frontend/src/web-api.js` | 0 |
+| 410 | `frontend/src/web-api.ts` | 33 |
+| 411 | `frontend/tailwind.config.mjs` | 0 |
+| 412 | `frontend/tests/actionGuards.test.mjs` | 1 |
+| 413 | `frontend/tests/actionStability.test.mjs` | 3 |
+| 414 | `frontend/tests/adminShellMediaGuards.test.mjs` | 0 |
+| 415 | `frontend/tests/apiHttp.test.mjs` | 3 |
+| 416 | `frontend/tests/appRefresh.test.mjs` | 2 |
+| 417 | `frontend/tests/appShellUtils.test.mjs` | 1 |
+| 418 | `frontend/tests/assetCompression.test.mjs` | 1 |
+| 419 | `frontend/tests/backupJobs.test.mjs` | 0 |
+| 420 | `frontend/tests/barcodeImageScanner.test.mjs` | 1 |
+| 421 | `frontend/tests/barcodeScannerState.test.mjs` | 1 |
+| 422 | `frontend/tests/bulkOps.test.mjs` | 1 |
+| 423 | `frontend/tests/contactImportWorker.test.mjs` | 1 |
+| 424 | `frontend/tests/csvImport.test.mjs` | 1 |
+| 425 | `frontend/tests/dashboardDataReliability.test.mjs` | 0 |
+| 426 | `frontend/tests/dateHelpers.test.mjs` | 2 |
+| 427 | `frontend/tests/deviceInfo.test.mjs` | 2 |
+| 428 | `frontend/tests/exportPackages.test.mjs` | 1 |
+| 429 | `frontend/tests/formatters.test.mjs` | 1 |
+| 430 | `frontend/tests/globalScroll.test.mjs` | 0 |
+| 431 | `frontend/tests/globalScrollControls.test.mjs` | 1 |
+| 432 | `frontend/tests/groupedRecords.test.mjs` | 1 |
+| 433 | `frontend/tests/historyHelpers.test.mjs` | 1 |
+| 434 | `frontend/tests/importJobRefresh.test.mjs` | 4 |
+| 435 | `frontend/tests/initials.test.mjs` | 1 |
+| 436 | `frontend/tests/inventoryImportWorker.test.mjs` | 1 |
+| 437 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 0 |
+| 438 | `frontend/tests/inventoryMovementGroups.test.mjs` | 1 |
+| 439 | `frontend/tests/inventoryRfidSection.test.mjs` | 0 |
+| 440 | `frontend/tests/jsxSyntaxCheck.mjs` | 1 |
+| 441 | `frontend/tests/loaders.test.mjs` | 1 |
+| 442 | `frontend/tests/mediaUploadHelpers.test.mjs` | 1 |
+| 443 | `frontend/tests/navigationConfig.test.mjs` | 1 |
+| 444 | `frontend/tests/notificationBadge.test.mjs` | 0 |
+| 445 | `frontend/tests/offlineSalesQueue.test.mjs` | 1 |
+| 446 | `frontend/tests/offlineSecurityHardening.test.mjs` | 1 |
+| 447 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 1 |
+| 448 | `frontend/tests/ownedGoogleAuth.test.mjs` | 1 |
+| 449 | `frontend/tests/performanceLoadingUx.test.mjs` | 0 |
+| 450 | `frontend/tests/permissionEditor.test.mjs` | 0 |
+| 451 | `frontend/tests/permissions.test.mjs` | 0 |
+| 452 | `frontend/tests/portalCatalogDisplay.test.mjs` | 3 |
+| 453 | `frontend/tests/portalContentI18n.test.mjs` | 0 |
+| 454 | `frontend/tests/portalEditorUtils.test.mjs` | 1 |
+| 455 | `frontend/tests/portalFaqVocabulary.test.mjs` | 0 |
+| 456 | `frontend/tests/portalLanguagePacks.test.mjs` | 0 |
+| 457 | `frontend/tests/portalTranslateController.test.mjs` | 2 |
+| 458 | `frontend/tests/posCore.test.mjs` | 1 |
+| 459 | `frontend/tests/pricingContacts.test.mjs` | 1 |
+| 460 | `frontend/tests/productBatches.test.mjs` | 0 |
+| 461 | `frontend/tests/productDiscountUx.test.mjs` | 1 |
+| 462 | `frontend/tests/productDisplayHelpers.test.mjs` | 0 |
+| 463 | `frontend/tests/productFilterHelpers.test.mjs` | 0 |
+| 464 | `frontend/tests/productGalleryHelpers.test.mjs` | 0 |
+| 465 | `frontend/tests/productGrouping.test.mjs` | 1 |
+| 466 | `frontend/tests/productGroupViewHelpers.test.mjs` | 2 |
+| 467 | `frontend/tests/productHistoryHelpers.test.mjs` | 1 |
+| 468 | `frontend/tests/productImportPlanner.test.mjs` | 1 |
+| 469 | `frontend/tests/productImportWorkerFallback.test.mjs` | 1 |
+| 470 | `frontend/tests/productMenuHelpers.test.mjs` | 3 |
+| 471 | `frontend/tests/productPageHelpers.test.mjs` | 0 |
+| 472 | `frontend/tests/productSearchPagination.test.mjs` | 0 |
+| 473 | `frontend/tests/productSelectionHelpers.test.mjs` | 0 |
+| 474 | `frontend/tests/productWriteHelpers.test.mjs` | 0 |
+| 475 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 |
+| 476 | `frontend/tests/receiptSettingsSync.test.mjs` | 0 |
+| 477 | `frontend/tests/receiptTemplate.test.mjs` | 1 |
+| 478 | `frontend/tests/returnsLayout.test.mjs` | 0 |
+| 479 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 0 |
+| 480 | `frontend/tests/salesImportWorker.test.mjs` | 1 |
+| 481 | `frontend/tests/scanbotScanner.test.mjs` | 2 |
+| 482 | `frontend/tests/scriptTypography.test.mjs` | 0 |
+| 483 | `frontend/tests/sectionNavigation.test.mjs` | 0 |
+| 484 | `frontend/tests/settingsConflictHelpers.test.mjs` | 1 |
+| 485 | `frontend/tests/settingsRefresh.test.mjs` | 0 |
+| 486 | `frontend/tests/storagePolicy.test.mjs` | 1 |
+| 487 | `frontend/tests/utilsSettingsBarrel.test.mjs` | 0 |
+| 488 | `frontend/vite.config.mjs` | 5 |
+| 489 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 18 |
+| 490 | `ops/scripts/architecture/language-runtime-audit.mjs` | 20 |
+| 491 | `ops/scripts/architecture/organization-audit.mjs` | 15 |
+| 492 | `ops/scripts/architecture/phase29-audit.mjs` | 13 |
+| 493 | `ops/scripts/backend/schema-audit.js` | 25 |
+| 494 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | 5 |
+| 495 | `ops/scripts/backend/verify-data-integrity.js` | 27 |
+| 496 | `ops/scripts/frontend/verify-i18n.js` | 6 |
+| 497 | `ops/scripts/frontend/verify-performance.js` | 4 |
+| 498 | `ops/scripts/frontend/verify-ui.js` | 11 |
+| 499 | `ops/scripts/lib/fs-utils.js` | 16 |
+| 500 | `ops/scripts/lib/report-utils.js` | 5 |
+| 501 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | 5 |
+| 502 | `ops/scripts/runtime/audits/audit-auth.mjs` | 6 |
+| 503 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 3 |
+| 504 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 11 |
+| 505 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 43 |
+| 506 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 22 |
+| 507 | `ops/scripts/runtime/browser-action-smoke.mjs` | 32 |
+| 508 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | 16 |
+| 509 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | 6 |
+| 510 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | 16 |
+| 511 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | 8 |
+| 512 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 8 |
+| 513 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 2 |
+| 514 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 2 |
+| 515 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
+| 516 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 3 |
+| 517 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | 11 |
+| 518 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 3 |
+| 519 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 2 |
+| 520 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 3 |
+| 521 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | 2 |
+| 522 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 2 |
+| 523 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 2 |
+| 524 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 3 |
+| 525 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | 5 |
+| 526 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
+| 527 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
+| 528 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 2 |
+| 529 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 11 |
+| 530 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | 3 |
+| 531 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 |
+| 532 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | 6 |
+| 533 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 8 |
+| 534 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 21 |
+| 535 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | 5 |
+| 536 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | 11 |
+| 537 | `ops/scripts/runtime/storage/prune-storage.mjs` | 17 |
+| 538 | `ops/scripts/runtime/storage/restore-candidates.mjs` | 8 |
+| 539 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | 14 |
+| 540 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
+| 541 | `ops/scripts/verification/verify-docker-release.js` | 11 |
+| 542 | `ops/scripts/verification/verify-hardening-policy.js` | 9 |
+| 543 | `ops/scripts/verification/verify-runtime-deps.js` | 13 |
+| 544 | `ops/scripts/verification/verify-scale-services.js` | 8 |
+| 545 | `ops/scripts/verification/verify-secret-hygiene.js` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -3727,29 +3724,21 @@ Code files scanned: **548**
 | 9 | `applyContactRulePreset` | const arrow | 141 |
 | 10 | `handleImport` | const arrow | 151 |
 
-### 3.180 `frontend/src/components/contacts/contactImportParser.mjs`
+### 3.180 `frontend/src/components/contacts/contactImportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.181 `frontend/src/components/contacts/contactImportParser.ts`
-
-- No top-level named symbols detected.
-
-### 3.182 `frontend/src/components/contacts/contactImportWorker.mjs`
-
-- No top-level named symbols detected.
-
-### 3.183 `frontend/src/components/contacts/contactImportWorker.ts`
+### 3.181 `frontend/src/components/contacts/contactImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.184 `frontend/src/components/contacts/contactOptionUtils.js`
+### 3.182 `frontend/src/components/contacts/contactOptionUtils.js`
 
 - No top-level named symbols detected.
 
-### 3.185 `frontend/src/components/contacts/contactOptionUtils.ts`
+### 3.183 `frontend/src/components/contacts/contactOptionUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3764,7 +3753,7 @@ Code files scanned: **548**
 | 9 | `parseContactOptionsFromImportRow` | export function | 110 |
 | 10 | `getPrimaryContactOption` | export function | 126 |
 
-### 3.186 `frontend/src/components/contacts/Contacts.jsx`
+### 3.184 `frontend/src/components/contacts/Contacts.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3782,7 +3771,7 @@ Code files scanned: **548**
 | 12 | `handleTypeSelected` | const arrow | 228 |
 | 13 | `handleImportDone` | const arrow | 233 |
 
-### 3.187 `frontend/src/components/contacts/CustomerFormModal.jsx`
+### 3.185 `frontend/src/components/contacts/CustomerFormModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3798,17 +3787,17 @@ Code files scanned: **548**
 | 10 | `updateOption` | const arrow | 83 |
 | 11 | `handleSubmit` | const arrow | 84 |
 
-### 3.188 `frontend/src/components/contacts/customerMembershipNumber.js`
+### 3.186 `frontend/src/components/contacts/customerMembershipNumber.js`
 
 - No top-level named symbols detected.
 
-### 3.189 `frontend/src/components/contacts/customerMembershipNumber.ts`
+### 3.187 `frontend/src/components/contacts/customerMembershipNumber.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `generateCustomerMembershipNumber` | export function | 4 |
 
-### 3.190 `frontend/src/components/contacts/CustomersTab.jsx`
+### 3.188 `frontend/src/components/contacts/CustomersTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3825,7 +3814,7 @@ Code files scanned: **548**
 | 11 | `handleDelete` | const arrow | 408 |
 | 12 | `handleBulkDelete` | const arrow | 447 |
 
-### 3.191 `frontend/src/components/contacts/DeliveryTab.jsx`
+### 3.189 `frontend/src/components/contacts/DeliveryTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3853,7 +3842,7 @@ Code files scanned: **548**
 | 22 | `handleDelete` | const arrow | 492 |
 | 23 | `handleBulkDelete` | const arrow | 529 |
 
-### 3.192 `frontend/src/components/contacts/shared.jsx`
+### 3.190 `frontend/src/components/contacts/shared.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3867,7 +3856,7 @@ Code files scanned: **548**
 | 8 | `DetailModal` | export function | 162 |
 | 9 | `ContactTable` | export function | 193 |
 
-### 3.193 `frontend/src/components/contacts/SuppliersTab.jsx`
+### 3.191 `frontend/src/components/contacts/SuppliersTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3888,7 +3877,7 @@ Code files scanned: **548**
 | 15 | `handleDelete` | const arrow | 463 |
 | 16 | `handleBulkDelete` | const arrow | 502 |
 
-### 3.194 `frontend/src/components/custom-tables/CustomTables.jsx`
+### 3.192 `frontend/src/components/custom-tables/CustomTables.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3904,7 +3893,7 @@ Code files scanned: **548**
 | 10 | `openAddRow` | const arrow | 369 |
 | 11 | `openEditRow` | const arrow | 376 |
 
-### 3.195 `frontend/src/components/dashboard/charts/BarChart.jsx`
+### 3.193 `frontend/src/components/dashboard/charts/BarChart.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3914,21 +3903,21 @@ Code files scanned: **548**
 | 4 | `updateWidth` | const arrow | 44 |
 | 5 | `yPx` | function | 79 |
 
-### 3.196 `frontend/src/components/dashboard/charts/DonutChart.jsx`
+### 3.194 `frontend/src/components/dashboard/charts/DonutChart.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `DonutChart` | export default function | 14 |
 
-### 3.197 `frontend/src/components/dashboard/charts/index.js`
+### 3.195 `frontend/src/components/dashboard/charts/index.js`
 
 - No top-level named symbols detected.
 
-### 3.198 `frontend/src/components/dashboard/charts/index.ts`
+### 3.196 `frontend/src/components/dashboard/charts/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.199 `frontend/src/components/dashboard/charts/LineChart.jsx`
+### 3.197 `frontend/src/components/dashboard/charts/LineChart.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3940,13 +3929,13 @@ Code files scanned: **548**
 | 6 | `yPx` | function | 84 |
 | 7 | `handleMouseMove` | const arrow | 92 |
 
-### 3.200 `frontend/src/components/dashboard/charts/NoData.jsx`
+### 3.198 `frontend/src/components/dashboard/charts/NoData.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `NoData` | export default function | 7 |
 
-### 3.201 `frontend/src/components/dashboard/Dashboard.jsx`
+### 3.199 `frontend/src/components/dashboard/Dashboard.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3967,13 +3956,13 @@ Code files scanned: **548**
 | 15 | `rangeLabel` | const arrow | 480 |
 | 16 | `periodShort` | const arrow | 486 |
 
-### 3.202 `frontend/src/components/dashboard/MiniStat.jsx`
+### 3.200 `frontend/src/components/dashboard/MiniStat.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `MiniStat` | export default function | 2 |
 
-### 3.203 `frontend/src/components/files/FilePickerModal.jsx`
+### 3.201 `frontend/src/components/files/FilePickerModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3984,7 +3973,7 @@ Code files scanned: **548**
 | 5 | `handleUpload` | function | 112 |
 | 6 | `handleDelete` | function | 154 |
 
-### 3.204 `frontend/src/components/files/FilesPage.jsx`
+### 3.202 `frontend/src/components/files/FilesPage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4014,26 +4003,26 @@ Code files scanned: **548**
 | 24 | `removeProvider` | function | 715 |
 | 25 | `tabButton` | const arrow | 736 |
 
-### 3.205 `frontend/src/components/files/FilesProvidersTab.jsx`
+### 3.203 `frontend/src/components/files/FilesProvidersTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ProviderStatus` | function | 10 |
 | 2 | `FilesProvidersTab` | export default function | 21 |
 
-### 3.206 `frontend/src/components/files/FilesResponsesTab.jsx`
+### 3.204 `frontend/src/components/files/FilesResponsesTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `FilesResponsesTab` | export default function | 11 |
 
-### 3.207 `frontend/src/components/inventory/DualMoney.jsx`
+### 3.205 `frontend/src/components/inventory/DualMoney.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `DualMoney` | function | 5 |
 
-### 3.208 `frontend/src/components/inventory/Inventory.jsx`
+### 3.206 `frontend/src/components/inventory/Inventory.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4065,7 +4054,7 @@ Code files scanned: **548**
 | 26 | `statsValue` | const arrow | 1851 |
 | 27 | `selectInventorySection` | const arrow | 3072 |
 
-### 3.209 `frontend/src/components/inventory/InventoryImportModal.jsx`
+### 3.207 `frontend/src/components/inventory/InventoryImportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4080,23 +4069,23 @@ Code files scanned: **548**
 | 9 | `handleDownloadTemplate` | const arrow | 110 |
 | 10 | `handleImport` | const arrow | 114 |
 
-### 3.210 `frontend/src/components/inventory/inventoryImportWorker.mjs`
+### 3.208 `frontend/src/components/inventory/inventoryImportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.211 `frontend/src/components/inventory/inventoryImportWorker.ts`
+### 3.209 `frontend/src/components/inventory/inventoryImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.212 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+### 3.210 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `InventoryMovementsSurface` | export default function | 6 |
 
-### 3.213 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+### 3.211 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4104,17 +4093,17 @@ Code files scanned: **548**
 | 2 | `renderDesktopTableHead` | const arrow | 45 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 67 |
 
-### 3.214 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
+### 3.212 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `InventoryRfidSurface` | export default function | 1 |
 
-### 3.215 `frontend/src/components/inventory/movementGroups.js`
+### 3.213 `frontend/src/components/inventory/movementGroups.js`
 
 - No top-level named symbols detected.
 
-### 3.216 `frontend/src/components/inventory/movementGroups.ts`
+### 3.214 `frontend/src/components/inventory/movementGroups.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4134,14 +4123,14 @@ Code files scanned: **548**
 | 14 | `getMovementGroupPage` | export function | 257 |
 | 15 | `movementGroupHaystack` | export function | 273 |
 
-### 3.217 `frontend/src/components/inventory/ProductDetailModal.jsx`
+### 3.215 `frontend/src/components/inventory/ProductDetailModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ProductDetailModal` | export default function | 6 |
 | 2 | `T` | const arrow | 7 |
 
-### 3.218 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+### 3.216 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4155,7 +4144,7 @@ Code files scanned: **548**
 | 8 | `handleSave` | function | 235 |
 | 9 | `handleLookup` | function | 259 |
 
-### 3.219 `frontend/src/components/navigation/Sidebar.jsx`
+### 3.217 `frontend/src/components/navigation/Sidebar.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4167,13 +4156,13 @@ Code files scanned: **548**
 | 6 | `announcePageIntent` | function | 94 |
 | 7 | `Sidebar` | export default function | 101 |
 
-### 3.220 `frontend/src/components/pos/CartItem.jsx`
+### 3.218 `frontend/src/components/pos/CartItem.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `CartItem` | export default function | 4 |
 
-### 3.221 `frontend/src/components/pos/FilterPanel.jsx`
+### 3.219 `frontend/src/components/pos/FilterPanel.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4184,7 +4173,7 @@ Code files scanned: **548**
 | 5 | `chip` | const arrow | 53 |
 | 6 | `SectionLabel` | const arrow | 59 |
 
-### 3.222 `frontend/src/components/pos/POS.jsx`
+### 3.220 `frontend/src/components/pos/POS.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4211,11 +4200,11 @@ Code files scanned: **548**
 | 21 | `handleMembershipUnits` | const arrow | 1017 |
 | 22 | `handleCheckout` | const arrow | 1056 |
 
-### 3.223 `frontend/src/components/pos/posCore.mjs`
+### 3.221 `frontend/src/components/pos/posCore.mjs`
 
 - No top-level named symbols detected.
 
-### 3.224 `frontend/src/components/pos/posCore.ts`
+### 3.222 `frontend/src/components/pos/posCore.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4230,28 +4219,28 @@ Code files scanned: **548**
 | 9 | `getCartLineId` | export function | 153 |
 | 10 | `findMatchingCartLineIndex` | export function | 160 |
 
-### 3.225 `frontend/src/components/pos/ProductImage.jsx`
+### 3.223 `frontend/src/components/pos/ProductImage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ProductImage` | export default function | 3 |
 
-### 3.226 `frontend/src/components/pos/QuickAddModal.jsx`
+### 3.224 `frontend/src/components/pos/QuickAddModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `QuickAddModal` | export default function | 4 |
 | 2 | `T` | const arrow | 5 |
 
-### 3.227 `frontend/src/components/products/config/productPageConfig.mjs`
+### 3.225 `frontend/src/components/products/config/productPageConfig.mjs`
 
 - No top-level named symbols detected.
 
-### 3.228 `frontend/src/components/products/config/productPageConfig.ts`
+### 3.226 `frontend/src/components/products/config/productPageConfig.ts`
 
 - No top-level named symbols detected.
 
-### 3.229 `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
+### 3.227 `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4260,14 +4249,14 @@ Code files scanned: **548**
 | 3 | `setRow` | const arrow | 34 |
 | 4 | `handleSave` | const arrow | 40 |
 
-### 3.230 `frontend/src/components/products/forms/BulkAddStockModal.jsx`
+### 3.228 `frontend/src/components/products/forms/BulkAddStockModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `BulkAddStockModal` | function | 9 |
 | 2 | `handleSave` | const arrow | 20 |
 
-### 3.231 `frontend/src/components/products/forms/ProductForm.jsx`
+### 3.229 `frontend/src/components/products/forms/ProductForm.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4289,7 +4278,7 @@ Code files scanned: **548**
 | 16 | `closeScanner` | function | 344 |
 | 17 | `applyScannedValue` | function | 348 |
 
-### 3.232 `frontend/src/components/products/forms/VariantFormModal.jsx`
+### 3.230 `frontend/src/components/products/forms/VariantFormModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4299,11 +4288,11 @@ Code files scanned: **548**
 | 4 | `setNumeric` | const arrow | 42 |
 | 5 | `handleSave` | const arrow | 47 |
 
-### 3.233 `frontend/src/components/products/helpers/productDisplayHelpers.mjs`
+### 3.231 `frontend/src/components/products/helpers/productDisplayHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.234 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
+### 3.232 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4314,11 +4303,11 @@ Code files scanned: **548**
 | 5 | `getProductStockStatus` | export function | 101 |
 | 6 | `buildProductRowDisplayState` | export function | 111 |
 
-### 3.235 `frontend/src/components/products/helpers/productFilterHelpers.mjs`
+### 3.233 `frontend/src/components/products/helpers/productFilterHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.236 `frontend/src/components/products/helpers/productFilterHelpers.ts`
+### 3.234 `frontend/src/components/products/helpers/productFilterHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4332,11 +4321,11 @@ Code files scanned: **548**
 | 8 | `toImageUrl` | const arrow | 153 |
 | 9 | `priceCsv` | const arrow | 154 |
 
-### 3.237 `frontend/src/components/products/helpers/productGalleryHelpers.mjs`
+### 3.235 `frontend/src/components/products/helpers/productGalleryHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.238 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
+### 3.236 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4349,22 +4338,22 @@ Code files scanned: **548**
 | 7 | `buildProductLightboxGalleryInput` | export function | 85 |
 | 8 | `updateProductLightboxIndex` | export function | 91 |
 
-### 3.239 `frontend/src/components/products/helpers/productGroupViewHelpers.mjs`
+### 3.237 `frontend/src/components/products/helpers/productGroupViewHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.240 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
+### 3.238 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildProductGroupPriceLabel` | export function | 22 |
 | 2 | `buildProductGroupSummaryParts` | export function | 32 |
 
-### 3.241 `frontend/src/components/products/helpers/productMenuHelpers.mjs`
+### 3.239 `frontend/src/components/products/helpers/productMenuHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.242 `frontend/src/components/products/helpers/productMenuHelpers.ts`
+### 3.240 `frontend/src/components/products/helpers/productMenuHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4374,11 +4363,11 @@ Code files scanned: **548**
 | 4 | `countActiveProductFilters` | export function | 121 |
 | 5 | `buildProductFilterSections` | export function | 147 |
 
-### 3.243 `frontend/src/components/products/helpers/productPageHelpers.mjs`
+### 3.241 `frontend/src/components/products/helpers/productPageHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.244 `frontend/src/components/products/helpers/productPageHelpers.ts`
+### 3.242 `frontend/src/components/products/helpers/productPageHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4386,11 +4375,11 @@ Code files scanned: **548**
 | 2 | `normalizeBrandLookup` | export function | 22 |
 | 3 | `waitForNextFrame` | export function | 26 |
 
-### 3.245 `frontend/src/components/products/helpers/productSelectionHelpers.mjs`
+### 3.243 `frontend/src/components/products/helpers/productSelectionHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.246 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
+### 3.244 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4402,11 +4391,11 @@ Code files scanned: **548**
 | 6 | `isSelectionScopeFullySelected` | export function | 132 |
 | 7 | `isSelectionScopePartiallySelected` | export function | 136 |
 
-### 3.247 `frontend/src/components/products/helpers/productWriteHelpers.mjs`
+### 3.245 `frontend/src/components/products/helpers/productWriteHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.248 `frontend/src/components/products/helpers/productWriteHelpers.ts`
+### 3.246 `frontend/src/components/products/helpers/productWriteHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4429,17 +4418,17 @@ Code files scanned: **548**
 | 17 | `getPreferredProductRestoreBranchId` | export function | 353 |
 | 18 | `resolveRestoredProductParentId` | export function | 361 |
 
-### 3.249 `frontend/src/components/products/history/productHistoryHelpers.mjs`
+### 3.247 `frontend/src/components/products/history/productHistoryHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.250 `frontend/src/components/products/history/productHistoryHelpers.ts`
+### 3.248 `frontend/src/components/products/history/productHistoryHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createProductHistoryRequestId` | export function | 43 |
 
-### 3.251 `frontend/src/components/products/import/BulkImportModal.jsx`
+### 3.249 `frontend/src/components/products/import/BulkImportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4507,11 +4496,11 @@ Code files scanned: **548**
 | 62 | `renderConflictRow` | const arrow | 1336 |
 | 63 | `updateEditedRow` | const arrow | 1344 |
 
-### 3.252 `frontend/src/components/products/import/productImportPlanner.mjs`
+### 3.250 `frontend/src/components/products/import/productImportPlanner.mjs`
 
 - No top-level named symbols detected.
 
-### 3.253 `frontend/src/components/products/import/productImportPlanner.ts`
+### 3.251 `frontend/src/components/products/import/productImportPlanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4534,11 +4523,11 @@ Code files scanned: **548**
 | 17 | `analyzeProductImportRows` | export function | 457 |
 | 18 | `analyzeProductImportText` | export function | 631 |
 
-### 3.254 `frontend/src/components/products/import/productImportWorker.mjs`
+### 3.252 `frontend/src/components/products/import/productImportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.255 `frontend/src/components/products/import/productImportWorker.ts`
+### 3.253 `frontend/src/components/products/import/productImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4546,7 +4535,7 @@ Code files scanned: **548**
 | 2 | `waitForNextTask` | function | 43 |
 | 3 | `getErrorMessage` | function | 49 |
 
-### 3.256 `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+### 3.254 `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4567,7 +4556,7 @@ Code files scanned: **548**
 | 15 | `toggleSelectedBrand` | const arrow | 450 |
 | 16 | `toggleAllVisibleBrands` | const arrow | 459 |
 
-### 3.257 `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
+### 3.255 `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4580,7 +4569,7 @@ Code files scanned: **548**
 | 7 | `toggleAllVisible` | const arrow | 301 |
 | 8 | `handleDeleteSelected` | const arrow | 314 |
 
-### 3.258 `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+### 3.256 `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4593,11 +4582,11 @@ Code files scanned: **548**
 | 7 | `toggleAllVisible` | const arrow | 295 |
 | 8 | `handleDeleteSelected` | const arrow | 308 |
 
-### 3.259 `frontend/src/components/products/lookups/productLookupSnapshots.mjs`
+### 3.257 `frontend/src/components/products/lookups/productLookupSnapshots.mjs`
 
 - No top-level named symbols detected.
 
-### 3.260 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
+### 3.258 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4612,7 +4601,7 @@ Code files scanned: **548**
 | 9 | `fetchProductsByIds` | function | 165 |
 | 10 | `restoreLookupProductSnapshots` | export function | 194 |
 
-### 3.261 `frontend/src/components/products/Products.jsx`
+### 3.259 `frontend/src/components/products/Products.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4632,11 +4621,11 @@ Code files scanned: **548**
 | 14 | `openLightbox` | const arrow | 736 |
 | 15 | `getStockBadge` | const arrow | 743 |
 
-### 3.262 `frontend/src/components/products/scanning/barcodeImageScanner.mjs`
+### 3.260 `frontend/src/components/products/scanning/barcodeImageScanner.mjs`
 
 - No top-level named symbols detected.
 
-### 3.263 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
+### 3.261 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4646,7 +4635,7 @@ Code files scanned: **548**
 | 4 | `detectWithNativeBarcodeDetector` | function | 75 |
 | 5 | `scanBarcodeFromImageFile` | export function | 101 |
 
-### 3.264 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+### 3.262 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4656,21 +4645,21 @@ Code files scanned: **548**
 | 4 | `handleChange` | const arrow | 44 |
 | 5 | `BarcodeScannerModal` | export default function | 53 |
 
-### 3.265 `frontend/src/components/products/scanning/barcodeScannerState.mjs`
+### 3.263 `frontend/src/components/products/scanning/barcodeScannerState.mjs`
 
 - No top-level named symbols detected.
 
-### 3.266 `frontend/src/components/products/scanning/barcodeScannerState.ts`
+### 3.264 `frontend/src/components/products/scanning/barcodeScannerState.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `deriveScannerPresentation` | export function | 31 |
 
-### 3.267 `frontend/src/components/products/scanning/scanbotScanner.mjs`
+### 3.265 `frontend/src/components/products/scanning/scanbotScanner.mjs`
 
 - No top-level named symbols detected.
 
-### 3.268 `frontend/src/components/products/scanning/scanbotScanner.ts`
+### 3.266 `frontend/src/components/products/scanning/scanbotScanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4684,7 +4673,7 @@ Code files scanned: **548**
 | 8 | `getInitializedScanbot` | function | 143 |
 | 9 | `scanBarcodeWithScanbot` | export function | 158 |
 
-### 3.269 `frontend/src/components/products/shared/primitives.jsx`
+### 3.267 `frontend/src/components/products/shared/primitives.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4700,7 +4689,7 @@ Code files scanned: **548**
 | 10 | `handleUsdChange` | const arrow | 167 |
 | 11 | `handleKhrChange` | const arrow | 168 |
 
-### 3.270 `frontend/src/components/products/surfaces/HeaderActions.jsx`
+### 3.268 `frontend/src/components/products/surfaces/HeaderActions.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4708,7 +4697,7 @@ Code files scanned: **548**
 | 2 | `cleanFallback` | const arrow | 16 |
 | 3 | `tr` | const arrow | 22 |
 
-### 3.271 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+### 3.269 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4716,7 +4705,7 @@ Code files scanned: **548**
 | 2 | `T` | const arrow | 23 |
 | 3 | `Row` | const arrow | 43 |
 
-### 3.272 `frontend/src/components/products/surfaces/ProductRowParts.jsx`
+### 3.270 `frontend/src/components/products/surfaces/ProductRowParts.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4726,7 +4715,7 @@ Code files scanned: **548**
 | 4 | `ProductBatchPreview` | export function | 42 |
 | 5 | `ProductDetailsCell` | export function | 65 |
 
-### 3.273 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
+### 3.271 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4734,7 +4723,7 @@ Code files scanned: **548**
 | 2 | `renderDesktopTableHead` | const arrow | 47 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 76 |
 
-### 3.274 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+### 3.272 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4743,22 +4732,22 @@ Code files scanned: **548**
 | 3 | `T` | const arrow | 23 |
 | 4 | `toggleSection` | const arrow | 42 |
 
-### 3.275 `frontend/src/components/receipt-settings/constants.js`
+### 3.273 `frontend/src/components/receipt-settings/constants.js`
 
 - No top-level named symbols detected.
 
-### 3.276 `frontend/src/components/receipt-settings/constants.ts`
+### 3.274 `frontend/src/components/receipt-settings/constants.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getFieldItems` | export function | 109 |
 | 2 | `T` | const arrow | 110 |
 
-### 3.277 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
+### 3.275 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
 
 - No top-level named symbols detected.
 
-### 3.278 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
+### 3.276 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4772,7 +4761,7 @@ Code files scanned: **548**
 | 8 | `handleDragStart` | const arrow | 91 |
 | 9 | `handleDragOver` | const arrow | 96 |
 
-### 3.279 `frontend/src/components/receipt-settings/PrintSettings.jsx`
+### 3.277 `frontend/src/components/receipt-settings/PrintSettings.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4786,14 +4775,14 @@ Code files scanned: **548**
 | 8 | `resetMargins` | const arrow | 94 |
 | 9 | `getPreviewSource` | const arrow | 110 |
 
-### 3.280 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+### 3.278 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ReceiptPreview` | export default function | 12 |
 | 2 | `loadPreview` | function | 23 |
 
-### 3.281 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
+### 3.279 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4802,11 +4791,11 @@ Code files scanned: **548**
 | 3 | `ReceiptSettings` | export default function | 45 |
 | 4 | `handleSave` | const arrow | 190 |
 
-### 3.282 `frontend/src/components/receipt-settings/template.js`
+### 3.280 `frontend/src/components/receipt-settings/template.js`
 
 - No top-level named symbols detected.
 
-### 3.283 `frontend/src/components/receipt-settings/template.ts`
+### 3.281 `frontend/src/components/receipt-settings/template.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4815,7 +4804,7 @@ Code files scanned: **548**
 | 3 | `parseReceiptTemplate` | export function | 19 |
 | 4 | `serializeReceiptTemplate` | export function | 30 |
 
-### 3.284 `frontend/src/components/receipt/Receipt.jsx`
+### 3.282 `frontend/src/components/receipt/Receipt.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4828,7 +4817,7 @@ Code files scanned: **548**
 | 7 | `em` | const arrow | 146 |
 | 8 | `exportReceiptPdf` | const arrow | 342 |
 
-### 3.285 `frontend/src/components/returns/EditReturnModal.jsx`
+### 3.283 `frontend/src/components/returns/EditReturnModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4838,7 +4827,7 @@ Code files scanned: **548**
 | 4 | `updateRestock` | const arrow | 41 |
 | 5 | `handleSubmit` | const arrow | 49 |
 
-### 3.286 `frontend/src/components/returns/NewReturnModal.jsx`
+### 3.284 `frontend/src/components/returns/NewReturnModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4853,7 +4842,7 @@ Code files scanned: **548**
 | 9 | `clearAll` | const arrow | 141 |
 | 10 | `handleSubmit` | const arrow | 148 |
 
-### 3.287 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+### 3.285 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4864,7 +4853,7 @@ Code files scanned: **548**
 | 5 | `updateQty` | const arrow | 162 |
 | 6 | `submit` | const arrow | 168 |
 
-### 3.288 `frontend/src/components/returns/ReturnDetailModal.jsx`
+### 3.286 `frontend/src/components/returns/ReturnDetailModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4872,7 +4861,7 @@ Code files scanned: **548**
 | 2 | `ReturnDetailModal` | export default function | 10 |
 | 3 | `tr` | const arrow | 12 |
 
-### 3.289 `frontend/src/components/returns/Returns.jsx`
+### 3.287 `frontend/src/components/returns/Returns.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4890,7 +4879,7 @@ Code files scanned: **548**
 | 12 | `handleOpenEdit` | const arrow | 246 |
 | 13 | `renderAmount` | const arrow | 663 |
 
-### 3.290 `frontend/src/components/returns/ReturnsListSurface.jsx`
+### 3.288 `frontend/src/components/returns/ReturnsListSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4900,7 +4889,7 @@ Code files scanned: **548**
 | 4 | `ReturnsListSurface` | export default function | 56 |
 | 5 | `apply` | const arrow | 87 |
 
-### 3.291 `frontend/src/components/sales/ExportModal.jsx`
+### 3.289 `frontend/src/components/sales/ExportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4914,7 +4903,7 @@ Code files scanned: **548**
 | 8 | `handlePreview` | const arrow | 84 |
 | 9 | `handleExportCSV` | const arrow | 101 |
 
-### 3.292 `frontend/src/components/sales/SaleDetailModal.jsx`
+### 3.290 `frontend/src/components/sales/SaleDetailModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4925,7 +4914,7 @@ Code files scanned: **548**
 | 5 | `handleStatusUpdate` | const arrow | 69 |
 | 6 | `handleMembershipAttach` | const arrow | 80 |
 
-### 3.293 `frontend/src/components/sales/Sales.jsx`
+### 3.291 `frontend/src/components/sales/Sales.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4944,7 +4933,7 @@ Code files scanned: **548**
 | 13 | `handleExportSelected` | const arrow | 537 |
 | 14 | `handleBulkStatusUpdate` | const arrow | 585 |
 
-### 3.294 `frontend/src/components/sales/SalesImportModal.jsx`
+### 3.292 `frontend/src/components/sales/SalesImportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4959,30 +4948,30 @@ Code files scanned: **548**
 | 9 | `handleDownloadTemplate` | const arrow | 109 |
 | 10 | `handleImport` | const arrow | 113 |
 
-### 3.295 `frontend/src/components/sales/salesImportWorker.mjs`
+### 3.293 `frontend/src/components/sales/salesImportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.296 `frontend/src/components/sales/salesImportWorker.ts`
+### 3.294 `frontend/src/components/sales/salesImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.297 `frontend/src/components/sales/SalesListSurface.jsx`
+### 3.295 `frontend/src/components/sales/SalesListSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `SalesListSurface` | export default function | 5 |
 
-### 3.298 `frontend/src/components/sales/StatusBadge.jsx`
+### 3.296 `frontend/src/components/sales/StatusBadge.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getStatusLabel` | export function | 23 |
 | 2 | `StatusBadge` | export default function | 39 |
 
-### 3.299 `frontend/src/components/server/ServerPage.jsx`
+### 3.297 `frontend/src/components/server/ServerPage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5003,7 +4992,7 @@ Code files scanned: **548**
 | 15 | `handleSave` | function | 606 |
 | 16 | `handleDisconnect` | function | 613 |
 
-### 3.300 `frontend/src/components/shared/ActionHistoryBar.jsx`
+### 3.298 `frontend/src/components/shared/ActionHistoryBar.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5012,7 +5001,7 @@ Code files scanned: **548**
 | 3 | `ActionHistoryBar` | export default function | 16 |
 | 4 | `T` | const arrow | 27 |
 
-### 3.301 `frontend/src/components/shared/BackgroundImportTracker.jsx`
+### 3.299 `frontend/src/components/shared/BackgroundImportTracker.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5036,24 +5025,24 @@ Code files scanned: **548**
 | 18 | `handleRemove` | const arrow | 398 |
 | 19 | `handleDismiss` | const arrow | 434 |
 
-### 3.302 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.300 `frontend/src/components/shared/ExportMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ExportMenu` | export default function | 4 |
 
-### 3.303 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.301 `frontend/src/components/shared/FilterMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `sectionButtonClass` | function | 4 |
 | 2 | `FilterMenu` | export default function | 10 |
 
-### 3.304 `frontend/src/components/shared/globalScroll.js`
+### 3.302 `frontend/src/components/shared/globalScroll.js`
 
 - No top-level named symbols detected.
 
-### 3.305 `frontend/src/components/shared/globalScroll.ts`
+### 3.303 `frontend/src/components/shared/globalScroll.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5063,7 +5052,7 @@ Code files scanned: **548**
 | 4 | `getScrollTarget` | export function | 46 |
 | 5 | `getScrollToPosition` | export function | 63 |
 
-### 3.306 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.304 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5073,29 +5062,29 @@ Code files scanned: **548**
 | 4 | `renderGalleryImage` | function | 40 |
 | 5 | `onKeyDown` | function | 47 |
 
-### 3.307 `frontend/src/components/shared/LoadingWatchdog.jsx`
+### 3.305 `frontend/src/components/shared/LoadingWatchdog.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `LoadingWatchdog` | export default function | 3 |
 
-### 3.308 `frontend/src/components/shared/Modal.jsx`
+### 3.306 `frontend/src/components/shared/Modal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `Modal` | export default function | 10 |
 
-### 3.309 `frontend/src/components/shared/navigationConfig.js`
+### 3.307 `frontend/src/components/shared/navigationConfig.js`
 
 - No top-level named symbols detected.
 
-### 3.310 `frontend/src/components/shared/navigationConfig.ts`
+### 3.308 `frontend/src/components/shared/navigationConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `parseNavSetting` | export function | 42 |
 
-### 3.311 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.309 `frontend/src/components/shared/NotificationCenter.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5107,23 +5096,23 @@ Code files scanned: **548**
 | 6 | `onVisible` | const arrow | 271 |
 | 7 | `handleClickOutside` | const arrow | 294 |
 
-### 3.312 `frontend/src/components/shared/pageActivity.js`
+### 3.310 `frontend/src/components/shared/pageActivity.js`
 
 - No top-level named symbols detected.
 
-### 3.313 `frontend/src/components/shared/pageActivity.ts`
+### 3.311 `frontend/src/components/shared/pageActivity.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `useIsPageActive` | export function | 5 |
 
-### 3.314 `frontend/src/components/shared/PageHeader.jsx`
+### 3.312 `frontend/src/components/shared/PageHeader.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `PageHeader` | export default function | 9 |
 
-### 3.315 `frontend/src/components/shared/PaginationControls.jsx`
+### 3.313 `frontend/src/components/shared/PaginationControls.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5133,7 +5122,7 @@ Code files scanned: **548**
 | 4 | `commitPageDraft` | const arrow | 50 |
 | 5 | `handlePageInputKeyDown` | const arrow | 61 |
 
-### 3.316 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.314 `frontend/src/components/shared/PortalMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5144,7 +5133,7 @@ Code files scanned: **548**
 | 5 | `closeIfEscape` | const arrow | 84 |
 | 6 | `ThreeDotPortal` | export function | 193 |
 
-### 3.317 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.315 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5152,7 +5141,7 @@ Code files scanned: **548**
 | 2 | `QuickPreferenceToggles` | export default function | 23 |
 | 3 | `tr` | const arrow | 25 |
 
-### 3.318 `frontend/src/components/shared/SectionSwitcher.jsx`
+### 3.316 `frontend/src/components/shared/SectionSwitcher.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5160,7 +5149,7 @@ Code files scanned: **548**
 | 2 | `SectionSwitcher` | export default function | 12 |
 | 3 | `selectValue` | const arrow | 39 |
 
-### 3.319 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.317 `frontend/src/components/shared/WriteConflictModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5170,7 +5159,7 @@ Code files scanned: **548**
 | 4 | `getConflictFieldRows` | function | 73 |
 | 5 | `WriteConflictModal` | export default function | 171 |
 
-### 3.320 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.318 `frontend/src/components/users/PermissionEditor.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5180,7 +5169,7 @@ Code files scanned: **548**
 | 4 | `sensitivityLabel` | const arrow | 57 |
 | 5 | `toggle` | const arrow | 64 |
 
-### 3.321 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.319 `frontend/src/components/users/UserDetailSheet.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5188,7 +5177,7 @@ Code files scanned: **548**
 | 2 | `buildRowData` | function | 9 |
 | 3 | `UserDetailSheet` | export default function | 21 |
 
-### 3.322 `frontend/src/components/users/UserProfileModal.jsx`
+### 3.320 `frontend/src/components/users/UserProfileModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5214,7 +5203,7 @@ Code files scanned: **548**
 | 20 | `handleAvatarSelected` | const arrow | 677 |
 | 21 | `saveAvatarFromEditor` | const arrow | 697 |
 
-### 3.323 `frontend/src/components/users/Users.jsx`
+### 3.321 `frontend/src/components/users/Users.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5237,7 +5226,7 @@ Code files scanned: **548**
 | 17 | `handleSaveRole` | const arrow | 554 |
 | 18 | `handleDeleteRole` | const arrow | 629 |
 
-### 3.324 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.322 `frontend/src/components/utils-settings/AuditLog.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5258,7 +5247,7 @@ Code files scanned: **548**
 | 15 | `AuditLog` | export default function | 184 |
 | 16 | `sessionEntryLabel` | function | 578 |
 
-### 3.325 `frontend/src/components/utils-settings/Backup.jsx`
+### 3.323 `frontend/src/components/utils-settings/Backup.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5293,28 +5282,28 @@ Code files scanned: **548**
 | 29 | `handleFolderExport` | const arrow | 1172 |
 | 30 | `handleFolderImport` | const arrow | 1241 |
 
-### 3.326 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.324 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `FontFamilyPicker` | function | 20 |
 
-### 3.327 `frontend/src/components/utils-settings/index.js`
+### 3.325 `frontend/src/components/utils-settings/index.js`
 
 - No top-level named symbols detected.
 
-### 3.328 `frontend/src/components/utils-settings/index.ts`
+### 3.326 `frontend/src/components/utils-settings/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.329 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.327 `frontend/src/components/utils-settings/OtpModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `OtpModal` | export default function | 17 |
 | 2 | `loadSetup` | function | 52 |
 
-### 3.330 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.328 `frontend/src/components/utils-settings/ResetData.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5327,7 +5316,7 @@ Code files scanned: **548**
 | 7 | `T` | const arrow | 194 |
 | 8 | `doFactoryReset` | function | 201 |
 
-### 3.331 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.329 `frontend/src/components/utils-settings/Settings.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5353,11 +5342,11 @@ Code files scanned: **548**
 | 20 | `uploadImageSetting` | const arrow | 665 |
 | 21 | `handleSaveSettings` | const arrow | 730 |
 
-### 3.332 `frontend/src/components/utils-settings/settingsConflict.js`
+### 3.330 `frontend/src/components/utils-settings/settingsConflict.js`
 
 - No top-level named symbols detected.
 
-### 3.333 `frontend/src/components/utils-settings/settingsConflict.ts`
+### 3.331 `frontend/src/components/utils-settings/settingsConflict.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5365,11 +5354,11 @@ Code files scanned: **548**
 | 2 | `buildSettingsConflictState` | export function | 32 |
 | 3 | `diffSettingsConflictFields` | export function | 46 |
 
-### 3.334 `frontend/src/constants.js`
+### 3.332 `frontend/src/constants.js`
 
 - No top-level named symbols detected.
 
-### 3.335 `frontend/src/constants.ts`
+### 3.333 `frontend/src/constants.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5377,7 +5366,7 @@ Code files scanned: **548**
 | 2 | `formatDate` | export function | 152 |
 | 3 | `isNetworkError` | export function | 181 |
 
-### 3.336 `frontend/src/index.jsx`
+### 3.334 `frontend/src/index.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5392,11 +5381,11 @@ Code files scanned: **548**
 | 9 | `stopKnownStartupNoise` | const arrow | 138 |
 | 10 | `scheduleFormFieldAccessibility` | function | 171 |
 
-### 3.337 `frontend/src/platform/runtime/clientRuntime.js`
+### 3.335 `frontend/src/platform/runtime/clientRuntime.js`
 
 - No top-level named symbols detected.
 
-### 3.338 `frontend/src/platform/runtime/clientRuntime.ts`
+### 3.336 `frontend/src/platform/runtime/clientRuntime.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5418,11 +5407,11 @@ Code files scanned: **548**
 | 16 | `restoreStorage` | function | 204 |
 | 17 | `resetClientRuntimeState` | export function | 214 |
 
-### 3.339 `frontend/src/platform/storage/storagePolicy.mjs`
+### 3.337 `frontend/src/platform/storage/storagePolicy.mjs`
 
 - No top-level named symbols detected.
 
-### 3.340 `frontend/src/platform/storage/storagePolicy.ts`
+### 3.338 `frontend/src/platform/storage/storagePolicy.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5430,7 +5419,7 @@ Code files scanned: **548**
 | 2 | `maxStoredNumber` | export function | 29 |
 | 3 | `isCooldownActive` | export function | 36 |
 
-### 3.341 `frontend/src/runtime/runtimeErrorClassifier.ts`
+### 3.339 `frontend/src/runtime/runtimeErrorClassifier.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5448,33 +5437,33 @@ Code files scanned: **548**
 | 12 | `shouldSuppressSecurityPolicyViolation` | export function | 134 |
 | 13 | `isGuardableStyleSheetError` | export function | 148 |
 
-### 3.342 `frontend/src/types/jsx-modules.d.ts`
+### 3.340 `frontend/src/types/jsx-modules.d.ts`
 
 - No top-level named symbols detected.
 
-### 3.343 `frontend/src/types/mjs-modules.d.ts`
+### 3.341 `frontend/src/types/mjs-modules.d.ts`
 
 - No top-level named symbols detected.
 
-### 3.344 `frontend/src/types/react.d.ts`
+### 3.342 `frontend/src/types/react.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `useEffect` | export function | 8 |
 
-### 3.345 `frontend/src/types/receiptContracts.ts`
+### 3.343 `frontend/src/types/receiptContracts.ts`
 
 - No top-level named symbols detected.
 
-### 3.346 `frontend/src/types/settingsContracts.ts`
+### 3.344 `frontend/src/types/settingsContracts.ts`
 
 - No top-level named symbols detected.
 
-### 3.347 `frontend/src/utils/actionGuards.mjs`
+### 3.345 `frontend/src/utils/actionGuards.mjs`
 
 - No top-level named symbols detected.
 
-### 3.348 `frontend/src/utils/actionGuards.ts`
+### 3.346 `frontend/src/utils/actionGuards.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5484,11 +5473,11 @@ Code files scanned: **548**
 | 4 | `beginKeyedAction` | export function | 58 |
 | 5 | `finishKeyedAction` | export function | 70 |
 
-### 3.349 `frontend/src/utils/actionHistory.mjs`
+### 3.347 `frontend/src/utils/actionHistory.mjs`
 
 - No top-level named symbols detected.
 
-### 3.350 `frontend/src/utils/actionHistory.ts`
+### 3.348 `frontend/src/utils/actionHistory.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5498,39 +5487,39 @@ Code files scanned: **548**
 | 4 | `getErrorMessage` | function | 116 |
 | 5 | `useActionHistory` | export function | 120 |
 
-### 3.351 `frontend/src/utils/appRefresh.d.ts`
+### 3.349 `frontend/src/utils/appRefresh.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeRefreshChannels` | export function | 2 |
 | 2 | `refreshAppData` | export function | 3 |
 
-### 3.352 `frontend/src/utils/appRefresh.js`
+### 3.350 `frontend/src/utils/appRefresh.js`
 
 - No top-level named symbols detected.
 
-### 3.353 `frontend/src/utils/appRefresh.ts`
+### 3.351 `frontend/src/utils/appRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeRefreshChannels` | export function | 20 |
 | 2 | `refreshAppData` | export function | 28 |
 
-### 3.354 `frontend/src/utils/bulkOps.mjs`
+### 3.352 `frontend/src/utils/bulkOps.mjs`
 
 - No top-level named symbols detected.
 
-### 3.355 `frontend/src/utils/bulkOps.ts`
+### 3.353 `frontend/src/utils/bulkOps.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runner` | function | 47 |
 
-### 3.356 `frontend/src/utils/color.js`
+### 3.354 `frontend/src/utils/color.js`
 
 - No top-level named symbols detected.
 
-### 3.357 `frontend/src/utils/color.ts`
+### 3.355 `frontend/src/utils/color.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5538,7 +5527,7 @@ Code files scanned: **548**
 | 2 | `relativeLuminance` | function | 12 |
 | 3 | `getContrastingTextColor` | export function | 29 |
 
-### 3.358 `frontend/src/utils/csv.d.ts`
+### 3.356 `frontend/src/utils/csv.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5550,11 +5539,11 @@ Code files scanned: **548**
 | 6 | `downloadZipFiles` | export function | 6 |
 | 7 | `downloadZipFilesAsync` | export function | 7 |
 
-### 3.359 `frontend/src/utils/csv.js`
+### 3.357 `frontend/src/utils/csv.js`
 
 - No top-level named symbols detected.
 
-### 3.360 `frontend/src/utils/csv.ts`
+### 3.358 `frontend/src/utils/csv.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5574,21 +5563,21 @@ Code files scanned: **548**
 | 14 | `downloadZipFiles` | export function | 219 |
 | 15 | `downloadZipFilesAsync` | export function | 225 |
 
-### 3.361 `frontend/src/utils/csvExportWorker.mjs`
+### 3.359 `frontend/src/utils/csvExportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.362 `frontend/src/utils/csvExportWorker.ts`
+### 3.360 `frontend/src/utils/csvExportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 20 |
 
-### 3.363 `frontend/src/utils/csvImport.js`
+### 3.361 `frontend/src/utils/csvImport.js`
 
 - No top-level named symbols detected.
 
-### 3.364 `frontend/src/utils/csvImport.ts`
+### 3.362 `frontend/src/utils/csvImport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5612,22 +5601,18 @@ Code files scanned: **548**
 | 18 | `normalizeCsvMoney` | export function | 299 |
 | 19 | `normalizeCsvPercent` | export function | 303 |
 
-### 3.365 `frontend/src/utils/csvRowCounter.mjs`
-
-- No top-level named symbols detected.
-
-### 3.366 `frontend/src/utils/csvRowCounter.ts`
+### 3.363 `frontend/src/utils/csvRowCounter.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `countCsvDataRows` | export function | 1 |
 | 2 | `finishRecord` | const arrow | 7 |
 
-### 3.367 `frontend/src/utils/dateHelpers.js`
+### 3.364 `frontend/src/utils/dateHelpers.js`
 
 - No top-level named symbols detected.
 
-### 3.368 `frontend/src/utils/dateHelpers.ts`
+### 3.365 `frontend/src/utils/dateHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5635,11 +5620,11 @@ Code files scanned: **548**
 | 2 | `todayStr` | export function | 8 |
 | 3 | `offsetDate` | export function | 13 |
 
-### 3.369 `frontend/src/utils/deviceInfo.js`
+### 3.366 `frontend/src/utils/deviceInfo.js`
 
 - No top-level named symbols detected.
 
-### 3.370 `frontend/src/utils/deviceInfo.ts`
+### 3.367 `frontend/src/utils/deviceInfo.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5648,18 +5633,18 @@ Code files scanned: **548**
 | 3 | `getClientDeviceInfo` | export function | 30 |
 | 4 | `getClientMetaHeaders` | export function | 42 |
 
-### 3.371 `frontend/src/utils/exportPackage.js`
+### 3.368 `frontend/src/utils/exportPackage.js`
 
 - No top-level named symbols detected.
 
-### 3.372 `frontend/src/utils/exportPackage.ts`
+### 3.369 `frontend/src/utils/exportPackage.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildReportManifestRows` | export function | 30 |
 | 2 | `buildReportPackageFiles` | export function | 38 |
 
-### 3.373 `frontend/src/utils/exportReports.jsx`
+### 3.370 `frontend/src/utils/exportReports.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5673,11 +5658,11 @@ Code files scanned: **548**
 | 8 | `renderNotes` | function | 317 |
 | 9 | `buildStandaloneReportHtml` | export function | 329 |
 
-### 3.374 `frontend/src/utils/favicon.js`
+### 3.371 `frontend/src/utils/favicon.js`
 
 - No top-level named symbols detected.
 
-### 3.375 `frontend/src/utils/favicon.ts`
+### 3.372 `frontend/src/utils/favicon.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5686,11 +5671,11 @@ Code files scanned: **548**
 | 3 | `loadImage` | function | 29 |
 | 4 | `createCircularFaviconDataUrl` | export function | 49 |
 
-### 3.376 `frontend/src/utils/formatters.js`
+### 3.373 `frontend/src/utils/formatters.js`
 
 - No top-level named symbols detected.
 
-### 3.377 `frontend/src/utils/formatters.ts`
+### 3.374 `frontend/src/utils/formatters.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5700,11 +5685,11 @@ Code files scanned: **548**
 | 4 | `fmtShort` | export function | 73 |
 | 5 | `fmtCount` | export function | 85 |
 
-### 3.378 `frontend/src/utils/groupedRecords.mjs`
+### 3.375 `frontend/src/utils/groupedRecords.mjs`
 
 - No top-level named symbols detected.
 
-### 3.379 `frontend/src/utils/groupedRecords.ts`
+### 3.376 `frontend/src/utils/groupedRecords.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5717,22 +5702,22 @@ Code files scanned: **548**
 | 7 | `getTimeGroupingMode` | export function | 119 |
 | 8 | `toggleIdSet` | export function | 321 |
 
-### 3.380 `frontend/src/utils/historyHelpers.mjs`
+### 3.377 `frontend/src/utils/historyHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.381 `frontend/src/utils/historyHelpers.ts`
+### 3.378 `frontend/src/utils/historyHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `extractHistoryResultId` | export function | 26 |
 | 2 | `resolveCreatedHistorySnapshot` | export function | 36 |
 
-### 3.382 `frontend/src/utils/importJobRefresh.js`
+### 3.379 `frontend/src/utils/importJobRefresh.js`
 
 - No top-level named symbols detected.
 
-### 3.383 `frontend/src/utils/importJobRefresh.ts`
+### 3.380 `frontend/src/utils/importJobRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5744,19 +5729,19 @@ Code files scanned: **548**
 | 6 | `shouldDispatchImportCompletionRefresh` | export function | 68 |
 | 7 | `dispatchImportCompletionRefresh` | export function | 79 |
 
-### 3.384 `frontend/src/utils/index.js`
+### 3.381 `frontend/src/utils/index.js`
 
 - No top-level named symbols detected.
 
-### 3.385 `frontend/src/utils/index.ts`
+### 3.382 `frontend/src/utils/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.386 `frontend/src/utils/initials.mjs`
+### 3.383 `frontend/src/utils/initials.mjs`
 
 - No top-level named symbols detected.
 
-### 3.387 `frontend/src/utils/initials.ts`
+### 3.384 `frontend/src/utils/initials.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5768,11 +5753,11 @@ Code files scanned: **548**
 | 6 | `aggregateInitialOptions` | export function | 79 |
 | 7 | `buildInitialOptionsFromProducts` | export function | 97 |
 
-### 3.388 `frontend/src/utils/loaders.mjs`
+### 3.385 `frontend/src/utils/loaders.mjs`
 
 - No top-level named symbols detected.
 
-### 3.389 `frontend/src/utils/loaders.ts`
+### 3.386 `frontend/src/utils/loaders.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5784,11 +5769,11 @@ Code files scanned: **548**
 | 6 | `getLoaderErrorMessage` | export function | 93 |
 | 7 | `getFirstLoaderError` | export function | 97 |
 
-### 3.390 `frontend/src/utils/mediaUpload.js`
+### 3.387 `frontend/src/utils/mediaUpload.js`
 
 - No top-level named symbols detected.
 
-### 3.391 `frontend/src/utils/mediaUpload.ts`
+### 3.388 `frontend/src/utils/mediaUpload.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5798,18 +5783,18 @@ Code files scanned: **548**
 | 4 | `buildCacheBustedMediaPath` | export function | 59 |
 | 5 | `reduceUploadState` | export function | 77 |
 
-### 3.392 `frontend/src/utils/permissions.js`
+### 3.389 `frontend/src/utils/permissions.js`
 
 - No top-level named symbols detected.
 
-### 3.393 `frontend/src/utils/permissions.ts`
+### 3.390 `frontend/src/utils/permissions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `isPermissionMap` | function | 3 |
 | 2 | `parsePermissionMap` | export function | 7 |
 
-### 3.394 `frontend/src/utils/pricing.d.ts`
+### 3.391 `frontend/src/utils/pricing.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5822,11 +5807,11 @@ Code files scanned: **548**
 | 7 | `isProductDiscountActive` | export function | 7 |
 | 8 | `calculateProductDiscount` | export function | 8 |
 
-### 3.395 `frontend/src/utils/pricing.js`
+### 3.392 `frontend/src/utils/pricing.js`
 
 - No top-level named symbols detected.
 
-### 3.396 `frontend/src/utils/pricing.ts`
+### 3.393 `frontend/src/utils/pricing.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5839,11 +5824,11 @@ Code files scanned: **548**
 | 7 | `isProductDiscountActive` | export function | 52 |
 | 8 | `calculateProductDiscount` | export function | 65 |
 
-### 3.397 `frontend/src/utils/printReceipt.js`
+### 3.394 `frontend/src/utils/printReceipt.js`
 
 - No top-level named symbols detected.
 
-### 3.398 `frontend/src/utils/printReceipt.ts`
+### 3.395 `frontend/src/utils/printReceipt.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5888,11 +5873,11 @@ Code files scanned: **548**
 | 39 | `openReceiptPdf` | export function | 984 |
 | 40 | `printReceipt` | export function | 1008 |
 
-### 3.399 `frontend/src/utils/productBatches.mjs`
+### 3.396 `frontend/src/utils/productBatches.mjs`
 
 - No top-level named symbols detected.
 
-### 3.400 `frontend/src/utils/productBatches.ts`
+### 3.397 `frontend/src/utils/productBatches.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5900,11 +5885,11 @@ Code files scanned: **548**
 | 2 | `getVisibleProductBatches` | export function | 32 |
 | 3 | `buildBatchPreview` | export function | 53 |
 
-### 3.401 `frontend/src/utils/productGrouping.mjs`
+### 3.398 `frontend/src/utils/productGrouping.mjs`
 
 - No top-level named symbols detected.
 
-### 3.402 `frontend/src/utils/productGrouping.ts`
+### 3.399 `frontend/src/utils/productGrouping.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5922,17 +5907,17 @@ Code files scanned: **548**
 | 12 | `buildProductGroups` | export function | 175 |
 | 13 | `buildProductGroupSections` | export function | 275 |
 
-### 3.403 `frontend/src/utils/publicAssetUrls.d.ts`
+### 3.400 `frontend/src/utils/publicAssetUrls.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `resolvePublicAssetUrl` | export function | 1 |
 
-### 3.404 `frontend/src/utils/publicAssetUrls.js`
+### 3.401 `frontend/src/utils/publicAssetUrls.js`
 
 - No top-level named symbols detected.
 
-### 3.405 `frontend/src/utils/publicAssetUrls.ts`
+### 3.402 `frontend/src/utils/publicAssetUrls.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5945,7 +5930,7 @@ Code files scanned: **548**
 | 7 | `api` | const arrow | 57 |
 | 8 | `resolvePublicAssetUrl` | export function | 68 |
 
-### 3.406 `frontend/src/utils/receiptAppliedConfig.ts`
+### 3.403 `frontend/src/utils/receiptAppliedConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5957,11 +5942,11 @@ Code files scanned: **548**
 | 6 | `readReceiptPrintSettingsFromSettings` | export function | 114 |
 | 7 | `buildAppliedReceiptConfig` | export function | 118 |
 
-### 3.407 `frontend/src/utils/scriptTypography.js`
+### 3.404 `frontend/src/utils/scriptTypography.js`
 
 - No top-level named symbols detected.
 
-### 3.408 `frontend/src/utils/scriptTypography.ts`
+### 3.405 `frontend/src/utils/scriptTypography.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5969,28 +5954,28 @@ Code files scanned: **548**
 | 2 | `withKhmerTextClass` | export function | 12 |
 | 3 | `getKhmerTextProps` | export function | 18 |
 
-### 3.409 `frontend/src/utils/settingsRefresh.js`
+### 3.406 `frontend/src/utils/settingsRefresh.js`
 
 - No top-level named symbols detected.
 
-### 3.410 `frontend/src/utils/settingsRefresh.ts`
+### 3.407 `frontend/src/utils/settingsRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeSettingKeys` | function | 62 |
 | 2 | `getSettingsRefreshChannels` | export function | 70 |
 
-### 3.411 `frontend/src/utils/settingsWriteOptions.ts`
+### 3.408 `frontend/src/utils/settingsWriteOptions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeSettingsWriteOptions` | export function | 3 |
 
-### 3.412 `frontend/src/web-api.js`
+### 3.409 `frontend/src/web-api.js`
 
 - No top-level named symbols detected.
 
-### 3.413 `frontend/src/web-api.ts`
+### 3.410 `frontend/src/web-api.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6028,17 +6013,17 @@ Code files scanned: **548**
 | 32 | `forwardServiceWorkerOutboxEvent` | function | 599 |
 | 33 | `forwardServiceWorkerAppEvent` | function | 693 |
 
-### 3.414 `frontend/tailwind.config.mjs`
+### 3.411 `frontend/tailwind.config.mjs`
 
 - No top-level named symbols detected.
 
-### 3.415 `frontend/tests/actionGuards.test.mjs`
+### 3.412 `frontend/tests/actionGuards.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.416 `frontend/tests/actionStability.test.mjs`
+### 3.413 `frontend/tests/actionStability.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6046,11 +6031,11 @@ Code files scanned: **548**
 | 2 | `readRepo` | function | 14 |
 | 3 | `runTest` | function | 20 |
 
-### 3.417 `frontend/tests/adminShellMediaGuards.test.mjs`
+### 3.414 `frontend/tests/adminShellMediaGuards.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.418 `frontend/tests/apiHttp.test.mjs`
+### 3.415 `frontend/tests/apiHttp.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6058,112 +6043,112 @@ Code files scanned: **548**
 | 2 | `createDeferredResponse` | function | 32 |
 | 3 | `resetApiState` | function | 43 |
 
-### 3.419 `frontend/tests/appRefresh.test.mjs`
+### 3.416 `frontend/tests/appRefresh.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `testNormalizeRefreshChannels` | function | 5 |
 | 2 | `testRefreshAppDataDispatchesMergedDetail` | function | 12 |
 
-### 3.420 `frontend/tests/appShellUtils.test.mjs`
+### 3.417 `frontend/tests/appShellUtils.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.421 `frontend/tests/assetCompression.test.mjs`
+### 3.418 `frontend/tests/assetCompression.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `collectMediaFiles` | function | 11 |
 
-### 3.422 `frontend/tests/backupJobs.test.mjs`
+### 3.419 `frontend/tests/backupJobs.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.423 `frontend/tests/barcodeImageScanner.test.mjs`
+### 3.420 `frontend/tests/barcodeImageScanner.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.424 `frontend/tests/barcodeScannerState.test.mjs`
+### 3.421 `frontend/tests/barcodeScannerState.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.425 `frontend/tests/bulkOps.test.mjs`
+### 3.422 `frontend/tests/bulkOps.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.426 `frontend/tests/contactImportWorker.test.mjs`
+### 3.423 `frontend/tests/contactImportWorker.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.427 `frontend/tests/csvImport.test.mjs`
+### 3.424 `frontend/tests/csvImport.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.428 `frontend/tests/dashboardDataReliability.test.mjs`
+### 3.425 `frontend/tests/dashboardDataReliability.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.429 `frontend/tests/dateHelpers.test.mjs`
+### 3.426 `frontend/tests/dateHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 | 2 | `parseLocalDate` | function | 17 |
 
-### 3.430 `frontend/tests/deviceInfo.test.mjs`
+### 3.427 `frontend/tests/deviceInfo.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 | 2 | `withNavigator` | function | 17 |
 
-### 3.431 `frontend/tests/exportPackages.test.mjs`
+### 3.428 `frontend/tests/exportPackages.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.432 `frontend/tests/formatters.test.mjs`
+### 3.429 `frontend/tests/formatters.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.433 `frontend/tests/globalScroll.test.mjs`
+### 3.430 `frontend/tests/globalScroll.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.434 `frontend/tests/globalScrollControls.test.mjs`
+### 3.431 `frontend/tests/globalScrollControls.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.435 `frontend/tests/groupedRecords.test.mjs`
+### 3.432 `frontend/tests/groupedRecords.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.436 `frontend/tests/historyHelpers.test.mjs`
+### 3.433 `frontend/tests/historyHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 10 |
 
-### 3.437 `frontend/tests/importJobRefresh.test.mjs`
+### 3.434 `frontend/tests/importJobRefresh.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6172,97 +6157,97 @@ Code files scanned: **548**
 | 3 | `testDispatchOnlyOnTerminalTransition` | function | 23 |
 | 4 | `testDispatchEmitsExpectedEvents` | function | 47 |
 
-### 3.438 `frontend/tests/initials.test.mjs`
+### 3.435 `frontend/tests/initials.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.439 `frontend/tests/inventoryImportWorker.test.mjs`
+### 3.436 `frontend/tests/inventoryImportWorker.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.440 `frontend/tests/inventoryMobileCardLayout.test.mjs`
+### 3.437 `frontend/tests/inventoryMobileCardLayout.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.441 `frontend/tests/inventoryMovementGroups.test.mjs`
+### 3.438 `frontend/tests/inventoryMovementGroups.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.442 `frontend/tests/inventoryRfidSection.test.mjs`
+### 3.439 `frontend/tests/inventoryRfidSection.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.443 `frontend/tests/jsxSyntaxCheck.mjs`
+### 3.440 `frontend/tests/jsxSyntaxCheck.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `listSourceFiles` | function | 10 |
 
-### 3.444 `frontend/tests/loaders.test.mjs`
+### 3.441 `frontend/tests/loaders.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.445 `frontend/tests/mediaUploadHelpers.test.mjs`
+### 3.442 `frontend/tests/mediaUploadHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.446 `frontend/tests/navigationConfig.test.mjs`
+### 3.443 `frontend/tests/navigationConfig.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.447 `frontend/tests/notificationBadge.test.mjs`
+### 3.444 `frontend/tests/notificationBadge.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.448 `frontend/tests/offlineSalesQueue.test.mjs`
+### 3.445 `frontend/tests/offlineSalesQueue.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.449 `frontend/tests/offlineSecurityHardening.test.mjs`
+### 3.446 `frontend/tests/offlineSecurityHardening.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.450 `frontend/tests/offlineSyncArchitecture.test.mjs`
+### 3.447 `frontend/tests/offlineSyncArchitecture.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.451 `frontend/tests/ownedGoogleAuth.test.mjs`
+### 3.448 `frontend/tests/ownedGoogleAuth.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.452 `frontend/tests/performanceLoadingUx.test.mjs`
+### 3.449 `frontend/tests/performanceLoadingUx.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.453 `frontend/tests/permissionEditor.test.mjs`
+### 3.450 `frontend/tests/permissionEditor.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.454 `frontend/tests/permissions.test.mjs`
+### 3.451 `frontend/tests/permissions.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.455 `frontend/tests/portalCatalogDisplay.test.mjs`
+### 3.452 `frontend/tests/portalCatalogDisplay.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6270,97 +6255,97 @@ Code files scanned: **548**
 | 2 | `copy` | const arrow | 29 |
 | 3 | `formatPortalPrice` | const arrow | 30 |
 
-### 3.456 `frontend/tests/portalContentI18n.test.mjs`
+### 3.453 `frontend/tests/portalContentI18n.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.457 `frontend/tests/portalEditorUtils.test.mjs`
+### 3.454 `frontend/tests/portalEditorUtils.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 
-### 3.458 `frontend/tests/portalFaqVocabulary.test.mjs`
+### 3.455 `frontend/tests/portalFaqVocabulary.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.459 `frontend/tests/portalLanguagePacks.test.mjs`
+### 3.456 `frontend/tests/portalLanguagePacks.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.460 `frontend/tests/portalTranslateController.test.mjs`
+### 3.457 `frontend/tests/portalTranslateController.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createStorage` | function | 17 |
 | 2 | `createDocument` | function | 32 |
 
-### 3.461 `frontend/tests/posCore.test.mjs`
+### 3.458 `frontend/tests/posCore.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 16 |
 
-### 3.462 `frontend/tests/pricingContacts.test.mjs`
+### 3.459 `frontend/tests/pricingContacts.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.463 `frontend/tests/productBatches.test.mjs`
+### 3.460 `frontend/tests/productBatches.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.464 `frontend/tests/productDiscountUx.test.mjs`
+### 3.461 `frontend/tests/productDiscountUx.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.465 `frontend/tests/productDisplayHelpers.test.mjs`
+### 3.462 `frontend/tests/productDisplayHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.466 `frontend/tests/productFilterHelpers.test.mjs`
+### 3.463 `frontend/tests/productFilterHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.467 `frontend/tests/productGalleryHelpers.test.mjs`
+### 3.464 `frontend/tests/productGalleryHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.468 `frontend/tests/productGrouping.test.mjs`
+### 3.465 `frontend/tests/productGrouping.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.469 `frontend/tests/productGroupViewHelpers.test.mjs`
+### 3.466 `frontend/tests/productGroupViewHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `fmtUSD` | const arrow | 7 |
 | 2 | `t` | const arrow | 8 |
 
-### 3.470 `frontend/tests/productHistoryHelpers.test.mjs`
+### 3.467 `frontend/tests/productHistoryHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.471 `frontend/tests/productImportPlanner.test.mjs`
+### 3.468 `frontend/tests/productImportPlanner.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.472 `frontend/tests/productImportWorkerFallback.test.mjs`
+### 3.469 `frontend/tests/productImportWorkerFallback.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.473 `frontend/tests/productMenuHelpers.test.mjs`
+### 3.470 `frontend/tests/productMenuHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6368,88 +6353,88 @@ Code files scanned: **548**
 | 2 | `tr` | const arrow | 11 |
 | 3 | `action` | const arrow | 88 |
 
-### 3.474 `frontend/tests/productPageHelpers.test.mjs`
+### 3.471 `frontend/tests/productPageHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.475 `frontend/tests/productSearchPagination.test.mjs`
+### 3.472 `frontend/tests/productSearchPagination.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.476 `frontend/tests/productSelectionHelpers.test.mjs`
+### 3.473 `frontend/tests/productSelectionHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.477 `frontend/tests/productWriteHelpers.test.mjs`
+### 3.474 `frontend/tests/productWriteHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.478 `frontend/tests/publicErrorRecovery.test.mjs`
+### 3.475 `frontend/tests/publicErrorRecovery.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createStorage` | function | 8 |
 
-### 3.479 `frontend/tests/receiptSettingsSync.test.mjs`
+### 3.476 `frontend/tests/receiptSettingsSync.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.480 `frontend/tests/receiptTemplate.test.mjs`
+### 3.477 `frontend/tests/receiptTemplate.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.481 `frontend/tests/returnsLayout.test.mjs`
+### 3.478 `frontend/tests/returnsLayout.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.482 `frontend/tests/runtimeErrorClassifier.test.mjs`
+### 3.479 `frontend/tests/runtimeErrorClassifier.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.483 `frontend/tests/salesImportWorker.test.mjs`
+### 3.480 `frontend/tests/salesImportWorker.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.484 `frontend/tests/scanbotScanner.test.mjs`
+### 3.481 `frontend/tests/scanbotScanner.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `setNavigator` | function | 8 |
 | 2 | `run` | function | 16 |
 
-### 3.485 `frontend/tests/scriptTypography.test.mjs`
+### 3.482 `frontend/tests/scriptTypography.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.486 `frontend/tests/sectionNavigation.test.mjs`
+### 3.483 `frontend/tests/sectionNavigation.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.487 `frontend/tests/settingsConflictHelpers.test.mjs`
+### 3.484 `frontend/tests/settingsConflictHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.488 `frontend/tests/settingsRefresh.test.mjs`
+### 3.485 `frontend/tests/settingsRefresh.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.489 `frontend/tests/storagePolicy.test.mjs`
+### 3.486 `frontend/tests/storagePolicy.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.490 `frontend/tests/utilsSettingsBarrel.test.mjs`
+### 3.487 `frontend/tests/utilsSettingsBarrel.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.491 `frontend/vite.config.mjs`
+### 3.488 `frontend/vite.config.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6459,7 +6444,7 @@ Code files scanned: **548**
 | 4 | `shouldDeferModulePreload` | function | 112 |
 | 5 | `manualChunks` | function | 116 |
 
-### 3.492 `ops/scripts/architecture/generated-bulk-audit.mjs`
+### 3.489 `ops/scripts/architecture/generated-bulk-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6482,7 +6467,7 @@ Code files scanned: **548**
 | 17 | `renderReport` | function | 457 |
 | 18 | `main` | function | 538 |
 
-### 3.493 `ops/scripts/architecture/language-runtime-audit.mjs`
+### 3.490 `ops/scripts/architecture/language-runtime-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6497,17 +6482,17 @@ Code files scanned: **548**
 | 9 | `compactCandidates` | function | 116 |
 | 10 | `verificationMatrix` | function | 124 |
 | 11 | `buildFirstExecutableSlices` | function | 162 |
-| 12 | `collectFocusedTestCoverage` | function | 1090 |
-| 13 | `collectConvertedTypeScriptSlices` | function | 1105 |
-| 14 | `collectCompletedWebWorkerSlices` | function | 1124 |
-| 15 | `collectCompletedDataPathSlices` | function | 1141 |
-| 16 | `collectProofCommandCoverage` | function | 1157 |
-| 17 | `collectRecords` | function | 1211 |
-| 18 | `renderReport` | function | 1228 |
-| 19 | `buildSummary` | function | 1385 |
-| 20 | `main` | function | 1464 |
+| 12 | `collectFocusedTestCoverage` | function | 1102 |
+| 13 | `collectConvertedTypeScriptSlices` | function | 1117 |
+| 14 | `collectCompletedWebWorkerSlices` | function | 1136 |
+| 15 | `collectCompletedDataPathSlices` | function | 1153 |
+| 16 | `collectProofCommandCoverage` | function | 1169 |
+| 17 | `collectRecords` | function | 1223 |
+| 18 | `renderReport` | function | 1240 |
+| 19 | `buildSummary` | function | 1397 |
+| 20 | `main` | function | 1476 |
 
-### 3.494 `ops/scripts/architecture/organization-audit.mjs`
+### 3.491 `ops/scripts/architecture/organization-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6527,7 +6512,7 @@ Code files scanned: **548**
 | 14 | `buildSummary` | function | 332 |
 | 15 | `main` | function | 360 |
 
-### 3.495 `ops/scripts/architecture/phase29-audit.mjs`
+### 3.492 `ops/scripts/architecture/phase29-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6545,7 +6530,7 @@ Code files scanned: **548**
 | 12 | `buildSummary` | function | 502 |
 | 13 | `main` | function | 540 |
 
-### 3.496 `ops/scripts/backend/schema-audit.js`
+### 3.493 `ops/scripts/backend/schema-audit.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6575,7 +6560,7 @@ Code files scanned: **548**
 | 24 | `buildSummary` | function | 398 |
 | 25 | `main` | function | 430 |
 
-### 3.497 `ops/scripts/backend/schema-primary-key-preflight.mjs`
+### 3.494 `ops/scripts/backend/schema-primary-key-preflight.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6585,7 +6570,7 @@ Code files scanned: **548**
 | 4 | `buildPreflightSql` | function | 50 |
 | 5 | `summarize` | function | 158 |
 
-### 3.498 `ops/scripts/backend/verify-data-integrity.js`
+### 3.495 `ops/scripts/backend/verify-data-integrity.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6617,7 +6602,7 @@ Code files scanned: **548**
 | 26 | `writeReport` | function | 646 |
 | 27 | `run` | function | 656 |
 
-### 3.499 `ops/scripts/frontend/verify-i18n.js`
+### 3.496 `ops/scripts/frontend/verify-i18n.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6628,7 +6613,7 @@ Code files scanned: **548**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.500 `ops/scripts/frontend/verify-performance.js`
+### 3.497 `ops/scripts/frontend/verify-performance.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6637,7 +6622,7 @@ Code files scanned: **548**
 | 3 | `trackedFiles` | function | 37 |
 | 4 | `assert` | function | 47 |
 
-### 3.501 `ops/scripts/frontend/verify-ui.js`
+### 3.498 `ops/scripts/frontend/verify-ui.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6653,7 +6638,7 @@ Code files scanned: **548**
 | 10 | `printAuditSummary` | function | 202 |
 | 11 | `main` | function | 220 |
 
-### 3.502 `ops/scripts/lib/fs-utils.js`
+### 3.499 `ops/scripts/lib/fs-utils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6674,7 +6659,7 @@ Code files scanned: **548**
 | 15 | `collectRootFiles` | function | 166 |
 | 16 | `isProbablyText` | function | 185 |
 
-### 3.503 `ops/scripts/lib/report-utils.js`
+### 3.500 `ops/scripts/lib/report-utils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6684,7 +6669,7 @@ Code files scanned: **548**
 | 4 | `outputTail` | function | 31 |
 | 5 | `formatBytes` | function | 38 |
 
-### 3.504 `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs`
+### 3.501 `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6694,7 +6679,7 @@ Code files scanned: **548**
 | 4 | `cleanupActionHistoryData` | function | 65 |
 | 5 | `main` | function | 98 |
 
-### 3.505 `ops/scripts/runtime/audits/audit-auth.mjs`
+### 3.502 `ops/scripts/runtime/audits/audit-auth.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6705,7 +6690,7 @@ Code files scanned: **548**
 | 5 | `applySessionToPlaywrightContext` | export function | 95 |
 | 6 | `hydratePlaywrightPage` | export function | 117 |
 
-### 3.506 `ops/scripts/runtime/audits/audit-manifest.mjs`
+### 3.503 `ops/scripts/runtime/audits/audit-manifest.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6713,7 +6698,7 @@ Code files scanned: **548**
 | 2 | `resolveAuditRoutes` | export function | 211 |
 | 3 | `getAuditProfiles` | export function | 248 |
 
-### 3.507 `ops/scripts/runtime/audits/audit-report-html.mjs`
+### 3.504 `ops/scripts/runtime/audits/audit-report-html.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6729,7 +6714,7 @@ Code files scanned: **548**
 | 10 | `writeFullAuditHtmlReport` | export function | 217 |
 | 11 | `writeBrowserActionHtmlReport` | export function | 278 |
 
-### 3.508 `ops/scripts/runtime/audits/deep-live-audit.mjs`
+### 3.505 `ops/scripts/runtime/audits/deep-live-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6777,7 +6762,7 @@ Code files scanned: **548**
 | 42 | `compareWithPreviousBaseline` | function | 1319 |
 | 43 | `main` | function | 1367 |
 
-### 3.509 `ops/scripts/runtime/audits/full-app-audit.mjs`
+### 3.506 `ops/scripts/runtime/audits/full-app-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6804,7 +6789,7 @@ Code files scanned: **548**
 | 21 | `writeSummary` | function | 570 |
 | 22 | `main` | function | 581 |
 
-### 3.510 `ops/scripts/runtime/browser-action-smoke.mjs`
+### 3.507 `ops/scripts/runtime/browser-action-smoke.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6841,7 +6826,7 @@ Code files scanned: **548**
 | 31 | `runProfile` | function | 678 |
 | 32 | `main` | function | 746 |
 
-### 3.511 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs`
+### 3.508 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6862,7 +6847,7 @@ Code files scanned: **548**
 | 15 | `main` | function | 150 |
 | 16 | `requestJson` | function | 205 |
 
-### 3.512 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs`
+### 3.509 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6873,7 +6858,7 @@ Code files scanned: **548**
 | 5 | `main` | function | 58 |
 | 6 | `requestJson` | function | 103 |
 
-### 3.513 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
+### 3.510 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6894,7 +6879,7 @@ Code files scanned: **548**
 | 15 | `applyCloudflareAutomation` | function | 182 |
 | 16 | `main` | function | 226 |
 
-### 3.514 `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs`
+### 3.511 `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6907,7 +6892,7 @@ Code files scanned: **548**
 | 7 | `verifyRuntimeObjectStoreFallback` | function | 88 |
 | 8 | `main` | function | 96 |
 
-### 3.515 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+### 3.512 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6920,28 +6905,28 @@ Code files scanned: **548**
 | 7 | `waitForRead` | export function | 50 |
 | 8 | `closeTopModal` | export function | 62 |
 
-### 3.516 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
+### 3.513 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.517 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
+### 3.514 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.518 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
+### 3.515 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 25 |
 
-### 3.519 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
+### 3.516 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6949,7 +6934,7 @@ Code files scanned: **548**
 | 2 | `openFirstProductDetail` | function | 26 |
 | 3 | `main` | function | 35 |
 
-### 3.520 `ops/scripts/runtime/live-checks/phase84-live-suite.mjs`
+### 3.517 `ops/scripts/runtime/live-checks/phase84-live-suite.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6965,7 +6950,7 @@ Code files scanned: **548**
 | 10 | `skippedStep` | function | 153 |
 | 11 | `runSuite` | function | 163 |
 
-### 3.521 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs`
+### 3.518 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6973,14 +6958,14 @@ Code files scanned: **548**
 | 2 | `verifiedContextGet` | function | 24 |
 | 3 | `main` | function | 31 |
 
-### 3.522 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs`
+### 3.519 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 25 |
 
-### 3.523 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
+### 3.520 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6988,28 +6973,28 @@ Code files scanned: **548**
 | 2 | `openFirstActionMenu` | function | 25 |
 | 3 | `main` | function | 34 |
 
-### 3.524 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
+### 3.521 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 19 |
 | 2 | `main` | function | 26 |
 
-### 3.525 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
+### 3.522 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.526 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs`
+### 3.523 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 25 |
 
-### 3.527 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
+### 3.524 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7017,7 +7002,7 @@ Code files scanned: **548**
 | 2 | `openFirstVariantModal` | function | 25 |
 | 3 | `main` | function | 42 |
 
-### 3.528 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
+### 3.525 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7027,28 +7012,28 @@ Code files scanned: **548**
 | 4 | `endpointStatus` | function | 27 |
 | 5 | `main` | function | 31 |
 
-### 3.529 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
+### 3.526 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 25 |
 
-### 3.530 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
+### 3.527 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 19 |
 | 2 | `main` | function | 26 |
 
-### 3.531 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
+### 3.528 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.532 `ops/scripts/runtime/smoke/check-public-url.mjs`
+### 3.529 `ops/scripts/runtime/smoke/check-public-url.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7064,7 +7049,7 @@ Code files scanned: **548**
 | 10 | `checkHttpsViaIp` | function | 123 |
 | 11 | `main` | function | 160 |
 
-### 3.533 `ops/scripts/runtime/smoke/check-route-contract.mjs`
+### 3.530 `ops/scripts/runtime/smoke/check-route-contract.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7072,7 +7057,7 @@ Code files scanned: **548**
 | 2 | `checkRoute` | function | 32 |
 | 3 | `main` | function | 59 |
 
-### 3.534 `ops/scripts/runtime/smoke/live-smoke.mjs`
+### 3.531 `ops/scripts/runtime/smoke/live-smoke.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7083,7 +7068,7 @@ Code files scanned: **548**
 | 5 | `main` | function | 87 |
 | 6 | `record` | const arrow | 92 |
 
-### 3.535 `ops/scripts/runtime/smoke/post-start-diagnostics.mjs`
+### 3.532 `ops/scripts/runtime/smoke/post-start-diagnostics.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7094,7 +7079,7 @@ Code files scanned: **548**
 | 5 | `writeReport` | function | 80 |
 | 6 | `main` | function | 86 |
 
-### 3.536 `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs`
+### 3.533 `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7107,7 +7092,7 @@ Code files scanned: **548**
 | 7 | `buildSql` | function | 192 |
 | 8 | `runPsql` | function | 201 |
 
-### 3.537 `ops/scripts/runtime/storage/cleanup-test-data.mjs`
+### 3.534 `ops/scripts/runtime/storage/cleanup-test-data.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7133,7 +7118,7 @@ Code files scanned: **548**
 | 20 | `cleanupAuditImportFiles` | function | 377 |
 | 21 | `countMatchedRows` | function | 400 |
 
-### 3.538 `ops/scripts/runtime/storage/dataset-readiness.mjs`
+### 3.535 `ops/scripts/runtime/storage/dataset-readiness.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7143,7 +7128,7 @@ Code files scanned: **548**
 | 4 | `buildCountsSql` | function | 47 |
 | 5 | `summarizeDataset` | function | 65 |
 
-### 3.539 `ops/scripts/runtime/storage/post-live-hygiene.mjs`
+### 3.536 `ops/scripts/runtime/storage/post-live-hygiene.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7159,7 +7144,7 @@ Code files scanned: **548**
 | 10 | `runChecks` | function | 185 |
 | 11 | `main` | function | 193 |
 
-### 3.540 `ops/scripts/runtime/storage/prune-storage.mjs`
+### 3.537 `ops/scripts/runtime/storage/prune-storage.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7181,7 +7166,7 @@ Code files scanned: **548**
 | 16 | `findBackupRoots` | function | 359 |
 | 17 | `main` | function | 373 |
 
-### 3.541 `ops/scripts/runtime/storage/restore-candidates.mjs`
+### 3.538 `ops/scripts/runtime/storage/restore-candidates.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7194,7 +7179,7 @@ Code files scanned: **548**
 | 7 | `findBackupPackages` | function | 112 |
 | 8 | `chooseRecommendation` | function | 126 |
 
-### 3.542 `ops/scripts/runtime/storage/restore-rehearsal.mjs`
+### 3.539 `ops/scripts/runtime/storage/restore-rehearsal.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7213,7 +7198,7 @@ Code files scanned: **548**
 | 13 | `countRestoredTables` | function | 137 |
 | 14 | `compareCounts` | function | 144 |
 
-### 3.543 `ops/scripts/verification/verify-backup-reliability.js`
+### 3.540 `ops/scripts/verification/verify-backup-reliability.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7224,7 +7209,7 @@ Code files scanned: **548**
 | 5 | `checkNeedles` | function | 29 |
 | 6 | `main` | function | 36 |
 
-### 3.544 `ops/scripts/verification/verify-docker-release.js`
+### 3.541 `ops/scripts/verification/verify-docker-release.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7240,7 +7225,7 @@ Code files scanned: **548**
 | 10 | `walk` | function | 314 |
 | 11 | `main` | function | 325 |
 
-### 3.545 `ops/scripts/verification/verify-hardening-policy.js`
+### 3.542 `ops/scripts/verification/verify-hardening-policy.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7254,7 +7239,7 @@ Code files scanned: **548**
 | 8 | `assertFullAutomationIncludesPolicy` | function | 77 |
 | 9 | `main` | function | 93 |
 
-### 3.546 `ops/scripts/verification/verify-runtime-deps.js`
+### 3.543 `ops/scripts/verification/verify-runtime-deps.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7272,7 +7257,7 @@ Code files scanned: **548**
 | 12 | `assertCoverageComplete` | function | 235 |
 | 13 | `main` | function | 248 |
 
-### 3.547 `ops/scripts/verification/verify-scale-services.js`
+### 3.544 `ops/scripts/verification/verify-scale-services.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7285,7 +7270,7 @@ Code files scanned: **548**
 | 7 | `trackedLicenses` | const arrow | 69 |
 | 8 | `main` | function | 95 |
 
-### 3.548 `ops/scripts/verification/verify-secret-hygiene.js`
+### 3.545 `ops/scripts/verification/verify-secret-hygiene.js`
 
 - No top-level named symbols detected.
 

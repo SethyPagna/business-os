@@ -70,17 +70,16 @@ Move 160 keeps `frontend/src/platform/storage/storagePolicy.mjs` intentionally
 alive as the API/storage-policy compatibility wrapper. The executable live
 mirror and cooldown policy now lives in `storagePolicy.ts`.
 
-Move 161 keeps `frontend/src/components/contacts/contactImportWorker.mjs` and
-`frontend/src/components/contacts/contactImportParser.mjs` intentionally alive
-as worker/test compatibility wrappers. The executable row-count worker and
-fallback parser now live in `contactImportWorker.ts` and
-`contactImportParser.ts`.
+Move 161 keeps `frontend/src/components/contacts/contactImportWorker.mjs`
+intentionally alive as the Vite worker wrapper. The contact-specific fallback
+parser shim has been retired; the executable row-count worker lives in
+`contactImportWorker.ts`, and the shared fallback parser lives in
+`csvRowCounter.ts`.
 
 Move 162 keeps `frontend/src/components/inventory/inventoryImportWorker.mjs`
-and `frontend/src/utils/csvRowCounter.mjs` intentionally alive as worker/test
-compatibility wrappers. The executable inventory row-count worker now lives in
-`inventoryImportWorker.ts`, and the shared quoted-record-aware parser now lives
-in `csvRowCounter.ts`.
+intentionally alive as the Vite worker wrapper. The shared row-counter wrapper
+has been retired after inventory, sales, contact, and focused tests moved to
+`csvRowCounter.ts`.
 
 Move 163 confirms the product import worker cluster is not dead code:
 `BulkImportModal.jsx` constructs the Vite worker from `productImportWorker.mjs`,
