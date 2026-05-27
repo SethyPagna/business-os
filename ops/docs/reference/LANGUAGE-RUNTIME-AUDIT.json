@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T19:11:37.836Z",
+  "generatedAt": "2026-05-27T19:16:26.391Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 516,
+  "sourceFiles": 519,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -33,7 +33,7 @@
     ],
     [
       "TypeScript",
-      72
+      75
     ],
     [
       "Windows batch",
@@ -75,7 +75,7 @@
     ],
     [
       ".ts",
-      72
+      75
     ],
     [
       ".bat",
@@ -1666,6 +1666,13 @@
       "file": "frontend/src/utils/csv.ts",
       "lines": 234,
       "score": 6,
+      "track": "Web Worker extraction",
+      "rule": "Browser CPU/file parsing/media work candidate."
+    },
+    {
+      "file": "frontend/src/components/products/scanning/scanbotScanner.ts",
+      "lines": 180,
+      "score": 5,
       "track": "Web Worker extraction",
       "rule": "Browser CPU/file parsing/media work candidate."
     }

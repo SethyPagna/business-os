@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-27T19:11:38.126Z
+Generated: 2026-05-27T19:16:26.713Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 614
+- Files scanned: 617
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -17,7 +17,7 @@ Generated: 2026-05-27T19:11:38.126Z
 | .js | 185 |
 | .mjs | 161 |
 | .jsx | 107 |
-| .ts | 73 |
+| .ts | 76 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -31,7 +31,7 @@ Generated: 2026-05-27T19:11:38.126Z
 | Area | Files |
 | --- | --- |
 | frontend/utils | 63 |
-| frontend/components/products | 44 |
+| frontend/components/products | 46 |
 | ops/docs/reference | 30 |
 | backend/routes | 24 |
 | frontend/components/shared | 19 |
@@ -57,15 +57,15 @@ Generated: 2026-05-27T19:11:38.126Z
 | frontend/app | 4 |
 | frontend/components/files | 4 |
 | frontend/components/users | 4 |
+| frontend/src/types | 4 |
 | ops/scripts/architecture | 4 |
 | ops/scripts/backend | 4 |
-| ops/scripts/runtime/cloudflare | 4 |
 
 ## Large Files
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 11647 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 11671 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8249 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6585 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-ROADMAP.md | 4917 | ops/docs |
@@ -73,7 +73,7 @@ Generated: 2026-05-27T19:11:38.126Z
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3443 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2748 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2770 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/lang/km.json | 2715 | frontend/src/lang |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2365 | ops/docs/reference |
@@ -89,7 +89,7 @@ Generated: 2026-05-27T19:11:38.126Z
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1788 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
-| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1674 | ops/docs/reference |
+| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1681 | ops/docs/reference |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1603 | frontend/src/AppContext.jsx |
 | backend/src/routes/sales.js | 1573 | backend/routes |
