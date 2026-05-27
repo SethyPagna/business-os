@@ -1269,10 +1269,10 @@ Decision rule:
     non-array inputs.
 144. Convert app shell path/navigation helper to TypeScript. Done:
     The route classification, mounted-page limit, warmup, and notification
-    helper moved to `frontend/src/app/appShellUtils.ts`, while
-    `appShellUtils.mjs` remains as the compatibility wrapper for `App.jsx`,
-    `AppContext.jsx`, startup routing, and focused app-shell tests. The
-    compiler now includes `src/app/**/*.ts`.
+    helper moved to `frontend/src/app/appShellUtils.ts`. The temporary
+    app-shell compatibility wrapper has been retired after `App.jsx`,
+    `AppContext.jsx`, startup routing, and focused app-shell tests moved to the
+    TypeScript source. The compiler now includes `src/app/**/*.ts`.
 145. Convert portal catalog display helper to TypeScript. Done:
     The customer portal grid, branch matching, promotion display, price
     presentation, and highlight-badge helper moved to

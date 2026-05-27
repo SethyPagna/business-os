@@ -412,10 +412,11 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   preserving the old `.mjs` wrapper. Cleanup must keep `bulkOps.mjs` until all
   bulk-action surfaces and focused tests intentionally move to a new public
   boundary or the wrapper audit proves it is unused.
-- Move 144 converts the app shell helper to TypeScript while preserving the old
-  `.mjs` wrapper. Cleanup must keep `appShellUtils.mjs` until `App.jsx`,
-  `AppContext.jsx`, `index.jsx`, and focused tests intentionally move to a new
-  public boundary or the wrapper audit proves it is unused.
+- Move 144 converts the app shell helper to TypeScript and retires the old
+  `.mjs` wrapper after `App.jsx`, `AppContext.jsx`, `index.jsx`, and focused
+  tests moved to the TypeScript source. Cleanup should keep this pattern for
+  future wrappers: update callers first, prove no first-party references remain,
+  then delete the wrapper.
 - Move 145 converts the portal catalog display helper to TypeScript while
   preserving the old `.mjs` wrapper. Cleanup must keep
   `portalCatalogDisplay.mjs` until catalog admin/public surfaces and focused

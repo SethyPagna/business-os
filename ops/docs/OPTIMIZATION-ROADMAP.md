@@ -2250,8 +2250,8 @@ Cleanup checkpoint:
 - The app shell helper slice is now complete:
   `frontend/src/app/appShellUtils.ts` owns route normalization, admin/public
   path classification, mounted-page limits, warmup gating, and notification
-  labels/colors, while `appShellUtils.mjs` remains as the compatibility wrapper
-  for the React shell and focused app-shell tests.
+  labels/colors. The temporary app-shell `.mjs` wrapper has been retired after
+  the React shell and focused app-shell tests moved to the TypeScript source.
 - The portal catalog display helper slice is now complete:
   `frontend/src/components/catalog/portalCatalogDisplay.ts` owns customer
   portal grid classes, branch matching, promotion display, price presentation,

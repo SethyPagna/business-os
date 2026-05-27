@@ -427,11 +427,11 @@ preserving `bulkOps.mjs` as an intentional compatibility wrapper. Shared
 product, inventory, branch, contact, and sales bulk-action flows now use one
 typed concurrency/result contract.
 
-Move 144 converts the app shell helper to TypeScript while preserving
-`appShellUtils.mjs` as an intentional compatibility wrapper. Route
-classification, mounted-page limits, warmup gating, and notification metadata
-stay centralized instead of duplicating shell logic across startup and React
-entrypoints.
+Move 144 converts the app shell helper to TypeScript and now retires the
+temporary app-shell `.mjs` compatibility wrapper. Route classification,
+mounted-page limits, warmup gating, and notification metadata stay centralized
+in the TypeScript source instead of duplicating shell logic across startup and
+React entrypoints.
 
 Move 145 converts the portal catalog display helper to TypeScript while
 preserving `portalCatalogDisplay.mjs` as an intentional compatibility wrapper.

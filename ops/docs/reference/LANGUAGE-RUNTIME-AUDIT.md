@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-27T21:12:45.824Z
+Generated: 2026-05-27T21:29:05.928Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 529
+- Files scanned: 528
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -23,7 +23,7 @@ Generated: 2026-05-27T21:12:45.824Z
 | Language | Files |
 | --- | --- |
 | JavaScript | 184 |
-| JavaScript modules | 121 |
+| JavaScript modules | 120 |
 | React JSX | 107 |
 | TypeScript | 85 |
 | Windows batch | 16 |
@@ -87,7 +87,8 @@ Generated: 2026-05-27T21:12:45.824Z
 
 | Implementation | Exists | Compatibility wrapper | Wrapper exists | Declaration support | Declarations exist | Proof |
 | --- | --- | --- | --- | --- | --- | --- |
-| `frontend/src/app/appShellUtils.ts` | yes | `frontend/src/app/appShellUtils.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\appShellUtils.test.mjs`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/app/appShellUtils.ts` | yes | retired after callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\appShellUtils.test.mjs`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/runtime/runtimeErrorClassifier.ts` | yes | retired after callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\runtimeErrorClassifier.test.mjs`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | yes | `frontend/src/components/catalog/portalCatalogDisplay.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalCatalogDisplay.test.mjs`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalContentI18n.ts` | yes | `frontend/src/components/catalog/portalContentI18n.mjs` | yes | `frontend/src/components/catalog/portalLanguagePacks.d.mts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalContentI18n.test.mjs`<br>`node frontend\tests\portalFaqVocabulary.test.mjs`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalEditorUtils.ts` | yes | `frontend/src/components/catalog/portalEditorUtils.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalEditorUtils.test.mjs`<br>`npm.cmd --prefix frontend run build` |

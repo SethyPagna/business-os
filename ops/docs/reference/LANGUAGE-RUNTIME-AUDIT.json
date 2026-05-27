@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T21:12:45.824Z",
+  "generatedAt": "2026-05-27T21:29:05.928Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 529,
+  "sourceFiles": 528,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -25,7 +25,7 @@
     ],
     [
       "JavaScript modules",
-      121
+      120
     ],
     [
       "React JSX",
@@ -67,7 +67,7 @@
     ],
     [
       ".mjs",
-      121
+      120
     ],
     [
       ".jsx",
@@ -518,7 +518,8 @@
   "convertedTypeScriptSlices": [
     {
       "implementation": "frontend/src/app/appShellUtils.ts",
-      "compatibilityWrapper": "frontend/src/app/appShellUtils.mjs",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -526,6 +527,23 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": false,
+      "compatibilityWrapperExists": true,
+      "declarationSupportExists": true,
+      "covered": true
+    },
+    {
+      "implementation": "frontend/src/runtime/runtimeErrorClassifier.ts",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after callers moved to TypeScript source",
+      "declarationSupport": "",
+      "proof": [
+        "npm.cmd --prefix frontend run typecheck",
+        "node frontend\\tests\\runtimeErrorClassifier.test.mjs",
+        "npm.cmd --prefix frontend run build"
+      ],
+      "implementationExists": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -540,6 +558,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -555,6 +574,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -569,6 +589,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -584,6 +605,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -598,6 +620,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -612,6 +635,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -626,6 +650,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -640,6 +665,7 @@
         "node frontend\\tests\\productImportPlanner.test.mjs"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -654,6 +680,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -668,6 +695,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -682,6 +710,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -696,6 +725,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -710,6 +740,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -725,6 +756,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -740,6 +772,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -755,6 +788,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -770,6 +804,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -785,6 +820,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -800,6 +836,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -815,6 +852,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -830,6 +868,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -845,6 +884,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -860,6 +900,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -875,6 +916,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -890,6 +932,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -905,6 +948,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -920,6 +964,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -935,6 +980,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -950,6 +996,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -965,6 +1012,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -980,6 +1028,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -995,6 +1044,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1011,6 +1061,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1026,6 +1077,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1041,6 +1093,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1056,6 +1109,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1071,6 +1125,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1086,6 +1141,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1101,6 +1157,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1116,6 +1173,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1131,6 +1189,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1145,6 +1204,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1160,6 +1220,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1175,6 +1236,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1190,6 +1252,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1205,6 +1268,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1220,6 +1284,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1235,6 +1300,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true

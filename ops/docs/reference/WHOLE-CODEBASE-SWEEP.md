@@ -442,8 +442,9 @@ bulk-action surfaces.
 Move 144 completes the app shell helper TypeScript conversion.
 `appShellUtils.ts` now owns route normalization, admin/public path
 classification, mounted-page limits, warmup gating, and notification display
-metadata, while `appShellUtils.mjs` remains as the compatibility wrapper for
-the React shell and focused app-shell tests.
+metadata. The temporary app-shell `.mjs` compatibility wrapper is retired
+because the React shell and focused app-shell tests now import the TypeScript
+source directly.
 
 Move 145 completes the portal catalog display helper TypeScript conversion.
 `portalCatalogDisplay.ts` now owns customer portal grid classes, branch

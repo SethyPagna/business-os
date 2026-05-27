@@ -4,7 +4,7 @@ Auto-generated function/class symbol commentary for all first-party code files (
 
 ## 1. Coverage Summary
 
-Code files scanned: **508**
+Code files scanned: **548**
 
 ## 2. Symbol Count by File
 
@@ -17,507 +17,547 @@ Code files scanned: **508**
 | 5 | `backend/src/backupSchema.js` | 4 |
 | 6 | `backend/src/businessMetrics.js` | 9 |
 | 7 | `backend/src/catalogTextIntegrity.js` | 5 |
-| 8 | `backend/src/config/index.js` | 10 |
+| 8 | `backend/src/config/index.js` | 11 |
 | 9 | `backend/src/conflictControl.js` | 6 |
-| 10 | `backend/src/contactOptions.js` | 8 |
+| 10 | `backend/src/contactOptions.js` | 10 |
 | 11 | `backend/src/database.js` | 0 |
 | 12 | `backend/src/dataPath/index.js` | 9 |
-| 13 | `backend/src/db/cutoverReadiness.js` | 7 |
-| 14 | `backend/src/db/postgresQueryCompat.js` | 11 |
-| 15 | `backend/src/fileAssets.js` | 51 |
-| 16 | `backend/src/helpers.js` | 20 |
+| 13 | `backend/src/db/cutoverReadiness.js` | 10 |
+| 14 | `backend/src/db/postgresQueryCompat.js` | 12 |
+| 15 | `backend/src/fileAssets.js` | 61 |
+| 16 | `backend/src/helpers.js` | 30 |
 | 17 | `backend/src/idempotency.js` | 1 |
-| 18 | `backend/src/importCsv.js` | 12 |
+| 18 | `backend/src/importCsv.js` | 17 |
 | 19 | `backend/src/importParsing.js` | 6 |
-| 20 | `backend/src/initials.js` | 6 |
-| 21 | `backend/src/maintenanceLock.js` | 7 |
+| 20 | `backend/src/initials.js` | 7 |
+| 21 | `backend/src/maintenanceLock.js` | 9 |
 | 22 | `backend/src/middleware.js` | 21 |
 | 23 | `backend/src/money.js` | 3 |
 | 24 | `backend/src/netSecurity.js` | 7 |
-| 25 | `backend/src/objectStore.js` | 23 |
+| 25 | `backend/src/objectStore.js` | 29 |
 | 26 | `backend/src/optionalSharp.js` | 1 |
 | 27 | `backend/src/organizationContext/index.js` | 14 |
-| 28 | `backend/src/permissions.js` | 6 |
+| 28 | `backend/src/permissions.js` | 7 |
 | 29 | `backend/src/portalUtils.js` | 6 |
-| 30 | `backend/src/postgresDatabase.js` | 13 |
-| 31 | `backend/src/productBatches.js` | 29 |
+| 30 | `backend/src/postgresDatabase.js` | 14 |
+| 31 | `backend/src/productBatches.js` | 34 |
 | 32 | `backend/src/productDiscounts.js` | 9 |
-| 33 | `backend/src/productImportPolicies.js` | 8 |
+| 33 | `backend/src/productImportPolicies.js` | 10 |
 | 34 | `backend/src/requestContext.js` | 5 |
-| 35 | `backend/src/routes/actionHistory.js` | 11 |
-| 36 | `backend/src/routes/ai.js` | 2 |
-| 37 | `backend/src/routes/auth.js` | 30 |
-| 38 | `backend/src/routes/branches.js` | 6 |
-| 39 | `backend/src/routes/catalog.js` | 0 |
+| 35 | `backend/src/routes/actionHistory.js` | 12 |
+| 36 | `backend/src/routes/ai.js` | 3 |
+| 37 | `backend/src/routes/auth.js` | 31 |
+| 38 | `backend/src/routes/branches.js` | 10 |
+| 39 | `backend/src/routes/catalog.js` | 4 |
 | 40 | `backend/src/routes/categories.js` | 2 |
-| 41 | `backend/src/routes/contacts.js` | 23 |
-| 42 | `backend/src/routes/customTables.js` | 8 |
+| 41 | `backend/src/routes/contacts.js` | 34 |
+| 42 | `backend/src/routes/customTables.js` | 9 |
 | 43 | `backend/src/routes/files.js` | 3 |
-| 44 | `backend/src/routes/importJobs.js` | 12 |
-| 45 | `backend/src/routes/inventory.js` | 22 |
-| 46 | `backend/src/routes/notifications.js` | 11 |
+| 44 | `backend/src/routes/importJobs.js` | 16 |
+| 45 | `backend/src/routes/inventory.js` | 32 |
+| 46 | `backend/src/routes/notifications.js` | 27 |
 | 47 | `backend/src/routes/organizations.js` | 0 |
-| 48 | `backend/src/routes/portal.js` | 38 |
-| 49 | `backend/src/routes/products.js` | 53 |
+| 48 | `backend/src/routes/portal.js` | 60 |
+| 49 | `backend/src/routes/products.js` | 64 |
 | 50 | `backend/src/routes/returns.js` | 10 |
-| 51 | `backend/src/routes/runtime.js` | 1 |
-| 52 | `backend/src/routes/sales.js` | 23 |
-| 53 | `backend/src/routes/settings.js` | 6 |
-| 54 | `backend/src/routes/sync.js` | 9 |
-| 55 | `backend/src/routes/system/index.js` | 29 |
+| 51 | `backend/src/routes/runtime.js` | 6 |
+| 52 | `backend/src/routes/sales.js` | 24 |
+| 53 | `backend/src/routes/settings.js` | 8 |
+| 54 | `backend/src/routes/sync.js` | 12 |
+| 55 | `backend/src/routes/system/index.js` | 44 |
 | 56 | `backend/src/routes/units.js` | 3 |
-| 57 | `backend/src/routes/users.js` | 23 |
-| 58 | `backend/src/runtimeCache.js` | 11 |
+| 57 | `backend/src/routes/users.js` | 26 |
+| 58 | `backend/src/runtimeCache.js` | 12 |
 | 59 | `backend/src/runtimeState/index.js` | 6 |
-| 60 | `backend/src/runtimeVersion.js` | 7 |
-| 61 | `backend/src/security.js` | 13 |
-| 62 | `backend/src/serverUtils.js` | 26 |
-| 63 | `backend/src/services/aiGateway.js` | 14 |
-| 64 | `backend/src/services/backupPackages.js` | 53 |
-| 65 | `backend/src/services/firebaseAuth.js` | 22 |
-| 66 | `backend/src/services/googleDriveSync/index.js` | 67 |
-| 67 | `backend/src/services/googleDriveSync/versioning.js` | 5 |
-| 68 | `backend/src/services/googleOauth.js` | 16 |
-| 69 | `backend/src/services/importJobs.js` | 139 |
-| 70 | `backend/src/services/integrationDoctor.js` | 13 |
-| 71 | `backend/src/services/mediaQueue.js` | 10 |
-| 72 | `backend/src/services/portalAi.js` | 29 |
-| 73 | `backend/src/services/verification.js` | 21 |
-| 74 | `backend/src/sessionAuth.js` | 13 |
-| 75 | `backend/src/settingsSnapshot.js` | 7 |
-| 76 | `backend/src/storage/organizationFolders.js` | 5 |
-| 77 | `backend/src/systemFsWorker.js` | 7 |
-| 78 | `backend/src/systemJobs.js` | 24 |
-| 79 | `backend/src/uploadReferenceCleanup.js` | 2 |
-| 80 | `backend/src/uploadSecurity.js` | 7 |
-| 81 | `backend/src/websocket.js` | 1 |
-| 82 | `backend/src/workers/importWorker.js` | 2 |
-| 83 | `backend/src/workers/mediaWorker.js` | 2 |
-| 84 | `backend/test/accessControl.test.js` | 2 |
-| 85 | `backend/test/analyticsRuntime.test.js` | 1 |
-| 86 | `backend/test/authOtpGuards.test.js` | 1 |
-| 87 | `backend/test/authSecurityFlow.test.js` | 9 |
-| 88 | `backend/test/backupDefaultDestination.test.js` | 0 |
-| 89 | `backend/test/backupPerformanceHardening.test.js` | 1 |
-| 90 | `backend/test/backupRetention.test.js` | 1 |
-| 91 | `backend/test/backupSchema.test.js` | 1 |
-| 92 | `backend/test/branchStockSearch.test.js` | 10 |
-| 93 | `backend/test/contactOptions.test.js` | 1 |
-| 94 | `backend/test/dataPath.test.js` | 2 |
-| 95 | `backend/test/defaultRoles.test.js` | 8 |
-| 96 | `backend/test/fileAssetStorageReconcile.test.js` | 1 |
-| 97 | `backend/test/fileRouteSecurityFlow.test.js` | 9 |
-| 98 | `backend/test/fullAutomation.test.js` | 2 |
-| 99 | `backend/test/googleDriveSyncVersioning.test.js` | 1 |
-| 100 | `backend/test/idempotency.test.js` | 1 |
-| 101 | `backend/test/importCsv.test.js` | 2 |
-| 102 | `backend/test/importDecisionIntegrity.test.js` | 0 |
-| 103 | `backend/test/importJobStateMachine.test.js` | 4 |
-| 104 | `backend/test/importScaleSmoke.test.js` | 3 |
-| 105 | `backend/test/initials.test.js` | 0 |
-| 106 | `backend/test/integrationDoctor.test.js` | 1 |
-| 107 | `backend/test/inventorySettingsMediaContracts.test.js` | 2 |
-| 108 | `backend/test/mediaOptimization.test.js` | 3 |
-| 109 | `backend/test/netSecurity.test.js` | 1 |
-| 110 | `backend/test/offlineSecurity.test.js` | 2 |
-| 111 | `backend/test/ownedGoogleAuth.test.js` | 2 |
-| 112 | `backend/test/permissionPolicy.test.js` | 0 |
-| 113 | `backend/test/portalInventoryRegression.test.js` | 2 |
-| 114 | `backend/test/portalUtils.test.js` | 1 |
-| 115 | `backend/test/postgresCutoverReadiness.test.js` | 1 |
-| 116 | `backend/test/postgresDatabase.test.js` | 3 |
-| 117 | `backend/test/postgresQueryCompat.test.js` | 1 |
-| 118 | `backend/test/productBatchHierarchy.test.js` | 2 |
-| 119 | `backend/test/productExpiry.test.js` | 1 |
-| 120 | `backend/test/productImportPolicies.test.js` | 1 |
-| 121 | `backend/test/productSearchPagination.test.js` | 0 |
-| 122 | `backend/test/rfidRoutes.test.js` | 1 |
-| 123 | `backend/test/routeContracts.test.js` | 2 |
-| 124 | `backend/test/runtimeCache.test.js` | 2 |
-| 125 | `backend/test/runtimeVersion.test.js` | 1 |
-| 126 | `backend/test/serverUtils.test.js` | 2 |
-| 127 | `backend/test/systemJobs.test.js` | 3 |
-| 128 | `backend/test/uploadSecurity.test.js` | 1 |
-| 129 | `frontend/postcss.config.mjs` | 0 |
-| 130 | `frontend/public/runtime-noise-guard.js` | 6 |
-| 131 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 |
-| 132 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js` | 0 |
-| 133 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js` | 0 |
-| 134 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js` | 0 |
-| 135 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js` | 0 |
-| 136 | `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js` | 0 |
-| 137 | `frontend/public/sw.js` | 24 |
-| 138 | `frontend/public/theme-bootstrap.js` | 10 |
-| 139 | `frontend/src/api/http.js` | 67 |
-| 140 | `frontend/src/api/localDb.js` | 10 |
-| 141 | `frontend/src/api/methods.js` | 226 |
-| 142 | `frontend/src/api/websocket.js` | 9 |
-| 143 | `frontend/src/App.jsx` | 55 |
-| 144 | `frontend/src/app/appShellUtils.mjs` | 0 |
-| 145 | `frontend/src/app/appShellUtils.ts` | 10 |
-| 146 | `frontend/src/app/publicErrorRecovery.mjs` | 3 |
-| 147 | `frontend/src/AppContext.jsx` | 41 |
-| 148 | `frontend/src/components/auth/Login.jsx` | 23 |
-| 149 | `frontend/src/components/branches/Branches.jsx` | 10 |
-| 150 | `frontend/src/components/branches/BranchForm.jsx` | 3 |
-| 151 | `frontend/src/components/branches/TransferModal.jsx` | 4 |
-| 152 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
-| 153 | `frontend/src/components/catalog/CatalogImageField.jsx` | 1 |
-| 154 | `frontend/src/components/catalog/CatalogPage.jsx` | 113 |
-| 155 | `frontend/src/components/catalog/CatalogPageContext.jsx` | 2 |
-| 156 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 2 |
-| 157 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 |
-| 158 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
-| 159 | `frontend/src/components/catalog/catalogUi.jsx` | 4 |
-| 160 | `frontend/src/components/catalog/portalCatalogDisplay.mjs` | 0 |
-| 161 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 9 |
-| 162 | `frontend/src/components/catalog/portalContentI18n.mjs` | 0 |
-| 163 | `frontend/src/components/catalog/portalContentI18n.ts` | 18 |
-| 164 | `frontend/src/components/catalog/portalEditorUtils.mjs` | 0 |
-| 165 | `frontend/src/components/catalog/portalEditorUtils.ts` | 10 |
-| 166 | `frontend/src/components/catalog/portalLanguagePacks.mjs` | 0 |
-| 167 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 3 |
-| 168 | `frontend/src/components/catalog/portalTranslateController.mjs` | 17 |
-| 169 | `frontend/src/components/contacts/ContactImportModal.jsx` | 10 |
-| 170 | `frontend/src/components/contacts/contactImportParser.mjs` | 0 |
-| 171 | `frontend/src/components/contacts/contactImportParser.ts` | 0 |
-| 172 | `frontend/src/components/contacts/contactImportWorker.mjs` | 0 |
-| 173 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
-| 174 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 |
-| 175 | `frontend/src/components/contacts/contactOptionUtils.ts` | 10 |
-| 176 | `frontend/src/components/contacts/Contacts.jsx` | 12 |
-| 177 | `frontend/src/components/contacts/CustomerFormModal.jsx` | 11 |
-| 178 | `frontend/src/components/contacts/customerMembershipNumber.js` | 0 |
-| 179 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
-| 180 | `frontend/src/components/contacts/CustomersTab.jsx` | 12 |
-| 181 | `frontend/src/components/contacts/DeliveryTab.jsx` | 23 |
-| 182 | `frontend/src/components/contacts/shared.jsx` | 7 |
-| 183 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
-| 184 | `frontend/src/components/custom-tables/CustomTables.jsx` | 11 |
-| 185 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 5 |
-| 186 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 1 |
-| 187 | `frontend/src/components/dashboard/charts/index.js` | 0 |
-| 188 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
-| 189 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 7 |
-| 190 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 |
-| 191 | `frontend/src/components/dashboard/Dashboard.jsx` | 17 |
-| 192 | `frontend/src/components/dashboard/MiniStat.jsx` | 1 |
-| 193 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
-| 194 | `frontend/src/components/files/FilesPage.jsx` | 25 |
-| 195 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
-| 196 | `frontend/src/components/files/FilesResponsesTab.jsx` | 1 |
-| 197 | `frontend/src/components/inventory/DualMoney.jsx` | 1 |
-| 198 | `frontend/src/components/inventory/Inventory.jsx` | 22 |
-| 199 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 10 |
-| 200 | `frontend/src/components/inventory/inventoryImportWorker.mjs` | 0 |
-| 201 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
-| 202 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
-| 203 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
-| 204 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 1 |
-| 205 | `frontend/src/components/inventory/movementGroups.js` | 0 |
-| 206 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
-| 207 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
-| 208 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
-| 209 | `frontend/src/components/navigation/Sidebar.jsx` | 6 |
-| 210 | `frontend/src/components/pos/CartItem.jsx` | 1 |
-| 211 | `frontend/src/components/pos/FilterPanel.jsx` | 5 |
-| 212 | `frontend/src/components/pos/POS.jsx` | 22 |
-| 213 | `frontend/src/components/pos/posCore.mjs` | 0 |
-| 214 | `frontend/src/components/pos/posCore.ts` | 9 |
-| 215 | `frontend/src/components/pos/ProductImage.jsx` | 1 |
-| 216 | `frontend/src/components/pos/QuickAddModal.jsx` | 2 |
-| 217 | `frontend/src/components/products/config/productPageConfig.mjs` | 0 |
-| 218 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
-| 219 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 4 |
-| 220 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 2 |
-| 221 | `frontend/src/components/products/forms/ProductForm.jsx` | 17 |
-| 222 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 5 |
-| 223 | `frontend/src/components/products/helpers/productDisplayHelpers.mjs` | 0 |
-| 224 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 6 |
-| 225 | `frontend/src/components/products/helpers/productFilterHelpers.mjs` | 0 |
-| 226 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 9 |
-| 227 | `frontend/src/components/products/helpers/productGalleryHelpers.mjs` | 0 |
-| 228 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 8 |
-| 229 | `frontend/src/components/products/helpers/productGroupViewHelpers.mjs` | 0 |
-| 230 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 2 |
-| 231 | `frontend/src/components/products/helpers/productMenuHelpers.mjs` | 0 |
-| 232 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 5 |
-| 233 | `frontend/src/components/products/helpers/productPageHelpers.mjs` | 4 |
-| 234 | `frontend/src/components/products/helpers/productSelectionHelpers.mjs` | 0 |
-| 235 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 7 |
-| 236 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | 0 |
-| 237 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 18 |
-| 238 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 |
-| 239 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 1 |
-| 240 | `frontend/src/components/products/import/BulkImportModal.jsx` | 63 |
-| 241 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 |
-| 242 | `frontend/src/components/products/import/productImportPlanner.ts` | 18 |
-| 243 | `frontend/src/components/products/import/productImportWorker.mjs` | 0 |
-| 244 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
-| 245 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 16 |
-| 246 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 8 |
-| 247 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | 8 |
-| 248 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | 7 |
-| 249 | `frontend/src/components/products/Products.jsx` | 15 |
-| 250 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | 0 |
-| 251 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
-| 252 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 5 |
-| 253 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | 0 |
-| 254 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
-| 255 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | 9 |
-| 256 | `frontend/src/components/products/shared/primitives.jsx` | 11 |
-| 257 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 |
-| 258 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
-| 259 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 5 |
-| 260 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
-| 261 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 4 |
-| 262 | `frontend/src/components/receipt-settings/constants.js` | 0 |
-| 263 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
-| 264 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 0 |
-| 265 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 9 |
-| 266 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 9 |
-| 267 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 |
-| 268 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
-| 269 | `frontend/src/components/receipt-settings/template.js` | 0 |
-| 270 | `frontend/src/components/receipt-settings/template.ts` | 4 |
-| 271 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
-| 272 | `frontend/src/components/returns/EditReturnModal.jsx` | 5 |
-| 273 | `frontend/src/components/returns/NewReturnModal.jsx` | 10 |
-| 274 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 6 |
-| 275 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 3 |
-| 276 | `frontend/src/components/returns/Returns.jsx` | 8 |
-| 277 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 5 |
-| 278 | `frontend/src/components/sales/ExportModal.jsx` | 9 |
-| 279 | `frontend/src/components/sales/SaleDetailModal.jsx` | 6 |
-| 280 | `frontend/src/components/sales/Sales.jsx` | 10 |
-| 281 | `frontend/src/components/sales/SalesImportModal.jsx` | 10 |
-| 282 | `frontend/src/components/sales/salesImportWorker.mjs` | 0 |
-| 283 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
-| 284 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
-| 285 | `frontend/src/components/sales/StatusBadge.jsx` | 2 |
-| 286 | `frontend/src/components/server/ServerPage.jsx` | 16 |
-| 287 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 4 |
-| 288 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
-| 289 | `frontend/src/components/shared/ExportMenu.jsx` | 1 |
-| 290 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
-| 291 | `frontend/src/components/shared/globalScroll.js` | 2 |
-| 292 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
-| 293 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 |
-| 294 | `frontend/src/components/shared/Modal.jsx` | 1 |
-| 295 | `frontend/src/components/shared/navigationConfig.js` | 0 |
-| 296 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
-| 297 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
-| 298 | `frontend/src/components/shared/pageActivity.js` | 1 |
-| 299 | `frontend/src/components/shared/PageHeader.jsx` | 1 |
-| 300 | `frontend/src/components/shared/PaginationControls.jsx` | 5 |
-| 301 | `frontend/src/components/shared/PortalMenu.jsx` | 6 |
-| 302 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 3 |
-| 303 | `frontend/src/components/shared/SectionSwitcher.jsx` | 3 |
-| 304 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
-| 305 | `frontend/src/components/users/PermissionEditor.jsx` | 5 |
-| 306 | `frontend/src/components/users/UserDetailSheet.jsx` | 3 |
-| 307 | `frontend/src/components/users/UserProfileModal.jsx` | 21 |
-| 308 | `frontend/src/components/users/Users.jsx` | 18 |
-| 309 | `frontend/src/components/utils-settings/AuditLog.jsx` | 12 |
-| 310 | `frontend/src/components/utils-settings/Backup.jsx` | 30 |
-| 311 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 |
-| 312 | `frontend/src/components/utils-settings/index.js` | 0 |
-| 313 | `frontend/src/components/utils-settings/index.ts` | 0 |
-| 314 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 |
-| 315 | `frontend/src/components/utils-settings/ResetData.jsx` | 8 |
-| 316 | `frontend/src/components/utils-settings/Settings.jsx` | 21 |
-| 317 | `frontend/src/components/utils-settings/settingsConflict.js` | 0 |
-| 318 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
-| 319 | `frontend/src/constants.js` | 3 |
-| 320 | `frontend/src/index.jsx` | 10 |
-| 321 | `frontend/src/platform/runtime/clientRuntime.js` | 15 |
-| 322 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 |
-| 323 | `frontend/src/platform/storage/storagePolicy.ts` | 3 |
-| 324 | `frontend/src/runtime/runtimeErrorClassifier.mjs` | 11 |
-| 325 | `frontend/src/types/jsx-modules.d.ts` | 0 |
-| 326 | `frontend/src/types/receiptContracts.ts` | 0 |
-| 327 | `frontend/src/types/settingsContracts.ts` | 0 |
-| 328 | `frontend/src/utils/actionGuards.mjs` | 0 |
-| 329 | `frontend/src/utils/actionGuards.ts` | 5 |
-| 330 | `frontend/src/utils/actionHistory.mjs` | 2 |
-| 331 | `frontend/src/utils/appRefresh.d.ts` | 2 |
-| 332 | `frontend/src/utils/appRefresh.js` | 2 |
-| 333 | `frontend/src/utils/bulkOps.mjs` | 0 |
-| 334 | `frontend/src/utils/bulkOps.ts` | 1 |
-| 335 | `frontend/src/utils/color.js` | 0 |
-| 336 | `frontend/src/utils/color.ts` | 3 |
-| 337 | `frontend/src/utils/csv.d.ts` | 7 |
-| 338 | `frontend/src/utils/csv.js` | 15 |
-| 339 | `frontend/src/utils/csvExportWorker.mjs` | 0 |
-| 340 | `frontend/src/utils/csvExportWorker.ts` | 1 |
-| 341 | `frontend/src/utils/csvImport.js` | 0 |
-| 342 | `frontend/src/utils/csvImport.ts` | 19 |
-| 343 | `frontend/src/utils/csvRowCounter.mjs` | 0 |
-| 344 | `frontend/src/utils/csvRowCounter.ts` | 2 |
-| 345 | `frontend/src/utils/dateHelpers.js` | 0 |
-| 346 | `frontend/src/utils/dateHelpers.ts` | 3 |
-| 347 | `frontend/src/utils/deviceInfo.js` | 0 |
-| 348 | `frontend/src/utils/deviceInfo.ts` | 4 |
-| 349 | `frontend/src/utils/exportPackage.js` | 0 |
-| 350 | `frontend/src/utils/exportPackage.ts` | 2 |
-| 351 | `frontend/src/utils/exportReports.jsx` | 9 |
-| 352 | `frontend/src/utils/favicon.js` | 4 |
-| 353 | `frontend/src/utils/formatters.js` | 0 |
-| 354 | `frontend/src/utils/formatters.ts` | 5 |
-| 355 | `frontend/src/utils/groupedRecords.mjs` | 0 |
-| 356 | `frontend/src/utils/groupedRecords.ts` | 8 |
-| 357 | `frontend/src/utils/historyHelpers.mjs` | 0 |
-| 358 | `frontend/src/utils/historyHelpers.ts` | 2 |
-| 359 | `frontend/src/utils/importJobRefresh.js` | 6 |
-| 360 | `frontend/src/utils/index.js` | 0 |
-| 361 | `frontend/src/utils/index.ts` | 0 |
-| 362 | `frontend/src/utils/initials.mjs` | 0 |
-| 363 | `frontend/src/utils/initials.ts` | 7 |
-| 364 | `frontend/src/utils/loaders.mjs` | 8 |
-| 365 | `frontend/src/utils/mediaUpload.js` | 0 |
-| 366 | `frontend/src/utils/mediaUpload.ts` | 5 |
-| 367 | `frontend/src/utils/permissions.js` | 0 |
-| 368 | `frontend/src/utils/permissions.ts` | 2 |
-| 369 | `frontend/src/utils/pricing.d.ts` | 8 |
-| 370 | `frontend/src/utils/pricing.js` | 0 |
-| 371 | `frontend/src/utils/pricing.ts` | 8 |
-| 372 | `frontend/src/utils/printReceipt.js` | 41 |
-| 373 | `frontend/src/utils/productBatches.mjs` | 0 |
-| 374 | `frontend/src/utils/productBatches.ts` | 3 |
-| 375 | `frontend/src/utils/productGrouping.mjs` | 0 |
-| 376 | `frontend/src/utils/productGrouping.ts` | 13 |
-| 377 | `frontend/src/utils/publicAssetUrls.d.ts` | 1 |
-| 378 | `frontend/src/utils/publicAssetUrls.js` | 7 |
-| 379 | `frontend/src/utils/receiptAppliedConfig.ts` | 7 |
-| 380 | `frontend/src/utils/scriptTypography.js` | 0 |
-| 381 | `frontend/src/utils/scriptTypography.ts` | 3 |
-| 382 | `frontend/src/utils/settingsRefresh.js` | 0 |
-| 383 | `frontend/src/utils/settingsRefresh.ts` | 2 |
-| 384 | `frontend/src/utils/settingsWriteOptions.ts` | 1 |
-| 385 | `frontend/src/web-api.js` | 31 |
-| 386 | `frontend/tailwind.config.mjs` | 0 |
-| 387 | `frontend/tests/actionGuards.test.mjs` | 1 |
-| 388 | `frontend/tests/actionStability.test.mjs` | 3 |
-| 389 | `frontend/tests/adminShellMediaGuards.test.mjs` | 0 |
-| 390 | `frontend/tests/apiHttp.test.mjs` | 3 |
-| 391 | `frontend/tests/appRefresh.test.mjs` | 2 |
-| 392 | `frontend/tests/appShellUtils.test.mjs` | 1 |
-| 393 | `frontend/tests/assetCompression.test.mjs` | 1 |
-| 394 | `frontend/tests/backupJobs.test.mjs` | 0 |
-| 395 | `frontend/tests/barcodeImageScanner.test.mjs` | 1 |
-| 396 | `frontend/tests/barcodeScannerState.test.mjs` | 1 |
-| 397 | `frontend/tests/bulkOps.test.mjs` | 1 |
-| 398 | `frontend/tests/contactImportWorker.test.mjs` | 1 |
-| 399 | `frontend/tests/csvImport.test.mjs` | 1 |
-| 400 | `frontend/tests/dashboardDataReliability.test.mjs` | 0 |
-| 401 | `frontend/tests/dateHelpers.test.mjs` | 2 |
-| 402 | `frontend/tests/deviceInfo.test.mjs` | 2 |
-| 403 | `frontend/tests/exportPackages.test.mjs` | 1 |
-| 404 | `frontend/tests/formatters.test.mjs` | 1 |
-| 405 | `frontend/tests/globalScroll.test.mjs` | 0 |
-| 406 | `frontend/tests/globalScrollControls.test.mjs` | 1 |
-| 407 | `frontend/tests/groupedRecords.test.mjs` | 1 |
-| 408 | `frontend/tests/historyHelpers.test.mjs` | 1 |
-| 409 | `frontend/tests/importJobRefresh.test.mjs` | 4 |
-| 410 | `frontend/tests/initials.test.mjs` | 1 |
-| 411 | `frontend/tests/inventoryImportWorker.test.mjs` | 1 |
-| 412 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 0 |
-| 413 | `frontend/tests/inventoryMovementGroups.test.mjs` | 1 |
-| 414 | `frontend/tests/inventoryRfidSection.test.mjs` | 0 |
-| 415 | `frontend/tests/jsxSyntaxCheck.mjs` | 1 |
-| 416 | `frontend/tests/loaders.test.mjs` | 1 |
-| 417 | `frontend/tests/mediaUploadHelpers.test.mjs` | 1 |
-| 418 | `frontend/tests/navigationConfig.test.mjs` | 1 |
-| 419 | `frontend/tests/notificationBadge.test.mjs` | 0 |
-| 420 | `frontend/tests/offlineSalesQueue.test.mjs` | 1 |
-| 421 | `frontend/tests/offlineSecurityHardening.test.mjs` | 1 |
-| 422 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 1 |
-| 423 | `frontend/tests/ownedGoogleAuth.test.mjs` | 1 |
-| 424 | `frontend/tests/performanceLoadingUx.test.mjs` | 0 |
-| 425 | `frontend/tests/permissionEditor.test.mjs` | 0 |
-| 426 | `frontend/tests/permissions.test.mjs` | 0 |
-| 427 | `frontend/tests/portalCatalogDisplay.test.mjs` | 3 |
-| 428 | `frontend/tests/portalContentI18n.test.mjs` | 0 |
-| 429 | `frontend/tests/portalEditorUtils.test.mjs` | 1 |
-| 430 | `frontend/tests/portalFaqVocabulary.test.mjs` | 0 |
-| 431 | `frontend/tests/portalLanguagePacks.test.mjs` | 0 |
-| 432 | `frontend/tests/portalTranslateController.test.mjs` | 2 |
-| 433 | `frontend/tests/posCore.test.mjs` | 1 |
-| 434 | `frontend/tests/pricingContacts.test.mjs` | 1 |
-| 435 | `frontend/tests/productBatches.test.mjs` | 0 |
-| 436 | `frontend/tests/productDiscountUx.test.mjs` | 1 |
-| 437 | `frontend/tests/productDisplayHelpers.test.mjs` | 0 |
-| 438 | `frontend/tests/productFilterHelpers.test.mjs` | 0 |
-| 439 | `frontend/tests/productGalleryHelpers.test.mjs` | 0 |
-| 440 | `frontend/tests/productGrouping.test.mjs` | 1 |
-| 441 | `frontend/tests/productGroupViewHelpers.test.mjs` | 2 |
-| 442 | `frontend/tests/productHistoryHelpers.test.mjs` | 1 |
-| 443 | `frontend/tests/productImportPlanner.test.mjs` | 1 |
-| 444 | `frontend/tests/productImportWorkerFallback.test.mjs` | 1 |
-| 445 | `frontend/tests/productMenuHelpers.test.mjs` | 3 |
-| 446 | `frontend/tests/productPageHelpers.test.mjs` | 0 |
-| 447 | `frontend/tests/productSearchPagination.test.mjs` | 0 |
-| 448 | `frontend/tests/productSelectionHelpers.test.mjs` | 0 |
-| 449 | `frontend/tests/productWriteHelpers.test.mjs` | 0 |
-| 450 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 |
-| 451 | `frontend/tests/receiptSettingsSync.test.mjs` | 0 |
-| 452 | `frontend/tests/receiptTemplate.test.mjs` | 1 |
-| 453 | `frontend/tests/returnsLayout.test.mjs` | 0 |
-| 454 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 0 |
-| 455 | `frontend/tests/salesImportWorker.test.mjs` | 1 |
-| 456 | `frontend/tests/scanbotScanner.test.mjs` | 2 |
-| 457 | `frontend/tests/scriptTypography.test.mjs` | 0 |
-| 458 | `frontend/tests/sectionNavigation.test.mjs` | 0 |
-| 459 | `frontend/tests/settingsConflictHelpers.test.mjs` | 1 |
-| 460 | `frontend/tests/settingsRefresh.test.mjs` | 0 |
-| 461 | `frontend/tests/storagePolicy.test.mjs` | 1 |
-| 462 | `frontend/tests/utilsSettingsBarrel.test.mjs` | 0 |
-| 463 | `frontend/vite.config.mjs` | 5 |
-| 464 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 18 |
-| 465 | `ops/scripts/architecture/language-runtime-audit.mjs` | 23 |
-| 466 | `ops/scripts/architecture/organization-audit.mjs` | 20 |
-| 467 | `ops/scripts/architecture/phase29-audit.mjs` | 17 |
-| 468 | `ops/scripts/backend/schema-audit.js` | 22 |
-| 469 | `ops/scripts/backend/verify-data-integrity.js` | 18 |
-| 470 | `ops/scripts/frontend/verify-i18n.js` | 6 |
-| 471 | `ops/scripts/frontend/verify-performance.js` | 4 |
-| 472 | `ops/scripts/frontend/verify-ui.js` | 13 |
-| 473 | `ops/scripts/lib/fs-utils.js` | 11 |
-| 474 | `ops/scripts/runtime/audits/audit-auth.mjs` | 6 |
-| 475 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 2 |
-| 476 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 11 |
-| 477 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 42 |
-| 478 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 21 |
-| 479 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | 16 |
-| 480 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | 6 |
-| 481 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | 15 |
-| 482 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | 5 |
-| 483 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 8 |
-| 484 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 2 |
-| 485 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 2 |
-| 486 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
-| 487 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 3 |
-| 488 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 3 |
-| 489 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 2 |
-| 490 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 3 |
-| 491 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | 2 |
-| 492 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 2 |
-| 493 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 2 |
-| 494 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 3 |
-| 495 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | 4 |
-| 496 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
-| 497 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
-| 498 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 2 |
-| 499 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 11 |
-| 500 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | 3 |
-| 501 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 5 |
-| 502 | `ops/scripts/runtime/storage/prune-storage.mjs` | 12 |
-| 503 | `ops/scripts/verification/verify-backup-reliability.js` | 5 |
-| 504 | `ops/scripts/verification/verify-docker-release.js` | 5 |
-| 505 | `ops/scripts/verification/verify-hardening-policy.js` | 11 |
-| 506 | `ops/scripts/verification/verify-runtime-deps.js` | 4 |
-| 507 | `ops/scripts/verification/verify-scale-services.js` | 8 |
-| 508 | `ops/scripts/verification/verify-secret-hygiene.js` | 0 |
+| 60 | `backend/src/runtimeVersion.js` | 8 |
+| 61 | `backend/src/schemaMetadata.js` | 9 |
+| 62 | `backend/src/security.js` | 14 |
+| 63 | `backend/src/serverUtils.js` | 26 |
+| 64 | `backend/src/services/aiGateway.js` | 17 |
+| 65 | `backend/src/services/backupPackages.js` | 59 |
+| 66 | `backend/src/services/firebaseAuth.js` | 22 |
+| 67 | `backend/src/services/googleDriveSync/index.js` | 75 |
+| 68 | `backend/src/services/googleDriveSync/versioning.js` | 7 |
+| 69 | `backend/src/services/googleOauth.js` | 17 |
+| 70 | `backend/src/services/importJobs.js` | 175 |
+| 71 | `backend/src/services/integrationDoctor.js` | 14 |
+| 72 | `backend/src/services/mediaQueue.js` | 10 |
+| 73 | `backend/src/services/portalAi.js` | 42 |
+| 74 | `backend/src/services/verification.js` | 21 |
+| 75 | `backend/src/sessionAuth.js` | 13 |
+| 76 | `backend/src/settingsSnapshot.js` | 12 |
+| 77 | `backend/src/storage/organizationFolders.js` | 5 |
+| 78 | `backend/src/systemFsWorker.js` | 7 |
+| 79 | `backend/src/systemJobs.js` | 28 |
+| 80 | `backend/src/uploadReferenceCleanup.js` | 3 |
+| 81 | `backend/src/uploadSecurity.js` | 7 |
+| 82 | `backend/src/websocket.js` | 1 |
+| 83 | `backend/src/workers/importWorker.js` | 2 |
+| 84 | `backend/src/workers/mediaWorker.js` | 2 |
+| 85 | `backend/test/accessControl.test.js` | 2 |
+| 86 | `backend/test/analyticsRuntime.test.js` | 1 |
+| 87 | `backend/test/authOtpGuards.test.js` | 1 |
+| 88 | `backend/test/authSecurityFlow.test.js` | 14 |
+| 89 | `backend/test/backupDefaultDestination.test.js` | 0 |
+| 90 | `backend/test/backupPerformanceHardening.test.js` | 1 |
+| 91 | `backend/test/backupRetention.test.js` | 1 |
+| 92 | `backend/test/backupSchema.test.js` | 1 |
+| 93 | `backend/test/branchStockSearch.test.js` | 10 |
+| 94 | `backend/test/contactOptions.test.js` | 1 |
+| 95 | `backend/test/dataPath.test.js` | 2 |
+| 96 | `backend/test/defaultRoles.test.js` | 8 |
+| 97 | `backend/test/fileAssetStorageReconcile.test.js` | 1 |
+| 98 | `backend/test/fileAssetUsageCache.test.js` | 1 |
+| 99 | `backend/test/fileRouteSecurityFlow.test.js` | 9 |
+| 100 | `backend/test/fullAutomation.test.js` | 2 |
+| 101 | `backend/test/googleDriveSyncVersioning.test.js` | 1 |
+| 102 | `backend/test/idempotency.test.js` | 1 |
+| 103 | `backend/test/importCsv.test.js` | 2 |
+| 104 | `backend/test/importDecisionIntegrity.test.js` | 0 |
+| 105 | `backend/test/importJobPerformanceHardening.test.js` | 1 |
+| 106 | `backend/test/importJobStateMachine.test.js` | 4 |
+| 107 | `backend/test/importScaleSmoke.test.js` | 3 |
+| 108 | `backend/test/initials.test.js` | 0 |
+| 109 | `backend/test/integrationDoctor.test.js` | 1 |
+| 110 | `backend/test/inventorySettingsMediaContracts.test.js` | 2 |
+| 111 | `backend/test/mediaOptimization.test.js` | 3 |
+| 112 | `backend/test/netSecurity.test.js` | 1 |
+| 113 | `backend/test/notificationSummaryCache.test.js` | 1 |
+| 114 | `backend/test/offlineSecurity.test.js` | 2 |
+| 115 | `backend/test/ownedGoogleAuth.test.js` | 2 |
+| 116 | `backend/test/permissionPolicy.test.js` | 0 |
+| 117 | `backend/test/portalInventoryRegression.test.js` | 2 |
+| 118 | `backend/test/portalUtils.test.js` | 1 |
+| 119 | `backend/test/postgresCutoverReadiness.test.js` | 1 |
+| 120 | `backend/test/postgresDatabase.test.js` | 3 |
+| 121 | `backend/test/postgresQueryCompat.test.js` | 1 |
+| 122 | `backend/test/productBatchHierarchy.test.js` | 2 |
+| 123 | `backend/test/productExpiry.test.js` | 1 |
+| 124 | `backend/test/productImportPolicies.test.js` | 1 |
+| 125 | `backend/test/productSearchPagination.test.js` | 0 |
+| 126 | `backend/test/rfidRoutes.test.js` | 1 |
+| 127 | `backend/test/routeContracts.test.js` | 2 |
+| 128 | `backend/test/runtimeCache.test.js` | 2 |
+| 129 | `backend/test/runtimeVersion.test.js` | 1 |
+| 130 | `backend/test/schemaMetadata.test.js` | 3 |
+| 131 | `backend/test/serverUtils.test.js` | 2 |
+| 132 | `backend/test/settingsSnapshotObjectStorage.test.js` | 4 |
+| 133 | `backend/test/systemJobs.test.js` | 3 |
+| 134 | `backend/test/uploadSecurity.test.js` | 1 |
+| 135 | `frontend/postcss.config.mjs` | 0 |
+| 136 | `frontend/public/runtime-noise-guard.js` | 6 |
+| 137 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 |
+| 138 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js` | 0 |
+| 139 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js` | 0 |
+| 140 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js` | 0 |
+| 141 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js` | 0 |
+| 142 | `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js` | 0 |
+| 143 | `frontend/public/sw.js` | 24 |
+| 144 | `frontend/public/theme-bootstrap.js` | 10 |
+| 145 | `frontend/src/api/http.js` | 0 |
+| 146 | `frontend/src/api/http.ts` | 62 |
+| 147 | `frontend/src/api/localDb.js` | 0 |
+| 148 | `frontend/src/api/localDb.ts` | 10 |
+| 149 | `frontend/src/api/methods.js` | 233 |
+| 150 | `frontend/src/api/websocket.js` | 0 |
+| 151 | `frontend/src/api/websocket.ts` | 11 |
+| 152 | `frontend/src/App.jsx` | 62 |
+| 153 | `frontend/src/app/appShellUtils.ts` | 10 |
+| 154 | `frontend/src/app/publicErrorRecovery.mjs` | 0 |
+| 155 | `frontend/src/app/publicErrorRecovery.ts` | 4 |
+| 156 | `frontend/src/AppContext.jsx` | 41 |
+| 157 | `frontend/src/components/auth/Login.jsx` | 23 |
+| 158 | `frontend/src/components/branches/Branches.jsx` | 11 |
+| 159 | `frontend/src/components/branches/BranchForm.jsx` | 3 |
+| 160 | `frontend/src/components/branches/TransferModal.jsx` | 4 |
+| 161 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
+| 162 | `frontend/src/components/catalog/CatalogImageField.jsx` | 1 |
+| 163 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
+| 164 | `frontend/src/components/catalog/CatalogPageContext.jsx` | 2 |
+| 165 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 2 |
+| 166 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 |
+| 167 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
+| 168 | `frontend/src/components/catalog/catalogUi.jsx` | 4 |
+| 169 | `frontend/src/components/catalog/portalCatalogDisplay.mjs` | 0 |
+| 170 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 9 |
+| 171 | `frontend/src/components/catalog/portalContentI18n.mjs` | 0 |
+| 172 | `frontend/src/components/catalog/portalContentI18n.ts` | 18 |
+| 173 | `frontend/src/components/catalog/portalEditorUtils.mjs` | 0 |
+| 174 | `frontend/src/components/catalog/portalEditorUtils.ts` | 10 |
+| 175 | `frontend/src/components/catalog/portalLanguagePacks.mjs` | 0 |
+| 176 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 3 |
+| 177 | `frontend/src/components/catalog/portalTranslateController.mjs` | 0 |
+| 178 | `frontend/src/components/catalog/portalTranslateController.ts` | 17 |
+| 179 | `frontend/src/components/contacts/ContactImportModal.jsx` | 10 |
+| 180 | `frontend/src/components/contacts/contactImportParser.mjs` | 0 |
+| 181 | `frontend/src/components/contacts/contactImportParser.ts` | 0 |
+| 182 | `frontend/src/components/contacts/contactImportWorker.mjs` | 0 |
+| 183 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
+| 184 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 |
+| 185 | `frontend/src/components/contacts/contactOptionUtils.ts` | 10 |
+| 186 | `frontend/src/components/contacts/Contacts.jsx` | 13 |
+| 187 | `frontend/src/components/contacts/CustomerFormModal.jsx` | 11 |
+| 188 | `frontend/src/components/contacts/customerMembershipNumber.js` | 0 |
+| 189 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
+| 190 | `frontend/src/components/contacts/CustomersTab.jsx` | 12 |
+| 191 | `frontend/src/components/contacts/DeliveryTab.jsx` | 23 |
+| 192 | `frontend/src/components/contacts/shared.jsx` | 9 |
+| 193 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
+| 194 | `frontend/src/components/custom-tables/CustomTables.jsx` | 11 |
+| 195 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 5 |
+| 196 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 1 |
+| 197 | `frontend/src/components/dashboard/charts/index.js` | 0 |
+| 198 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
+| 199 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 7 |
+| 200 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 |
+| 201 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
+| 202 | `frontend/src/components/dashboard/MiniStat.jsx` | 1 |
+| 203 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
+| 204 | `frontend/src/components/files/FilesPage.jsx` | 25 |
+| 205 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
+| 206 | `frontend/src/components/files/FilesResponsesTab.jsx` | 1 |
+| 207 | `frontend/src/components/inventory/DualMoney.jsx` | 1 |
+| 208 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
+| 209 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 10 |
+| 210 | `frontend/src/components/inventory/inventoryImportWorker.mjs` | 0 |
+| 211 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
+| 212 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
+| 213 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
+| 214 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 1 |
+| 215 | `frontend/src/components/inventory/movementGroups.js` | 0 |
+| 216 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
+| 217 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
+| 218 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
+| 219 | `frontend/src/components/navigation/Sidebar.jsx` | 7 |
+| 220 | `frontend/src/components/pos/CartItem.jsx` | 1 |
+| 221 | `frontend/src/components/pos/FilterPanel.jsx` | 6 |
+| 222 | `frontend/src/components/pos/POS.jsx` | 22 |
+| 223 | `frontend/src/components/pos/posCore.mjs` | 0 |
+| 224 | `frontend/src/components/pos/posCore.ts` | 10 |
+| 225 | `frontend/src/components/pos/ProductImage.jsx` | 1 |
+| 226 | `frontend/src/components/pos/QuickAddModal.jsx` | 2 |
+| 227 | `frontend/src/components/products/config/productPageConfig.mjs` | 0 |
+| 228 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
+| 229 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 4 |
+| 230 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 2 |
+| 231 | `frontend/src/components/products/forms/ProductForm.jsx` | 17 |
+| 232 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 5 |
+| 233 | `frontend/src/components/products/helpers/productDisplayHelpers.mjs` | 0 |
+| 234 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 6 |
+| 235 | `frontend/src/components/products/helpers/productFilterHelpers.mjs` | 0 |
+| 236 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 9 |
+| 237 | `frontend/src/components/products/helpers/productGalleryHelpers.mjs` | 0 |
+| 238 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 8 |
+| 239 | `frontend/src/components/products/helpers/productGroupViewHelpers.mjs` | 0 |
+| 240 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 2 |
+| 241 | `frontend/src/components/products/helpers/productMenuHelpers.mjs` | 0 |
+| 242 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 5 |
+| 243 | `frontend/src/components/products/helpers/productPageHelpers.mjs` | 0 |
+| 244 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 3 |
+| 245 | `frontend/src/components/products/helpers/productSelectionHelpers.mjs` | 0 |
+| 246 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 7 |
+| 247 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | 0 |
+| 248 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 18 |
+| 249 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 |
+| 250 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 1 |
+| 251 | `frontend/src/components/products/import/BulkImportModal.jsx` | 63 |
+| 252 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 |
+| 253 | `frontend/src/components/products/import/productImportPlanner.ts` | 18 |
+| 254 | `frontend/src/components/products/import/productImportWorker.mjs` | 0 |
+| 255 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
+| 256 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 16 |
+| 257 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 8 |
+| 258 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | 8 |
+| 259 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | 0 |
+| 260 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
+| 261 | `frontend/src/components/products/Products.jsx` | 15 |
+| 262 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | 0 |
+| 263 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
+| 264 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 5 |
+| 265 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | 0 |
+| 266 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
+| 267 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | 0 |
+| 268 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 9 |
+| 269 | `frontend/src/components/products/shared/primitives.jsx` | 11 |
+| 270 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 |
+| 271 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
+| 272 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 5 |
+| 273 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
+| 274 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 4 |
+| 275 | `frontend/src/components/receipt-settings/constants.js` | 0 |
+| 276 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
+| 277 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 0 |
+| 278 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 9 |
+| 279 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 9 |
+| 280 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 |
+| 281 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
+| 282 | `frontend/src/components/receipt-settings/template.js` | 0 |
+| 283 | `frontend/src/components/receipt-settings/template.ts` | 4 |
+| 284 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
+| 285 | `frontend/src/components/returns/EditReturnModal.jsx` | 5 |
+| 286 | `frontend/src/components/returns/NewReturnModal.jsx` | 10 |
+| 287 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 6 |
+| 288 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 3 |
+| 289 | `frontend/src/components/returns/Returns.jsx` | 13 |
+| 290 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 5 |
+| 291 | `frontend/src/components/sales/ExportModal.jsx` | 9 |
+| 292 | `frontend/src/components/sales/SaleDetailModal.jsx` | 6 |
+| 293 | `frontend/src/components/sales/Sales.jsx` | 14 |
+| 294 | `frontend/src/components/sales/SalesImportModal.jsx` | 10 |
+| 295 | `frontend/src/components/sales/salesImportWorker.mjs` | 0 |
+| 296 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
+| 297 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
+| 298 | `frontend/src/components/sales/StatusBadge.jsx` | 2 |
+| 299 | `frontend/src/components/server/ServerPage.jsx` | 16 |
+| 300 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 4 |
+| 301 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
+| 302 | `frontend/src/components/shared/ExportMenu.jsx` | 1 |
+| 303 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
+| 304 | `frontend/src/components/shared/globalScroll.js` | 0 |
+| 305 | `frontend/src/components/shared/globalScroll.ts` | 5 |
+| 306 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
+| 307 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 |
+| 308 | `frontend/src/components/shared/Modal.jsx` | 1 |
+| 309 | `frontend/src/components/shared/navigationConfig.js` | 0 |
+| 310 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
+| 311 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
+| 312 | `frontend/src/components/shared/pageActivity.js` | 0 |
+| 313 | `frontend/src/components/shared/pageActivity.ts` | 1 |
+| 314 | `frontend/src/components/shared/PageHeader.jsx` | 1 |
+| 315 | `frontend/src/components/shared/PaginationControls.jsx` | 5 |
+| 316 | `frontend/src/components/shared/PortalMenu.jsx` | 6 |
+| 317 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 3 |
+| 318 | `frontend/src/components/shared/SectionSwitcher.jsx` | 3 |
+| 319 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
+| 320 | `frontend/src/components/users/PermissionEditor.jsx` | 5 |
+| 321 | `frontend/src/components/users/UserDetailSheet.jsx` | 3 |
+| 322 | `frontend/src/components/users/UserProfileModal.jsx` | 21 |
+| 323 | `frontend/src/components/users/Users.jsx` | 18 |
+| 324 | `frontend/src/components/utils-settings/AuditLog.jsx` | 16 |
+| 325 | `frontend/src/components/utils-settings/Backup.jsx` | 30 |
+| 326 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 |
+| 327 | `frontend/src/components/utils-settings/index.js` | 0 |
+| 328 | `frontend/src/components/utils-settings/index.ts` | 0 |
+| 329 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 |
+| 330 | `frontend/src/components/utils-settings/ResetData.jsx` | 8 |
+| 331 | `frontend/src/components/utils-settings/Settings.jsx` | 21 |
+| 332 | `frontend/src/components/utils-settings/settingsConflict.js` | 0 |
+| 333 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
+| 334 | `frontend/src/constants.js` | 0 |
+| 335 | `frontend/src/constants.ts` | 3 |
+| 336 | `frontend/src/index.jsx` | 10 |
+| 337 | `frontend/src/platform/runtime/clientRuntime.js` | 0 |
+| 338 | `frontend/src/platform/runtime/clientRuntime.ts` | 17 |
+| 339 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 |
+| 340 | `frontend/src/platform/storage/storagePolicy.ts` | 3 |
+| 341 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 13 |
+| 342 | `frontend/src/types/jsx-modules.d.ts` | 0 |
+| 343 | `frontend/src/types/mjs-modules.d.ts` | 0 |
+| 344 | `frontend/src/types/react.d.ts` | 1 |
+| 345 | `frontend/src/types/receiptContracts.ts` | 0 |
+| 346 | `frontend/src/types/settingsContracts.ts` | 0 |
+| 347 | `frontend/src/utils/actionGuards.mjs` | 0 |
+| 348 | `frontend/src/utils/actionGuards.ts` | 5 |
+| 349 | `frontend/src/utils/actionHistory.mjs` | 0 |
+| 350 | `frontend/src/utils/actionHistory.ts` | 5 |
+| 351 | `frontend/src/utils/appRefresh.d.ts` | 2 |
+| 352 | `frontend/src/utils/appRefresh.js` | 0 |
+| 353 | `frontend/src/utils/appRefresh.ts` | 2 |
+| 354 | `frontend/src/utils/bulkOps.mjs` | 0 |
+| 355 | `frontend/src/utils/bulkOps.ts` | 1 |
+| 356 | `frontend/src/utils/color.js` | 0 |
+| 357 | `frontend/src/utils/color.ts` | 3 |
+| 358 | `frontend/src/utils/csv.d.ts` | 7 |
+| 359 | `frontend/src/utils/csv.js` | 0 |
+| 360 | `frontend/src/utils/csv.ts` | 15 |
+| 361 | `frontend/src/utils/csvExportWorker.mjs` | 0 |
+| 362 | `frontend/src/utils/csvExportWorker.ts` | 1 |
+| 363 | `frontend/src/utils/csvImport.js` | 0 |
+| 364 | `frontend/src/utils/csvImport.ts` | 19 |
+| 365 | `frontend/src/utils/csvRowCounter.mjs` | 0 |
+| 366 | `frontend/src/utils/csvRowCounter.ts` | 2 |
+| 367 | `frontend/src/utils/dateHelpers.js` | 0 |
+| 368 | `frontend/src/utils/dateHelpers.ts` | 3 |
+| 369 | `frontend/src/utils/deviceInfo.js` | 0 |
+| 370 | `frontend/src/utils/deviceInfo.ts` | 4 |
+| 371 | `frontend/src/utils/exportPackage.js` | 0 |
+| 372 | `frontend/src/utils/exportPackage.ts` | 2 |
+| 373 | `frontend/src/utils/exportReports.jsx` | 9 |
+| 374 | `frontend/src/utils/favicon.js` | 0 |
+| 375 | `frontend/src/utils/favicon.ts` | 4 |
+| 376 | `frontend/src/utils/formatters.js` | 0 |
+| 377 | `frontend/src/utils/formatters.ts` | 5 |
+| 378 | `frontend/src/utils/groupedRecords.mjs` | 0 |
+| 379 | `frontend/src/utils/groupedRecords.ts` | 8 |
+| 380 | `frontend/src/utils/historyHelpers.mjs` | 0 |
+| 381 | `frontend/src/utils/historyHelpers.ts` | 2 |
+| 382 | `frontend/src/utils/importJobRefresh.js` | 0 |
+| 383 | `frontend/src/utils/importJobRefresh.ts` | 7 |
+| 384 | `frontend/src/utils/index.js` | 0 |
+| 385 | `frontend/src/utils/index.ts` | 0 |
+| 386 | `frontend/src/utils/initials.mjs` | 0 |
+| 387 | `frontend/src/utils/initials.ts` | 7 |
+| 388 | `frontend/src/utils/loaders.mjs` | 0 |
+| 389 | `frontend/src/utils/loaders.ts` | 7 |
+| 390 | `frontend/src/utils/mediaUpload.js` | 0 |
+| 391 | `frontend/src/utils/mediaUpload.ts` | 5 |
+| 392 | `frontend/src/utils/permissions.js` | 0 |
+| 393 | `frontend/src/utils/permissions.ts` | 2 |
+| 394 | `frontend/src/utils/pricing.d.ts` | 8 |
+| 395 | `frontend/src/utils/pricing.js` | 0 |
+| 396 | `frontend/src/utils/pricing.ts` | 8 |
+| 397 | `frontend/src/utils/printReceipt.js` | 0 |
+| 398 | `frontend/src/utils/printReceipt.ts` | 40 |
+| 399 | `frontend/src/utils/productBatches.mjs` | 0 |
+| 400 | `frontend/src/utils/productBatches.ts` | 3 |
+| 401 | `frontend/src/utils/productGrouping.mjs` | 0 |
+| 402 | `frontend/src/utils/productGrouping.ts` | 13 |
+| 403 | `frontend/src/utils/publicAssetUrls.d.ts` | 1 |
+| 404 | `frontend/src/utils/publicAssetUrls.js` | 0 |
+| 405 | `frontend/src/utils/publicAssetUrls.ts` | 8 |
+| 406 | `frontend/src/utils/receiptAppliedConfig.ts` | 7 |
+| 407 | `frontend/src/utils/scriptTypography.js` | 0 |
+| 408 | `frontend/src/utils/scriptTypography.ts` | 3 |
+| 409 | `frontend/src/utils/settingsRefresh.js` | 0 |
+| 410 | `frontend/src/utils/settingsRefresh.ts` | 2 |
+| 411 | `frontend/src/utils/settingsWriteOptions.ts` | 1 |
+| 412 | `frontend/src/web-api.js` | 0 |
+| 413 | `frontend/src/web-api.ts` | 33 |
+| 414 | `frontend/tailwind.config.mjs` | 0 |
+| 415 | `frontend/tests/actionGuards.test.mjs` | 1 |
+| 416 | `frontend/tests/actionStability.test.mjs` | 3 |
+| 417 | `frontend/tests/adminShellMediaGuards.test.mjs` | 0 |
+| 418 | `frontend/tests/apiHttp.test.mjs` | 3 |
+| 419 | `frontend/tests/appRefresh.test.mjs` | 2 |
+| 420 | `frontend/tests/appShellUtils.test.mjs` | 1 |
+| 421 | `frontend/tests/assetCompression.test.mjs` | 1 |
+| 422 | `frontend/tests/backupJobs.test.mjs` | 0 |
+| 423 | `frontend/tests/barcodeImageScanner.test.mjs` | 1 |
+| 424 | `frontend/tests/barcodeScannerState.test.mjs` | 1 |
+| 425 | `frontend/tests/bulkOps.test.mjs` | 1 |
+| 426 | `frontend/tests/contactImportWorker.test.mjs` | 1 |
+| 427 | `frontend/tests/csvImport.test.mjs` | 1 |
+| 428 | `frontend/tests/dashboardDataReliability.test.mjs` | 0 |
+| 429 | `frontend/tests/dateHelpers.test.mjs` | 2 |
+| 430 | `frontend/tests/deviceInfo.test.mjs` | 2 |
+| 431 | `frontend/tests/exportPackages.test.mjs` | 1 |
+| 432 | `frontend/tests/formatters.test.mjs` | 1 |
+| 433 | `frontend/tests/globalScroll.test.mjs` | 0 |
+| 434 | `frontend/tests/globalScrollControls.test.mjs` | 1 |
+| 435 | `frontend/tests/groupedRecords.test.mjs` | 1 |
+| 436 | `frontend/tests/historyHelpers.test.mjs` | 1 |
+| 437 | `frontend/tests/importJobRefresh.test.mjs` | 4 |
+| 438 | `frontend/tests/initials.test.mjs` | 1 |
+| 439 | `frontend/tests/inventoryImportWorker.test.mjs` | 1 |
+| 440 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 0 |
+| 441 | `frontend/tests/inventoryMovementGroups.test.mjs` | 1 |
+| 442 | `frontend/tests/inventoryRfidSection.test.mjs` | 0 |
+| 443 | `frontend/tests/jsxSyntaxCheck.mjs` | 1 |
+| 444 | `frontend/tests/loaders.test.mjs` | 1 |
+| 445 | `frontend/tests/mediaUploadHelpers.test.mjs` | 1 |
+| 446 | `frontend/tests/navigationConfig.test.mjs` | 1 |
+| 447 | `frontend/tests/notificationBadge.test.mjs` | 0 |
+| 448 | `frontend/tests/offlineSalesQueue.test.mjs` | 1 |
+| 449 | `frontend/tests/offlineSecurityHardening.test.mjs` | 1 |
+| 450 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 1 |
+| 451 | `frontend/tests/ownedGoogleAuth.test.mjs` | 1 |
+| 452 | `frontend/tests/performanceLoadingUx.test.mjs` | 0 |
+| 453 | `frontend/tests/permissionEditor.test.mjs` | 0 |
+| 454 | `frontend/tests/permissions.test.mjs` | 0 |
+| 455 | `frontend/tests/portalCatalogDisplay.test.mjs` | 3 |
+| 456 | `frontend/tests/portalContentI18n.test.mjs` | 0 |
+| 457 | `frontend/tests/portalEditorUtils.test.mjs` | 1 |
+| 458 | `frontend/tests/portalFaqVocabulary.test.mjs` | 0 |
+| 459 | `frontend/tests/portalLanguagePacks.test.mjs` | 0 |
+| 460 | `frontend/tests/portalTranslateController.test.mjs` | 2 |
+| 461 | `frontend/tests/posCore.test.mjs` | 1 |
+| 462 | `frontend/tests/pricingContacts.test.mjs` | 1 |
+| 463 | `frontend/tests/productBatches.test.mjs` | 0 |
+| 464 | `frontend/tests/productDiscountUx.test.mjs` | 1 |
+| 465 | `frontend/tests/productDisplayHelpers.test.mjs` | 0 |
+| 466 | `frontend/tests/productFilterHelpers.test.mjs` | 0 |
+| 467 | `frontend/tests/productGalleryHelpers.test.mjs` | 0 |
+| 468 | `frontend/tests/productGrouping.test.mjs` | 1 |
+| 469 | `frontend/tests/productGroupViewHelpers.test.mjs` | 2 |
+| 470 | `frontend/tests/productHistoryHelpers.test.mjs` | 1 |
+| 471 | `frontend/tests/productImportPlanner.test.mjs` | 1 |
+| 472 | `frontend/tests/productImportWorkerFallback.test.mjs` | 1 |
+| 473 | `frontend/tests/productMenuHelpers.test.mjs` | 3 |
+| 474 | `frontend/tests/productPageHelpers.test.mjs` | 0 |
+| 475 | `frontend/tests/productSearchPagination.test.mjs` | 0 |
+| 476 | `frontend/tests/productSelectionHelpers.test.mjs` | 0 |
+| 477 | `frontend/tests/productWriteHelpers.test.mjs` | 0 |
+| 478 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 |
+| 479 | `frontend/tests/receiptSettingsSync.test.mjs` | 0 |
+| 480 | `frontend/tests/receiptTemplate.test.mjs` | 1 |
+| 481 | `frontend/tests/returnsLayout.test.mjs` | 0 |
+| 482 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 0 |
+| 483 | `frontend/tests/salesImportWorker.test.mjs` | 1 |
+| 484 | `frontend/tests/scanbotScanner.test.mjs` | 2 |
+| 485 | `frontend/tests/scriptTypography.test.mjs` | 0 |
+| 486 | `frontend/tests/sectionNavigation.test.mjs` | 0 |
+| 487 | `frontend/tests/settingsConflictHelpers.test.mjs` | 1 |
+| 488 | `frontend/tests/settingsRefresh.test.mjs` | 0 |
+| 489 | `frontend/tests/storagePolicy.test.mjs` | 1 |
+| 490 | `frontend/tests/utilsSettingsBarrel.test.mjs` | 0 |
+| 491 | `frontend/vite.config.mjs` | 5 |
+| 492 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 18 |
+| 493 | `ops/scripts/architecture/language-runtime-audit.mjs` | 20 |
+| 494 | `ops/scripts/architecture/organization-audit.mjs` | 15 |
+| 495 | `ops/scripts/architecture/phase29-audit.mjs` | 13 |
+| 496 | `ops/scripts/backend/schema-audit.js` | 25 |
+| 497 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | 5 |
+| 498 | `ops/scripts/backend/verify-data-integrity.js` | 27 |
+| 499 | `ops/scripts/frontend/verify-i18n.js` | 6 |
+| 500 | `ops/scripts/frontend/verify-performance.js` | 4 |
+| 501 | `ops/scripts/frontend/verify-ui.js` | 11 |
+| 502 | `ops/scripts/lib/fs-utils.js` | 16 |
+| 503 | `ops/scripts/lib/report-utils.js` | 5 |
+| 504 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | 5 |
+| 505 | `ops/scripts/runtime/audits/audit-auth.mjs` | 6 |
+| 506 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 3 |
+| 507 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 11 |
+| 508 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 43 |
+| 509 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 22 |
+| 510 | `ops/scripts/runtime/browser-action-smoke.mjs` | 32 |
+| 511 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | 16 |
+| 512 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | 6 |
+| 513 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | 16 |
+| 514 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | 8 |
+| 515 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 8 |
+| 516 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 2 |
+| 517 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 2 |
+| 518 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
+| 519 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 3 |
+| 520 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | 11 |
+| 521 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 3 |
+| 522 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 2 |
+| 523 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 3 |
+| 524 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | 2 |
+| 525 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 2 |
+| 526 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 2 |
+| 527 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 3 |
+| 528 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | 5 |
+| 529 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
+| 530 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
+| 531 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 2 |
+| 532 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 11 |
+| 533 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | 3 |
+| 534 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 |
+| 535 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | 6 |
+| 536 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 8 |
+| 537 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 21 |
+| 538 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | 5 |
+| 539 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | 11 |
+| 540 | `ops/scripts/runtime/storage/prune-storage.mjs` | 17 |
+| 541 | `ops/scripts/runtime/storage/restore-candidates.mjs` | 8 |
+| 542 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | 14 |
+| 543 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
+| 544 | `ops/scripts/verification/verify-docker-release.js` | 11 |
+| 545 | `ops/scripts/verification/verify-hardening-policy.js` | 9 |
+| 546 | `ops/scripts/verification/verify-runtime-deps.js` | 13 |
+| 547 | `ops/scripts/verification/verify-scale-services.js` | 8 |
+| 548 | `ops/scripts/verification/verify-secret-hygiene.js` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -569,8 +609,8 @@ Code files scanned: **508**
 | 14 | `getConfiguredTailscaleHost` | function | 95 |
 | 15 | `isPublicRemoteRequest` | function | 99 |
 | 16 | `isPublicApiRequest` | function | 107 |
-| 17 | `classifyRequestAccess` | function | 113 |
-| 18 | `authorizeProtectedRequest` | function | 142 |
+| 17 | `classifyRequestAccess` | function | 116 |
+| 18 | `authorizeProtectedRequest` | function | 145 |
 
 ### 3.3 `backend/src/analytics/duckdbRuntime.js`
 
@@ -593,9 +633,9 @@ Code files scanned: **508**
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `countRowsByTable` | function | 90 |
-| 2 | `countCustomTableRows` | function | 98 |
-| 3 | `buildBackupSummary` | function | 104 |
-| 4 | `buildBackupSummaryFromCounts` | function | 109 |
+| 2 | `countCustomTableRows` | function | 99 |
+| 3 | `buildBackupSummary` | function | 107 |
+| 4 | `buildBackupSummaryFromCounts` | function | 112 |
 
 ### 3.6 `backend/src/businessMetrics.js`
 
@@ -618,23 +658,24 @@ Code files scanned: **508**
 | 1 | `normalizeCatalogText` | function | 7 |
 | 2 | `hasSuspiciousCatalogText` | function | 18 |
 | 3 | `listSuspiciousCatalogFields` | function | 28 |
-| 4 | `assertCatalogTextIntegrity` | function | 35 |
-| 5 | `normalizeOptionList` | function | 41 |
+| 4 | `assertCatalogTextIntegrity` | function | 39 |
+| 5 | `normalizeOptionList` | function | 45 |
 
 ### 3.8 `backend/src/config/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `isDefaultDataMarker` | function | 46 |
-| 2 | `resolveStoredDataDir` | function | 51 |
-| 3 | `normalizeSelectedDataDir` | function | 58 |
-| 4 | `readDataLocation` | function | 70 |
-| 5 | `writeDataLocation` | function | 81 |
-| 6 | `ensureDirectory` | function | 97 |
-| 7 | `readSecretFileValue` | function | 101 |
-| 8 | `ensureOrganizationRuntimeLayout` | function | 113 |
-| 9 | `normalizeOrganizationSeed` | function | 119 |
-| 10 | `STORAGE_ROOT` | const arrow | 126 |
+| 1 | `buildEnvCandidates` | function | 25 |
+| 2 | `isDefaultDataMarker` | function | 54 |
+| 3 | `resolveStoredDataDir` | function | 59 |
+| 4 | `normalizeSelectedDataDir` | function | 66 |
+| 5 | `readDataLocation` | function | 78 |
+| 6 | `writeDataLocation` | function | 89 |
+| 7 | `ensureDirectory` | function | 105 |
+| 8 | `readSecretFileValue` | function | 109 |
+| 9 | `ensureOrganizationRuntimeLayout` | function | 121 |
+| 10 | `normalizeOrganizationSeed` | function | 128 |
+| 11 | `STORAGE_ROOT` | const arrow | 135 |
 
 ### 3.9 `backend/src/conflictControl.js`
 
@@ -654,11 +695,13 @@ Code files scanned: **508**
 | 1 | `cleanText` | function | 5 |
 | 2 | `normalizeContactOption` | function | 10 |
 | 3 | `hasContactOptionData` | function | 21 |
-| 4 | `parseStoredContactOptions` | function | 28 |
-| 5 | `parseImportContactOptions` | function | 56 |
-| 6 | `serializeContactOptions` | function | 72 |
-| 7 | `getPrimaryContactOption` | function | 80 |
-| 8 | `buildImportedContactState` | function | 85 |
+| 4 | `collectNormalizedContactOptions` | function | 31 |
+| 5 | `collectLegacyContactOptions` | function | 43 |
+| 6 | `parseStoredContactOptions` | function | 60 |
+| 7 | `parseImportContactOptions` | function | 79 |
+| 8 | `serializeContactOptions` | function | 95 |
+| 9 | `getPrimaryContactOption` | function | 100 |
+| 10 | `buildImportedContactState` | function | 107 |
 
 ### 3.11 `backend/src/database.js`
 
@@ -672,11 +715,11 @@ Code files scanned: **508**
 | 2 | `isSamePath` | function | 15 |
 | 3 | `isSubPath` | function | 19 |
 | 4 | `ensureDataRootLayout` | function | 24 |
-| 5 | `walkFiles` | function | 30 |
-| 6 | `summarizeDataRoot` | function | 48 |
-| 7 | `copyDirectoryContents` | function | 91 |
-| 8 | `buildArchivedTargetPath` | function | 128 |
-| 9 | `relocateDataRoot` | function | 145 |
+| 5 | `walkFiles` | function | 31 |
+| 6 | `summarizeDataRoot` | function | 49 |
+| 7 | `copyDirectoryContents` | function | 92 |
+| 8 | `buildArchivedTargetPath` | function | 129 |
+| 9 | `relocateDataRoot` | function | 146 |
 
 ### 3.13 `backend/src/db/cutoverReadiness.js`
 
@@ -687,8 +730,11 @@ Code files scanned: **508**
 | 3 | `shouldSkipDir` | function | 44 |
 | 4 | `listJavaScriptFiles` | function | 52 |
 | 5 | `analyzeFile` | function | 66 |
-| 6 | `summarizeBlockers` | function | 86 |
-| 7 | `analyzePostgresCutoverReadiness` | function | 103 |
+| 6 | `incrementCount` | function | 87 |
+| 7 | `mapCountsToRows` | function | 91 |
+| 8 | `summarizeBlockers` | function | 99 |
+| 9 | `analyzeFiles` | function | 116 |
+| 10 | `analyzePostgresCutoverReadiness` | function | 125 |
 
 ### 3.14 `backend/src/db/postgresQueryCompat.js`
 
@@ -701,66 +747,77 @@ Code files scanned: **508**
 | 5 | `translateInsertOrIgnore` | function | 131 |
 | 6 | `translateParameters` | function | 135 |
 | 7 | `appendReturning` | function | 160 |
-| 8 | `getInsertTableName` | function | 172 |
-| 9 | `translateSql` | function | 177 |
-| 10 | `coerceRowValue` | function | 195 |
-| 11 | `coerceRow` | function | 208 |
+| 8 | `isNumericFieldName` | function | 172 |
+| 9 | `getInsertTableName` | function | 179 |
+| 10 | `translateSql` | function | 184 |
+| 11 | `coerceRowValue` | function | 202 |
+| 12 | `coerceRow` | function | 215 |
 
 ### 3.15 `backend/src/fileAssets.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getDb` | function | 56 |
-| 2 | `ensureUploadsDirectory` | function | 65 |
-| 3 | `getMimeTypeFromName` | function | 69 |
-| 4 | `getMediaType` | function | 74 |
-| 5 | `sanitizeOriginalFileName` | function | 83 |
-| 6 | `preserveOriginalDisplayName` | function | 96 |
-| 7 | `buildUniqueStoredName` | function | 104 |
-| 8 | `shouldCompressImage` | function | 121 |
-| 9 | `compressBufferForAsset` | function | 127 |
-| 10 | `encodeImageCandidate` | function | 211 |
-| 11 | `readImageDimensions` | function | 240 |
-| 12 | `getFfmpegPath` | function | 253 |
-| 13 | `buildVideoOptimizationArgs` | function | 261 |
-| 14 | `optimizeStoredVideo` | function | 299 |
-| 15 | `createFileAssetRecord` | function | 365 |
-| 16 | `getFileAssetByPublicPath` | function | 445 |
-| 17 | `buildFileAssetFilterParams` | function | 454 |
-| 18 | `listAssetRows` | function | 461 |
-| 19 | `countAssetRows` | function | 486 |
-| 20 | `writeObjectBodyToFile` | function | 506 |
-| 21 | `ensureStoredAssetAvailableLocally` | function | 524 |
-| 22 | `collectUploadPathsFromValue` | function | 534 |
-| 23 | `pruneInvalidReferenceBackfillAssets` | function | 558 |
-| 24 | `collectReferencedUploadPaths` | function | 566 |
-| 25 | `add` | const arrow | 568 |
-| 26 | `ensureReferencedAssetsRegistered` | function | 579 |
-| 27 | `getUploadFilePath` | function | 612 |
-| 28 | `toUploadPublicPathFromObjectKey` | function | 617 |
-| 29 | `findUploadStorageOrphans` | function | 623 |
-| 30 | `collectTrackedUploadPublicPaths` | function | 633 |
-| 31 | `add` | const arrow | 635 |
-| 32 | `reconcileUploadStorage` | function | 648 |
-| 33 | `requestUploadStorageReconcile` | function | 710 |
-| 34 | `ensureFileAssetListingWarm` | function | 714 |
-| 35 | `prewarmFileAssetListing` | function | 732 |
-| 36 | `deleteAllStoredUploads` | function | 741 |
-| 37 | `buildInClausePlaceholders` | function | 762 |
-| 38 | `collectUsagesByPublicPath` | function | 766 |
-| 39 | `addUsage` | const arrow | 774 |
-| 40 | `collectUsage` | function | 839 |
-| 41 | `resolveBrowserPublicPath` | function | 843 |
-| 42 | `serializeAssetRow` | function | 850 |
-| 43 | `serializeAssetRows` | function | 864 |
-| 44 | `registerStoredAsset` | function | 870 |
-| 45 | `registerUploadFromRequest` | function | 947 |
-| 46 | `optimizeStoredAssetFromQueue` | function | 961 |
-| 47 | `storeDataUrlAsset` | function | 993 |
-| 48 | `backfillUploadAssets` | function | 1019 |
-| 49 | `listFileAssets` | function | 1038 |
-| 50 | `getFileAssetById` | function | 1061 |
-| 51 | `deleteFileAsset` | function | 1066 |
+| 1 | `getDb` | function | 59 |
+| 2 | `buildAssetExtToMime` | function | 63 |
+| 3 | `ensureUploadsDirectory` | function | 73 |
+| 4 | `getMimeTypeFromName` | function | 77 |
+| 5 | `getMediaType` | function | 82 |
+| 6 | `sanitizeOriginalFileName` | function | 91 |
+| 7 | `preserveOriginalDisplayName` | function | 105 |
+| 8 | `buildUniqueStoredName` | function | 113 |
+| 9 | `shouldCompressImage` | function | 130 |
+| 10 | `compressBufferForAsset` | function | 136 |
+| 11 | `encodeImageCandidate` | function | 220 |
+| 12 | `readImageDimensions` | function | 249 |
+| 13 | `getFfmpegPath` | function | 262 |
+| 14 | `buildVideoOptimizationArgs` | function | 270 |
+| 15 | `optimizeStoredVideo` | function | 308 |
+| 16 | `createFileAssetRecord` | function | 374 |
+| 17 | `getFileAssetByPublicPath` | function | 454 |
+| 18 | `buildFileAssetFilterParams` | function | 463 |
+| 19 | `listAssetRows` | function | 470 |
+| 20 | `countAssetRows` | function | 495 |
+| 21 | `writeObjectBodyToFile` | function | 515 |
+| 22 | `ensureStoredAssetAvailableLocally` | function | 533 |
+| 23 | `collectUploadPathsFromValue` | function | 543 |
+| 24 | `pruneInvalidReferenceBackfillAssets` | function | 571 |
+| 25 | `collectReferencedUploadPaths` | function | 579 |
+| 26 | `add` | const arrow | 581 |
+| 27 | `ensureReferencedAssetsRegistered` | function | 592 |
+| 28 | `getUploadFilePath` | function | 625 |
+| 29 | `toUploadPublicPathFromObjectKey` | function | 630 |
+| 30 | `findUploadStorageOrphans` | function | 636 |
+| 31 | `collectTrackedUploadPublicPaths` | function | 654 |
+| 32 | `add` | const arrow | 656 |
+| 33 | `collectObjectKeys` | function | 673 |
+| 34 | `listLocalUploadFiles` | function | 682 |
+| 35 | `reconcileUploadStorage` | function | 690 |
+| 36 | `requestUploadStorageReconcile` | function | 750 |
+| 37 | `ensureFileAssetListingWarm` | function | 754 |
+| 38 | `prewarmFileAssetListing` | function | 772 |
+| 39 | `deleteAllStoredUploads` | function | 783 |
+| 40 | `buildInClausePlaceholders` | function | 804 |
+| 41 | `normalizeUniquePublicPaths` | function | 810 |
+| 42 | `createUsageMap` | function | 822 |
+| 43 | `addReferencedRowUsages` | function | 830 |
+| 44 | `buildUploadReferenceUsageMap` | function | 840 |
+| 45 | `getCachedSettingsUsageReferences` | function | 862 |
+| 46 | `getCachedSubmissionUsageReferences` | function | 882 |
+| 47 | `mergeUsageReferences` | function | 902 |
+| 48 | `collectUsagesByPublicPath` | function | 911 |
+| 49 | `addUsage` | const arrow | 917 |
+| 50 | `collectUsage` | function | 987 |
+| 51 | `resolveBrowserPublicPath` | function | 991 |
+| 52 | `serializeAssetRow` | function | 998 |
+| 53 | `serializeAssetRows` | function | 1012 |
+| 54 | `registerStoredAsset` | function | 1026 |
+| 55 | `registerUploadFromRequest` | function | 1103 |
+| 56 | `optimizeStoredAssetFromQueue` | function | 1117 |
+| 57 | `storeDataUrlAsset` | function | 1149 |
+| 58 | `backfillUploadAssets` | function | 1175 |
+| 59 | `listFileAssets` | function | 1192 |
+| 60 | `getFileAssetById` | function | 1215 |
+| 61 | `deleteFileAsset` | function | 1220 |
 
 ### 3.16 `backend/src/helpers.js`
 
@@ -776,16 +833,26 @@ Code files scanned: **508**
 | 8 | `broadcast` | function | 164 |
 | 9 | `tryParse` | function | 181 |
 | 10 | `today` | function | 186 |
-| 11 | `parseCSVRows` | function | 198 |
-| 12 | `bulkImportCSV` | function | 222 |
-| 13 | `parseCSVLine` | function | 248 |
-| 14 | `importRows` | function | 268 |
-| 15 | `verifyAndRepairStockQuantities` | function | 283 |
-| 16 | `verifyAndRepairSaleStatuses` | function | 341 |
-| 17 | `verifyAndRepairCostPrices` | function | 401 |
-| 18 | `runDataIntegrityCheck` | function | 483 |
-| 19 | `getSafeCostPrice` | function | 510 |
-| 20 | `calculateSaleProfit` | function | 521 |
+| 11 | `nonEmptyCsvLines` | function | 190 |
+| 12 | `normalizeCsvHeaders` | function | 198 |
+| 13 | `normalizeCsvCell` | function | 206 |
+| 14 | `buildCsvRow` | function | 210 |
+| 15 | `buildParsedCsvRows` | function | 218 |
+| 16 | `parseCSVRows` | function | 237 |
+| 17 | `bulkImportCSV` | function | 254 |
+| 18 | `parseCSVLine` | function | 280 |
+| 19 | `buildPlaceholders` | function | 294 |
+| 20 | `rowValuesForColumns` | function | 300 |
+| 21 | `importRows` | function | 314 |
+| 22 | `verifyAndRepairStockQuantities` | function | 329 |
+| 23 | `mapReturnedQuantities` | function | 382 |
+| 24 | `areAllSaleItemsReturned` | function | 390 |
+| 25 | `verifyAndRepairSaleStatuses` | function | 402 |
+| 26 | `verifyAndRepairCostPrices` | function | 461 |
+| 27 | `runDataIntegrityCheck` | function | 543 |
+| 28 | `hasRepairMessages` | function | 567 |
+| 29 | `getSafeCostPrice` | function | 577 |
+| 30 | `calculateSaleProfit` | function | 588 |
 
 ### 3.17 `backend/src/idempotency.js`
 
@@ -802,13 +869,18 @@ Code files scanned: **508**
 | 3 | `normalizeNumericText` | function | 21 |
 | 4 | `countDelimiter` | function | 28 |
 | 5 | `detectCsvDelimiter` | function | 47 |
-| 6 | `parseDelimitedRows` | function | 54 |
-| 7 | `normalizeCsvKey` | function | 99 |
-| 8 | `parseCsvRows` | function | 107 |
-| 9 | `detectCsvDelimiterFromFile` | function | 126 |
-| 10 | `csvValuesToRow` | function | 137 |
-| 11 | `hasCsvContent` | function | 147 |
-| 12 | `emitRecord` | const function | 165 |
+| 6 | `parseDelimitedRows` | function | 62 |
+| 7 | `hasDelimitedRowContent` | function | 107 |
+| 8 | `normalizeCsvKey` | function | 114 |
+| 9 | `normalizeCsvHeaders` | function | 122 |
+| 10 | `hasDelimitedRowContent` | function | 130 |
+| 11 | `hasParsedCsvRowContent` | function | 137 |
+| 12 | `buildParsedCsvRows` | function | 144 |
+| 13 | `parseCsvRows` | function | 154 |
+| 14 | `detectCsvDelimiterFromFile` | function | 161 |
+| 15 | `csvValuesToRow` | function | 172 |
+| 16 | `hasCsvContent` | function | 183 |
+| 17 | `emitRecord` | const function | 201 |
 
 ### 3.19 `backend/src/importParsing.js`
 
@@ -825,12 +897,13 @@ Code files scanned: **508**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeInitialText` | function | 16 |
-| 2 | `getInitialKey` | function | 20 |
-| 3 | `getInitialType` | function | 31 |
-| 4 | `compareInitialKeys` | function | 40 |
-| 5 | `rank` | const arrow | 44 |
-| 6 | `aggregateInitialRows` | function | 64 |
+| 1 | `buildKhmerOrder` | function | 13 |
+| 2 | `normalizeInitialText` | function | 24 |
+| 3 | `getInitialKey` | function | 28 |
+| 4 | `getInitialType` | function | 39 |
+| 5 | `compareInitialKeys` | function | 48 |
+| 6 | `rank` | const arrow | 52 |
+| 7 | `aggregateInitialRows` | function | 72 |
 
 ### 3.21 `backend/src/maintenanceLock.js`
 
@@ -842,7 +915,9 @@ Code files scanned: **508**
 | 4 | `acquireMaintenanceLock` | function | 17 |
 | 5 | `releaseMaintenanceLock` | function | 29 |
 | 6 | `withMaintenanceLock` | function | 37 |
-| 7 | `maintenanceWriteGuard` | function | 46 |
+| 7 | `isReadOnlyMethod` | function | 46 |
+| 8 | `isMaintenanceWriteAllowed` | function | 50 |
+| 9 | `maintenanceWriteGuard` | function | 66 |
 
 ### 3.22 `backend/src/middleware.js`
 
@@ -863,12 +938,12 @@ Code files scanned: **508**
 | 13 | `hasPermission` | function | 197 |
 | 14 | `requirePermission` | function | 204 |
 | 15 | `requireAnyPermission` | function | 216 |
-| 16 | `readAuditTextValue` | function | 229 |
-| 17 | `getAuditRequestMeta` | function | 235 |
-| 18 | `getAuditActor` | function | 264 |
-| 19 | `compressUpload` | function | 280 |
-| 20 | `validateUploadedFile` | function | 298 |
-| 21 | `validateUploadBufferPayload` | function | 309 |
+| 16 | `readAuditTextValue` | function | 234 |
+| 17 | `getAuditRequestMeta` | function | 240 |
+| 18 | `getAuditActor` | function | 269 |
+| 19 | `compressUpload` | function | 285 |
+| 20 | `validateUploadedFile` | function | 303 |
+| 21 | `validateUploadBufferPayload` | function | 314 |
 
 ### 3.23 `backend/src/money.js`
 
@@ -885,10 +960,10 @@ Code files scanned: **508**
 | 1 | `trim` | function | 26 |
 | 2 | `normalizeHostname` | function | 30 |
 | 3 | `isPrivateIpv4` | function | 34 |
-| 4 | `isPrivateIpv6` | function | 47 |
-| 5 | `isBlockedHostname` | function | 58 |
-| 6 | `assertSafeOutboundUrl` | function | 69 |
-| 7 | `isSafeExternalImageReference` | function | 97 |
+| 4 | `isPrivateIpv6` | function | 52 |
+| 5 | `isBlockedHostname` | function | 63 |
+| 6 | `assertSafeOutboundUrl` | function | 76 |
+| 7 | `isSafeExternalImageReference` | function | 104 |
 
 ### 3.25 `backend/src/objectStore.js`
 
@@ -905,18 +980,24 @@ Code files scanned: **508**
 | 9 | `canUseCloudflareR2Api` | function | 68 |
 | 10 | `buildR2ApiObjectUrl` | function | 72 |
 | 11 | `cloudflareR2ApiRequest` | function | 87 |
-| 12 | `shouldFallbackToR2Api` | function | 123 |
-| 13 | `getS3Client` | function | 133 |
-| 14 | `normalizeObjectKey` | function | 152 |
-| 15 | `ensureBucket` | function | 156 |
-| 16 | `putObject` | function | 174 |
-| 17 | `sendWithTimeout` | function | 209 |
-| 18 | `getObjectStream` | function | 221 |
-| 19 | `deleteObject` | function | 254 |
-| 20 | `deleteObjects` | function | 273 |
-| 21 | `listObjects` | function | 308 |
-| 22 | `testObjectStore` | function | 359 |
-| 23 | `bufferToStream` | function | 374 |
+| 12 | `shouldFallbackToR2Api` | function | 125 |
+| 13 | `isMissingObjectError` | function | 135 |
+| 14 | `getS3Client` | function | 145 |
+| 15 | `normalizeObjectKey` | function | 164 |
+| 16 | `normalizeUniqueObjectKeys` | function | 168 |
+| 17 | `buildDeleteObjectRefs` | function | 180 |
+| 18 | `serializeCloudflareObjectList` | function | 188 |
+| 19 | `serializeS3ObjectList` | function | 201 |
+| 20 | `ensureBucket` | function | 214 |
+| 21 | `putObject` | function | 232 |
+| 22 | `sendWithTimeout` | function | 267 |
+| 23 | `getObjectStream` | function | 279 |
+| 24 | `objectExists` | function | 312 |
+| 25 | `deleteObject` | function | 345 |
+| 26 | `deleteObjects` | function | 364 |
+| 27 | `listObjects` | function | 397 |
+| 28 | `testObjectStore` | function | 433 |
+| 29 | `bufferToStream` | function | 448 |
 
 ### 3.26 `backend/src/optionalSharp.js`
 
@@ -947,12 +1028,13 @@ Code files scanned: **508**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeKey` | function | 127 |
-| 2 | `getPermissionDefinition` | function | 131 |
-| 3 | `isSensitivePermissionKey` | function | 136 |
-| 4 | `permissionForActionHistory` | function | 143 |
-| 5 | `isSensitiveActionHistory` | function | 151 |
-| 6 | `hasPermissionValue` | function | 166 |
+| 1 | `buildPermissionDefinitions` | function | 41 |
+| 2 | `normalizeKey` | function | 135 |
+| 3 | `getPermissionDefinition` | function | 139 |
+| 4 | `isSensitivePermissionKey` | function | 147 |
+| 5 | `permissionForActionHistory` | function | 154 |
+| 6 | `isSensitiveActionHistory` | function | 162 |
+| 7 | `hasPermissionValue` | function | 177 |
 
 ### 3.29 `backend/src/portalUtils.js`
 
@@ -962,8 +1044,8 @@ Code files scanned: **508**
 | 2 | `safeJsonParse` | function | 9 |
 | 3 | `createAboutBlock` | function | 17 |
 | 4 | `normalizeAboutBlocks` | function | 28 |
-| 5 | `extractGoogleMapsEmbedUrl` | function | 47 |
-| 6 | `normalizeGoogleMapsEmbed` | function | 55 |
+| 5 | `extractGoogleMapsEmbedUrl` | function | 51 |
+| 6 | `normalizeGoogleMapsEmbed` | function | 59 |
 
 ### 3.30 `backend/src/postgresDatabase.js`
 
@@ -971,17 +1053,18 @@ Code files scanned: **508**
 |---:|---|---|---:|
 | 1 | `loadPgNative` | function | 13 |
 | 2 | `normalizeQueryRows` | function | 30 |
-| 3 | `buildRunResult` | function | 35 |
-| 4 | `normalizeStatementArgs` | function | 44 |
-| 5 | `PostgresCompatStatement` | class | 53 |
-| 6 | `PostgresCompatDatabase` | class | 77 |
-| 7 | `createPostgresDatabase` | function | 460 |
-| 8 | `runDatabaseMaintenance` | function | 464 |
-| 9 | `ensureCoreDataInvariants` | function | 468 |
-| 10 | `ensureDefaultOrganizationAndGroup` | function | 472 |
-| 11 | `ensurePrimaryAdminRoleAndUser` | function | 476 |
-| 12 | `getDb` | function | 482 |
-| 13 | `closeDatabase` | function | 510 |
+| 3 | `buildRunResult` | function | 37 |
+| 4 | `normalizeStatementArgs` | function | 46 |
+| 5 | `splitSqlStatements` | function | 55 |
+| 6 | `PostgresCompatStatement` | class | 65 |
+| 7 | `PostgresCompatDatabase` | class | 89 |
+| 8 | `createPostgresDatabase` | function | 531 |
+| 9 | `runDatabaseMaintenance` | function | 535 |
+| 10 | `ensureCoreDataInvariants` | function | 539 |
+| 11 | `ensureDefaultOrganizationAndGroup` | function | 543 |
+| 12 | `ensurePrimaryAdminRoleAndUser` | function | 547 |
+| 13 | `getDb` | function | 553 |
+| 14 | `closeDatabase` | function | 581 |
 
 ### 3.31 `backend/src/productBatches.js`
 
@@ -992,30 +1075,35 @@ Code files scanned: **508**
 | 3 | `isSellableProduct` | function | 33 |
 | 4 | `buildBatchKey` | function | 37 |
 | 5 | `getProductById` | function | 46 |
-| 6 | `getProductBatchIds` | function | 52 |
-| 7 | `getBatchRowsForProduct` | function | 56 |
-| 8 | `getLegacyBatchBackfillCandidates` | function | 65 |
-| 9 | `createOrFindProductBatch` | function | 78 |
-| 10 | `setBranchBatchQuantity` | function | 135 |
-| 11 | `incrementBranchBatchQuantity` | function | 145 |
-| 12 | `getBatchStockRows` | function | 156 |
-| 13 | `listProductBatches` | function | 196 |
-| 14 | `syncProductBatchRollups` | function | 267 |
-| 15 | `migrateLegacyProductToBatches` | function | 306 |
-| 16 | `migrateAllLegacyProductsToBatches` | function | 350 |
-| 17 | `scheduleLegacyBatchBackfill` | function | 362 |
-| 18 | `runNextChunk` | const arrow | 368 |
-| 19 | `getLegacyBatchBackfillStatus` | function | 398 |
-| 20 | `getAvailableProductQuantity` | function | 407 |
-| 21 | `allocateProductBatches` | function | 412 |
-| 22 | `increaseProductBatchStock` | function | 452 |
-| 23 | `restoreBatchAllocations` | function | 469 |
-| 24 | `cloneAllocationsToProduct` | function | 484 |
-| 25 | `getSaleItemAllocations` | function | 508 |
-| 26 | `markSaleItemAllocationsReleased` | function | 520 |
-| 27 | `getAvailableSaleAllocationRows` | function | 528 |
-| 28 | `getReturnItemAllocations` | function | 551 |
-| 29 | `markReturnItemAllocationsReversed` | function | 563 |
+| 6 | `rowsToIds` | function | 52 |
+| 7 | `normalizePositiveIds` | function | 60 |
+| 8 | `buildPlaceholders` | function | 72 |
+| 9 | `sumQuantities` | function | 78 |
+| 10 | `hasTrackedBatch` | function | 86 |
+| 11 | `getProductBatchIds` | function | 93 |
+| 12 | `getBatchRowsForProduct` | function | 97 |
+| 13 | `getLegacyBatchBackfillCandidates` | function | 106 |
+| 14 | `createOrFindProductBatch` | function | 119 |
+| 15 | `setBranchBatchQuantity` | function | 176 |
+| 16 | `incrementBranchBatchQuantity` | function | 186 |
+| 17 | `getBatchStockRows` | function | 197 |
+| 18 | `listProductBatches` | function | 237 |
+| 19 | `syncProductBatchRollups` | function | 308 |
+| 20 | `migrateLegacyProductToBatches` | function | 353 |
+| 21 | `migrateAllLegacyProductsToBatches` | function | 397 |
+| 22 | `scheduleLegacyBatchBackfill` | function | 409 |
+| 23 | `runNextChunk` | const arrow | 415 |
+| 24 | `getLegacyBatchBackfillStatus` | function | 445 |
+| 25 | `getAvailableProductQuantity` | function | 454 |
+| 26 | `allocateProductBatches` | function | 459 |
+| 27 | `increaseProductBatchStock` | function | 499 |
+| 28 | `restoreBatchAllocations` | function | 516 |
+| 29 | `cloneAllocationsToProduct` | function | 531 |
+| 30 | `getSaleItemAllocations` | function | 555 |
+| 31 | `markSaleItemAllocationsReleased` | function | 567 |
+| 32 | `getAvailableSaleAllocationRows` | function | 575 |
+| 33 | `getReturnItemAllocations` | function | 598 |
+| 34 | `markReturnItemAllocationsReversed` | function | 610 |
 
 ### 3.32 `backend/src/productDiscounts.js`
 
@@ -1040,9 +1128,11 @@ Code files scanned: **508**
 | 3 | `hasImportValue` | function | 22 |
 | 4 | `normalizeFieldRule` | function | 27 |
 | 5 | `splitUniqueImportValues` | function | 34 |
-| 6 | `appendUniqueImportValue` | function | 50 |
-| 7 | `resolveImportValue` | function | 67 |
-| 8 | `normalizeImageConflictMode` | function | 81 |
+| 6 | `collectImportListValues` | function | 47 |
+| 7 | `buildLowercaseSet` | function | 56 |
+| 8 | `appendUniqueImportValue` | function | 64 |
+| 9 | `resolveImportValue` | function | 81 |
+| 10 | `normalizeImageConflictMode` | function | 95 |
 
 ### 3.34 `backend/src/requestContext.js`
 
@@ -1068,14 +1158,16 @@ Code files scanned: **508**
 | 8 | `canRecordHistory` | function | 67 |
 | 9 | `getHistoryRow` | function | 87 |
 | 10 | `mapRow` | function | 94 |
-| 11 | `completeServerHistoryTransition` | function | 206 |
+| 11 | `mapHistoryRows` | function | 103 |
+| 12 | `completeServerHistoryTransition` | function | 214 |
 
 ### 3.36 `backend/src/routes/ai.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `listProviders` | function | 19 |
-| 2 | `getProviderRow` | function | 28 |
+| 2 | `getProviderRow` | function | 32 |
+| 3 | `serializeResponseRows` | function | 244 |
 
 ### 3.37 `backend/src/routes/auth.js`
 
@@ -1091,41 +1183,51 @@ Code files scanned: **508**
 | 8 | `isLocalOrigin` | function | 140 |
 | 9 | `resolvePublicAssetBaseUrl` | function | 149 |
 | 10 | `resolvePasswordResetRedirect` | function | 155 |
-| 11 | `loginIdentifierPreview` | function | 171 |
-| 12 | `rejectLogin` | function | 185 |
-| 13 | `getOtpSecret` | function | 207 |
-| 14 | `requireOtpActor` | function | 211 |
-| 15 | `getOtpTargetUser` | function | 217 |
-| 16 | `buildUserPayload` | function | 232 |
-| 17 | `resolveOrganizationLookup` | function | 264 |
-| 18 | `findUserByIdentifier` | function | 270 |
-| 19 | `getExactActiveUserById` | function | 339 |
-| 20 | `normalizeOauthMode` | function | 354 |
-| 21 | `isEmailIdentifier` | function | 359 |
-| 22 | `getUserById` | function | 363 |
-| 23 | `getSettingsSnapshot` | function | 367 |
-| 24 | `getBootstrapSystemSnapshot` | function | 376 |
-| 25 | `buildAuthenticatedBootstrap` | function | 408 |
-| 26 | `generateTemporaryAuthPassword` | function | 437 |
-| 27 | `issueAuthSession` | function | 441 |
-| 28 | `updateLocalUserGoogleIdentity` | function | 452 |
-| 29 | `completeGoogleLogin` | function | 601 |
-| 30 | `buildOauthCallbackHtml` | function | 687 |
+| 11 | `findFirstHttpUrl` | function | 168 |
+| 12 | `loginIdentifierPreview` | function | 178 |
+| 13 | `rejectLogin` | function | 192 |
+| 14 | `getOtpSecret` | function | 214 |
+| 15 | `requireOtpActor` | function | 218 |
+| 16 | `getOtpTargetUser` | function | 224 |
+| 17 | `buildUserPayload` | function | 239 |
+| 18 | `resolveOrganizationLookup` | function | 271 |
+| 19 | `findUserByIdentifier` | function | 277 |
+| 20 | `getExactActiveUserById` | function | 346 |
+| 21 | `normalizeOauthMode` | function | 361 |
+| 22 | `isEmailIdentifier` | function | 366 |
+| 23 | `getUserById` | function | 370 |
+| 24 | `getSettingsSnapshot` | function | 374 |
+| 25 | `getBootstrapSystemSnapshot` | function | 383 |
+| 26 | `buildAuthenticatedBootstrap` | function | 415 |
+| 27 | `generateTemporaryAuthPassword` | function | 444 |
+| 28 | `issueAuthSession` | function | 448 |
+| 29 | `updateLocalUserGoogleIdentity` | function | 459 |
+| 30 | `completeGoogleLogin` | function | 608 |
+| 31 | `buildOauthCallbackHtml` | function | 694 |
 
 ### 3.38 `backend/src/routes/branches.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toDbBool` | function | 11 |
-| 2 | `getStockTransferNoteColumn` | function | 19 |
-| 3 | `normalizePositiveInt` | function | 34 |
-| 4 | `getDefaultBranch` | function | 40 |
-| 5 | `getSellableProductWhere` | function | 44 |
-| 6 | `buildBranchStockWhere` | function | 50 |
+| 1 | `toDbBool` | function | 13 |
+| 2 | `getStockTransferNoteColumn` | function | 21 |
+| 3 | `normalizePositiveInt` | function | 25 |
+| 4 | `getDefaultBranch` | function | 31 |
+| 5 | `getSellableProductWhere` | function | 35 |
+| 6 | `buildStockIntegrityPreview` | function | 41 |
+| 7 | `buildSqlPlaceholders` | function | 53 |
+| 8 | `quoteSqlColumns` | function | 61 |
+| 9 | `buildBranchStockWhere` | function | 69 |
+| 10 | `hasPagedStockQuery` | function | 93 |
 
 ### 3.39 `backend/src/routes/catalog.js`
 
-- No top-level named symbols detected.
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `collectProductIds` | function | 10 |
+| 2 | `buildPlaceholders` | function | 18 |
+| 3 | `buildImageMap` | function | 26 |
+| 4 | `buildCatalogProductPayloads` | function | 35 |
 
 ### 3.40 `backend/src/routes/categories.js`
 
@@ -1148,32 +1250,44 @@ Code files scanned: **508**
 | 8 | `normalizeFieldRule` | function | 75 |
 | 9 | `resolveFieldValue` | function | 82 |
 | 10 | `buildImportRows` | function | 93 |
-| 11 | `normalizeConflictMode` | function | 103 |
-| 12 | `toNumber` | function | 108 |
-| 13 | `normalizePositiveInt` | function | 113 |
-| 14 | `parseDateFilterParams` | function | 119 |
-| 15 | `buildContactListFilters` | function | 143 |
-| 16 | `parseScopedIds` | function | 169 |
-| 17 | `loadPointPolicy` | function | 177 |
-| 18 | `calculatePolicyPoints` | function | 203 |
-| 19 | `wantsExpandedPoints` | function | 208 |
-| 20 | `buildCustomerPointSummaries` | function | 213 |
-| 21 | `findExisting` | const arrow | 489 |
-| 22 | `findExisting` | const arrow | 704 |
-| 23 | `findExisting` | const arrow | 898 |
+| 11 | `buildProvidedImportRows` | function | 103 |
+| 12 | `normalizeConflictMode` | function | 112 |
+| 13 | `toNumber` | function | 117 |
+| 14 | `normalizePositiveInt` | function | 122 |
+| 15 | `parseDateFilterParams` | function | 128 |
+| 16 | `buildContactListFilters` | function | 152 |
+| 17 | `buildSearchHaystack` | function | 176 |
+| 18 | `parseScopedIds` | function | 185 |
+| 19 | `addPositiveId` | function | 201 |
+| 20 | `collectPositiveIds` | function | 208 |
+| 21 | `buildSqlPlaceholders` | function | 217 |
+| 22 | `loadPointPolicy` | function | 225 |
+| 23 | `calculatePolicyPoints` | function | 253 |
+| 24 | `wantsExpandedPoints` | function | 258 |
+| 25 | `buildCustomerPointSummaries` | function | 263 |
+| 26 | `buildCustomerRowMap` | function | 336 |
+| 27 | `collectPointSummarySourceIds` | function | 345 |
+| 28 | `defaultPointSummary` | function | 356 |
+| 29 | `buildPointSummaryList` | function | 367 |
+| 30 | `attachPointSummaries` | function | 375 |
+| 31 | `collectCustomerIdsFromRows` | function | 387 |
+| 32 | `findExisting` | const arrow | 560 |
+| 33 | `findExisting` | const arrow | 775 |
+| 34 | `findExisting` | const arrow | 969 |
 
 ### 3.42 `backend/src/routes/customTables.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `humanizeTableName` | function | 11 |
-| 2 | `serializeCustomTable` | function | 20 |
-| 3 | `sanitizeCustomTableName` | function | 28 |
-| 4 | `resolveCustomTableRow` | function | 34 |
-| 5 | `escapeIdentifier` | function | 43 |
-| 6 | `normalizeCustomTableSchema` | function | 47 |
-| 7 | `tableHasColumn` | function | 68 |
-| 8 | `ensureCustomTableRowVersioning` | function | 79 |
+| 1 | `humanizeTableName` | function | 13 |
+| 2 | `serializeCustomTable` | function | 21 |
+| 3 | `sanitizeCustomTableName` | function | 29 |
+| 4 | `resolveCustomTableRow` | function | 35 |
+| 5 | `escapeIdentifier` | function | 44 |
+| 6 | `normalizeCustomTableSchema` | function | 48 |
+| 7 | `tableHasColumn` | function | 71 |
+| 8 | `ensureCustomTableRowVersioning` | function | 75 |
+| 9 | `getWritableCustomTableKeys` | function | 92 |
 
 ### 3.43 `backend/src/routes/files.js`
 
@@ -1190,58 +1304,88 @@ Code files scanned: **508**
 | 1 | `permissionForImportType` | function | 34 |
 | 2 | `requireImportPermission` | function | 42 |
 | 3 | `hasAnyImportPermission` | function | 55 |
-| 4 | `requireAnyImportPermission` | function | 59 |
-| 5 | `ensureDir` | function | 69 |
-| 6 | `getJobUploadRoot` | function | 73 |
-| 7 | `getJobOr404` | function | 78 |
-| 8 | `isAllowedImportFile` | function | 107 |
-| 9 | `parsePolicy` | function | 131 |
-| 10 | `parseRelativePaths` | function | 137 |
-| 11 | `shouldForceDelete` | function | 148 |
-| 12 | `auditImportJobEvent` | function | 153 |
+| 4 | `getPermittedImportTypes` | function | 63 |
+| 5 | `requireAnyImportPermission` | function | 71 |
+| 6 | `ensureDir` | function | 81 |
+| 7 | `getJobUploadRoot` | function | 85 |
+| 8 | `getJobOr404` | function | 90 |
+| 9 | `serializeJobFile` | function | 99 |
+| 10 | `serializeJobFiles` | function | 111 |
+| 11 | `saveImageJobFiles` | function | 120 |
+| 12 | `isAllowedImportFile` | function | 149 |
+| 13 | `parsePolicy` | function | 173 |
+| 14 | `parseRelativePaths` | function | 179 |
+| 15 | `shouldForceDelete` | function | 190 |
+| 16 | `auditImportJobEvent` | function | 195 |
 
 ### 3.45 `backend/src/routes/inventory.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeImportedTimestamp` | function | 27 |
-| 2 | `recalcProductStock` | function | 35 |
-| 3 | `findTransferByClientRequestId` | function | 39 |
-| 4 | `cleanMoveReason` | function | 53 |
-| 5 | `normalizePositiveInt` | function | 59 |
-| 6 | `cleanInventoryReasonEntry` | function | 65 |
-| 7 | `loadSavedInventoryReasons` | function | 79 |
-| 8 | `persistSavedInventoryReasons` | function | 93 |
-| 9 | `splitSearchTerms` | function | 111 |
-| 10 | `normalizeMovementDisplayText` | function | 123 |
-| 11 | `sanitizeInventoryResponseProduct` | function | 134 |
-| 12 | `appendInventoryProductFilters` | function | 147 |
-| 13 | `hydrateInventoryProducts` | function | 200 |
-| 14 | `buildInventoryFinancialJoinSql` | function | 220 |
-| 15 | `inventoryFinancialSelectSql` | function | 326 |
-| 16 | `getFilteredInventoryStats` | function | 340 |
-| 17 | `normalizeRfidId` | function | 1149 |
-| 18 | `getRfidSession` | function | 1153 |
-| 19 | `getBranchLedgerQty` | function | 1157 |
-| 20 | `refreshRfidSessionCounts` | function | 1161 |
-| 21 | `upsertRfidSessionItem` | function | 1196 |
-| 22 | `recordRfidEvent` | function | 1221 |
+| 1 | `normalizeImportedTimestamp` | function | 28 |
+| 2 | `recalcProductStock` | function | 36 |
+| 3 | `findTransferByClientRequestId` | function | 40 |
+| 4 | `getStockTransferNoteColumn` | function | 54 |
+| 5 | `buildActiveBranchIndex` | function | 58 |
+| 6 | `collectSetValues` | function | 73 |
+| 7 | `compareInventoryProductRows` | function | 81 |
+| 8 | `insertInventoryProductRowSorted` | function | 89 |
+| 9 | `collectSortedInventoryProductRows` | function | 97 |
+| 10 | `cleanMoveReason` | function | 105 |
+| 11 | `normalizePositiveInt` | function | 111 |
+| 12 | `hasInventoryStatsFilter` | function | 117 |
+| 13 | `cleanInventoryReasonEntry` | function | 125 |
+| 14 | `normalizeInventoryReasonList` | function | 139 |
+| 15 | `loadSavedInventoryReasons` | function | 161 |
+| 16 | `persistSavedInventoryReasons` | function | 172 |
+| 17 | `splitSearchTerms` | function | 182 |
+| 18 | `normalizeMovementDisplayText` | function | 198 |
+| 19 | `sanitizeInventoryResponseProduct` | function | 209 |
+| 20 | `appendInventoryProductFilters` | function | 222 |
+| 21 | `hydrateInventoryProducts` | function | 278 |
+| 22 | `appendAllocationMovementEntries` | function | 301 |
+| 23 | `buildInsertColumnSql` | function | 316 |
+| 24 | `buildInventoryFinancialJoinSql` | function | 329 |
+| 25 | `inventoryFinancialSelectSql` | function | 435 |
+| 26 | `getFilteredInventoryStats` | function | 449 |
+| 27 | `normalizeRfidId` | function | 1231 |
+| 28 | `getRfidSession` | function | 1235 |
+| 29 | `getBranchLedgerQty` | function | 1239 |
+| 30 | `refreshRfidSessionCounts` | function | 1243 |
+| 31 | `upsertRfidSessionItem` | function | 1278 |
+| 32 | `recordRfidEvent` | function | 1303 |
 
 ### 3.46 `backend/src/routes/notifications.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeBoolean` | function | 23 |
-| 2 | `toNumber` | function | 31 |
-| 3 | `loadNotificationPreferences` | function | 36 |
-| 4 | `loadPointPolicy` | function | 62 |
-| 5 | `calculatePolicyPoints` | function | 88 |
-| 6 | `buildInventorySection` | function | 93 |
-| 7 | `buildExpirySection` | function | 137 |
-| 8 | `buildSalesSection` | function | 171 |
-| 9 | `buildLoyaltySection` | function | 238 |
-| 10 | `buildPortalSection` | function | 325 |
-| 11 | `buildSystemSection` | function | 362 |
+| 1 | `normalizeBoolean` | function | 26 |
+| 2 | `toNumber` | function | 34 |
+| 3 | `pruneNotificationSummaryCache` | function | 39 |
+| 4 | `getNotificationSummaryCacheKey` | function | 47 |
+| 5 | `cloneNotificationSummaryPayload` | function | 60 |
+| 6 | `getCachedNotificationSummary` | function | 64 |
+| 7 | `setCachedNotificationSummary` | function | 73 |
+| 8 | `buildPlaceholders` | function | 80 |
+| 9 | `rowsToSettingMap` | function | 88 |
+| 10 | `joinNotificationSummary` | function | 96 |
+| 11 | `loadNotificationPreferences` | function | 104 |
+| 12 | `loadPointPolicy` | function | 127 |
+| 13 | `calculatePolicyPoints` | function | 152 |
+| 14 | `buildInventoryItems` | function | 157 |
+| 15 | `buildInventorySection` | function | 186 |
+| 16 | `buildExpiryItems` | function | 209 |
+| 17 | `buildExpirySection` | function | 229 |
+| 18 | `buildSalesItems` | function | 251 |
+| 19 | `buildSalesSection` | function | 280 |
+| 20 | `rowsByCustomerId` | function | 326 |
+| 21 | `buildLoyaltyMatches` | function | 334 |
+| 22 | `buildLoyaltyItems` | function | 357 |
+| 23 | `buildLoyaltySection` | function | 376 |
+| 24 | `buildPortalItems` | function | 435 |
+| 25 | `buildPortalSection` | function | 452 |
+| 26 | `buildSystemSection` | function | 480 |
+| 27 | `sumSectionCounts` | function | 510 |
 
 ### 3.47 `backend/src/routes/organizations.js`
 
@@ -1261,92 +1405,125 @@ Code files scanned: **508**
 | 8 | `normalizeRedeemValueKhr` | function | 80 |
 | 9 | `normalizeHexColor` | function | 87 |
 | 10 | `normalizeFaqItems` | function | 93 |
-| 11 | `normalizePortalTranslations` | function | 107 |
-| 12 | `normalizeProductIdList` | function | 121 |
-| 13 | `loadSettingsMap` | function | 136 |
-| 14 | `buildPortalConfig` | function | 144 |
-| 15 | `buildRankMap` | function | 270 |
-| 16 | `getPortalProductSignals` | function | 289 |
-| 17 | `calculatePointsValue` | function | 387 |
-| 18 | `summarizePoints` | function | 397 |
-| 19 | `getPortalProducts` | function | 437 |
-| 20 | `cacheTtl` | function | 527 |
-| 21 | `normalizePositiveInt` | function | 531 |
-| 22 | `splitSearchTerms` | function | 537 |
-| 23 | `splitFilterValues` | function | 546 |
-| 24 | `appendPortalProductSearchFilters` | function | 555 |
-| 25 | `getPortalCatalogSearchMetadata` | function | 623 |
-| 26 | `distinctField` | const arrow | 628 |
-| 27 | `getPortalCatalogProductPage` | function | 652 |
-| 28 | `getCachedPortalConfig` | function | 766 |
-| 29 | `getCachedPortalMeta` | function | 770 |
-| 30 | `getCachedPortalProducts` | function | 774 |
-| 31 | `getPortalCatalogMeta` | function | 779 |
-| 32 | `findCustomerByMembership` | function | 825 |
-| 33 | `sanitizeScreenshots` | function | 835 |
-| 34 | `materializePortalScreenshots` | function | 844 |
-| 35 | `sanitizeAiProfile` | function | 862 |
-| 36 | `getVisitorFingerprint` | function | 874 |
-| 37 | `getClientKey` | function | 880 |
-| 38 | `applyPortalRateLimit` | function | 885 |
+| 11 | `normalizePortalTranslations` | function | 111 |
+| 12 | `normalizeProductIdList` | function | 125 |
+| 13 | `loadSettingsMap` | function | 140 |
+| 14 | `buildPortalConfig` | function | 150 |
+| 15 | `buildRankMap` | function | 276 |
+| 16 | `buildEmptyPortalMetric` | function | 297 |
+| 17 | `collectPortalSignalRows` | function | 309 |
+| 18 | `buildIdRankMap` | function | 322 |
+| 19 | `buildRecommendedRankMap` | function | 331 |
+| 20 | `getPortalProductSignals` | function | 339 |
+| 21 | `buildPlaceholders` | function | 415 |
+| 22 | `collectProductIds` | function | 421 |
+| 23 | `getPortalProductAssets` | function | 427 |
+| 24 | `buildPortalProductPayload` | function | 467 |
+| 25 | `buildPortalProductPayloads` | function | 484 |
+| 26 | `calculatePointsValue` | function | 493 |
+| 27 | `summarizePoints` | function | 503 |
+| 28 | `joinWrappedClauses` | function | 543 |
+| 29 | `normalizePortalSubmissionRows` | function | 550 |
+| 30 | `summarizeMembershipTotals` | function | 562 |
+| 31 | `getPortalProducts` | function | 593 |
+| 32 | `cacheTtl` | function | 632 |
+| 33 | `normalizePositiveInt` | function | 636 |
+| 34 | `splitSearchTerms` | function | 642 |
+| 35 | `splitFilterValues` | function | 653 |
+| 36 | `parsePositiveIds` | function | 664 |
+| 37 | `buildNamedPlaceholders` | function | 673 |
+| 38 | `appendSearchTermFilters` | function | 681 |
+| 39 | `appendNamedFilter` | function | 697 |
+| 40 | `normalizeLowerValues` | function | 713 |
+| 41 | `appendPortalProductSearchFilters` | function | 719 |
+| 42 | `collectRowValues` | function | 759 |
+| 43 | `normalizeStringList` | function | 765 |
+| 44 | `uniqueSortedStrings` | function | 776 |
+| 45 | `getPortalCatalogSearchMetadata` | function | 790 |
+| 46 | `distinctField` | const arrow | 795 |
+| 47 | `getPortalCatalogProductPage` | function | 819 |
+| 48 | `getCachedPortalConfig` | function | 882 |
+| 49 | `getCachedPortalMeta` | function | 886 |
+| 50 | `getCachedPortalProducts` | function | 890 |
+| 51 | `getPortalCatalogMeta` | function | 895 |
+| 52 | `findCustomerByMembership` | function | 935 |
+| 53 | `sanitizeScreenshots` | function | 945 |
+| 54 | `materializePortalScreenshots` | function | 958 |
+| 55 | `sanitizeAiProfile` | function | 976 |
+| 56 | `hasAiProfilePreference` | function | 987 |
+| 57 | `getVisitorFingerprint` | function | 995 |
+| 58 | `getClientKey` | function | 1001 |
+| 59 | `applyPortalRateLimit` | function | 1006 |
+| 60 | `collectRecommendationCitations` | function | 1014 |
 
 ### 3.49 `backend/src/routes/products.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getActiveBranches` | function | 52 |
-| 2 | `getDefaultBranch` | function | 56 |
-| 3 | `seedBranchRows` | function | 60 |
-| 4 | `recalcProductStock` | function | 65 |
-| 5 | `normalizeImageGallery` | function | 69 |
-| 6 | `syncProductImageGallery` | function | 76 |
-| 7 | `loadProductImageMap` | function | 94 |
-| 8 | `attachImageGallery` | function | 112 |
-| 9 | `findProductByClientRequestId` | function | 124 |
-| 10 | `assertUniqueProductFields` | function | 134 |
-| 11 | `normalizeProductIdentifier` | function | 182 |
-| 12 | `hasOwnField` | function | 187 |
-| 13 | `pickField` | function | 191 |
-| 14 | `ensureParentProductExists` | function | 195 |
-| 15 | `markParentProductAsGroup` | function | 205 |
-| 16 | `normalizeImportLookup` | function | 210 |
-| 17 | `normalizeLookup` | function | 214 |
-| 18 | `normalizeImportFlagValue` | function | 218 |
-| 19 | `getProductImportDetailSignature` | function | 251 |
-| 20 | `chooseImportParentProduct` | function | 261 |
-| 21 | `normalizeImportAction` | function | 276 |
-| 22 | `parseOptionalImportId` | function | 284 |
-| 23 | `discountInsertColumns` | function | 291 |
-| 24 | `discountValues` | function | 295 |
-| 25 | `normalizeExpiryFields` | function | 310 |
-| 26 | `normalizeBatchFields` | function | 321 |
-| 27 | `seedOpeningBatch` | function | 328 |
-| 28 | `normalizePositiveInt` | function | 343 |
-| 29 | `parseInclude` | function | 349 |
-| 30 | `splitSearchTerms` | function | 353 |
-| 31 | `getProductCatalogSnapshotVersion` | function | 361 |
-| 32 | `parseBrandOptionsSetting` | function | 374 |
-| 33 | `sanitizeProductLookupPayload` | function | 380 |
-| 34 | `buildLookupUsageEntries` | function | 393 |
-| 35 | `buildLookupUsageSummary` | function | 455 |
-| 36 | `appendProductSearchFilters` | function | 482 |
-| 37 | `getProductSearchMetadata` | function | 557 |
-| 38 | `distinctField` | const arrow | 562 |
-| 39 | `attachBranchStock` | function | 586 |
-| 40 | `expandProductFamilyRows` | function | 613 |
-| 41 | `bindList` | const arrow | 632 |
-| 42 | `normalizeLookup` | const arrow | 1319 |
-| 43 | `resolveImage` | const arrow | 1434 |
-| 44 | `ensureCategory` | const arrow | 1450 |
-| 45 | `ensureUnit` | const arrow | 1465 |
-| 46 | `ensureBrand` | const arrow | 1480 |
-| 47 | `ensureSupplier` | const arrow | 1493 |
-| 48 | `determineBranch` | const arrow | 1505 |
-| 49 | `handleBranch` | const arrow | 1525 |
-| 50 | `isDirectImageRef` | const arrow | 1561 |
-| 51 | `normalizeDirectImageRef` | const arrow | 1572 |
-| 52 | `parseIncomingImageRefs` | const arrow | 1579 |
-| 53 | `loadCurrentGallery` | const arrow | 1612 |
+| 1 | `getActiveBranches` | function | 53 |
+| 2 | `settingsHasUpdatedAt` | function | 57 |
+| 3 | `getDefaultBranch` | function | 61 |
+| 4 | `getBranchById` | function | 70 |
+| 5 | `findBranchByName` | function | 77 |
+| 6 | `seedBranchRows` | function | 86 |
+| 7 | `recalcProductStock` | function | 93 |
+| 8 | `normalizeImageGallery` | function | 97 |
+| 9 | `syncProductImageGallery` | function | 104 |
+| 10 | `loadProductImageMap` | function | 123 |
+| 11 | `attachImageGallery` | function | 144 |
+| 12 | `findProductByClientRequestId` | function | 162 |
+| 13 | `assertUniqueProductFields` | function | 172 |
+| 14 | `normalizeProductIdentifier` | function | 220 |
+| 15 | `hasOwnField` | function | 225 |
+| 16 | `pickField` | function | 229 |
+| 17 | `ensureParentProductExists` | function | 233 |
+| 18 | `markParentProductAsGroup` | function | 243 |
+| 19 | `normalizeImportLookup` | function | 248 |
+| 20 | `normalizeLookup` | function | 252 |
+| 21 | `collectUniquePositiveIds` | function | 256 |
+| 22 | `collectNormalizedTokens` | function | 269 |
+| 23 | `collectBoundedValues` | function | 283 |
+| 24 | `collectSortedMapValues` | function | 292 |
+| 25 | `insertSortedValue` | function | 300 |
+| 26 | `normalizeImportFlagValue` | function | 308 |
+| 27 | `getProductImportDetailSignature` | function | 341 |
+| 28 | `chooseImportParentProduct` | function | 362 |
+| 29 | `compareImportParentProduct` | function | 370 |
+| 30 | `findImportProductWithSignature` | function | 383 |
+| 31 | `normalizeImportAction` | function | 391 |
+| 32 | `parseOptionalImportId` | function | 399 |
+| 33 | `discountInsertColumns` | function | 406 |
+| 34 | `discountValues` | function | 410 |
+| 35 | `normalizeExpiryFields` | function | 425 |
+| 36 | `normalizeBatchFields` | function | 436 |
+| 37 | `seedOpeningBatch` | function | 443 |
+| 38 | `normalizePositiveInt` | function | 458 |
+| 39 | `parseInclude` | function | 464 |
+| 40 | `splitSearchTerms` | function | 468 |
+| 41 | `getProductCatalogSnapshotVersion` | function | 472 |
+| 42 | `parseBrandOptionsSetting` | function | 485 |
+| 43 | `sanitizeProductLookupPayload` | function | 495 |
+| 44 | `buildLookupUsageEntries` | function | 508 |
+| 45 | `buildLookupUsageSummary` | function | 575 |
+| 46 | `appendProductSearchFilters` | function | 604 |
+| 47 | `getProductSearchMetadata` | function | 681 |
+| 48 | `distinctField` | const arrow | 686 |
+| 49 | `attachBranchStock` | function | 717 |
+| 50 | `expandProductFamilyRows` | function | 754 |
+| 51 | `bindList` | const arrow | 778 |
+| 52 | `normalizeLookup` | const arrow | 1510 |
+| 53 | `resolveImage` | const arrow | 1620 |
+| 54 | `ensureCategory` | const arrow | 1636 |
+| 55 | `ensureUnit` | const arrow | 1651 |
+| 56 | `ensureBrand` | const arrow | 1666 |
+| 57 | `ensureSupplier` | const arrow | 1679 |
+| 58 | `determineBranch` | const arrow | 1691 |
+| 59 | `handleBranch` | const arrow | 1710 |
+| 60 | `resetBatchStock` | const arrow | 1713 |
+| 61 | `isDirectImageRef` | const arrow | 1750 |
+| 62 | `normalizeDirectImageRef` | const arrow | 1761 |
+| 63 | `parseIncomingImageRefs` | const arrow | 1768 |
+| 64 | `loadCurrentGallery` | const arrow | 1804 |
 
 ### 3.50 `backend/src/routes/returns.js`
 
@@ -1361,13 +1538,18 @@ Code files scanned: **508**
 | 7 | `toNumber` | function | 76 |
 | 8 | `findReturnByClientRequestId` | function | 81 |
 | 9 | `assertReturnableItems` | function | 91 |
-| 10 | `assertSupplierReturnableStock` | function | 515 |
+| 10 | `assertSupplierReturnableStock` | function | 535 |
 
 ### 3.51 `backend/src/routes/runtime.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `requireRuntimePermission` | function | 19 |
+| 1 | `createProductFieldCounts` | function | 18 |
+| 2 | `collectSuspiciousProductFields` | function | 26 |
+| 3 | `summarizeSuspiciousProducts` | function | 36 |
+| 4 | `parseJsonArray` | function | 62 |
+| 5 | `summarizeSuspiciousTextValues` | function | 71 |
+| 6 | `requireRuntimePermission` | function | 91 |
 
 ### 3.52 `backend/src/routes/sales.js`
 
@@ -1383,78 +1565,99 @@ Code files scanned: **508**
 | 8 | `normalizeImportedTimestamp` | function | 81 |
 | 9 | `getSaleItemCosts` | function | 89 |
 | 10 | `assertSaleStockAvailable` | function | 115 |
-| 11 | `findCustomerForSaleAssignment` | function | 142 |
-| 12 | `parseBranchId` | function | 163 |
-| 13 | `getActiveBranchContext` | function | 168 |
-| 14 | `requireActiveBranch` | function | 183 |
-| 15 | `resolveSaleItemBranchId` | function | 190 |
-| 16 | `normalizeSaleItems` | function | 201 |
-| 17 | `summarizeSaleBranch` | function | 231 |
-| 18 | `refreshProductStockQuantity` | function | 255 |
-| 19 | `refreshProductStockQuantities` | function | 259 |
-| 20 | `deductBranchStock` | function | 266 |
-| 21 | `restoreBranchStock` | function | 274 |
-| 22 | `fetchSaleItemsWithBranches` | function | 282 |
-| 23 | `findSaleByClientRequestId` | function | 291 |
+| 11 | `findSaleItemForProduct` | function | 142 |
+| 12 | `findCustomerForSaleAssignment` | function | 149 |
+| 13 | `parseBranchId` | function | 170 |
+| 14 | `getActiveBranchContext` | function | 175 |
+| 15 | `requireActiveBranch` | function | 197 |
+| 16 | `resolveSaleItemBranchId` | function | 204 |
+| 17 | `normalizeSaleItems` | function | 215 |
+| 18 | `summarizeSaleBranch` | function | 249 |
+| 19 | `refreshProductStockQuantity` | function | 281 |
+| 20 | `refreshProductStockQuantities` | function | 285 |
+| 21 | `deductBranchStock` | function | 292 |
+| 22 | `restoreBranchStock` | function | 300 |
+| 23 | `fetchSaleItemsWithBranches` | function | 308 |
+| 24 | `findSaleByClientRequestId` | function | 317 |
 
 ### 3.53 `backend/src/routes/settings.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeLookup` | function | 19 |
-| 2 | `normalizeBrandOptionsValue` | function | 23 |
-| 3 | `normalizeBrandColorMapValue` | function | 43 |
-| 4 | `settingsHasUpdatedAt` | function | 67 |
-| 5 | `getSettingsSnapshot` | function | 82 |
-| 6 | `getSettingsUpdatedAt` | function | 89 |
+| 1 | `normalizeLookup` | function | 21 |
+| 2 | `normalizeBrandOptionsValue` | function | 25 |
+| 3 | `hasSuspiciousCatalogValue` | function | 47 |
+| 4 | `normalizeBrandColorMapValue` | function | 54 |
+| 5 | `settingsHasUpdatedAt` | function | 83 |
+| 6 | `getSettingsSnapshot` | function | 87 |
+| 7 | `collectAttemptedSettings` | function | 94 |
+| 8 | `getSettingsUpdatedAt` | function | 106 |
 
 ### 3.54 `backend/src/routes/sync.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `stableStringify` | function | 47 |
-| 2 | `sha256` | function | 53 |
-| 3 | `verifyOperationDigest` | function | 57 |
-| 4 | `normalizeOperation` | function | 64 |
-| 5 | `hasWriteConflict` | function | 77 |
-| 6 | `buildReplayUrl` | function | 84 |
-| 7 | `replayOperation` | function | 88 |
-| 8 | `getUploadDir` | function | 182 |
-| 9 | `readManifest` | function | 186 |
+| 2 | `sha256` | function | 65 |
+| 3 | `verifyOperationDigest` | function | 69 |
+| 4 | `normalizeOperation` | function | 76 |
+| 5 | `normalizeOperations` | function | 89 |
+| 6 | `hasWriteConflict` | function | 98 |
+| 7 | `hasResultCode` | function | 105 |
+| 8 | `hasBlockingReplayResult` | function | 112 |
+| 9 | `buildReplayUrl` | function | 120 |
+| 10 | `replayOperation` | function | 124 |
+| 11 | `getUploadDir` | function | 218 |
+| 12 | `readManifest` | function | 222 |
 
 ### 3.55 `backend/src/routes/system/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `auditWithActorMeta` | function | 86 |
-| 2 | `q` | function | 104 |
-| 3 | `getClientKey` | function | 108 |
-| 4 | `applyRouteRateLimit` | function | 114 |
-| 5 | `stopImportsBeforeDestructiveAction` | function | 126 |
-| 6 | `runFsWorker` | function | 141 |
-| 7 | `finish` | const arrow | 153 |
-| 8 | `getHostUiAvailability` | function | 197 |
-| 9 | `buildRequestBaseUrl` | function | 206 |
-| 10 | `resolveDriveRedirectUri` | function | 213 |
-| 11 | `getSafeTableCount` | function | 220 |
-| 12 | `buildMigrationTableCounts` | function | 228 |
-| 13 | `safeJsonParse` | function | 248 |
-| 14 | `readSystemSettings` | function | 257 |
-| 15 | `writeSystemSettings` | function | 268 |
-| 16 | `getMigrationSafetyBackupDestination` | function | 283 |
-| 17 | `getMigrationSafetyState` | function | 287 |
-| 18 | `createMigrationSafetyBackup` | function | 309 |
-| 19 | `runMigrationSafetyDriveSync` | function | 326 |
-| 20 | `runMigrationSafetyAutomation` | function | 364 |
-| 21 | `buildScaleMigrationStatus` | function | 379 |
-| 22 | `readFinalBackupManifest` | function | 448 |
-| 23 | `getCustomTableNames` | function | 452 |
-| 24 | `getDefaultBackupDestinationDir` | function | 458 |
-| 25 | `createFolderBackup` | function | 464 |
-| 26 | `restoreFolderBackup` | function | 501 |
-| 27 | `sendBackupVersions` | function | 871 |
-| 28 | `listWindowsFsRoots` | const arrow | 1371 |
-| 29 | `listDriveRoots` | const arrow | 1388 |
+| 1 | `auditWithActorMeta` | function | 87 |
+| 2 | `q` | function | 105 |
+| 3 | `buildSqlPlaceholders` | function | 109 |
+| 4 | `joinRemainingImportJobIds` | function | 117 |
+| 5 | `collectSystemSettingKeys` | function | 125 |
+| 6 | `buildSettingsMap` | function | 133 |
+| 7 | `buildSystemSettingEntries` | function | 141 |
+| 8 | `sumNumericValues` | function | 149 |
+| 9 | `getCustomTableNames` | function | 157 |
+| 10 | `broadcastMany` | function | 166 |
+| 11 | `dropCustomTables` | function | 172 |
+| 12 | `clearTables` | function | 179 |
+| 13 | `collectAppliedOperationIds` | function | 185 |
+| 14 | `collectSortedSetValues` | function | 193 |
+| 15 | `buildFolderEntries` | function | 202 |
+| 16 | `buildExistingFavoriteFolders` | function | 214 |
+| 17 | `listVisibleDirectories` | function | 226 |
+| 18 | `buildPickerScript` | function | 237 |
+| 19 | `getClientKey` | function | 252 |
+| 20 | `applyRouteRateLimit` | function | 258 |
+| 21 | `stopImportsBeforeDestructiveAction` | function | 270 |
+| 22 | `runFsWorker` | function | 285 |
+| 23 | `finish` | const arrow | 297 |
+| 24 | `getHostUiAvailability` | function | 341 |
+| 25 | `buildRequestBaseUrl` | function | 350 |
+| 26 | `resolveDriveRedirectUri` | function | 357 |
+| 27 | `getSafeTableCount` | function | 364 |
+| 28 | `buildMigrationTableCounts` | function | 372 |
+| 29 | `safeJsonParse` | function | 392 |
+| 30 | `readSystemSettings` | function | 401 |
+| 31 | `writeSystemSettings` | function | 409 |
+| 32 | `getMigrationSafetyBackupDestination` | function | 425 |
+| 33 | `getMigrationSafetyState` | function | 429 |
+| 34 | `createMigrationSafetyBackup` | function | 451 |
+| 35 | `runMigrationSafetyDriveSync` | function | 468 |
+| 36 | `runMigrationSafetyAutomation` | function | 506 |
+| 37 | `buildScaleMigrationStatus` | function | 521 |
+| 38 | `readFinalBackupManifest` | function | 590 |
+| 39 | `getDefaultBackupDestinationDir` | function | 594 |
+| 40 | `createFolderBackup` | function | 600 |
+| 41 | `restoreFolderBackup` | function | 637 |
+| 42 | `sendBackupVersions` | function | 1007 |
+| 43 | `listWindowsFsRoots` | const arrow | 1510 |
+| 44 | `listDriveRoots` | const arrow | 1525 |
 
 ### 3.56 `backend/src/routes/units.js`
 
@@ -1486,11 +1689,14 @@ Code files scanned: **508**
 | 16 | `syncLocalEmailVerification` | function | 230 |
 | 17 | `repairGoogleIdentityForUser` | function | 261 |
 | 18 | `sanitizeUserRow` | function | 290 |
-| 19 | `isValidEmail` | function | 306 |
-| 20 | `getAuthIdentityList` | function | 311 |
-| 21 | `isUuid` | function | 317 |
-| 22 | `resolveAuthIdentityUuid` | function | 321 |
-| 23 | `buildAuthMethodsPayload` | function | 330 |
+| 19 | `sanitizeUserRows` | function | 306 |
+| 20 | `isValidEmail` | function | 314 |
+| 21 | `getAuthIdentityList` | function | 319 |
+| 22 | `isUuid` | function | 325 |
+| 23 | `resolveAuthIdentityUuid` | function | 329 |
+| 24 | `findFirstUuid` | function | 337 |
+| 25 | `findProviderIdentity` | function | 344 |
+| 26 | `buildAuthMethodsPayload` | function | 352 |
 
 ### 3.58 `backend/src/runtimeCache.js`
 
@@ -1503,10 +1709,11 @@ Code files scanned: **508**
 | 5 | `setJson` | function | 77 |
 | 6 | `getOrSetJson` | function | 90 |
 | 7 | `deleteByPrefix` | function | 98 |
-| 8 | `prefixesForChannel` | function | 117 |
-| 9 | `invalidateForChannel` | function | 138 |
-| 10 | `pingRuntimeCache` | function | 148 |
-| 11 | `getRuntimeCacheStatus` | function | 159 |
+| 8 | `deletePrefixesInOrder` | function | 117 |
+| 9 | `prefixesForChannel` | function | 125 |
+| 10 | `invalidateForChannel` | function | 146 |
+| 11 | `pingRuntimeCache` | function | 155 |
+| 12 | `getRuntimeCacheStatus` | function | 166 |
 
 ### 3.59 `backend/src/runtimeState/index.js`
 
@@ -1524,14 +1731,29 @@ Code files scanned: **508**
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `firstExistingDir` | function | 11 |
-| 2 | `readGitRevision` | function | 15 |
-| 3 | `collectFiles` | function | 30 |
-| 4 | `computeSourceHash` | function | 44 |
-| 5 | `emptyFrontendBuildInfo` | function | 69 |
-| 6 | `readFrontendBuildInfoFromRoot` | function | 77 |
-| 7 | `getRuntimeVersion` | function | 112 |
+| 2 | `collectExistingFiles` | function | 18 |
+| 3 | `readGitRevision` | function | 27 |
+| 4 | `collectFiles` | function | 42 |
+| 5 | `computeSourceHash` | function | 56 |
+| 6 | `emptyFrontendBuildInfo` | function | 80 |
+| 7 | `readFrontendBuildInfoFromRoot` | function | 88 |
+| 8 | `getRuntimeVersion` | function | 123 |
 
-### 3.61 `backend/src/security.js`
+### 3.61 `backend/src/schemaMetadata.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeName` | function | 8 |
+| 2 | `columnKey` | function | 12 |
+| 3 | `normalizeNames` | function | 16 |
+| 4 | `normalizeColumnRows` | function | 25 |
+| 5 | `candidateKey` | function | 34 |
+| 6 | `listColumns` | function | 38 |
+| 7 | `hasColumn` | function | 48 |
+| 8 | `firstExistingColumn` | function | 68 |
+| 9 | `markColumnPresent` | function | 95 |
+
+### 3.62 `backend/src/security.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1540,16 +1762,17 @@ Code files scanned: **508**
 | 3 | `encryptSecret` | function | 33 |
 | 4 | `decryptSecret` | function | 46 |
 | 5 | `pruneRateBucket` | function | 67 |
-| 6 | `checkRateLimit` | function | 79 |
-| 7 | `resetRateLimit` | function | 108 |
-| 8 | `safeCompare` | function | 115 |
-| 9 | `getAbuseBucket` | function | 126 |
-| 10 | `pruneAbuseBucket` | function | 136 |
-| 11 | `checkAbuseLock` | function | 148 |
-| 12 | `recordAbuseFailure` | function | 165 |
-| 13 | `clearAbuseFailure` | function | 189 |
+| 6 | `keepRecentTimestamps` | function | 79 |
+| 7 | `checkRateLimit` | function | 87 |
+| 8 | `resetRateLimit` | function | 116 |
+| 9 | `safeCompare` | function | 123 |
+| 10 | `getAbuseBucket` | function | 134 |
+| 11 | `pruneAbuseBucket` | function | 144 |
+| 12 | `checkAbuseLock` | function | 156 |
+| 13 | `recordAbuseFailure` | function | 173 |
+| 14 | `clearAbuseFailure` | function | 197 |
 
-### 3.62 `backend/src/serverUtils.js`
+### 3.63 `backend/src/serverUtils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1557,30 +1780,30 @@ Code files scanned: **508**
 | 2 | `parseOriginHost` | function | 24 |
 | 3 | `normalizeConfiguredHost` | function | 34 |
 | 4 | `getConfiguredPublicHosts` | function | 44 |
-| 5 | `getConfiguredCustomerPortalHosts` | function | 52 |
-| 6 | `isConfiguredCustomerPortalHost` | function | 59 |
-| 7 | `isAllowedRequestOrigin` | function | 69 |
-| 8 | `isAllowedWebSocketOrigin` | function | 78 |
-| 9 | `hostIsLoopbackPair` | function | 95 |
-| 10 | `getTrustedDocumentOrigins` | function | 100 |
-| 11 | `addOrigin` | const arrow | 102 |
-| 12 | `buildPermissionsPolicy` | function | 131 |
-| 13 | `getCloudflareAccessDiagnostics` | function | 158 |
-| 14 | `sanitizeObjectKeys` | function | 184 |
-| 15 | `sanitizeStringValue` | function | 203 |
-| 16 | `sanitizeRequestPayload` | function | 209 |
-| 17 | `sanitizeDeepStrings` | function | 216 |
-| 18 | `isApiOrHealthPath` | function | 233 |
-| 19 | `isSpaFallbackEligible` | function | 237 |
-| 20 | `setNoStoreHeaders` | function | 245 |
-| 21 | `setHtmlNoCacheHeaders` | function | 251 |
-| 22 | `isCustomerPortalRoutePath` | function | 258 |
-| 23 | `setTunnelSecurityHeaders` | function | 263 |
-| 24 | `setFrontendStaticHeaders` | function | 306 |
-| 25 | `setUploadStaticHeaders` | function | 356 |
-| 26 | `mapServerError` | function | 366 |
+| 5 | `getConfiguredCustomerPortalHosts` | function | 55 |
+| 6 | `isConfiguredCustomerPortalHost` | function | 67 |
+| 7 | `isAllowedRequestOrigin` | function | 77 |
+| 8 | `isAllowedWebSocketOrigin` | function | 86 |
+| 9 | `hostIsLoopbackPair` | function | 103 |
+| 10 | `getTrustedDocumentOrigins` | function | 108 |
+| 11 | `addOrigin` | const arrow | 110 |
+| 12 | `buildPermissionsPolicy` | function | 139 |
+| 13 | `getCloudflareAccessDiagnostics` | function | 166 |
+| 14 | `sanitizeObjectKeys` | function | 192 |
+| 15 | `sanitizeStringValue` | function | 215 |
+| 16 | `sanitizeRequestPayload` | function | 221 |
+| 17 | `sanitizeDeepStrings` | function | 228 |
+| 18 | `isApiOrHealthPath` | function | 245 |
+| 19 | `isSpaFallbackEligible` | function | 249 |
+| 20 | `setNoStoreHeaders` | function | 257 |
+| 21 | `setHtmlNoCacheHeaders` | function | 263 |
+| 22 | `isCustomerPortalRoutePath` | function | 270 |
+| 23 | `setTunnelSecurityHeaders` | function | 275 |
+| 24 | `setFrontendStaticHeaders` | function | 318 |
+| 25 | `setUploadStaticHeaders` | function | 368 |
+| 26 | `mapServerError` | function | 378 |
 
-### 3.63 `backend/src/services/aiGateway.js`
+### 3.64 `backend/src/services/aiGateway.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1589,75 +1812,84 @@ Code files scanned: **508**
 | 3 | `parseJsonSafe` | function | 14 |
 | 4 | `clamp` | function | 22 |
 | 5 | `maskApiKey` | function | 26 |
-| 6 | `getProviderMeta` | function | 96 |
-| 7 | `normalizeProviderPayload` | function | 100 |
-| 8 | `serializeProviderRow` | function | 132 |
-| 9 | `providerCanUseWebResearch` | function | 165 |
-| 10 | `resolveProviderEndpoint` | function | 170 |
-| 11 | `buildProviderHttpError` | function | 177 |
-| 12 | `host` | const arrow | 180 |
-| 13 | `callChatProvider` | function | 193 |
-| 14 | `testProviderConfig` | function | 285 |
+| 6 | `normalizeTextList` | function | 33 |
+| 7 | `getProviderMeta` | function | 106 |
+| 8 | `normalizeProviderPayload` | function | 110 |
+| 9 | `serializeProviderRow` | function | 137 |
+| 10 | `providerCanUseWebResearch` | function | 170 |
+| 11 | `resolveProviderEndpoint` | function | 175 |
+| 12 | `buildProviderHttpError` | function | 182 |
+| 13 | `host` | const arrow | 185 |
+| 14 | `buildGoogleMessageContents` | function | 198 |
+| 15 | `joinGoogleTextParts` | function | 209 |
+| 16 | `callChatProvider` | function | 218 |
+| 17 | `testProviderConfig` | function | 307 |
 
-### 3.64 `backend/src/services/backupPackages.js`
+### 3.65 `backend/src/services/backupPackages.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readCachedBackupVersions` | function | 29 |
-| 2 | `writeCachedBackupVersions` | function | 38 |
-| 3 | `clearBackupVersionCaches` | function | 46 |
-| 4 | `getDb` | function | 51 |
-| 5 | `q` | function | 55 |
-| 6 | `nowSafeId` | function | 59 |
-| 7 | `sha256` | function | 63 |
-| 8 | `createSha256` | function | 67 |
-| 9 | `sha256File` | function | 71 |
-| 10 | `readTableRows` | function | 81 |
-| 11 | `yieldToEventLoop` | function | 93 |
-| 12 | `throwIfAborted` | function | 97 |
-| 13 | `getManagedWritableState` | function | 105 |
-| 14 | `writeStream` | function | 136 |
-| 15 | `closeWriteStream` | function | 150 |
-| 16 | `handleFinish` | const arrow | 154 |
-| 17 | `handleError` | const arrow | 159 |
-| 18 | `cleanup` | const arrow | 163 |
-| 19 | `createProgressReporter` | function | 173 |
-| 20 | `getSafeTableCount` | function | 212 |
-| 21 | `streamBackupDataFile` | function | 220 |
-| 22 | `buildObjectManifest` | function | 278 |
-| 23 | `buildPackageMetadata` | function | 295 |
-| 24 | `writeTextFileWithChecksum` | function | 349 |
-| 25 | `writeJsonLinesFileWithChecksum` | function | 354 |
-| 26 | `uploadPackageFile` | function | 367 |
-| 27 | `writeAndUploadMetadataFiles` | function | 387 |
-| 28 | `retryOperation` | function | 413 |
-| 29 | `writeDestinationChunk` | function | 428 |
-| 30 | `endDestination` | function | 441 |
-| 31 | `handleFinish` | const arrow | 445 |
-| 32 | `handleError` | const arrow | 450 |
-| 33 | `cleanup` | const arrow | 454 |
-| 34 | `copyOnePackageObject` | function | 464 |
-| 35 | `abortCopy` | const arrow | 476 |
-| 36 | `copyPackageObjects` | function | 503 |
-| 37 | `worker` | function | 512 |
-| 38 | `createFinalBackupPackage` | function | 554 |
-| 39 | `validateLocalBackupPackage` | function | 669 |
-| 40 | `getLocalBackupRoot` | function | 693 |
-| 41 | `isDockerReleaseBackupRoot` | function | 698 |
-| 42 | `isLocalBackupDirectoryName` | function | 703 |
-| 43 | `listLocalBackupDirectories` | function | 709 |
-| 44 | `getDirectoryBytes` | function | 729 |
-| 45 | `planBackupPackageRetention` | function | 755 |
-| 46 | `pruneLocalBackupVersions` | function | 772 |
-| 47 | `groupRemoteBackupObjects` | function | 798 |
-| 48 | `pruneRemoteBackupVersions` | function | 820 |
-| 49 | `pruneBackupVersions` | function | 847 |
-| 50 | `readReusableLocalBackupPackage` | function | 864 |
-| 51 | `findReusableLocalBackupPackage` | function | 889 |
-| 52 | `listLocalBackupVersions` | function | 900 |
-| 53 | `listBackupVersions` | function | 930 |
+| 1 | `readCachedBackupVersions` | function | 30 |
+| 2 | `writeCachedBackupVersions` | function | 39 |
+| 3 | `clearBackupVersionCaches` | function | 53 |
+| 4 | `getDb` | function | 58 |
+| 5 | `q` | function | 62 |
+| 6 | `nowSafeId` | function | 66 |
+| 7 | `sha256` | function | 70 |
+| 8 | `createSha256` | function | 74 |
+| 9 | `sha256File` | function | 78 |
+| 10 | `readTableRows` | function | 88 |
+| 11 | `yieldToEventLoop` | function | 105 |
+| 12 | `throwIfAborted` | function | 109 |
+| 13 | `collectSetValues` | function | 117 |
+| 14 | `startWorkerPromises` | function | 125 |
+| 15 | `getManagedWritableState` | function | 133 |
+| 16 | `writeStream` | function | 164 |
+| 17 | `closeWriteStream` | function | 178 |
+| 18 | `handleFinish` | const arrow | 182 |
+| 19 | `handleError` | const arrow | 187 |
+| 20 | `cleanup` | const arrow | 191 |
+| 21 | `createProgressReporter` | function | 201 |
+| 22 | `getSafeTableCount` | function | 240 |
+| 23 | `streamBackupDataFile` | function | 248 |
+| 24 | `buildObjectManifest` | function | 308 |
+| 25 | `buildPackageMetadata` | function | 326 |
+| 26 | `writeTextFileWithChecksum` | function | 380 |
+| 27 | `writeJsonLinesFileWithChecksum` | function | 385 |
+| 28 | `uploadPackageFile` | function | 398 |
+| 29 | `writeAndUploadMetadataFiles` | function | 418 |
+| 30 | `retryOperation` | function | 444 |
+| 31 | `writeDestinationChunk` | function | 459 |
+| 32 | `endDestination` | function | 472 |
+| 33 | `handleFinish` | const arrow | 476 |
+| 34 | `handleError` | const arrow | 481 |
+| 35 | `cleanup` | const arrow | 485 |
+| 36 | `copyOnePackageObject` | function | 495 |
+| 37 | `abortCopy` | const arrow | 507 |
+| 38 | `copyPackageObjects` | function | 534 |
+| 39 | `worker` | function | 543 |
+| 40 | `createFinalBackupPackage` | function | 585 |
+| 41 | `validateLocalBackupPackage` | function | 700 |
+| 42 | `getLocalBackupRoot` | function | 724 |
+| 43 | `isDockerReleaseBackupRoot` | function | 729 |
+| 44 | `isLocalBackupDirectoryName` | function | 734 |
+| 45 | `listLocalBackupDirectories` | function | 740 |
+| 46 | `getDirectoryBytes` | function | 761 |
+| 47 | `planBackupPackageRetention` | function | 787 |
+| 48 | `pruneLocalBackupVersions` | function | 807 |
+| 49 | `groupRemoteBackupObjects` | function | 833 |
+| 50 | `packageIds` | function | 855 |
+| 51 | `summarizeRemovedRemotePackages` | function | 863 |
+| 52 | `collectRemoteDeleteKeys` | function | 878 |
+| 53 | `sortBackupVersionsByPackageId` | function | 888 |
+| 54 | `pruneRemoteBackupVersions` | function | 894 |
+| 55 | `pruneBackupVersions` | function | 918 |
+| 56 | `readReusableLocalBackupPackage` | function | 935 |
+| 57 | `findReusableLocalBackupPackage` | function | 960 |
+| 58 | `listLocalBackupVersions` | function | 971 |
+| 59 | `listBackupVersions` | function | 1003 |
 
-### 3.65 `backend/src/services/firebaseAuth.js`
+### 3.66 `backend/src/services/firebaseAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1684,7 +1916,7 @@ Code files scanned: **508**
 | 21 | `setAuthUserActive` | function | 342 |
 | 22 | `verifyPasswordWithFirebase` | function | 355 |
 
-### 3.66 `backend/src/services/googleDriveSync/index.js`
+### 3.67 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1693,70 +1925,78 @@ Code files scanned: **508**
 | 3 | `toBool` | function | 88 |
 | 4 | `clamp` | function | 96 |
 | 5 | `escapeDriveQueryValue` | function | 102 |
-| 6 | `readSettingsMap` | function | 106 |
-| 7 | `writeSettingsMap` | function | 116 |
-| 8 | `clearDriveSyncMappings` | function | 134 |
-| 9 | `resetDriveSyncRootState` | function | 138 |
-| 10 | `getDriveSyncConfig` | function | 148 |
-| 11 | `getDriveSyncEntriesMap` | function | 184 |
-| 12 | `upsertDriveSyncEntry` | function | 196 |
-| 13 | `deleteDriveSyncEntry` | function | 233 |
-| 14 | `deleteDriveSyncEntriesUnder` | function | 237 |
-| 15 | `inferMimeType` | function | 244 |
-| 16 | `hashFile` | function | 259 |
-| 17 | `hashFileMany` | function | 269 |
-| 18 | `yieldToEventLoop` | function | 289 |
-| 19 | `sleep` | function | 293 |
-| 20 | `buildAccessTokenKey` | function | 297 |
-| 21 | `clearCachedAccessToken` | function | 304 |
-| 22 | `describeFetchFailure` | function | 311 |
-| 23 | `fetchWithTimeout` | function | 325 |
-| 24 | `exchangeRefreshToken` | function | 352 |
-| 25 | `exchangeAuthorizationCode` | function | 394 |
-| 26 | `driveApiRequest` | function | 417 |
-| 27 | `driveApiUpload` | function | 434 |
-| 28 | `fetchDriveUserProfile` | function | 450 |
-| 29 | `findDriveItem` | function | 465 |
-| 30 | `findDriveItems` | function | 470 |
-| 31 | `listDriveChildren` | function | 485 |
-| 32 | `getDriveFileIfExists` | function | 494 |
-| 33 | `removeDuplicateDriveItems` | function | 506 |
-| 34 | `createDriveFolder` | function | 518 |
-| 35 | `ensureRootFolder` | function | 530 |
-| 36 | `ensureDriveVersionFolder` | function | 549 |
-| 37 | `writeSnapshotManifest` | function | 596 |
-| 38 | `buildManagedSnapshotRoot` | function | 630 |
-| 39 | `ensureSnapshotLayout` | function | 634 |
-| 40 | `shouldSkipSnapshotFile` | function | 640 |
-| 41 | `createDataRootSnapshot` | function | 647 |
-| 42 | `collectSnapshotItems` | function | 689 |
-| 43 | `ensureRemoteDirectories` | function | 739 |
-| 44 | `updateRuntimeUploadProgress` | function | 790 |
-| 45 | `clearRuntimeUploadProgress` | function | 797 |
-| 46 | `initiateDriveResumableSession` | function | 804 |
-| 47 | `queryResumableOffset` | function | 832 |
-| 48 | `isInvalidUploadRequest` | function | 860 |
-| 49 | `isDriveNotFoundError` | function | 864 |
-| 50 | `isDriveWriteAccessError` | function | 868 |
-| 51 | `canRecoverDriveItemWrite` | function | 876 |
-| 52 | `putResumableChunk` | function | 880 |
-| 53 | `uploadDriveFileResumable` | function | 915 |
-| 54 | `uploadDriveFile` | function | 989 |
-| 55 | `updateDriveFile` | function | 994 |
-| 56 | `removeDriveFile` | function | 999 |
-| 57 | `runDriveSync` | function | 1011 |
-| 58 | `runDriveSyncInternal` | function | 1022 |
-| 59 | `scheduleDriveSync` | function | 1267 |
-| 60 | `getDriveSyncStatus` | function | 1289 |
-| 61 | `beginGoogleDriveOAuth` | function | 1338 |
-| 62 | `prunePendingOauthStates` | function | 1362 |
-| 63 | `finalizeGoogleDriveOAuth` | function | 1369 |
-| 64 | `saveDriveSyncPreferences` | function | 1412 |
-| 65 | `disconnectDriveSync` | function | 1433 |
-| 66 | `forgetDriveSyncCredentials` | function | 1453 |
-| 67 | `schedulePeriodicDriveSync` | function | 1461 |
+| 6 | `buildPlaceholders` | function | 106 |
+| 7 | `readSettingsMap` | function | 114 |
+| 8 | `writeSettingsMap` | function | 125 |
+| 9 | `clearDriveSyncMappings` | function | 147 |
+| 10 | `resetDriveSyncRootState` | function | 151 |
+| 11 | `getDriveSyncConfig` | function | 161 |
+| 12 | `getDriveSyncEntriesMap` | function | 197 |
+| 13 | `hasCanonicalDriveLayout` | function | 210 |
+| 14 | `upsertDriveSyncEntry` | function | 218 |
+| 15 | `deleteDriveSyncEntry` | function | 255 |
+| 16 | `deleteDriveSyncEntriesUnder` | function | 259 |
+| 17 | `inferMimeType` | function | 266 |
+| 18 | `hashFile` | function | 281 |
+| 19 | `hashFileMany` | function | 291 |
+| 20 | `yieldToEventLoop` | function | 315 |
+| 21 | `sleep` | function | 319 |
+| 22 | `buildAccessTokenKey` | function | 323 |
+| 23 | `clearCachedAccessToken` | function | 330 |
+| 24 | `describeFetchFailure` | function | 337 |
+| 25 | `joinNonEmptyParts` | function | 351 |
+| 26 | `fetchWithTimeout` | function | 359 |
+| 27 | `exchangeRefreshToken` | function | 386 |
+| 28 | `exchangeAuthorizationCode` | function | 428 |
+| 29 | `driveApiRequest` | function | 451 |
+| 30 | `driveApiUpload` | function | 468 |
+| 31 | `fetchDriveUserProfile` | function | 484 |
+| 32 | `findDriveItem` | function | 499 |
+| 33 | `findDriveItems` | function | 504 |
+| 34 | `listDriveChildren` | function | 519 |
+| 35 | `getDriveFileIfExists` | function | 528 |
+| 36 | `removeDuplicateDriveItems` | function | 540 |
+| 37 | `buildSortedDirectoryList` | function | 552 |
+| 38 | `getNonFolderDriveItems` | function | 561 |
+| 39 | `getFirstNonFolderDriveItem` | function | 571 |
+| 40 | `buildLiveSyncPathSet` | function | 578 |
+| 41 | `selectStaleDriveMappings` | function | 589 |
+| 42 | `createDriveFolder` | function | 598 |
+| 43 | `ensureRootFolder` | function | 610 |
+| 44 | `ensureDriveVersionFolder` | function | 629 |
+| 45 | `writeSnapshotManifest` | function | 676 |
+| 46 | `buildManagedSnapshotRoot` | function | 710 |
+| 47 | `ensureSnapshotLayout` | function | 714 |
+| 48 | `shouldSkipSnapshotFile` | function | 720 |
+| 49 | `createDataRootSnapshot` | function | 727 |
+| 50 | `collectSnapshotItems` | function | 769 |
+| 51 | `ensureRemoteDirectories` | function | 819 |
+| 52 | `updateRuntimeUploadProgress` | function | 870 |
+| 53 | `clearRuntimeUploadProgress` | function | 877 |
+| 54 | `initiateDriveResumableSession` | function | 884 |
+| 55 | `queryResumableOffset` | function | 912 |
+| 56 | `isInvalidUploadRequest` | function | 940 |
+| 57 | `isDriveNotFoundError` | function | 944 |
+| 58 | `isDriveWriteAccessError` | function | 948 |
+| 59 | `canRecoverDriveItemWrite` | function | 956 |
+| 60 | `putResumableChunk` | function | 960 |
+| 61 | `uploadDriveFileResumable` | function | 995 |
+| 62 | `uploadDriveFile` | function | 1069 |
+| 63 | `updateDriveFile` | function | 1074 |
+| 64 | `removeDriveFile` | function | 1079 |
+| 65 | `runDriveSync` | function | 1091 |
+| 66 | `runDriveSyncInternal` | function | 1102 |
+| 67 | `scheduleDriveSync` | function | 1341 |
+| 68 | `getDriveSyncStatus` | function | 1363 |
+| 69 | `beginGoogleDriveOAuth` | function | 1412 |
+| 70 | `prunePendingOauthStates` | function | 1436 |
+| 71 | `finalizeGoogleDriveOAuth` | function | 1443 |
+| 72 | `saveDriveSyncPreferences` | function | 1486 |
+| 73 | `disconnectDriveSync` | function | 1507 |
+| 74 | `forgetDriveSyncCredentials` | function | 1527 |
+| 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.67 `backend/src/services/googleDriveSync/versioning.js`
+### 3.68 `backend/src/services/googleDriveSync/versioning.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1764,192 +2004,232 @@ Code files scanned: **508**
 | 2 | `toSafeVersionNumber` | function | 12 |
 | 3 | `resolveDriveSyncVersionState` | function | 17 |
 | 4 | `parseVersionName` | function | 56 |
-| 5 | `selectExpiredDriveSyncVersions` | function | 61 |
+| 5 | `buildDriveSyncVersionRows` | function | 61 |
+| 6 | `selectDateExpiredVersions` | function | 81 |
+| 7 | `selectExpiredDriveSyncVersions` | function | 92 |
 
-### 3.68 `backend/src/services/googleOauth.js`
+### 3.69 `backend/src/services/googleOauth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `trim` | function | 27 |
 | 2 | `unique` | function | 31 |
-| 3 | `getGoogleLoginOrigins` | function | 35 |
-| 4 | `getGoogleLoginRedirectUris` | function | 44 |
-| 5 | `getPrimaryRedirectUri` | function | 52 |
-| 6 | `getDefaultReturnPath` | function | 56 |
-| 7 | `normalizeReturnTarget` | function | 62 |
-| 8 | `base64url` | function | 99 |
-| 9 | `sha256Base64Url` | function | 104 |
-| 10 | `getStateSecret` | function | 108 |
-| 11 | `signState` | function | 112 |
-| 12 | `verifyState` | function | 118 |
-| 13 | `getGoogleLoginPublicConfig` | function | 134 |
-| 14 | `buildGoogleOauthStartUrl` | function | 147 |
-| 15 | `exchangeGoogleOauthCode` | function | 178 |
-| 16 | `getGoogleUserFromTokens` | function | 201 |
+| 3 | `appendCallbackPath` | function | 43 |
+| 4 | `getGoogleLoginOrigins` | function | 53 |
+| 5 | `getGoogleLoginRedirectUris` | function | 62 |
+| 6 | `getPrimaryRedirectUri` | function | 70 |
+| 7 | `getDefaultReturnPath` | function | 74 |
+| 8 | `normalizeReturnTarget` | function | 80 |
+| 9 | `base64url` | function | 117 |
+| 10 | `sha256Base64Url` | function | 122 |
+| 11 | `getStateSecret` | function | 126 |
+| 12 | `signState` | function | 130 |
+| 13 | `verifyState` | function | 136 |
+| 14 | `getGoogleLoginPublicConfig` | function | 152 |
+| 15 | `buildGoogleOauthStartUrl` | function | 165 |
+| 16 | `exchangeGoogleOauthCode` | function | 196 |
+| 17 | `getGoogleUserFromTokens` | function | 219 |
 
-### 3.69 `backend/src/services/importJobs.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `nowIso` | function | 62 |
-| 2 | `wait` | function | 66 |
-| 3 | `yieldImportWorker` | function | 70 |
-| 4 | `countCsvRowsFromFile` | function | 75 |
-| 5 | `safeJson` | function | 120 |
-| 6 | `stringify` | function | 125 |
-| 7 | `cleanAuditActorText` | function | 129 |
-| 8 | `normalizeAuditActor` | function | 135 |
-| 9 | `attachInternalPolicyMetadata` | function | 145 |
-| 10 | `stripInternalPolicyMetadata` | function | 156 |
-| 11 | `getPersistedAuditActor` | function | 162 |
-| 12 | `mergeAuditActors` | function | 167 |
-| 13 | `auditWithActor` | function | 177 |
-| 14 | `decorateImportJobRow` | function | 195 |
-| 15 | `isCancelRequested` | function | 205 |
-| 16 | `isImportJobStale` | function | 212 |
-| 17 | `isImportJobWorkDrained` | function | 218 |
-| 18 | `markStoredImportFilesCancelled` | function | 230 |
-| 19 | `reconcileImportJobRow` | function | 240 |
-| 20 | `ensureDir` | function | 261 |
-| 21 | `ensureImportRoot` | function | 265 |
-| 22 | `getJobRoot` | function | 269 |
-| 23 | `assertSafeImportPath` | function | 273 |
-| 24 | `deleteImportJobFiles` | function | 282 |
-| 25 | `clearImportRuntimeFiles` | function | 289 |
-| 26 | `createImportJob` | function | 300 |
-| 27 | `getImportJob` | function | 320 |
-| 28 | `listImportJobs` | function | 326 |
-| 29 | `updateJob` | function | 335 |
-| 30 | `addJobError` | function | 361 |
-| 31 | `getJobErrors` | function | 368 |
-| 32 | `normalizeReviewText` | function | 378 |
-| 33 | `normalizeReviewIdentifier` | function | 382 |
-| 34 | `getBarcodeReviewIssue` | function | 386 |
-| 35 | `isBlockingBarcodeIssue` | function | 403 |
-| 36 | `buildProductImportReviewState` | function | 407 |
-| 37 | `add` | const arrow | 411 |
-| 38 | `duplicateGroupCount` | const arrow | 424 |
-| 39 | `hasReviewQueryMatch` | function | 435 |
-| 40 | `normalizeReviewFilter` | function | 455 |
-| 41 | `matchesReviewFilter` | function | 463 |
-| 42 | `buildProductReviewIndex` | function | 471 |
-| 43 | `getProductConflictForReview` | function | 498 |
-| 44 | `getReviewRowNumber` | function | 586 |
-| 45 | `summarizeImportReviewRow` | function | 591 |
-| 46 | `addProductReviewGroup` | function | 611 |
-| 47 | `finalizeProductReviewGroups` | function | 655 |
-| 48 | `buildContactReviewIndex` | function | 689 |
-| 49 | `getContactConflictForReview` | function | 709 |
-| 50 | `getGenericImportConflictForReview` | function | 760 |
-| 51 | `applyImportDecisionToRow` | function | 773 |
-| 52 | `getImportDecisionMap` | function | 841 |
-| 53 | `getImportJobReview` | function | 850 |
-| 54 | `updateImportJobDecisions` | function | 960 |
-| 55 | `addJobFile` | function | 993 |
-| 56 | `getJobFiles` | function | 1012 |
-| 57 | `markJobCancelled` | function | 1017 |
-| 58 | `isCancelled` | function | 1021 |
-| 59 | `waitForQueuedImportMedia` | function | 1027 |
-| 60 | `finalizeSkippedImportImages` | function | 1054 |
-| 61 | `normalizeLookup` | function | 1071 |
-| 62 | `normalizeText` | function | 1075 |
-| 63 | `getMimeTypeFromName` | function | 1079 |
-| 64 | `normalizeProductSignature` | function | 1115 |
-| 65 | `chooseParentProduct` | function | 1123 |
-| 66 | `normalizeImportAction` | function | 1137 |
-| 67 | `parseOptionalImportId` | function | 1145 |
-| 68 | `parseIncomingImageRefs` | function | 1150 |
-| 69 | `syncProductImageGallery` | function | 1184 |
-| 70 | `loadCurrentGallery` | function | 1207 |
-| 71 | `ensureParentProductExists` | function | 1214 |
-| 72 | `assertUniqueProductFields` | function | 1223 |
-| 73 | `findProductIdentifierConflict` | function | 1266 |
-| 74 | `normalizeIdentifierConflictMode` | function | 1296 |
-| 75 | `resolveNewProductIdentifiers` | function | 1304 |
-| 76 | `copyImageIntoAssets` | function | 1341 |
-| 77 | `resolveImageGallery` | function | 1380 |
-| 78 | `ensureSettingOptionMap` | function | 1436 |
-| 79 | `upsertSettingJson` | function | 1446 |
-| 80 | `normalizeRowForProduct` | function | 1453 |
-| 81 | `createProductContext` | function | 1501 |
-| 82 | `buildImportSignatureKey` | function | 1525 |
-| 83 | `ensureCategory` | function | 1531 |
-| 84 | `ensureUnit` | function | 1544 |
-| 85 | `ensureBrand` | function | 1556 |
-| 86 | `ensureSupplier` | function | 1569 |
-| 87 | `determineBranch` | function | 1581 |
-| 88 | `handleBranchStock` | function | 1596 |
-| 89 | `recalcProductStock` | function | 1625 |
-| 90 | `insertInventoryMovement` | function | 1629 |
-| 91 | `seedBranchRows` | function | 1657 |
-| 92 | `processProductRow` | function | 1664 |
-| 93 | `processProductRowBatches` | function | 1945 |
-| 94 | `flushProgress` | const arrow | 1957 |
-| 95 | `processProductRows` | function | 2062 |
-| 96 | `preflightImportJob` | function | 2072 |
-| 97 | `addFailure` | const arrow | 2086 |
-| 98 | `buildImageLookup` | function | 2179 |
-| 99 | `normalizeImageMatchKey` | function | 2194 |
-| 100 | `processImageOnlyFiles` | function | 2204 |
-| 101 | `normalizeContactMode` | function | 2266 |
-| 102 | `resolveContactValue` | function | 2271 |
-| 103 | `parseFieldRules` | function | 2279 |
-| 104 | `generateCustomerMembershipNumber` | function | 2285 |
-| 105 | `normalizeImportedMembershipNumber` | function | 2301 |
-| 106 | `processContactRowBatches` | function | 2307 |
-| 107 | `processContactRows` | function | 2476 |
-| 108 | `normalizeInventoryAction` | function | 2486 |
-| 109 | `processInventoryRowBatches` | function | 2493 |
-| 110 | `processInventoryRows` | function | 2595 |
-| 111 | `processSalesRowBatches` | function | 2604 |
-| 112 | `processSalesRows` | function | 2819 |
-| 113 | `extractZipImages` | function | 2828 |
-| 114 | `processImportJob` | function | 2898 |
-| 115 | `runLocalJob` | function | 3036 |
-| 116 | `normalizeQueueMode` | function | 3043 |
-| 117 | `queueNameForMode` | function | 3047 |
-| 118 | `configuredQueueDriver` | function | 3051 |
-| 119 | `getImportQueueConcurrency` | function | 3056 |
-| 120 | `hasBullProducer` | function | 3060 |
-| 121 | `hasBullWorkers` | function | 3064 |
-| 122 | `removeQueuedBullJobsForImport` | function | 3068 |
-| 123 | `getBullConnection` | function | 3091 |
-| 124 | `initializeBullQueue` | function | 3104 |
-| 125 | `startImportWorkers` | function | 3123 |
-| 126 | `startWorker` | const arrow | 3130 |
-| 127 | `enqueueImportJob` | function | 3166 |
-| 128 | `resetImportJobForRetry` | function | 3209 |
-| 129 | `cancelImportJob` | function | 3261 |
-| 130 | `listCancellableImportJobs` | function | 3294 |
-| 131 | `waitForImportJobsToStop` | function | 3303 |
-| 132 | `cancelAllImportJobs` | function | 3325 |
-| 133 | `deleteImportJob` | function | 3356 |
-| 134 | `deleteAllImportJobs` | function | 3386 |
-| 135 | `approveImportJob` | function | 3402 |
-| 136 | `recoverImportJobs` | function | 3426 |
-| 137 | `getQueueStatus` | function | 3448 |
-| 138 | `buildErrorsCsv` | function | 3465 |
-| 139 | `escape` | const arrow | 3467 |
-
-### 3.70 `backend/src/services/integrationDoctor.js`
+### 3.70 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `trim` | function | 39 |
-| 2 | `hasValue` | function | 43 |
-| 3 | `redactPresence` | function | 47 |
-| 4 | `status` | function | 54 |
-| 5 | `unique` | function | 62 |
-| 6 | `buildExpectedOauthChecklist` | function | 66 |
-| 7 | `probeDatabase` | function | 100 |
-| 8 | `getSafeTableCount` | function | 110 |
-| 9 | `readCurrentBusinessCounts` | function | 119 |
-| 10 | `findLatestVerifiedReleaseBackup` | function | 133 |
-| 11 | `probeQueue` | function | 157 |
-| 12 | `probeBackups` | function | 178 |
-| 13 | `buildIntegrationDoctor` | function | 195 |
+| 1 | `nowIso` | function | 65 |
+| 2 | `wait` | function | 69 |
+| 3 | `yieldImportWorker` | function | 73 |
+| 4 | `countCsvRowsFromFile` | function | 78 |
+| 5 | `safeJson` | function | 123 |
+| 6 | `normalizeImportJobListLimit` | function | 128 |
+| 7 | `clearImportJobListCache` | function | 132 |
+| 8 | `readCachedImportJobList` | function | 136 |
+| 9 | `canCacheImportJobList` | function | 144 |
+| 10 | `writeCachedImportJobList` | function | 148 |
+| 11 | `stringify` | function | 161 |
+| 12 | `cleanAuditActorText` | function | 165 |
+| 13 | `normalizeAuditActor` | function | 171 |
+| 14 | `attachInternalPolicyMetadata` | function | 181 |
+| 15 | `stripInternalPolicyMetadata` | function | 192 |
+| 16 | `getPersistedAuditActor` | function | 198 |
+| 17 | `mergeAuditActors` | function | 203 |
+| 18 | `auditWithActor` | function | 213 |
+| 19 | `decorateImportJobRow` | function | 231 |
+| 20 | `isCancelRequested` | function | 241 |
+| 21 | `isImportJobStale` | function | 248 |
+| 22 | `isImportJobWorkDrained` | function | 254 |
+| 23 | `markStoredImportFilesCancelled` | function | 266 |
+| 24 | `reconcileImportJobRow` | function | 276 |
+| 25 | `ensureDir` | function | 297 |
+| 26 | `ensureImportRoot` | function | 301 |
+| 27 | `getJobRoot` | function | 305 |
+| 28 | `assertSafeImportPath` | function | 309 |
+| 29 | `deleteImportJobFiles` | function | 318 |
+| 30 | `clearImportRuntimeFiles` | function | 325 |
+| 31 | `createImportJob` | function | 336 |
+| 32 | `getImportJob` | function | 357 |
+| 33 | `buildSqlPlaceholders` | function | 363 |
+| 34 | `collectRowIds` | function | 371 |
+| 35 | `decorateImportJobRows` | function | 379 |
+| 36 | `listImportJobs` | function | 388 |
+| 37 | `updateJob` | function | 421 |
+| 38 | `addJobError` | function | 457 |
+| 39 | `getJobErrors` | function | 464 |
+| 40 | `normalizeReviewText` | function | 474 |
+| 41 | `normalizeReviewIdentifier` | function | 478 |
+| 42 | `getBarcodeReviewIssue` | function | 482 |
+| 43 | `isBlockingBarcodeIssue` | function | 499 |
+| 44 | `buildProductImportReviewState` | function | 503 |
+| 45 | `add` | const arrow | 507 |
+| 46 | `duplicateGroupCount` | const arrow | 520 |
+| 47 | `hasReviewQueryMatch` | function | 537 |
+| 48 | `normalizeReviewFilter` | function | 557 |
+| 49 | `matchesReviewFilter` | function | 565 |
+| 50 | `hasAnyIdentifierField` | function | 573 |
+| 51 | `buildProductReviewLabels` | function | 580 |
+| 52 | `buildContactReviewLabels` | function | 604 |
+| 53 | `hasMeaningfulImportRowValue` | function | 613 |
+| 54 | `addReviewConflictCounts` | function | 621 |
+| 55 | `normalizeGroupDecisions` | function | 635 |
+| 56 | `addSetValues` | function | 645 |
+| 57 | `setValuesToArray` | function | 651 |
+| 58 | `firstRowNumber` | function | 659 |
+| 59 | `buildProductReviewIndex` | function | 663 |
+| 60 | `getProductConflictForReview` | function | 690 |
+| 61 | `getReviewRowNumber` | function | 773 |
+| 62 | `summarizeImportReviewRow` | function | 778 |
+| 63 | `addProductReviewGroup` | function | 798 |
+| 64 | `finalizeProductReviewSubgroups` | function | 843 |
+| 65 | `finalizeProductReviewGroups` | function | 868 |
+| 66 | `buildContactReviewIndex` | function | 890 |
+| 67 | `getContactConflictForReview` | function | 910 |
+| 68 | `getGenericImportConflictForReview` | function | 956 |
+| 69 | `applyImportDecisionToRow` | function | 969 |
+| 70 | `getImportDecisionMap` | function | 1037 |
+| 71 | `getImportJobReview` | function | 1046 |
+| 72 | `updateImportJobDecisions` | function | 1146 |
+| 73 | `addJobFile` | function | 1174 |
+| 74 | `getJobFiles` | function | 1194 |
+| 75 | `markJobCancelled` | function | 1199 |
+| 76 | `isCancelled` | function | 1203 |
+| 77 | `waitForQueuedImportMedia` | function | 1209 |
+| 78 | `finalizeSkippedImportImages` | function | 1236 |
+| 79 | `normalizeLookup` | function | 1253 |
+| 80 | `normalizeText` | function | 1257 |
+| 81 | `getMimeTypeFromName` | function | 1261 |
+| 82 | `normalizeProductSignature` | function | 1329 |
+| 83 | `findProductWithSignature` | function | 1340 |
+| 84 | `chooseParentProduct` | function | 1348 |
+| 85 | `compareParentProductCandidate` | function | 1357 |
+| 86 | `normalizeImportAction` | function | 1369 |
+| 87 | `parseOptionalImportId` | function | 1377 |
+| 88 | `parseIncomingImageRefs` | function | 1382 |
+| 89 | `syncProductImageGallery` | function | 1413 |
+| 90 | `loadCurrentGallery` | function | 1439 |
+| 91 | `ensureParentProductExists` | function | 1451 |
+| 92 | `assertUniqueProductFields` | function | 1460 |
+| 93 | `findProductIdentifierConflict` | function | 1503 |
+| 94 | `normalizeIdentifierConflictMode` | function | 1533 |
+| 95 | `resolveNewProductIdentifiers` | function | 1541 |
+| 96 | `copyImageIntoAssets` | function | 1578 |
+| 97 | `resolveImageGallery` | function | 1617 |
+| 98 | `ensureSettingOptionMap` | function | 1673 |
+| 99 | `buildLookupMap` | function | 1692 |
+| 100 | `getDefaultBranch` | function | 1700 |
+| 101 | `upsertSettingJson` | function | 1709 |
+| 102 | `normalizeRowForProduct` | function | 1716 |
+| 103 | `createProductContext` | function | 1764 |
+| 104 | `sortProductImportRows` | function | 1793 |
+| 105 | `compareProductImportRows` | function | 1801 |
+| 106 | `insertProductImportRow` | function | 1811 |
+| 107 | `getProductsByNameForImport` | function | 1828 |
+| 108 | `rememberProductForImport` | function | 1843 |
+| 109 | `buildImportSignatureKey` | function | 1850 |
+| 110 | `ensureCategory` | function | 1856 |
+| 111 | `ensureUnit` | function | 1869 |
+| 112 | `ensureBrand` | function | 1881 |
+| 113 | `ensureSupplier` | function | 1894 |
+| 114 | `determineBranch` | function | 1908 |
+| 115 | `clearBranchBatchStockForProduct` | function | 1925 |
+| 116 | `handleBranchStock` | function | 1936 |
+| 117 | `recalcProductStock` | function | 1953 |
+| 118 | `insertInventoryMovement` | function | 1957 |
+| 119 | `seedBranchRows` | function | 1985 |
+| 120 | `processProductRow` | function | 1992 |
+| 121 | `processProductRowBatches` | function | 2282 |
+| 122 | `flushProgress` | const arrow | 2294 |
+| 123 | `processProductRows` | function | 2395 |
+| 124 | `buildSafeCatalogOptionList` | function | 2405 |
+| 125 | `preflightImportJob` | function | 2414 |
+| 126 | `addFailure` | const arrow | 2428 |
+| 127 | `buildImageLookup` | function | 2521 |
+| 128 | `addImageLookupCandidate` | function | 2531 |
+| 129 | `normalizeImageMatchKey` | function | 2536 |
+| 130 | `processImageOnlyFiles` | function | 2546 |
+| 131 | `addImageProductKey` | function | 2607 |
+| 132 | `normalizeContactMode` | function | 2612 |
+| 133 | `resolveContactValue` | function | 2617 |
+| 134 | `parseFieldRules` | function | 2625 |
+| 135 | `generateCustomerMembershipNumber` | function | 2631 |
+| 136 | `normalizeImportedMembershipNumber` | function | 2647 |
+| 137 | `processContactRowBatches` | function | 2653 |
+| 138 | `processContactRows` | function | 2822 |
+| 139 | `normalizeInventoryAction` | function | 2832 |
+| 140 | `addCsvLookupValue` | function | 2839 |
+| 141 | `buildProductCsvLookupMap` | function | 2845 |
+| 142 | `buildBranchCsvLookupMap` | function | 2856 |
+| 143 | `processInventoryRowBatches` | function | 2865 |
+| 144 | `processInventoryRows` | function | 2955 |
+| 145 | `processSalesRowBatches` | function | 2964 |
+| 146 | `processSalesRows` | function | 3167 |
+| 147 | `extractZipImages` | function | 3176 |
+| 148 | `processImportJob` | function | 3246 |
+| 149 | `runLocalJob` | function | 3384 |
+| 150 | `normalizeQueueMode` | function | 3391 |
+| 151 | `queueNameForMode` | function | 3395 |
+| 152 | `configuredQueueDriver` | function | 3399 |
+| 153 | `getImportQueueConcurrency` | function | 3404 |
+| 154 | `hasBullProducer` | function | 3408 |
+| 155 | `hasBullWorkers` | function | 3412 |
+| 156 | `removeQueuedBullJobsForImport` | function | 3416 |
+| 157 | `getBullConnection` | function | 3439 |
+| 158 | `initializeBullQueue` | function | 3452 |
+| 159 | `startImportWorkers` | function | 3471 |
+| 160 | `startWorker` | const arrow | 3478 |
+| 161 | `enqueueImportJob` | function | 3514 |
+| 162 | `resetImportJobForRetry` | function | 3557 |
+| 163 | `cancelImportJob` | function | 3610 |
+| 164 | `listCancellableImportJobs` | function | 3643 |
+| 165 | `waitForImportJobsToStop` | function | 3652 |
+| 166 | `cancelAllImportJobs` | function | 3680 |
+| 167 | `deleteImportJob` | function | 3712 |
+| 168 | `deleteAllImportJobs` | function | 3743 |
+| 169 | `approveImportJob` | function | 3760 |
+| 170 | `recoverImportJobs` | function | 3784 |
+| 171 | `getUnprocessedJobFiles` | function | 3806 |
+| 172 | `getQueueStatus` | function | 3814 |
+| 173 | `buildErrorsCsv` | function | 3831 |
+| 174 | `escape` | const arrow | 3833 |
+| 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.71 `backend/src/services/mediaQueue.js`
+### 3.71 `backend/src/services/integrationDoctor.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `trim` | function | 44 |
+| 2 | `hasValue` | function | 48 |
+| 3 | `redactPresence` | function | 52 |
+| 4 | `status` | function | 59 |
+| 5 | `allCriticalChecksOk` | function | 67 |
+| 6 | `unique` | function | 80 |
+| 7 | `buildExpectedOauthChecklist` | function | 92 |
+| 8 | `probeDatabase` | function | 120 |
+| 9 | `getSafeTableCount` | function | 130 |
+| 10 | `readCurrentBusinessCounts` | function | 139 |
+| 11 | `findLatestVerifiedReleaseBackup` | function | 153 |
+| 12 | `probeQueue` | function | 178 |
+| 13 | `probeBackups` | function | 199 |
+| 14 | `buildIntegrationDoctor` | function | 216 |
+
+### 3.72 `backend/src/services/mediaQueue.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1964,41 +2244,54 @@ Code files scanned: **508**
 | 9 | `startMediaWorker` | function | 157 |
 | 10 | `getMediaQueueStatus` | function | 181 |
 
-### 3.72 `backend/src/services/portalAi.js`
+### 3.73 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `trim` | function | 15 |
 | 2 | `toNumber` | function | 19 |
 | 3 | `tokenize` | function | 24 |
-| 4 | `nowMs` | function | 32 |
-| 5 | `getProviderPriority` | function | 36 |
-| 6 | `getProviderCapacity` | function | 41 |
-| 7 | `getProviderMaxInputChars` | function | 46 |
-| 8 | `getProviderMaxCompletionTokens` | function | 51 |
-| 9 | `getProviderTimeoutMs` | function | 56 |
-| 10 | `getProviderCooldownMs` | function | 61 |
-| 11 | `getRuntimeState` | function | 67 |
-| 12 | `pruneProviderState` | function | 82 |
-| 13 | `pruneVisitorActivity` | function | 88 |
-| 14 | `registerVisitorActivity` | function | 96 |
-| 15 | `countActiveVisitors` | function | 106 |
-| 16 | `getVisitorMinuteCount` | function | 111 |
-| 17 | `summarizeProfile` | function | 118 |
-| 18 | `sanitizeQuestion` | function | 128 |
-| 19 | `scoreProduct` | function | 132 |
-| 20 | `selectCandidateProducts` | function | 164 |
-| 21 | `buildPrompt` | function | 196 |
-| 22 | `parseAssistantPayload` | function | 221 |
-| 23 | `listEnabledChatProviders` | function | 287 |
-| 24 | `chooseProviderForAttempt` | function | 306 |
-| 25 | `markProviderStart` | function | 327 |
-| 26 | `markProviderSuccess` | function | 335 |
-| 27 | `markProviderFailure` | function | 342 |
-| 28 | `getPortalAiUsageStatus` | function | 350 |
-| 29 | `generatePortalAiResponse` | function | 378 |
+| 4 | `nowMs` | function | 36 |
+| 5 | `getProviderPriority` | function | 40 |
+| 6 | `getProviderCapacity` | function | 45 |
+| 7 | `getProviderMaxInputChars` | function | 50 |
+| 8 | `getProviderMaxCompletionTokens` | function | 55 |
+| 9 | `getProviderTimeoutMs` | function | 60 |
+| 10 | `getProviderCooldownMs` | function | 65 |
+| 11 | `getRuntimeState` | function | 71 |
+| 12 | `pruneProviderState` | function | 86 |
+| 13 | `keepRecentTimestamps` | function | 92 |
+| 14 | `pruneVisitorActivity` | function | 100 |
+| 15 | `registerVisitorActivity` | function | 108 |
+| 16 | `countActiveVisitors` | function | 118 |
+| 17 | `getVisitorMinuteCount` | function | 123 |
+| 18 | `summarizeProfile` | function | 130 |
+| 19 | `sanitizeQuestion` | function | 140 |
+| 20 | `scoreProduct` | function | 144 |
+| 21 | `buildQueryTermSet` | function | 176 |
+| 22 | `productMatchesPreference` | function | 185 |
+| 23 | `toPromptCandidate` | function | 195 |
+| 24 | `selectCandidateProducts` | function | 212 |
+| 25 | `buildPrompt` | function | 236 |
+| 26 | `takeTrimmedStrings` | function | 266 |
+| 27 | `normalizeCitations` | function | 277 |
+| 28 | `buildRecommendationPayloads` | function | 293 |
+| 29 | `parseAssistantPayload` | function | 322 |
+| 30 | `listEnabledChatProviders` | function | 351 |
+| 31 | `chooseProviderForAttempt` | function | 373 |
+| 32 | `markProviderStart` | function | 395 |
+| 33 | `markProviderSuccess` | function | 403 |
+| 34 | `markProviderFailure` | function | 410 |
+| 35 | `sumProviderCapacity` | function | 418 |
+| 36 | `buildProviderUsageItems` | function | 426 |
+| 37 | `getPortalAiUsageStatus` | function | 445 |
+| 38 | `minProviderInputChars` | function | 460 |
+| 39 | `hasAnyProfileValue` | function | 468 |
+| 40 | `productsById` | function | 475 |
+| 41 | `remainingProviders` | function | 483 |
+| 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.73 `backend/src/services/verification.js`
+### 3.74 `backend/src/services/verification.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2024,7 +2317,7 @@ Code files scanned: **508**
 | 20 | `sendEmail` | function | 183 |
 | 21 | `requestVerificationCode` | function | 247 |
 
-### 3.74 `backend/src/sessionAuth.js`
+### 3.75 `backend/src/sessionAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2042,19 +2335,24 @@ Code files scanned: **508**
 | 12 | `revokeAuthSession` | function | 175 |
 | 13 | `revokeUserSessions` | function | 187 |
 
-### 3.75 `backend/src/settingsSnapshot.js`
+### 3.76 `backend/src/settingsSnapshot.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeUploadPublicPath` | function | 8 |
 | 2 | `isUploadPublicPath` | function | 22 |
-| 3 | `sanitizeMediaPath` | function | 27 |
-| 4 | `sanitizeMediaList` | function | 35 |
-| 5 | `uploadPublicPathExists` | function | 48 |
-| 6 | `sanitizeSettingValue` | function | 60 |
-| 7 | `sanitizeSettingsSnapshot` | function | 64 |
+| 3 | `toUploadObjectKey` | function | 27 |
+| 4 | `sanitizeMediaPath` | function | 34 |
+| 5 | `sanitizeMediaPathAsync` | function | 42 |
+| 6 | `sanitizeMediaList` | function | 58 |
+| 7 | `sanitizeMediaListAsync` | function | 71 |
+| 8 | `uploadPublicPathExists` | function | 84 |
+| 9 | `sanitizeSettingValue` | function | 96 |
+| 10 | `sanitizeSettingValueAsync` | function | 100 |
+| 11 | `sanitizeSettingsSnapshot` | function | 104 |
+| 12 | `sanitizeSettingsSnapshotAsync` | function | 112 |
 
-### 3.76 `backend/src/storage/organizationFolders.js`
+### 3.77 `backend/src/storage/organizationFolders.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2064,7 +2362,7 @@ Code files scanned: **508**
 | 4 | `extractOrganizationPublicId` | function | 26 |
 | 5 | `findOrganizationFolderByPublicId` | function | 33 |
 
-### 3.77 `backend/src/systemFsWorker.js`
+### 3.78 `backend/src/systemFsWorker.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2076,7 +2374,7 @@ Code files scanned: **508**
 | 6 | `runRelocateDataRoot` | function | 70 |
 | 7 | `main` | function | 77 |
 
-### 3.78 `backend/src/systemJobs.js`
+### 3.79 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2087,119 +2385,129 @@ Code files scanned: **508**
 | 5 | `safeJsonParse` | function | 55 |
 | 6 | `getDb` | function | 64 |
 | 7 | `ensureTable` | function | 68 |
-| 8 | `persistJob` | function | 123 |
-| 9 | `cleanupJobs` | function | 170 |
-| 10 | `buildPersistSignature` | function | 190 |
-| 11 | `markPersisted` | function | 205 |
-| 12 | `flushPersistJob` | function | 210 |
-| 13 | `shouldPersistJob` | function | 222 |
-| 14 | `schedulePersistJob` | function | 240 |
-| 15 | `updateJob` | function | 251 |
-| 16 | `SystemJobCancelledError` | class | 268 |
-| 17 | `startSystemJob` | function | 276 |
-| 18 | `runWorker` | const arrow | 305 |
-| 19 | `isCancelled` | const arrow | 324 |
-| 20 | `throwIfCancelled` | const arrow | 325 |
-| 21 | `progress` | const arrow | 328 |
-| 22 | `cancelSystemJob` | function | 381 |
-| 23 | `getSystemJob` | function | 398 |
-| 24 | `listSystemJobs` | function | 410 |
+| 8 | `persistJob` | function | 124 |
+| 9 | `collectFinishedJobs` | function | 171 |
+| 10 | `removeOldFinishedJobs` | function | 182 |
+| 11 | `serializeJobRows` | function | 188 |
+| 12 | `listActiveJobs` | function | 198 |
+| 13 | `cleanupJobs` | function | 207 |
+| 14 | `buildPersistSignature` | function | 224 |
+| 15 | `markPersisted` | function | 239 |
+| 16 | `flushPersistJob` | function | 244 |
+| 17 | `shouldPersistJob` | function | 256 |
+| 18 | `schedulePersistJob` | function | 274 |
+| 19 | `updateJob` | function | 285 |
+| 20 | `SystemJobCancelledError` | class | 302 |
+| 21 | `startSystemJob` | function | 310 |
+| 22 | `runWorker` | const arrow | 339 |
+| 23 | `isCancelled` | const arrow | 358 |
+| 24 | `throwIfCancelled` | const arrow | 359 |
+| 25 | `progress` | const arrow | 362 |
+| 26 | `cancelSystemJob` | function | 415 |
+| 27 | `getSystemJob` | function | 432 |
+| 28 | `listSystemJobs` | function | 444 |
 
-### 3.79 `backend/src/uploadReferenceCleanup.js`
+### 3.80 `backend/src/uploadReferenceCleanup.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `safeJsonArray` | function | 10 |
-| 2 | `repairMissingUploadReferences` | function | 19 |
+| 1 | `safeJsonArray` | function | 13 |
+| 2 | `repairMissingUploadReferences` | function | 22 |
+| 3 | `repairMissingUploadReferencesAsync` | function | 134 |
 
-### 3.80 `backend/src/uploadSecurity.js`
+### 3.81 `backend/src/uploadSecurity.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `bufferStartsWith` | function | 12 |
-| 2 | `isLikelyCsvBuffer` | function | 16 |
-| 3 | `detectBufferKind` | function | 29 |
-| 4 | `getExpectedUploadedKind` | function | 43 |
-| 5 | `validateImageMetadata` | function | 52 |
-| 6 | `validateUploadedBuffer` | function | 66 |
-| 7 | `validateUploadedPath` | function | 77 |
+| 2 | `isLikelyCsvBuffer` | function | 19 |
+| 3 | `detectBufferKind` | function | 32 |
+| 4 | `getExpectedUploadedKind` | function | 46 |
+| 5 | `validateImageMetadata` | function | 55 |
+| 6 | `validateUploadedBuffer` | function | 69 |
+| 7 | `validateUploadedPath` | function | 80 |
 
-### 3.81 `backend/src/websocket.js`
+### 3.82 `backend/src/websocket.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `attachWss` | function | 24 |
 
-### 3.82 `backend/src/workers/importWorker.js`
+### 3.83 `backend/src/workers/importWorker.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `start` | function | 10 |
 | 2 | `shutdown` | function | 16 |
 
-### 3.83 `backend/src/workers/mediaWorker.js`
+### 3.84 `backend/src/workers/mediaWorker.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `start` | function | 10 |
 | 2 | `shutdown` | function | 15 |
 
-### 3.84 `backend/test/accessControl.test.js`
+### 3.85 `backend/test/accessControl.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 | 2 | `makeReq` | function | 22 |
 
-### 3.85 `backend/test/analyticsRuntime.test.js`
+### 3.86 `backend/test/analyticsRuntime.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.86 `backend/test/authOtpGuards.test.js`
+### 3.87 `backend/test/authOtpGuards.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 
-### 3.87 `backend/test/authSecurityFlow.test.js`
+### 3.88 `backend/test/authSecurityFlow.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 16 |
-| 2 | `makeTempRoot` | function | 34 |
-| 3 | `getFreePort` | function | 38 |
-| 4 | `waitForHealth` | function | 49 |
-| 5 | `startServer` | function | 61 |
-| 6 | `stopServer` | function | 82 |
-| 7 | `fetchJson` | function | 96 |
-| 8 | `extractSessionCookie` | function | 108 |
-| 9 | `login` | function | 115 |
+| 1 | `runTest` | function | 19 |
+| 2 | `runTests` | function | 23 |
+| 3 | `makeTempRoot` | function | 37 |
+| 4 | `getFreePort` | function | 41 |
+| 5 | `waitForHealth` | function | 52 |
+| 6 | `startServer` | function | 64 |
+| 7 | `captureOutput` | const arrow | 67 |
+| 8 | `stopServer` | function | 93 |
+| 9 | `fetchJson` | function | 107 |
+| 10 | `getDefaultOrganizationIds` | function | 119 |
+| 11 | `cleanupTestUser` | function | 143 |
+| 12 | `createTestUser` | function | 152 |
+| 13 | `extractSessionCookie` | function | 171 |
+| 14 | `login` | function | 178 |
 
-### 3.88 `backend/test/backupDefaultDestination.test.js`
+### 3.89 `backend/test/backupDefaultDestination.test.js`
 
 - No top-level named symbols detected.
 
-### 3.89 `backend/test/backupPerformanceHardening.test.js`
+### 3.90 `backend/test/backupPerformanceHardening.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.90 `backend/test/backupRetention.test.js`
+### 3.91 `backend/test/backupRetention.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.91 `backend/test/backupSchema.test.js`
+### 3.92 `backend/test/backupSchema.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 17 |
 
-### 3.92 `backend/test/branchStockSearch.test.js`
+### 3.93 `backend/test/branchStockSearch.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2214,20 +2522,20 @@ Code files scanned: **508**
 | 9 | `loginAsAdmin` | function | 105 |
 | 10 | `main` | function | 125 |
 
-### 3.93 `backend/test/contactOptions.test.js`
+### 3.94 `backend/test/contactOptions.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.94 `backend/test/dataPath.test.js`
+### 3.95 `backend/test/dataPath.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 16 |
 | 2 | `makeTempRoot` | function | 27 |
 
-### 3.95 `backend/test/defaultRoles.test.js`
+### 3.96 `backend/test/defaultRoles.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2240,13 +2548,19 @@ Code files scanned: **508**
 | 7 | `login` | function | 82 |
 | 8 | `main` | function | 103 |
 
-### 3.96 `backend/test/fileAssetStorageReconcile.test.js`
+### 3.97 `backend/test/fileAssetStorageReconcile.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.97 `backend/test/fileRouteSecurityFlow.test.js`
+### 3.98 `backend/test/fileAssetUsageCache.test.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `runTest` | function | 14 |
+
+### 3.99 `backend/test/fileRouteSecurityFlow.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2260,37 +2574,43 @@ Code files scanned: **508**
 | 8 | `login` | function | 108 |
 | 9 | `buildForm` | function | 129 |
 
-### 3.98 `backend/test/fullAutomation.test.js`
+### 3.100 `backend/test/fullAutomation.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `read` | function | 9 |
 | 2 | `runTest` | function | 13 |
 
-### 3.99 `backend/test/googleDriveSyncVersioning.test.js`
+### 3.101 `backend/test/googleDriveSyncVersioning.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.100 `backend/test/idempotency.test.js`
+### 3.102 `backend/test/idempotency.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.101 `backend/test/importCsv.test.js`
+### 3.103 `backend/test/importCsv.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 | 2 | `collectBatches` | function | 26 |
 
-### 3.102 `backend/test/importDecisionIntegrity.test.js`
+### 3.104 `backend/test/importDecisionIntegrity.test.js`
 
 - No top-level named symbols detected.
 
-### 3.103 `backend/test/importJobStateMachine.test.js`
+### 3.105 `backend/test/importJobPerformanceHardening.test.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `runTest` | function | 9 |
+
+### 3.106 `backend/test/importJobStateMachine.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2299,7 +2619,7 @@ Code files scanned: **508**
 | 3 | `writeJobFile` | function | 53 |
 | 4 | `main` | function | 60 |
 
-### 3.104 `backend/test/importScaleSmoke.test.js`
+### 3.107 `backend/test/importScaleSmoke.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2307,24 +2627,24 @@ Code files scanned: **508**
 | 2 | `makeLargeCsv` | function | 23 |
 | 3 | `assertLargeCsvSmoke` | function | 38 |
 
-### 3.105 `backend/test/initials.test.js`
+### 3.108 `backend/test/initials.test.js`
 
 - No top-level named symbols detected.
 
-### 3.106 `backend/test/integrationDoctor.test.js`
+### 3.109 `backend/test/integrationDoctor.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.107 `backend/test/inventorySettingsMediaContracts.test.js`
+### 3.110 `backend/test/inventorySettingsMediaContracts.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 | 2 | `readSource` | function | 20 |
 
-### 3.108 `backend/test/mediaOptimization.test.js`
+### 3.111 `backend/test/mediaOptimization.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2332,50 +2652,56 @@ Code files scanned: **508**
 | 2 | `buildDeterministicPixels` | function | 34 |
 | 3 | `buildLogoPixels` | function | 44 |
 
-### 3.109 `backend/test/netSecurity.test.js`
+### 3.112 `backend/test/netSecurity.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.110 `backend/test/offlineSecurity.test.js`
+### 3.113 `backend/test/notificationSummaryCache.test.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `runTest` | function | 16 |
+
+### 3.114 `backend/test/offlineSecurity.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `read` | function | 5 |
 | 2 | `runTest` | function | 9 |
 
-### 3.111 `backend/test/ownedGoogleAuth.test.js`
+### 3.115 `backend/test/ownedGoogleAuth.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `read` | function | 9 |
 | 2 | `runTest` | function | 13 |
 
-### 3.112 `backend/test/permissionPolicy.test.js`
+### 3.116 `backend/test/permissionPolicy.test.js`
 
 - No top-level named symbols detected.
 
-### 3.113 `backend/test/portalInventoryRegression.test.js`
+### 3.117 `backend/test/portalInventoryRegression.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 | 2 | `readSource` | function | 20 |
 
-### 3.114 `backend/test/portalUtils.test.js`
+### 3.118 `backend/test/portalUtils.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.115 `backend/test/postgresCutoverReadiness.test.js`
+### 3.119 `backend/test/postgresCutoverReadiness.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 10 |
 
-### 3.116 `backend/test/postgresDatabase.test.js`
+### 3.120 `backend/test/postgresDatabase.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2383,69 +2709,86 @@ Code files scanned: **508**
 | 2 | `FakeClient` | class | 21 |
 | 3 | `createFakeDb` | function | 37 |
 
-### 3.117 `backend/test/postgresQueryCompat.test.js`
+### 3.121 `backend/test/postgresQueryCompat.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.118 `backend/test/productBatchHierarchy.test.js`
+### 3.122 `backend/test/productBatchHierarchy.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 | 2 | `readSource` | function | 20 |
 
-### 3.119 `backend/test/productExpiry.test.js`
+### 3.123 `backend/test/productExpiry.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.120 `backend/test/productImportPolicies.test.js`
+### 3.124 `backend/test/productImportPolicies.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.121 `backend/test/productSearchPagination.test.js`
+### 3.125 `backend/test/productSearchPagination.test.js`
 
 - No top-level named symbols detected.
 
-### 3.122 `backend/test/rfidRoutes.test.js`
+### 3.126 `backend/test/rfidRoutes.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.123 `backend/test/routeContracts.test.js`
+### 3.127 `backend/test/routeContracts.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 | 2 | `getRoutePaths` | function | 20 |
 
-### 3.124 `backend/test/runtimeCache.test.js`
+### 3.128 `backend/test/runtimeCache.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 23 |
-| 2 | `main` | function | 34 |
+| 1 | `runTest` | function | 24 |
+| 2 | `main` | function | 35 |
 
-### 3.125 `backend/test/runtimeVersion.test.js`
+### 3.129 `backend/test/runtimeVersion.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 
-### 3.126 `backend/test/serverUtils.test.js`
+### 3.130 `backend/test/schemaMetadata.test.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `runTest` | function | 7 |
+| 2 | `loadSchemaMetadataWithColumns` | function | 18 |
+| 3 | `cleanup` | const arrow | 46 |
+
+### 3.131 `backend/test/serverUtils.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 22 |
 | 2 | `collectHeaders` | const arrow | 230 |
 
-### 3.127 `backend/test/systemJobs.test.js`
+### 3.132 `backend/test/settingsSnapshotObjectStorage.test.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `runTest` | function | 7 |
+| 2 | `withObjectStoreStub` | function | 23 |
+| 3 | `restore` | const arrow | 38 |
+| 4 | `createFakeCleanupDb` | function | 51 |
+
+### 3.133 `backend/test/systemJobs.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2453,17 +2796,17 @@ Code files scanned: **508**
 | 2 | `waitForStatus` | function | 10 |
 | 3 | `main` | function | 20 |
 
-### 3.128 `backend/test/uploadSecurity.test.js`
+### 3.134 `backend/test/uploadSecurity.test.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.129 `frontend/postcss.config.mjs`
+### 3.135 `frontend/postcss.config.mjs`
 
 - No top-level named symbols detected.
 
-### 3.130 `frontend/public/runtime-noise-guard.js`
+### 3.136 `frontend/public/runtime-noise-guard.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2474,31 +2817,31 @@ Code files scanned: **508**
 | 5 | `isKnownNoise` | function | 32 |
 | 6 | `suppress` | function | 45 |
 
-### 3.131 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js`
+### 3.137 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js`
 
 - No top-level named symbols detected.
 
-### 3.132 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js`
+### 3.138 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js`
 
 - No top-level named symbols detected.
 
-### 3.133 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js`
+### 3.139 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js`
 
 - No top-level named symbols detected.
 
-### 3.134 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js`
+### 3.140 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js`
 
 - No top-level named symbols detected.
 
-### 3.135 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js`
+### 3.141 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js`
 
 - No top-level named symbols detected.
 
-### 3.136 `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js`
+### 3.142 `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js`
 
 - No top-level named symbols detected.
 
-### 3.137 `frontend/public/sw.js`
+### 3.143 `frontend/public/sw.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2527,7 +2870,7 @@ Code files scanned: **508**
 | 23 | `appShellFallback` | function | 370 |
 | 24 | `networkFirstStatic` | function | 389 |
 
-### 3.138 `frontend/public/theme-bootstrap.js`
+### 3.144 `frontend/public/theme-bootstrap.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2542,426 +2885,450 @@ Code files scanned: **508**
 | 9 | `shouldSuppressRuntimeError` | function | 93 |
 | 10 | `installStyleSheetGuards` | function | 103 |
 
-### 3.139 `frontend/src/api/http.js`
+### 3.145 `frontend/src/api/http.js`
+
+- No top-level named symbols detected.
+
+### 3.146 `frontend/src/api/http.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSyncServerUrl` | export function | 38 |
-| 2 | `getSyncToken` | export function | 39 |
-| 3 | `setSyncServerUrl` | export function | 41 |
-| 4 | `setSyncToken` | export function | 42 |
-| 5 | `hasStoredAuthSession` | function | 61 |
-| 6 | `isProtectedAdminHost` | function | 70 |
-| 7 | `normalizeApiPath` | function | 87 |
-| 8 | `isRequiredRuntimeApiPath` | export function | 99 |
-| 9 | `getApiMismatchKey` | function | 104 |
-| 10 | `getApiVersionMismatchCooldown` | export function | 108 |
-| 11 | `dispatchApiVersionMismatch` | function | 119 |
-| 12 | `createApiVersionMismatchError` | export function | 133 |
-| 13 | `isApiVersionMismatchError` | export function | 144 |
-| 14 | `markApiVersionMismatch` | export function | 148 |
-| 15 | `cacheGet` | export function | 158 |
-| 16 | `cacheSet` | export function | 162 |
-| 17 | `cacheInvalidate` | export function | 163 |
-| 18 | `cacheClearAll` | export function | 166 |
-| 19 | `logCall` | function | 194 |
-| 20 | `getCallLog` | export function | 199 |
-| 21 | `clearCallLog` | export function | 200 |
-| 22 | `getClientMetaHeaders` | function | 202 |
-| 23 | `createApiError` | function | 206 |
-| 24 | `isCloudflareAccessRedirectResponse` | export function | 222 |
-| 25 | `createCloudflareAccessError` | function | 235 |
-| 26 | `dispatchUnauthorized` | function | 245 |
-| 27 | `shouldCompareRuntimeVersions` | export function | 257 |
-| 28 | `dispatchRuntimeVersionMismatch` | function | 273 |
-| 29 | `checkRuntimeVersionFromHealth` | function | 285 |
-| 30 | `createWriteBlockedError` | function | 292 |
-| 31 | `dispatchWriteBlocked` | function | 303 |
-| 32 | `dispatchTransientGatewayOutage` | function | 318 |
-| 33 | `isWriteConflictError` | export function | 334 |
-| 34 | `isWriteBlockedError` | export function | 338 |
-| 35 | `isInvalidSessionError` | export function | 342 |
-| 36 | `requireLiveServerWrite` | export function | 351 |
-| 37 | `getConflictRefreshChannels` | function | 383 |
-| 38 | `dispatchGlobalDataRefresh` | function | 392 |
-| 39 | `sleep` | function | 401 |
-| 40 | `hasUsableLocalData` | function | 405 |
-| 41 | `tryServerReadWithRetry` | function | 420 |
-| 42 | `noteReadFailure` | function | 431 |
-| 43 | `resolveLocalRead` | function | 445 |
-| 44 | `stableStringifyForDedupe` | function | 452 |
-| 45 | `clampDedupeBody` | function | 462 |
-| 46 | `buildApiRequestDedupeKey` | export function | 468 |
-| 47 | `methodAllowsRequestBody` | function | 474 |
-| 48 | `__resetApiWriteDedupeForTests` | export function | 479 |
-| 49 | `apiFetch` | export function | 484 |
-| 50 | `requestPromise` | const arrow | 504 |
-| 51 | `parsed` | const arrow | 541 |
-| 52 | `isNetErr` | export function | 580 |
-| 53 | `isTransientGatewayError` | export function | 586 |
-| 54 | `isReachableServerResponseStatus` | export function | 591 |
-| 55 | `shouldDispatchUnauthorized` | function | 602 |
-| 56 | `isConnectivityError` | function | 615 |
-| 57 | `isServerOnline` | export function | 636 |
-| 58 | `setServerHealth` | function | 638 |
-| 59 | `pingServerHealth` | function | 651 |
-| 60 | `startHealthCheck` | export function | 683 |
-| 61 | `cacheGetStale` | export function | 714 |
-| 62 | `getChannelRefreshKey` | function | 723 |
-| 63 | `emitCacheRefresh` | function | 727 |
-| 64 | `clearInflight` | function | 741 |
-| 65 | `hasReusableInflight` | function | 746 |
-| 66 | `raceServerReadWithLocalFallback` | function | 756 |
-| 67 | `route` | export function | 831 |
+| 1 | `getSyncServerUrl` | export function | 54 |
+| 2 | `getSyncToken` | export function | 55 |
+| 3 | `setSyncServerUrl` | export function | 57 |
+| 4 | `setSyncToken` | export function | 58 |
+| 5 | `hasStoredAuthSession` | function | 77 |
+| 6 | `isProtectedAdminHost` | function | 86 |
+| 7 | `normalizeApiPath` | function | 103 |
+| 8 | `isRequiredRuntimeApiPath` | export function | 115 |
+| 9 | `getApiMismatchKey` | function | 120 |
+| 10 | `getApiVersionMismatchCooldown` | export function | 124 |
+| 11 | `dispatchApiVersionMismatch` | function | 135 |
+| 12 | `createApiVersionMismatchError` | export function | 149 |
+| 13 | `isApiVersionMismatchError` | export function | 160 |
+| 14 | `markApiVersionMismatch` | export function | 164 |
+| 15 | `cacheGet` | export function | 174 |
+| 16 | `cacheSet` | export function | 178 |
+| 17 | `cacheInvalidate` | export function | 179 |
+| 18 | `cacheClearAll` | export function | 182 |
+| 19 | `logCall` | function | 210 |
+| 20 | `getCallLog` | export function | 215 |
+| 21 | `clearCallLog` | export function | 216 |
+| 22 | `getClientMetaHeaders` | function | 218 |
+| 23 | `createApiError` | function | 222 |
+| 24 | `isCloudflareAccessRedirectResponse` | export function | 238 |
+| 25 | `createCloudflareAccessError` | function | 251 |
+| 26 | `dispatchUnauthorized` | function | 261 |
+| 27 | `shouldCompareRuntimeVersions` | export function | 273 |
+| 28 | `dispatchRuntimeVersionMismatch` | function | 289 |
+| 29 | `checkRuntimeVersionFromHealth` | function | 301 |
+| 30 | `createWriteBlockedError` | function | 308 |
+| 31 | `dispatchWriteBlocked` | function | 319 |
+| 32 | `dispatchTransientGatewayOutage` | function | 334 |
+| 33 | `isWriteConflictError` | export function | 350 |
+| 34 | `isWriteBlockedError` | export function | 354 |
+| 35 | `isInvalidSessionError` | export function | 358 |
+| 36 | `requireLiveServerWrite` | export function | 367 |
+| 37 | `getConflictRefreshChannels` | function | 399 |
+| 38 | `dispatchGlobalDataRefresh` | function | 408 |
+| 39 | `sleep` | function | 417 |
+| 40 | `hasUsableLocalData` | function | 421 |
+| 41 | `noteReadFailure` | function | 447 |
+| 42 | `stableStringifyForDedupe` | function | 468 |
+| 43 | `clampDedupeBody` | function | 478 |
+| 44 | `buildApiRequestDedupeKey` | export function | 484 |
+| 45 | `methodAllowsRequestBody` | function | 490 |
+| 46 | `__resetApiWriteDedupeForTests` | export function | 495 |
+| 47 | `apiFetch` | export function | 500 |
+| 48 | `parsed` | const arrow | 557 |
+| 49 | `isNetErr` | export function | 596 |
+| 50 | `isTransientGatewayError` | export function | 602 |
+| 51 | `isReachableServerResponseStatus` | export function | 607 |
+| 52 | `shouldDispatchUnauthorized` | function | 618 |
+| 53 | `isConnectivityError` | function | 631 |
+| 54 | `isServerOnline` | export function | 652 |
+| 55 | `setServerHealth` | function | 654 |
+| 56 | `pingServerHealth` | function | 667 |
+| 57 | `startHealthCheck` | export function | 699 |
+| 58 | `cacheGetStale` | export function | 730 |
+| 59 | `getChannelRefreshKey` | function | 739 |
+| 60 | `emitCacheRefresh` | function | 744 |
+| 61 | `clearInflight` | function | 758 |
+| 62 | `hasReusableInflight` | function | 763 |
 
-### 3.140 `frontend/src/api/localDb.js`
+### 3.147 `frontend/src/api/localDb.js`
+
+- No top-level named symbols detected.
+
+### 3.148 `frontend/src/api/localDb.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `localGetSettings` | export function | 139 |
-| 2 | `localSaveSettings` | export function | 146 |
-| 3 | `localGetSettingsMeta` | export function | 154 |
-| 4 | `localSaveSettingsMeta` | export function | 158 |
-| 5 | `replaceTableContents` | export function | 168 |
-| 6 | `resetLocalMirrorDb` | export function | 212 |
-| 7 | `clearLocalMirrorTables` | export function | 227 |
-| 8 | `parseCSV` | export function | 253 |
-| 9 | `splitCSVLine` | function | 257 |
-| 10 | `buildCSVTemplate` | export function | 268 |
+| 1 | `localGetSettings` | export function | 148 |
+| 2 | `localSaveSettings` | export function | 155 |
+| 3 | `localGetSettingsMeta` | export function | 163 |
+| 4 | `localSaveSettingsMeta` | export function | 167 |
+| 5 | `replaceTableContents` | export function | 177 |
+| 6 | `resetLocalMirrorDb` | export function | 221 |
+| 7 | `clearLocalMirrorTables` | export function | 236 |
+| 8 | `parseCSV` | export function | 264 |
+| 9 | `splitCSVLine` | function | 268 |
+| 10 | `buildCSVTemplate` | export function | 279 |
 
-### 3.141 `frontend/src/api/methods.js`
+### 3.149 `frontend/src/api/methods.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getDeviceInfo` | function | 3 |
 | 2 | `getPortalBaseUrl` | function | 52 |
-| 3 | `getCurrentUserContext` | function | 57 |
-| 4 | `registerOutboxBackgroundSync` | function | 79 |
-| 5 | `hasStoredUserSession` | function | 91 |
-| 6 | `emitSyncQueueChanged` | function | 100 |
-| 7 | `discardPendingSyncQueue` | export function | 107 |
-| 8 | `createClientRequestId` | function | 125 |
-| 9 | `ensureClientRequestId` | function | 132 |
-| 10 | `getPendingSyncState` | export function | 138 |
-| 11 | `retryPendingSyncNow` | export function | 179 |
-| 12 | `canRefreshOfflineDeviceSnapshot` | function | 183 |
-| 13 | `readOfflineDeviceSnapshotMeta` | function | 190 |
-| 14 | `writeOfflineDeviceSnapshotMeta` | function | 198 |
-| 15 | `runOfflineSnapshotStep` | function | 215 |
-| 16 | `refreshOfflineDeviceSnapshot` | export function | 227 |
-| 17 | `previousMeta` | const arrow | 235 |
-| 18 | `invalidateClientRuntimeState` | function | 280 |
-| 19 | `withExpectedUpdatedAt` | function | 296 |
-| 20 | `withSettingsExpectedUpdatedAt` | function | 310 |
-| 21 | `appendActorQuery` | function | 320 |
-| 22 | `fetchJsonWithTimeout` | function | 333 |
-| 23 | `mirrorReadResult` | function | 351 |
-| 24 | `routeMirrored` | function | 360 |
-| 25 | `shouldPersistLocalMirror` | function | 366 |
-| 26 | `purgeSensitiveLiveServerMirrors` | function | 370 |
-| 27 | `mirrorTable` | function | 381 |
-| 28 | `buildQueryCacheStorageKey` | function | 395 |
-| 29 | `readCachedQueryResult` | function | 399 |
-| 30 | `writeCachedQueryResult` | function | 413 |
-| 31 | `clearCachedQueryResults` | function | 427 |
-| 32 | `getNotificationSummaryFallback` | function | 460 |
-| 33 | `getDriveSyncStatusFallback` | function | 469 |
-| 34 | `readNotificationSummaryMissingUntil` | function | 477 |
-| 35 | `markNotificationSummaryMissing` | function | 489 |
-| 36 | `clearNotificationSummaryMissing` | function | 504 |
-| 37 | `readStorageNumber` | function | 513 |
-| 38 | `writeStorageNumber` | function | 529 |
-| 39 | `clearStorageNumber` | function | 540 |
-| 40 | `login` | export function | 552 |
-| 41 | `logout` | export function | 564 |
-| 42 | `resetPasswordWithOtp` | export function | 567 |
-| 43 | `requestPasswordResetEmail` | export function | 570 |
-| 44 | `completePasswordReset` | export function | 573 |
-| 45 | `updateSessionDuration` | export function | 576 |
-| 46 | `getVerificationCapabilities` | export function | 579 |
-| 47 | `getSystemConfig` | export function | 582 |
-| 48 | `getNotificationSummary` | export function | 585 |
-| 49 | `getSystemDebugLog` | export function | 627 |
-| 50 | `startGoogleOauth` | export function | 630 |
-| 51 | `completeGoogleOauth` | export function | 633 |
-| 52 | `unlinkGoogleOauth` | export function | 636 |
-| 53 | `getAppBootstrap` | export function | 639 |
-| 54 | `buildLocalBootstrap` | const arrow | 640 |
-| 55 | `getOrganizationBootstrap` | export function | 697 |
-| 56 | `searchOrganizations` | export function | 700 |
-| 57 | `getCurrentOrganization` | export function | 704 |
-| 58 | `getSettings` | export function | 709 |
-| 59 | `saveSettings` | export function | 734 |
-| 60 | `runSave` | const arrow | 735 |
-| 61 | `getCategories` | const arrow | 795 |
-| 62 | `createCategory` | const arrow | 796 |
-| 63 | `updateCategory` | const arrow | 801 |
-| 64 | `deleteCategory` | const arrow | 806 |
-| 65 | `getUnits` | const arrow | 813 |
-| 66 | `createUnit` | const arrow | 814 |
-| 67 | `updateUnit` | const arrow | 819 |
-| 68 | `deleteUnit` | const arrow | 824 |
-| 69 | `getBranches` | const arrow | 831 |
-| 70 | `getBranchSummary` | const arrow | 832 |
-| 71 | `updateBranch` | const arrow | 834 |
-| 72 | `deleteBranch` | const arrow | 838 |
-| 73 | `getBranchStock` | const arrow | 842 |
-| 74 | `getTransfers` | const arrow | 846 |
-| 75 | `getBranchStockIntegrity` | const arrow | 848 |
-| 76 | `getProducts` | const arrow | 852 |
-| 77 | `searchProducts` | const arrow | 853 |
-| 78 | `getProductsByIds` | const arrow | 863 |
-| 79 | `getProductFilters` | const arrow | 874 |
-| 80 | `getProductLookupUsage` | const arrow | 884 |
-| 81 | `replaceProductLookupValues` | const arrow | 892 |
-| 82 | `getCatalogMeta` | export function | 905 |
-| 83 | `getCatalogProducts` | export function | 913 |
-| 84 | `getPortalConfig` | export function | 921 |
-| 85 | `getPortalBootstrap` | export function | 929 |
-| 86 | `getPortalCatalogMeta` | export function | 937 |
-| 87 | `getPortalCatalogProducts` | export function | 945 |
-| 88 | `searchPortalCatalogProducts` | export function | 953 |
-| 89 | `lookupPortalMembership` | export function | 965 |
-| 90 | `createPortalSubmission` | export function | 975 |
-| 91 | `getPortalAiStatus` | export function | 989 |
-| 92 | `askPortalAi` | export function | 997 |
-| 93 | `getPortalSubmissionsForReview` | const arrow | 1011 |
-| 94 | `reviewPortalSubmission` | const arrow | 1013 |
-| 95 | `getAiProviders` | const arrow | 1016 |
-| 96 | `createAiProvider` | const arrow | 1018 |
-| 97 | `updateAiProvider` | const arrow | 1020 |
-| 98 | `deleteAiProvider` | const arrow | 1022 |
-| 99 | `testAiProvider` | const arrow | 1024 |
-| 100 | `getAiResponses` | const arrow | 1026 |
-| 101 | `createProduct` | export function | 1028 |
-| 102 | `updateProduct` | export function | 1042 |
-| 103 | `deleteProduct` | const arrow | 1055 |
-| 104 | `buildMultipartHeaders` | function | 1072 |
-| 105 | `apiFormPost` | function | 1082 |
-| 106 | `withImportDeviceInfo` | const arrow | 1101 |
-| 107 | `listImportJobs` | const arrow | 1104 |
-| 108 | `getImportJobReview` | const arrow | 1113 |
-| 109 | `updateImportJobDecisions` | const arrow | 1117 |
-| 110 | `startImportJob` | const arrow | 1120 |
-| 111 | `approveImportJob` | const arrow | 1122 |
-| 112 | `cancelImportJob` | const arrow | 1124 |
-| 113 | `retryImportJob` | const arrow | 1126 |
-| 114 | `deleteImportJob` | const arrow | 1128 |
-| 115 | `getImportQueueStatus` | const arrow | 1147 |
-| 116 | `downloadImportJobErrors` | export function | 1149 |
-| 117 | `uploadImportJobCsv` | export function | 1169 |
-| 118 | `uploadImportJobZip` | export function | 1180 |
-| 119 | `uploadImportJobImages` | export function | 1191 |
-| 120 | `getFiles` | export function | 1219 |
-| 121 | `uploadFileAsset` | export function | 1235 |
-| 122 | `finish` | const arrow | 1262 |
-| 123 | `abortListener` | const arrow | 1269 |
-| 124 | `deleteFileAsset` | export function | 1316 |
-| 125 | `uploadProductImage` | export function | 1328 |
-| 126 | `uploadUserAvatar` | export function | 1362 |
-| 127 | `openCSVDialog` | export function | 1401 |
-| 128 | `openImageDialog` | export function | 1421 |
-| 129 | `getImageDataUrl` | export function | 1429 |
-| 130 | `getActionHistory` | const arrow | 1441 |
-| 131 | `updateActionHistory` | const arrow | 1447 |
-| 132 | `getInventorySummary` | const arrow | 1453 |
-| 133 | `getInventoryStats` | const arrow | 1454 |
-| 134 | `searchInventoryProducts` | const arrow | 1458 |
-| 135 | `getInventoryMovements` | const arrow | 1468 |
-| 136 | `getInventoryReasons` | const arrow | 1493 |
-| 137 | `saveInventoryReasons` | const arrow | 1495 |
-| 138 | `buildOfflineSaleReceiptNumber` | function | 1498 |
-| 139 | `isRetryableOfflineSaleError` | function | 1504 |
-| 140 | `findQueuedSale` | function | 1513 |
-| 141 | `putOfflineSaleMirror` | function | 1520 |
-| 142 | `queueOfflineSale` | function | 1545 |
-| 143 | `queuedSaleBackoffMs` | function | 1603 |
-| 144 | `updateQueuedRow` | function | 1608 |
-| 145 | `completeQueuedSale` | function | 1617 |
-| 146 | `failQueuedSale` | function | 1644 |
-| 147 | `markQueuedSaleConflict` | function | 1657 |
-| 148 | `syncPendingSalesQueue` | function | 1679 |
-| 149 | `getRfidStatus` | const arrow | 1720 |
-| 150 | `searchRfidTags` | const arrow | 1726 |
-| 151 | `recordRfidSessionEvents` | const arrow | 1732 |
-| 152 | `applyRfidSession` | const arrow | 1736 |
-| 153 | `createSale` | export function | 1740 |
-| 154 | `getSales` | const arrow | 1752 |
-| 155 | `getDashboard` | const arrow | 1759 |
-| 156 | `getAnalytics` | const arrow | 1760 |
-| 157 | `getCustomers` | const arrow | 1769 |
-| 158 | `getCustomerPointSummaries` | const arrow | 1790 |
-| 159 | `createCustomer` | export function | 1794 |
-| 160 | `updateCustomer` | const arrow | 1798 |
-| 161 | `deleteCustomer` | const arrow | 1802 |
-| 162 | `downloadCustomerTemplate` | const arrow | 1807 |
-| 163 | `getSuppliers` | const arrow | 1816 |
-| 164 | `createSupplier` | export function | 1821 |
-| 165 | `updateSupplier` | const arrow | 1825 |
-| 166 | `deleteSupplier` | const arrow | 1829 |
-| 167 | `downloadSupplierTemplate` | const arrow | 1834 |
-| 168 | `getDeliveryContacts` | const arrow | 1843 |
-| 169 | `createDeliveryContact` | export function | 1848 |
-| 170 | `updateDeliveryContact` | const arrow | 1852 |
-| 171 | `deleteDeliveryContact` | const arrow | 1856 |
-| 172 | `getUsers` | const arrow | 1863 |
-| 173 | `updateUser` | const arrow | 1865 |
-| 174 | `getUserProfile` | const arrow | 1866 |
-| 175 | `getUserAuthMethods` | const arrow | 1867 |
-| 176 | `updateUserProfile` | const arrow | 1869 |
-| 177 | `disconnectUserAuthProvider` | const arrow | 1871 |
-| 178 | `changeUserPassword` | const arrow | 1873 |
-| 179 | `resetPassword` | const arrow | 1875 |
-| 180 | `getRoles` | const arrow | 1878 |
-| 181 | `updateRole` | const arrow | 1880 |
-| 182 | `deleteRole` | const arrow | 1881 |
-| 183 | `getCustomTables` | const arrow | 1884 |
-| 184 | `getCustomTableData` | const arrow | 1886 |
-| 185 | `insertCustomRow` | const arrow | 1887 |
-| 186 | `updateCustomRow` | const arrow | 1888 |
-| 187 | `deleteCustomRow` | const arrow | 1889 |
-| 188 | `getAuditLogs` | const arrow | 1892 |
-| 189 | `deleteAuditLogsRetention` | const arrow | 1918 |
-| 190 | `wait` | function | 1922 |
-| 191 | `getSystemJob` | export function | 1926 |
-| 192 | `cancelSystemJob` | export function | 1931 |
-| 193 | `pollSystemJob` | export function | 1936 |
-| 194 | `waitForSystemJob` | function | 1962 |
-| 195 | `getIntegrationDoctor` | export function | 1970 |
-| 196 | `queueBackupFolderExport` | export function | 1981 |
-| 197 | `exportBackupFolder` | export function | 1990 |
-| 198 | `queueBackupFolderRestore` | export function | 1994 |
-| 199 | `importBackupFolder` | export function | 2001 |
-| 200 | `getGoogleDriveSyncStatus` | const arrow | 2009 |
-| 201 | `saveGoogleDriveSyncPreferences` | const arrow | 2043 |
-| 202 | `startGoogleDriveSyncOauth` | const arrow | 2046 |
-| 203 | `disconnectGoogleDriveSync` | const arrow | 2049 |
-| 204 | `forgetGoogleDriveSyncCredentials` | const arrow | 2052 |
-| 205 | `queueGoogleDriveSyncNow` | const arrow | 2055 |
-| 206 | `syncGoogleDriveNow` | const arrow | 2058 |
-| 207 | `resetData` | export function | 2063 |
-| 208 | `factoryReset` | export function | 2070 |
-| 209 | `downloadImportTemplate` | export function | 2078 |
-| 210 | `openPath` | export function | 2125 |
-| 211 | `getReturns` | const arrow | 2134 |
-| 212 | `createReturn` | export function | 2140 |
-| 213 | `createSupplierReturn` | export function | 2146 |
-| 214 | `updateSaleStatus` | const arrow | 2155 |
-| 215 | `attachSaleCustomer` | const arrow | 2171 |
-| 216 | `getSalesExport` | const arrow | 2195 |
-| 217 | `updateReturn` | const arrow | 2199 |
-| 218 | `testSyncServer` | export function | 2229 |
-| 219 | `openFolderDialog` | export function | 2248 |
-| 220 | `getDataPath` | const arrow | 2259 |
-| 221 | `getScaleMigrationStatus` | const arrow | 2260 |
-| 222 | `prepareScaleMigration` | const arrow | 2261 |
-| 223 | `runScaleMigration` | const arrow | 2262 |
-| 224 | `setDataPath` | export function | 2263 |
-| 225 | `resetDataPath` | export function | 2268 |
-| 226 | `browseDir` | const arrow | 2273 |
+| 3 | `buildQueryString` | function | 57 |
+| 4 | `appendQuery` | function | 68 |
+| 5 | `normalizePositiveUniqueIds` | function | 72 |
+| 6 | `buildAttemptedSettings` | function | 87 |
+| 7 | `buildAttemptedReturnItems` | function | 96 |
+| 8 | `getCurrentUserContext` | function | 108 |
+| 9 | `dispatchSyncUpdates` | function | 133 |
+| 10 | `registerOutboxBackgroundSync` | function | 143 |
+| 11 | `hasStoredUserSession` | function | 155 |
+| 12 | `emitSyncQueueChanged` | function | 164 |
+| 13 | `discardPendingSyncQueue` | export function | 171 |
+| 14 | `createClientRequestId` | function | 183 |
+| 15 | `ensureClientRequestId` | function | 190 |
+| 16 | `serializePendingSyncPreview` | function | 196 |
+| 17 | `getPendingSyncState` | export function | 219 |
+| 18 | `retryPendingSyncNow` | export function | 247 |
+| 19 | `canRefreshOfflineDeviceSnapshot` | function | 251 |
+| 20 | `readOfflineDeviceSnapshotMeta` | function | 258 |
+| 21 | `writeOfflineDeviceSnapshotMeta` | function | 266 |
+| 22 | `runOfflineSnapshotStep` | function | 283 |
+| 23 | `refreshOfflineDeviceSnapshot` | export function | 295 |
+| 24 | `previousMeta` | const arrow | 303 |
+| 25 | `invalidateClientRuntimeState` | function | 348 |
+| 26 | `withExpectedUpdatedAt` | function | 364 |
+| 27 | `withSettingsExpectedUpdatedAt` | function | 378 |
+| 28 | `appendActorQuery` | function | 388 |
+| 29 | `fetchJsonWithTimeout` | function | 403 |
+| 30 | `mirrorReadResult` | function | 421 |
+| 31 | `routeMirrored` | function | 430 |
+| 32 | `shouldPersistLocalMirror` | function | 436 |
+| 33 | `purgeSensitiveLiveServerMirrors` | function | 440 |
+| 34 | `mirrorTable` | function | 451 |
+| 35 | `buildQueryCacheStorageKey` | function | 468 |
+| 36 | `readCachedQueryResult` | function | 472 |
+| 37 | `writeCachedQueryResult` | function | 486 |
+| 38 | `clearCachedQueryResults` | function | 500 |
+| 39 | `getNotificationSummaryFallback` | function | 543 |
+| 40 | `getDriveSyncStatusFallback` | function | 552 |
+| 41 | `readNotificationSummaryMissingUntil` | function | 560 |
+| 42 | `markNotificationSummaryMissing` | function | 572 |
+| 43 | `clearNotificationSummaryMissing` | function | 587 |
+| 44 | `readStorageNumber` | function | 596 |
+| 45 | `writeStorageNumber` | function | 612 |
+| 46 | `clearStorageNumber` | function | 623 |
+| 47 | `login` | export function | 635 |
+| 48 | `logout` | export function | 647 |
+| 49 | `resetPasswordWithOtp` | export function | 650 |
+| 50 | `requestPasswordResetEmail` | export function | 653 |
+| 51 | `completePasswordReset` | export function | 656 |
+| 52 | `updateSessionDuration` | export function | 659 |
+| 53 | `getVerificationCapabilities` | export function | 662 |
+| 54 | `getSystemConfig` | export function | 665 |
+| 55 | `getNotificationSummary` | export function | 668 |
+| 56 | `getSystemDebugLog` | export function | 710 |
+| 57 | `startGoogleOauth` | export function | 713 |
+| 58 | `completeGoogleOauth` | export function | 716 |
+| 59 | `unlinkGoogleOauth` | export function | 719 |
+| 60 | `getAppBootstrap` | export function | 722 |
+| 61 | `buildLocalBootstrap` | const arrow | 723 |
+| 62 | `getOrganizationBootstrap` | export function | 780 |
+| 63 | `searchOrganizations` | export function | 783 |
+| 64 | `getCurrentOrganization` | export function | 787 |
+| 65 | `getSettings` | export function | 792 |
+| 66 | `saveSettings` | export function | 813 |
+| 67 | `runSave` | const arrow | 814 |
+| 68 | `getCategories` | const arrow | 872 |
+| 69 | `createCategory` | const arrow | 873 |
+| 70 | `updateCategory` | const arrow | 878 |
+| 71 | `deleteCategory` | const arrow | 883 |
+| 72 | `getUnits` | const arrow | 890 |
+| 73 | `createUnit` | const arrow | 891 |
+| 74 | `updateUnit` | const arrow | 896 |
+| 75 | `deleteUnit` | const arrow | 901 |
+| 76 | `getBranches` | const arrow | 908 |
+| 77 | `getBranchSummary` | const arrow | 909 |
+| 78 | `updateBranch` | const arrow | 911 |
+| 79 | `deleteBranch` | const arrow | 915 |
+| 80 | `getBranchStock` | const arrow | 919 |
+| 81 | `getTransfers` | const arrow | 923 |
+| 82 | `getBranchStockIntegrity` | const arrow | 925 |
+| 83 | `getProducts` | const arrow | 929 |
+| 84 | `searchProducts` | const arrow | 930 |
+| 85 | `getProductsByIds` | const arrow | 940 |
+| 86 | `getProductFilters` | const arrow | 951 |
+| 87 | `getProductLookupUsage` | const arrow | 961 |
+| 88 | `replaceProductLookupValues` | const arrow | 969 |
+| 89 | `getCatalogMeta` | export function | 982 |
+| 90 | `getCatalogProducts` | export function | 990 |
+| 91 | `getPortalConfig` | export function | 998 |
+| 92 | `getPortalBootstrap` | export function | 1006 |
+| 93 | `getPortalCatalogMeta` | export function | 1014 |
+| 94 | `getPortalCatalogProducts` | export function | 1022 |
+| 95 | `searchPortalCatalogProducts` | export function | 1030 |
+| 96 | `lookupPortalMembership` | export function | 1042 |
+| 97 | `createPortalSubmission` | export function | 1052 |
+| 98 | `getPortalAiStatus` | export function | 1066 |
+| 99 | `askPortalAi` | export function | 1074 |
+| 100 | `getPortalSubmissionsForReview` | const arrow | 1088 |
+| 101 | `reviewPortalSubmission` | const arrow | 1090 |
+| 102 | `getAiProviders` | const arrow | 1093 |
+| 103 | `createAiProvider` | const arrow | 1095 |
+| 104 | `updateAiProvider` | const arrow | 1097 |
+| 105 | `deleteAiProvider` | const arrow | 1099 |
+| 106 | `testAiProvider` | const arrow | 1101 |
+| 107 | `getAiResponses` | const arrow | 1103 |
+| 108 | `createProduct` | export function | 1105 |
+| 109 | `updateProduct` | export function | 1119 |
+| 110 | `deleteProduct` | const arrow | 1132 |
+| 111 | `buildMultipartHeaders` | function | 1149 |
+| 112 | `apiFormPost` | function | 1159 |
+| 113 | `withImportDeviceInfo` | const arrow | 1178 |
+| 114 | `listImportJobs` | const arrow | 1181 |
+| 115 | `getImportJobReview` | const arrow | 1190 |
+| 116 | `updateImportJobDecisions` | const arrow | 1194 |
+| 117 | `startImportJob` | const arrow | 1197 |
+| 118 | `approveImportJob` | const arrow | 1199 |
+| 119 | `cancelImportJob` | const arrow | 1201 |
+| 120 | `retryImportJob` | const arrow | 1203 |
+| 121 | `deleteImportJob` | const arrow | 1205 |
+| 122 | `getImportQueueStatus` | const arrow | 1224 |
+| 123 | `downloadImportJobErrors` | export function | 1226 |
+| 124 | `uploadImportJobCsv` | export function | 1246 |
+| 125 | `uploadImportJobZip` | export function | 1257 |
+| 126 | `uploadImportJobImages` | export function | 1268 |
+| 127 | `getFiles` | export function | 1298 |
+| 128 | `uploadFileAsset` | export function | 1314 |
+| 129 | `finish` | const arrow | 1341 |
+| 130 | `abortListener` | const arrow | 1348 |
+| 131 | `deleteFileAsset` | export function | 1396 |
+| 132 | `uploadProductImage` | export function | 1408 |
+| 133 | `uploadUserAvatar` | export function | 1442 |
+| 134 | `openCSVDialog` | export function | 1481 |
+| 135 | `openImageDialog` | export function | 1501 |
+| 136 | `getImageDataUrl` | export function | 1509 |
+| 137 | `getActionHistory` | const arrow | 1521 |
+| 138 | `updateActionHistory` | const arrow | 1527 |
+| 139 | `getInventorySummary` | const arrow | 1533 |
+| 140 | `getInventoryStats` | const arrow | 1534 |
+| 141 | `searchInventoryProducts` | const arrow | 1538 |
+| 142 | `getInventoryMovements` | const arrow | 1548 |
+| 143 | `getInventoryReasons` | const arrow | 1573 |
+| 144 | `saveInventoryReasons` | const arrow | 1575 |
+| 145 | `buildOfflineSaleReceiptNumber` | function | 1578 |
+| 146 | `isRetryableOfflineSaleError` | function | 1584 |
+| 147 | `findQueuedSale` | function | 1593 |
+| 148 | `putOfflineSaleMirror` | function | 1600 |
+| 149 | `queueOfflineSale` | function | 1625 |
+| 150 | `queuedSaleBackoffMs` | function | 1683 |
+| 151 | `updateQueuedRow` | function | 1688 |
+| 152 | `completeQueuedSale` | function | 1697 |
+| 153 | `failQueuedSale` | function | 1720 |
+| 154 | `markQueuedSaleConflict` | function | 1733 |
+| 155 | `syncPendingSalesQueue` | function | 1755 |
+| 156 | `getRfidStatus` | const arrow | 1798 |
+| 157 | `searchRfidTags` | const arrow | 1804 |
+| 158 | `recordRfidSessionEvents` | const arrow | 1810 |
+| 159 | `applyRfidSession` | const arrow | 1814 |
+| 160 | `createSale` | export function | 1818 |
+| 161 | `getSales` | const arrow | 1830 |
+| 162 | `getDashboard` | const arrow | 1837 |
+| 163 | `getAnalytics` | const arrow | 1838 |
+| 164 | `getCustomers` | const arrow | 1847 |
+| 165 | `getCustomerPointSummaries` | const arrow | 1868 |
+| 166 | `createCustomer` | export function | 1872 |
+| 167 | `updateCustomer` | const arrow | 1876 |
+| 168 | `deleteCustomer` | const arrow | 1880 |
+| 169 | `downloadCustomerTemplate` | const arrow | 1885 |
+| 170 | `getSuppliers` | const arrow | 1894 |
+| 171 | `createSupplier` | export function | 1899 |
+| 172 | `updateSupplier` | const arrow | 1903 |
+| 173 | `deleteSupplier` | const arrow | 1907 |
+| 174 | `downloadSupplierTemplate` | const arrow | 1912 |
+| 175 | `getDeliveryContacts` | const arrow | 1921 |
+| 176 | `createDeliveryContact` | export function | 1926 |
+| 177 | `updateDeliveryContact` | const arrow | 1930 |
+| 178 | `deleteDeliveryContact` | const arrow | 1934 |
+| 179 | `getUsers` | const arrow | 1941 |
+| 180 | `updateUser` | const arrow | 1943 |
+| 181 | `getUserProfile` | const arrow | 1944 |
+| 182 | `getUserAuthMethods` | const arrow | 1945 |
+| 183 | `updateUserProfile` | const arrow | 1947 |
+| 184 | `disconnectUserAuthProvider` | const arrow | 1949 |
+| 185 | `changeUserPassword` | const arrow | 1951 |
+| 186 | `resetPassword` | const arrow | 1953 |
+| 187 | `getRoles` | const arrow | 1956 |
+| 188 | `updateRole` | const arrow | 1958 |
+| 189 | `deleteRole` | const arrow | 1959 |
+| 190 | `getCustomTables` | const arrow | 1962 |
+| 191 | `getCustomTableData` | const arrow | 1964 |
+| 192 | `insertCustomRow` | const arrow | 1965 |
+| 193 | `updateCustomRow` | const arrow | 1966 |
+| 194 | `deleteCustomRow` | const arrow | 1967 |
+| 195 | `getAuditLogs` | const arrow | 1970 |
+| 196 | `deleteAuditLogsRetention` | const arrow | 1996 |
+| 197 | `wait` | function | 2000 |
+| 198 | `getSystemJob` | export function | 2004 |
+| 199 | `cancelSystemJob` | export function | 2009 |
+| 200 | `pollSystemJob` | export function | 2014 |
+| 201 | `waitForSystemJob` | function | 2040 |
+| 202 | `getIntegrationDoctor` | export function | 2048 |
+| 203 | `queueBackupFolderExport` | export function | 2059 |
+| 204 | `exportBackupFolder` | export function | 2068 |
+| 205 | `queueBackupFolderRestore` | export function | 2072 |
+| 206 | `importBackupFolder` | export function | 2079 |
+| 207 | `getGoogleDriveSyncStatus` | const arrow | 2087 |
+| 208 | `saveGoogleDriveSyncPreferences` | const arrow | 2121 |
+| 209 | `startGoogleDriveSyncOauth` | const arrow | 2124 |
+| 210 | `disconnectGoogleDriveSync` | const arrow | 2127 |
+| 211 | `forgetGoogleDriveSyncCredentials` | const arrow | 2130 |
+| 212 | `queueGoogleDriveSyncNow` | const arrow | 2133 |
+| 213 | `syncGoogleDriveNow` | const arrow | 2136 |
+| 214 | `resetData` | export function | 2141 |
+| 215 | `factoryReset` | export function | 2148 |
+| 216 | `downloadImportTemplate` | export function | 2156 |
+| 217 | `openPath` | export function | 2203 |
+| 218 | `getReturns` | const arrow | 2212 |
+| 219 | `createReturn` | export function | 2218 |
+| 220 | `createSupplierReturn` | export function | 2224 |
+| 221 | `updateSaleStatus` | const arrow | 2233 |
+| 222 | `attachSaleCustomer` | const arrow | 2249 |
+| 223 | `getSalesExport` | const arrow | 2273 |
+| 224 | `updateReturn` | const arrow | 2277 |
+| 225 | `testSyncServer` | export function | 2301 |
+| 226 | `openFolderDialog` | export function | 2320 |
+| 227 | `getDataPath` | const arrow | 2331 |
+| 228 | `getScaleMigrationStatus` | const arrow | 2332 |
+| 229 | `prepareScaleMigration` | const arrow | 2333 |
+| 230 | `runScaleMigration` | const arrow | 2334 |
+| 231 | `setDataPath` | export function | 2335 |
+| 232 | `resetDataPath` | export function | 2340 |
+| 233 | `browseDir` | const arrow | 2345 |
 
-### 3.142 `frontend/src/api/websocket.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `hasStoredAuthSession` | function | 21 |
-| 2 | `isProtectedAdminHost` | function | 30 |
-| 3 | `shouldDebugWs` | function | 40 |
-| 4 | `logWs` | function | 50 |
-| 5 | `connectWS` | export function | 56 |
-| 6 | `disconnectWS` | export function | 147 |
-| 7 | `reconnectWS` | export function | 168 |
-| 8 | `scheduleReconnect` | function | 173 |
-| 9 | `isWSConnected` | export function | 192 |
-
-### 3.143 `frontend/src/App.jsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getChunkErrorMessage` | function | 97 |
-| 2 | `isChunkLoadError` | function | 102 |
-| 3 | `createChunkTimeoutError` | function | 111 |
-| 4 | `isRetryableImportError` | function | 117 |
-| 5 | `importWithTimeout` | function | 125 |
-| 6 | `clearRetryMarker` | function | 141 |
-| 7 | `buildChunkRecoveryUrl` | function | 148 |
-| 8 | `clearStaleShellCaches` | function | 159 |
-| 9 | `triggerChunkRecoveryReload` | function | 171 |
-| 10 | `reload` | const arrow | 178 |
-| 11 | `createChunkReloadStallError` | function | 188 |
-| 12 | `shouldRetryChunk` | function | 194 |
-| 13 | `lazyWithRetry` | function | 204 |
-| 14 | `getWarmupImporters` | function | 279 |
-| 15 | `shouldSkipBackgroundWarmup` | function | 291 |
-| 16 | `getDataWarmupLoaders` | function | 300 |
-| 17 | `createWarmupLoader` | function | 309 |
-| 18 | `runWarmupBatches` | function | 314 |
-| 19 | `getPageEntryWarmupLoaders` | function | 323 |
-| 20 | `useMountedPages` | function | 330 |
-| 21 | `syncProfile` | const arrow | 344 |
-| 22 | `useSyncErrorBanner` | function | 373 |
-| 23 | `refreshPendingSync` | const arrow | 383 |
-| 24 | `onSyncError` | const arrow | 388 |
-| 25 | `onTransientOutage` | const arrow | 393 |
-| 26 | `onSyncRecovered` | const arrow | 401 |
-| 27 | `onQueueChanged` | const arrow | 408 |
-| 28 | `onVaultLocked` | const arrow | 409 |
-| 29 | `onAppUpdate` | const arrow | 410 |
-| 30 | `onConflictReview` | const arrow | 411 |
-| 31 | `useVisibilityRecovery` | function | 458 |
-| 32 | `onVisible` | const arrow | 462 |
-| 33 | `onFocus` | const arrow | 472 |
-| 34 | `useChunkWarmup` | function | 490 |
-| 35 | `runWarmup` | const arrow | 503 |
-| 36 | `useDataWarmup` | function | 535 |
-| 37 | `runWarmup` | const arrow | 546 |
-| 38 | `usePageEntryWarmup` | function | 571 |
-| 39 | `run` | const arrow | 603 |
-| 40 | `PageErrorBoundary` | class | 626 |
-| 41 | `Notification` | function | 679 |
-| 42 | `SyncErrorBanner` | function | 692 |
-| 43 | `GlobalScrollControls` | function | 714 |
-| 44 | `scrollTo` | const arrow | 715 |
-| 45 | `formatSyncTimestamp` | function | 751 |
-| 46 | `OfflineModeBanner` | function | 763 |
-| 47 | `PageLoader` | function | 912 |
-| 48 | `NotificationCenterFallback` | function | 955 |
-| 49 | `PageSlot` | function | 969 |
-| 50 | `PublicCatalogView` | function | 995 |
-| 51 | `App` | export default function | 1005 |
-| 52 | `onQueued` | const arrow | 1069 |
-| 53 | `onSynced` | const arrow | 1082 |
-| 54 | `handleLocationChange` | const arrow | 1107 |
-| 55 | `loadFavicon` | function | 1153 |
-
-### 3.144 `frontend/src/app/appShellUtils.mjs`
+### 3.150 `frontend/src/api/websocket.js`
 
 - No top-level named symbols detected.
 
-### 3.145 `frontend/src/app/appShellUtils.ts`
+### 3.151 `frontend/src/api/websocket.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeAppPath` | export function | 60 |
-| 2 | `getAdminPageFromPath` | export function | 70 |
-| 3 | `getAdminPathForPage` | export function | 77 |
-| 4 | `isAdminAppPath` | export function | 81 |
-| 5 | `isPublicCatalogPath` | export function | 88 |
-| 6 | `updateMountedPages` | export function | 99 |
-| 7 | `getMountedPageLimit` | export function | 119 |
-| 8 | `shouldWarmPageEntries` | export function | 137 |
-| 9 | `getNotificationPrefix` | export function | 144 |
-| 10 | `getNotificationColor` | export function | 151 |
+| 1 | `clearReconnectTimer` | function | 21 |
+| 2 | `clearPingTimer` | function | 27 |
+| 3 | `hasStoredAuthSession` | function | 33 |
+| 4 | `isProtectedAdminHost` | function | 42 |
+| 5 | `shouldDebugWs` | function | 52 |
+| 6 | `logWs` | function | 62 |
+| 7 | `connectWS` | export function | 68 |
+| 8 | `disconnectWS` | export function | 158 |
+| 9 | `reconnectWS` | export function | 178 |
+| 10 | `scheduleReconnect` | function | 183 |
+| 11 | `isWSConnected` | export function | 202 |
 
-### 3.146 `frontend/src/app/publicErrorRecovery.mjs`
+### 3.152 `frontend/src/App.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `isPublicDomMutationError` | export function | 3 |
-| 2 | `shouldAttemptPublicDomRecovery` | export function | 8 |
-| 3 | `clearPublicDomRecoveryMarker` | export function | 19 |
+| 1 | `getChunkErrorMessage` | function | 100 |
+| 2 | `isChunkLoadError` | function | 105 |
+| 3 | `createChunkTimeoutError` | function | 114 |
+| 4 | `isRetryableImportError` | function | 120 |
+| 5 | `importWithTimeout` | function | 128 |
+| 6 | `clearRetryMarker` | function | 144 |
+| 7 | `buildChunkRecoveryUrl` | function | 151 |
+| 8 | `deleteStaleShellCaches` | function | 162 |
+| 9 | `clearStaleShellCaches` | function | 175 |
+| 10 | `triggerChunkRecoveryReload` | function | 185 |
+| 11 | `reload` | const arrow | 192 |
+| 12 | `createChunkReloadStallError` | function | 202 |
+| 13 | `shouldRetryChunk` | function | 208 |
+| 14 | `lazyWithRetry` | function | 218 |
+| 15 | `getWarmupImporters` | function | 293 |
+| 16 | `shouldSkipBackgroundWarmup` | function | 305 |
+| 17 | `shouldSkipIntentWarmup` | function | 314 |
+| 18 | `getIntentPageId` | function | 323 |
+| 19 | `scheduleIntentChunkLoad` | function | 327 |
+| 20 | `run` | const arrow | 334 |
+| 21 | `getDataWarmupLoaders` | function | 358 |
+| 22 | `createWarmupLoader` | function | 367 |
+| 23 | `runWarmupBatches` | function | 372 |
+| 24 | `getPageEntryWarmupLoaders` | function | 381 |
+| 25 | `useMountedPages` | function | 388 |
+| 26 | `syncProfile` | const arrow | 402 |
+| 27 | `useSyncErrorBanner` | function | 431 |
+| 28 | `refreshPendingSync` | const arrow | 441 |
+| 29 | `onSyncError` | const arrow | 446 |
+| 30 | `onTransientOutage` | const arrow | 451 |
+| 31 | `onSyncRecovered` | const arrow | 459 |
+| 32 | `onQueueChanged` | const arrow | 466 |
+| 33 | `onVaultLocked` | const arrow | 467 |
+| 34 | `onAppUpdate` | const arrow | 468 |
+| 35 | `onConflictReview` | const arrow | 469 |
+| 36 | `useVisibilityRecovery` | function | 516 |
+| 37 | `onVisible` | const arrow | 520 |
+| 38 | `onFocus` | const arrow | 530 |
+| 39 | `useChunkWarmup` | function | 548 |
+| 40 | `runWarmup` | const arrow | 561 |
+| 41 | `useIntentChunkWarmup` | function | 593 |
+| 42 | `warmIntentPage` | const arrow | 600 |
+| 43 | `useDataWarmup` | function | 620 |
+| 44 | `runWarmup` | const arrow | 631 |
+| 45 | `usePageEntryWarmup` | function | 656 |
+| 46 | `run` | const arrow | 688 |
+| 47 | `PageErrorBoundary` | class | 711 |
+| 48 | `Notification` | function | 764 |
+| 49 | `SyncErrorBanner` | function | 777 |
+| 50 | `GlobalScrollControls` | function | 799 |
+| 51 | `scrollTo` | const arrow | 800 |
+| 52 | `formatSyncTimestamp` | function | 836 |
+| 53 | `OfflineModeBanner` | function | 848 |
+| 54 | `PageLoader` | function | 997 |
+| 55 | `NotificationCenterFallback` | function | 1040 |
+| 56 | `PageSlot` | function | 1054 |
+| 57 | `PublicCatalogView` | function | 1080 |
+| 58 | `App` | export default function | 1090 |
+| 59 | `onQueued` | const arrow | 1155 |
+| 60 | `onSynced` | const arrow | 1168 |
+| 61 | `handleLocationChange` | const arrow | 1193 |
+| 62 | `loadFavicon` | function | 1239 |
 
-### 3.147 `frontend/src/AppContext.jsx`
+### 3.153 `frontend/src/app/appShellUtils.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeAppPath` | export function | 61 |
+| 2 | `getAdminPageFromPath` | export function | 71 |
+| 3 | `getAdminPathForPage` | export function | 78 |
+| 4 | `isAdminAppPath` | export function | 82 |
+| 5 | `isPublicCatalogPath` | export function | 89 |
+| 6 | `updateMountedPages` | export function | 100 |
+| 7 | `getMountedPageLimit` | export function | 120 |
+| 8 | `shouldWarmPageEntries` | export function | 138 |
+| 9 | `getNotificationPrefix` | export function | 145 |
+| 10 | `getNotificationColor` | export function | 152 |
+
+### 3.154 `frontend/src/app/publicErrorRecovery.mjs`
+
+- No top-level named symbols detected.
+
+### 3.155 `frontend/src/app/publicErrorRecovery.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getRecoveryStorage` | function | 6 |
+| 2 | `isPublicDomMutationError` | export function | 11 |
+| 3 | `shouldAttemptPublicDomRecovery` | export function | 16 |
+| 4 | `clearPublicDomRecoveryMarker` | export function | 32 |
+
+### 3.156 `frontend/src/AppContext.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3003,11 +3370,11 @@ Code files scanned: **508**
 | 36 | `clearCallbackUrl` | const arrow | 1215 |
 | 37 | `clearPendingLink` | const arrow | 1219 |
 | 38 | `run` | const arrow | 1223 |
-| 39 | `useApp` | const arrow | 1585 |
-| 40 | `useSync` | const arrow | 1586 |
-| 41 | `useT` | const arrow | 1589 |
+| 39 | `useApp` | const arrow | 1590 |
+| 40 | `useSync` | const arrow | 1591 |
+| 41 | `useT` | const arrow | 1594 |
 
-### 3.148 `frontend/src/components/auth/Login.jsx`
+### 3.157 `frontend/src/components/auth/Login.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3035,22 +3402,23 @@ Code files scanned: **508**
 | 22 | `handleStartOauth` | const arrow | 579 |
 | 23 | `closeAuxMode` | const arrow | 627 |
 
-### 3.149 `frontend/src/components/branches/Branches.jsx`
+### 3.158 `frontend/src/components/branches/Branches.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `formatTransferDate` | function | 39 |
-| 2 | `Branches` | export default function | 56 |
-| 3 | `promise` | const arrow | 101 |
-| 4 | `loadBranchStock` | const arrow | 231 |
-| 5 | `loadMoreBranchStock` | const arrow | 252 |
-| 6 | `handleSaveBranch` | const arrow | 278 |
-| 7 | `handleDelete` | const arrow | 346 |
-| 8 | `handleBulkDelete` | const arrow | 394 |
-| 9 | `toggleSelect` | const arrow | 480 |
-| 10 | `toggleSelectAll` | const arrow | 489 |
+| 1 | `BranchStatTile` | function | 36 |
+| 2 | `formatTransferDate` | function | 53 |
+| 3 | `Branches` | export default function | 70 |
+| 4 | `promise` | const arrow | 116 |
+| 5 | `loadBranchStock` | const arrow | 249 |
+| 6 | `loadMoreBranchStock` | const arrow | 270 |
+| 7 | `handleSaveBranch` | const arrow | 296 |
+| 8 | `handleDelete` | const arrow | 364 |
+| 9 | `handleBulkDelete` | const arrow | 412 |
+| 10 | `toggleSelect` | const arrow | 498 |
+| 11 | `toggleSelectAll` | const arrow | 507 |
 
-### 3.150 `frontend/src/components/branches/BranchForm.jsx`
+### 3.159 `frontend/src/components/branches/BranchForm.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3058,7 +3426,7 @@ Code files scanned: **508**
 | 2 | `set` | const arrow | 33 |
 | 3 | `handleSave` | const arrow | 45 |
 
-### 3.151 `frontend/src/components/branches/TransferModal.jsx`
+### 3.160 `frontend/src/components/branches/TransferModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3067,26 +3435,26 @@ Code files scanned: **508**
 | 3 | `loadStock` | function | 79 |
 | 4 | `handleTransfer` | const arrow | 125 |
 
-### 3.152 `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+### 3.161 `frontend/src/components/catalog/CatalogEditorSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `CatalogEditorSurface` | export default function | 7 |
 
-### 3.153 `frontend/src/components/catalog/CatalogImageField.jsx`
+### 3.162 `frontend/src/components/catalog/CatalogImageField.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `CatalogImageField` | export default function | 4 |
 
-### 3.154 `frontend/src/components/catalog/CatalogPage.jsx`
+### 3.163 `frontend/src/components/catalog/CatalogPage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `loadCatalogEditorSurface` | const arrow | 92 |
-| 2 | `loadCatalogSecondaryTabs` | const arrow | 93 |
-| 3 | `loadCatalogProductsSection` | const arrow | 94 |
-| 4 | `loadCatalogPreviewSurface` | const arrow | 95 |
+| 1 | `loadCatalogEditorSurface` | const arrow | 90 |
+| 2 | `loadCatalogSecondaryTabs` | const arrow | 91 |
+| 3 | `loadCatalogProductsSection` | const arrow | 92 |
+| 4 | `loadCatalogPreviewSurface` | const arrow | 93 |
 | 5 | `getAboutBlockLabel` | function | 115 |
 | 6 | `withAssetVersion` | function | 121 |
 | 7 | `sanitizePortalMediaValue` | function | 131 |
@@ -3121,97 +3489,99 @@ Code files scanned: **508**
 | 36 | `formatDateTime` | function | 665 |
 | 37 | `formatPortalPrice` | function | 672 |
 | 38 | `ImageField` | function | 685 |
-| 39 | `pickImageAsDataUrl` | function | 775 |
-| 40 | `pickMultipleImagesAsDataUrls` | function | 794 |
-| 41 | `replaceVars` | function | 815 |
-| 42 | `getPortalResourceText` | function | 819 |
-| 43 | `isFirstPartyTranslateTarget` | function | 865 |
-| 44 | `normalizePortalTranslateChoice` | function | 872 |
-| 45 | `isDocumentVisible` | function | 880 |
-| 46 | `sleep` | function | 885 |
-| 47 | `CatalogPage` | export default function | 991 |
-| 48 | `warmPublicProductsPanel` | const arrow | 1105 |
-| 49 | `warmPublicSecondaryTabs` | const arrow | 1109 |
-| 50 | `copy` | const arrow | 1188 |
-| 51 | `resolveVisibleTab` | const arrow | 1208 |
-| 52 | `getMediaUploadState` | const arrow | 1256 |
-| 53 | `updateMediaUploadState` | const arrow | 1257 |
-| 54 | `forgetMediaUploadState` | const arrow | 1264 |
-| 55 | `loadAssistantStatus` | function | 1311 |
-| 56 | `openProductGallery` | function | 1333 |
-| 57 | `changeTranslateTarget` | function | 1346 |
-| 58 | `isPortalLoadCurrent` | function | 1394 |
-| 59 | `loadPortalEditorData` | function | 1398 |
-| 60 | `refreshPortalView` | function | 1435 |
-| 61 | `loadPortal` | function | 1464 |
-| 62 | `ensureLink` | const arrow | 1720 |
-| 63 | `updateVisibility` | const arrow | 1813 |
-| 64 | `handleScroll` | const arrow | 1843 |
-| 65 | `initWidget` | const arrow | 1888 |
-| 66 | `waitForWidget` | const arrow | 1906 |
-| 67 | `toggleFilterValue` | function | 2030 |
-| 68 | `clearPortalFilters` | function | 2038 |
-| 69 | `setDraft` | function | 2046 |
-| 70 | `toggleRecommendedProduct` | function | 2051 |
-| 71 | `openPortalImage` | function | 2060 |
-| 72 | `setAboutBlocksDraft` | function | 2071 |
-| 73 | `setPromoItemsDraft` | function | 2075 |
-| 74 | `getPortalMediaValue` | function | 2079 |
-| 75 | `setPortalMediaValue` | function | 2093 |
-| 76 | `clearPortalUploadPreview` | function | 2107 |
-| 77 | `clearPortalMediaTarget` | function | 2113 |
-| 78 | `uploadPortalMedia` | function | 2124 |
-| 79 | `cancelPortalMediaUpload` | function | 2194 |
-| 80 | `updateAboutBlock` | function | 2200 |
-| 81 | `updatePromoItem` | function | 2206 |
-| 82 | `addAboutBlock` | function | 2212 |
-| 83 | `addPromoItem` | function | 2216 |
-| 84 | `moveAboutBlockBefore` | function | 2220 |
-| 85 | `removeAboutBlock` | function | 2232 |
-| 86 | `movePromoItemBefore` | function | 2243 |
-| 87 | `removePromoItem` | function | 2255 |
-| 88 | `setFaqDraft` | function | 2266 |
-| 89 | `addFaqItem` | function | 2270 |
-| 90 | `mergeFaqStarterItems` | function | 2281 |
-| 91 | `addFaqStarterSet` | function | 2294 |
-| 92 | `addAiFaqStarterSet` | function | 2298 |
-| 93 | `updateFaqItem` | function | 2302 |
-| 94 | `removeFaqItem` | function | 2308 |
-| 95 | `clearAssistantState` | function | 2312 |
-| 96 | `uploadDraftImage` | function | 2327 |
-| 97 | `uploadAboutBlockMedia` | function | 2331 |
-| 98 | `uploadPromoItemMedia` | function | 2337 |
-| 99 | `openFilePicker` | function | 2341 |
-| 100 | `handleFilePickerSelect` | function | 2345 |
-| 101 | `savePortalDraft` | function | 2371 |
-| 102 | `askAssistant` | function | 2563 |
-| 103 | `refreshMembershipData` | function | 2608 |
-| 104 | `handleMembershipLookup` | function | 2650 |
-| 105 | `addSubmissionImages` | function | 2663 |
-| 106 | `handleSubmissionPaste` | function | 2673 |
-| 107 | `handleSubmitShareProof` | function | 2689 |
-| 108 | `handleReviewSubmission` | function | 2736 |
-| 109 | `renderCatalogSection` | function | 2899 |
-| 110 | `handleUploadSubmissionImages` | const arrow | 2925 |
-| 111 | `renderSecondaryTabPanel` | function | 2981 |
-| 112 | `renderSecondaryTabSection` | function | 2993 |
-| 113 | `scrollPublicPortal` | const arrow | 3134 |
+| 39 | `readImageFileAsDataUrl` | function | 774 |
+| 40 | `readImageFilesAsDataUrls` | function | 783 |
+| 41 | `pickImageAsDataUrl` | function | 803 |
+| 42 | `pickMultipleImagesAsDataUrls` | function | 816 |
+| 43 | `replaceVars` | function | 829 |
+| 44 | `getPortalResourceText` | function | 833 |
+| 45 | `isFirstPartyTranslateTarget` | function | 871 |
+| 46 | `normalizePortalTranslateChoice` | function | 878 |
+| 47 | `isDocumentVisible` | function | 886 |
+| 48 | `sleep` | function | 891 |
+| 49 | `CatalogPage` | export default function | 997 |
+| 50 | `warmPublicProductsPanel` | const arrow | 1111 |
+| 51 | `warmPublicSecondaryTabs` | const arrow | 1115 |
+| 52 | `copy` | const arrow | 1194 |
+| 53 | `resolveVisibleTab` | const arrow | 1214 |
+| 54 | `getMediaUploadState` | const arrow | 1262 |
+| 55 | `updateMediaUploadState` | const arrow | 1263 |
+| 56 | `forgetMediaUploadState` | const arrow | 1270 |
+| 57 | `loadAssistantStatus` | function | 1317 |
+| 58 | `openProductGallery` | function | 1339 |
+| 59 | `changeTranslateTarget` | function | 1352 |
+| 60 | `isPortalLoadCurrent` | function | 1400 |
+| 61 | `loadPortalEditorData` | function | 1404 |
+| 62 | `refreshPortalView` | function | 1441 |
+| 63 | `loadPortal` | function | 1470 |
+| 64 | `ensureLink` | const arrow | 1726 |
+| 65 | `updateVisibility` | const arrow | 1819 |
+| 66 | `handleScroll` | const arrow | 1849 |
+| 67 | `initWidget` | const arrow | 1894 |
+| 68 | `waitForWidget` | const arrow | 1912 |
+| 69 | `toggleFilterValue` | function | 2036 |
+| 70 | `clearPortalFilters` | function | 2044 |
+| 71 | `setDraft` | function | 2052 |
+| 72 | `toggleRecommendedProduct` | function | 2057 |
+| 73 | `openPortalImage` | function | 2066 |
+| 74 | `setAboutBlocksDraft` | function | 2077 |
+| 75 | `setPromoItemsDraft` | function | 2081 |
+| 76 | `getPortalMediaValue` | function | 2085 |
+| 77 | `setPortalMediaValue` | function | 2099 |
+| 78 | `clearPortalUploadPreview` | function | 2113 |
+| 79 | `clearPortalMediaTarget` | function | 2119 |
+| 80 | `uploadPortalMedia` | function | 2130 |
+| 81 | `cancelPortalMediaUpload` | function | 2200 |
+| 82 | `updateAboutBlock` | function | 2206 |
+| 83 | `updatePromoItem` | function | 2212 |
+| 84 | `addAboutBlock` | function | 2218 |
+| 85 | `addPromoItem` | function | 2222 |
+| 86 | `moveAboutBlockBefore` | function | 2226 |
+| 87 | `removeAboutBlock` | function | 2238 |
+| 88 | `movePromoItemBefore` | function | 2249 |
+| 89 | `removePromoItem` | function | 2261 |
+| 90 | `setFaqDraft` | function | 2272 |
+| 91 | `addFaqItem` | function | 2276 |
+| 92 | `mergeFaqStarterItems` | function | 2287 |
+| 93 | `addFaqStarterSet` | function | 2300 |
+| 94 | `addAiFaqStarterSet` | function | 2304 |
+| 95 | `updateFaqItem` | function | 2308 |
+| 96 | `removeFaqItem` | function | 2314 |
+| 97 | `clearAssistantState` | function | 2318 |
+| 98 | `uploadDraftImage` | function | 2333 |
+| 99 | `uploadAboutBlockMedia` | function | 2337 |
+| 100 | `uploadPromoItemMedia` | function | 2343 |
+| 101 | `openFilePicker` | function | 2347 |
+| 102 | `handleFilePickerSelect` | function | 2351 |
+| 103 | `savePortalDraft` | function | 2377 |
+| 104 | `askAssistant` | function | 2569 |
+| 105 | `refreshMembershipData` | function | 2614 |
+| 106 | `handleMembershipLookup` | function | 2656 |
+| 107 | `addSubmissionImages` | function | 2669 |
+| 108 | `handleSubmissionPaste` | function | 2679 |
+| 109 | `handleSubmitShareProof` | function | 2695 |
+| 110 | `handleReviewSubmission` | function | 2742 |
+| 111 | `renderCatalogSection` | function | 2905 |
+| 112 | `handleUploadSubmissionImages` | const arrow | 2931 |
+| 113 | `renderSecondaryTabPanel` | function | 2987 |
+| 114 | `renderSecondaryTabSection` | function | 2999 |
+| 115 | `scrollPublicPortal` | const arrow | 3128 |
 
-### 3.155 `frontend/src/components/catalog/CatalogPageContext.jsx`
+### 3.164 `frontend/src/components/catalog/CatalogPageContext.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `CatalogPageProvider` | export function | 5 |
 | 2 | `useCatalogPageContext` | export function | 13 |
 
-### 3.156 `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+### 3.165 `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `CatalogPreviewSurface` | export default function | 9 |
 | 2 | `handlePortalTabClick` | const arrow | 47 |
 
-### 3.157 `frontend/src/components/catalog/CatalogProductsSection.jsx`
+### 3.166 `frontend/src/components/catalog/CatalogProductsSection.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3220,7 +3590,7 @@ Code files scanned: **508**
 | 3 | `getProductInitial` | function | 27 |
 | 4 | `CatalogProductsSection` | export default function | 35 |
 
-### 3.158 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
+### 3.167 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3231,7 +3601,7 @@ Code files scanned: **508**
 | 5 | `CatalogAiSection` | function | 644 |
 | 6 | `CatalogSecondaryTabs` | export default function | 830 |
 
-### 3.159 `frontend/src/components/catalog/catalogUi.jsx`
+### 3.168 `frontend/src/components/catalog/catalogUi.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3240,11 +3610,11 @@ Code files scanned: **508**
 | 3 | `SummaryTile` | export function | 26 |
 | 4 | `StatusPill` | export function | 50 |
 
-### 3.160 `frontend/src/components/catalog/portalCatalogDisplay.mjs`
+### 3.169 `frontend/src/components/catalog/portalCatalogDisplay.mjs`
 
 - No top-level named symbols detected.
 
-### 3.161 `frontend/src/components/catalog/portalCatalogDisplay.ts`
+### 3.170 `frontend/src/components/catalog/portalCatalogDisplay.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3258,11 +3628,11 @@ Code files scanned: **508**
 | 8 | `replaceRankVars` | function | 173 |
 | 9 | `normalizeRankBadgeLabel` | function | 177 |
 
-### 3.162 `frontend/src/components/catalog/portalContentI18n.mjs`
+### 3.171 `frontend/src/components/catalog/portalContentI18n.mjs`
 
 - No top-level named symbols detected.
 
-### 3.163 `frontend/src/components/catalog/portalContentI18n.ts`
+### 3.172 `frontend/src/components/catalog/portalContentI18n.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3285,11 +3655,11 @@ Code files scanned: **508**
 | 17 | `localizePortalConfig` | export function | 737 |
 | 18 | `getProductTranslationBlock` | function | 762 |
 
-### 3.164 `frontend/src/components/catalog/portalEditorUtils.mjs`
+### 3.173 `frontend/src/components/catalog/portalEditorUtils.mjs`
 
 - No top-level named symbols detected.
 
-### 3.165 `frontend/src/components/catalog/portalEditorUtils.ts`
+### 3.174 `frontend/src/components/catalog/portalEditorUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3304,11 +3674,11 @@ Code files scanned: **508**
 | 9 | `extractGoogleMapsEmbedUrl` | export function | 154 |
 | 10 | `normalizeGoogleMapsEmbed` | export function | 162 |
 
-### 3.166 `frontend/src/components/catalog/portalLanguagePacks.mjs`
+### 3.175 `frontend/src/components/catalog/portalLanguagePacks.mjs`
 
 - No top-level named symbols detected.
 
-### 3.167 `frontend/src/components/catalog/portalLanguagePacks.ts`
+### 3.176 `frontend/src/components/catalog/portalLanguagePacks.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3316,7 +3686,11 @@ Code files scanned: **508**
 | 2 | `isFirstPartyPortalLanguage` | export function | 1339 |
 | 3 | `getPortalLanguageText` | export function | 1343 |
 
-### 3.168 `frontend/src/components/catalog/portalTranslateController.mjs`
+### 3.177 `frontend/src/components/catalog/portalTranslateController.mjs`
+
+- No top-level named symbols detected.
+
+### 3.178 `frontend/src/components/catalog/portalTranslateController.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3338,7 +3712,7 @@ Code files scanned: **508**
 | 16 | `readStoredTranslateTarget` | export function | 197 |
 | 17 | `requestPortalTranslateReload` | export function | 214 |
 
-### 3.169 `frontend/src/components/contacts/ContactImportModal.jsx`
+### 3.179 `frontend/src/components/contacts/ContactImportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3353,29 +3727,29 @@ Code files scanned: **508**
 | 9 | `applyContactRulePreset` | const arrow | 141 |
 | 10 | `handleImport` | const arrow | 151 |
 
-### 3.170 `frontend/src/components/contacts/contactImportParser.mjs`
+### 3.180 `frontend/src/components/contacts/contactImportParser.mjs`
 
 - No top-level named symbols detected.
 
-### 3.171 `frontend/src/components/contacts/contactImportParser.ts`
+### 3.181 `frontend/src/components/contacts/contactImportParser.ts`
 
 - No top-level named symbols detected.
 
-### 3.172 `frontend/src/components/contacts/contactImportWorker.mjs`
+### 3.182 `frontend/src/components/contacts/contactImportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.173 `frontend/src/components/contacts/contactImportWorker.ts`
+### 3.183 `frontend/src/components/contacts/contactImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.174 `frontend/src/components/contacts/contactOptionUtils.js`
+### 3.184 `frontend/src/components/contacts/contactOptionUtils.js`
 
 - No top-level named symbols detected.
 
-### 3.175 `frontend/src/components/contacts/contactOptionUtils.ts`
+### 3.185 `frontend/src/components/contacts/contactOptionUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3390,24 +3764,25 @@ Code files scanned: **508**
 | 9 | `parseContactOptionsFromImportRow` | export function | 110 |
 | 10 | `getPrimaryContactOption` | export function | 126 |
 
-### 3.176 `frontend/src/components/contacts/Contacts.jsx`
+### 3.186 `frontend/src/components/contacts/Contacts.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `TABS` | const arrow | 16 |
-| 2 | `loadSuppliersTab` | const arrow | 23 |
-| 3 | `loadDeliveryTab` | const arrow | 24 |
-| 4 | `ContactTabFallback` | function | 28 |
-| 5 | `ImportTypePicker` | function | 77 |
-| 6 | `T` | const arrow | 78 |
-| 7 | `Contacts` | export default function | 117 |
-| 8 | `prefetchTab` | const arrow | 125 |
-| 9 | `handleExportAll` | const arrow | 133 |
-| 10 | `openImportPicker` | const arrow | 220 |
-| 11 | `handleTypeSelected` | const arrow | 222 |
-| 12 | `handleImportDone` | const arrow | 227 |
+| 1 | `normalizeContactExportRows` | function | 16 |
+| 2 | `TABS` | const arrow | 22 |
+| 3 | `loadSuppliersTab` | const arrow | 29 |
+| 4 | `loadDeliveryTab` | const arrow | 30 |
+| 5 | `ContactTabFallback` | function | 34 |
+| 6 | `ImportTypePicker` | function | 83 |
+| 7 | `T` | const arrow | 84 |
+| 8 | `Contacts` | export default function | 123 |
+| 9 | `prefetchTab` | const arrow | 131 |
+| 10 | `handleExportAll` | const arrow | 139 |
+| 11 | `openImportPicker` | const arrow | 226 |
+| 12 | `handleTypeSelected` | const arrow | 228 |
+| 13 | `handleImportDone` | const arrow | 233 |
 
-### 3.177 `frontend/src/components/contacts/CustomerFormModal.jsx`
+### 3.187 `frontend/src/components/contacts/CustomerFormModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3423,17 +3798,17 @@ Code files scanned: **508**
 | 10 | `updateOption` | const arrow | 83 |
 | 11 | `handleSubmit` | const arrow | 84 |
 
-### 3.178 `frontend/src/components/contacts/customerMembershipNumber.js`
+### 3.188 `frontend/src/components/contacts/customerMembershipNumber.js`
 
 - No top-level named symbols detected.
 
-### 3.179 `frontend/src/components/contacts/customerMembershipNumber.ts`
+### 3.189 `frontend/src/components/contacts/customerMembershipNumber.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `generateCustomerMembershipNumber` | export function | 4 |
 
-### 3.180 `frontend/src/components/contacts/CustomersTab.jsx`
+### 3.190 `frontend/src/components/contacts/CustomersTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3450,7 +3825,7 @@ Code files scanned: **508**
 | 11 | `handleDelete` | const arrow | 408 |
 | 12 | `handleBulkDelete` | const arrow | 447 |
 
-### 3.181 `frontend/src/components/contacts/DeliveryTab.jsx`
+### 3.191 `frontend/src/components/contacts/DeliveryTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3478,19 +3853,21 @@ Code files scanned: **508**
 | 22 | `handleDelete` | const arrow | 492 |
 | 23 | `handleBulkDelete` | const arrow | 529 |
 
-### 3.182 `frontend/src/components/contacts/shared.jsx`
+### 3.192 `frontend/src/components/contacts/shared.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `useContactSelection` | export function | 14 |
 | 2 | `toggleOne` | const arrow | 30 |
 | 3 | `clearSelection` | const arrow | 41 |
-| 4 | `ThreeDotMenu` | export function | 68 |
-| 5 | `menuContent` | const arrow | 77 |
-| 6 | `DetailModal` | export function | 140 |
-| 7 | `ContactTable` | export function | 171 |
+| 4 | `countActiveFlags` | export function | 64 |
+| 5 | `buildSelectedSnapshots` | export function | 72 |
+| 6 | `ThreeDotMenu` | export function | 90 |
+| 7 | `menuContent` | const arrow | 99 |
+| 8 | `DetailModal` | export function | 162 |
+| 9 | `ContactTable` | export function | 193 |
 
-### 3.183 `frontend/src/components/contacts/SuppliersTab.jsx`
+### 3.193 `frontend/src/components/contacts/SuppliersTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3511,7 +3888,7 @@ Code files scanned: **508**
 | 15 | `handleDelete` | const arrow | 463 |
 | 16 | `handleBulkDelete` | const arrow | 502 |
 
-### 3.184 `frontend/src/components/custom-tables/CustomTables.jsx`
+### 3.194 `frontend/src/components/custom-tables/CustomTables.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3527,7 +3904,7 @@ Code files scanned: **508**
 | 10 | `openAddRow` | const arrow | 369 |
 | 11 | `openEditRow` | const arrow | 376 |
 
-### 3.185 `frontend/src/components/dashboard/charts/BarChart.jsx`
+### 3.195 `frontend/src/components/dashboard/charts/BarChart.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3537,21 +3914,21 @@ Code files scanned: **508**
 | 4 | `updateWidth` | const arrow | 44 |
 | 5 | `yPx` | function | 79 |
 
-### 3.186 `frontend/src/components/dashboard/charts/DonutChart.jsx`
+### 3.196 `frontend/src/components/dashboard/charts/DonutChart.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `DonutChart` | export default function | 14 |
 
-### 3.187 `frontend/src/components/dashboard/charts/index.js`
+### 3.197 `frontend/src/components/dashboard/charts/index.js`
 
 - No top-level named symbols detected.
 
-### 3.188 `frontend/src/components/dashboard/charts/index.ts`
+### 3.198 `frontend/src/components/dashboard/charts/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.189 `frontend/src/components/dashboard/charts/LineChart.jsx`
+### 3.199 `frontend/src/components/dashboard/charts/LineChart.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3563,13 +3940,13 @@ Code files scanned: **508**
 | 6 | `yPx` | function | 84 |
 | 7 | `handleMouseMove` | const arrow | 92 |
 
-### 3.190 `frontend/src/components/dashboard/charts/NoData.jsx`
+### 3.200 `frontend/src/components/dashboard/charts/NoData.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `NoData` | export default function | 7 |
 
-### 3.191 `frontend/src/components/dashboard/Dashboard.jsx`
+### 3.201 `frontend/src/components/dashboard/Dashboard.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3586,18 +3963,17 @@ Code files scanned: **508**
 | 11 | `normalizeDashboardAnalyticsPayload` | function | 166 |
 | 12 | `Dashboard` | export default function | 185 |
 | 13 | `translateOr` | const arrow | 190 |
-| 14 | `calcTrend` | const arrow | 420 |
-| 15 | `rangeLabel` | const arrow | 464 |
-| 16 | `periodShort` | const arrow | 470 |
-| 17 | `buildExportAll` | const arrow | 857 |
+| 14 | `calcTrend` | const arrow | 436 |
+| 15 | `rangeLabel` | const arrow | 480 |
+| 16 | `periodShort` | const arrow | 486 |
 
-### 3.192 `frontend/src/components/dashboard/MiniStat.jsx`
+### 3.202 `frontend/src/components/dashboard/MiniStat.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `MiniStat` | export default function | 2 |
 
-### 3.193 `frontend/src/components/files/FilePickerModal.jsx`
+### 3.203 `frontend/src/components/files/FilePickerModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3608,7 +3984,7 @@ Code files scanned: **508**
 | 5 | `handleUpload` | function | 112 |
 | 6 | `handleDelete` | function | 154 |
 
-### 3.194 `frontend/src/components/files/FilesPage.jsx`
+### 3.204 `frontend/src/components/files/FilesPage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3638,53 +4014,58 @@ Code files scanned: **508**
 | 24 | `removeProvider` | function | 715 |
 | 25 | `tabButton` | const arrow | 736 |
 
-### 3.195 `frontend/src/components/files/FilesProvidersTab.jsx`
+### 3.205 `frontend/src/components/files/FilesProvidersTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ProviderStatus` | function | 10 |
 | 2 | `FilesProvidersTab` | export default function | 21 |
 
-### 3.196 `frontend/src/components/files/FilesResponsesTab.jsx`
+### 3.206 `frontend/src/components/files/FilesResponsesTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `FilesResponsesTab` | export default function | 11 |
 
-### 3.197 `frontend/src/components/inventory/DualMoney.jsx`
+### 3.207 `frontend/src/components/inventory/DualMoney.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `DualMoney` | function | 5 |
 
-### 3.198 `frontend/src/components/inventory/Inventory.jsx`
+### 3.208 `frontend/src/components/inventory/Inventory.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `reuseSetWhenUnchanged` | function | 52 |
-| 2 | `limitInventorySectionsForMobile` | function | 63 |
-| 3 | `priceCsv` | function | 90 |
-| 4 | `parseInventoryTimestamp` | function | 94 |
-| 5 | `InventoryDiscountBadge` | function | 108 |
-| 6 | `InventoryBatchPreview` | function | 119 |
-| 7 | `label` | const arrow | 121 |
-| 8 | `loadInventoryExportTools` | function | 176 |
-| 9 | `Inventory` | export default function | 191 |
-| 10 | `promise` | const arrow | 411 |
-| 11 | `handleAdjust` | const arrow | 763 |
-| 12 | `openAdjust` | const arrow | 841 |
-| 13 | `openMove` | const arrow | 848 |
-| 14 | `openTransfer` | const arrow | 871 |
-| 15 | `handleMoveStock` | const arrow | 928 |
-| 16 | `handleTransferStock` | const arrow | 1001 |
-| 17 | `matchesSearch` | const arrow | 1088 |
-| 18 | `productHay` | const arrow | 1095 |
-| 19 | `movHay` | const arrow | 1098 |
-| 20 | `syncViewport` | const arrow | 1146 |
-| 21 | `statsValue` | const arrow | 1743 |
-| 22 | `selectInventorySection` | const arrow | 2964 |
+| 2 | `normalizeFiniteIdsFrom` | function | 61 |
+| 3 | `normalizeFiniteIds` | function | 69 |
+| 4 | `countActiveFlags` | function | 73 |
+| 5 | `countSelectedIds` | function | 81 |
+| 6 | `renderDestinationProductOptions` | function | 89 |
+| 7 | `limitInventorySectionsForMobile` | function | 100 |
+| 8 | `priceCsv` | function | 127 |
+| 9 | `parseInventoryTimestamp` | function | 131 |
+| 10 | `InventoryDiscountBadge` | function | 145 |
+| 11 | `InventoryBatchPreview` | function | 156 |
+| 12 | `label` | const arrow | 158 |
+| 13 | `loadInventoryExportTools` | function | 213 |
+| 14 | `Inventory` | export default function | 228 |
+| 15 | `promise` | const arrow | 471 |
+| 16 | `handleAdjust` | const arrow | 836 |
+| 17 | `openAdjust` | const arrow | 917 |
+| 18 | `openMove` | const arrow | 924 |
+| 19 | `openTransfer` | const arrow | 947 |
+| 20 | `handleMoveStock` | const arrow | 1002 |
+| 21 | `handleTransferStock` | const arrow | 1075 |
+| 22 | `matchesSearch` | const arrow | 1166 |
+| 23 | `productHay` | const arrow | 1173 |
+| 24 | `movHay` | const arrow | 1176 |
+| 25 | `syncViewport` | const arrow | 1232 |
+| 26 | `statsValue` | const arrow | 1851 |
+| 27 | `selectInventorySection` | const arrow | 3072 |
 
-### 3.199 `frontend/src/components/inventory/InventoryImportModal.jsx`
+### 3.209 `frontend/src/components/inventory/InventoryImportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3699,23 +4080,23 @@ Code files scanned: **508**
 | 9 | `handleDownloadTemplate` | const arrow | 110 |
 | 10 | `handleImport` | const arrow | 114 |
 
-### 3.200 `frontend/src/components/inventory/inventoryImportWorker.mjs`
+### 3.210 `frontend/src/components/inventory/inventoryImportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.201 `frontend/src/components/inventory/inventoryImportWorker.ts`
+### 3.211 `frontend/src/components/inventory/inventoryImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.202 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+### 3.212 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `InventoryMovementsSurface` | export default function | 6 |
 
-### 3.203 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+### 3.213 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3723,17 +4104,17 @@ Code files scanned: **508**
 | 2 | `renderDesktopTableHead` | const arrow | 45 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 67 |
 
-### 3.204 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
+### 3.214 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `InventoryRfidSurface` | export default function | 1 |
 
-### 3.205 `frontend/src/components/inventory/movementGroups.js`
+### 3.215 `frontend/src/components/inventory/movementGroups.js`
 
 - No top-level named symbols detected.
 
-### 3.206 `frontend/src/components/inventory/movementGroups.ts`
+### 3.216 `frontend/src/components/inventory/movementGroups.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3753,14 +4134,14 @@ Code files scanned: **508**
 | 14 | `getMovementGroupPage` | export function | 257 |
 | 15 | `movementGroupHaystack` | export function | 273 |
 
-### 3.207 `frontend/src/components/inventory/ProductDetailModal.jsx`
+### 3.217 `frontend/src/components/inventory/ProductDetailModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ProductDetailModal` | export default function | 6 |
 | 2 | `T` | const arrow | 7 |
 
-### 3.208 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+### 3.218 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3774,34 +4155,36 @@ Code files scanned: **508**
 | 8 | `handleSave` | function | 235 |
 | 9 | `handleLookup` | function | 259 |
 
-### 3.209 `frontend/src/components/navigation/Sidebar.jsx`
+### 3.219 `frontend/src/components/navigation/Sidebar.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getFallbackLabel` | function | 49 |
-| 2 | `getNavLabel` | function | 57 |
-| 3 | `isDarkColor` | function | 73 |
-| 4 | `withAlpha` | function | 83 |
-| 5 | `mergeStyles` | function | 89 |
-| 6 | `Sidebar` | export default function | 93 |
+| 1 | `getFallbackLabel` | function | 50 |
+| 2 | `getNavLabel` | function | 58 |
+| 3 | `isDarkColor` | function | 74 |
+| 4 | `withAlpha` | function | 84 |
+| 5 | `mergeStyles` | function | 90 |
+| 6 | `announcePageIntent` | function | 94 |
+| 7 | `Sidebar` | export default function | 101 |
 
-### 3.210 `frontend/src/components/pos/CartItem.jsx`
+### 3.220 `frontend/src/components/pos/CartItem.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `CartItem` | export default function | 4 |
 
-### 3.211 `frontend/src/components/pos/FilterPanel.jsx`
+### 3.221 `frontend/src/components/pos/FilterPanel.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `POSFilterPanel` | export default function | 3 |
-| 2 | `T` | const arrow | 25 |
-| 3 | `clearAll` | const arrow | 36 |
-| 4 | `chip` | const arrow | 45 |
-| 5 | `SectionLabel` | const arrow | 51 |
+| 1 | `countActiveFlags` | function | 3 |
+| 2 | `POSFilterPanel` | export default function | 11 |
+| 3 | `T` | const arrow | 33 |
+| 4 | `clearAll` | const arrow | 44 |
+| 5 | `chip` | const arrow | 53 |
+| 6 | `SectionLabel` | const arrow | 59 |
 
-### 3.212 `frontend/src/components/pos/POS.jsx`
+### 3.222 `frontend/src/components/pos/POS.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3819,55 +4202,56 @@ Code files scanned: **508**
 | 12 | `clearDelivery` | const arrow | 629 |
 | 13 | `handleAddDelivery` | const arrow | 631 |
 | 14 | `qty` | const arrow | 731 |
-| 15 | `addToCart` | function | 894 |
-| 16 | `updateQty` | const arrow | 933 |
-| 17 | `updatePrice` | const arrow | 941 |
-| 18 | `updateItemBranch` | const arrow | 965 |
-| 19 | `handleDiscountUsd` | const arrow | 1014 |
-| 20 | `handleDiscountKhr` | const arrow | 1015 |
-| 21 | `handleMembershipUnits` | const arrow | 1016 |
-| 22 | `handleCheckout` | const arrow | 1055 |
+| 15 | `addToCart` | function | 895 |
+| 16 | `updateQty` | const arrow | 934 |
+| 17 | `updatePrice` | const arrow | 942 |
+| 18 | `updateItemBranch` | const arrow | 966 |
+| 19 | `handleDiscountUsd` | const arrow | 1015 |
+| 20 | `handleDiscountKhr` | const arrow | 1016 |
+| 21 | `handleMembershipUnits` | const arrow | 1017 |
+| 22 | `handleCheckout` | const arrow | 1056 |
 
-### 3.213 `frontend/src/components/pos/posCore.mjs`
+### 3.223 `frontend/src/components/pos/posCore.mjs`
 
 - No top-level named symbols detected.
 
-### 3.214 `frontend/src/components/pos/posCore.ts`
+### 3.224 `frontend/src/components/pos/posCore.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeNumber` | function | 41 |
-| 2 | `buildProductsById` | export function | 45 |
-| 3 | `buildVariantChildrenByParentId` | export function | 49 |
-| 4 | `getVariantRootProduct` | export function | 61 |
-| 5 | `buildVisibleProductCards` | export function | 68 |
-| 6 | `getVariantChoices` | export function | 81 |
-| 7 | `resolveCartPriceValues` | export function | 89 |
-| 8 | `getCartLineId` | export function | 129 |
-| 9 | `findMatchingCartLineIndex` | export function | 136 |
+| 1 | `normalizeNumber` | function | 48 |
+| 2 | `buildProductsById` | export function | 52 |
+| 3 | `buildVariantChildrenByParentId` | export function | 61 |
+| 4 | `getVariantRootProduct` | export function | 73 |
+| 5 | `buildVisibleProductCards` | export function | 80 |
+| 6 | `getVariantChoices` | export function | 96 |
+| 7 | `buildPosFilterMeta` | export function | 104 |
+| 8 | `resolveCartPriceValues` | export function | 113 |
+| 9 | `getCartLineId` | export function | 153 |
+| 10 | `findMatchingCartLineIndex` | export function | 160 |
 
-### 3.215 `frontend/src/components/pos/ProductImage.jsx`
+### 3.225 `frontend/src/components/pos/ProductImage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ProductImage` | export default function | 3 |
 
-### 3.216 `frontend/src/components/pos/QuickAddModal.jsx`
+### 3.226 `frontend/src/components/pos/QuickAddModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `QuickAddModal` | export default function | 4 |
 | 2 | `T` | const arrow | 5 |
 
-### 3.217 `frontend/src/components/products/config/productPageConfig.mjs`
+### 3.227 `frontend/src/components/products/config/productPageConfig.mjs`
 
 - No top-level named symbols detected.
 
-### 3.218 `frontend/src/components/products/config/productPageConfig.ts`
+### 3.228 `frontend/src/components/products/config/productPageConfig.ts`
 
 - No top-level named symbols detected.
 
-### 3.219 `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
+### 3.229 `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3876,14 +4260,14 @@ Code files scanned: **508**
 | 3 | `setRow` | const arrow | 34 |
 | 4 | `handleSave` | const arrow | 40 |
 
-### 3.220 `frontend/src/components/products/forms/BulkAddStockModal.jsx`
+### 3.230 `frontend/src/components/products/forms/BulkAddStockModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `BulkAddStockModal` | function | 9 |
 | 2 | `handleSave` | const arrow | 20 |
 
-### 3.221 `frontend/src/components/products/forms/ProductForm.jsx`
+### 3.231 `frontend/src/components/products/forms/ProductForm.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3905,7 +4289,7 @@ Code files scanned: **508**
 | 16 | `closeScanner` | function | 344 |
 | 17 | `applyScannedValue` | function | 348 |
 
-### 3.222 `frontend/src/components/products/forms/VariantFormModal.jsx`
+### 3.232 `frontend/src/components/products/forms/VariantFormModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3915,11 +4299,11 @@ Code files scanned: **508**
 | 4 | `setNumeric` | const arrow | 42 |
 | 5 | `handleSave` | const arrow | 47 |
 
-### 3.223 `frontend/src/components/products/helpers/productDisplayHelpers.mjs`
+### 3.233 `frontend/src/components/products/helpers/productDisplayHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.224 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
+### 3.234 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3930,11 +4314,11 @@ Code files scanned: **508**
 | 5 | `getProductStockStatus` | export function | 101 |
 | 6 | `buildProductRowDisplayState` | export function | 111 |
 
-### 3.225 `frontend/src/components/products/helpers/productFilterHelpers.mjs`
+### 3.235 `frontend/src/components/products/helpers/productFilterHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.226 `frontend/src/components/products/helpers/productFilterHelpers.ts`
+### 3.236 `frontend/src/components/products/helpers/productFilterHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3948,11 +4332,11 @@ Code files scanned: **508**
 | 8 | `toImageUrl` | const arrow | 153 |
 | 9 | `priceCsv` | const arrow | 154 |
 
-### 3.227 `frontend/src/components/products/helpers/productGalleryHelpers.mjs`
+### 3.237 `frontend/src/components/products/helpers/productGalleryHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.228 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
+### 3.238 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3965,22 +4349,22 @@ Code files scanned: **508**
 | 7 | `buildProductLightboxGalleryInput` | export function | 85 |
 | 8 | `updateProductLightboxIndex` | export function | 91 |
 
-### 3.229 `frontend/src/components/products/helpers/productGroupViewHelpers.mjs`
+### 3.239 `frontend/src/components/products/helpers/productGroupViewHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.230 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
+### 3.240 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildProductGroupPriceLabel` | export function | 22 |
 | 2 | `buildProductGroupSummaryParts` | export function | 32 |
 
-### 3.231 `frontend/src/components/products/helpers/productMenuHelpers.mjs`
+### 3.241 `frontend/src/components/products/helpers/productMenuHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.232 `frontend/src/components/products/helpers/productMenuHelpers.ts`
+### 3.242 `frontend/src/components/products/helpers/productMenuHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3990,36 +4374,39 @@ Code files scanned: **508**
 | 4 | `countActiveProductFilters` | export function | 121 |
 | 5 | `buildProductFilterSections` | export function | 147 |
 
-### 3.233 `frontend/src/components/products/helpers/productPageHelpers.mjs`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `useDebouncedValue` | export function | 3 |
-| 2 | `parseBrandColorMap` | export function | 12 |
-| 3 | `normalizeBrandLookup` | export function | 22 |
-| 4 | `waitForNextFrame` | export function | 26 |
-
-### 3.234 `frontend/src/components/products/helpers/productSelectionHelpers.mjs`
+### 3.243 `frontend/src/components/products/helpers/productPageHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.235 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
+### 3.244 `frontend/src/components/products/helpers/productPageHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `buildVisibleProductIds` | export function | 39 |
-| 2 | `buildParentProductIdSet` | export function | 53 |
-| 3 | `buildSelectedVisibleIds` | export function | 61 |
-| 4 | `buildProductPaginationState` | export function | 66 |
-| 5 | `buildJumpTargetIdsByLetter` | export function | 98 |
-| 6 | `isSelectionScopeFullySelected` | export function | 115 |
-| 7 | `isSelectionScopePartiallySelected` | export function | 119 |
+| 1 | `parseBrandColorMap` | export function | 12 |
+| 2 | `normalizeBrandLookup` | export function | 22 |
+| 3 | `waitForNextFrame` | export function | 26 |
 
-### 3.236 `frontend/src/components/products/helpers/productWriteHelpers.mjs`
+### 3.245 `frontend/src/components/products/helpers/productSelectionHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.237 `frontend/src/components/products/helpers/productWriteHelpers.ts`
+### 3.246 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `buildVisibleProductIds` | export function | 51 |
+| 2 | `buildParentProductIdSet` | export function | 69 |
+| 3 | `buildSelectedVisibleIds` | export function | 78 |
+| 4 | `buildProductPaginationState` | export function | 83 |
+| 5 | `buildJumpTargetIdsByLetter` | export function | 115 |
+| 6 | `isSelectionScopeFullySelected` | export function | 132 |
+| 7 | `isSelectionScopePartiallySelected` | export function | 136 |
+
+### 3.247 `frontend/src/components/products/helpers/productWriteHelpers.mjs`
+
+- No top-level named symbols detected.
+
+### 3.248 `frontend/src/components/products/helpers/productWriteHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4042,17 +4429,17 @@ Code files scanned: **508**
 | 17 | `getPreferredProductRestoreBranchId` | export function | 353 |
 | 18 | `resolveRestoredProductParentId` | export function | 361 |
 
-### 3.238 `frontend/src/components/products/history/productHistoryHelpers.mjs`
+### 3.249 `frontend/src/components/products/history/productHistoryHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.239 `frontend/src/components/products/history/productHistoryHelpers.ts`
+### 3.250 `frontend/src/components/products/history/productHistoryHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createProductHistoryRequestId` | export function | 43 |
 
-### 3.240 `frontend/src/components/products/import/BulkImportModal.jsx`
+### 3.251 `frontend/src/components/products/import/BulkImportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4109,22 +4496,22 @@ Code files scanned: **508**
 | 51 | `handleImageOnlyImport` | const arrow | 847 |
 | 52 | `handlePickCSV` | const arrow | 939 |
 | 53 | `handleImport` | const arrow | 1003 |
-| 54 | `toggleFamilyCollapse` | const arrow | 1232 |
-| 55 | `toggleInlineDetails` | const arrow | 1241 |
-| 56 | `toggleConflictSelection` | const arrow | 1250 |
-| 57 | `toggleSelectAllConflicts` | const arrow | 1259 |
-| 58 | `applyDecisionToSelection` | const arrow | 1267 |
-| 59 | `applyImageDecisionToSelection` | const arrow | 1277 |
-| 60 | `applyIdentifierDecisionToSelection` | const arrow | 1294 |
-| 61 | `applyFieldRulePreset` | const arrow | 1306 |
-| 62 | `renderConflictRow` | const arrow | 1319 |
-| 63 | `updateEditedRow` | const arrow | 1327 |
+| 54 | `toggleFamilyCollapse` | const arrow | 1249 |
+| 55 | `toggleInlineDetails` | const arrow | 1258 |
+| 56 | `toggleConflictSelection` | const arrow | 1267 |
+| 57 | `toggleSelectAllConflicts` | const arrow | 1276 |
+| 58 | `applyDecisionToSelection` | const arrow | 1284 |
+| 59 | `applyImageDecisionToSelection` | const arrow | 1294 |
+| 60 | `applyIdentifierDecisionToSelection` | const arrow | 1311 |
+| 61 | `applyFieldRulePreset` | const arrow | 1323 |
+| 62 | `renderConflictRow` | const arrow | 1336 |
+| 63 | `updateEditedRow` | const arrow | 1344 |
 
-### 3.241 `frontend/src/components/products/import/productImportPlanner.mjs`
+### 3.252 `frontend/src/components/products/import/productImportPlanner.mjs`
 
 - No top-level named symbols detected.
 
-### 3.242 `frontend/src/components/products/import/productImportPlanner.ts`
+### 3.253 `frontend/src/components/products/import/productImportPlanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4147,11 +4534,11 @@ Code files scanned: **508**
 | 17 | `analyzeProductImportRows` | export function | 457 |
 | 18 | `analyzeProductImportText` | export function | 631 |
 
-### 3.243 `frontend/src/components/products/import/productImportWorker.mjs`
+### 3.254 `frontend/src/components/products/import/productImportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.244 `frontend/src/components/products/import/productImportWorker.ts`
+### 3.255 `frontend/src/components/products/import/productImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4159,7 +4546,7 @@ Code files scanned: **508**
 | 2 | `waitForNextTask` | function | 43 |
 | 3 | `getErrorMessage` | function | 49 |
 
-### 3.245 `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+### 3.256 `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4170,79 +4557,86 @@ Code files scanned: **508**
 | 5 | `getBrandSortScore` | function | 75 |
 | 6 | `buildSavedLibrary` | function | 81 |
 | 7 | `ManageBrandsModal` | export default function | 99 |
-| 8 | `saveLibrary` | const arrow | 198 |
-| 9 | `restoreProductFieldSnapshots` | const arrow | 207 |
-| 10 | `addLibraryBrand` | const arrow | 221 |
-| 11 | `renameBrand` | const arrow | 273 |
-| 12 | `removeBrands` | const arrow | 353 |
-| 13 | `removeBrand` | const arrow | 432 |
-| 14 | `applySuggestedNormalization` | const arrow | 434 |
-| 15 | `toggleSelectedBrand` | const arrow | 440 |
-| 16 | `toggleAllVisibleBrands` | const arrow | 449 |
+| 8 | `saveLibrary` | const arrow | 207 |
+| 9 | `restoreProductFieldSnapshots` | const arrow | 216 |
+| 10 | `addLibraryBrand` | const arrow | 230 |
+| 11 | `renameBrand` | const arrow | 282 |
+| 12 | `removeBrands` | const arrow | 362 |
+| 13 | `removeBrand` | const arrow | 442 |
+| 14 | `applySuggestedNormalization` | const arrow | 444 |
+| 15 | `toggleSelectedBrand` | const arrow | 450 |
+| 16 | `toggleAllVisibleBrands` | const arrow | 459 |
 
-### 3.246 `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
+### 3.257 `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `mergeCategoryUsage` | function | 24 |
 | 2 | `ManageCategoriesModal` | export default function | 53 |
-| 3 | `handleAdd` | const arrow | 144 |
-| 4 | `handleUpdate` | const arrow | 180 |
-| 5 | `handleDelete` | const arrow | 235 |
-| 6 | `toggleSelected` | const arrow | 283 |
-| 7 | `toggleAllVisible` | const arrow | 293 |
-| 8 | `handleDeleteSelected` | const arrow | 306 |
+| 3 | `handleAdd` | const arrow | 152 |
+| 4 | `handleUpdate` | const arrow | 188 |
+| 5 | `handleDelete` | const arrow | 243 |
+| 6 | `toggleSelected` | const arrow | 291 |
+| 7 | `toggleAllVisible` | const arrow | 301 |
+| 8 | `handleDeleteSelected` | const arrow | 314 |
 
-### 3.247 `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+### 3.258 `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `mergeUnitUsage` | function | 24 |
 | 2 | `ManageUnitsModal` | export default function | 53 |
-| 3 | `handleAdd` | const arrow | 144 |
-| 4 | `handleUpdate` | const arrow | 180 |
-| 5 | `handleDelete` | const arrow | 229 |
-| 6 | `toggleSelected` | const arrow | 277 |
-| 7 | `toggleAllVisible` | const arrow | 287 |
-| 8 | `handleDeleteSelected` | const arrow | 300 |
+| 3 | `handleAdd` | const arrow | 152 |
+| 4 | `handleUpdate` | const arrow | 188 |
+| 5 | `handleDelete` | const arrow | 237 |
+| 6 | `toggleSelected` | const arrow | 285 |
+| 7 | `toggleAllVisible` | const arrow | 295 |
+| 8 | `handleDeleteSelected` | const arrow | 308 |
 
-### 3.248 `frontend/src/components/products/lookups/productLookupSnapshots.mjs`
+### 3.259 `frontend/src/components/products/lookups/productLookupSnapshots.mjs`
 
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `normalizeLookup` | export function | 6 |
-| 2 | `normalizeProductRows` | function | 10 |
-| 3 | `snapshotLookupProducts` | function | 16 |
-| 4 | `mergeUniqueSnapshots` | function | 30 |
-| 5 | `fetchLookupProductSnapshots` | export function | 39 |
-| 6 | `fetchProductsByIds` | function | 75 |
-| 7 | `restoreLookupProductSnapshots` | export function | 94 |
+- No top-level named symbols detected.
 
-### 3.249 `frontend/src/components/products/Products.jsx`
+### 3.260 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `Products` | export default function | 129 |
+| 1 | `normalizeLookup` | export function | 53 |
+| 2 | `getFallbackApiClient` | function | 57 |
+| 3 | `normalizeProductRows` | function | 63 |
+| 4 | `getPayloadNumber` | function | 70 |
+| 5 | `snapshotLookupProducts` | function | 75 |
+| 6 | `mergeUniqueSnapshots` | function | 89 |
+| 7 | `fetchLookupProductSnapshotsForName` | function | 113 |
+| 8 | `fetchLookupProductSnapshots` | export function | 149 |
+| 9 | `fetchProductsByIds` | function | 165 |
+| 10 | `restoreLookupProductSnapshots` | export function | 194 |
+
+### 3.261 `frontend/src/components/products/Products.jsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `Products` | export default function | 130 |
 | 2 | `promise` | const arrow | 212 |
 | 3 | `handleSave` | const arrow | 383 |
 | 4 | `uploadGalleryImages` | const arrow | 407 |
 | 5 | `handleSaveWithGallery` | const arrow | 433 |
-| 6 | `handleBulkDelete` | const arrow | 499 |
-| 7 | `handleBulkOutOfStock` | const arrow | 546 |
-| 8 | `handleBulkChangeBranch` | const arrow | 589 |
-| 9 | `handleBulkAddStock` | const arrow | 619 |
-| 10 | `toggleSelect` | const arrow | 627 |
-| 11 | `toggleSelectAll` | const arrow | 634 |
-| 12 | `handleDelete` | const arrow | 641 |
-| 13 | `renderUnitChip` | const arrow | 720 |
-| 14 | `openLightbox` | const arrow | 734 |
-| 15 | `getStockBadge` | const arrow | 741 |
+| 6 | `handleBulkDelete` | const arrow | 500 |
+| 7 | `handleBulkOutOfStock` | const arrow | 547 |
+| 8 | `handleBulkChangeBranch` | const arrow | 590 |
+| 9 | `handleBulkAddStock` | const arrow | 620 |
+| 10 | `toggleSelect` | const arrow | 628 |
+| 11 | `toggleSelectAll` | const arrow | 635 |
+| 12 | `handleDelete` | const arrow | 642 |
+| 13 | `renderUnitChip` | const arrow | 722 |
+| 14 | `openLightbox` | const arrow | 736 |
+| 15 | `getStockBadge` | const arrow | 743 |
 
-### 3.250 `frontend/src/components/products/scanning/barcodeImageScanner.mjs`
+### 3.262 `frontend/src/components/products/scanning/barcodeImageScanner.mjs`
 
 - No top-level named symbols detected.
 
-### 3.251 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
+### 3.263 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4252,7 +4646,7 @@ Code files scanned: **508**
 | 4 | `detectWithNativeBarcodeDetector` | function | 75 |
 | 5 | `scanBarcodeFromImageFile` | export function | 101 |
 
-### 3.252 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+### 3.264 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4262,31 +4656,35 @@ Code files scanned: **508**
 | 4 | `handleChange` | const arrow | 44 |
 | 5 | `BarcodeScannerModal` | export default function | 53 |
 
-### 3.253 `frontend/src/components/products/scanning/barcodeScannerState.mjs`
+### 3.265 `frontend/src/components/products/scanning/barcodeScannerState.mjs`
 
 - No top-level named symbols detected.
 
-### 3.254 `frontend/src/components/products/scanning/barcodeScannerState.ts`
+### 3.266 `frontend/src/components/products/scanning/barcodeScannerState.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `deriveScannerPresentation` | export function | 31 |
 
-### 3.255 `frontend/src/components/products/scanning/scanbotScanner.mjs`
+### 3.267 `frontend/src/components/products/scanning/scanbotScanner.mjs`
+
+- No top-level named symbols detected.
+
+### 3.268 `frontend/src/components/products/scanning/scanbotScanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `publicBasePath` | const arrow | 1 |
-| 2 | `getScanbotGlobal` | function | 13 |
-| 3 | `isCameraBlockedByDocumentPolicy` | export function | 17 |
-| 4 | `normalizeScanbotError` | function | 27 |
-| 5 | `loadScanbotScript` | function | 41 |
-| 6 | `readCameraPermissionState` | function | 69 |
-| 7 | `getPreferredScannerMode` | export function | 79 |
-| 8 | `getInitializedScanbot` | function | 103 |
-| 9 | `scanBarcodeWithScanbot` | export function | 117 |
+| 1 | `publicBasePath` | const arrow | 35 |
+| 2 | `getScanbotGlobal` | function | 47 |
+| 3 | `isCameraBlockedByDocumentPolicy` | export function | 52 |
+| 4 | `normalizeScanbotError` | function | 66 |
+| 5 | `loadScanbotScript` | function | 80 |
+| 6 | `readCameraPermissionState` | function | 109 |
+| 7 | `getPreferredScannerMode` | export function | 119 |
+| 8 | `getInitializedScanbot` | function | 143 |
+| 9 | `scanBarcodeWithScanbot` | export function | 158 |
 
-### 3.256 `frontend/src/components/products/shared/primitives.jsx`
+### 3.269 `frontend/src/components/products/shared/primitives.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4302,7 +4700,7 @@ Code files scanned: **508**
 | 10 | `handleUsdChange` | const arrow | 167 |
 | 11 | `handleKhrChange` | const arrow | 168 |
 
-### 3.257 `frontend/src/components/products/surfaces/HeaderActions.jsx`
+### 3.270 `frontend/src/components/products/surfaces/HeaderActions.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4310,7 +4708,7 @@ Code files scanned: **508**
 | 2 | `cleanFallback` | const arrow | 16 |
 | 3 | `tr` | const arrow | 22 |
 
-### 3.258 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+### 3.271 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4318,7 +4716,7 @@ Code files scanned: **508**
 | 2 | `T` | const arrow | 23 |
 | 3 | `Row` | const arrow | 43 |
 
-### 3.259 `frontend/src/components/products/surfaces/ProductRowParts.jsx`
+### 3.272 `frontend/src/components/products/surfaces/ProductRowParts.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4328,7 +4726,7 @@ Code files scanned: **508**
 | 4 | `ProductBatchPreview` | export function | 42 |
 | 5 | `ProductDetailsCell` | export function | 65 |
 
-### 3.260 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
+### 3.273 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4336,7 +4734,7 @@ Code files scanned: **508**
 | 2 | `renderDesktopTableHead` | const arrow | 47 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 76 |
 
-### 3.261 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+### 3.274 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4345,22 +4743,22 @@ Code files scanned: **508**
 | 3 | `T` | const arrow | 23 |
 | 4 | `toggleSection` | const arrow | 42 |
 
-### 3.262 `frontend/src/components/receipt-settings/constants.js`
+### 3.275 `frontend/src/components/receipt-settings/constants.js`
 
 - No top-level named symbols detected.
 
-### 3.263 `frontend/src/components/receipt-settings/constants.ts`
+### 3.276 `frontend/src/components/receipt-settings/constants.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getFieldItems` | export function | 109 |
 | 2 | `T` | const arrow | 110 |
 
-### 3.264 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
+### 3.277 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
 
 - No top-level named symbols detected.
 
-### 3.265 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
+### 3.278 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4374,7 +4772,7 @@ Code files scanned: **508**
 | 8 | `handleDragStart` | const arrow | 91 |
 | 9 | `handleDragOver` | const arrow | 96 |
 
-### 3.266 `frontend/src/components/receipt-settings/PrintSettings.jsx`
+### 3.279 `frontend/src/components/receipt-settings/PrintSettings.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4388,14 +4786,14 @@ Code files scanned: **508**
 | 8 | `resetMargins` | const arrow | 94 |
 | 9 | `getPreviewSource` | const arrow | 110 |
 
-### 3.267 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+### 3.280 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ReceiptPreview` | export default function | 12 |
 | 2 | `loadPreview` | function | 23 |
 
-### 3.268 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
+### 3.281 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4404,11 +4802,11 @@ Code files scanned: **508**
 | 3 | `ReceiptSettings` | export default function | 45 |
 | 4 | `handleSave` | const arrow | 190 |
 
-### 3.269 `frontend/src/components/receipt-settings/template.js`
+### 3.282 `frontend/src/components/receipt-settings/template.js`
 
 - No top-level named symbols detected.
 
-### 3.270 `frontend/src/components/receipt-settings/template.ts`
+### 3.283 `frontend/src/components/receipt-settings/template.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4417,7 +4815,7 @@ Code files scanned: **508**
 | 3 | `parseReceiptTemplate` | export function | 19 |
 | 4 | `serializeReceiptTemplate` | export function | 30 |
 
-### 3.271 `frontend/src/components/receipt/Receipt.jsx`
+### 3.284 `frontend/src/components/receipt/Receipt.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4430,7 +4828,7 @@ Code files scanned: **508**
 | 7 | `em` | const arrow | 146 |
 | 8 | `exportReceiptPdf` | const arrow | 342 |
 
-### 3.272 `frontend/src/components/returns/EditReturnModal.jsx`
+### 3.285 `frontend/src/components/returns/EditReturnModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4440,7 +4838,7 @@ Code files scanned: **508**
 | 4 | `updateRestock` | const arrow | 41 |
 | 5 | `handleSubmit` | const arrow | 49 |
 
-### 3.273 `frontend/src/components/returns/NewReturnModal.jsx`
+### 3.286 `frontend/src/components/returns/NewReturnModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4455,7 +4853,7 @@ Code files scanned: **508**
 | 9 | `clearAll` | const arrow | 141 |
 | 10 | `handleSubmit` | const arrow | 148 |
 
-### 3.274 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+### 3.287 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4466,7 +4864,7 @@ Code files scanned: **508**
 | 5 | `updateQty` | const arrow | 162 |
 | 6 | `submit` | const arrow | 168 |
 
-### 3.275 `frontend/src/components/returns/ReturnDetailModal.jsx`
+### 3.288 `frontend/src/components/returns/ReturnDetailModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4474,20 +4872,25 @@ Code files scanned: **508**
 | 2 | `ReturnDetailModal` | export default function | 10 |
 | 3 | `tr` | const arrow | 12 |
 
-### 3.276 `frontend/src/components/returns/Returns.jsx`
+### 3.289 `frontend/src/components/returns/Returns.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeScope` | function | 34 |
 | 2 | `getReturnTypeKey` | function | 38 |
 | 3 | `getReturnTypeLabel` | function | 44 |
-| 4 | `exportReturnRows` | function | 52 |
-| 5 | `Returns` | export default function | 70 |
-| 6 | `promise` | const arrow | 135 |
-| 7 | `handleOpenEdit` | const arrow | 212 |
-| 8 | `renderAmount` | const arrow | 588 |
+| 4 | `normalizeFiniteIdsFrom` | function | 52 |
+| 5 | `normalizeFiniteIds` | function | 60 |
+| 6 | `countSelectedIds` | function | 64 |
+| 7 | `countActiveFlags` | function | 72 |
+| 8 | `exportReturnRows` | function | 80 |
+| 9 | `getInitialReturnPageSize` | function | 98 |
+| 10 | `Returns` | export default function | 103 |
+| 11 | `promise` | const arrow | 169 |
+| 12 | `handleOpenEdit` | const arrow | 246 |
+| 13 | `renderAmount` | const arrow | 663 |
 
-### 3.277 `frontend/src/components/returns/ReturnsListSurface.jsx`
+### 3.290 `frontend/src/components/returns/ReturnsListSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4497,7 +4900,7 @@ Code files scanned: **508**
 | 4 | `ReturnsListSurface` | export default function | 56 |
 | 5 | `apply` | const arrow | 87 |
 
-### 3.278 `frontend/src/components/sales/ExportModal.jsx`
+### 3.291 `frontend/src/components/sales/ExportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4511,7 +4914,7 @@ Code files scanned: **508**
 | 8 | `handlePreview` | const arrow | 84 |
 | 9 | `handleExportCSV` | const arrow | 101 |
 
-### 3.279 `frontend/src/components/sales/SaleDetailModal.jsx`
+### 3.292 `frontend/src/components/sales/SaleDetailModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4522,22 +4925,26 @@ Code files scanned: **508**
 | 5 | `handleStatusUpdate` | const arrow | 69 |
 | 6 | `handleMembershipAttach` | const arrow | 80 |
 
-### 3.280 `frontend/src/components/sales/Sales.jsx`
+### 3.293 `frontend/src/components/sales/Sales.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `multiMatch` | function | 33 |
-| 2 | `getSaleBranchLabel` | function | 37 |
-| 3 | `Sales` | export default function | 45 |
-| 4 | `promise` | const arrow | 128 |
-| 5 | `handleStatusChange` | const arrow | 240 |
-| 6 | `handleAttachMembership` | const arrow | 284 |
-| 7 | `toggleSelected` | const arrow | 464 |
-| 8 | `toggleSelectAll` | const arrow | 470 |
-| 9 | `handleExportSelected` | const arrow | 501 |
-| 10 | `handleBulkStatusUpdate` | const arrow | 549 |
+| 2 | `normalizeFiniteIdsFrom` | function | 37 |
+| 3 | `normalizeFiniteIds` | function | 45 |
+| 4 | `countSelectedIds` | function | 49 |
+| 5 | `countActiveFlags` | function | 57 |
+| 6 | `getSaleBranchLabel` | function | 65 |
+| 7 | `Sales` | export default function | 73 |
+| 8 | `promise` | const arrow | 156 |
+| 9 | `handleStatusChange` | const arrow | 268 |
+| 10 | `handleAttachMembership` | const arrow | 312 |
+| 11 | `toggleSelected` | const arrow | 492 |
+| 12 | `toggleSelectAll` | const arrow | 498 |
+| 13 | `handleExportSelected` | const arrow | 537 |
+| 14 | `handleBulkStatusUpdate` | const arrow | 585 |
 
-### 3.281 `frontend/src/components/sales/SalesImportModal.jsx`
+### 3.294 `frontend/src/components/sales/SalesImportModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4552,30 +4959,30 @@ Code files scanned: **508**
 | 9 | `handleDownloadTemplate` | const arrow | 109 |
 | 10 | `handleImport` | const arrow | 113 |
 
-### 3.282 `frontend/src/components/sales/salesImportWorker.mjs`
+### 3.295 `frontend/src/components/sales/salesImportWorker.mjs`
 
 - No top-level named symbols detected.
 
-### 3.283 `frontend/src/components/sales/salesImportWorker.ts`
+### 3.296 `frontend/src/components/sales/salesImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.284 `frontend/src/components/sales/SalesListSurface.jsx`
+### 3.297 `frontend/src/components/sales/SalesListSurface.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `SalesListSurface` | export default function | 5 |
 
-### 3.285 `frontend/src/components/sales/StatusBadge.jsx`
+### 3.298 `frontend/src/components/sales/StatusBadge.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getStatusLabel` | export function | 23 |
 | 2 | `StatusBadge` | export default function | 39 |
 
-### 3.286 `frontend/src/components/server/ServerPage.jsx`
+### 3.299 `frontend/src/components/server/ServerPage.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4596,7 +5003,7 @@ Code files scanned: **508**
 | 15 | `handleSave` | function | 606 |
 | 16 | `handleDisconnect` | function | 613 |
 
-### 3.287 `frontend/src/components/shared/ActionHistoryBar.jsx`
+### 3.300 `frontend/src/components/shared/ActionHistoryBar.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4605,7 +5012,7 @@ Code files scanned: **508**
 | 3 | `ActionHistoryBar` | export default function | 16 |
 | 4 | `T` | const arrow | 27 |
 
-### 3.288 `frontend/src/components/shared/BackgroundImportTracker.jsx`
+### 3.301 `frontend/src/components/shared/BackgroundImportTracker.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4629,27 +5036,34 @@ Code files scanned: **508**
 | 18 | `handleRemove` | const arrow | 398 |
 | 19 | `handleDismiss` | const arrow | 434 |
 
-### 3.289 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.302 `frontend/src/components/shared/ExportMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `ExportMenu` | export default function | 4 |
 
-### 3.290 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.303 `frontend/src/components/shared/FilterMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `sectionButtonClass` | function | 4 |
 | 2 | `FilterMenu` | export default function | 10 |
 
-### 3.291 `frontend/src/components/shared/globalScroll.js`
+### 3.304 `frontend/src/components/shared/globalScroll.js`
+
+- No top-level named symbols detected.
+
+### 3.305 `frontend/src/components/shared/globalScroll.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getScrollTarget` | export function | 1 |
-| 2 | `getScrollToPosition` | export function | 21 |
+| 1 | `getDocumentLike` | function | 21 |
+| 2 | `getPageScrollCandidates` | function | 25 |
+| 3 | `isVisibleScrollNode` | function | 38 |
+| 4 | `getScrollTarget` | export function | 46 |
+| 5 | `getScrollToPosition` | export function | 63 |
 
-### 3.292 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.306 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4659,29 +5073,29 @@ Code files scanned: **508**
 | 4 | `renderGalleryImage` | function | 40 |
 | 5 | `onKeyDown` | function | 47 |
 
-### 3.293 `frontend/src/components/shared/LoadingWatchdog.jsx`
+### 3.307 `frontend/src/components/shared/LoadingWatchdog.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `LoadingWatchdog` | export default function | 3 |
 
-### 3.294 `frontend/src/components/shared/Modal.jsx`
+### 3.308 `frontend/src/components/shared/Modal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `Modal` | export default function | 10 |
 
-### 3.295 `frontend/src/components/shared/navigationConfig.js`
+### 3.309 `frontend/src/components/shared/navigationConfig.js`
 
 - No top-level named symbols detected.
 
-### 3.296 `frontend/src/components/shared/navigationConfig.ts`
+### 3.310 `frontend/src/components/shared/navigationConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `parseNavSetting` | export function | 42 |
 
-### 3.297 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.311 `frontend/src/components/shared/NotificationCenter.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4693,19 +5107,23 @@ Code files scanned: **508**
 | 6 | `onVisible` | const arrow | 271 |
 | 7 | `handleClickOutside` | const arrow | 294 |
 
-### 3.298 `frontend/src/components/shared/pageActivity.js`
+### 3.312 `frontend/src/components/shared/pageActivity.js`
+
+- No top-level named symbols detected.
+
+### 3.313 `frontend/src/components/shared/pageActivity.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `useIsPageActive` | export function | 4 |
+| 1 | `useIsPageActive` | export function | 5 |
 
-### 3.299 `frontend/src/components/shared/PageHeader.jsx`
+### 3.314 `frontend/src/components/shared/PageHeader.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `PageHeader` | export default function | 9 |
 
-### 3.300 `frontend/src/components/shared/PaginationControls.jsx`
+### 3.315 `frontend/src/components/shared/PaginationControls.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4715,7 +5133,7 @@ Code files scanned: **508**
 | 4 | `commitPageDraft` | const arrow | 50 |
 | 5 | `handlePageInputKeyDown` | const arrow | 61 |
 
-### 3.301 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.316 `frontend/src/components/shared/PortalMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4726,7 +5144,7 @@ Code files scanned: **508**
 | 5 | `closeIfEscape` | const arrow | 84 |
 | 6 | `ThreeDotPortal` | export function | 193 |
 
-### 3.302 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.317 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4734,7 +5152,7 @@ Code files scanned: **508**
 | 2 | `QuickPreferenceToggles` | export default function | 23 |
 | 3 | `tr` | const arrow | 25 |
 
-### 3.303 `frontend/src/components/shared/SectionSwitcher.jsx`
+### 3.318 `frontend/src/components/shared/SectionSwitcher.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4742,7 +5160,7 @@ Code files scanned: **508**
 | 2 | `SectionSwitcher` | export default function | 12 |
 | 3 | `selectValue` | const arrow | 39 |
 
-### 3.304 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.319 `frontend/src/components/shared/WriteConflictModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4752,7 +5170,7 @@ Code files scanned: **508**
 | 4 | `getConflictFieldRows` | function | 73 |
 | 5 | `WriteConflictModal` | export default function | 171 |
 
-### 3.305 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.320 `frontend/src/components/users/PermissionEditor.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4762,7 +5180,7 @@ Code files scanned: **508**
 | 4 | `sensitivityLabel` | const arrow | 57 |
 | 5 | `toggle` | const arrow | 64 |
 
-### 3.306 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.321 `frontend/src/components/users/UserDetailSheet.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4770,7 +5188,7 @@ Code files scanned: **508**
 | 2 | `buildRowData` | function | 9 |
 | 3 | `UserDetailSheet` | export default function | 21 |
 
-### 3.307 `frontend/src/components/users/UserProfileModal.jsx`
+### 3.322 `frontend/src/components/users/UserProfileModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4796,7 +5214,7 @@ Code files scanned: **508**
 | 20 | `handleAvatarSelected` | const arrow | 677 |
 | 21 | `saveAvatarFromEditor` | const arrow | 697 |
 
-### 3.308 `frontend/src/components/users/Users.jsx`
+### 3.323 `frontend/src/components/users/Users.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4819,7 +5237,7 @@ Code files scanned: **508**
 | 17 | `handleSaveRole` | const arrow | 554 |
 | 18 | `handleDeleteRole` | const arrow | 629 |
 
-### 3.309 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.324 `frontend/src/components/utils-settings/AuditLog.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4832,11 +5250,15 @@ Code files scanned: **508**
 | 7 | `flattenSummaryValue` | function | 99 |
 | 8 | `formatEntityName` | function | 118 |
 | 9 | `readableSummary` | function | 124 |
-| 10 | `DetailRow` | function | 144 |
-| 11 | `AuditLog` | export default function | 156 |
-| 12 | `sessionEntryLabel` | function | 542 |
+| 10 | `normalizeFiniteIdsFrom` | function | 144 |
+| 11 | `normalizeFiniteIds` | function | 152 |
+| 12 | `countSelectedIds` | function | 156 |
+| 13 | `countActiveFlags` | function | 164 |
+| 14 | `DetailRow` | function | 172 |
+| 15 | `AuditLog` | export default function | 184 |
+| 16 | `sessionEntryLabel` | function | 578 |
 
-### 3.310 `frontend/src/components/utils-settings/Backup.jsx`
+### 3.325 `frontend/src/components/utils-settings/Backup.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4871,28 +5293,28 @@ Code files scanned: **508**
 | 29 | `handleFolderExport` | const arrow | 1172 |
 | 30 | `handleFolderImport` | const arrow | 1241 |
 
-### 3.311 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.326 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `FontFamilyPicker` | function | 20 |
 
-### 3.312 `frontend/src/components/utils-settings/index.js`
+### 3.327 `frontend/src/components/utils-settings/index.js`
 
 - No top-level named symbols detected.
 
-### 3.313 `frontend/src/components/utils-settings/index.ts`
+### 3.328 `frontend/src/components/utils-settings/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.314 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.329 `frontend/src/components/utils-settings/OtpModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `OtpModal` | export default function | 17 |
 | 2 | `loadSetup` | function | 52 |
 
-### 3.315 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.330 `frontend/src/components/utils-settings/ResetData.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4905,7 +5327,7 @@ Code files scanned: **508**
 | 7 | `T` | const arrow | 194 |
 | 8 | `doFactoryReset` | function | 201 |
 
-### 3.316 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.331 `frontend/src/components/utils-settings/Settings.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4931,11 +5353,11 @@ Code files scanned: **508**
 | 20 | `uploadImageSetting` | const arrow | 665 |
 | 21 | `handleSaveSettings` | const arrow | 730 |
 
-### 3.317 `frontend/src/components/utils-settings/settingsConflict.js`
+### 3.332 `frontend/src/components/utils-settings/settingsConflict.js`
 
 - No top-level named symbols detected.
 
-### 3.318 `frontend/src/components/utils-settings/settingsConflict.ts`
+### 3.333 `frontend/src/components/utils-settings/settingsConflict.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4943,15 +5365,19 @@ Code files scanned: **508**
 | 2 | `buildSettingsConflictState` | export function | 32 |
 | 3 | `diffSettingsConflictFields` | export function | 46 |
 
-### 3.319 `frontend/src/constants.js`
+### 3.334 `frontend/src/constants.js`
+
+- No top-level named symbols detected.
+
+### 3.335 `frontend/src/constants.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createEmptyOrder` | export function | 128 |
-| 2 | `formatDate` | export function | 158 |
-| 3 | `isNetworkError` | export function | 178 |
+| 2 | `formatDate` | export function | 152 |
+| 3 | `isNetworkError` | export function | 181 |
 
-### 3.320 `frontend/src/index.jsx`
+### 3.336 `frontend/src/index.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4966,31 +5392,37 @@ Code files scanned: **508**
 | 9 | `stopKnownStartupNoise` | const arrow | 138 |
 | 10 | `scheduleFormFieldAccessibility` | function | 171 |
 
-### 3.321 `frontend/src/platform/runtime/clientRuntime.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `canUseBrowserStorage` | function | 6 |
-| 2 | `isBusinessOsStorageKey` | function | 10 |
-| 3 | `sanitizeText` | function | 15 |
-| 4 | `sanitizeSyncServerUrl` | export function | 19 |
-| 5 | `normalizeRuntimeDescriptor` | export function | 31 |
-| 6 | `readStoredRuntimeDescriptor` | export function | 40 |
-| 7 | `writeStoredRuntimeDescriptor` | export function | 51 |
-| 8 | `shouldResetForRuntimeChange` | export function | 65 |
-| 9 | `buildQueuedOperationScope` | export function | 79 |
-| 10 | `doesQueuedScopeMatchCurrent` | export function | 87 |
-| 11 | `clearServiceWorkersAndCaches` | function | 102 |
-| 12 | `snapshotStorage` | function | 122 |
-| 13 | `clearStorage` | function | 135 |
-| 14 | `restoreStorage` | function | 148 |
-| 15 | `resetClientRuntimeState` | export function | 158 |
-
-### 3.322 `frontend/src/platform/storage/storagePolicy.mjs`
+### 3.337 `frontend/src/platform/runtime/clientRuntime.js`
 
 - No top-level named symbols detected.
 
-### 3.323 `frontend/src/platform/storage/storagePolicy.ts`
+### 3.338 `frontend/src/platform/runtime/clientRuntime.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `canUseBrowserStorage` | function | 31 |
+| 2 | `isBusinessOsStorageKey` | function | 35 |
+| 3 | `sanitizeText` | function | 40 |
+| 4 | `sanitizeSyncServerUrl` | export function | 44 |
+| 5 | `normalizeRuntimeDescriptor` | export function | 56 |
+| 6 | `readStoredRuntimeDescriptor` | export function | 65 |
+| 7 | `writeStoredRuntimeDescriptor` | export function | 76 |
+| 8 | `shouldResetForRuntimeChange` | export function | 90 |
+| 9 | `buildQueuedOperationScope` | export function | 107 |
+| 10 | `doesQueuedScopeMatchCurrent` | export function | 115 |
+| 11 | `unregisterServiceWorkers` | function | 152 |
+| 12 | `deleteBusinessOsCaches` | function | 156 |
+| 13 | `clearServiceWorkersAndCaches` | function | 162 |
+| 14 | `snapshotStorage` | function | 178 |
+| 15 | `clearStorage` | function | 191 |
+| 16 | `restoreStorage` | function | 204 |
+| 17 | `resetClientRuntimeState` | export function | 214 |
+
+### 3.339 `frontend/src/platform/storage/storagePolicy.mjs`
+
+- No top-level named symbols detected.
+
+### 3.340 `frontend/src/platform/storage/storagePolicy.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4998,39 +5430,51 @@ Code files scanned: **508**
 | 2 | `maxStoredNumber` | export function | 29 |
 | 3 | `isCooldownActive` | export function | 36 |
 
-### 3.324 `frontend/src/runtime/runtimeErrorClassifier.mjs`
+### 3.341 `frontend/src/runtime/runtimeErrorClassifier.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toText` | function | 8 |
-| 2 | `includesExtensionOrigin` | function | 12 |
-| 3 | `getPathname` | function | 17 |
-| 4 | `isFirstPartyBuiltAssetSource` | export function | 27 |
-| 5 | `isLikelyInjectedRuntimeSource` | export function | 37 |
-| 6 | `isKnownBridgeMessage` | export function | 48 |
-| 7 | `isKnownStyleInjectionNoise` | export function | 59 |
-| 8 | `isKnownEvalCspNoise` | export function | 78 |
-| 9 | `shouldSuppressRuntimeError` | export function | 85 |
-| 10 | `shouldSuppressSecurityPolicyViolation` | export function | 107 |
-| 11 | `isGuardableStyleSheetError` | export function | 121 |
+| 1 | `messageOf` | function | 27 |
+| 2 | `stackOf` | function | 31 |
+| 3 | `toText` | function | 35 |
+| 4 | `includesExtensionOrigin` | function | 39 |
+| 5 | `getPathname` | function | 44 |
+| 6 | `isFirstPartyBuiltAssetSource` | export function | 54 |
+| 7 | `isLikelyInjectedRuntimeSource` | export function | 64 |
+| 8 | `isKnownBridgeMessage` | export function | 75 |
+| 9 | `isKnownStyleInjectionNoise` | export function | 86 |
+| 10 | `isKnownEvalCspNoise` | export function | 105 |
+| 11 | `shouldSuppressRuntimeError` | export function | 112 |
+| 12 | `shouldSuppressSecurityPolicyViolation` | export function | 134 |
+| 13 | `isGuardableStyleSheetError` | export function | 148 |
 
-### 3.325 `frontend/src/types/jsx-modules.d.ts`
-
-- No top-level named symbols detected.
-
-### 3.326 `frontend/src/types/receiptContracts.ts`
+### 3.342 `frontend/src/types/jsx-modules.d.ts`
 
 - No top-level named symbols detected.
 
-### 3.327 `frontend/src/types/settingsContracts.ts`
+### 3.343 `frontend/src/types/mjs-modules.d.ts`
 
 - No top-level named symbols detected.
 
-### 3.328 `frontend/src/utils/actionGuards.mjs`
+### 3.344 `frontend/src/types/react.d.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `useEffect` | export function | 8 |
+
+### 3.345 `frontend/src/types/receiptContracts.ts`
 
 - No top-level named symbols detected.
 
-### 3.329 `frontend/src/utils/actionGuards.ts`
+### 3.346 `frontend/src/types/settingsContracts.ts`
+
+- No top-level named symbols detected.
+
+### 3.347 `frontend/src/utils/actionGuards.mjs`
+
+- No top-level named symbols detected.
+
+### 3.348 `frontend/src/utils/actionGuards.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5040,42 +5484,53 @@ Code files scanned: **508**
 | 4 | `beginKeyedAction` | export function | 58 |
 | 5 | `finishKeyedAction` | export function | 70 |
 
-### 3.330 `frontend/src/utils/actionHistory.mjs`
+### 3.349 `frontend/src/utils/actionHistory.mjs`
+
+- No top-level named symbols detected.
+
+### 3.350 `frontend/src/utils/actionHistory.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeEntry` | function | 13 |
-| 2 | `useActionHistory` | export function | 26 |
+| 1 | `normalizeActionHistoryId` | function | 85 |
+| 2 | `normalizeEntry` | function | 91 |
+| 3 | `parsePermissions` | function | 104 |
+| 4 | `getErrorMessage` | function | 116 |
+| 5 | `useActionHistory` | export function | 120 |
 
-### 3.331 `frontend/src/utils/appRefresh.d.ts`
+### 3.351 `frontend/src/utils/appRefresh.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeRefreshChannels` | export function | 2 |
 | 2 | `refreshAppData` | export function | 3 |
 
-### 3.332 `frontend/src/utils/appRefresh.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `normalizeRefreshChannels` | function | 18 |
-| 2 | `refreshAppData` | export function | 26 |
-
-### 3.333 `frontend/src/utils/bulkOps.mjs`
+### 3.352 `frontend/src/utils/appRefresh.js`
 
 - No top-level named symbols detected.
 
-### 3.334 `frontend/src/utils/bulkOps.ts`
+### 3.353 `frontend/src/utils/appRefresh.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeRefreshChannels` | export function | 20 |
+| 2 | `refreshAppData` | export function | 28 |
+
+### 3.354 `frontend/src/utils/bulkOps.mjs`
+
+- No top-level named symbols detected.
+
+### 3.355 `frontend/src/utils/bulkOps.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runner` | function | 47 |
 
-### 3.335 `frontend/src/utils/color.js`
+### 3.356 `frontend/src/utils/color.js`
 
 - No top-level named symbols detected.
 
-### 3.336 `frontend/src/utils/color.ts`
+### 3.357 `frontend/src/utils/color.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5083,7 +5538,7 @@ Code files scanned: **508**
 | 2 | `relativeLuminance` | function | 12 |
 | 3 | `getContrastingTextColor` | export function | 29 |
 
-### 3.337 `frontend/src/utils/csv.d.ts`
+### 3.358 `frontend/src/utils/csv.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5095,41 +5550,45 @@ Code files scanned: **508**
 | 6 | `downloadZipFiles` | export function | 6 |
 | 7 | `downloadZipFilesAsync` | export function | 7 |
 
-### 3.338 `frontend/src/utils/csv.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `escapeCsvValue` | function | 7 |
-| 2 | `buildCSV` | export function | 18 |
-| 3 | `downloadBlob` | export function | 27 |
-| 4 | `downloadCSV` | export function | 41 |
-| 5 | `normalizeZipFile` | function | 47 |
-| 6 | `CRC32_TABLE` | const arrow | 59 |
-| 7 | `crc32` | function | 71 |
-| 8 | `writeUint16` | function | 79 |
-| 9 | `writeUint32` | function | 83 |
-| 10 | `encodeZipTimestamp` | function | 87 |
-| 11 | `buildZip` | export function | 100 |
-| 12 | `buildZipInWorker` | export function | 177 |
-| 13 | `finish` | const arrow | 183 |
-| 14 | `downloadZipFiles` | export function | 205 |
-| 15 | `downloadZipFilesAsync` | export function | 211 |
-
-### 3.339 `frontend/src/utils/csvExportWorker.mjs`
+### 3.359 `frontend/src/utils/csv.js`
 
 - No top-level named symbols detected.
 
-### 3.340 `frontend/src/utils/csvExportWorker.ts`
+### 3.360 `frontend/src/utils/csv.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `escapeCsvValue` | function | 17 |
+| 2 | `buildCSV` | export function | 28 |
+| 3 | `downloadBlob` | export function | 40 |
+| 4 | `downloadCSV` | export function | 48 |
+| 5 | `normalizeZipFile` | function | 54 |
+| 6 | `CRC32_TABLE` | const arrow | 66 |
+| 7 | `crc32` | function | 78 |
+| 8 | `writeUint16` | function | 86 |
+| 9 | `writeUint32` | function | 90 |
+| 10 | `toBlobPart` | function | 94 |
+| 11 | `encodeZipTimestamp` | function | 100 |
+| 12 | `buildZip` | export function | 113 |
+| 13 | `buildZipInWorker` | export function | 190 |
+| 14 | `downloadZipFiles` | export function | 219 |
+| 15 | `downloadZipFilesAsync` | export function | 225 |
+
+### 3.361 `frontend/src/utils/csvExportWorker.mjs`
+
+- No top-level named symbols detected.
+
+### 3.362 `frontend/src/utils/csvExportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 20 |
 
-### 3.341 `frontend/src/utils/csvImport.js`
+### 3.363 `frontend/src/utils/csvImport.js`
 
 - No top-level named symbols detected.
 
-### 3.342 `frontend/src/utils/csvImport.ts`
+### 3.364 `frontend/src/utils/csvImport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5153,22 +5612,22 @@ Code files scanned: **508**
 | 18 | `normalizeCsvMoney` | export function | 299 |
 | 19 | `normalizeCsvPercent` | export function | 303 |
 
-### 3.343 `frontend/src/utils/csvRowCounter.mjs`
+### 3.365 `frontend/src/utils/csvRowCounter.mjs`
 
 - No top-level named symbols detected.
 
-### 3.344 `frontend/src/utils/csvRowCounter.ts`
+### 3.366 `frontend/src/utils/csvRowCounter.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `countCsvDataRows` | export function | 1 |
 | 2 | `finishRecord` | const arrow | 7 |
 
-### 3.345 `frontend/src/utils/dateHelpers.js`
+### 3.367 `frontend/src/utils/dateHelpers.js`
 
 - No top-level named symbols detected.
 
-### 3.346 `frontend/src/utils/dateHelpers.ts`
+### 3.368 `frontend/src/utils/dateHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5176,11 +5635,11 @@ Code files scanned: **508**
 | 2 | `todayStr` | export function | 8 |
 | 3 | `offsetDate` | export function | 13 |
 
-### 3.347 `frontend/src/utils/deviceInfo.js`
+### 3.369 `frontend/src/utils/deviceInfo.js`
 
 - No top-level named symbols detected.
 
-### 3.348 `frontend/src/utils/deviceInfo.ts`
+### 3.370 `frontend/src/utils/deviceInfo.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5189,18 +5648,18 @@ Code files scanned: **508**
 | 3 | `getClientDeviceInfo` | export function | 30 |
 | 4 | `getClientMetaHeaders` | export function | 42 |
 
-### 3.349 `frontend/src/utils/exportPackage.js`
+### 3.371 `frontend/src/utils/exportPackage.js`
 
 - No top-level named symbols detected.
 
-### 3.350 `frontend/src/utils/exportPackage.ts`
+### 3.372 `frontend/src/utils/exportPackage.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildReportManifestRows` | export function | 30 |
 | 2 | `buildReportPackageFiles` | export function | 38 |
 
-### 3.351 `frontend/src/utils/exportReports.jsx`
+### 3.373 `frontend/src/utils/exportReports.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5214,20 +5673,24 @@ Code files scanned: **508**
 | 8 | `renderNotes` | function | 317 |
 | 9 | `buildStandaloneReportHtml` | export function | 329 |
 
-### 3.352 `frontend/src/utils/favicon.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `clamp` | function | 1 |
-| 2 | `shouldUseAnonymousCors` | function | 8 |
-| 3 | `loadImage` | function | 19 |
-| 4 | `createCircularFaviconDataUrl` | export function | 39 |
-
-### 3.353 `frontend/src/utils/formatters.js`
+### 3.374 `frontend/src/utils/favicon.js`
 
 - No top-level named symbols detected.
 
-### 3.354 `frontend/src/utils/formatters.ts`
+### 3.375 `frontend/src/utils/favicon.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `clamp` | function | 11 |
+| 2 | `shouldUseAnonymousCors` | function | 18 |
+| 3 | `loadImage` | function | 29 |
+| 4 | `createCircularFaviconDataUrl` | export function | 49 |
+
+### 3.376 `frontend/src/utils/formatters.js`
+
+- No top-level named symbols detected.
+
+### 3.377 `frontend/src/utils/formatters.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5237,11 +5700,11 @@ Code files scanned: **508**
 | 4 | `fmtShort` | export function | 73 |
 | 5 | `fmtCount` | export function | 85 |
 
-### 3.355 `frontend/src/utils/groupedRecords.mjs`
+### 3.378 `frontend/src/utils/groupedRecords.mjs`
 
 - No top-level named symbols detected.
 
-### 3.356 `frontend/src/utils/groupedRecords.ts`
+### 3.379 `frontend/src/utils/groupedRecords.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5254,41 +5717,46 @@ Code files scanned: **508**
 | 7 | `getTimeGroupingMode` | export function | 119 |
 | 8 | `toggleIdSet` | export function | 321 |
 
-### 3.357 `frontend/src/utils/historyHelpers.mjs`
+### 3.380 `frontend/src/utils/historyHelpers.mjs`
 
 - No top-level named symbols detected.
 
-### 3.358 `frontend/src/utils/historyHelpers.ts`
+### 3.381 `frontend/src/utils/historyHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `extractHistoryResultId` | export function | 26 |
 | 2 | `resolveCreatedHistorySnapshot` | export function | 36 |
 
-### 3.359 `frontend/src/utils/importJobRefresh.js`
+### 3.382 `frontend/src/utils/importJobRefresh.js`
+
+- No top-level named symbols detected.
+
+### 3.383 `frontend/src/utils/importJobRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeImportJobStatus` | function | 3 |
-| 2 | `normalizeImportJobType` | function | 7 |
-| 3 | `uniqueChannels` | function | 11 |
-| 4 | `getImportCompletionRefreshChannels` | export function | 15 |
-| 5 | `shouldDispatchImportCompletionRefresh` | export function | 38 |
-| 6 | `dispatchImportCompletionRefresh` | export function | 46 |
+| 1 | `normalizeImportJobStatus` | function | 24 |
+| 2 | `normalizeImportJobType` | function | 28 |
+| 3 | `uniqueChannels` | function | 32 |
+| 4 | `dispatchSyncUpdate` | function | 41 |
+| 5 | `getImportCompletionRefreshChannels` | export function | 45 |
+| 6 | `shouldDispatchImportCompletionRefresh` | export function | 68 |
+| 7 | `dispatchImportCompletionRefresh` | export function | 79 |
 
-### 3.360 `frontend/src/utils/index.js`
-
-- No top-level named symbols detected.
-
-### 3.361 `frontend/src/utils/index.ts`
+### 3.384 `frontend/src/utils/index.js`
 
 - No top-level named symbols detected.
 
-### 3.362 `frontend/src/utils/initials.mjs`
+### 3.385 `frontend/src/utils/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.363 `frontend/src/utils/initials.ts`
+### 3.386 `frontend/src/utils/initials.mjs`
+
+- No top-level named symbols detected.
+
+### 3.387 `frontend/src/utils/initials.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5300,24 +5768,27 @@ Code files scanned: **508**
 | 6 | `aggregateInitialOptions` | export function | 79 |
 | 7 | `buildInitialOptionsFromProducts` | export function | 97 |
 
-### 3.364 `frontend/src/utils/loaders.mjs`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `settleLoaderMap` | export function | 10 |
-| 2 | `beginTrackedRequest` | export function | 34 |
-| 3 | `isTrackedRequestCurrent` | export function | 40 |
-| 4 | `invalidateTrackedRequest` | export function | 44 |
-| 5 | `createLoaderTimeoutError` | export function | 52 |
-| 6 | `withLoaderTimeout` | export function | 59 |
-| 7 | `getLoaderErrorMessage` | export function | 76 |
-| 8 | `getFirstLoaderError` | export function | 80 |
-
-### 3.365 `frontend/src/utils/mediaUpload.js`
+### 3.388 `frontend/src/utils/loaders.mjs`
 
 - No top-level named symbols detected.
 
-### 3.366 `frontend/src/utils/mediaUpload.ts`
+### 3.389 `frontend/src/utils/loaders.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `settleLoaderMap` | export function | 20 |
+| 2 | `beginTrackedRequest` | export function | 47 |
+| 3 | `isTrackedRequestCurrent` | export function | 53 |
+| 4 | `invalidateTrackedRequest` | export function | 57 |
+| 5 | `createLoaderTimeoutError` | export function | 63 |
+| 6 | `getLoaderErrorMessage` | export function | 93 |
+| 7 | `getFirstLoaderError` | export function | 97 |
+
+### 3.390 `frontend/src/utils/mediaUpload.js`
+
+- No top-level named symbols detected.
+
+### 3.391 `frontend/src/utils/mediaUpload.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5327,18 +5798,18 @@ Code files scanned: **508**
 | 4 | `buildCacheBustedMediaPath` | export function | 59 |
 | 5 | `reduceUploadState` | export function | 77 |
 
-### 3.367 `frontend/src/utils/permissions.js`
+### 3.392 `frontend/src/utils/permissions.js`
 
 - No top-level named symbols detected.
 
-### 3.368 `frontend/src/utils/permissions.ts`
+### 3.393 `frontend/src/utils/permissions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `isPermissionMap` | function | 3 |
 | 2 | `parsePermissionMap` | export function | 7 |
 
-### 3.369 `frontend/src/utils/pricing.d.ts`
+### 3.394 `frontend/src/utils/pricing.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5351,11 +5822,11 @@ Code files scanned: **508**
 | 7 | `isProductDiscountActive` | export function | 7 |
 | 8 | `calculateProductDiscount` | export function | 8 |
 
-### 3.370 `frontend/src/utils/pricing.js`
+### 3.395 `frontend/src/utils/pricing.js`
 
 - No top-level named symbols detected.
 
-### 3.371 `frontend/src/utils/pricing.ts`
+### 3.396 `frontend/src/utils/pricing.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5368,57 +5839,60 @@ Code files scanned: **508**
 | 7 | `isProductDiscountActive` | export function | 52 |
 | 8 | `calculateProductDiscount` | export function | 65 |
 
-### 3.372 `frontend/src/utils/printReceipt.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `parsePrintNumber` | function | 9 |
-| 2 | `cloneElementWithInlineStyles` | function | 82 |
-| 3 | `normalizeReceiptContentWidth` | export function | 105 |
-| 4 | `escapeHtml` | function | 128 |
-| 5 | `blobToDataUrl` | function | 137 |
-| 6 | `inlineImageNodeSources` | function | 146 |
-| 7 | `extractUrlsFromCssValue` | function | 169 |
-| 8 | `inlineStyleAssetUrls` | function | 175 |
-| 9 | `normalizePrintableRoot` | function | 209 |
-| 10 | `mmToPt` | function | 226 |
-| 11 | `dataUrlToBytes` | function | 230 |
-| 12 | `joinPdfChunks` | function | 240 |
-| 13 | `buildPdfStream` | function | 251 |
-| 14 | `buildSingleImagePdf` | function | 260 |
-| 15 | `escapePdfText` | function | 298 |
-| 16 | `wrapTextLine` | function | 305 |
-| 17 | `buildTextOnlyPdf` | function | 324 |
-| 18 | `buildReceiptFileName` | function | 377 |
-| 19 | `createTextOnlyReceiptCanvas` | function | 388 |
-| 20 | `canvasToPngBlob` | function | 429 |
-| 21 | `waitForElementAssets` | function | 442 |
-| 22 | `renderElementToCanvas` | function | 471 |
-| 23 | `withReceiptElement` | function | 537 |
-| 24 | `createPrintableReceiptMarkup` | function | 577 |
-| 25 | `buildPrintablePreviewDocument` | function | 592 |
-| 26 | `attachPrintablePreviewActions` | function | 739 |
-| 27 | `schedulePrint` | const arrow | 748 |
-| 28 | `openPrintableReceiptPreview` | export function | 753 |
-| 29 | `downloadBlob` | function | 766 |
-| 30 | `getPrintSettings` | export function | 777 |
-| 31 | `savePrintSettings` | export function | 790 |
-| 32 | `getPaperWidthMm` | export function | 798 |
-| 33 | `createReceiptPdfBlob` | export function | 808 |
-| 34 | `buildTextOnlyReceiptBlob` | const arrow | 814 |
-| 35 | `renderPdfBlob` | const arrow | 828 |
-| 36 | `createReceiptImageBlob` | export function | 863 |
-| 37 | `extractReceiptLines` | function | 884 |
-| 38 | `downloadReceiptPdf` | export function | 902 |
-| 39 | `downloadReceiptImage` | export function | 921 |
-| 40 | `openReceiptPdf` | export function | 928 |
-| 41 | `printReceipt` | export function | 952 |
-
-### 3.373 `frontend/src/utils/productBatches.mjs`
+### 3.397 `frontend/src/utils/printReceipt.js`
 
 - No top-level named symbols detected.
 
-### 3.374 `frontend/src/utils/productBatches.ts`
+### 3.398 `frontend/src/utils/printReceipt.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parsePrintNumber` | function | 42 |
+| 2 | `cloneElementWithInlineStyles` | function | 115 |
+| 3 | `escapeHtml` | function | 161 |
+| 4 | `blobToDataUrl` | function | 170 |
+| 5 | `inlineImageNodeSources` | function | 193 |
+| 6 | `extractUrlsFromCssValue` | function | 216 |
+| 7 | `inlineStyleAssetUrls` | function | 222 |
+| 8 | `normalizePrintableRoot` | function | 256 |
+| 9 | `mmToPt` | function | 273 |
+| 10 | `dataUrlToBytes` | function | 277 |
+| 11 | `bytesToBlobPart` | function | 287 |
+| 12 | `joinPdfChunks` | function | 291 |
+| 13 | `buildPdfStream` | function | 302 |
+| 14 | `buildSingleImagePdf` | function | 311 |
+| 15 | `escapePdfText` | function | 349 |
+| 16 | `wrapTextLine` | function | 356 |
+| 17 | `buildTextOnlyPdf` | function | 375 |
+| 18 | `buildReceiptFileName` | function | 428 |
+| 19 | `createTextOnlyReceiptCanvas` | function | 439 |
+| 20 | `canvasToPngBlob` | function | 480 |
+| 21 | `waitForElementAssets` | function | 493 |
+| 22 | `renderElementToCanvas` | function | 522 |
+| 23 | `createPrintableReceiptMarkup` | function | 633 |
+| 24 | `buildPrintablePreviewDocument` | function | 648 |
+| 25 | `attachPrintablePreviewActions` | function | 795 |
+| 26 | `schedulePrint` | const arrow | 804 |
+| 27 | `openPrintableReceiptPreview` | export function | 809 |
+| 28 | `downloadBlob` | function | 822 |
+| 29 | `getPrintSettings` | export function | 833 |
+| 30 | `savePrintSettings` | export function | 846 |
+| 31 | `getPaperWidthMm` | export function | 854 |
+| 32 | `createReceiptPdfBlob` | export function | 864 |
+| 33 | `buildTextOnlyReceiptBlob` | const arrow | 870 |
+| 34 | `renderPdfBlob` | const arrow | 884 |
+| 35 | `createReceiptImageBlob` | export function | 919 |
+| 36 | `extractReceiptLines` | function | 940 |
+| 37 | `downloadReceiptPdf` | export function | 958 |
+| 38 | `downloadReceiptImage` | export function | 977 |
+| 39 | `openReceiptPdf` | export function | 984 |
+| 40 | `printReceipt` | export function | 1008 |
+
+### 3.399 `frontend/src/utils/productBatches.mjs`
+
+- No top-level named symbols detected.
+
+### 3.400 `frontend/src/utils/productBatches.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5426,11 +5900,11 @@ Code files scanned: **508**
 | 2 | `getVisibleProductBatches` | export function | 32 |
 | 3 | `buildBatchPreview` | export function | 53 |
 
-### 3.375 `frontend/src/utils/productGrouping.mjs`
+### 3.401 `frontend/src/utils/productGrouping.mjs`
 
 - No top-level named symbols detected.
 
-### 3.376 `frontend/src/utils/productGrouping.ts`
+### 3.402 `frontend/src/utils/productGrouping.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5448,25 +5922,30 @@ Code files scanned: **508**
 | 12 | `buildProductGroups` | export function | 175 |
 | 13 | `buildProductGroupSections` | export function | 275 |
 
-### 3.377 `frontend/src/utils/publicAssetUrls.d.ts`
+### 3.403 `frontend/src/utils/publicAssetUrls.d.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `resolvePublicAssetUrl` | export function | 1 |
 
-### 3.378 `frontend/src/utils/publicAssetUrls.js`
+### 3.404 `frontend/src/utils/publicAssetUrls.js`
+
+- No top-level named symbols detected.
+
+### 3.405 `frontend/src/utils/publicAssetUrls.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `trimBaseUrl` | function | 4 |
-| 2 | `normalizeUploadPath` | function | 8 |
-| 3 | `appendAssetVersion` | function | 16 |
-| 4 | `isLocalLikeHostname` | function | 31 |
-| 5 | `getSafeCurrentOrigin` | function | 35 |
-| 6 | `getStoredPublicAssetBaseUrl` | export function | 47 |
-| 7 | `resolvePublicAssetUrl` | export function | 60 |
+| 1 | `trimBaseUrl` | function | 11 |
+| 2 | `normalizeUploadPath` | function | 15 |
+| 3 | `appendAssetVersion` | function | 23 |
+| 4 | `isLocalLikeHostname` | function | 38 |
+| 5 | `getSafeCurrentOrigin` | function | 42 |
+| 6 | `getStoredPublicAssetBaseUrl` | export function | 54 |
+| 7 | `api` | const arrow | 57 |
+| 8 | `resolvePublicAssetUrl` | export function | 68 |
 
-### 3.379 `frontend/src/utils/receiptAppliedConfig.ts`
+### 3.406 `frontend/src/utils/receiptAppliedConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5478,11 +5957,11 @@ Code files scanned: **508**
 | 6 | `readReceiptPrintSettingsFromSettings` | export function | 114 |
 | 7 | `buildAppliedReceiptConfig` | export function | 118 |
 
-### 3.380 `frontend/src/utils/scriptTypography.js`
+### 3.407 `frontend/src/utils/scriptTypography.js`
 
 - No top-level named symbols detected.
 
-### 3.381 `frontend/src/utils/scriptTypography.ts`
+### 3.408 `frontend/src/utils/scriptTypography.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5490,70 +5969,76 @@ Code files scanned: **508**
 | 2 | `withKhmerTextClass` | export function | 12 |
 | 3 | `getKhmerTextProps` | export function | 18 |
 
-### 3.382 `frontend/src/utils/settingsRefresh.js`
+### 3.409 `frontend/src/utils/settingsRefresh.js`
 
 - No top-level named symbols detected.
 
-### 3.383 `frontend/src/utils/settingsRefresh.ts`
+### 3.410 `frontend/src/utils/settingsRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeSettingKeys` | function | 62 |
 | 2 | `getSettingsRefreshChannels` | export function | 70 |
 
-### 3.384 `frontend/src/utils/settingsWriteOptions.ts`
+### 3.411 `frontend/src/utils/settingsWriteOptions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeSettingsWriteOptions` | export function | 3 |
 
-### 3.385 `frontend/src/web-api.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `sanitizeBaseUrl` | function | 43 |
-| 2 | `loadMethodsModule` | function | 47 |
-| 3 | `getLazyApiMethod` | function | 52 |
-| 4 | `bytesToBase64` | function | 66 |
-| 5 | `base64ToBytes` | function | 73 |
-| 6 | `stableStringify` | function | 80 |
-| 7 | `sha256Hex` | function | 86 |
-| 8 | `deriveOfflineVaultKey` | function | 94 |
-| 9 | `encryptOfflineVaultValue` | function | 111 |
-| 10 | `decryptOfflineVaultValue` | function | 119 |
-| 11 | `requestOfflinePersistentStorage` | function | 129 |
-| 12 | `dispatchVaultLocked` | function | 136 |
-| 13 | `scheduleOfflineVaultIdleLock` | function | 141 |
-| 14 | `lockOfflineVault` | function | 147 |
-| 15 | `unlockOfflineVault` | function | 154 |
-| 16 | `queueBusinessOutboxOperation` | function | 179 |
-| 17 | `queueOfflineFileChunks` | function | 217 |
-| 18 | `dispatchOutboxProgress` | function | 270 |
-| 19 | `dispatchOutboxFileProgress` | function | 277 |
-| 20 | `dispatchOutboxConflict` | function | 284 |
-| 21 | `getSyncOutboxKey` | function | 291 |
-| 22 | `syncUnlockedOfflineOutbox` | function | 295 |
-| 23 | `syncUnlockedOfflineFileChunks` | function | 404 |
-| 24 | `registerOutboxBackgroundSync` | function | 462 |
-| 25 | `refreshOfflineSnapshotSoon` | function | 474 |
-| 26 | `run` | const arrow | 484 |
-| 27 | `refreshServiceWorkerSoon` | function | 503 |
-| 28 | `runOfflineMaintenance` | function | 513 |
-| 29 | `startOfflineMaintenanceLoop` | function | 525 |
-| 30 | `forwardServiceWorkerOutboxEvent` | function | 533 |
-| 31 | `forwardServiceWorkerAppEvent` | function | 627 |
-
-### 3.386 `frontend/tailwind.config.mjs`
+### 3.412 `frontend/src/web-api.js`
 
 - No top-level named symbols detected.
 
-### 3.387 `frontend/tests/actionGuards.test.mjs`
+### 3.413 `frontend/src/web-api.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `sanitizeBaseUrl` | function | 77 |
+| 2 | `loadMethodsModule` | function | 81 |
+| 3 | `getLazyApiMethod` | function | 87 |
+| 4 | `mapOfflineFileChunkStatusUpdates` | function | 101 |
+| 5 | `asArrayBuffer` | function | 117 |
+| 6 | `bytesToBase64` | function | 121 |
+| 7 | `base64ToBytes` | function | 132 |
+| 8 | `stableStringify` | function | 139 |
+| 9 | `sha256Hex` | function | 145 |
+| 10 | `deriveOfflineVaultKey` | function | 153 |
+| 11 | `encryptOfflineVaultValue` | function | 170 |
+| 12 | `decryptOfflineVaultValue` | function | 178 |
+| 13 | `requestOfflinePersistentStorage` | function | 188 |
+| 14 | `dispatchVaultLocked` | function | 195 |
+| 15 | `scheduleOfflineVaultIdleLock` | function | 200 |
+| 16 | `lockOfflineVault` | function | 206 |
+| 17 | `unlockOfflineVault` | function | 214 |
+| 18 | `queueBusinessOutboxOperation` | function | 239 |
+| 19 | `queueOfflineFileChunks` | function | 277 |
+| 20 | `dispatchOutboxProgress` | function | 330 |
+| 21 | `dispatchOutboxFileProgress` | function | 337 |
+| 22 | `dispatchOutboxConflict` | function | 344 |
+| 23 | `getSyncOutboxKey` | function | 351 |
+| 24 | `syncUnlockedOfflineOutbox` | function | 355 |
+| 25 | `syncUnlockedOfflineFileChunks` | function | 464 |
+| 26 | `registerOutboxBackgroundSync` | function | 525 |
+| 27 | `refreshOfflineSnapshotSoon` | function | 540 |
+| 28 | `run` | const arrow | 550 |
+| 29 | `refreshServiceWorkerSoon` | function | 569 |
+| 30 | `runOfflineMaintenance` | function | 579 |
+| 31 | `startOfflineMaintenanceLoop` | function | 591 |
+| 32 | `forwardServiceWorkerOutboxEvent` | function | 599 |
+| 33 | `forwardServiceWorkerAppEvent` | function | 693 |
+
+### 3.414 `frontend/tailwind.config.mjs`
+
+- No top-level named symbols detected.
+
+### 3.415 `frontend/tests/actionGuards.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.388 `frontend/tests/actionStability.test.mjs`
+### 3.416 `frontend/tests/actionStability.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5561,11 +6046,11 @@ Code files scanned: **508**
 | 2 | `readRepo` | function | 14 |
 | 3 | `runTest` | function | 20 |
 
-### 3.389 `frontend/tests/adminShellMediaGuards.test.mjs`
+### 3.417 `frontend/tests/adminShellMediaGuards.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.390 `frontend/tests/apiHttp.test.mjs`
+### 3.418 `frontend/tests/apiHttp.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5573,112 +6058,112 @@ Code files scanned: **508**
 | 2 | `createDeferredResponse` | function | 32 |
 | 3 | `resetApiState` | function | 43 |
 
-### 3.391 `frontend/tests/appRefresh.test.mjs`
+### 3.419 `frontend/tests/appRefresh.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `testNormalizeRefreshChannels` | function | 5 |
 | 2 | `testRefreshAppDataDispatchesMergedDetail` | function | 12 |
 
-### 3.392 `frontend/tests/appShellUtils.test.mjs`
+### 3.420 `frontend/tests/appShellUtils.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.393 `frontend/tests/assetCompression.test.mjs`
+### 3.421 `frontend/tests/assetCompression.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `collectMediaFiles` | function | 11 |
 
-### 3.394 `frontend/tests/backupJobs.test.mjs`
+### 3.422 `frontend/tests/backupJobs.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.395 `frontend/tests/barcodeImageScanner.test.mjs`
+### 3.423 `frontend/tests/barcodeImageScanner.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.396 `frontend/tests/barcodeScannerState.test.mjs`
+### 3.424 `frontend/tests/barcodeScannerState.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.397 `frontend/tests/bulkOps.test.mjs`
+### 3.425 `frontend/tests/bulkOps.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.398 `frontend/tests/contactImportWorker.test.mjs`
+### 3.426 `frontend/tests/contactImportWorker.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.399 `frontend/tests/csvImport.test.mjs`
+### 3.427 `frontend/tests/csvImport.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.400 `frontend/tests/dashboardDataReliability.test.mjs`
+### 3.428 `frontend/tests/dashboardDataReliability.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.401 `frontend/tests/dateHelpers.test.mjs`
+### 3.429 `frontend/tests/dateHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 | 2 | `parseLocalDate` | function | 17 |
 
-### 3.402 `frontend/tests/deviceInfo.test.mjs`
+### 3.430 `frontend/tests/deviceInfo.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 | 2 | `withNavigator` | function | 17 |
 
-### 3.403 `frontend/tests/exportPackages.test.mjs`
+### 3.431 `frontend/tests/exportPackages.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.404 `frontend/tests/formatters.test.mjs`
+### 3.432 `frontend/tests/formatters.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.405 `frontend/tests/globalScroll.test.mjs`
+### 3.433 `frontend/tests/globalScroll.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.406 `frontend/tests/globalScrollControls.test.mjs`
+### 3.434 `frontend/tests/globalScrollControls.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.407 `frontend/tests/groupedRecords.test.mjs`
+### 3.435 `frontend/tests/groupedRecords.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.408 `frontend/tests/historyHelpers.test.mjs`
+### 3.436 `frontend/tests/historyHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 10 |
 
-### 3.409 `frontend/tests/importJobRefresh.test.mjs`
+### 3.437 `frontend/tests/importJobRefresh.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5687,97 +6172,97 @@ Code files scanned: **508**
 | 3 | `testDispatchOnlyOnTerminalTransition` | function | 23 |
 | 4 | `testDispatchEmitsExpectedEvents` | function | 47 |
 
-### 3.410 `frontend/tests/initials.test.mjs`
+### 3.438 `frontend/tests/initials.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.411 `frontend/tests/inventoryImportWorker.test.mjs`
+### 3.439 `frontend/tests/inventoryImportWorker.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.412 `frontend/tests/inventoryMobileCardLayout.test.mjs`
+### 3.440 `frontend/tests/inventoryMobileCardLayout.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.413 `frontend/tests/inventoryMovementGroups.test.mjs`
+### 3.441 `frontend/tests/inventoryMovementGroups.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.414 `frontend/tests/inventoryRfidSection.test.mjs`
+### 3.442 `frontend/tests/inventoryRfidSection.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.415 `frontend/tests/jsxSyntaxCheck.mjs`
+### 3.443 `frontend/tests/jsxSyntaxCheck.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `listSourceFiles` | function | 10 |
 
-### 3.416 `frontend/tests/loaders.test.mjs`
+### 3.444 `frontend/tests/loaders.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.417 `frontend/tests/mediaUploadHelpers.test.mjs`
+### 3.445 `frontend/tests/mediaUploadHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.418 `frontend/tests/navigationConfig.test.mjs`
+### 3.446 `frontend/tests/navigationConfig.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.419 `frontend/tests/notificationBadge.test.mjs`
+### 3.447 `frontend/tests/notificationBadge.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.420 `frontend/tests/offlineSalesQueue.test.mjs`
+### 3.448 `frontend/tests/offlineSalesQueue.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.421 `frontend/tests/offlineSecurityHardening.test.mjs`
+### 3.449 `frontend/tests/offlineSecurityHardening.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.422 `frontend/tests/offlineSyncArchitecture.test.mjs`
+### 3.450 `frontend/tests/offlineSyncArchitecture.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.423 `frontend/tests/ownedGoogleAuth.test.mjs`
+### 3.451 `frontend/tests/ownedGoogleAuth.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.424 `frontend/tests/performanceLoadingUx.test.mjs`
+### 3.452 `frontend/tests/performanceLoadingUx.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.425 `frontend/tests/permissionEditor.test.mjs`
+### 3.453 `frontend/tests/permissionEditor.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.426 `frontend/tests/permissions.test.mjs`
+### 3.454 `frontend/tests/permissions.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.427 `frontend/tests/portalCatalogDisplay.test.mjs`
+### 3.455 `frontend/tests/portalCatalogDisplay.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5785,97 +6270,97 @@ Code files scanned: **508**
 | 2 | `copy` | const arrow | 29 |
 | 3 | `formatPortalPrice` | const arrow | 30 |
 
-### 3.428 `frontend/tests/portalContentI18n.test.mjs`
+### 3.456 `frontend/tests/portalContentI18n.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.429 `frontend/tests/portalEditorUtils.test.mjs`
+### 3.457 `frontend/tests/portalEditorUtils.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 
-### 3.430 `frontend/tests/portalFaqVocabulary.test.mjs`
+### 3.458 `frontend/tests/portalFaqVocabulary.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.431 `frontend/tests/portalLanguagePacks.test.mjs`
+### 3.459 `frontend/tests/portalLanguagePacks.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.432 `frontend/tests/portalTranslateController.test.mjs`
+### 3.460 `frontend/tests/portalTranslateController.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createStorage` | function | 17 |
 | 2 | `createDocument` | function | 32 |
 
-### 3.433 `frontend/tests/posCore.test.mjs`
+### 3.461 `frontend/tests/posCore.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 15 |
+| 1 | `runTest` | function | 16 |
 
-### 3.434 `frontend/tests/pricingContacts.test.mjs`
+### 3.462 `frontend/tests/pricingContacts.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.435 `frontend/tests/productBatches.test.mjs`
+### 3.463 `frontend/tests/productBatches.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.436 `frontend/tests/productDiscountUx.test.mjs`
+### 3.464 `frontend/tests/productDiscountUx.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.437 `frontend/tests/productDisplayHelpers.test.mjs`
+### 3.465 `frontend/tests/productDisplayHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.438 `frontend/tests/productFilterHelpers.test.mjs`
+### 3.466 `frontend/tests/productFilterHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.439 `frontend/tests/productGalleryHelpers.test.mjs`
+### 3.467 `frontend/tests/productGalleryHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.440 `frontend/tests/productGrouping.test.mjs`
+### 3.468 `frontend/tests/productGrouping.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.441 `frontend/tests/productGroupViewHelpers.test.mjs`
+### 3.469 `frontend/tests/productGroupViewHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `fmtUSD` | const arrow | 7 |
 | 2 | `t` | const arrow | 8 |
 
-### 3.442 `frontend/tests/productHistoryHelpers.test.mjs`
+### 3.470 `frontend/tests/productHistoryHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.443 `frontend/tests/productImportPlanner.test.mjs`
+### 3.471 `frontend/tests/productImportPlanner.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.444 `frontend/tests/productImportWorkerFallback.test.mjs`
+### 3.472 `frontend/tests/productImportWorkerFallback.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.445 `frontend/tests/productMenuHelpers.test.mjs`
+### 3.473 `frontend/tests/productMenuHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5883,88 +6368,88 @@ Code files scanned: **508**
 | 2 | `tr` | const arrow | 11 |
 | 3 | `action` | const arrow | 88 |
 
-### 3.446 `frontend/tests/productPageHelpers.test.mjs`
+### 3.474 `frontend/tests/productPageHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.447 `frontend/tests/productSearchPagination.test.mjs`
+### 3.475 `frontend/tests/productSearchPagination.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.448 `frontend/tests/productSelectionHelpers.test.mjs`
+### 3.476 `frontend/tests/productSelectionHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.449 `frontend/tests/productWriteHelpers.test.mjs`
+### 3.477 `frontend/tests/productWriteHelpers.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.450 `frontend/tests/publicErrorRecovery.test.mjs`
+### 3.478 `frontend/tests/publicErrorRecovery.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createStorage` | function | 8 |
 
-### 3.451 `frontend/tests/receiptSettingsSync.test.mjs`
+### 3.479 `frontend/tests/receiptSettingsSync.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.452 `frontend/tests/receiptTemplate.test.mjs`
+### 3.480 `frontend/tests/receiptTemplate.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.453 `frontend/tests/returnsLayout.test.mjs`
+### 3.481 `frontend/tests/returnsLayout.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.454 `frontend/tests/runtimeErrorClassifier.test.mjs`
+### 3.482 `frontend/tests/runtimeErrorClassifier.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.455 `frontend/tests/salesImportWorker.test.mjs`
+### 3.483 `frontend/tests/salesImportWorker.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.456 `frontend/tests/scanbotScanner.test.mjs`
+### 3.484 `frontend/tests/scanbotScanner.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `setNavigator` | function | 8 |
 | 2 | `run` | function | 16 |
 
-### 3.457 `frontend/tests/scriptTypography.test.mjs`
+### 3.485 `frontend/tests/scriptTypography.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.458 `frontend/tests/sectionNavigation.test.mjs`
+### 3.486 `frontend/tests/sectionNavigation.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.459 `frontend/tests/settingsConflictHelpers.test.mjs`
+### 3.487 `frontend/tests/settingsConflictHelpers.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.460 `frontend/tests/settingsRefresh.test.mjs`
+### 3.488 `frontend/tests/settingsRefresh.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.461 `frontend/tests/storagePolicy.test.mjs`
+### 3.489 `frontend/tests/storagePolicy.test.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.462 `frontend/tests/utilsSettingsBarrel.test.mjs`
+### 3.490 `frontend/tests/utilsSettingsBarrel.test.mjs`
 
 - No top-level named symbols detected.
 
-### 3.463 `frontend/vite.config.mjs`
+### 3.491 `frontend/vite.config.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5974,105 +6459,93 @@ Code files scanned: **508**
 | 4 | `shouldDeferModulePreload` | function | 112 |
 | 5 | `manualChunks` | function | 116 |
 
-### 3.464 `ops/scripts/architecture/generated-bulk-audit.mjs`
+### 3.492 `ops/scripts/architecture/generated-bulk-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizePath` | function | 150 |
-| 2 | `formatBytes` | function | 154 |
-| 3 | `parseArgs` | function | 166 |
-| 4 | `mapLimit` | function | 180 |
-| 5 | `worker` | function | 183 |
-| 6 | `pathStats` | function | 195 |
-| 7 | `readText` | function | 245 |
-| 8 | `readJsonFile` | function | 253 |
-| 9 | `hasAnyToken` | function | 262 |
-| 10 | `toPowerShellTargetToken` | function | 266 |
-| 11 | `markdownTable` | function | 270 |
-| 12 | `compactTargetRows` | function | 278 |
-| 13 | `compactTimedRows` | function | 293 |
-| 14 | `isNestedTarget` | function | 309 |
-| 15 | `collectTargetOverlaps` | function | 315 |
-| 16 | `buildSummary` | function | 331 |
-| 17 | `renderReport` | function | 388 |
-| 18 | `main` | function | 464 |
+| 1 | `parseArgs` | function | 161 |
+| 2 | `walkPathStats` | function | 175 |
+| 3 | `recursivePathStats` | function | 212 |
+| 4 | `pathStats` | function | 241 |
+| 5 | `hasAnyToken` | function | 262 |
+| 6 | `toPowerShellTargetToken` | function | 266 |
+| 7 | `compactTargetRows` | function | 270 |
+| 8 | `compactTimedRows` | function | 285 |
+| 9 | `summarizeByDisposition` | function | 301 |
+| 10 | `dispositionRows` | function | 316 |
+| 11 | `isNestedTarget` | function | 328 |
+| 12 | `collectTargetOverlaps` | function | 334 |
+| 13 | `manifestHasInstallDeps` | function | 350 |
+| 14 | `recordExists` | function | 359 |
+| 15 | `buildDependencyTopology` | function | 363 |
+| 16 | `buildSummary` | function | 397 |
+| 17 | `renderReport` | function | 457 |
+| 18 | `main` | function | 538 |
 
-### 3.465 `ops/scripts/architecture/language-runtime-audit.mjs`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `normalizePath` | function | 31 |
-| 2 | `pathExists` | function | 35 |
-| 3 | `readJson` | function | 44 |
-| 4 | `walkFiles` | function | 52 |
-| 5 | `countBy` | function | 74 |
-| 6 | `hasReactOrDomBoundary` | function | 83 |
-| 7 | `hasWorkerCandidateWork` | function | 87 |
-| 8 | `hasSqlOrAnalyticsWork` | function | 91 |
-| 9 | `scoreTypeScriptCandidate` | function | 95 |
-| 10 | `scoreWorkerCandidate` | function | 109 |
-| 11 | `scoreSqlCandidate` | function | 119 |
-| 12 | `compactCandidates` | function | 128 |
-| 13 | `verificationMatrix` | function | 136 |
-| 14 | `buildFirstExecutableSlices` | function | 174 |
-| 15 | `collectFocusedTestCoverage` | function | 855 |
-| 16 | `collectConvertedTypeScriptSlices` | function | 870 |
-| 17 | `collectCompletedWebWorkerSlices` | function | 885 |
-| 18 | `collectProofCommandCoverage` | function | 903 |
-| 19 | `collectRecords` | function | 957 |
-| 20 | `markdownTable` | function | 974 |
-| 21 | `renderReport` | function | 982 |
-| 22 | `buildSummary` | function | 1117 |
-| 23 | `main` | function | 1184 |
-
-### 3.466 `ops/scripts/architecture/organization-audit.mjs`
+### 3.493 `ops/scripts/architecture/language-runtime-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizePath` | function | 22 |
-| 2 | `pathExists` | function | 26 |
-| 3 | `walkFiles` | function | 35 |
-| 4 | `getArea` | function | 56 |
-| 5 | `countBy` | function | 87 |
-| 6 | `extractRelativeImports` | function | 96 |
-| 7 | `mapLimit` | function | 111 |
-| 8 | `worker` | function | 114 |
-| 9 | `collectFileRecords` | function | 126 |
-| 10 | `nonEmptyLines` | function | 160 |
-| 11 | `extractWrapperTarget` | function | 164 |
-| 12 | `collectCompatibilityWrappers` | function | 177 |
-| 13 | `countOccurrences` | function | 200 |
-| 14 | `wrapperReferenceCandidates` | function | 211 |
-| 15 | `collectWrapperReferenceDetails` | function | 231 |
-| 16 | `markdownTable` | function | 258 |
-| 17 | `renderReferenceFiles` | function | 264 |
-| 18 | `renderReport` | function | 272 |
-| 19 | `buildSummary` | function | 361 |
-| 20 | `main` | function | 387 |
+| 1 | `walkFiles` | function | 39 |
+| 2 | `countBy` | function | 61 |
+| 3 | `hasReactOrDomBoundary` | function | 70 |
+| 4 | `hasWorkerCandidateWork` | function | 74 |
+| 5 | `hasSqlOrAnalyticsWork` | function | 78 |
+| 6 | `scoreTypeScriptCandidate` | function | 82 |
+| 7 | `scoreWorkerCandidate` | function | 97 |
+| 8 | `scoreSqlCandidate` | function | 107 |
+| 9 | `compactCandidates` | function | 116 |
+| 10 | `verificationMatrix` | function | 124 |
+| 11 | `buildFirstExecutableSlices` | function | 162 |
+| 12 | `collectFocusedTestCoverage` | function | 1090 |
+| 13 | `collectConvertedTypeScriptSlices` | function | 1105 |
+| 14 | `collectCompletedWebWorkerSlices` | function | 1124 |
+| 15 | `collectCompletedDataPathSlices` | function | 1141 |
+| 16 | `collectProofCommandCoverage` | function | 1157 |
+| 17 | `collectRecords` | function | 1211 |
+| 18 | `renderReport` | function | 1228 |
+| 19 | `buildSummary` | function | 1385 |
+| 20 | `main` | function | 1464 |
 
-### 3.467 `ops/scripts/architecture/phase29-audit.mjs`
+### 3.494 `ops/scripts/architecture/organization-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 52 |
-| 2 | `normalizePath` | function | 69 |
-| 3 | `parseLastJsonObject` | function | 73 |
-| 4 | `markdownTable` | function | 85 |
-| 5 | `stableDigest` | function | 93 |
-| 6 | `summarizeReportValue` | function | 97 |
-| 7 | `outputTail` | function | 111 |
-| 8 | `pathExists` | function | 118 |
-| 9 | `runCheck` | function | 127 |
-| 10 | `flattenCycles` | function | 160 |
-| 11 | `buildDurationSummary` | function | 164 |
-| 12 | `renderReport` | function | 199 |
-| 13 | `comparableValue` | function | 284 |
-| 14 | `collectParsedByCycle` | function | 291 |
-| 15 | `buildRepeatConsistency` | function | 297 |
-| 16 | `buildSummary` | function | 448 |
-| 17 | `main` | function | 483 |
+| 1 | `walkFiles` | function | 27 |
+| 2 | `getArea` | function | 48 |
+| 3 | `countBy` | function | 79 |
+| 4 | `extractRelativeImports` | function | 88 |
+| 5 | `collectFileRecords` | function | 103 |
+| 6 | `nonEmptyLines` | function | 137 |
+| 7 | `extractWrapperTarget` | function | 141 |
+| 8 | `collectCompatibilityWrappers` | function | 154 |
+| 9 | `countOccurrences` | function | 177 |
+| 10 | `wrapperReferenceCandidates` | function | 188 |
+| 11 | `collectWrapperReferenceDetails` | function | 208 |
+| 12 | `renderReferenceFiles` | function | 235 |
+| 13 | `renderReport` | function | 243 |
+| 14 | `buildSummary` | function | 332 |
+| 15 | `main` | function | 360 |
 
-### 3.468 `ops/scripts/backend/schema-audit.js`
+### 3.495 `ops/scripts/architecture/phase29-audit.mjs`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseArgs` | function | 76 |
+| 2 | `parseLastJsonObject` | function | 93 |
+| 3 | `runChildProcess` | function | 105 |
+| 4 | `runCheck` | function | 133 |
+| 5 | `runCheckGroup` | function | 158 |
+| 6 | `flattenCycles` | function | 162 |
+| 7 | `buildDurationSummary` | function | 166 |
+| 8 | `renderReport` | function | 201 |
+| 9 | `comparableValue` | function | 292 |
+| 10 | `collectParsedByCycle` | function | 304 |
+| 11 | `buildRepeatConsistency` | function | 310 |
+| 12 | `buildSummary` | function | 502 |
+| 13 | `main` | function | 540 |
+
+### 3.496 `ops/scripts/backend/schema-audit.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6081,48 +6554,70 @@ Code files scanned: **508**
 | 3 | `getLineNumber` | function | 41 |
 | 4 | `matchAllWithLine` | function | 45 |
 | 5 | `parseSqlTables` | function | 54 |
-| 6 | `parseColumns` | function | 76 |
-| 7 | `parsePrimaryKey` | function | 93 |
-| 8 | `cleanColumnList` | function | 116 |
-| 9 | `parseIndexes` | function | 123 |
-| 10 | `parseRuntimeStatements` | function | 140 |
-| 11 | `uniqueRuntimeRows` | function | 176 |
-| 12 | `parseDexieStores` | function | 188 |
-| 13 | `loadBackupSchema` | function | 209 |
-| 14 | `countForeignKeyDeclarations` | function | 215 |
-| 15 | `buildCoverage` | function | 222 |
-| 16 | `buildBackupCoverage` | function | 231 |
-| 17 | `renderList` | function | 253 |
-| 18 | `renderRuntimeRows` | function | 258 |
-| 19 | `renderTableCatalog` | function | 263 |
-| 20 | `renderReport` | function | 269 |
-| 21 | `buildSummary` | function | 352 |
-| 22 | `main` | function | 378 |
+| 6 | `parseAlteredPrimaryKeys` | function | 77 |
+| 7 | `parseColumns` | function | 87 |
+| 8 | `parsePrimaryKey` | function | 104 |
+| 9 | `cleanColumnList` | function | 121 |
+| 10 | `parseIndexes` | function | 128 |
+| 11 | `parseRuntimeStatements` | function | 145 |
+| 12 | `uniqueRuntimeRows` | function | 187 |
+| 13 | `parseDexieStores` | function | 199 |
+| 14 | `loadBackupSchema` | function | 220 |
+| 15 | `countForeignKeyDeclarations` | function | 226 |
+| 16 | `buildCoverage` | function | 233 |
+| 17 | `buildBackupCoverage` | function | 242 |
+| 18 | `renderList` | function | 264 |
+| 19 | `renderRuntimeRows` | function | 269 |
+| 20 | `renderTableCatalog` | function | 274 |
+| 21 | `primaryKeyGapRows` | function | 280 |
+| 22 | `renderPrimaryKeyGaps` | function | 293 |
+| 23 | `renderReport` | function | 308 |
+| 24 | `buildSummary` | function | 398 |
+| 25 | `main` | function | 430 |
 
-### 3.469 `ops/scripts/backend/verify-data-integrity.js`
+### 3.497 `ops/scripts/backend/schema-primary-key-preflight.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseEnvFile` | function | 23 |
-| 2 | `fail` | function | 41 |
-| 3 | `pass` | function | 46 |
-| 4 | `approxEqual` | function | 50 |
-| 5 | `stripTrailingSemicolon` | function | 54 |
-| 6 | `runPsql` | function | 58 |
-| 7 | `queryRows` | function | 80 |
-| 8 | `queryOne` | function | 89 |
-| 9 | `execSql` | function | 93 |
-| 10 | `sqlString` | function | 97 |
-| 11 | `checkNoNegativeStock` | function | 101 |
-| 12 | `checkProductStockMatchesBranches` | function | 110 |
-| 13 | `checkSaleItemTotals` | function | 155 |
-| 14 | `checkReturnDoesNotExceedSold` | function | 165 |
-| 15 | `checkProfitFormulaConsistency` | function | 188 |
-| 16 | `checkCogsSnapshotVsCurrentProductCost` | function | 224 |
-| 17 | `checkPostgresRuntimeTables` | function | 245 |
-| 18 | `run` | function | 274 |
+| 1 | `parseArgs` | function | 10 |
+| 2 | `assertInsideWorkspace` | function | 33 |
+| 3 | `runPsql` | function | 39 |
+| 4 | `buildPreflightSql` | function | 50 |
+| 5 | `summarize` | function | 158 |
 
-### 3.470 `ops/scripts/frontend/verify-i18n.js`
+### 3.498 `ops/scripts/backend/verify-data-integrity.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseEnvFile` | function | 27 |
+| 2 | `fail` | function | 59 |
+| 3 | `pass` | function | 66 |
+| 4 | `approxEqual` | function | 71 |
+| 5 | `stripTrailingSemicolon` | function | 75 |
+| 6 | `runPsql` | function | 79 |
+| 7 | `queryRows` | function | 101 |
+| 8 | `queryOne` | function | 110 |
+| 9 | `queryScalarList` | function | 114 |
+| 10 | `execSql` | function | 118 |
+| 11 | `sqlString` | function | 122 |
+| 12 | `sqlIdentifier` | function | 126 |
+| 13 | `generatedTextMatch` | function | 130 |
+| 14 | `checkNoNegativeStock` | function | 137 |
+| 15 | `checkProductStockMatchesBranches` | function | 146 |
+| 16 | `checkSaleItemTotals` | function | 191 |
+| 17 | `checkReturnDoesNotExceedSold` | function | 201 |
+| 18 | `addCleanupClassification` | function | 231 |
+| 19 | `addCleanupCandidateIds` | function | 243 |
+| 20 | `classifyIntegrityBacklog` | function | 253 |
+| 21 | `checkProfitFormulaConsistency` | function | 405 |
+| 22 | `checkCogsSnapshotVsCurrentProductCost` | function | 441 |
+| 23 | `checkPostgresRuntimeTables` | function | 462 |
+| 24 | `checkDatasetReadiness` | function | 491 |
+| 25 | `checkRelationshipOrphans` | function | 529 |
+| 26 | `writeReport` | function | 646 |
+| 27 | `run` | function | 656 |
+
+### 3.499 `ops/scripts/frontend/verify-i18n.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6133,7 +6628,7 @@ Code files scanned: **508**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.471 `ops/scripts/frontend/verify-performance.js`
+### 3.500 `ops/scripts/frontend/verify-performance.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6142,25 +6637,23 @@ Code files scanned: **508**
 | 3 | `trackedFiles` | function | 37 |
 | 4 | `assert` | function | 47 |
 
-### 3.472 `ops/scripts/frontend/verify-ui.js`
+### 3.501 `ops/scripts/frontend/verify-ui.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readText` | function | 61 |
-| 2 | `readJson` | function | 65 |
-| 3 | `flatten` | function | 69 |
-| 4 | `walkFiles` | function | 82 |
-| 5 | `isIntentionalLatin` | function | 94 |
-| 6 | `report` | function | 102 |
-| 7 | `checkKhmerQuality` | function | 108 |
-| 8 | `checkPortalDarkModeContracts` | function | 132 |
-| 9 | `checkPortalVisibleStrings` | function | 154 |
-| 10 | `checkFormControlLabels` | function | 176 |
-| 11 | `checkVerificationWiring` | function | 196 |
-| 12 | `printAuditSummary` | function | 209 |
-| 13 | `main` | function | 227 |
+| 1 | `flatten` | function | 62 |
+| 2 | `walkFiles` | function | 75 |
+| 3 | `isIntentionalLatin` | function | 87 |
+| 4 | `report` | function | 95 |
+| 5 | `checkKhmerQuality` | function | 101 |
+| 6 | `checkPortalDarkModeContracts` | function | 125 |
+| 7 | `checkPortalVisibleStrings` | function | 147 |
+| 8 | `checkFormControlLabels` | function | 169 |
+| 9 | `checkVerificationWiring` | function | 189 |
+| 10 | `printAuditSummary` | function | 202 |
+| 11 | `main` | function | 220 |
 
-### 3.473 `ops/scripts/lib/fs-utils.js`
+### 3.502 `ops/scripts/lib/fs-utils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6169,14 +6662,39 @@ Code files scanned: **508**
 | 3 | `relFrom` | function | 35 |
 | 4 | `readUtf8` | function | 42 |
 | 5 | `readJson` | function | 50 |
-| 6 | `lineCount` | function | 58 |
-| 7 | `shouldSkipDirectory` | function | 66 |
-| 8 | `walkFilesRecursive` | function | 70 |
-| 9 | `collectFilesAndFolders` | function | 97 |
-| 10 | `collectRootFiles` | function | 126 |
-| 11 | `isProbablyText` | function | 145 |
+| 6 | `readUtf8Async` | function | 58 |
+| 7 | `readJsonAsync` | function | 66 |
+| 8 | `lineCount` | function | 74 |
+| 9 | `pathExists` | function | 79 |
+| 10 | `mapLimit` | function | 88 |
+| 11 | `worker` | function | 91 |
+| 12 | `shouldSkipDirectory` | function | 106 |
+| 13 | `walkFilesRecursive` | function | 110 |
+| 14 | `collectFilesAndFolders` | function | 137 |
+| 15 | `collectRootFiles` | function | 166 |
+| 16 | `isProbablyText` | function | 185 |
 
-### 3.474 `ops/scripts/runtime/audits/audit-auth.mjs`
+### 3.503 `ops/scripts/lib/report-utils.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `markdownTable` | function | 5 |
+| 2 | `stableDigest` | function | 13 |
+| 3 | `summarizeReportValue` | function | 17 |
+| 4 | `outputTail` | function | 31 |
+| 5 | `formatBytes` | function | 38 |
+
+### 3.504 `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 24 |
+| 2 | `request` | function | 28 |
+| 3 | `runCleanupCommand` | function | 48 |
+| 4 | `cleanupActionHistoryData` | function | 65 |
+| 5 | `main` | function | 98 |
+
+### 3.505 `ops/scripts/runtime/audits/audit-auth.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6187,103 +6705,143 @@ Code files scanned: **508**
 | 5 | `applySessionToPlaywrightContext` | export function | 95 |
 | 6 | `hydratePlaywrightPage` | export function | 117 |
 
-### 3.475 `ops/scripts/runtime/audits/audit-manifest.mjs`
+### 3.506 `ops/scripts/runtime/audits/audit-manifest.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getRouteManifest` | export function | 192 |
-| 2 | `getAuditProfiles` | export function | 210 |
+| 1 | `getRouteManifest` | export function | 204 |
+| 2 | `resolveAuditRoutes` | export function | 211 |
+| 3 | `getAuditProfiles` | export function | 248 |
 
-### 3.476 `ops/scripts/runtime/audits/audit-report-html.mjs`
+### 3.507 `ops/scripts/runtime/audits/audit-report-html.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `escapeHtml` | function | 4 |
-| 2 | `formatMs` | function | 13 |
-| 3 | `formatCls` | function | 19 |
-| 4 | `formatCount` | function | 25 |
-| 5 | `formatBytes` | function | 30 |
-| 6 | `toRelativeLink` | function | 38 |
-| 7 | `inferHotPath` | function | 44 |
-| 8 | `renderFindings` | function | 64 |
-| 9 | `renderSummaryCards` | function | 88 |
-| 10 | `writeDeepAuditHtmlReport` | export function | 103 |
-| 11 | `writeFullAuditHtmlReport` | export function | 221 |
+| 1 | `escapeHtml` | function | 8 |
+| 2 | `formatMs` | function | 17 |
+| 3 | `formatCls` | function | 23 |
+| 4 | `formatCount` | function | 29 |
+| 5 | `toRelativeLink` | function | 34 |
+| 6 | `inferHotPath` | function | 40 |
+| 7 | `renderFindings` | function | 60 |
+| 8 | `renderSummaryCards` | function | 84 |
+| 9 | `writeDeepAuditHtmlReport` | export function | 99 |
+| 10 | `writeFullAuditHtmlReport` | export function | 217 |
+| 11 | `writeBrowserActionHtmlReport` | export function | 278 |
 
-### 3.477 `ops/scripts/runtime/audits/deep-live-audit.mjs`
+### 3.508 `ops/scripts/runtime/audits/deep-live-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `readArg` | function | 71 |
-| 2 | `safeName` | function | 78 |
-| 3 | `escapeRegExp` | function | 82 |
-| 4 | `addFinding` | function | 86 |
-| 5 | `assetFileName` | function | 95 |
-| 6 | `getScriptBudgetBytes` | function | 103 |
-| 7 | `isFailingFinding` | function | 124 |
-| 8 | `appOwnedUrl` | function | 128 |
-| 9 | `externalNoise` | function | 138 |
-| 10 | `isAppConsoleIssue` | function | 142 |
-| 11 | `isNavigationAbort` | function | 149 |
-| 12 | `writeJson` | function | 156 |
-| 13 | `requestJson` | function | 160 |
-| 14 | `runCommand` | function | 181 |
-| 15 | `captureHealth` | function | 218 |
-| 16 | `runFullApiAudit` | function | 234 |
-| 17 | `primeDirectRouteProbeMap` | function | 304 |
-| 18 | `loginForAudit` | function | 343 |
-| 19 | `isLoginScreen` | function | 357 |
-| 20 | `ensureAuditLogin` | function | 363 |
-| 21 | `installPerfObservers` | function | 397 |
-| 22 | `bosSelectorFor` | const arrow | 399 |
-| 23 | `createBrowserHarness` | function | 501 |
-| 24 | `createContext` | const arrow | 505 |
-| 25 | `attachCollectors` | function | 516 |
-| 26 | `resetBrowserState` | function | 604 |
-| 27 | `waitForRouteReady` | function | 620 |
-| 28 | `collectPerfSnapshot` | function | 647 |
-| 29 | `saveScreenshot` | function | 707 |
-| 30 | `performSearchInteraction` | function | 714 |
-| 31 | `dismissTransientUi` | function | 749 |
-| 32 | `clickNamedButton` | function | 767 |
-| 33 | `clickTestIdButton` | function | 802 |
-| 34 | `runRouteInteractions` | function | 842 |
-| 35 | `analyzeRoute` | function | 856 |
-| 36 | `auditRoute` | function | 955 |
-| 37 | `auditBrowserProfile` | function | 1151 |
-| 38 | `runIsolatedRoute` | const arrow | 1176 |
-| 39 | `auditRemoteReadOnly` | function | 1209 |
-| 40 | `captureDockerStateAndLogs` | function | 1247 |
-| 41 | `compareWithPreviousBaseline` | function | 1295 |
-| 42 | `main` | function | 1343 |
+| 2 | `readArgs` | function | 78 |
+| 3 | `safeName` | function | 94 |
+| 4 | `escapeRegExp` | function | 98 |
+| 5 | `addFinding` | function | 102 |
+| 6 | `assetFileName` | function | 111 |
+| 7 | `getScriptBudgetBytes` | function | 119 |
+| 8 | `isFailingFinding` | function | 140 |
+| 9 | `appOwnedUrl` | function | 144 |
+| 10 | `externalNoise` | function | 154 |
+| 11 | `isAppConsoleIssue` | function | 158 |
+| 12 | `isNavigationAbort` | function | 165 |
+| 13 | `writeJson` | function | 172 |
+| 14 | `requestJson` | function | 176 |
+| 15 | `runCommand` | function | 197 |
+| 16 | `captureHealth` | function | 234 |
+| 17 | `runFullApiAudit` | function | 250 |
+| 18 | `primeDirectRouteProbeMap` | function | 320 |
+| 19 | `loginForAudit` | function | 359 |
+| 20 | `isLoginScreen` | function | 373 |
+| 21 | `ensureAuditLogin` | function | 379 |
+| 22 | `installPerfObservers` | function | 413 |
+| 23 | `bosSelectorFor` | const arrow | 415 |
+| 24 | `createBrowserHarness` | function | 517 |
+| 25 | `createContext` | const arrow | 521 |
+| 26 | `attachCollectors` | function | 532 |
+| 27 | `resetBrowserState` | function | 620 |
+| 28 | `waitForRouteReady` | function | 636 |
+| 29 | `collectPerfSnapshot` | function | 663 |
+| 30 | `saveScreenshot` | function | 723 |
+| 31 | `performSearchInteraction` | function | 730 |
+| 32 | `dismissTransientUi` | function | 765 |
+| 33 | `clickNamedButton` | function | 783 |
+| 34 | `clickTestIdButton` | function | 818 |
+| 35 | `runRouteInteractions` | function | 858 |
+| 36 | `analyzeRoute` | function | 874 |
+| 37 | `auditRoute` | function | 973 |
+| 38 | `auditBrowserProfile` | function | 1169 |
+| 39 | `runIsolatedRoute` | const arrow | 1200 |
+| 40 | `auditRemoteReadOnly` | function | 1233 |
+| 41 | `captureDockerStateAndLogs` | function | 1271 |
+| 42 | `compareWithPreviousBaseline` | function | 1319 |
+| 43 | `main` | function | 1367 |
 
-### 3.478 `ops/scripts/runtime/audits/full-app-audit.mjs`
+### 3.509 `ops/scripts/runtime/audits/full-app-audit.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `wait` | function | 40 |
-| 2 | `pushFinding` | function | 44 |
-| 3 | `assert` | function | 53 |
-| 4 | `isJsonResponse` | function | 57 |
-| 5 | `fetchWithTimeout` | function | 61 |
-| 6 | `request` | function | 71 |
-| 7 | `recordApi` | function | 110 |
-| 8 | `login` | function | 128 |
-| 9 | `captureHealth` | function | 141 |
-| 10 | `auditHtmlRoutes` | function | 155 |
-| 11 | `auditReadEndpoints` | function | 182 |
-| 12 | `getActiveBranches` | function | 216 |
-| 13 | `runFefoWriteFlow` | function | 225 |
-| 14 | `runImportFlow` | function | 380 |
-| 15 | `tinyPngBytes` | function | 430 |
-| 16 | `runFilesFlow` | function | 437 |
-| 17 | `runBackupFlow` | function | 452 |
-| 18 | `pollSystemJob` | function | 489 |
-| 19 | `auditRemotePublic` | function | 502 |
-| 20 | `writeSummary` | function | 537 |
-| 21 | `main` | function | 548 |
+| 1 | `wait` | function | 42 |
+| 2 | `pushFinding` | function | 46 |
+| 3 | `assert` | function | 55 |
+| 4 | `isJsonResponse` | function | 59 |
+| 5 | `fetchWithTimeout` | function | 63 |
+| 6 | `request` | function | 73 |
+| 7 | `recordApi` | function | 112 |
+| 8 | `login` | function | 130 |
+| 9 | `captureHealth` | function | 143 |
+| 10 | `auditHtmlRoutes` | function | 157 |
+| 11 | `auditReadEndpoints` | function | 184 |
+| 12 | `getActiveBranches` | function | 218 |
+| 13 | `runFefoWriteFlow` | function | 227 |
+| 14 | `runImportFlow` | function | 382 |
+| 15 | `tinyPngBytes` | function | 432 |
+| 16 | `runFilesFlow` | function | 439 |
+| 17 | `runBackupFlow` | function | 454 |
+| 18 | `pollSystemJob` | function | 491 |
+| 19 | `cleanupAuditData` | function | 504 |
+| 20 | `auditRemotePublic` | function | 535 |
+| 21 | `writeSummary` | function | 570 |
+| 22 | `main` | function | 581 |
 
-### 3.479 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs`
+### 3.510 `ops/scripts/runtime/browser-action-smoke.mjs`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `readArg` | function | 42 |
+| 2 | `readArgs` | function | 49 |
+| 3 | `safeName` | function | 65 |
+| 4 | `escapeRegExp` | function | 69 |
+| 5 | `addFinding` | function | 73 |
+| 6 | `isExternalConsoleNoise` | function | 82 |
+| 7 | `isAppConsoleIssue` | function | 86 |
+| 8 | `requestJson` | function | 92 |
+| 9 | `captureHealth` | function | 104 |
+| 10 | `buildContextOptions` | function | 117 |
+| 11 | `attachConsoleCapture` | function | 126 |
+| 12 | `saveScreenshot` | function | 147 |
+| 13 | `waitForRouteReady` | function | 154 |
+| 14 | `getActiveRouteRoot` | function | 175 |
+| 15 | `dismissTransientUi` | function | 179 |
+| 16 | `clickWithFallback` | function | 197 |
+| 17 | `countVisibleDialogs` | function | 207 |
+| 18 | `countVisibleNamedButtons` | function | 223 |
+| 19 | `countVisiblePortalLayers` | function | 235 |
+| 20 | `clickVisibleButton` | function | 248 |
+| 21 | `findButtonInLocator` | function | 267 |
+| 22 | `openMobileMoreDrawer` | function | 288 |
+| 23 | `navigateViaUi` | function | 297 |
+| 24 | `verifyExpectation` | function | 412 |
+| 25 | `clickNamedButton` | function | 474 |
+| 26 | `clickTestIdButton` | function | 526 |
+| 27 | `performSearchInteraction` | function | 576 |
+| 28 | `findSearchInput` | function | 579 |
+| 29 | `runRouteInteractions` | function | 647 |
+| 30 | `bootstrapProfile` | function | 661 |
+| 31 | `runProfile` | function | 678 |
+| 32 | `main` | function | 746 |
+
+### 3.511 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6304,7 +6862,7 @@ Code files scanned: **508**
 | 15 | `main` | function | 150 |
 | 16 | `requestJson` | function | 205 |
 
-### 3.480 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs`
+### 3.512 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6315,37 +6873,41 @@ Code files scanned: **508**
 | 5 | `main` | function | 58 |
 | 6 | `requestJson` | function | 103 |
 
-### 3.481 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
+### 3.513 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 10 |
-| 2 | `readJson` | function | 20 |
-| 3 | `readToken` | function | 24 |
-| 4 | `cleanToken` | const arrow | 25 |
-| 5 | `readAllowedEmails` | function | 31 |
-| 6 | `requestJson` | function | 43 |
-| 7 | `summarizeFailure` | function | 78 |
-| 8 | `cloudflareErrors` | function | 85 |
-| 9 | `assertSuccess` | function | 91 |
-| 10 | `upsertAccessApp` | function | 98 |
-| 11 | `getEntrypointRuleset` | function | 130 |
-| 12 | `upsertEntrypointRuleset` | function | 136 |
-| 13 | `tryApplyRuleset` | function | 155 |
-| 14 | `applyCloudflareAutomation` | function | 166 |
-| 15 | `main` | function | 209 |
+| 1 | `parseArgs` | function | 14 |
+| 2 | `readToken` | function | 24 |
+| 3 | `cleanToken` | const arrow | 25 |
+| 4 | `readAllowedEmails` | function | 31 |
+| 5 | `normalizeAdminAccessMode` | function | 39 |
+| 6 | `requestJson` | function | 45 |
+| 7 | `summarizeFailure` | function | 80 |
+| 8 | `cloudflareErrors` | function | 87 |
+| 9 | `assertSuccess` | function | 93 |
+| 10 | `buildAccessPolicies` | function | 100 |
+| 11 | `upsertAccessApp` | function | 121 |
+| 12 | `getEntrypointRuleset` | function | 146 |
+| 13 | `upsertEntrypointRuleset` | function | 152 |
+| 14 | `tryApplyRuleset` | function | 171 |
+| 15 | `applyCloudflareAutomation` | function | 182 |
+| 16 | `main` | function | 226 |
 
-### 3.482 `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs`
+### 3.514 `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `loadEnvFile` | function | 20 |
 | 2 | `readConfig` | function | 38 |
-| 3 | `bodyToString` | function | 52 |
-| 4 | `isMissingObjectError` | function | 60 |
-| 5 | `main` | function | 66 |
+| 3 | `bodyToString` | function | 61 |
+| 4 | `isMissingObjectError` | function | 69 |
+| 5 | `isAuthLikeError` | function | 75 |
+| 6 | `canUseApiFallback` | function | 84 |
+| 7 | `verifyRuntimeObjectStoreFallback` | function | 88 |
+| 8 | `main` | function | 96 |
 
-### 3.483 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+### 3.515 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6358,28 +6920,28 @@ Code files scanned: **508**
 | 7 | `waitForRead` | export function | 50 |
 | 8 | `closeTopModal` | export function | 62 |
 
-### 3.484 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
+### 3.516 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.485 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
+### 3.517 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.486 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
+### 3.518 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 25 |
 
-### 3.487 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
+### 3.519 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6387,7 +6949,23 @@ Code files scanned: **508**
 | 2 | `openFirstProductDetail` | function | 26 |
 | 3 | `main` | function | 35 |
 
-### 3.488 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs`
+### 3.520 `ops/scripts/runtime/live-checks/phase84-live-suite.mjs`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseArgs` | function | 31 |
+| 2 | `assertInsideWorkspace` | function | 54 |
+| 3 | `tail` | function | 60 |
+| 4 | `readJsonIfExists` | function | 64 |
+| 5 | `latestReportPathForPrefix` | function | 69 |
+| 6 | `relativePath` | function | 87 |
+| 7 | `summarizeReport` | function | 92 |
+| 8 | `readStepReport` | function | 123 |
+| 9 | `runNodeStep` | function | 133 |
+| 10 | `skippedStep` | function | 153 |
+| 11 | `runSuite` | function | 163 |
+
+### 3.521 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6395,14 +6973,14 @@ Code files scanned: **508**
 | 2 | `verifiedContextGet` | function | 24 |
 | 3 | `main` | function | 31 |
 
-### 3.489 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs`
+### 3.522 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 25 |
 
-### 3.490 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
+### 3.523 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6410,28 +6988,28 @@ Code files scanned: **508**
 | 2 | `openFirstActionMenu` | function | 25 |
 | 3 | `main` | function | 34 |
 
-### 3.491 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
+### 3.524 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 19 |
 | 2 | `main` | function | 26 |
 
-### 3.492 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
+### 3.525 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.493 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs`
+### 3.526 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 25 |
 
-### 3.494 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
+### 3.527 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6439,37 +7017,38 @@ Code files scanned: **508**
 | 2 | `openFirstVariantModal` | function | 25 |
 | 3 | `main` | function | 42 |
 
-### 3.495 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
+### 3.528 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 14 |
 | 2 | `isRelevantConsole` | function | 18 |
-| 3 | `endpointStatus` | function | 22 |
-| 4 | `main` | function | 26 |
+| 3 | `isCloudflareScriptMonitorReportOnlyCsp` | function | 22 |
+| 4 | `endpointStatus` | function | 27 |
+| 5 | `main` | function | 31 |
 
-### 3.496 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
+### 3.529 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 25 |
 
-### 3.497 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
+### 3.530 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 19 |
 | 2 | `main` | function | 26 |
 
-### 3.498 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
+### 3.531 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.499 `ops/scripts/runtime/smoke/check-public-url.mjs`
+### 3.532 `ops/scripts/runtime/smoke/check-public-url.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6485,7 +7064,7 @@ Code files scanned: **508**
 | 10 | `checkHttpsViaIp` | function | 123 |
 | 11 | `main` | function | 160 |
 
-### 3.500 `ops/scripts/runtime/smoke/check-route-contract.mjs`
+### 3.533 `ops/scripts/runtime/smoke/check-route-contract.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6493,92 +7072,220 @@ Code files scanned: **508**
 | 2 | `checkRoute` | function | 32 |
 | 3 | `main` | function | 59 |
 
-### 3.501 `ops/scripts/runtime/smoke/live-smoke.mjs`
+### 3.534 `ops/scripts/runtime/smoke/live-smoke.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 11 |
-| 2 | `request` | function | 15 |
-| 3 | `login` | function | 44 |
-| 4 | `main` | function | 57 |
-| 5 | `record` | const arrow | 61 |
+| 1 | `assert` | function | 16 |
+| 2 | `request` | function | 20 |
+| 3 | `login` | function | 49 |
+| 4 | `cleanupLiveSmokeData` | function | 62 |
+| 5 | `main` | function | 87 |
+| 6 | `record` | const arrow | 92 |
 
-### 3.502 `ops/scripts/runtime/storage/prune-storage.mjs`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `parseArgs` | function | 13 |
-| 2 | `runDockerCommand` | function | 42 |
-| 3 | `pruneDockerSafe` | function | 50 |
-| 4 | `loadEnvFile` | function | 97 |
-| 5 | `loadRuntimeEnv` | function | 115 |
-| 6 | `assertInsideWorkspace` | function | 124 |
-| 7 | `directoryBytes` | function | 133 |
-| 8 | `pathBytes` | function | 159 |
-| 9 | `pruneDirectoryChildren` | function | 168 |
-| 10 | `pruneDirectoryEntries` | function | 172 |
-| 11 | `findBackupRoots` | function | 209 |
-| 12 | `main` | function | 223 |
-
-### 3.503 `ops/scripts/verification/verify-backup-reliability.js`
+### 3.535 `ops/scripts/runtime/smoke/post-start-diagnostics.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `read` | function | 10 |
-| 2 | `lineFor` | function | 14 |
-| 3 | `requireText` | function | 20 |
-| 4 | `forbidText` | function | 24 |
-| 5 | `main` | function | 28 |
+| 1 | `parseArgs` | function | 7 |
+| 2 | `readResponse` | function | 33 |
+| 3 | `hasBuildInfo` | function | 66 |
+| 4 | `mkdirForFile` | function | 75 |
+| 5 | `writeReport` | function | 80 |
+| 6 | `main` | function | 86 |
 
-### 3.504 `ops/scripts/verification/verify-docker-release.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `read` | function | 38 |
-| 2 | `rel` | function | 42 |
-| 3 | `requireFile` | function | 46 |
-| 4 | `requireToken` | function | 50 |
-| 5 | `main` | function | 54 |
-
-### 3.505 `ops/scripts/verification/verify-hardening-policy.js`
+### 3.536 `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readJson` | function | 12 |
-| 2 | `normalizeRelativePath` | function | 16 |
-| 3 | `readText` | function | 20 |
-| 4 | `readTextWithLocalImports` | function | 24 |
-| 5 | `listTrackedFiles` | function | 38 |
-| 6 | `lineFor` | function | 45 |
-| 7 | `assertContains` | function | 51 |
-| 8 | `assertNotContains` | function | 57 |
-| 9 | `assertNoApiCachingRegression` | function | 63 |
-| 10 | `assertFullAutomationIncludesPolicy` | function | 84 |
-| 11 | `main` | function | 100 |
+| 1 | `parseArgs` | function | 9 |
+| 2 | `assertInsideWorkspace` | function | 31 |
+| 3 | `generatedTextMatch` | function | 37 |
+| 4 | `buildTempTablesSql` | function | 44 |
+| 5 | `buildCountsSql` | function | 145 |
+| 6 | `buildDeleteSql` | function | 163 |
+| 7 | `buildSql` | function | 192 |
+| 8 | `runPsql` | function | 201 |
 
-### 3.506 `ops/scripts/verification/verify-runtime-deps.js`
+### 3.537 `ops/scripts/runtime/storage/cleanup-test-data.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readJson` | function | 22 |
-| 2 | `assertTrackedFile` | function | 26 |
-| 3 | `hasLockDependency` | function | 32 |
-| 4 | `main` | function | 38 |
+| 1 | `parseArgs` | function | 9 |
+| 2 | `assertInsideWorkspace` | function | 39 |
+| 3 | `sqlString` | function | 45 |
+| 4 | `likeEscape` | function | 49 |
+| 5 | `productSeedWhere` | function | 53 |
+| 6 | `textQaWhere` | function | 73 |
+| 7 | `lookupNameWhere` | function | 85 |
+| 8 | `buildTempTablesSql` | function | 97 |
+| 9 | `textMatch` | const arrow | 98 |
+| 10 | `lookupNameMatch` | const arrow | 99 |
+| 11 | `buildCountsSelectSql` | function | 219 |
+| 12 | `buildDeleteSql` | function | 243 |
+| 13 | `buildSql` | function | 304 |
+| 14 | `runPsql` | function | 308 |
+| 15 | `pathIsInside` | function | 320 |
+| 16 | `measurePathBytes` | function | 325 |
+| 17 | `walkFiles` | function | 336 |
+| 18 | `fileMatchesGeneratedImport` | function | 345 |
+| 19 | `findGeneratedImportDirectories` | function | 351 |
+| 20 | `cleanupAuditImportFiles` | function | 377 |
+| 21 | `countMatchedRows` | function | 400 |
 
-### 3.507 `ops/scripts/verification/verify-scale-services.js`
+### 3.538 `ops/scripts/runtime/storage/dataset-readiness.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ensureDir` | function | 18 |
-| 2 | `run` | function | 22 |
-| 3 | `firstExisting` | function | 40 |
-| 4 | `whereDocker` | function | 44 |
-| 5 | `resolveDocker` | function | 57 |
-| 6 | `checkSecretIgnoreRules` | function | 67 |
-| 7 | `trackedLicenses` | const arrow | 68 |
-| 8 | `main` | function | 94 |
+| 1 | `parseArgs` | function | 9 |
+| 2 | `assertInsideWorkspace` | function | 30 |
+| 3 | `runPsql` | function | 36 |
+| 4 | `buildCountsSql` | function | 47 |
+| 5 | `summarizeDataset` | function | 65 |
 
-### 3.508 `ops/scripts/verification/verify-secret-hygiene.js`
+### 3.539 `ops/scripts/runtime/storage/post-live-hygiene.mjs`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseArgs` | function | 12 |
+| 2 | `assertInsideWorkspace` | function | 27 |
+| 3 | `runCheck` | function | 33 |
+| 4 | `appendBounded` | const arrow | 43 |
+| 5 | `readJsonReport` | function | 77 |
+| 6 | `sumMatchedCounts` | function | 83 |
+| 7 | `withReportCheck` | function | 88 |
+| 8 | `nodeCheck` | function | 111 |
+| 9 | `buildCheckPlan` | function | 115 |
+| 10 | `runChecks` | function | 185 |
+| 11 | `main` | function | 193 |
+
+### 3.540 `ops/scripts/runtime/storage/prune-storage.mjs`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `readJsonFile` | function | 14 |
+| 2 | `numberFromPolicy` | function | 22 |
+| 3 | `parseArgs` | function | 27 |
+| 4 | `runDockerCommand` | function | 103 |
+| 5 | `pruneDockerSafe` | function | 111 |
+| 6 | `loadEnvFile` | function | 158 |
+| 7 | `loadRuntimeEnv` | function | 176 |
+| 8 | `assertInsideWorkspace` | function | 185 |
+| 9 | `directoryBytes` | function | 194 |
+| 10 | `pathBytes` | function | 220 |
+| 11 | `pruneDirectoryChildren` | function | 229 |
+| 12 | `pruneDirectoryEntries` | function | 233 |
+| 13 | `collectLogFiles` | function | 270 |
+| 14 | `compactLogFile` | function | 298 |
+| 15 | `compactRuntimeLogs` | function | 326 |
+| 16 | `findBackupRoots` | function | 359 |
+| 17 | `main` | function | 373 |
+
+### 3.541 `ops/scripts/runtime/storage/restore-candidates.mjs`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseArgs` | function | 24 |
+| 2 | `assertInsideWorkspace` | function | 43 |
+| 3 | `readJson` | function | 49 |
+| 4 | `countSqlCopyRows` | function | 61 |
+| 5 | `summarizeCounts` | function | 82 |
+| 6 | `inspectBackupPackage` | function | 92 |
+| 7 | `findBackupPackages` | function | 112 |
+| 8 | `chooseRecommendation` | function | 126 |
+
+### 3.542 `ops/scripts/runtime/storage/restore-rehearsal.mjs`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseArgs` | function | 21 |
+| 2 | `assertInsideWorkspace` | function | 45 |
+| 3 | `readJson` | function | 51 |
+| 4 | `resolveRecommendedBackupPath` | function | 59 |
+| 5 | `countSqlCopyRows` | function | 69 |
+| 6 | `runDocker` | function | 89 |
+| 7 | `runPsql` | function | 101 |
+| 8 | `createTempDatabaseName` | function | 108 |
+| 9 | `quoteIdentifier` | function | 112 |
+| 10 | `createDatabase` | function | 116 |
+| 11 | `dropDatabase` | function | 120 |
+| 12 | `restoreSql` | function | 129 |
+| 13 | `countRestoredTables` | function | 137 |
+| 14 | `compareCounts` | function | 144 |
+
+### 3.543 `ops/scripts/verification/verify-backup-reliability.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `read` | function | 11 |
+| 2 | `lineFor` | function | 15 |
+| 3 | `requireText` | function | 21 |
+| 4 | `forbidText` | function | 25 |
+| 5 | `checkNeedles` | function | 29 |
+| 6 | `main` | function | 36 |
+
+### 3.544 `ops/scripts/verification/verify-docker-release.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `read` | function | 60 |
+| 2 | `rel` | function | 64 |
+| 3 | `requireFile` | function | 68 |
+| 4 | `requireToken` | function | 72 |
+| 5 | `buildCloudflareRuntimeCoverage` | function | 76 |
+| 6 | `assertCloudflareRuntimeCoverage` | function | 196 |
+| 7 | `walk` | function | 198 |
+| 8 | `buildTestDataCleanupCoverage` | function | 211 |
+| 9 | `assertBooleanCoverage` | function | 312 |
+| 10 | `walk` | function | 314 |
+| 11 | `main` | function | 325 |
+
+### 3.545 `ops/scripts/verification/verify-hardening-policy.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeRelativePath` | function | 13 |
+| 2 | `readWithLocalImports` | function | 17 |
+| 3 | `listTrackedOrPendingFiles` | function | 31 |
+| 4 | `lineFor` | function | 38 |
+| 5 | `assertContains` | function | 44 |
+| 6 | `assertNotContains` | function | 50 |
+| 7 | `assertNoApiCachingRegression` | function | 56 |
+| 8 | `assertFullAutomationIncludesPolicy` | function | 77 |
+| 9 | `main` | function | 93 |
+
+### 3.546 `ops/scripts/verification/verify-runtime-deps.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assertTrackedFile` | function | 39 |
+| 2 | `rel` | function | 45 |
+| 3 | `requireToken` | function | 49 |
+| 4 | `hasLockDependency` | function | 55 |
+| 5 | `readIncludes` | function | 61 |
+| 6 | `packageLockVersion` | function | 65 |
+| 7 | `buildVersionConsistency` | function | 69 |
+| 8 | `assertVersionConsistency` | function | 95 |
+| 9 | `assertRuntimeVersionGuardWiring` | function | 101 |
+| 10 | `assertBuildManifestShapeWhenPresent` | function | 170 |
+| 11 | `buildLocalVerificationCoverage` | function | 187 |
+| 12 | `assertCoverageComplete` | function | 235 |
+| 13 | `main` | function | 248 |
+
+### 3.547 `ops/scripts/verification/verify-scale-services.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `ensureDir` | function | 19 |
+| 2 | `run` | function | 23 |
+| 3 | `firstExisting` | function | 41 |
+| 4 | `whereDocker` | function | 45 |
+| 5 | `resolveDocker` | function | 58 |
+| 6 | `checkSecretIgnoreRules` | function | 68 |
+| 7 | `trackedLicenses` | const arrow | 69 |
+| 8 | `main` | function | 95 |
+
+### 3.548 `ops/scripts/verification/verify-secret-hygiene.js`
 
 - No top-level named symbols detected.
 

@@ -10,9 +10,9 @@ Total folders documented: **81**
 
 | No. | Folder | Purpose | Direct files | Direct subfolders |
 |---:|---|---|---:|---:|
-| 1 | `.` | Project root (run files, setup, packaging, top-level config) | 4 | 5 |
+| 1 | `.` | Project root (run files, setup, packaging, top-level config) | 4 | 4 |
 | 2 | `backend` | Backend project root | 6 | 2 |
-| 3 | `backend/src` | Backend runtime core | 39 | 10 |
+| 3 | `backend/src` | Backend runtime core | 40 | 10 |
 | 4 | `backend/src/analytics` | Backend runtime core | 1 | 0 |
 | 5 | `backend/src/config` | Backend runtime core | 1 | 0 |
 | 6 | `backend/src/dataPath` | Backend runtime core | 1 | 0 |
@@ -25,20 +25,20 @@ Total folders documented: **81**
 | 13 | `backend/src/services/googleDriveSync` | Provider/service integrations | 2 | 0 |
 | 14 | `backend/src/storage` | Backend runtime core | 1 | 0 |
 | 15 | `backend/src/workers` | Backend runtime core | 2 | 0 |
-| 16 | `backend/test` | Project folder | 45 | 0 |
+| 16 | `backend/test` | Project folder | 50 | 0 |
 | 17 | `frontend` | Frontend project root | 9 | 3 |
 | 18 | `frontend/public` | Project folder | 6 | 1 |
 | 19 | `frontend/public/scanbot-web-sdk` | Project folder | 0 | 1 |
 | 20 | `frontend/public/scanbot-web-sdk/bundle` | Project folder | 2 | 1 |
 | 21 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
 | 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
-| 23 | `frontend/src` | Project folder | 6 | 9 |
-| 24 | `frontend/src/api` | Frontend API and sync transport | 5 | 0 |
+| 23 | `frontend/src` | Project folder | 8 | 9 |
+| 24 | `frontend/src/api` | Frontend API and sync transport | 8 | 0 |
 | 25 | `frontend/src/app` | Project folder | 3 | 0 |
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
 | 28 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
-| 29 | `frontend/src/components/catalog` | UI pages/components domain | 18 | 0 |
+| 29 | `frontend/src/components/catalog` | UI pages/components domain | 19 | 0 |
 | 30 | `frontend/src/components/contacts` | UI pages/components domain | 15 | 0 |
 | 31 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
 | 32 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
@@ -51,11 +51,11 @@ Total folders documented: **81**
 | 39 | `frontend/src/components/products` | UI pages/components domain | 1 | 9 |
 | 40 | `frontend/src/components/products/config` | UI pages/components domain | 2 | 0 |
 | 41 | `frontend/src/components/products/forms` | UI pages/components domain | 4 | 0 |
-| 42 | `frontend/src/components/products/helpers` | UI pages/components domain | 16 | 0 |
+| 42 | `frontend/src/components/products/helpers` | UI pages/components domain | 17 | 0 |
 | 43 | `frontend/src/components/products/history` | UI pages/components domain | 2 | 0 |
 | 44 | `frontend/src/components/products/import` | UI pages/components domain | 5 | 0 |
-| 45 | `frontend/src/components/products/lookups` | UI pages/components domain | 4 | 0 |
-| 46 | `frontend/src/components/products/scanning` | UI pages/components domain | 6 | 0 |
+| 45 | `frontend/src/components/products/lookups` | UI pages/components domain | 5 | 0 |
+| 46 | `frontend/src/components/products/scanning` | UI pages/components domain | 7 | 0 |
 | 47 | `frontend/src/components/products/shared` | UI pages/components domain | 1 | 0 |
 | 48 | `frontend/src/components/products/surfaces` | UI pages/components domain | 4 | 0 |
 | 49 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
@@ -63,30 +63,30 @@ Total folders documented: **81**
 | 51 | `frontend/src/components/returns` | UI pages/components domain | 6 | 0 |
 | 52 | `frontend/src/components/sales` | UI pages/components domain | 8 | 0 |
 | 53 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
-| 54 | `frontend/src/components/shared` | UI pages/components domain | 18 | 0 |
+| 54 | `frontend/src/components/shared` | UI pages/components domain | 20 | 0 |
 | 55 | `frontend/src/components/users` | UI pages/components domain | 4 | 0 |
 | 56 | `frontend/src/components/utils-settings` | UI pages/components domain | 10 | 0 |
 | 57 | `frontend/src/lang` | Localization resources | 2 | 0 |
 | 58 | `frontend/src/platform` | Project folder | 0 | 2 |
-| 59 | `frontend/src/platform/runtime` | Project folder | 1 | 0 |
+| 59 | `frontend/src/platform/runtime` | Project folder | 2 | 0 |
 | 60 | `frontend/src/platform/storage` | Project folder | 2 | 0 |
 | 61 | `frontend/src/runtime` | Project folder | 1 | 0 |
 | 62 | `frontend/src/styles` | Project folder | 1 | 0 |
-| 63 | `frontend/src/types` | Project folder | 3 | 0 |
-| 64 | `frontend/src/utils` | Project folder | 61 | 0 |
+| 63 | `frontend/src/types` | Project folder | 5 | 0 |
+| 64 | `frontend/src/utils` | Project folder | 69 | 0 |
 | 65 | `frontend/tests` | Project folder | 76 | 0 |
 | 66 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
 | 67 | `ops/scripts/architecture` | Project folder | 4 | 0 |
-| 68 | `ops/scripts/backend` | Project folder | 2 | 0 |
+| 68 | `ops/scripts/backend` | Project folder | 4 | 0 |
 | 69 | `ops/scripts/frontend` | Project folder | 3 | 0 |
-| 70 | `ops/scripts/lib` | Project folder | 1 | 0 |
-| 71 | `ops/scripts/powershell` | Project folder | 6 | 0 |
-| 72 | `ops/scripts/runtime` | Project folder | 0 | 5 |
-| 73 | `ops/scripts/runtime/audits` | Project folder | 5 | 0 |
+| 70 | `ops/scripts/lib` | Project folder | 2 | 0 |
+| 71 | `ops/scripts/powershell` | Project folder | 8 | 0 |
+| 72 | `ops/scripts/runtime` | Project folder | 1 | 5 |
+| 73 | `ops/scripts/runtime/audits` | Project folder | 6 | 0 |
 | 74 | `ops/scripts/runtime/cloudflare` | Project folder | 4 | 0 |
-| 75 | `ops/scripts/runtime/live-checks` | Project folder | 16 | 0 |
-| 76 | `ops/scripts/runtime/smoke` | Project folder | 3 | 0 |
-| 77 | `ops/scripts/runtime/storage` | Project folder | 1 | 0 |
+| 75 | `ops/scripts/runtime/live-checks` | Project folder | 17 | 0 |
+| 76 | `ops/scripts/runtime/smoke` | Project folder | 4 | 0 |
+| 77 | `ops/scripts/runtime/storage` | Project folder | 7 | 0 |
 | 78 | `ops/scripts/verification` | Project folder | 6 | 0 |
 | 79 | `run` | Project run-script home for bat and sh launchers | 9 | 2 |
 | 80 | `run/docker` | Project folder | 9 | 0 |
@@ -98,7 +98,7 @@ Total folders documented: **81**
 
 - Purpose: Project root (run files, setup, packaging, top-level config)
 - Direct files: **4**
-- Direct subfolders: **5**
+- Direct subfolders: **4**
 
 #### 3.1.1 Subfolders
 
@@ -107,8 +107,7 @@ Total folders documented: **81**
 | 1 | `backend` |
 | 2 | `frontend` |
 | 3 | `ops` |
-| 4 | `output` |
-| 5 | `run` |
+| 4 | `run` |
 
 #### 3.1.2 Files
 
@@ -148,7 +147,7 @@ Total folders documented: **81**
 ### 3.3 Folder: `backend/src`
 
 - Purpose: Backend runtime core
-- Direct files: **39**
+- Direct files: **40**
 - Direct subfolders: **10**
 
 #### 3.3.1 Subfolders
@@ -200,15 +199,16 @@ Total folders documented: **81**
 | 28 | `requestContext.js` | Project source/support file |
 | 29 | `runtimeCache.js` | Project source/support file |
 | 30 | `runtimeVersion.js` | Project source/support file |
-| 31 | `security.js` | Project source/support file |
-| 32 | `serverUtils.js` | Project source/support file |
-| 33 | `sessionAuth.js` | Project source/support file |
-| 34 | `settingsSnapshot.js` | Project source/support file |
-| 35 | `systemFsWorker.js` | Project source/support file |
-| 36 | `systemJobs.js` | Project source/support file |
-| 37 | `uploadReferenceCleanup.js` | Project source/support file |
-| 38 | `uploadSecurity.js` | Project source/support file |
-| 39 | `websocket.js` | Project source/support file |
+| 31 | `schemaMetadata.js` | Project source/support file |
+| 32 | `security.js` | Project source/support file |
+| 33 | `serverUtils.js` | Project source/support file |
+| 34 | `sessionAuth.js` | Project source/support file |
+| 35 | `settingsSnapshot.js` | Project source/support file |
+| 36 | `systemFsWorker.js` | Project source/support file |
+| 37 | `systemJobs.js` | Project source/support file |
+| 38 | `uploadReferenceCleanup.js` | Project source/support file |
+| 39 | `uploadSecurity.js` | Project source/support file |
+| 40 | `websocket.js` | Project source/support file |
 
 
 ### 3.4 Folder: `backend/src/analytics`
@@ -417,7 +417,7 @@ Total folders documented: **81**
 ### 3.16 Folder: `backend/test`
 
 - Purpose: Project folder
-- Direct files: **45**
+- Direct files: **50**
 - Direct subfolders: **0**
 
 #### 3.16.2 Files
@@ -437,38 +437,43 @@ Total folders documented: **81**
 | 11 | `dataPath.test.js` | Project source/support file |
 | 12 | `defaultRoles.test.js` | Project source/support file |
 | 13 | `fileAssetStorageReconcile.test.js` | Project source/support file |
-| 14 | `fileRouteSecurityFlow.test.js` | Project source/support file |
-| 15 | `fullAutomation.test.js` | Project source/support file |
-| 16 | `googleDriveSyncVersioning.test.js` | Project source/support file |
-| 17 | `idempotency.test.js` | Project source/support file |
-| 18 | `importCsv.test.js` | Project source/support file |
-| 19 | `importDecisionIntegrity.test.js` | Project source/support file |
-| 20 | `importJobStateMachine.test.js` | Project source/support file |
-| 21 | `importScaleSmoke.test.js` | Project source/support file |
-| 22 | `initials.test.js` | Project source/support file |
-| 23 | `integrationDoctor.test.js` | Project source/support file |
-| 24 | `inventorySettingsMediaContracts.test.js` | Project source/support file |
-| 25 | `mediaOptimization.test.js` | Project source/support file |
-| 26 | `netSecurity.test.js` | Project source/support file |
-| 27 | `offlineSecurity.test.js` | Project source/support file |
-| 28 | `ownedGoogleAuth.test.js` | Project source/support file |
-| 29 | `permissionPolicy.test.js` | Project source/support file |
-| 30 | `portalInventoryRegression.test.js` | Project source/support file |
-| 31 | `portalUtils.test.js` | Project source/support file |
-| 32 | `postgresCutoverReadiness.test.js` | Project source/support file |
-| 33 | `postgresDatabase.test.js` | Project source/support file |
-| 34 | `postgresQueryCompat.test.js` | Project source/support file |
-| 35 | `productBatchHierarchy.test.js` | Project source/support file |
-| 36 | `productExpiry.test.js` | Project source/support file |
-| 37 | `productImportPolicies.test.js` | Project source/support file |
-| 38 | `productSearchPagination.test.js` | Project source/support file |
-| 39 | `rfidRoutes.test.js` | Project source/support file |
-| 40 | `routeContracts.test.js` | Project source/support file |
-| 41 | `runtimeCache.test.js` | Project source/support file |
-| 42 | `runtimeVersion.test.js` | Project source/support file |
-| 43 | `serverUtils.test.js` | Project source/support file |
-| 44 | `systemJobs.test.js` | Project source/support file |
-| 45 | `uploadSecurity.test.js` | Project source/support file |
+| 14 | `fileAssetUsageCache.test.js` | Project source/support file |
+| 15 | `fileRouteSecurityFlow.test.js` | Project source/support file |
+| 16 | `fullAutomation.test.js` | Project source/support file |
+| 17 | `googleDriveSyncVersioning.test.js` | Project source/support file |
+| 18 | `idempotency.test.js` | Project source/support file |
+| 19 | `importCsv.test.js` | Project source/support file |
+| 20 | `importDecisionIntegrity.test.js` | Project source/support file |
+| 21 | `importJobPerformanceHardening.test.js` | Project source/support file |
+| 22 | `importJobStateMachine.test.js` | Project source/support file |
+| 23 | `importScaleSmoke.test.js` | Project source/support file |
+| 24 | `initials.test.js` | Project source/support file |
+| 25 | `integrationDoctor.test.js` | Project source/support file |
+| 26 | `inventorySettingsMediaContracts.test.js` | Project source/support file |
+| 27 | `mediaOptimization.test.js` | Project source/support file |
+| 28 | `netSecurity.test.js` | Project source/support file |
+| 29 | `notificationSummaryCache.test.js` | Project source/support file |
+| 30 | `offlineSecurity.test.js` | Project source/support file |
+| 31 | `ownedGoogleAuth.test.js` | Project source/support file |
+| 32 | `permissionPolicy.test.js` | Project source/support file |
+| 33 | `portalInventoryRegression.test.js` | Project source/support file |
+| 34 | `portalUtils.test.js` | Project source/support file |
+| 35 | `postgresCutoverReadiness.test.js` | Project source/support file |
+| 36 | `postgresDatabase.test.js` | Project source/support file |
+| 37 | `postgresQueryCompat.test.js` | Project source/support file |
+| 38 | `productBatchHierarchy.test.js` | Project source/support file |
+| 39 | `productExpiry.test.js` | Project source/support file |
+| 40 | `productImportPolicies.test.js` | Project source/support file |
+| 41 | `productSearchPagination.test.js` | Project source/support file |
+| 42 | `rfidRoutes.test.js` | Project source/support file |
+| 43 | `routeContracts.test.js` | Project source/support file |
+| 44 | `runtimeCache.test.js` | Project source/support file |
+| 45 | `runtimeVersion.test.js` | Project source/support file |
+| 46 | `schemaMetadata.test.js` | Project source/support file |
+| 47 | `serverUtils.test.js` | Project source/support file |
+| 48 | `settingsSnapshotObjectStorage.test.js` | Project source/support file |
+| 49 | `systemJobs.test.js` | Project source/support file |
+| 50 | `uploadSecurity.test.js` | Project source/support file |
 
 
 ### 3.17 Folder: `frontend`
@@ -593,7 +598,7 @@ Total folders documented: **81**
 ### 3.23 Folder: `frontend/src`
 
 - Purpose: Project folder
-- Direct files: **6**
+- Direct files: **8**
 - Direct subfolders: **9**
 
 #### 3.23.1 Subfolders
@@ -617,15 +622,17 @@ Total folders documented: **81**
 | 1 | `App.jsx` | Main app shell and page mounting |
 | 2 | `AppContext.jsx` | Global app state/context provider |
 | 3 | `constants.js` | Project source/support file |
-| 4 | `index.jsx` | Project source/support file |
-| 5 | `README.md` | Documentation |
-| 6 | `web-api.js` | Project source/support file |
+| 4 | `constants.ts` | Project source/support file |
+| 5 | `index.jsx` | Project source/support file |
+| 6 | `README.md` | Documentation |
+| 7 | `web-api.js` | Project source/support file |
+| 8 | `web-api.ts` | Project source/support file |
 
 
 ### 3.24 Folder: `frontend/src/api`
 
 - Purpose: Frontend API and sync transport
-- Direct files: **5**
+- Direct files: **8**
 - Direct subfolders: **0**
 
 #### 3.24.2 Files
@@ -633,10 +640,13 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `http.js` | Frontend API/sync helper |
-| 2 | `localDb.js` | Frontend API/sync helper |
-| 3 | `methods.js` | Frontend API/sync helper |
-| 4 | `README.md` | Frontend API/sync helper |
-| 5 | `websocket.js` | Frontend API/sync helper |
+| 2 | `http.ts` | Frontend API/sync helper |
+| 3 | `localDb.js` | Frontend API/sync helper |
+| 4 | `localDb.ts` | Frontend API/sync helper |
+| 5 | `methods.js` | Frontend API/sync helper |
+| 6 | `README.md` | Frontend API/sync helper |
+| 7 | `websocket.js` | Frontend API/sync helper |
+| 8 | `websocket.ts` | Frontend API/sync helper |
 
 
 ### 3.25 Folder: `frontend/src/app`
@@ -649,9 +659,9 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `appShellUtils.mjs` | Project source/support file |
-| 2 | `appShellUtils.ts` | Project source/support file |
-| 3 | `publicErrorRecovery.mjs` | Project source/support file |
+| 1 | `appShellUtils.ts` | Project source/support file |
+| 2 | `publicErrorRecovery.mjs` | Project source/support file |
+| 3 | `publicErrorRecovery.ts` | Project source/support file |
 
 
 ### 3.26 Folder: `frontend/src/components`
@@ -723,7 +733,7 @@ Total folders documented: **81**
 ### 3.29 Folder: `frontend/src/components/catalog`
 
 - Purpose: UI pages/components domain
-- Direct files: **18**
+- Direct files: **19**
 - Direct subfolders: **0**
 
 #### 3.29.2 Files
@@ -748,6 +758,7 @@ Total folders documented: **81**
 | 16 | `portalLanguagePacks.mjs` | UI component/page |
 | 17 | `portalLanguagePacks.ts` | UI component/page |
 | 18 | `portalTranslateController.mjs` | UI component/page |
+| 19 | `portalTranslateController.ts` | UI component/page |
 
 
 ### 3.30 Folder: `frontend/src/components/contacts`
@@ -972,7 +983,7 @@ Total folders documented: **81**
 ### 3.42 Folder: `frontend/src/components/products/helpers`
 
 - Purpose: UI pages/components domain
-- Direct files: **16**
+- Direct files: **17**
 - Direct subfolders: **0**
 
 #### 3.42.2 Files
@@ -991,10 +1002,11 @@ Total folders documented: **81**
 | 10 | `productMenuHelpers.mjs` | UI component/page |
 | 11 | `productMenuHelpers.ts` | UI component/page |
 | 12 | `productPageHelpers.mjs` | UI component/page |
-| 13 | `productSelectionHelpers.mjs` | UI component/page |
-| 14 | `productSelectionHelpers.ts` | UI component/page |
-| 15 | `productWriteHelpers.mjs` | UI component/page |
-| 16 | `productWriteHelpers.ts` | UI component/page |
+| 13 | `productPageHelpers.ts` | UI component/page |
+| 14 | `productSelectionHelpers.mjs` | UI component/page |
+| 15 | `productSelectionHelpers.ts` | UI component/page |
+| 16 | `productWriteHelpers.mjs` | UI component/page |
+| 17 | `productWriteHelpers.ts` | UI component/page |
 
 
 ### 3.43 Folder: `frontend/src/components/products/history`
@@ -1031,7 +1043,7 @@ Total folders documented: **81**
 ### 3.45 Folder: `frontend/src/components/products/lookups`
 
 - Purpose: UI pages/components domain
-- Direct files: **4**
+- Direct files: **5**
 - Direct subfolders: **0**
 
 #### 3.45.2 Files
@@ -1042,12 +1054,13 @@ Total folders documented: **81**
 | 2 | `ManageCategoriesModal.jsx` | UI component/page |
 | 3 | `ManageUnitsModal.jsx` | UI component/page |
 | 4 | `productLookupSnapshots.mjs` | UI component/page |
+| 5 | `productLookupSnapshots.ts` | UI component/page |
 
 
 ### 3.46 Folder: `frontend/src/components/products/scanning`
 
 - Purpose: UI pages/components domain
-- Direct files: **6**
+- Direct files: **7**
 - Direct subfolders: **0**
 
 #### 3.46.2 Files
@@ -1060,6 +1073,7 @@ Total folders documented: **81**
 | 4 | `barcodeScannerState.mjs` | UI component/page |
 | 5 | `barcodeScannerState.ts` | UI component/page |
 | 6 | `scanbotScanner.mjs` | UI component/page |
+| 7 | `scanbotScanner.ts` | UI component/page |
 
 
 ### 3.47 Folder: `frontend/src/components/products/shared`
@@ -1180,7 +1194,7 @@ Total folders documented: **81**
 ### 3.54 Folder: `frontend/src/components/shared`
 
 - Purpose: UI pages/components domain
-- Direct files: **18**
+- Direct files: **20**
 - Direct subfolders: **0**
 
 #### 3.54.2 Files
@@ -1192,19 +1206,21 @@ Total folders documented: **81**
 | 3 | `ExportMenu.jsx` | UI component/page |
 | 4 | `FilterMenu.jsx` | UI component/page |
 | 5 | `globalScroll.js` | UI component/page |
-| 6 | `ImageGalleryLightbox.jsx` | UI component/page |
-| 7 | `LoadingWatchdog.jsx` | UI component/page |
-| 8 | `Modal.jsx` | UI component/page |
-| 9 | `navigationConfig.js` | UI component/page |
-| 10 | `navigationConfig.ts` | UI component/page |
-| 11 | `NotificationCenter.jsx` | UI component/page |
-| 12 | `pageActivity.js` | UI component/page |
-| 13 | `PageHeader.jsx` | UI component/page |
-| 14 | `PaginationControls.jsx` | UI component/page |
-| 15 | `PortalMenu.jsx` | UI component/page |
-| 16 | `QuickPreferenceToggles.jsx` | UI component/page |
-| 17 | `SectionSwitcher.jsx` | UI component/page |
-| 18 | `WriteConflictModal.jsx` | UI component/page |
+| 6 | `globalScroll.ts` | UI component/page |
+| 7 | `ImageGalleryLightbox.jsx` | UI component/page |
+| 8 | `LoadingWatchdog.jsx` | UI component/page |
+| 9 | `Modal.jsx` | UI component/page |
+| 10 | `navigationConfig.js` | UI component/page |
+| 11 | `navigationConfig.ts` | UI component/page |
+| 12 | `NotificationCenter.jsx` | UI component/page |
+| 13 | `pageActivity.js` | UI component/page |
+| 14 | `pageActivity.ts` | UI component/page |
+| 15 | `PageHeader.jsx` | UI component/page |
+| 16 | `PaginationControls.jsx` | UI component/page |
+| 17 | `PortalMenu.jsx` | UI component/page |
+| 18 | `QuickPreferenceToggles.jsx` | UI component/page |
+| 19 | `SectionSwitcher.jsx` | UI component/page |
+| 20 | `WriteConflictModal.jsx` | UI component/page |
 
 
 ### 3.55 Folder: `frontend/src/components/users`
@@ -1276,7 +1292,7 @@ Total folders documented: **81**
 ### 3.59 Folder: `frontend/src/platform/runtime`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **2**
 - Direct subfolders: **0**
 
 #### 3.59.2 Files
@@ -1284,6 +1300,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `clientRuntime.js` | Project source/support file |
+| 2 | `clientRuntime.ts` | Project source/support file |
 
 
 ### 3.60 Folder: `frontend/src/platform/storage`
@@ -1310,7 +1327,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `runtimeErrorClassifier.mjs` | Project source/support file |
+| 1 | `runtimeErrorClassifier.ts` | Project source/support file |
 
 
 ### 3.62 Folder: `frontend/src/styles`
@@ -1329,7 +1346,7 @@ Total folders documented: **81**
 ### 3.63 Folder: `frontend/src/types`
 
 - Purpose: Project folder
-- Direct files: **3**
+- Direct files: **5**
 - Direct subfolders: **0**
 
 #### 3.63.2 Files
@@ -1337,14 +1354,16 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `jsx-modules.d.ts` | Project source/support file |
-| 2 | `receiptContracts.ts` | Project source/support file |
-| 3 | `settingsContracts.ts` | Project source/support file |
+| 2 | `mjs-modules.d.ts` | Project source/support file |
+| 3 | `react.d.ts` | Project source/support file |
+| 4 | `receiptContracts.ts` | Project source/support file |
+| 5 | `settingsContracts.ts` | Project source/support file |
 
 
 ### 3.64 Folder: `frontend/src/utils`
 
 - Purpose: Project folder
-- Direct files: **61**
+- Direct files: **69**
 - Direct subfolders: **0**
 
 #### 3.64.2 Files
@@ -1354,64 +1373,72 @@ Total folders documented: **81**
 | 1 | `actionGuards.mjs` | Utility helper |
 | 2 | `actionGuards.ts` | Utility helper |
 | 3 | `actionHistory.mjs` | Utility helper |
-| 4 | `appRefresh.d.ts` | Utility helper |
-| 5 | `appRefresh.js` | Utility helper |
-| 6 | `bulkOps.mjs` | Utility helper |
-| 7 | `bulkOps.ts` | Utility helper |
-| 8 | `color.js` | Utility helper |
-| 9 | `color.ts` | Utility helper |
-| 10 | `csv.d.ts` | Utility helper |
-| 11 | `csv.js` | Utility helper |
-| 12 | `csvExportWorker.mjs` | Utility helper |
-| 13 | `csvExportWorker.ts` | Utility helper |
-| 14 | `csvImport.js` | Utility helper |
-| 15 | `csvImport.ts` | Utility helper |
-| 16 | `csvRowCounter.d.mts` | Utility helper |
-| 17 | `csvRowCounter.mjs` | Utility helper |
-| 18 | `csvRowCounter.ts` | Utility helper |
-| 19 | `dateHelpers.js` | Utility helper |
-| 20 | `dateHelpers.ts` | Utility helper |
-| 21 | `deviceInfo.js` | Utility helper |
-| 22 | `deviceInfo.ts` | Utility helper |
-| 23 | `exportPackage.js` | Utility helper |
-| 24 | `exportPackage.ts` | Utility helper |
-| 25 | `exportReports.jsx` | Utility helper |
-| 26 | `favicon.js` | Utility helper |
-| 27 | `formatters.js` | Utility helper |
-| 28 | `formatters.ts` | Utility helper |
-| 29 | `groupedRecords.d.mts` | Utility helper |
-| 30 | `groupedRecords.mjs` | Utility helper |
-| 31 | `groupedRecords.ts` | Utility helper |
-| 32 | `historyHelpers.mjs` | Utility helper |
-| 33 | `historyHelpers.ts` | Utility helper |
-| 34 | `importJobRefresh.js` | Utility helper |
-| 35 | `index.js` | Utility helper |
-| 36 | `index.ts` | Utility helper |
-| 37 | `initials.d.mts` | Utility helper |
-| 38 | `initials.mjs` | Utility helper |
-| 39 | `initials.ts` | Utility helper |
-| 40 | `loaders.mjs` | Utility helper |
-| 41 | `mediaUpload.js` | Utility helper |
-| 42 | `mediaUpload.ts` | Utility helper |
-| 43 | `permissions.js` | Utility helper |
-| 44 | `permissions.ts` | Utility helper |
-| 45 | `pricing.d.ts` | Utility helper |
-| 46 | `pricing.js` | Utility helper |
-| 47 | `pricing.ts` | Utility helper |
-| 48 | `printReceipt.js` | Utility helper |
-| 49 | `productBatches.mjs` | Utility helper |
-| 50 | `productBatches.ts` | Utility helper |
-| 51 | `productGrouping.d.mts` | Utility helper |
-| 52 | `productGrouping.mjs` | Utility helper |
-| 53 | `productGrouping.ts` | Utility helper |
-| 54 | `publicAssetUrls.d.ts` | Utility helper |
-| 55 | `publicAssetUrls.js` | Utility helper |
-| 56 | `receiptAppliedConfig.ts` | Utility helper |
-| 57 | `scriptTypography.js` | Utility helper |
-| 58 | `scriptTypography.ts` | Utility helper |
-| 59 | `settingsRefresh.js` | Utility helper |
-| 60 | `settingsRefresh.ts` | Utility helper |
-| 61 | `settingsWriteOptions.ts` | Utility helper |
+| 4 | `actionHistory.ts` | Utility helper |
+| 5 | `appRefresh.d.ts` | Utility helper |
+| 6 | `appRefresh.js` | Utility helper |
+| 7 | `appRefresh.ts` | Utility helper |
+| 8 | `bulkOps.mjs` | Utility helper |
+| 9 | `bulkOps.ts` | Utility helper |
+| 10 | `color.js` | Utility helper |
+| 11 | `color.ts` | Utility helper |
+| 12 | `csv.d.ts` | Utility helper |
+| 13 | `csv.js` | Utility helper |
+| 14 | `csv.ts` | Utility helper |
+| 15 | `csvExportWorker.mjs` | Utility helper |
+| 16 | `csvExportWorker.ts` | Utility helper |
+| 17 | `csvImport.js` | Utility helper |
+| 18 | `csvImport.ts` | Utility helper |
+| 19 | `csvRowCounter.d.mts` | Utility helper |
+| 20 | `csvRowCounter.mjs` | Utility helper |
+| 21 | `csvRowCounter.ts` | Utility helper |
+| 22 | `dateHelpers.js` | Utility helper |
+| 23 | `dateHelpers.ts` | Utility helper |
+| 24 | `deviceInfo.js` | Utility helper |
+| 25 | `deviceInfo.ts` | Utility helper |
+| 26 | `exportPackage.js` | Utility helper |
+| 27 | `exportPackage.ts` | Utility helper |
+| 28 | `exportReports.jsx` | Utility helper |
+| 29 | `favicon.js` | Utility helper |
+| 30 | `favicon.ts` | Utility helper |
+| 31 | `formatters.js` | Utility helper |
+| 32 | `formatters.ts` | Utility helper |
+| 33 | `groupedRecords.d.mts` | Utility helper |
+| 34 | `groupedRecords.mjs` | Utility helper |
+| 35 | `groupedRecords.ts` | Utility helper |
+| 36 | `historyHelpers.mjs` | Utility helper |
+| 37 | `historyHelpers.ts` | Utility helper |
+| 38 | `importJobRefresh.js` | Utility helper |
+| 39 | `importJobRefresh.ts` | Utility helper |
+| 40 | `index.js` | Utility helper |
+| 41 | `index.ts` | Utility helper |
+| 42 | `initials.d.mts` | Utility helper |
+| 43 | `initials.mjs` | Utility helper |
+| 44 | `initials.ts` | Utility helper |
+| 45 | `loaders.mjs` | Utility helper |
+| 46 | `loaders.ts` | Utility helper |
+| 47 | `mediaUpload.js` | Utility helper |
+| 48 | `mediaUpload.ts` | Utility helper |
+| 49 | `permissions.js` | Utility helper |
+| 50 | `permissions.ts` | Utility helper |
+| 51 | `pricing.d.ts` | Utility helper |
+| 52 | `pricing.js` | Utility helper |
+| 53 | `pricing.ts` | Utility helper |
+| 54 | `printReceipt.js` | Utility helper |
+| 55 | `printReceipt.ts` | Utility helper |
+| 56 | `productBatches.mjs` | Utility helper |
+| 57 | `productBatches.ts` | Utility helper |
+| 58 | `productGrouping.d.mts` | Utility helper |
+| 59 | `productGrouping.mjs` | Utility helper |
+| 60 | `productGrouping.ts` | Utility helper |
+| 61 | `publicAssetUrls.d.ts` | Utility helper |
+| 62 | `publicAssetUrls.js` | Utility helper |
+| 63 | `publicAssetUrls.ts` | Utility helper |
+| 64 | `receiptAppliedConfig.ts` | Utility helper |
+| 65 | `scriptTypography.js` | Utility helper |
+| 66 | `scriptTypography.ts` | Utility helper |
+| 67 | `settingsRefresh.js` | Utility helper |
+| 68 | `settingsRefresh.ts` | Utility helper |
+| 69 | `settingsWriteOptions.ts` | Utility helper |
 
 
 ### 3.65 Folder: `frontend/tests`
@@ -1540,7 +1567,7 @@ Total folders documented: **81**
 ### 3.68 Folder: `ops/scripts/backend`
 
 - Purpose: Project folder
-- Direct files: **2**
+- Direct files: **4**
 - Direct subfolders: **0**
 
 #### 3.68.2 Files
@@ -1548,7 +1575,9 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `schema-audit.js` | Project source/support file |
-| 2 | `verify-data-integrity.js` | Project source/support file |
+| 2 | `schema-primary-key-preflight.mjs` | Project source/support file |
+| 3 | `schema-primary-key-rollback.sql` | Project source/support file |
+| 4 | `verify-data-integrity.js` | Project source/support file |
 
 
 ### 3.69 Folder: `ops/scripts/frontend`
@@ -1569,7 +1598,7 @@ Total folders documented: **81**
 ### 3.70 Folder: `ops/scripts/lib`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **2**
 - Direct subfolders: **0**
 
 #### 3.70.2 Files
@@ -1577,12 +1606,13 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `fs-utils.js` | Project source/support file |
+| 2 | `report-utils.js` | Project source/support file |
 
 
 ### 3.71 Folder: `ops/scripts/powershell`
 
 - Purpose: Project folder
-- Direct files: **6**
+- Direct files: **8**
 - Direct subfolders: **0**
 
 #### 3.71.2 Files
@@ -1590,17 +1620,19 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `clean-generated.ps1` | Project source/support file |
-| 2 | `docker-release.ps1` | Project source/support file |
-| 3 | `full-automation.ps1` | Project source/support file |
-| 4 | `runtime-bootstrap.ps1` | Project source/support file |
-| 5 | `start-runtime.ps1` | Project source/support file |
-| 6 | `tailscale-health-monitor.ps1` | Project source/support file |
+| 2 | `clear-stale-node-processes.ps1` | Project source/support file |
+| 3 | `docker-release.ps1` | Project source/support file |
+| 4 | `full-automation.ps1` | Project source/support file |
+| 5 | `npm-install-mode.ps1` | Project source/support file |
+| 6 | `runtime-bootstrap.ps1` | Project source/support file |
+| 7 | `start-runtime.ps1` | Project source/support file |
+| 8 | `tailscale-health-monitor.ps1` | Project source/support file |
 
 
 ### 3.72 Folder: `ops/scripts/runtime`
 
 - Purpose: Project folder
-- Direct files: **0**
+- Direct files: **1**
 - Direct subfolders: **5**
 
 #### 3.72.1 Subfolders
@@ -1613,22 +1645,29 @@ Total folders documented: **81**
 | 4 | `smoke` |
 | 5 | `storage` |
 
+#### 3.72.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `browser-action-smoke.mjs` | Project source/support file |
+
 
 ### 3.73 Folder: `ops/scripts/runtime/audits`
 
 - Purpose: Project folder
-- Direct files: **5**
+- Direct files: **6**
 - Direct subfolders: **0**
 
 #### 3.73.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `audit-auth.mjs` | Project source/support file |
-| 2 | `audit-manifest.mjs` | Project source/support file |
-| 3 | `audit-report-html.mjs` | Project source/support file |
-| 4 | `deep-live-audit.mjs` | Project source/support file |
-| 5 | `full-app-audit.mjs` | Project source/support file |
+| 1 | `action-history-undo-redo-check.mjs` | Project source/support file |
+| 2 | `audit-auth.mjs` | Project source/support file |
+| 3 | `audit-manifest.mjs` | Project source/support file |
+| 4 | `audit-report-html.mjs` | Project source/support file |
+| 5 | `deep-live-audit.mjs` | Project source/support file |
+| 6 | `full-app-audit.mjs` | Project source/support file |
 
 
 ### 3.74 Folder: `ops/scripts/runtime/cloudflare`
@@ -1650,7 +1689,7 @@ Total folders documented: **81**
 ### 3.75 Folder: `ops/scripts/runtime/live-checks`
 
 - Purpose: Project folder
-- Direct files: **16**
+- Direct files: **17**
 - Direct subfolders: **0**
 
 #### 3.75.2 Files
@@ -1662,23 +1701,24 @@ Total folders documented: **81**
 | 3 | `phase84-contacts-live-check.mjs` | Project source/support file |
 | 4 | `phase84-files-providers-actions-live-check.mjs` | Project source/support file |
 | 5 | `phase84-inventory-actions-live-check.mjs` | Project source/support file |
-| 6 | `phase84-product-brands-actions-live-check.mjs` | Project source/support file |
-| 7 | `phase84-product-categories-actions-live-check.mjs` | Project source/support file |
-| 8 | `phase84-product-page-actions-live-check.mjs` | Project source/support file |
-| 9 | `phase84-product-scanning-actions-live-check.mjs` | Project source/support file |
-| 10 | `phase84-product-stock-actions-live-check.mjs` | Project source/support file |
-| 11 | `phase84-product-units-actions-live-check.mjs` | Project source/support file |
-| 12 | `phase84-product-variant-actions-live-check.mjs` | Project source/support file |
-| 13 | `phase84-public-portal-cloudflare-check.mjs` | Project source/support file |
-| 14 | `phase84-sales-actions-live-check.mjs` | Project source/support file |
-| 15 | `phase84-ui-live-check.mjs` | Project source/support file |
-| 16 | `phase84-users-actions-live-check.mjs` | Project source/support file |
+| 6 | `phase84-live-suite.mjs` | Project source/support file |
+| 7 | `phase84-product-brands-actions-live-check.mjs` | Project source/support file |
+| 8 | `phase84-product-categories-actions-live-check.mjs` | Project source/support file |
+| 9 | `phase84-product-page-actions-live-check.mjs` | Project source/support file |
+| 10 | `phase84-product-scanning-actions-live-check.mjs` | Project source/support file |
+| 11 | `phase84-product-stock-actions-live-check.mjs` | Project source/support file |
+| 12 | `phase84-product-units-actions-live-check.mjs` | Project source/support file |
+| 13 | `phase84-product-variant-actions-live-check.mjs` | Project source/support file |
+| 14 | `phase84-public-portal-cloudflare-check.mjs` | Project source/support file |
+| 15 | `phase84-sales-actions-live-check.mjs` | Project source/support file |
+| 16 | `phase84-ui-live-check.mjs` | Project source/support file |
+| 17 | `phase84-users-actions-live-check.mjs` | Project source/support file |
 
 
 ### 3.76 Folder: `ops/scripts/runtime/smoke`
 
 - Purpose: Project folder
-- Direct files: **3**
+- Direct files: **4**
 - Direct subfolders: **0**
 
 #### 3.76.2 Files
@@ -1688,19 +1728,26 @@ Total folders documented: **81**
 | 1 | `check-public-url.mjs` | Project source/support file |
 | 2 | `check-route-contract.mjs` | Project source/support file |
 | 3 | `live-smoke.mjs` | Project source/support file |
+| 4 | `post-start-diagnostics.mjs` | Project source/support file |
 
 
 ### 3.77 Folder: `ops/scripts/runtime/storage`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **7**
 - Direct subfolders: **0**
 
 #### 3.77.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `prune-storage.mjs` | Project source/support file |
+| 1 | `cleanup-integrity-backlog.mjs` | Project source/support file |
+| 2 | `cleanup-test-data.mjs` | Project source/support file |
+| 3 | `dataset-readiness.mjs` | Project source/support file |
+| 4 | `post-live-hygiene.mjs` | Project source/support file |
+| 5 | `prune-storage.mjs` | Project source/support file |
+| 6 | `restore-candidates.mjs` | Project source/support file |
+| 7 | `restore-rehearsal.mjs` | Project source/support file |
 
 
 ### 3.78 Folder: `ops/scripts/verification`
