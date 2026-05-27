@@ -350,7 +350,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
 })
 
 await runTest('empty local mirrors are not treated as usable server read fallback data', () => {
-  const source = fs.readFileSync(new URL('../src/api/http.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8')
   assert.match(source, /if\s*\(\s*Array\.isArray\(value\)\s*\)\s*return\s+value\.length\s*>\s*0/)
 })
 
