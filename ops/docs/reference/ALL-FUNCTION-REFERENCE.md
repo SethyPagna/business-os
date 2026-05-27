@@ -420,33 +420,33 @@ Code files scanned: **540**
 | 408 | `frontend/tests/actionStability.test.mjs` | 3 |
 | 409 | `frontend/tests/adminShellMediaGuards.test.mjs` | 0 |
 | 410 | `frontend/tests/apiHttp.test.mjs` | 3 |
-| 411 | `frontend/tests/appRefresh.test.mjs` | 2 |
+| 411 | `frontend/tests/appRefresh.test.ts` | 2 |
 | 412 | `frontend/tests/appShellUtils.test.ts` | 1 |
 | 413 | `frontend/tests/assetCompression.test.ts` | 1 |
 | 414 | `frontend/tests/backupJobs.test.mjs` | 0 |
 | 415 | `frontend/tests/barcodeImageScanner.test.ts` | 2 |
 | 416 | `frontend/tests/barcodeScannerState.test.ts` | 1 |
 | 417 | `frontend/tests/bulkOps.test.ts` | 1 |
-| 418 | `frontend/tests/contactImportWorker.test.mjs` | 1 |
-| 419 | `frontend/tests/csvImport.test.mjs` | 1 |
+| 418 | `frontend/tests/contactImportWorker.test.ts` | 1 |
+| 419 | `frontend/tests/csvImport.test.ts` | 1 |
 | 420 | `frontend/tests/dashboardDataReliability.test.ts` | 0 |
 | 421 | `frontend/tests/dateHelpers.test.ts` | 2 |
 | 422 | `frontend/tests/deviceInfo.test.ts` | 2 |
-| 423 | `frontend/tests/exportPackages.test.mjs` | 1 |
+| 423 | `frontend/tests/exportPackages.test.ts` | 1 |
 | 424 | `frontend/tests/formatters.test.ts` | 1 |
 | 425 | `frontend/tests/globalScroll.test.mjs` | 0 |
 | 426 | `frontend/tests/globalScrollControls.test.mjs` | 1 |
 | 427 | `frontend/tests/groupedRecords.test.ts` | 1 |
 | 428 | `frontend/tests/historyHelpers.test.ts` | 1 |
-| 429 | `frontend/tests/importJobRefresh.test.mjs` | 4 |
+| 429 | `frontend/tests/importJobRefresh.test.ts` | 4 |
 | 430 | `frontend/tests/initials.test.ts` | 1 |
-| 431 | `frontend/tests/inventoryImportWorker.test.mjs` | 1 |
+| 431 | `frontend/tests/inventoryImportWorker.test.ts` | 1 |
 | 432 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 0 |
 | 433 | `frontend/tests/inventoryMovementGroups.test.mjs` | 1 |
 | 434 | `frontend/tests/inventoryRfidSection.test.mjs` | 0 |
 | 435 | `frontend/tests/jsxSyntaxCheck.mjs` | 1 |
 | 436 | `frontend/tests/loaders.test.ts` | 1 |
-| 437 | `frontend/tests/mediaUploadHelpers.test.mjs` | 1 |
+| 437 | `frontend/tests/mediaUploadHelpers.test.ts` | 1 |
 | 438 | `frontend/tests/navigationConfig.test.ts` | 1 |
 | 439 | `frontend/tests/notificationBadge.test.mjs` | 0 |
 | 440 | `frontend/tests/offlineSalesQueue.test.mjs` | 1 |
@@ -472,8 +472,8 @@ Code files scanned: **540**
 | 460 | `frontend/tests/productGrouping.test.ts` | 1 |
 | 461 | `frontend/tests/productGroupViewHelpers.test.ts` | 2 |
 | 462 | `frontend/tests/productHistoryHelpers.test.ts` | 1 |
-| 463 | `frontend/tests/productImportPlanner.test.mjs` | 1 |
-| 464 | `frontend/tests/productImportWorkerFallback.test.mjs` | 1 |
+| 463 | `frontend/tests/productImportPlanner.test.ts` | 1 |
+| 464 | `frontend/tests/productImportWorkerFallback.test.ts` | 1 |
 | 465 | `frontend/tests/productMenuHelpers.test.ts` | 5 |
 | 466 | `frontend/tests/productPageHelpers.test.ts` | 0 |
 | 467 | `frontend/tests/productSearchPagination.test.mjs` | 0 |
@@ -484,7 +484,7 @@ Code files scanned: **540**
 | 472 | `frontend/tests/receiptTemplate.test.mjs` | 1 |
 | 473 | `frontend/tests/returnsLayout.test.mjs` | 0 |
 | 474 | `frontend/tests/runtimeErrorClassifier.test.ts` | 0 |
-| 475 | `frontend/tests/salesImportWorker.test.mjs` | 1 |
+| 475 | `frontend/tests/salesImportWorker.test.ts` | 1 |
 | 476 | `frontend/tests/scanbotScanner.test.ts` | 2 |
 | 477 | `frontend/tests/scriptTypography.test.ts` | 0 |
 | 478 | `frontend/tests/sectionNavigation.test.ts` | 0 |
@@ -6018,12 +6018,12 @@ Code files scanned: **540**
 | 2 | `createDeferredResponse` | function | 32 |
 | 3 | `resetApiState` | function | 43 |
 
-### 3.411 `frontend/tests/appRefresh.test.mjs`
+### 3.411 `frontend/tests/appRefresh.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `testNormalizeRefreshChannels` | function | 5 |
-| 2 | `testRefreshAppDataDispatchesMergedDetail` | function | 12 |
+| 1 | `testNormalizeRefreshChannels` | function | 10 |
+| 2 | `testRefreshAppDataDispatchesMergedDetail` | function | 17 |
 
 ### 3.412 `frontend/tests/appShellUtils.test.ts`
 
@@ -6060,17 +6060,17 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.418 `frontend/tests/contactImportWorker.test.mjs`
+### 3.418 `frontend/tests/contactImportWorker.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 7 |
+| 1 | `runTest` | function | 9 |
 
-### 3.419 `frontend/tests/csvImport.test.mjs`
+### 3.419 `frontend/tests/csvImport.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 7 |
+| 1 | `runTest` | function | 9 |
 
 ### 3.420 `frontend/tests/dashboardDataReliability.test.ts`
 
@@ -6090,11 +6090,11 @@ Code files scanned: **540**
 | 1 | `runTest` | function | 8 |
 | 2 | `withNavigator` | function | 19 |
 
-### 3.423 `frontend/tests/exportPackages.test.mjs`
+### 3.423 `frontend/tests/exportPackages.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 8 |
+| 1 | `runTest` | function | 10 |
 
 ### 3.424 `frontend/tests/formatters.test.ts`
 
@@ -6124,14 +6124,14 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.429 `frontend/tests/importJobRefresh.test.mjs`
+### 3.429 `frontend/tests/importJobRefresh.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `testProductImportChannels` | function | 9 |
-| 2 | `testSupplierImportChannels` | function | 16 |
-| 3 | `testDispatchOnlyOnTerminalTransition` | function | 23 |
-| 4 | `testDispatchEmitsExpectedEvents` | function | 47 |
+| 1 | `testProductImportChannels` | function | 14 |
+| 2 | `testSupplierImportChannels` | function | 21 |
+| 3 | `testDispatchOnlyOnTerminalTransition` | function | 28 |
+| 4 | `testDispatchEmitsExpectedEvents` | function | 52 |
 
 ### 3.430 `frontend/tests/initials.test.ts`
 
@@ -6139,11 +6139,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.431 `frontend/tests/inventoryImportWorker.test.mjs`
+### 3.431 `frontend/tests/inventoryImportWorker.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 7 |
+| 1 | `runTest` | function | 9 |
 
 ### 3.432 `frontend/tests/inventoryMobileCardLayout.test.mjs`
 
@@ -6171,11 +6171,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 16 |
 
-### 3.437 `frontend/tests/mediaUploadHelpers.test.mjs`
+### 3.437 `frontend/tests/mediaUploadHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
 ### 3.438 `frontend/tests/navigationConfig.test.ts`
 
@@ -6308,17 +6308,17 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.463 `frontend/tests/productImportPlanner.test.mjs`
+### 3.463 `frontend/tests/productImportPlanner.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 7 |
+| 1 | `runTest` | function | 15 |
 
-### 3.464 `frontend/tests/productImportWorkerFallback.test.mjs`
+### 3.464 `frontend/tests/productImportWorkerFallback.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 7 |
+| 1 | `runTest` | function | 9 |
 
 ### 3.465 `frontend/tests/productMenuHelpers.test.ts`
 
@@ -6370,11 +6370,11 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.475 `frontend/tests/salesImportWorker.test.mjs`
+### 3.475 `frontend/tests/salesImportWorker.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 7 |
+| 1 | `runTest` | function | 9 |
 
 ### 3.476 `frontend/tests/scanbotScanner.test.ts`
 

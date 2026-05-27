@@ -257,8 +257,8 @@ Code files documented: **540**
 | 245 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 | 0 | 0 | 1 |
 | 246 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 0 | 2 | 0 | 1 |
 | 247 | `frontend/src/components/products/import/BulkImportModal.jsx` | 6 | 1 | 4 | 1 |
-| 248 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 | 0 | 0 | 2 |
-| 249 | `frontend/src/components/products/import/productImportPlanner.ts` | 0 | 11 | 0 | 1 |
+| 248 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 | 0 | 0 | 0 |
+| 249 | `frontend/src/components/products/import/productImportPlanner.ts` | 0 | 11 | 0 | 3 |
 | 250 | `frontend/src/components/products/import/productImportWorker.mjs` | 1 | 0 | 1 | 0 |
 | 251 | `frontend/src/components/products/import/productImportWorker.ts` | 1 | 0 | 1 | 1 |
 | 252 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 6 | 1 | 5 | 1 |
@@ -357,26 +357,26 @@ Code files documented: **540**
 | 345 | `frontend/src/utils/actionHistory.mjs` | 0 | 0 | 0 | 16 |
 | 346 | `frontend/src/utils/actionHistory.ts` | 2 | 1 | 1 | 0 |
 | 347 | `frontend/src/utils/appRefresh.d.ts` | 0 | 3 | 0 | 0 |
-| 348 | `frontend/src/utils/appRefresh.js` | 0 | 0 | 0 | 5 |
-| 349 | `frontend/src/utils/appRefresh.ts` | 0 | 3 | 0 | 0 |
+| 348 | `frontend/src/utils/appRefresh.js` | 0 | 0 | 0 | 4 |
+| 349 | `frontend/src/utils/appRefresh.ts` | 0 | 3 | 0 | 1 |
 | 350 | `frontend/src/utils/bulkOps.mjs` | 0 | 0 | 0 | 7 |
 | 351 | `frontend/src/utils/bulkOps.ts` | 0 | 1 | 0 | 1 |
 | 352 | `frontend/src/utils/color.js` | 0 | 0 | 0 | 2 |
 | 353 | `frontend/src/utils/color.ts` | 0 | 1 | 0 | 0 |
 | 354 | `frontend/src/utils/csv.d.ts` | 0 | 7 | 0 | 0 |
-| 355 | `frontend/src/utils/csv.js` | 0 | 0 | 0 | 14 |
-| 356 | `frontend/src/utils/csv.ts` | 0 | 8 | 0 | 0 |
+| 355 | `frontend/src/utils/csv.js` | 0 | 0 | 0 | 13 |
+| 356 | `frontend/src/utils/csv.ts` | 0 | 8 | 0 | 1 |
 | 357 | `frontend/src/utils/csvExportWorker.mjs` | 1 | 0 | 1 | 0 |
 | 358 | `frontend/src/utils/csvExportWorker.ts` | 1 | 0 | 1 | 1 |
-| 359 | `frontend/src/utils/csvImport.js` | 0 | 0 | 0 | 3 |
-| 360 | `frontend/src/utils/csvImport.ts` | 1 | 11 | 1 | 0 |
+| 359 | `frontend/src/utils/csvImport.js` | 0 | 0 | 0 | 2 |
+| 360 | `frontend/src/utils/csvImport.ts` | 1 | 11 | 1 | 1 |
 | 361 | `frontend/src/utils/csvRowCounter.ts` | 0 | 1 | 0 | 9 |
 | 362 | `frontend/src/utils/dateHelpers.js` | 0 | 0 | 0 | 1 |
 | 363 | `frontend/src/utils/dateHelpers.ts` | 0 | 2 | 0 | 1 |
 | 364 | `frontend/src/utils/deviceInfo.js` | 0 | 0 | 0 | 6 |
 | 365 | `frontend/src/utils/deviceInfo.ts` | 0 | 2 | 0 | 1 |
-| 366 | `frontend/src/utils/exportPackage.js` | 0 | 0 | 0 | 3 |
-| 367 | `frontend/src/utils/exportPackage.ts` | 1 | 2 | 1 | 0 |
+| 366 | `frontend/src/utils/exportPackage.js` | 0 | 0 | 0 | 2 |
+| 367 | `frontend/src/utils/exportPackage.ts` | 1 | 2 | 1 | 1 |
 | 368 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
 | 369 | `frontend/src/utils/favicon.js` | 0 | 0 | 0 | 3 |
 | 370 | `frontend/src/utils/favicon.ts` | 0 | 1 | 0 | 0 |
@@ -392,8 +392,8 @@ Code files documented: **540**
 | 380 | `frontend/src/utils/initials.ts` | 0 | 7 | 0 | 7 |
 | 381 | `frontend/src/utils/loaders.mjs` | 0 | 0 | 0 | 19 |
 | 382 | `frontend/src/utils/loaders.ts` | 0 | 9 | 0 | 1 |
-| 383 | `frontend/src/utils/mediaUpload.js` | 0 | 0 | 0 | 3 |
-| 384 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 0 |
+| 383 | `frontend/src/utils/mediaUpload.js` | 0 | 0 | 0 | 2 |
+| 384 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 1 |
 | 385 | `frontend/src/utils/permissions.js` | 0 | 0 | 0 | 1 |
 | 386 | `frontend/src/utils/permissions.ts` | 0 | 1 | 0 | 1 |
 | 387 | `frontend/src/utils/pricing.d.ts` | 0 | 8 | 0 | 0 |
@@ -420,33 +420,33 @@ Code files documented: **540**
 | 408 | `frontend/tests/actionStability.test.mjs` | 4 | 0 | 0 | 0 |
 | 409 | `frontend/tests/adminShellMediaGuards.test.mjs` | 2 | 0 | 0 | 0 |
 | 410 | `frontend/tests/apiHttp.test.mjs` | 2 | 0 | 0 | 0 |
-| 411 | `frontend/tests/appRefresh.test.mjs` | 2 | 0 | 1 | 0 |
+| 411 | `frontend/tests/appRefresh.test.ts` | 2 | 0 | 1 | 0 |
 | 412 | `frontend/tests/appShellUtils.test.ts` | 3 | 0 | 1 | 0 |
 | 413 | `frontend/tests/assetCompression.test.ts` | 4 | 0 | 0 | 0 |
 | 414 | `frontend/tests/backupJobs.test.mjs` | 2 | 0 | 0 | 0 |
 | 415 | `frontend/tests/barcodeImageScanner.test.ts` | 2 | 0 | 1 | 0 |
 | 416 | `frontend/tests/barcodeScannerState.test.ts` | 2 | 0 | 1 | 0 |
 | 417 | `frontend/tests/bulkOps.test.ts` | 2 | 0 | 1 | 0 |
-| 418 | `frontend/tests/contactImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
-| 419 | `frontend/tests/csvImport.test.mjs` | 3 | 0 | 1 | 0 |
+| 418 | `frontend/tests/contactImportWorker.test.ts` | 3 | 0 | 1 | 0 |
+| 419 | `frontend/tests/csvImport.test.ts` | 3 | 0 | 1 | 0 |
 | 420 | `frontend/tests/dashboardDataReliability.test.ts` | 2 | 0 | 0 | 0 |
 | 421 | `frontend/tests/dateHelpers.test.ts` | 2 | 0 | 1 | 0 |
 | 422 | `frontend/tests/deviceInfo.test.ts` | 2 | 0 | 1 | 0 |
-| 423 | `frontend/tests/exportPackages.test.mjs` | 4 | 0 | 2 | 0 |
+| 423 | `frontend/tests/exportPackages.test.ts` | 4 | 0 | 2 | 0 |
 | 424 | `frontend/tests/formatters.test.ts` | 2 | 0 | 1 | 0 |
 | 425 | `frontend/tests/globalScroll.test.mjs` | 2 | 0 | 0 | 0 |
 | 426 | `frontend/tests/globalScrollControls.test.mjs` | 2 | 0 | 1 | 0 |
 | 427 | `frontend/tests/groupedRecords.test.ts` | 2 | 0 | 1 | 0 |
 | 428 | `frontend/tests/historyHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 429 | `frontend/tests/importJobRefresh.test.mjs` | 1 | 0 | 0 | 0 |
+| 429 | `frontend/tests/importJobRefresh.test.ts` | 1 | 0 | 0 | 0 |
 | 430 | `frontend/tests/initials.test.ts` | 1 | 0 | 0 | 0 |
-| 431 | `frontend/tests/inventoryImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
+| 431 | `frontend/tests/inventoryImportWorker.test.ts` | 3 | 0 | 1 | 0 |
 | 432 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 2 | 0 | 0 | 0 |
 | 433 | `frontend/tests/inventoryMovementGroups.test.mjs` | 2 | 0 | 1 | 0 |
 | 434 | `frontend/tests/inventoryRfidSection.test.mjs` | 2 | 0 | 0 | 0 |
 | 435 | `frontend/tests/jsxSyntaxCheck.mjs` | 5 | 0 | 0 | 0 |
 | 436 | `frontend/tests/loaders.test.ts` | 1 | 0 | 0 | 0 |
-| 437 | `frontend/tests/mediaUploadHelpers.test.mjs` | 2 | 0 | 1 | 0 |
+| 437 | `frontend/tests/mediaUploadHelpers.test.ts` | 2 | 0 | 1 | 0 |
 | 438 | `frontend/tests/navigationConfig.test.ts` | 2 | 0 | 1 | 0 |
 | 439 | `frontend/tests/notificationBadge.test.mjs` | 2 | 0 | 0 | 0 |
 | 440 | `frontend/tests/offlineSalesQueue.test.mjs` | 2 | 0 | 0 | 0 |
@@ -472,8 +472,8 @@ Code files documented: **540**
 | 460 | `frontend/tests/productGrouping.test.ts` | 2 | 0 | 1 | 0 |
 | 461 | `frontend/tests/productGroupViewHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 462 | `frontend/tests/productHistoryHelpers.test.ts` | 2 | 0 | 1 | 0 |
-| 463 | `frontend/tests/productImportPlanner.test.mjs` | 3 | 0 | 1 | 0 |
-| 464 | `frontend/tests/productImportWorkerFallback.test.mjs` | 3 | 0 | 1 | 0 |
+| 463 | `frontend/tests/productImportPlanner.test.ts` | 3 | 0 | 1 | 0 |
+| 464 | `frontend/tests/productImportWorkerFallback.test.ts` | 3 | 0 | 1 | 0 |
 | 465 | `frontend/tests/productMenuHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 466 | `frontend/tests/productPageHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 467 | `frontend/tests/productSearchPagination.test.mjs` | 2 | 0 | 0 | 0 |
@@ -484,7 +484,7 @@ Code files documented: **540**
 | 472 | `frontend/tests/receiptTemplate.test.mjs` | 4 | 0 | 2 | 0 |
 | 473 | `frontend/tests/returnsLayout.test.mjs` | 2 | 0 | 0 | 0 |
 | 474 | `frontend/tests/runtimeErrorClassifier.test.ts` | 1 | 0 | 0 | 0 |
-| 475 | `frontend/tests/salesImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
+| 475 | `frontend/tests/salesImportWorker.test.ts` | 3 | 0 | 1 | 0 |
 | 476 | `frontend/tests/scanbotScanner.test.ts` | 2 | 0 | 1 | 0 |
 | 477 | `frontend/tests/scriptTypography.test.ts` | 2 | 0 | 1 | 0 |
 | 478 | `frontend/tests/sectionNavigation.test.ts` | 2 | 0 | 0 | 0 |
@@ -4695,9 +4695,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
-  - `frontend/tests/productImportPlanner.test.mjs`
-  - `frontend/tests/productImportWorkerFallback.test.mjs`
+- Referenced by (0)
+  - none
 
 ### 3.249 `frontend/src/components/products/import/productImportPlanner.ts`
 
@@ -4706,8 +4705,10 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (1)
+- Referenced by (3)
   - `frontend/src/components/products/import/productImportWorker.ts`
+  - `frontend/tests/productImportPlanner.test.ts`
+  - `frontend/tests/productImportWorkerFallback.test.ts`
 
 ### 3.250 `frontend/src/components/products/import/productImportWorker.mjs`
 
@@ -6284,12 +6285,11 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (5)
+- Referenced by (4)
   - `frontend/src/api/methods.js`
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/utils-settings/ResetData.jsx`
   - `frontend/src/utils/settingsRefresh.ts`
-  - `frontend/tests/appRefresh.test.mjs`
 
 ### 3.349 `frontend/src/utils/appRefresh.ts`
 
@@ -6298,8 +6298,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/appRefresh.test.ts`
 
 ### 3.350 `frontend/src/utils/bulkOps.mjs`
 
@@ -6365,7 +6365,7 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (14)
+- Referenced by (13)
   - `frontend/src/api/localDb.ts`
   - `frontend/src/components/contacts/Contacts.jsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
@@ -6379,7 +6379,6 @@ Code files documented: **540**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/utils/csvExportWorker.ts`
   - `frontend/src/utils/exportPackage.ts`
-  - `frontend/tests/exportPackages.test.mjs`
 
 ### 3.356 `frontend/src/utils/csv.ts`
 
@@ -6388,8 +6387,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/exportPackages.test.ts`
 
 ### 3.357 `frontend/src/utils/csvExportWorker.mjs`
 
@@ -6418,10 +6417,9 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (3)
+- Referenced by (2)
   - `frontend/src/api/localDb.ts`
   - `frontend/src/api/methods.js`
-  - `frontend/tests/csvImport.test.mjs`
 
 ### 3.360 `frontend/src/utils/csvImport.ts`
 
@@ -6430,8 +6428,8 @@ Code files documented: **540**
   - `./pricing.js`
 - Internal dependencies (1)
   - `frontend/src/utils/pricing.js`
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/csvImport.test.ts`
 
 ### 3.361 `frontend/src/utils/csvRowCounter.ts`
 
@@ -6447,9 +6445,9 @@ Code files documented: **540**
   - `frontend/src/components/inventory/inventoryImportWorker.ts`
   - `frontend/src/components/sales/SalesImportModal.jsx`
   - `frontend/src/components/sales/salesImportWorker.ts`
-  - `frontend/tests/contactImportWorker.test.mjs`
-  - `frontend/tests/inventoryImportWorker.test.mjs`
-  - `frontend/tests/salesImportWorker.test.mjs`
+  - `frontend/tests/contactImportWorker.test.ts`
+  - `frontend/tests/inventoryImportWorker.test.ts`
+  - `frontend/tests/salesImportWorker.test.ts`
 
 ### 3.362 `frontend/src/utils/dateHelpers.js`
 
@@ -6503,10 +6501,9 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (3)
+- Referenced by (2)
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/tests/exportPackages.test.mjs`
 
 ### 3.367 `frontend/src/utils/exportPackage.ts`
 
@@ -6515,8 +6512,8 @@ Code files documented: **540**
   - `./csv.js`
 - Internal dependencies (1)
   - `frontend/src/utils/csv.js`
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/exportPackages.test.ts`
 
 ### 3.368 `frontend/src/utils/exportReports.jsx`
 
@@ -6739,10 +6736,9 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (3)
+- Referenced by (2)
   - `frontend/src/components/catalog/CatalogImageField.jsx`
   - `frontend/src/components/products/forms/ProductForm.jsx`
-  - `frontend/tests/mediaUploadHelpers.test.mjs`
 
 ### 3.384 `frontend/src/utils/mediaUpload.ts`
 
@@ -6751,8 +6747,8 @@ Code files documented: **540**
   - `./publicAssetUrls.js`
 - Internal dependencies (1)
   - `frontend/src/utils/publicAssetUrls.js`
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/mediaUploadHelpers.test.ts`
 
 ### 3.385 `frontend/src/utils/permissions.js`
 
@@ -7064,14 +7060,14 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.411 `frontend/tests/appRefresh.test.mjs`
+### 3.411 `frontend/tests/appRefresh.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/utils/appRefresh.js`
+  - `../src/utils/appRefresh.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/utils/appRefresh.js`
+  - `frontend/src/utils/appRefresh.ts`
 - Referenced by (0)
   - none
 
@@ -7144,7 +7140,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.418 `frontend/tests/contactImportWorker.test.mjs`
+### 3.418 `frontend/tests/contactImportWorker.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7156,15 +7152,15 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.419 `frontend/tests/csvImport.test.mjs`
+### 3.419 `frontend/tests/csvImport.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/utils/csvImport.js`
+  - `../src/utils/csvImport.ts`
   - `node:assert/strict`
   - `node:fs`
 - Internal dependencies (1)
-  - `frontend/src/utils/csvImport.js`
+  - `frontend/src/utils/csvImport.ts`
 - Referenced by (0)
   - none
 
@@ -7201,17 +7197,17 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.423 `frontend/tests/exportPackages.test.mjs`
+### 3.423 `frontend/tests/exportPackages.test.ts`
 
 - Declared exports: none detected
 - Imports (4)
-  - `../src/utils/csv.js`
-  - `../src/utils/exportPackage.js`
+  - `../src/utils/csv.ts`
+  - `../src/utils/exportPackage.ts`
   - `node:assert/strict`
   - `node:fs`
 - Internal dependencies (2)
-  - `frontend/src/utils/csv.js`
-  - `frontend/src/utils/exportPackage.js`
+  - `frontend/src/utils/csv.ts`
+  - `frontend/src/utils/exportPackage.ts`
 - Referenced by (0)
   - none
 
@@ -7269,7 +7265,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.429 `frontend/tests/importJobRefresh.test.mjs`
+### 3.429 `frontend/tests/importJobRefresh.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7289,7 +7285,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.431 `frontend/tests/inventoryImportWorker.test.mjs`
+### 3.431 `frontend/tests/inventoryImportWorker.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7358,14 +7354,14 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.437 `frontend/tests/mediaUploadHelpers.test.mjs`
+### 3.437 `frontend/tests/mediaUploadHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/utils/mediaUpload.js`
+  - `../src/utils/mediaUpload.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/utils/mediaUpload.js`
+  - `frontend/src/utils/mediaUpload.ts`
 - Referenced by (0)
   - none
 
@@ -7635,27 +7631,27 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.463 `frontend/tests/productImportPlanner.test.mjs`
+### 3.463 `frontend/tests/productImportPlanner.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/components/products/import/productImportPlanner.mjs`
+  - `../src/components/products/import/productImportPlanner.ts`
   - `node:assert/strict`
   - `node:fs`
 - Internal dependencies (1)
-  - `frontend/src/components/products/import/productImportPlanner.mjs`
+  - `frontend/src/components/products/import/productImportPlanner.ts`
 - Referenced by (0)
   - none
 
-### 3.464 `frontend/tests/productImportWorkerFallback.test.mjs`
+### 3.464 `frontend/tests/productImportWorkerFallback.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/components/products/import/productImportPlanner.mjs`
+  - `../src/components/products/import/productImportPlanner.ts`
   - `node:assert/strict`
   - `node:fs`
 - Internal dependencies (1)
-  - `frontend/src/components/products/import/productImportPlanner.mjs`
+  - `frontend/src/components/products/import/productImportPlanner.ts`
 - Referenced by (0)
   - none
 
@@ -7766,7 +7762,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.475 `frontend/tests/salesImportWorker.test.mjs`
+### 3.475 `frontend/tests/salesImportWorker.test.ts`
 
 - Declared exports: none detected
 - Imports (3)

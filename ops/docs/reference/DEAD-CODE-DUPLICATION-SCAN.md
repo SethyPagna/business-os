@@ -289,7 +289,7 @@ noise.
 
 Move 117 converts the media upload helper to TypeScript while preserving
 `mediaUpload.js` as an intentional compatibility wrapper. The newly wired
-`mediaUploadHelpers.test.mjs` prevents cache-busting and reducer behavior from
+`mediaUploadHelpers.test.ts` prevents cache-busting and reducer behavior from
 being treated as untested duplicate utility code.
 
 Move 118 converts the pricing helper to TypeScript while preserving
