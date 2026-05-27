@@ -249,7 +249,7 @@ pricing helper. The language audit records this under
 
 Move 114 completes the second narrow TypeScript conversion. `formatters.ts`
 owns the shared date/time/count formatter implementation, `formatters.js`
-remains as a compatibility wrapper, and `formatters.test.mjs` is now part of
+remains as a compatibility wrapper, and `formatters.test.ts` is now part of
 the frontend utility suite. The language audit now lists both completed
 TypeScript slices.
 

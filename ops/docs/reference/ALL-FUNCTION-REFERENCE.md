@@ -416,7 +416,7 @@ Code files scanned: **540**
 | 404 | `frontend/src/web-api.js` | 0 |
 | 405 | `frontend/src/web-api.ts` | 33 |
 | 406 | `frontend/tailwind.config.mjs` | 0 |
-| 407 | `frontend/tests/actionGuards.test.mjs` | 1 |
+| 407 | `frontend/tests/actionGuards.test.ts` | 1 |
 | 408 | `frontend/tests/actionStability.test.mjs` | 3 |
 | 409 | `frontend/tests/adminShellMediaGuards.test.mjs` | 0 |
 | 410 | `frontend/tests/apiHttp.test.mjs` | 3 |
@@ -426,18 +426,18 @@ Code files scanned: **540**
 | 414 | `frontend/tests/backupJobs.test.mjs` | 0 |
 | 415 | `frontend/tests/barcodeImageScanner.test.mjs` | 1 |
 | 416 | `frontend/tests/barcodeScannerState.test.mjs` | 1 |
-| 417 | `frontend/tests/bulkOps.test.mjs` | 1 |
+| 417 | `frontend/tests/bulkOps.test.ts` | 1 |
 | 418 | `frontend/tests/contactImportWorker.test.mjs` | 1 |
 | 419 | `frontend/tests/csvImport.test.mjs` | 1 |
 | 420 | `frontend/tests/dashboardDataReliability.test.mjs` | 0 |
-| 421 | `frontend/tests/dateHelpers.test.mjs` | 2 |
-| 422 | `frontend/tests/deviceInfo.test.mjs` | 2 |
+| 421 | `frontend/tests/dateHelpers.test.ts` | 2 |
+| 422 | `frontend/tests/deviceInfo.test.ts` | 2 |
 | 423 | `frontend/tests/exportPackages.test.mjs` | 1 |
-| 424 | `frontend/tests/formatters.test.mjs` | 1 |
+| 424 | `frontend/tests/formatters.test.ts` | 1 |
 | 425 | `frontend/tests/globalScroll.test.mjs` | 0 |
 | 426 | `frontend/tests/globalScrollControls.test.mjs` | 1 |
 | 427 | `frontend/tests/groupedRecords.test.ts` | 1 |
-| 428 | `frontend/tests/historyHelpers.test.mjs` | 1 |
+| 428 | `frontend/tests/historyHelpers.test.ts` | 1 |
 | 429 | `frontend/tests/importJobRefresh.test.mjs` | 4 |
 | 430 | `frontend/tests/initials.test.ts` | 1 |
 | 431 | `frontend/tests/inventoryImportWorker.test.mjs` | 1 |
@@ -445,9 +445,9 @@ Code files scanned: **540**
 | 433 | `frontend/tests/inventoryMovementGroups.test.mjs` | 1 |
 | 434 | `frontend/tests/inventoryRfidSection.test.mjs` | 0 |
 | 435 | `frontend/tests/jsxSyntaxCheck.mjs` | 1 |
-| 436 | `frontend/tests/loaders.test.mjs` | 1 |
+| 436 | `frontend/tests/loaders.test.ts` | 1 |
 | 437 | `frontend/tests/mediaUploadHelpers.test.mjs` | 1 |
-| 438 | `frontend/tests/navigationConfig.test.mjs` | 1 |
+| 438 | `frontend/tests/navigationConfig.test.ts` | 1 |
 | 439 | `frontend/tests/notificationBadge.test.mjs` | 0 |
 | 440 | `frontend/tests/offlineSalesQueue.test.mjs` | 1 |
 | 441 | `frontend/tests/offlineSecurityHardening.test.mjs` | 1 |
@@ -455,7 +455,7 @@ Code files scanned: **540**
 | 443 | `frontend/tests/ownedGoogleAuth.test.mjs` | 1 |
 | 444 | `frontend/tests/performanceLoadingUx.test.mjs` | 0 |
 | 445 | `frontend/tests/permissionEditor.test.mjs` | 0 |
-| 446 | `frontend/tests/permissions.test.mjs` | 0 |
+| 446 | `frontend/tests/permissions.test.ts` | 0 |
 | 447 | `frontend/tests/portalCatalogDisplay.test.mjs` | 3 |
 | 448 | `frontend/tests/portalContentI18n.test.mjs` | 0 |
 | 449 | `frontend/tests/portalEditorUtils.test.mjs` | 1 |
@@ -464,7 +464,7 @@ Code files scanned: **540**
 | 452 | `frontend/tests/portalTranslateController.test.mjs` | 2 |
 | 453 | `frontend/tests/posCore.test.mjs` | 1 |
 | 454 | `frontend/tests/pricingContacts.test.mjs` | 1 |
-| 455 | `frontend/tests/productBatches.test.mjs` | 0 |
+| 455 | `frontend/tests/productBatches.test.ts` | 0 |
 | 456 | `frontend/tests/productDiscountUx.test.mjs` | 1 |
 | 457 | `frontend/tests/productDisplayHelpers.test.mjs` | 0 |
 | 458 | `frontend/tests/productFilterHelpers.test.mjs` | 0 |
@@ -486,12 +486,12 @@ Code files scanned: **540**
 | 474 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 0 |
 | 475 | `frontend/tests/salesImportWorker.test.mjs` | 1 |
 | 476 | `frontend/tests/scanbotScanner.test.mjs` | 2 |
-| 477 | `frontend/tests/scriptTypography.test.mjs` | 0 |
+| 477 | `frontend/tests/scriptTypography.test.ts` | 0 |
 | 478 | `frontend/tests/sectionNavigation.test.mjs` | 0 |
-| 479 | `frontend/tests/settingsConflictHelpers.test.mjs` | 1 |
-| 480 | `frontend/tests/settingsRefresh.test.mjs` | 0 |
-| 481 | `frontend/tests/storagePolicy.test.mjs` | 1 |
-| 482 | `frontend/tests/utilsSettingsBarrel.test.mjs` | 0 |
+| 479 | `frontend/tests/settingsConflictHelpers.test.ts` | 1 |
+| 480 | `frontend/tests/settingsRefresh.test.ts` | 0 |
+| 481 | `frontend/tests/storagePolicy.test.ts` | 1 |
+| 482 | `frontend/tests/utilsSettingsBarrel.test.ts` | 0 |
 | 483 | `frontend/vite.config.mjs` | 5 |
 | 484 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 18 |
 | 485 | `ops/scripts/architecture/language-runtime-audit.mjs` | 20 |
@@ -5992,11 +5992,11 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.407 `frontend/tests/actionGuards.test.mjs`
+### 3.407 `frontend/tests/actionGuards.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 13 |
+| 1 | `runTest` | function | 15 |
 
 ### 3.408 `frontend/tests/actionStability.test.mjs`
 
@@ -6053,11 +6053,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.417 `frontend/tests/bulkOps.test.mjs`
+### 3.417 `frontend/tests/bulkOps.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
 ### 3.418 `frontend/tests/contactImportWorker.test.mjs`
 
@@ -6075,19 +6075,19 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.421 `frontend/tests/dateHelpers.test.mjs`
+### 3.421 `frontend/tests/dateHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
-| 2 | `parseLocalDate` | function | 17 |
+| 1 | `runTest` | function | 8 |
+| 2 | `parseLocalDate` | function | 19 |
 
-### 3.422 `frontend/tests/deviceInfo.test.mjs`
+### 3.422 `frontend/tests/deviceInfo.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
-| 2 | `withNavigator` | function | 17 |
+| 1 | `runTest` | function | 8 |
+| 2 | `withNavigator` | function | 19 |
 
 ### 3.423 `frontend/tests/exportPackages.test.mjs`
 
@@ -6095,11 +6095,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.424 `frontend/tests/formatters.test.mjs`
+### 3.424 `frontend/tests/formatters.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
 ### 3.425 `frontend/tests/globalScroll.test.mjs`
 
@@ -6117,11 +6117,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.428 `frontend/tests/historyHelpers.test.mjs`
+### 3.428 `frontend/tests/historyHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 10 |
+| 1 | `runTest` | function | 13 |
 
 ### 3.429 `frontend/tests/importJobRefresh.test.mjs`
 
@@ -6164,11 +6164,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `listSourceFiles` | function | 10 |
 
-### 3.436 `frontend/tests/loaders.test.mjs`
+### 3.436 `frontend/tests/loaders.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 14 |
+| 1 | `runTest` | function | 16 |
 
 ### 3.437 `frontend/tests/mediaUploadHelpers.test.mjs`
 
@@ -6176,11 +6176,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 6 |
 
-### 3.438 `frontend/tests/navigationConfig.test.mjs`
+### 3.438 `frontend/tests/navigationConfig.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
 ### 3.439 `frontend/tests/notificationBadge.test.mjs`
 
@@ -6218,7 +6218,7 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.446 `frontend/tests/permissions.test.mjs`
+### 3.446 `frontend/tests/permissions.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6267,7 +6267,7 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.455 `frontend/tests/productBatches.test.mjs`
+### 3.455 `frontend/tests/productBatches.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6381,7 +6381,7 @@ Code files scanned: **540**
 | 1 | `setNavigator` | function | 8 |
 | 2 | `run` | function | 16 |
 
-### 3.477 `frontend/tests/scriptTypography.test.mjs`
+### 3.477 `frontend/tests/scriptTypography.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6389,23 +6389,23 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.479 `frontend/tests/settingsConflictHelpers.test.mjs`
+### 3.479 `frontend/tests/settingsConflictHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
-### 3.480 `frontend/tests/settingsRefresh.test.mjs`
+### 3.480 `frontend/tests/settingsRefresh.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.481 `frontend/tests/storagePolicy.test.mjs`
+### 3.481 `frontend/tests/storagePolicy.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 13 |
+| 1 | `runTest` | function | 15 |
 
-### 3.482 `frontend/tests/utilsSettingsBarrel.test.mjs`
+### 3.482 `frontend/tests/utilsSettingsBarrel.test.ts`
 
 - No top-level named symbols detected.
 

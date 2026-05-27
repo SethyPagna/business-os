@@ -265,7 +265,7 @@ Continue with Phase 8.4:
 - Latest verification passed:
   - `node tests/performanceLoadingUx.test.mjs`
   - `node tests/apiHttp.test.mjs`
-  - `node tests/actionGuards.test.mjs`
+  - `node tests/actionGuards.test.ts`
   - `node tests/actionStability.test.mjs`
   - `npm.cmd run typecheck`
   - `npm.cmd run test:utils`

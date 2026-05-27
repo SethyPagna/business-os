@@ -1438,7 +1438,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `actionGuards.test.mjs` | Project source/support file |
+| 1 | `actionGuards.test.ts` | Project source/support file |
 | 2 | `actionStability.test.mjs` | Project source/support file |
 | 3 | `adminShellMediaGuards.test.mjs` | Project source/support file |
 | 4 | `apiHttp.test.mjs` | Project source/support file |
@@ -1448,18 +1448,18 @@ Total folders documented: **81**
 | 8 | `backupJobs.test.mjs` | Project source/support file |
 | 9 | `barcodeImageScanner.test.mjs` | Project source/support file |
 | 10 | `barcodeScannerState.test.mjs` | Project source/support file |
-| 11 | `bulkOps.test.mjs` | Project source/support file |
+| 11 | `bulkOps.test.ts` | Project source/support file |
 | 12 | `contactImportWorker.test.mjs` | Project source/support file |
 | 13 | `csvImport.test.mjs` | Project source/support file |
 | 14 | `dashboardDataReliability.test.mjs` | Project source/support file |
-| 15 | `dateHelpers.test.mjs` | Project source/support file |
-| 16 | `deviceInfo.test.mjs` | Project source/support file |
+| 15 | `dateHelpers.test.ts` | Project source/support file |
+| 16 | `deviceInfo.test.ts` | Project source/support file |
 | 17 | `exportPackages.test.mjs` | Project source/support file |
-| 18 | `formatters.test.mjs` | Project source/support file |
+| 18 | `formatters.test.ts` | Project source/support file |
 | 19 | `globalScroll.test.mjs` | Project source/support file |
 | 20 | `globalScrollControls.test.mjs` | Project source/support file |
 | 21 | `groupedRecords.test.ts` | Project source/support file |
-| 22 | `historyHelpers.test.mjs` | Project source/support file |
+| 22 | `historyHelpers.test.ts` | Project source/support file |
 | 23 | `importJobRefresh.test.mjs` | Project source/support file |
 | 24 | `initials.test.ts` | Project source/support file |
 | 25 | `inventoryImportWorker.test.mjs` | Project source/support file |
@@ -1467,9 +1467,9 @@ Total folders documented: **81**
 | 27 | `inventoryMovementGroups.test.mjs` | Project source/support file |
 | 28 | `inventoryRfidSection.test.mjs` | Project source/support file |
 | 29 | `jsxSyntaxCheck.mjs` | Project source/support file |
-| 30 | `loaders.test.mjs` | Project source/support file |
+| 30 | `loaders.test.ts` | Project source/support file |
 | 31 | `mediaUploadHelpers.test.mjs` | Project source/support file |
-| 32 | `navigationConfig.test.mjs` | Project source/support file |
+| 32 | `navigationConfig.test.ts` | Project source/support file |
 | 33 | `notificationBadge.test.mjs` | Project source/support file |
 | 34 | `offlineSalesQueue.test.mjs` | Project source/support file |
 | 35 | `offlineSecurityHardening.test.mjs` | Project source/support file |
@@ -1477,7 +1477,7 @@ Total folders documented: **81**
 | 37 | `ownedGoogleAuth.test.mjs` | Project source/support file |
 | 38 | `performanceLoadingUx.test.mjs` | Project source/support file |
 | 39 | `permissionEditor.test.mjs` | Project source/support file |
-| 40 | `permissions.test.mjs` | Project source/support file |
+| 40 | `permissions.test.ts` | Project source/support file |
 | 41 | `portalCatalogDisplay.test.mjs` | Project source/support file |
 | 42 | `portalContentI18n.test.mjs` | Project source/support file |
 | 43 | `portalEditorUtils.test.mjs` | Project source/support file |
@@ -1486,7 +1486,7 @@ Total folders documented: **81**
 | 46 | `portalTranslateController.test.mjs` | Project source/support file |
 | 47 | `posCore.test.mjs` | Project source/support file |
 | 48 | `pricingContacts.test.mjs` | Project source/support file |
-| 49 | `productBatches.test.mjs` | Project source/support file |
+| 49 | `productBatches.test.ts` | Project source/support file |
 | 50 | `productDiscountUx.test.mjs` | Project source/support file |
 | 51 | `productDisplayHelpers.test.mjs` | Project source/support file |
 | 52 | `productFilterHelpers.test.mjs` | Project source/support file |
@@ -1508,12 +1508,12 @@ Total folders documented: **81**
 | 68 | `runtimeErrorClassifier.test.mjs` | Project source/support file |
 | 69 | `salesImportWorker.test.mjs` | Project source/support file |
 | 70 | `scanbotScanner.test.mjs` | Project source/support file |
-| 71 | `scriptTypography.test.mjs` | Project source/support file |
+| 71 | `scriptTypography.test.ts` | Project source/support file |
 | 72 | `sectionNavigation.test.mjs` | Project source/support file |
-| 73 | `settingsConflictHelpers.test.mjs` | Project source/support file |
-| 74 | `settingsRefresh.test.mjs` | Project source/support file |
-| 75 | `storagePolicy.test.mjs` | Project source/support file |
-| 76 | `utilsSettingsBarrel.test.mjs` | Project source/support file |
+| 73 | `settingsConflictHelpers.test.ts` | Project source/support file |
+| 74 | `settingsRefresh.test.ts` | Project source/support file |
+| 75 | `storagePolicy.test.ts` | Project source/support file |
+| 76 | `utilsSettingsBarrel.test.ts` | Project source/support file |
 
 
 ### 3.66 Folder: `ops/scripts`
