@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 626,
+  "filesScanned": 628,
   "largeFiles": 71,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -127,6 +127,10 @@
       6
     ],
     [
+      "frontend/src/types",
+      5
+    ],
+    [
       "frontend/app",
       4
     ],
@@ -140,10 +144,6 @@
     ],
     [
       "frontend/src/platform",
-      4
-    ],
-    [
-      "frontend/src/types",
       4
     ],
     [
@@ -200,7 +200,7 @@
     "frontend/src/lang/km.json",
     "frontend/src/styles/main.css",
     "frontend/src/utils/printReceipt.ts",
-    "frontend/src/web-api.js",
+    "frontend/src/web-api.ts",
     "frontend/tests/actionStability.test.mjs",
     "frontend/tests/performanceLoadingUx.test.mjs",
     "ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md",
