@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T19:32:08.452Z",
+  "generatedAt": "2026-05-27T19:38:07.014Z",
   "report": "ops/docs/reference/PHASE29-AUDIT.md",
   "summary": "ops/docs/reference/PHASE29-AUDIT.json",
   "policy": "ops/automation/business-os-automation.json",
@@ -14,83 +14,83 @@
   "failures": 0,
   "failedChecks": [],
   "durationSummary": {
-    "totalMs": 4934,
+    "totalMs": 5914,
     "byCheck": [
       {
         "label": "Generated bulk audit",
         "runs": 3,
-        "totalMs": 2561,
-        "maxMs": 922,
-        "averageMs": 854
+        "totalMs": 3152,
+        "maxMs": 1363,
+        "averageMs": 1051
       },
       {
         "label": "Organization audit",
         "runs": 3,
-        "totalMs": 692,
-        "maxMs": 235,
-        "averageMs": 231
+        "totalMs": 828,
+        "maxMs": 293,
+        "averageMs": 276
       },
       {
         "label": "Language/runtime audit",
         "runs": 3,
-        "totalMs": 508,
-        "maxMs": 183,
-        "averageMs": 169
+        "totalMs": 614,
+        "maxMs": 240,
+        "averageMs": 205
       },
       {
         "label": "Performance/code-flow scan",
         "runs": 3,
-        "totalMs": 390,
-        "maxMs": 163,
-        "averageMs": 130
+        "totalMs": 447,
+        "maxMs": 172,
+        "averageMs": 149
       },
       {
         "label": "Schema audit",
         "runs": 3,
-        "totalMs": 299,
-        "maxMs": 126,
-        "averageMs": 100
+        "totalMs": 314,
+        "maxMs": 107,
+        "averageMs": 105
       },
       {
         "label": "Docker release guardrail",
         "runs": 3,
-        "totalMs": 246,
-        "maxMs": 83,
-        "averageMs": 82
+        "totalMs": 280,
+        "maxMs": 95,
+        "averageMs": 93
       },
       {
         "label": "Runtime dependency guardrail",
         "runs": 3,
-        "totalMs": 238,
-        "maxMs": 81,
-        "averageMs": 79
+        "totalMs": 279,
+        "maxMs": 96,
+        "averageMs": 93
       }
     ],
     "slowestRuns": [
       {
         "cycle": 1,
         "label": "Generated bulk audit",
-        "durationMs": 922
+        "durationMs": 1363
       },
       {
         "cycle": 2,
         "label": "Generated bulk audit",
-        "durationMs": 848
+        "durationMs": 914
       },
       {
         "cycle": 3,
         "label": "Generated bulk audit",
-        "durationMs": 791
+        "durationMs": 875
       },
       {
         "cycle": 2,
         "label": "Organization audit",
-        "durationMs": 235
+        "durationMs": 293
       },
       {
-        "cycle": 1,
+        "cycle": 3,
         "label": "Organization audit",
-        "durationMs": 234
+        "durationMs": 274
       }
     ]
   },
@@ -105,15 +105,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 537512565
+            "value": 537512654
           },
           {
             "cycle": 2,
-            "value": 537512565
+            "value": 537512654
           },
           {
             "cycle": 3,
-            "value": 537512565
+            "value": 537512654
           }
         ]
       },
@@ -143,15 +143,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 322245035
+            "value": 322245124
           },
           {
             "cycle": 2,
-            "value": 322245035
+            "value": 322245124
           },
           {
             "cycle": 3,
-            "value": 322245035
+            "value": 322245124
           }
         ]
       },
@@ -200,15 +200,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 522016009
+            "value": 522016098
           },
           {
             "cycle": 2,
-            "value": 522016009
+            "value": 522016098
           },
           {
             "cycle": 3,
-            "value": 522016009
+            "value": 522016098
           }
         ]
       },
@@ -238,15 +238,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 322245035
+            "value": 322245124
           },
           {
             "cycle": 2,
-            "value": 322245035
+            "value": 322245124
           },
           {
             "cycle": 3,
-            "value": 322245035
+            "value": 322245124
           }
         ]
       },
@@ -276,15 +276,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":156252794,\"files\":11241,\"folders\":985,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31624471,\"files\":123,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
+            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":156252794,\"files\":11241,\"folders\":985,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31624560,\"files\":123,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
           },
           {
             "cycle": 2,
-            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":156252794,\"files\":11241,\"folders\":985,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31624471,\"files\":123,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
+            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":156252794,\"files\":11241,\"folders\":985,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31624560,\"files\":123,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
           },
           {
             "cycle": 3,
-            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":156252794,\"files\":11241,\"folders\":985,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31624471,\"files\":123,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
+            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":156252794,\"files\":11241,\"folders\":985,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31624560,\"files\":123,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
           }
         ]
       },
@@ -295,15 +295,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":36463604,\"files\":404,\"folders\":56,\"targets\":1},\"reinstallable\":{\"bytes\":276822762,\"files\":19859,\"folders\":2639,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31624471,\"files\":123,\"folders\":6,\"targets\":1}}"
+            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":36463604,\"files\":404,\"folders\":56,\"targets\":1},\"reinstallable\":{\"bytes\":276822762,\"files\":19859,\"folders\":2639,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31624560,\"files\":123,\"folders\":6,\"targets\":1}}"
           },
           {
             "cycle": 2,
-            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":36463604,\"files\":404,\"folders\":56,\"targets\":1},\"reinstallable\":{\"bytes\":276822762,\"files\":19859,\"folders\":2639,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31624471,\"files\":123,\"folders\":6,\"targets\":1}}"
+            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":36463604,\"files\":404,\"folders\":56,\"targets\":1},\"reinstallable\":{\"bytes\":276822762,\"files\":19859,\"folders\":2639,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31624560,\"files\":123,\"folders\":6,\"targets\":1}}"
           },
           {
             "cycle": 3,
-            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":36463604,\"files\":404,\"folders\":56,\"targets\":1},\"reinstallable\":{\"bytes\":276822762,\"files\":19859,\"folders\":2639,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31624471,\"files\":123,\"folders\":6,\"targets\":1}}"
+            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":36463604,\"files\":404,\"folders\":56,\"targets\":1},\"reinstallable\":{\"bytes\":276822762,\"files\":19859,\"folders\":2639,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31624560,\"files\":123,\"folders\":6,\"targets\":1}}"
           }
         ]
       },
@@ -523,15 +523,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 620
+            "value": 621
           },
           {
             "cycle": 2,
-            "value": 620
+            "value": 621
           },
           {
             "cycle": 3,
-            "value": 620
+            "value": 621
           }
         ]
       },
@@ -1264,15 +1264,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 341
+            "value": 342
           },
           {
             "cycle": 2,
-            "value": 341
+            "value": 342
           },
           {
             "cycle": 3,
-            "value": 341
+            "value": 342
           }
         ]
       },
@@ -1302,15 +1302,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 5513197
+            "value": 5509024
           },
           {
             "cycle": 2,
-            "value": 5513197
+            "value": 5509024
           },
           {
             "cycle": 3,
-            "value": 5513197
+            "value": 5509024
           }
         ]
       },
@@ -1321,15 +1321,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 121396
+            "value": 121400
           },
           {
             "cycle": 2,
-            "value": 121396
+            "value": 121400
           },
           {
             "cycle": 3,
-            "value": 121396
+            "value": 121400
           }
         ]
       },
@@ -1416,15 +1416,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[\"frontend/dist/assets/catalog-CNGkvmK3.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
+            "value": "[\"frontend/dist/assets/catalog-CsB5lWEo.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
           },
           {
             "cycle": 2,
-            "value": "[\"frontend/dist/assets/catalog-CNGkvmK3.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
+            "value": "[\"frontend/dist/assets/catalog-CsB5lWEo.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
           },
           {
             "cycle": 3,
-            "value": "[\"frontend/dist/assets/catalog-CNGkvmK3.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
+            "value": "[\"frontend/dist/assets/catalog-CsB5lWEo.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
           }
         ]
       },
@@ -1473,15 +1473,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"size\":286889,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-CNGkvmK3.js\",\"size\":188537,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-tEv6xER4.js\",\"size\":147138,\"lines\":0},{\"file\":\"frontend/dist/assets/index-8pNPbOTb.js\",\"size\":130288,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-JkTIWAi3.js\",\"size\":93772,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-CdetSBe6.js\",\"size\":84460,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-gjVwAkCg.js\",\"size\":76665,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-B5G7FstP.js\",\"size\":72155,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-BKhV8cYc.js\",\"size\":71820,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-BxfRYGBv.js\",\"size\":69876,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-CRlPvoXJ.js\",\"size\":65591,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-B7df2RUd.js\",\"size\":61562,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-CNciA0aw.js\",\"size\":58711,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-RAvr19U5.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-DuYG61_S.js\",\"size\":53073,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-2sRKINIY.js\",\"size\":41128,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-CisJQuc5.js\",\"size\":38369,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-DkQ1rTiK.js\",\"size\":37966,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-N9TMQCm_.js\",\"size\":37742,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-CFTgGTpp.js\",\"size\":35618,\"lines\":0}]"
+            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"size\":286889,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-CsB5lWEo.js\",\"size\":188537,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-hg2q1z_Z.js\",\"size\":147138,\"lines\":0},{\"file\":\"frontend/dist/assets/index-CnRAJNvr.js\",\"size\":130288,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-_9Befuwe.js\",\"size\":93772,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-UKmsd90m.js\",\"size\":84460,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-C6wD55bb.js\",\"size\":76665,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-BTYAEpSd.js\",\"size\":72155,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-CBkUGe5Z.js\",\"size\":71820,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-BtN7JGUW.js\",\"size\":69876,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-DogvNn4y.js\",\"size\":65591,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-B-wnC2ZF.js\",\"size\":61562,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-CV8eVzuH.js\",\"size\":58711,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-RAvr19U5.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-Ce5VJwQy.js\",\"size\":53073,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-BFe-oTwe.js\",\"size\":41128,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches--gVLXm6u.js\",\"size\":38369,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-W73ra77Y.js\",\"size\":37966,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-CbSuG6Bs.js\",\"size\":37831,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-HRDooPdl.js\",\"size\":35618,\"lines\":0}]"
           },
           {
             "cycle": 2,
-            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"size\":286889,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-CNGkvmK3.js\",\"size\":188537,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-tEv6xER4.js\",\"size\":147138,\"lines\":0},{\"file\":\"frontend/dist/assets/index-8pNPbOTb.js\",\"size\":130288,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-JkTIWAi3.js\",\"size\":93772,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-CdetSBe6.js\",\"size\":84460,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-gjVwAkCg.js\",\"size\":76665,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-B5G7FstP.js\",\"size\":72155,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-BKhV8cYc.js\",\"size\":71820,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-BxfRYGBv.js\",\"size\":69876,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-CRlPvoXJ.js\",\"size\":65591,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-B7df2RUd.js\",\"size\":61562,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-CNciA0aw.js\",\"size\":58711,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-RAvr19U5.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-DuYG61_S.js\",\"size\":53073,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-2sRKINIY.js\",\"size\":41128,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-CisJQuc5.js\",\"size\":38369,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-DkQ1rTiK.js\",\"size\":37966,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-N9TMQCm_.js\",\"size\":37742,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-CFTgGTpp.js\",\"size\":35618,\"lines\":0}]"
+            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"size\":286889,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-CsB5lWEo.js\",\"size\":188537,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-hg2q1z_Z.js\",\"size\":147138,\"lines\":0},{\"file\":\"frontend/dist/assets/index-CnRAJNvr.js\",\"size\":130288,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-_9Befuwe.js\",\"size\":93772,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-UKmsd90m.js\",\"size\":84460,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-C6wD55bb.js\",\"size\":76665,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-BTYAEpSd.js\",\"size\":72155,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-CBkUGe5Z.js\",\"size\":71820,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-BtN7JGUW.js\",\"size\":69876,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-DogvNn4y.js\",\"size\":65591,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-B-wnC2ZF.js\",\"size\":61562,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-CV8eVzuH.js\",\"size\":58711,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-RAvr19U5.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-Ce5VJwQy.js\",\"size\":53073,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-BFe-oTwe.js\",\"size\":41128,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches--gVLXm6u.js\",\"size\":38369,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-W73ra77Y.js\",\"size\":37966,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-CbSuG6Bs.js\",\"size\":37831,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-HRDooPdl.js\",\"size\":35618,\"lines\":0}]"
           },
           {
             "cycle": 3,
-            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"size\":286889,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-CNGkvmK3.js\",\"size\":188537,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-tEv6xER4.js\",\"size\":147138,\"lines\":0},{\"file\":\"frontend/dist/assets/index-8pNPbOTb.js\",\"size\":130288,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-JkTIWAi3.js\",\"size\":93772,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-CdetSBe6.js\",\"size\":84460,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-gjVwAkCg.js\",\"size\":76665,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-B5G7FstP.js\",\"size\":72155,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-BKhV8cYc.js\",\"size\":71820,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-BxfRYGBv.js\",\"size\":69876,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-CRlPvoXJ.js\",\"size\":65591,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-B7df2RUd.js\",\"size\":61562,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-CNciA0aw.js\",\"size\":58711,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-RAvr19U5.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-DuYG61_S.js\",\"size\":53073,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-2sRKINIY.js\",\"size\":41128,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-CisJQuc5.js\",\"size\":38369,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-DkQ1rTiK.js\",\"size\":37966,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-N9TMQCm_.js\",\"size\":37742,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-CFTgGTpp.js\",\"size\":35618,\"lines\":0}]"
+            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-BWLtbhWu.js\",\"size\":286889,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-CsB5lWEo.js\",\"size\":188537,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-hg2q1z_Z.js\",\"size\":147138,\"lines\":0},{\"file\":\"frontend/dist/assets/index-CnRAJNvr.js\",\"size\":130288,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-_9Befuwe.js\",\"size\":93772,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-UKmsd90m.js\",\"size\":84460,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-C6wD55bb.js\",\"size\":76665,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-BTYAEpSd.js\",\"size\":72155,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-CBkUGe5Z.js\",\"size\":71820,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-BtN7JGUW.js\",\"size\":69876,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-DogvNn4y.js\",\"size\":65591,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-B-wnC2ZF.js\",\"size\":61562,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-CV8eVzuH.js\",\"size\":58711,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-RAvr19U5.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-Ce5VJwQy.js\",\"size\":53073,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-BFe-oTwe.js\",\"size\":41128,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches--gVLXm6u.js\",\"size\":38369,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-W73ra77Y.js\",\"size\":37966,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-CbSuG6Bs.js\",\"size\":37831,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-HRDooPdl.js\",\"size\":35618,\"lines\":0}]"
           }
         ]
       },
@@ -1625,15 +1625,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 521
+            "value": 522
           },
           {
             "cycle": 2,
-            "value": 521
+            "value": 522
           },
           {
             "cycle": 3,
-            "value": 521
+            "value": 522
           }
         ]
       },
@@ -1758,15 +1758,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[[\"JavaScript\",184],[\"JavaScript modules\",121],[\"React JSX\",107],[\"TypeScript\",77],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"JavaScript\",184],[\"JavaScript modules\",121],[\"React JSX\",107],[\"TypeScript\",78],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           },
           {
             "cycle": 2,
-            "value": "[[\"JavaScript\",184],[\"JavaScript modules\",121],[\"React JSX\",107],[\"TypeScript\",77],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"JavaScript\",184],[\"JavaScript modules\",121],[\"React JSX\",107],[\"TypeScript\",78],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           },
           {
             "cycle": 3,
-            "value": "[[\"JavaScript\",184],[\"JavaScript modules\",121],[\"React JSX\",107],[\"TypeScript\",77],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"JavaScript\",184],[\"JavaScript modules\",121],[\"React JSX\",107],[\"TypeScript\",78],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           }
         ]
       },
@@ -1777,15 +1777,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[[\".js\",184],[\".mjs\",121],[\".jsx\",107],[\".ts\",77],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".js\",184],[\".mjs\",121],[\".jsx\",107],[\".ts\",78],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           },
           {
             "cycle": 2,
-            "value": "[[\".js\",184],[\".mjs\",121],[\".jsx\",107],[\".ts\",77],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".js\",184],[\".mjs\",121],[\".jsx\",107],[\".ts\",78],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           },
           {
             "cycle": 3,
-            "value": "[[\".js\",184],[\".mjs\",121],[\".jsx\",107],[\".ts\",77],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".js\",184],[\".mjs\",121],[\".jsx\",107],[\".ts\",78],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           }
         ]
       },
@@ -2595,14 +2595,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 922,
+      "durationMs": 1363,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.mjs --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-27T19:32:04.592Z",
+        "generatedAt": "2026-05-27T19:38:02.641Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -2612,9 +2612,9 @@
         "fileStatConcurrency": 32,
         "targets": 15,
         "existingTargets": 8,
-        "totalBytes": 537512565,
+        "totalBytes": 537512654,
         "protectedBytes": 215267530,
-        "cleanupCandidateBytes": 322245035,
+        "cleanupCandidateBytes": 322245124,
         "nestedTargetOverlaps": [
           {
             "parent": "business-os-data",
@@ -2634,9 +2634,9 @@
           }
         ],
         "nestedOverlapBytes": 15496556,
-        "adjustedTotalBytes": 522016009,
+        "adjustedTotalBytes": 522016098,
         "adjustedProtectedBytes": 199770974,
-        "adjustedCleanupCandidateBytes": 322245035,
+        "adjustedCleanupCandidateBytes": 322245124,
         "largestProtectedTargets": [
           {
             "path": "business-os-data",
@@ -2690,7 +2690,7 @@
           },
           {
             "path": "frontend/dist",
-            "bytes": 31624471,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "category": "build output",
@@ -2708,7 +2708,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 808,
+            "measureMs": 1234,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -2717,7 +2717,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 521,
+            "measureMs": 622,
             "bytes": 156252794,
             "files": 11241,
             "folders": 985,
@@ -2726,7 +2726,7 @@
           },
           {
             "path": "ops/node_modules",
-            "measureMs": 43,
+            "measureMs": 52,
             "bytes": 13797802,
             "files": 605,
             "folders": 71,
@@ -2735,7 +2735,7 @@
           },
           {
             "path": "ops/runtime",
-            "measureMs": 29,
+            "measureMs": 35,
             "bytes": 36463604,
             "files": 404,
             "folders": 56,
@@ -2744,7 +2744,7 @@
           },
           {
             "path": "business-os-data",
-            "measureMs": 11,
+            "measureMs": 13,
             "bytes": 163307370,
             "files": 52,
             "folders": 35,
@@ -2753,12 +2753,21 @@
           },
           {
             "path": "frontend/dist",
-            "measureMs": 4,
-            "bytes": 31624471,
+            "measureMs": 6,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "category": "build output",
             "protected": false
+          },
+          {
+            "path": "ops/runtime/secrets",
+            "measureMs": 2,
+            "bytes": 713,
+            "files": 4,
+            "folders": 1,
+            "category": "secrets",
+            "protected": true
           },
           {
             "path": "business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads",
@@ -2767,15 +2776,6 @@
             "files": 12,
             "folders": 1,
             "category": "business uploads",
-            "protected": true
-          },
-          {
-            "path": "ops/runtime/secrets",
-            "measureMs": 1,
-            "bytes": 713,
-            "files": 4,
-            "folders": 1,
-            "category": "secrets",
             "protected": true
           }
         ],
@@ -2805,7 +2805,7 @@
             "targets": 1
           },
           "regenerable": {
-            "bytes": 31624471,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "targets": 1
@@ -2853,7 +2853,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 126,
+      "durationMs": 107,
       "command": "node.exe ops/scripts/backend/schema-audit.js",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -3032,7 +3032,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 163,
+      "durationMs": 146,
       "command": "node.exe ops/scripts/docs/performance-scan.js",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -3041,10 +3041,10 @@
       "parsedOutput": {
         "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
         "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-        "sourceFiles": 341,
+        "sourceFiles": 342,
         "distAssets": 87,
-        "totalSourceBytes": 5513197,
-        "totalSourceLines": 121396,
+        "totalSourceBytes": 5509024,
+        "totalSourceLines": 121400,
         "largestSourceFile": "frontend/src/lang/km.json",
         "largestSourceFileBytes": 250756,
         "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -3072,7 +3072,7 @@
           "frontend/src/lang/km.json"
         ],
         "oversizedBuiltChunks": [
-          "frontend/dist/assets/catalog-CNGkvmK3.js",
+          "frontend/dist/assets/catalog-CsB5lWEo.js",
           "frontend/dist/assets/index-DQztsXP7.css",
           "frontend/dist/assets/lang-km-BWLtbhWu.js",
           "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
@@ -3349,7 +3349,7 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-CNGkvmK3.js",
+            "file": "frontend/dist/assets/catalog-CsB5lWEo.js",
             "size": 188537,
             "lines": 0
           },
@@ -3359,12 +3359,12 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Inventory-tEv6xER4.js",
+            "file": "frontend/dist/assets/Inventory-hg2q1z_Z.js",
             "size": 147138,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/index-8pNPbOTb.js",
+            "file": "frontend/dist/assets/index-CnRAJNvr.js",
             "size": 130288,
             "lines": 0
           },
@@ -3374,17 +3374,17 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Products-JkTIWAi3.js",
+            "file": "frontend/dist/assets/Products-_9Befuwe.js",
             "size": 93772,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-shared-CdetSBe6.js",
+            "file": "frontend/dist/assets/app-shared-UKmsd90m.js",
             "size": 84460,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/POS-gjVwAkCg.js",
+            "file": "frontend/dist/assets/POS-C6wD55bb.js",
             "size": 76665,
             "lines": 0
           },
@@ -3394,32 +3394,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-editor-B5G7FstP.js",
+            "file": "frontend/dist/assets/catalog-editor-BTYAEpSd.js",
             "size": 72155,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Dashboard-BKhV8cYc.js",
+            "file": "frontend/dist/assets/Dashboard-CBkUGe5Z.js",
             "size": 71820,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/BulkImportModal-BxfRYGBv.js",
+            "file": "frontend/dist/assets/BulkImportModal-BtN7JGUW.js",
             "size": 69876,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-preview-CRlPvoXJ.js",
+            "file": "frontend/dist/assets/catalog-preview-DogvNn4y.js",
             "size": 65591,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-methods-B7df2RUd.js",
+            "file": "frontend/dist/assets/app-api-methods-B-wnC2ZF.js",
             "size": 61562,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Backup-CNciA0aw.js",
+            "file": "frontend/dist/assets/Backup-CV8eVzuH.js",
             "size": 58711,
             "lines": 0
           },
@@ -3429,32 +3429,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Settings-DuYG61_S.js",
+            "file": "frontend/dist/assets/Settings-Ce5VJwQy.js",
             "size": 53073,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Users-2sRKINIY.js",
+            "file": "frontend/dist/assets/Users-BFe-oTwe.js",
             "size": 41128,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Branches-CisJQuc5.js",
+            "file": "frontend/dist/assets/Branches--gVLXm6u.js",
             "size": 38369,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/ReceiptSettings-DkQ1rTiK.js",
+            "file": "frontend/dist/assets/ReceiptSettings-W73ra77Y.js",
             "size": 37966,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-N9TMQCm_.js",
-            "size": 37742,
+            "file": "frontend/dist/assets/app-api-CbSuG6Bs.js",
+            "size": 37831,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Sales-CFTgGTpp.js",
+            "file": "frontend/dist/assets/Sales-HRDooPdl.js",
             "size": 35618,
             "lines": 0
           }
@@ -3471,14 +3471,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 183,
+      "durationMs": 198,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.mjs",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-27T19:32:05.081Z",
+        "generatedAt": "2026-05-27T19:38:03.108Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -3490,7 +3490,7 @@
           "ops/scripts",
           "run"
         ],
-        "sourceFiles": 521,
+        "sourceFiles": 522,
         "fileReadMode": "bounded-parallel",
         "rootWalkMode": "bounded-parallel",
         "rootWalkConcurrency": 3,
@@ -3512,7 +3512,7 @@
           ],
           [
             "TypeScript",
-            77
+            78
           ],
           [
             "Windows batch",
@@ -3554,7 +3554,7 @@
           ],
           [
             ".ts",
-            77
+            78
           ],
           [
             ".bat",
@@ -5163,7 +5163,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 83,
+      "durationMs": 92,
       "command": "node.exe ops/scripts/verification/verify-docker-release.js",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -5305,7 +5305,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 79,
+      "durationMs": 96,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.js",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -5385,7 +5385,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 234,
+      "durationMs": 261,
       "command": "node.exe ops/scripts/architecture/organization-audit.mjs",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",
@@ -5394,7 +5394,7 @@
       "parsedOutput": {
         "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
         "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-        "filesScanned": 620,
+        "filesScanned": 621,
         "largeFiles": 71,
         "compatibilityWrappers": 0,
         "brokenCompatibilityWrappers": 0,
@@ -5627,14 +5627,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 848,
+      "durationMs": 914,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.mjs --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-27T19:32:06.245Z",
+        "generatedAt": "2026-05-27T19:38:04.387Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -5644,9 +5644,9 @@
         "fileStatConcurrency": 32,
         "targets": 15,
         "existingTargets": 8,
-        "totalBytes": 537512565,
+        "totalBytes": 537512654,
         "protectedBytes": 215267530,
-        "cleanupCandidateBytes": 322245035,
+        "cleanupCandidateBytes": 322245124,
         "nestedTargetOverlaps": [
           {
             "parent": "business-os-data",
@@ -5666,9 +5666,9 @@
           }
         ],
         "nestedOverlapBytes": 15496556,
-        "adjustedTotalBytes": 522016009,
+        "adjustedTotalBytes": 522016098,
         "adjustedProtectedBytes": 199770974,
-        "adjustedCleanupCandidateBytes": 322245035,
+        "adjustedCleanupCandidateBytes": 322245124,
         "largestProtectedTargets": [
           {
             "path": "business-os-data",
@@ -5722,7 +5722,7 @@
           },
           {
             "path": "frontend/dist",
-            "bytes": 31624471,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "category": "build output",
@@ -5740,7 +5740,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 752,
+            "measureMs": 810,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -5749,7 +5749,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 488,
+            "measureMs": 503,
             "bytes": 156252794,
             "files": 11241,
             "folders": 985,
@@ -5758,7 +5758,7 @@
           },
           {
             "path": "ops/node_modules",
-            "measureMs": 42,
+            "measureMs": 45,
             "bytes": 13797802,
             "files": 605,
             "folders": 71,
@@ -5767,7 +5767,7 @@
           },
           {
             "path": "ops/runtime",
-            "measureMs": 26,
+            "measureMs": 30,
             "bytes": 36463604,
             "files": 404,
             "folders": 56,
@@ -5776,7 +5776,7 @@
           },
           {
             "path": "business-os-data",
-            "measureMs": 11,
+            "measureMs": 10,
             "bytes": 163307370,
             "files": 52,
             "folders": 35,
@@ -5785,8 +5785,8 @@
           },
           {
             "path": "frontend/dist",
-            "measureMs": 3,
-            "bytes": 31624471,
+            "measureMs": 4,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "category": "build output",
@@ -5837,7 +5837,7 @@
             "targets": 1
           },
           "regenerable": {
-            "bytes": 31624471,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "targets": 1
@@ -5885,7 +5885,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 87,
+      "durationMs": 105,
       "command": "node.exe ops/scripts/backend/schema-audit.js",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -6064,7 +6064,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 114,
+      "durationMs": 129,
       "command": "node.exe ops/scripts/docs/performance-scan.js",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -6073,10 +6073,10 @@
       "parsedOutput": {
         "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
         "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-        "sourceFiles": 341,
+        "sourceFiles": 342,
         "distAssets": 87,
-        "totalSourceBytes": 5513197,
-        "totalSourceLines": 121396,
+        "totalSourceBytes": 5509024,
+        "totalSourceLines": 121400,
         "largestSourceFile": "frontend/src/lang/km.json",
         "largestSourceFileBytes": 250756,
         "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -6104,7 +6104,7 @@
           "frontend/src/lang/km.json"
         ],
         "oversizedBuiltChunks": [
-          "frontend/dist/assets/catalog-CNGkvmK3.js",
+          "frontend/dist/assets/catalog-CsB5lWEo.js",
           "frontend/dist/assets/index-DQztsXP7.css",
           "frontend/dist/assets/lang-km-BWLtbhWu.js",
           "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
@@ -6381,7 +6381,7 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-CNGkvmK3.js",
+            "file": "frontend/dist/assets/catalog-CsB5lWEo.js",
             "size": 188537,
             "lines": 0
           },
@@ -6391,12 +6391,12 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Inventory-tEv6xER4.js",
+            "file": "frontend/dist/assets/Inventory-hg2q1z_Z.js",
             "size": 147138,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/index-8pNPbOTb.js",
+            "file": "frontend/dist/assets/index-CnRAJNvr.js",
             "size": 130288,
             "lines": 0
           },
@@ -6406,17 +6406,17 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Products-JkTIWAi3.js",
+            "file": "frontend/dist/assets/Products-_9Befuwe.js",
             "size": 93772,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-shared-CdetSBe6.js",
+            "file": "frontend/dist/assets/app-shared-UKmsd90m.js",
             "size": 84460,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/POS-gjVwAkCg.js",
+            "file": "frontend/dist/assets/POS-C6wD55bb.js",
             "size": 76665,
             "lines": 0
           },
@@ -6426,32 +6426,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-editor-B5G7FstP.js",
+            "file": "frontend/dist/assets/catalog-editor-BTYAEpSd.js",
             "size": 72155,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Dashboard-BKhV8cYc.js",
+            "file": "frontend/dist/assets/Dashboard-CBkUGe5Z.js",
             "size": 71820,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/BulkImportModal-BxfRYGBv.js",
+            "file": "frontend/dist/assets/BulkImportModal-BtN7JGUW.js",
             "size": 69876,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-preview-CRlPvoXJ.js",
+            "file": "frontend/dist/assets/catalog-preview-DogvNn4y.js",
             "size": 65591,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-methods-B7df2RUd.js",
+            "file": "frontend/dist/assets/app-api-methods-B-wnC2ZF.js",
             "size": 61562,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Backup-CNciA0aw.js",
+            "file": "frontend/dist/assets/Backup-CV8eVzuH.js",
             "size": 58711,
             "lines": 0
           },
@@ -6461,32 +6461,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Settings-DuYG61_S.js",
+            "file": "frontend/dist/assets/Settings-Ce5VJwQy.js",
             "size": 53073,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Users-2sRKINIY.js",
+            "file": "frontend/dist/assets/Users-BFe-oTwe.js",
             "size": 41128,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Branches-CisJQuc5.js",
+            "file": "frontend/dist/assets/Branches--gVLXm6u.js",
             "size": 38369,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/ReceiptSettings-DkQ1rTiK.js",
+            "file": "frontend/dist/assets/ReceiptSettings-W73ra77Y.js",
             "size": 37966,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-N9TMQCm_.js",
-            "size": 37742,
+            "file": "frontend/dist/assets/app-api-CbSuG6Bs.js",
+            "size": 37831,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Sales-CFTgGTpp.js",
+            "file": "frontend/dist/assets/Sales-HRDooPdl.js",
             "size": 35618,
             "lines": 0
           }
@@ -6503,14 +6503,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 164,
+      "durationMs": 176,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.mjs",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-27T19:32:06.619Z",
+        "generatedAt": "2026-05-27T19:38:04.808Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -6522,7 +6522,7 @@
           "ops/scripts",
           "run"
         ],
-        "sourceFiles": 521,
+        "sourceFiles": 522,
         "fileReadMode": "bounded-parallel",
         "rootWalkMode": "bounded-parallel",
         "rootWalkConcurrency": 3,
@@ -6544,7 +6544,7 @@
           ],
           [
             "TypeScript",
-            77
+            78
           ],
           [
             "Windows batch",
@@ -6586,7 +6586,7 @@
           ],
           [
             ".ts",
-            77
+            78
           ],
           [
             ".bat",
@@ -8195,7 +8195,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 83,
+      "durationMs": 95,
       "command": "node.exe ops/scripts/verification/verify-docker-release.js",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -8337,7 +8337,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 81,
+      "durationMs": 88,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.js",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -8417,7 +8417,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 235,
+      "durationMs": 293,
       "command": "node.exe ops/scripts/architecture/organization-audit.mjs",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",
@@ -8426,7 +8426,7 @@
       "parsedOutput": {
         "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
         "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-        "filesScanned": 620,
+        "filesScanned": 621,
         "largeFiles": 71,
         "compatibilityWrappers": 0,
         "brokenCompatibilityWrappers": 0,
@@ -8659,14 +8659,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 791,
+      "durationMs": 875,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.mjs --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-27T19:32:07.731Z",
+        "generatedAt": "2026-05-27T19:38:06.071Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -8676,9 +8676,9 @@
         "fileStatConcurrency": 32,
         "targets": 15,
         "existingTargets": 8,
-        "totalBytes": 537512565,
+        "totalBytes": 537512654,
         "protectedBytes": 215267530,
-        "cleanupCandidateBytes": 322245035,
+        "cleanupCandidateBytes": 322245124,
         "nestedTargetOverlaps": [
           {
             "parent": "business-os-data",
@@ -8698,9 +8698,9 @@
           }
         ],
         "nestedOverlapBytes": 15496556,
-        "adjustedTotalBytes": 522016009,
+        "adjustedTotalBytes": 522016098,
         "adjustedProtectedBytes": 199770974,
-        "adjustedCleanupCandidateBytes": 322245035,
+        "adjustedCleanupCandidateBytes": 322245124,
         "largestProtectedTargets": [
           {
             "path": "business-os-data",
@@ -8754,7 +8754,7 @@
           },
           {
             "path": "frontend/dist",
-            "bytes": 31624471,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "category": "build output",
@@ -8772,7 +8772,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 681,
+            "measureMs": 762,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -8781,7 +8781,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 442,
+            "measureMs": 492,
             "bytes": 156252794,
             "files": 11241,
             "folders": 985,
@@ -8790,7 +8790,7 @@
           },
           {
             "path": "ops/node_modules",
-            "measureMs": 36,
+            "measureMs": 39,
             "bytes": 13797802,
             "files": 605,
             "folders": 71,
@@ -8799,7 +8799,7 @@
           },
           {
             "path": "ops/runtime",
-            "measureMs": 26,
+            "measureMs": 27,
             "bytes": 36463604,
             "files": 404,
             "folders": 56,
@@ -8808,7 +8808,7 @@
           },
           {
             "path": "business-os-data",
-            "measureMs": 9,
+            "measureMs": 10,
             "bytes": 163307370,
             "files": 52,
             "folders": 35,
@@ -8817,8 +8817,8 @@
           },
           {
             "path": "frontend/dist",
-            "measureMs": 3,
-            "bytes": 31624471,
+            "measureMs": 4,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "category": "build output",
@@ -8826,7 +8826,7 @@
           },
           {
             "path": "business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads",
-            "measureMs": 1,
+            "measureMs": 2,
             "bytes": 15495843,
             "files": 12,
             "folders": 1,
@@ -8869,7 +8869,7 @@
             "targets": 1
           },
           "regenerable": {
-            "bytes": 31624471,
+            "bytes": 31624560,
             "files": 123,
             "folders": 6,
             "targets": 1
@@ -8917,7 +8917,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 86,
+      "durationMs": 102,
       "command": "node.exe ops/scripts/backend/schema-audit.js",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -9096,7 +9096,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 113,
+      "durationMs": 172,
       "command": "node.exe ops/scripts/docs/performance-scan.js",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -9105,10 +9105,10 @@
       "parsedOutput": {
         "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
         "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-        "sourceFiles": 341,
+        "sourceFiles": 342,
         "distAssets": 87,
-        "totalSourceBytes": 5513197,
-        "totalSourceLines": 121396,
+        "totalSourceBytes": 5509024,
+        "totalSourceLines": 121400,
         "largestSourceFile": "frontend/src/lang/km.json",
         "largestSourceFileBytes": 250756,
         "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -9136,7 +9136,7 @@
           "frontend/src/lang/km.json"
         ],
         "oversizedBuiltChunks": [
-          "frontend/dist/assets/catalog-CNGkvmK3.js",
+          "frontend/dist/assets/catalog-CsB5lWEo.js",
           "frontend/dist/assets/index-DQztsXP7.css",
           "frontend/dist/assets/lang-km-BWLtbhWu.js",
           "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
@@ -9413,7 +9413,7 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-CNGkvmK3.js",
+            "file": "frontend/dist/assets/catalog-CsB5lWEo.js",
             "size": 188537,
             "lines": 0
           },
@@ -9423,12 +9423,12 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Inventory-tEv6xER4.js",
+            "file": "frontend/dist/assets/Inventory-hg2q1z_Z.js",
             "size": 147138,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/index-8pNPbOTb.js",
+            "file": "frontend/dist/assets/index-CnRAJNvr.js",
             "size": 130288,
             "lines": 0
           },
@@ -9438,17 +9438,17 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Products-JkTIWAi3.js",
+            "file": "frontend/dist/assets/Products-_9Befuwe.js",
             "size": 93772,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-shared-CdetSBe6.js",
+            "file": "frontend/dist/assets/app-shared-UKmsd90m.js",
             "size": 84460,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/POS-gjVwAkCg.js",
+            "file": "frontend/dist/assets/POS-C6wD55bb.js",
             "size": 76665,
             "lines": 0
           },
@@ -9458,32 +9458,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-editor-B5G7FstP.js",
+            "file": "frontend/dist/assets/catalog-editor-BTYAEpSd.js",
             "size": 72155,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Dashboard-BKhV8cYc.js",
+            "file": "frontend/dist/assets/Dashboard-CBkUGe5Z.js",
             "size": 71820,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/BulkImportModal-BxfRYGBv.js",
+            "file": "frontend/dist/assets/BulkImportModal-BtN7JGUW.js",
             "size": 69876,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-preview-CRlPvoXJ.js",
+            "file": "frontend/dist/assets/catalog-preview-DogvNn4y.js",
             "size": 65591,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-methods-B7df2RUd.js",
+            "file": "frontend/dist/assets/app-api-methods-B-wnC2ZF.js",
             "size": 61562,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Backup-CNciA0aw.js",
+            "file": "frontend/dist/assets/Backup-CV8eVzuH.js",
             "size": 58711,
             "lines": 0
           },
@@ -9493,32 +9493,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Settings-DuYG61_S.js",
+            "file": "frontend/dist/assets/Settings-Ce5VJwQy.js",
             "size": 53073,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Users-2sRKINIY.js",
+            "file": "frontend/dist/assets/Users-BFe-oTwe.js",
             "size": 41128,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Branches-CisJQuc5.js",
+            "file": "frontend/dist/assets/Branches--gVLXm6u.js",
             "size": 38369,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/ReceiptSettings-DkQ1rTiK.js",
+            "file": "frontend/dist/assets/ReceiptSettings-W73ra77Y.js",
             "size": 37966,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-N9TMQCm_.js",
-            "size": 37742,
+            "file": "frontend/dist/assets/app-api-CbSuG6Bs.js",
+            "size": 37831,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Sales-CFTgGTpp.js",
+            "file": "frontend/dist/assets/Sales-HRDooPdl.js",
             "size": 35618,
             "lines": 0
           }
@@ -9535,14 +9535,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 161,
+      "durationMs": 240,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.mjs",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-27T19:32:08.102Z",
+        "generatedAt": "2026-05-27T19:38:06.575Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -9554,7 +9554,7 @@
           "ops/scripts",
           "run"
         ],
-        "sourceFiles": 521,
+        "sourceFiles": 522,
         "fileReadMode": "bounded-parallel",
         "rootWalkMode": "bounded-parallel",
         "rootWalkConcurrency": 3,
@@ -9576,7 +9576,7 @@
           ],
           [
             "TypeScript",
-            77
+            78
           ],
           [
             "Windows batch",
@@ -9618,7 +9618,7 @@
           ],
           [
             ".ts",
-            77
+            78
           ],
           [
             ".bat",
@@ -11227,7 +11227,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 80,
+      "durationMs": 93,
       "command": "node.exe ops/scripts/verification/verify-docker-release.js",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -11369,7 +11369,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 78,
+      "durationMs": 95,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.js",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -11449,7 +11449,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 223,
+      "durationMs": 274,
       "command": "node.exe ops/scripts/architecture/organization-audit.mjs",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",
@@ -11458,7 +11458,7 @@
       "parsedOutput": {
         "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
         "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-        "filesScanned": 620,
+        "filesScanned": 621,
         "largeFiles": 71,
         "compatibilityWrappers": 0,
         "brokenCompatibilityWrappers": 0,
