@@ -1,0 +1,229 @@
+{
+  "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
+  "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
+  "filesScanned": 597,
+  "largeFiles": 70,
+  "compatibilityWrappers": 0,
+  "brokenCompatibilityWrappers": 0,
+  "wrapperRemovalCandidates": 0,
+  "generatedOnlyWrapperReferences": 0,
+  "scanRoots": [
+    "frontend/src",
+    "frontend/tests",
+    "backend/src",
+    "backend/test",
+    "ops/scripts",
+    "ops/docs",
+    "run"
+  ],
+  "scanFiles": [
+    "package.json",
+    "backend/package.json",
+    "frontend/package.json",
+    "ops/package.json",
+    "docker-compose.yml",
+    "Dockerfile"
+  ],
+  "fileReadMode": "bounded-parallel",
+  "rootWalkMode": "bounded-parallel",
+  "rootWalkConcurrency": 3,
+  "fileReadConcurrency": 24,
+  "largeFileThreshold": 700,
+  "largestAreas": [
+    [
+      "frontend/utils",
+      58
+    ],
+    [
+      "frontend/components/products",
+      44
+    ],
+    [
+      "ops/docs/reference",
+      30
+    ],
+    [
+      "backend/routes",
+      24
+    ],
+    [
+      "frontend/components/shared",
+      18
+    ],
+    [
+      "frontend/components/catalog",
+      17
+    ],
+    [
+      "ops/scripts/runtime/live-checks",
+      17
+    ],
+    [
+      "frontend/components/contacts",
+      15
+    ],
+    [
+      "backend/services",
+      12
+    ],
+    [
+      "frontend/components/inventory",
+      11
+    ],
+    [
+      "ops/docs",
+      11
+    ],
+    [
+      "frontend/components/receipt-settings",
+      10
+    ],
+    [
+      "frontend/components/utils-settings",
+      10
+    ],
+    [
+      "run",
+      9
+    ],
+    [
+      "run/docker",
+      9
+    ],
+    [
+      "frontend/components/dashboard",
+      8
+    ],
+    [
+      "frontend/components/sales",
+      8
+    ],
+    [
+      "ops/scripts/powershell",
+      8
+    ],
+    [
+      "frontend/components/pos",
+      7
+    ],
+    [
+      "ops/scripts/runtime/storage",
+      7
+    ],
+    [
+      "frontend/components/returns",
+      6
+    ],
+    [
+      "ops/scripts/runtime/audits",
+      6
+    ],
+    [
+      "ops/scripts/verification",
+      6
+    ],
+    [
+      "frontend/api",
+      5
+    ],
+    [
+      "frontend/components/files",
+      4
+    ],
+    [
+      "frontend/components/users",
+      4
+    ],
+    [
+      "ops/scripts/architecture",
+      4
+    ],
+    [
+      "ops/scripts/backend",
+      4
+    ],
+    [
+      "ops/scripts/runtime/cloudflare",
+      4
+    ],
+    [
+      "ops/scripts/runtime/smoke",
+      4
+    ]
+  ],
+  "largeFilePaths": [
+    "backend/src/db/postgresSchema.sql",
+    "backend/src/fileAssets.js",
+    "backend/src/routes/auth.js",
+    "backend/src/routes/contacts.js",
+    "backend/src/routes/inventory.js",
+    "backend/src/routes/portal.js",
+    "backend/src/routes/products.js",
+    "backend/src/routes/returns.js",
+    "backend/src/routes/sales.js",
+    "backend/src/routes/system/index.js",
+    "backend/src/routes/users.js",
+    "backend/src/services/backupPackages.js",
+    "backend/src/services/googleDriveSync/index.js",
+    "backend/src/services/importJobs.js",
+    "backend/test/fullAutomation.test.js",
+    "frontend/src/App.jsx",
+    "frontend/src/AppContext.jsx",
+    "frontend/src/api/http.js",
+    "frontend/src/api/methods.js",
+    "frontend/src/components/auth/Login.jsx",
+    "frontend/src/components/branches/Branches.jsx",
+    "frontend/src/components/catalog/CatalogEditorSurface.jsx",
+    "frontend/src/components/catalog/CatalogPage.jsx",
+    "frontend/src/components/catalog/CatalogSecondaryTabs.jsx",
+    "frontend/src/components/catalog/portalContentI18n.ts",
+    "frontend/src/components/catalog/portalLanguagePacks.ts",
+    "frontend/src/components/contacts/CustomersTab.jsx",
+    "frontend/src/components/contacts/DeliveryTab.jsx",
+    "frontend/src/components/contacts/SuppliersTab.jsx",
+    "frontend/src/components/dashboard/Dashboard.jsx",
+    "frontend/src/components/files/FilesPage.jsx",
+    "frontend/src/components/inventory/Inventory.jsx",
+    "frontend/src/components/pos/POS.jsx",
+    "frontend/src/components/products/Products.jsx",
+    "frontend/src/components/products/forms/ProductForm.jsx",
+    "frontend/src/components/products/import/BulkImportModal.jsx",
+    "frontend/src/components/returns/Returns.jsx",
+    "frontend/src/components/sales/Sales.jsx",
+    "frontend/src/components/server/ServerPage.jsx",
+    "frontend/src/components/users/UserProfileModal.jsx",
+    "frontend/src/components/users/Users.jsx",
+    "frontend/src/components/utils-settings/AuditLog.jsx",
+    "frontend/src/components/utils-settings/Backup.jsx",
+    "frontend/src/components/utils-settings/Settings.jsx",
+    "frontend/src/lang/en.json",
+    "frontend/src/lang/km.json",
+    "frontend/src/styles/main.css",
+    "frontend/src/utils/printReceipt.js",
+    "frontend/src/web-api.js",
+    "frontend/tests/actionStability.test.mjs",
+    "frontend/tests/performanceLoadingUx.test.mjs",
+    "ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md",
+    "ops/docs/OPTIMIZATION-ROADMAP.md",
+    "ops/docs/reference/ACTION-STABILITY-INVENTORY.md",
+    "ops/docs/reference/ALL-FUNCTION-REFERENCE.md",
+    "ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md",
+    "ops/docs/reference/CLEANUP-SWEEP.md",
+    "ops/docs/reference/FOLDER-COVERAGE.md",
+    "ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md",
+    "ops/docs/reference/IMPORT-EXPORT-REFERENCE.md",
+    "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
+    "ops/docs/reference/PERFORMANCE-SCAN.md",
+    "ops/docs/reference/PHASE29-AUDIT.json",
+    "ops/docs/reference/TRANSLATION-REFERENCE.md",
+    "ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md",
+    "ops/docs/whole-app-hardening.md",
+    "ops/scripts/architecture/language-runtime-audit.mjs",
+    "ops/scripts/powershell/docker-release.ps1",
+    "ops/scripts/runtime/audits/deep-live-audit.mjs",
+    "ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs"
+  ],
+  "wrapperFiles": [],
+  "brokenWrapperFiles": [],
+  "removableWrapperFiles": []
+}
