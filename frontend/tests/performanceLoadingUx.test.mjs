@@ -50,7 +50,7 @@ const usersPage = fs.readFileSync(new URL('../src/components/users/Users.jsx', i
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.jsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.jsx', import.meta.url), 'utf8')
-const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.mjs', import.meta.url), 'utf8')
+const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 const apiMethods = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
 
@@ -305,7 +305,7 @@ assert.match(
 )
 assert.match(
   actionHistory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
   'action history server reads should timeout slow history requests',
 )
 assert.match(
@@ -315,7 +315,7 @@ assert.match(
 )
 assert.match(
   actionHistory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getUsers\(\),\s*'Action history users',\s*ACTION_HISTORY_USERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getUsers\(\),\s*'Action history users',\s*ACTION_HISTORY_USERS_TIMEOUT_MS,\s*\)/,
   'action history admin user options should timeout slow user reads',
 )
 assert.match(
