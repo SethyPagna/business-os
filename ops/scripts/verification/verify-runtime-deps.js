@@ -14,6 +14,7 @@ const OPS_PACKAGE_JSON = path.join(ROOT, 'ops', 'package.json')
 const OPS_PACKAGE_LOCK = path.join(ROOT, 'ops', 'package-lock.json')
 const FRONTEND_VITE_CONFIG = path.join(ROOT, 'frontend', 'vite.config.mjs')
 const FRONTEND_API_HTTP = path.join(ROOT, 'frontend', 'src', 'api', 'http.js')
+const FRONTEND_API_HTTP_SOURCE = path.join(ROOT, 'frontend', 'src', 'api', 'http.ts')
 const FRONTEND_APP_CONTEXT = path.join(ROOT, 'frontend', 'src', 'AppContext.jsx')
 const FRONTEND_SERVICE_WORKER = path.join(ROOT, 'frontend', 'public', 'sw.js')
 const FRONTEND_DIST_BUILD_MANIFEST = path.join(ROOT, 'frontend', 'dist', 'business-os-build.json')
@@ -101,6 +102,7 @@ function assertRuntimeVersionGuardWiring() {
   ;[
     FRONTEND_VITE_CONFIG,
     FRONTEND_API_HTTP,
+    FRONTEND_API_HTTP_SOURCE,
     FRONTEND_APP_CONTEXT,
     FRONTEND_SERVICE_WORKER,
     BACKEND_RUNTIME_VERSION,
@@ -117,7 +119,7 @@ function assertRuntimeVersionGuardWiring() {
     '__FRONTEND_BUILD_REVISION__',
   ].forEach((token) => requireToken(viteConfig, token, rel(FRONTEND_VITE_CONFIG)))
 
-  const apiHttp = readUtf8(FRONTEND_API_HTTP)
+  const apiHttp = readUtf8(FRONTEND_API_HTTP_SOURCE)
   ;[
     'FRONTEND_BUILD_INFO',
     'shouldCompareRuntimeVersions',
@@ -304,9 +306,9 @@ function main() {
     serviceWorkerBuildHash: readIncludes(FRONTEND_SERVICE_WORKER, '__BUSINESS_OS_BUILD_HASH__') &&
       readIncludes(FRONTEND_SERVICE_WORKER, 'APP_SHELL_VERSION') &&
       readIncludes(FRONTEND_SERVICE_WORKER, 'STATIC_CACHE'),
-    frontendMismatchDispatch: readIncludes(FRONTEND_API_HTTP, 'runtime:version-mismatch') &&
-      readIncludes(FRONTEND_API_HTTP, 'shouldCompareRuntimeVersions') &&
-      readIncludes(FRONTEND_API_HTTP, 'checkRuntimeVersionFromHealth'),
+    frontendMismatchDispatch: readIncludes(FRONTEND_API_HTTP_SOURCE, 'runtime:version-mismatch') &&
+      readIncludes(FRONTEND_API_HTTP_SOURCE, 'shouldCompareRuntimeVersions') &&
+      readIncludes(FRONTEND_API_HTTP_SOURCE, 'checkRuntimeVersionFromHealth'),
     appContextMismatchListener: readIncludes(FRONTEND_APP_CONTEXT, 'runtime:version-mismatch') &&
       readIncludes(FRONTEND_APP_CONTEXT, 'addEventListener') &&
       readIncludes(FRONTEND_APP_CONTEXT, 'removeEventListener'),

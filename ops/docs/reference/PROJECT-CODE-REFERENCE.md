@@ -308,19 +308,19 @@ Total files documented: **24**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `assertTrackedFile` | function | 38 |
-| 2 | `rel` | function | 44 |
-| 3 | `requireToken` | function | 48 |
-| 4 | `hasLockDependency` | function | 54 |
-| 5 | `readIncludes` | function | 60 |
-| 6 | `packageLockVersion` | function | 64 |
-| 7 | `buildVersionConsistency` | function | 68 |
-| 8 | `assertVersionConsistency` | function | 94 |
-| 9 | `assertRuntimeVersionGuardWiring` | function | 100 |
-| 10 | `assertBuildManifestShapeWhenPresent` | function | 168 |
-| 11 | `buildLocalVerificationCoverage` | function | 185 |
-| 12 | `assertCoverageComplete` | function | 233 |
-| 13 | `main` | function | 246 |
+| 1 | `assertTrackedFile` | function | 39 |
+| 2 | `rel` | function | 45 |
+| 3 | `requireToken` | function | 49 |
+| 4 | `hasLockDependency` | function | 55 |
+| 5 | `readIncludes` | function | 61 |
+| 6 | `packageLockVersion` | function | 65 |
+| 7 | `buildVersionConsistency` | function | 69 |
+| 8 | `assertVersionConsistency` | function | 95 |
+| 9 | `assertRuntimeVersionGuardWiring` | function | 101 |
+| 10 | `assertBuildManifestShapeWhenPresent` | function | 170 |
+| 11 | `buildLocalVerificationCoverage` | function | 187 |
+| 12 | `assertCoverageComplete` | function | 235 |
+| 13 | `main` | function | 248 |
 
 ### 3.23 `ops/scripts/verification/verify-scale-services.js`
 

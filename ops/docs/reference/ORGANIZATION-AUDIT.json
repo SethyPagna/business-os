@@ -169,7 +169,7 @@
     "backend/test/fullAutomation.test.js",
     "frontend/src/App.jsx",
     "frontend/src/AppContext.jsx",
-    "frontend/src/api/http.js",
+    "frontend/src/api/http.ts",
     "frontend/src/api/methods.js",
     "frontend/src/components/auth/Login.jsx",
     "frontend/src/components/branches/Branches.jsx",

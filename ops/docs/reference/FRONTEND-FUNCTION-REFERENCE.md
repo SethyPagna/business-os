@@ -10,8 +10,8 @@ Total files documented: **234**
 
 | No. | File | Symbols |
 |---:|---|---:|
-| 1 | `frontend/src/api/http.d.ts` | 0 |
-| 2 | `frontend/src/api/http.js` | 36 |
+| 1 | `frontend/src/api/http.js` | 0 |
+| 2 | `frontend/src/api/http.ts` | 32 |
 | 3 | `frontend/src/api/localDb.js` | 0 |
 | 4 | `frontend/src/api/localDb.ts` | 1 |
 | 5 | `frontend/src/api/methods.js` | 163 |
@@ -247,50 +247,46 @@ Total files documented: **234**
 
 ## 3. Detailed Function Commentary
 
-### 3.1 `frontend/src/api/http.d.ts`
+### 3.1 `frontend/src/api/http.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.2 `frontend/src/api/http.js`
+### 3.2 `frontend/src/api/http.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `hasStoredAuthSession` | function | 61 |
-| 2 | `isProtectedAdminHost` | function | 70 |
-| 3 | `normalizeApiPath` | function | 87 |
-| 4 | `getApiMismatchKey` | function | 104 |
-| 5 | `dispatchApiVersionMismatch` | function | 119 |
-| 6 | `logCall` | function | 194 |
-| 7 | `getClientMetaHeaders` | function | 202 |
-| 8 | `createApiError` | function | 206 |
-| 9 | `createCloudflareAccessError` | function | 235 |
-| 10 | `dispatchUnauthorized` | function | 245 |
-| 11 | `dispatchRuntimeVersionMismatch` | function | 273 |
-| 12 | `checkRuntimeVersionFromHealth` | function | 285 |
-| 13 | `createWriteBlockedError` | function | 292 |
-| 14 | `dispatchWriteBlocked` | function | 303 |
-| 15 | `dispatchTransientGatewayOutage` | function | 318 |
-| 16 | `getConflictRefreshChannels` | function | 383 |
-| 17 | `dispatchGlobalDataRefresh` | function | 392 |
-| 18 | `sleep` | function | 401 |
-| 19 | `hasUsableLocalData` | function | 405 |
-| 20 | `tryServerReadWithRetry` | function | 420 |
-| 21 | `noteReadFailure` | function | 431 |
-| 22 | `resolveLocalRead` | function | 445 |
-| 23 | `stableStringifyForDedupe` | function | 452 |
-| 24 | `clampDedupeBody` | function | 462 |
-| 25 | `methodAllowsRequestBody` | function | 474 |
-| 26 | `requestPromise` | const arrow | 504 |
-| 27 | `parsed` | const arrow | 541 |
-| 28 | `shouldDispatchUnauthorized` | function | 602 |
-| 29 | `isConnectivityError` | function | 615 |
-| 30 | `setServerHealth` | function | 638 |
-| 31 | `pingServerHealth` | function | 651 |
-| 32 | `getChannelRefreshKey` | function | 723 |
-| 33 | `emitCacheRefresh` | function | 727 |
-| 34 | `clearInflight` | function | 741 |
-| 35 | `hasReusableInflight` | function | 746 |
-| 36 | `raceServerReadWithLocalFallback` | function | 756 |
+| 1 | `hasStoredAuthSession` | function | 77 |
+| 2 | `isProtectedAdminHost` | function | 86 |
+| 3 | `normalizeApiPath` | function | 103 |
+| 4 | `getApiMismatchKey` | function | 120 |
+| 5 | `dispatchApiVersionMismatch` | function | 135 |
+| 6 | `logCall` | function | 210 |
+| 7 | `getClientMetaHeaders` | function | 218 |
+| 8 | `createApiError` | function | 222 |
+| 9 | `createCloudflareAccessError` | function | 251 |
+| 10 | `dispatchUnauthorized` | function | 261 |
+| 11 | `dispatchRuntimeVersionMismatch` | function | 289 |
+| 12 | `checkRuntimeVersionFromHealth` | function | 301 |
+| 13 | `createWriteBlockedError` | function | 308 |
+| 14 | `dispatchWriteBlocked` | function | 319 |
+| 15 | `dispatchTransientGatewayOutage` | function | 334 |
+| 16 | `getConflictRefreshChannels` | function | 399 |
+| 17 | `dispatchGlobalDataRefresh` | function | 408 |
+| 18 | `sleep` | function | 417 |
+| 19 | `hasUsableLocalData` | function | 421 |
+| 20 | `noteReadFailure` | function | 447 |
+| 21 | `stableStringifyForDedupe` | function | 468 |
+| 22 | `clampDedupeBody` | function | 478 |
+| 23 | `methodAllowsRequestBody` | function | 490 |
+| 24 | `parsed` | const arrow | 557 |
+| 25 | `shouldDispatchUnauthorized` | function | 618 |
+| 26 | `isConnectivityError` | function | 631 |
+| 27 | `setServerHealth` | function | 654 |
+| 28 | `pingServerHealth` | function | 667 |
+| 29 | `getChannelRefreshKey` | function | 739 |
+| 30 | `emitCacheRefresh` | function | 744 |
+| 31 | `clearInflight` | function | 758 |
+| 32 | `hasReusableInflight` | function | 763 |
 
 ### 3.3 `frontend/src/api/localDb.js`
 
