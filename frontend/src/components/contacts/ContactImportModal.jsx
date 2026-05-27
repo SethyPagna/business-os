@@ -5,7 +5,7 @@ import { useApp } from '../../AppContext'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
-import { countCsvDataRows } from './contactImportParser.mjs'
+import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 
 const CONTACT_IMPORT_CONFIG = {
   customer: {

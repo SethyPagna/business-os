@@ -1,4 +1,4 @@
-import { countCsvDataRows } from './contactImportParser'
+import { countCsvDataRows } from '../../utils/csvRowCounter'
 
 type IncomingContactImportMessage = {
   id?: string

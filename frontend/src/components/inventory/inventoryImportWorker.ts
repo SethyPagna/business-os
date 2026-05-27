@@ -1,4 +1,4 @@
-import { countCsvDataRows } from '../../utils/csvRowCounter.mjs'
+import { countCsvDataRows } from '../../utils/csvRowCounter'
 
 type IncomingInventoryImportMessage = {
   id?: string

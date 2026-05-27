@@ -1397,7 +1397,8 @@ Decision rule:
     `frontend/src/components/contacts/contactImportWorker.ts` now handles CSV
     row-count analysis for the contact import modal, with
     `contactImportWorker.mjs` as the Vite worker wrapper and
-    `contactImportParser.ts` as the synchronous fallback/correctness oracle.
+    `frontend/src/utils/csvRowCounter.ts` as the synchronous fallback and
+    correctness oracle.
     The modal keeps the existing background import job upload path, adds a
     bounded worker timeout, and ignores stale worker responses when staff pick a
     newer CSV before an older analysis finishes.

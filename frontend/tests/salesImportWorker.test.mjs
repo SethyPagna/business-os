@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { countCsvDataRows } from '../src/utils/csvRowCounter.mjs'
+import { countCsvDataRows } from '../src/utils/csvRowCounter.ts'
 
 let failed = 0
 

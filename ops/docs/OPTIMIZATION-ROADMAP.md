@@ -2352,8 +2352,8 @@ Cleanup checkpoint:
   keeps sensitive live-server table mirrors blocked.
 - The first Web Worker extraction slice is now complete:
   `frontend/src/components/contacts/contactImportWorker.ts` counts contact CSV
-  rows off the modal render path, with `contactImportParser.ts` kept as the
-  synchronous fallback and correctness oracle. `ContactImportModal.jsx`
+  rows off the modal render path, with `frontend/src/utils/csvRowCounter.ts`
+  kept as the synchronous fallback and correctness oracle. `ContactImportModal.jsx`
   preserves the existing server-side background import job contract while adding
   a 5 second worker timeout and stale-result guard for rapid file changes.
 - The inventory import Web Worker slice is now complete:

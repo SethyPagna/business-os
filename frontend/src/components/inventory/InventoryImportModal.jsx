@@ -8,7 +8,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
-import { countCsvDataRows } from '../../utils/csvRowCounter.mjs'
+import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 
 const INVENTORY_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
 const INVENTORY_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 30000

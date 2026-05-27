@@ -336,6 +336,18 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     ],
   },
   {
+    implementation: 'frontend/src/utils/csvRowCounter.ts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after import modals and workers moved to TypeScript source',
+    declarationSupport: '',
+    proof: [
+      'npm.cmd --prefix frontend run typecheck',
+      'node frontend\\tests\\inventoryImportWorker.test.mjs',
+      'node frontend\\tests\\salesImportWorker.test.mjs',
+      'npm.cmd --prefix frontend run build',
+    ],
+  },
+  {
     implementation: 'frontend/src/utils/formatters.ts',
     compatibilityWrapper: 'frontend/src/utils/formatters.js',
     declarationSupport: '',
@@ -791,7 +803,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     surface: 'frontend/src/components/contacts/ContactImportModal.jsx',
     worker: 'frontend/src/components/contacts/contactImportWorker.ts',
     compatibilityWrapper: 'frontend/src/components/contacts/contactImportWorker.mjs',
-    fallback: 'frontend/src/components/contacts/contactImportParser.ts',
+    fallback: 'frontend/src/utils/csvRowCounter.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\contactImportWorker.test.mjs',
