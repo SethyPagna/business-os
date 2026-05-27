@@ -8,7 +8,7 @@ const webApiSource = readFileSync(new URL('../src/web-api.js', import.meta.url),
 const localDbSource = readFileSync(new URL('../src/api/localDb.js', import.meta.url), 'utf8')
 const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
 const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
-const faviconSource = readFileSync(new URL('../src/utils/favicon.js', import.meta.url), 'utf8')
+const faviconSource = readFileSync(new URL('../src/utils/favicon.ts', import.meta.url), 'utf8')
 const userProfileSource = readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
 
 assert.doesNotMatch(
@@ -127,7 +127,7 @@ assert.match(
 
 assert.match(
   faviconSource,
-  /function shouldUseAnonymousCors\(source\)/,
+  /function shouldUseAnonymousCors\(source: unknown\)/,
   'Favicon canvas processing should decide CORS per URL instead of forcing protected same-origin uploads through anonymous CORS',
 )
 
