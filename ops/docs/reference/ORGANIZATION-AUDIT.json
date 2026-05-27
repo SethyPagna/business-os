@@ -1,8 +1,8 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 597,
-  "largeFiles": 70,
+  "filesScanned": 605,
+  "largeFiles": 71,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
   "wrapperRemovalCandidates": 0,
@@ -63,15 +63,15 @@
       15
     ],
     [
+      "ops/docs",
+      14
+    ],
+    [
       "backend/services",
       12
     ],
     [
       "frontend/components/inventory",
-      11
-    ],
-    [
-      "ops/docs",
       11
     ],
     [
@@ -221,6 +221,7 @@
     "ops/scripts/architecture/language-runtime-audit.mjs",
     "ops/scripts/powershell/docker-release.ps1",
     "ops/scripts/runtime/audits/deep-live-audit.mjs",
+    "ops/scripts/runtime/browser-action-smoke.mjs",
     "ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs"
   ],
   "wrapperFiles": [],

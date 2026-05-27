@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-27T18:23:32.204Z
+Generated: 2026-05-27T18:37:28.952Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 597
+- Files scanned: 605
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,11 +14,11 @@ Generated: 2026-05-27T18:23:32.204Z
 
 | Extension | Files |
 | --- | --- |
-| .js | 181 |
-| .mjs | 160 |
+| .js | 185 |
+| .mjs | 161 |
 | .jsx | 107 |
 | .ts | 64 |
-| .md | 41 |
+| .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -38,9 +38,9 @@ Generated: 2026-05-27T18:23:32.204Z
 | frontend/components/catalog | 17 |
 | ops/scripts/runtime/live-checks | 17 |
 | frontend/components/contacts | 15 |
+| ops/docs | 14 |
 | backend/services | 12 |
 | frontend/components/inventory | 11 |
-| ops/docs | 11 |
 | frontend/components/receipt-settings | 10 |
 | frontend/components/utils-settings | 10 |
 | run | 9 |
@@ -68,11 +68,11 @@ Generated: 2026-05-27T18:23:32.204Z
 | ops/docs/reference/PHASE29-AUDIT.json | 11644 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8249 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6585 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 4905 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 4917 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
-| backend/src/services/importJobs.js | 3830 | backend/services |
+| backend/src/services/importJobs.js | 3880 | backend/services |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3443 | ops/docs |
-| frontend/src/components/catalog/CatalogPage.jsx | 3230 | frontend/components/catalog |
+| frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/lang/km.json | 2715 | frontend/src/lang |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2681 | ops/docs/reference |
@@ -82,16 +82,16 @@ Generated: 2026-05-27T18:23:32.204Z
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2124 | ops/docs/reference |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2105 | ops/docs/reference |
 | frontend/tests/performanceLoadingUx.test.mjs | 2077 | frontend/tests/performanceLoadingUx.test.mjs |
-| frontend/src/components/products/Products.jsx | 2028 | frontend/components/products |
-| frontend/src/components/dashboard/Dashboard.jsx | 2003 | frontend/components/dashboard |
+| frontend/src/components/dashboard/Dashboard.jsx | 2063 | frontend/components/dashboard |
+| frontend/src/components/products/Products.jsx | 2006 | frontend/components/products |
 | frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |
 | frontend/src/components/products/import/BulkImportModal.jsx | 1907 | frontend/components/products |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1788 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1666 | ops/docs/reference |
-| backend/src/routes/system/index.js | 1653 | backend/routes |
-| frontend/src/AppContext.jsx | 1598 | frontend/src/AppContext.jsx |
+| backend/src/routes/system/index.js | 1659 | backend/routes |
+| frontend/src/AppContext.jsx | 1603 | frontend/src/AppContext.jsx |
 | backend/src/routes/sales.js | 1573 | backend/routes |
 | backend/src/services/googleDriveSync/index.js | 1564 | backend/services |
 | ops/scripts/architecture/language-runtime-audit.mjs | 1531 | ops/scripts/architecture |
@@ -107,12 +107,12 @@ Generated: 2026-05-27T18:23:32.204Z
 | frontend/src/components/sales/Sales.jsx | 20 | frontend/components/sales |
 | frontend/src/components/pos/POS.jsx | 19 | frontend/components/pos |
 | frontend/src/components/catalog/CatalogPage.jsx | 18 | frontend/components/catalog |
+| frontend/src/components/dashboard/Dashboard.jsx | 18 | frontend/components/dashboard |
 | frontend/src/components/returns/Returns.jsx | 18 | frontend/components/returns |
 | backend/src/routes/products.js | 17 | backend/routes |
 | frontend/src/components/contacts/CustomersTab.jsx | 17 | frontend/components/contacts |
 | frontend/src/components/contacts/DeliveryTab.jsx | 16 | frontend/components/contacts |
 | frontend/src/components/contacts/SuppliersTab.jsx | 16 | frontend/components/contacts |
-| frontend/src/components/dashboard/Dashboard.jsx | 15 | frontend/components/dashboard |
 | backend/src/services/importJobs.js | 14 | backend/services |
 | backend/src/routes/auth.js | 13 | backend/routes |
 | frontend/src/AppContext.jsx | 13 | frontend/src/AppContext.jsx |

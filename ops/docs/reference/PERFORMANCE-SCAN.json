@@ -2,11 +2,11 @@
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 326,
-  "distAssets": 86,
-  "totalSourceBytes": 5419209,
-  "totalSourceLines": 119804,
+  "distAssets": 87,
+  "totalSourceBytes": 5474367,
+  "totalSourceLines": 120295,
   "largestSourceFile": "frontend/src/lang/km.json",
-  "largestSourceFileBytes": 250722,
+  "largestSourceFileBytes": 250756,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
   "largestSourceLines": 4123,
   "largestBuiltChunk": "frontend/dist/assets/vendor-zxing-BxcS2Ffh.js",
@@ -32,7 +32,7 @@
     "frontend/src/lang/km.json"
   ],
   "oversizedBuiltChunks": [
-    "frontend/dist/assets/catalog-BGSQ7Enk.js",
+    "frontend/dist/assets/catalog-dgZQxnzi.js",
     "frontend/dist/assets/index-DQztsXP7.css",
     "frontend/dist/assets/lang-km-BWLtbhWu.js",
     "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
@@ -41,254 +41,254 @@
   "topSourceBySize": [
     {
       "file": "frontend/src/lang/km.json",
-      "size": 250722,
+      "size": 250756,
       "lines": 2715
     },
     {
       "file": "frontend/src/components/inventory/Inventory.jsx",
-      "size": 213095,
+      "size": 213992,
       "lines": 4123
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 158489,
-      "lines": 3830
+      "size": 160882,
+      "lines": 3880
     },
     {
       "file": "frontend/src/components/catalog/CatalogPage.jsx",
-      "size": 142504,
-      "lines": 3230
+      "size": 142543,
+      "lines": 3218
     },
     {
       "file": "frontend/src/lang/en.json",
-      "size": 137686,
+      "size": 137737,
       "lines": 2721
     },
     {
       "file": "frontend/src/components/pos/POS.jsx",
-      "size": 110093,
+      "size": 110204,
       "lines": 1919
     },
     {
       "file": "frontend/src/components/dashboard/Dashboard.jsx",
-      "size": 107246,
-      "lines": 2003
+      "size": 110051,
+      "lines": 2063
     },
     {
       "file": "frontend/src/api/methods.js",
-      "size": 104677,
+      "size": 105076,
       "lines": 2346
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 100754,
+      "size": 101435,
       "lines": 2218
     },
     {
       "file": "frontend/src/components/products/Products.jsx",
-      "size": 98739,
-      "lines": 2028
+      "size": 98670,
+      "lines": 2006
     },
     {
       "file": "frontend/src/components/catalog/CatalogEditorSurface.jsx",
-      "size": 96950,
+      "size": 98244,
       "lines": 1295
     },
     {
       "file": "frontend/src/components/products/import/BulkImportModal.jsx",
-      "size": 93712,
+      "size": 94051,
       "lines": 1907
     },
     {
       "file": "backend/src/routes/inventory.js",
-      "size": 85346,
+      "size": 85838,
       "lines": 1881
     },
     {
       "file": "frontend/src/components/utils-settings/Settings.jsx",
-      "size": 82436,
+      "size": 82561,
       "lines": 1730
     },
     {
       "file": "frontend/src/components/utils-settings/Backup.jsx",
-      "size": 70763,
+      "size": 72252,
       "lines": 1490
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66472,
-      "lines": 1653
+      "size": 66845,
+      "lines": 1659
     },
     {
       "file": "backend/src/routes/sales.js",
-      "size": 65894,
+      "size": 66182,
       "lines": 1573
     },
     {
       "file": "frontend/src/AppContext.jsx",
-      "size": 64096,
-      "lines": 1598
+      "size": 65791,
+      "lines": 1603
     },
     {
       "file": "frontend/src/components/catalog/portalLanguagePacks.ts",
-      "size": 63981,
+      "size": 64016,
       "lines": 1349
     },
     {
       "file": "frontend/src/components/users/UserProfileModal.jsx",
-      "size": 63855,
+      "size": 63940,
       "lines": 1158
     },
     {
       "file": "backend/src/services/googleDriveSync/index.js",
-      "size": 58964,
+      "size": 59146,
       "lines": 1564
     },
     {
       "file": "frontend/src/components/utils-settings/AuditLog.jsx",
-      "size": 57301,
+      "size": 57546,
       "lines": 1198
     },
     {
       "file": "frontend/src/App.jsx",
-      "size": 54129,
+      "size": 54430,
       "lines": 1387
     },
     {
       "file": "backend/src/routes/portal.js",
-      "size": 52047,
+      "size": 52672,
       "lines": 1407
     },
     {
-      "file": "frontend/src/components/catalog/CatalogSecondaryTabs.jsx",
-      "size": 51630,
-      "lines": 837
+      "file": "frontend/src/components/users/Users.jsx",
+      "size": 51654,
+      "lines": 1036
     }
   ],
   "topSourceByLines": [
     {
       "file": "frontend/src/components/inventory/Inventory.jsx",
-      "size": 213095,
+      "size": 213992,
       "lines": 4123
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 158489,
-      "lines": 3830
+      "size": 160882,
+      "lines": 3880
     },
     {
       "file": "frontend/src/components/catalog/CatalogPage.jsx",
-      "size": 142504,
-      "lines": 3230
+      "size": 142543,
+      "lines": 3218
     },
     {
       "file": "frontend/src/lang/en.json",
-      "size": 137686,
+      "size": 137737,
       "lines": 2721
     },
     {
       "file": "frontend/src/lang/km.json",
-      "size": 250722,
+      "size": 250756,
       "lines": 2715
     },
     {
       "file": "frontend/src/api/methods.js",
-      "size": 104677,
+      "size": 105076,
       "lines": 2346
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 100754,
+      "size": 101435,
       "lines": 2218
     },
     {
-      "file": "frontend/src/components/products/Products.jsx",
-      "size": 98739,
-      "lines": 2028
+      "file": "frontend/src/components/dashboard/Dashboard.jsx",
+      "size": 110051,
+      "lines": 2063
     },
     {
-      "file": "frontend/src/components/dashboard/Dashboard.jsx",
-      "size": 107246,
-      "lines": 2003
+      "file": "frontend/src/components/products/Products.jsx",
+      "size": 98670,
+      "lines": 2006
     },
     {
       "file": "frontend/src/components/pos/POS.jsx",
-      "size": 110093,
+      "size": 110204,
       "lines": 1919
     },
     {
       "file": "frontend/src/components/products/import/BulkImportModal.jsx",
-      "size": 93712,
+      "size": 94051,
       "lines": 1907
     },
     {
       "file": "backend/src/routes/inventory.js",
-      "size": 85346,
+      "size": 85838,
       "lines": 1881
     },
     {
       "file": "frontend/src/components/utils-settings/Settings.jsx",
-      "size": 82436,
+      "size": 82561,
       "lines": 1730
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66472,
-      "lines": 1653
+      "size": 66845,
+      "lines": 1659
     },
     {
       "file": "frontend/src/AppContext.jsx",
-      "size": 64096,
-      "lines": 1598
+      "size": 65791,
+      "lines": 1603
     },
     {
       "file": "backend/src/routes/sales.js",
-      "size": 65894,
+      "size": 66182,
       "lines": 1573
     },
     {
       "file": "backend/src/services/googleDriveSync/index.js",
-      "size": 58964,
+      "size": 59146,
       "lines": 1564
     },
     {
       "file": "frontend/src/components/utils-settings/Backup.jsx",
-      "size": 70763,
+      "size": 72252,
       "lines": 1490
     },
     {
       "file": "backend/src/routes/portal.js",
-      "size": 52047,
+      "size": 52672,
       "lines": 1407
     },
     {
       "file": "frontend/src/App.jsx",
-      "size": 54129,
+      "size": 54430,
       "lines": 1387
     },
     {
       "file": "frontend/src/components/catalog/portalLanguagePacks.ts",
-      "size": 63981,
+      "size": 64016,
       "lines": 1349
     },
     {
       "file": "frontend/src/components/catalog/CatalogEditorSurface.jsx",
-      "size": 96950,
+      "size": 98244,
       "lines": 1295
     },
     {
+      "file": "backend/src/fileAssets.js",
+      "size": 44917,
+      "lines": 1261
+    },
+    {
       "file": "frontend/src/components/utils-settings/AuditLog.jsx",
-      "size": 57301,
+      "size": 57546,
       "lines": 1198
     },
     {
-      "file": "backend/src/fileAssets.js",
-      "size": 40877,
-      "lines": 1173
-    },
-    {
       "file": "frontend/src/components/users/UserProfileModal.jsx",
-      "size": 63855,
+      "size": 63940,
       "lines": 1158
     }
   ],
@@ -309,8 +309,8 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-BGSQ7Enk.js",
-      "size": 188829,
+      "file": "frontend/dist/assets/catalog-dgZQxnzi.js",
+      "size": 188539,
       "lines": 0
     },
     {
@@ -319,13 +319,13 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Inventory-eaBUr1j3.js",
-      "size": 147116,
+      "file": "frontend/dist/assets/Inventory-DweEKaIj.js",
+      "size": 147138,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/index-DBvwsK2h.js",
-      "size": 130329,
+      "file": "frontend/dist/assets/index-BUr4GP1Y.js",
+      "size": 130288,
       "lines": 0
     },
     {
@@ -334,18 +334,18 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Products-2GttIF0S.js",
-      "size": 94106,
+      "file": "frontend/dist/assets/Products-XzU4ndkY.js",
+      "size": 93764,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/app-shared-nLwifNL1.js",
-      "size": 84300,
+      "file": "frontend/dist/assets/app-shared-BQ6bswET.js",
+      "size": 84353,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/POS-T-vHU4_z.js",
-      "size": 76667,
+      "file": "frontend/dist/assets/POS-kA3l-0dz.js",
+      "size": 76665,
       "lines": 0
     },
     {
@@ -354,67 +354,67 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-editor-CqAxMHp5.js",
+      "file": "frontend/dist/assets/catalog-editor-B142V06A.js",
       "size": 72155,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Dashboard-BZzPOlDA.js",
-      "size": 70554,
+      "file": "frontend/dist/assets/Dashboard-D0SdksmC.js",
+      "size": 71820,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/BulkImportModal-De5bGpcZ.js",
-      "size": 69874,
+      "file": "frontend/dist/assets/BulkImportModal-qgLZuqIu.js",
+      "size": 69876,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-preview-8OnTGsuw.js",
-      "size": 65450,
+      "file": "frontend/dist/assets/catalog-preview-HU7c1J6k.js",
+      "size": 65591,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/app-api-methods-LhIuDm0n.js",
+      "file": "frontend/dist/assets/app-api-methods-D2Qsj7r-.js",
       "size": 61562,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Backup-D0xD4anJ.js",
+      "file": "frontend/dist/assets/Backup-BcLb4J0p.js",
       "size": 58711,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/vendor-lucide-CrnNh1SI.js",
+      "file": "frontend/dist/assets/vendor-lucide-RAvr19U5.js",
       "size": 53758,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Settings-DnV0C8Ya.js",
+      "file": "frontend/dist/assets/Settings-Cpfj1mKt.js",
       "size": 53073,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Users-CjyDfUGn.js",
+      "file": "frontend/dist/assets/Users-Uk2Ck8RI.js",
       "size": 41128,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Branches-BFJ4927t.js",
+      "file": "frontend/dist/assets/Branches-Dh9yjQ8Y.js",
       "size": 38369,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/ReceiptSettings-C4yp2-ch.js",
+      "file": "frontend/dist/assets/ReceiptSettings-C4qVDm8X.js",
       "size": 37966,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/app-api-D3hzsQWP.js",
+      "file": "frontend/dist/assets/app-api-tZ8tehAb.js",
       "size": 37591,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Sales-BLiu15ys.js",
+      "file": "frontend/dist/assets/Sales-BU6PpRIh.js",
       "size": 35618,
       "lines": 0
     }
