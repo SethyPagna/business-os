@@ -38,7 +38,7 @@ Total folders documented: **81**
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
 | 28 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
-| 29 | `frontend/src/components/catalog` | UI pages/components domain | 19 | 0 |
+| 29 | `frontend/src/components/catalog` | UI pages/components domain | 17 | 0 |
 | 30 | `frontend/src/components/contacts` | UI pages/components domain | 13 | 0 |
 | 31 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
 | 32 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
@@ -51,7 +51,7 @@ Total folders documented: **81**
 | 39 | `frontend/src/components/products` | UI pages/components domain | 1 | 9 |
 | 40 | `frontend/src/components/products/config` | UI pages/components domain | 2 | 0 |
 | 41 | `frontend/src/components/products/forms` | UI pages/components domain | 4 | 0 |
-| 42 | `frontend/src/components/products/helpers` | UI pages/components domain | 17 | 0 |
+| 42 | `frontend/src/components/products/helpers` | UI pages/components domain | 15 | 0 |
 | 43 | `frontend/src/components/products/history` | UI pages/components domain | 2 | 0 |
 | 44 | `frontend/src/components/products/import` | UI pages/components domain | 5 | 0 |
 | 45 | `frontend/src/components/products/lookups` | UI pages/components domain | 5 | 0 |
@@ -73,7 +73,7 @@ Total folders documented: **81**
 | 61 | `frontend/src/runtime` | Project folder | 1 | 0 |
 | 62 | `frontend/src/styles` | Project folder | 1 | 0 |
 | 63 | `frontend/src/types` | Project folder | 5 | 0 |
-| 64 | `frontend/src/utils` | Project folder | 68 | 0 |
+| 64 | `frontend/src/utils` | Project folder | 62 | 0 |
 | 65 | `frontend/tests` | Project folder | 76 | 0 |
 | 66 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
 | 67 | `ops/scripts/architecture` | Project folder | 4 | 0 |
@@ -733,7 +733,7 @@ Total folders documented: **81**
 ### 3.29 Folder: `frontend/src/components/catalog`
 
 - Purpose: UI pages/components domain
-- Direct files: **19**
+- Direct files: **17**
 - Direct subfolders: **0**
 
 #### 3.29.2 Files
@@ -754,11 +754,9 @@ Total folders documented: **81**
 | 12 | `portalContentI18n.ts` | UI component/page |
 | 13 | `portalEditorUtils.mjs` | UI component/page |
 | 14 | `portalEditorUtils.ts` | UI component/page |
-| 15 | `portalLanguagePacks.d.mts` | UI component/page |
-| 16 | `portalLanguagePacks.mjs` | UI component/page |
-| 17 | `portalLanguagePacks.ts` | UI component/page |
-| 18 | `portalTranslateController.mjs` | UI component/page |
-| 19 | `portalTranslateController.ts` | UI component/page |
+| 15 | `portalLanguagePacks.ts` | UI component/page |
+| 16 | `portalTranslateController.mjs` | UI component/page |
+| 17 | `portalTranslateController.ts` | UI component/page |
 
 
 ### 3.30 Folder: `frontend/src/components/contacts`
@@ -981,7 +979,7 @@ Total folders documented: **81**
 ### 3.42 Folder: `frontend/src/components/products/helpers`
 
 - Purpose: UI pages/components domain
-- Direct files: **17**
+- Direct files: **15**
 - Direct subfolders: **0**
 
 #### 3.42.2 Files
@@ -992,19 +990,17 @@ Total folders documented: **81**
 | 2 | `productDisplayHelpers.ts` | UI component/page |
 | 3 | `productFilterHelpers.mjs` | UI component/page |
 | 4 | `productFilterHelpers.ts` | UI component/page |
-| 5 | `productGalleryHelpers.d.mts` | UI component/page |
-| 6 | `productGalleryHelpers.mjs` | UI component/page |
-| 7 | `productGalleryHelpers.ts` | UI component/page |
-| 8 | `productGroupViewHelpers.mjs` | UI component/page |
-| 9 | `productGroupViewHelpers.ts` | UI component/page |
-| 10 | `productMenuHelpers.mjs` | UI component/page |
-| 11 | `productMenuHelpers.ts` | UI component/page |
-| 12 | `productPageHelpers.mjs` | UI component/page |
-| 13 | `productPageHelpers.ts` | UI component/page |
-| 14 | `productSelectionHelpers.mjs` | UI component/page |
-| 15 | `productSelectionHelpers.ts` | UI component/page |
-| 16 | `productWriteHelpers.mjs` | UI component/page |
-| 17 | `productWriteHelpers.ts` | UI component/page |
+| 5 | `productGalleryHelpers.ts` | UI component/page |
+| 6 | `productGroupViewHelpers.mjs` | UI component/page |
+| 7 | `productGroupViewHelpers.ts` | UI component/page |
+| 8 | `productMenuHelpers.mjs` | UI component/page |
+| 9 | `productMenuHelpers.ts` | UI component/page |
+| 10 | `productPageHelpers.mjs` | UI component/page |
+| 11 | `productPageHelpers.ts` | UI component/page |
+| 12 | `productSelectionHelpers.mjs` | UI component/page |
+| 13 | `productSelectionHelpers.ts` | UI component/page |
+| 14 | `productWriteHelpers.mjs` | UI component/page |
+| 15 | `productWriteHelpers.ts` | UI component/page |
 
 
 ### 3.43 Folder: `frontend/src/components/products/history`
@@ -1361,7 +1357,7 @@ Total folders documented: **81**
 ### 3.64 Folder: `frontend/src/utils`
 
 - Purpose: Project folder
-- Direct files: **68**
+- Direct files: **62**
 - Direct subfolders: **0**
 
 #### 3.64.2 Files
@@ -1399,43 +1395,37 @@ Total folders documented: **81**
 | 29 | `favicon.ts` | Utility helper |
 | 30 | `formatters.js` | Utility helper |
 | 31 | `formatters.ts` | Utility helper |
-| 32 | `groupedRecords.d.mts` | Utility helper |
-| 33 | `groupedRecords.mjs` | Utility helper |
-| 34 | `groupedRecords.ts` | Utility helper |
-| 35 | `historyHelpers.mjs` | Utility helper |
-| 36 | `historyHelpers.ts` | Utility helper |
-| 37 | `importJobRefresh.js` | Utility helper |
-| 38 | `importJobRefresh.ts` | Utility helper |
-| 39 | `index.js` | Utility helper |
-| 40 | `index.ts` | Utility helper |
-| 41 | `initials.d.mts` | Utility helper |
-| 42 | `initials.mjs` | Utility helper |
-| 43 | `initials.ts` | Utility helper |
-| 44 | `loaders.mjs` | Utility helper |
-| 45 | `loaders.ts` | Utility helper |
-| 46 | `mediaUpload.js` | Utility helper |
-| 47 | `mediaUpload.ts` | Utility helper |
-| 48 | `permissions.js` | Utility helper |
-| 49 | `permissions.ts` | Utility helper |
-| 50 | `pricing.d.ts` | Utility helper |
-| 51 | `pricing.js` | Utility helper |
-| 52 | `pricing.ts` | Utility helper |
-| 53 | `printReceipt.js` | Utility helper |
-| 54 | `printReceipt.ts` | Utility helper |
-| 55 | `productBatches.mjs` | Utility helper |
-| 56 | `productBatches.ts` | Utility helper |
-| 57 | `productGrouping.d.mts` | Utility helper |
-| 58 | `productGrouping.mjs` | Utility helper |
-| 59 | `productGrouping.ts` | Utility helper |
-| 60 | `publicAssetUrls.d.ts` | Utility helper |
-| 61 | `publicAssetUrls.js` | Utility helper |
-| 62 | `publicAssetUrls.ts` | Utility helper |
-| 63 | `receiptAppliedConfig.ts` | Utility helper |
-| 64 | `scriptTypography.js` | Utility helper |
-| 65 | `scriptTypography.ts` | Utility helper |
-| 66 | `settingsRefresh.js` | Utility helper |
-| 67 | `settingsRefresh.ts` | Utility helper |
-| 68 | `settingsWriteOptions.ts` | Utility helper |
+| 32 | `groupedRecords.ts` | Utility helper |
+| 33 | `historyHelpers.mjs` | Utility helper |
+| 34 | `historyHelpers.ts` | Utility helper |
+| 35 | `importJobRefresh.js` | Utility helper |
+| 36 | `importJobRefresh.ts` | Utility helper |
+| 37 | `index.js` | Utility helper |
+| 38 | `index.ts` | Utility helper |
+| 39 | `initials.ts` | Utility helper |
+| 40 | `loaders.mjs` | Utility helper |
+| 41 | `loaders.ts` | Utility helper |
+| 42 | `mediaUpload.js` | Utility helper |
+| 43 | `mediaUpload.ts` | Utility helper |
+| 44 | `permissions.js` | Utility helper |
+| 45 | `permissions.ts` | Utility helper |
+| 46 | `pricing.d.ts` | Utility helper |
+| 47 | `pricing.js` | Utility helper |
+| 48 | `pricing.ts` | Utility helper |
+| 49 | `printReceipt.js` | Utility helper |
+| 50 | `printReceipt.ts` | Utility helper |
+| 51 | `productBatches.mjs` | Utility helper |
+| 52 | `productBatches.ts` | Utility helper |
+| 53 | `productGrouping.ts` | Utility helper |
+| 54 | `publicAssetUrls.d.ts` | Utility helper |
+| 55 | `publicAssetUrls.js` | Utility helper |
+| 56 | `publicAssetUrls.ts` | Utility helper |
+| 57 | `receiptAppliedConfig.ts` | Utility helper |
+| 58 | `scriptTypography.js` | Utility helper |
+| 59 | `scriptTypography.ts` | Utility helper |
+| 60 | `settingsRefresh.js` | Utility helper |
+| 61 | `settingsRefresh.ts` | Utility helper |
+| 62 | `settingsWriteOptions.ts` | Utility helper |
 
 
 ### 3.65 Folder: `frontend/tests`

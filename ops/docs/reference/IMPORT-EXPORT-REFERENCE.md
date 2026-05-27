@@ -4,7 +4,7 @@ Auto-generated import/export and dependency-link coverage for frontend/backend c
 
 ## 1. Coverage Summary
 
-Code files documented: **545**
+Code files documented: **540**
 
 ## 2. Dependency Matrix
 
@@ -184,377 +184,372 @@ Code files documented: **545**
 | 172 | `frontend/src/components/catalog/portalContentI18n.ts` | 1 | 6 | 1 | 0 |
 | 173 | `frontend/src/components/catalog/portalEditorUtils.mjs` | 0 | 0 | 0 | 0 |
 | 174 | `frontend/src/components/catalog/portalEditorUtils.ts` | 0 | 9 | 0 | 0 |
-| 175 | `frontend/src/components/catalog/portalLanguagePacks.mjs` | 0 | 0 | 0 | 1 |
-| 176 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 0 | 4 | 0 | 0 |
-| 177 | `frontend/src/components/catalog/portalTranslateController.mjs` | 0 | 0 | 0 | 0 |
-| 178 | `frontend/src/components/catalog/portalTranslateController.ts` | 0 | 19 | 0 | 0 |
-| 179 | `frontend/src/components/contacts/ContactImportModal.jsx` | 8 | 1 | 7 | 4 |
-| 180 | `frontend/src/components/contacts/contactImportWorker.mjs` | 1 | 0 | 1 | 0 |
-| 181 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 | 0 | 1 | 1 |
-| 182 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 | 0 | 0 | 0 |
-| 183 | `frontend/src/components/contacts/contactOptionUtils.ts` | 0 | 9 | 0 | 0 |
-| 184 | `frontend/src/components/contacts/Contacts.jsx` | 12 | 1 | 10 | 1 |
-| 185 | `frontend/src/components/contacts/CustomerFormModal.jsx` | 3 | 1 | 2 | 1 |
-| 186 | `frontend/src/components/contacts/customerMembershipNumber.js` | 0 | 0 | 0 | 2 |
-| 187 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 | 1 | 0 | 0 |
-| 188 | `frontend/src/components/contacts/CustomersTab.jsx` | 17 | 2 | 15 | 2 |
-| 189 | `frontend/src/components/contacts/DeliveryTab.jsx` | 16 | 2 | 14 | 1 |
-| 190 | `frontend/src/components/contacts/shared.jsx` | 7 | 6 | 5 | 3 |
-| 191 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 | 0 | 14 | 1 |
-| 192 | `frontend/src/components/custom-tables/CustomTables.jsx` | 6 | 1 | 5 | 0 |
-| 193 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 3 | 1 | 2 | 0 |
-| 194 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 3 | 1 | 2 | 0 |
-| 195 | `frontend/src/components/dashboard/charts/index.js` | 0 | 0 | 0 | 2 |
-| 196 | `frontend/src/components/dashboard/charts/index.ts` | 0 | 0 | 0 | 0 |
-| 197 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 3 | 1 | 2 | 0 |
-| 198 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 | 1 | 1 | 3 |
-| 199 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 | 1 | 14 | 1 |
-| 200 | `frontend/src/components/dashboard/MiniStat.jsx` | 0 | 1 | 0 | 1 |
-| 201 | `frontend/src/components/files/FilePickerModal.jsx` | 4 | 1 | 3 | 5 |
-| 202 | `frontend/src/components/files/FilesPage.jsx` | 11 | 1 | 10 | 1 |
-| 203 | `frontend/src/components/files/FilesProvidersTab.jsx` | 0 | 1 | 0 | 1 |
-| 204 | `frontend/src/components/files/FilesResponsesTab.jsx` | 0 | 1 | 0 | 1 |
-| 205 | `frontend/src/components/inventory/DualMoney.jsx` | 0 | 1 | 0 | 1 |
-| 206 | `frontend/src/components/inventory/Inventory.jsx` | 30 | 1 | 28 | 1 |
-| 207 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 5 | 1 | 4 | 1 |
-| 208 | `frontend/src/components/inventory/inventoryImportWorker.mjs` | 1 | 0 | 1 | 0 |
-| 209 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 | 0 | 1 | 1 |
-| 210 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 4 | 1 | 2 | 1 |
-| 211 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 4 | 1 | 2 | 1 |
-| 212 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 0 | 1 | 0 | 1 |
-| 213 | `frontend/src/components/inventory/movementGroups.js` | 0 | 0 | 0 | 2 |
-| 214 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 0 |
-| 215 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 | 1 | 2 | 1 |
-| 216 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 7 | 1 | 5 | 1 |
-| 217 | `frontend/src/components/navigation/Sidebar.jsx` | 7 | 1 | 6 | 1 |
-| 218 | `frontend/src/components/pos/CartItem.jsx` | 2 | 1 | 2 | 1 |
-| 219 | `frontend/src/components/pos/FilterPanel.jsx` | 1 | 1 | 0 | 1 |
-| 220 | `frontend/src/components/pos/POS.jsx` | 18 | 1 | 16 | 1 |
-| 221 | `frontend/src/components/pos/posCore.mjs` | 0 | 0 | 0 | 0 |
-| 222 | `frontend/src/components/pos/posCore.ts` | 3 | 9 | 3 | 0 |
-| 223 | `frontend/src/components/pos/ProductImage.jsx` | 1 | 1 | 1 | 1 |
-| 224 | `frontend/src/components/pos/QuickAddModal.jsx` | 0 | 1 | 0 | 1 |
-| 225 | `frontend/src/components/products/config/productPageConfig.mjs` | 0 | 0 | 0 | 0 |
-| 226 | `frontend/src/components/products/config/productPageConfig.ts` | 0 | 9 | 0 | 0 |
-| 227 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 3 | 1 | 2 | 1 |
-| 228 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 3 | 1 | 2 | 1 |
-| 229 | `frontend/src/components/products/forms/ProductForm.jsx` | 9 | 1 | 7 | 1 |
-| 230 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 8 | 1 | 7 | 1 |
-| 231 | `frontend/src/components/products/helpers/productDisplayHelpers.mjs` | 0 | 0 | 0 | 0 |
-| 232 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 1 | 7 | 1 | 0 |
-| 233 | `frontend/src/components/products/helpers/productFilterHelpers.mjs` | 0 | 0 | 0 | 0 |
-| 234 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 2 | 4 | 2 | 0 |
-| 235 | `frontend/src/components/products/helpers/productGalleryHelpers.mjs` | 0 | 0 | 0 | 1 |
-| 236 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 1 | 8 | 1 | 0 |
-| 237 | `frontend/src/components/products/helpers/productGroupViewHelpers.mjs` | 0 | 0 | 0 | 0 |
-| 238 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 0 | 2 | 0 | 0 |
-| 239 | `frontend/src/components/products/helpers/productMenuHelpers.mjs` | 0 | 0 | 0 | 0 |
-| 240 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 0 | 4 | 0 | 0 |
-| 241 | `frontend/src/components/products/helpers/productPageHelpers.mjs` | 0 | 0 | 0 | 0 |
-| 242 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 1 | 4 | 0 | 0 |
-| 243 | `frontend/src/components/products/helpers/productSelectionHelpers.mjs` | 0 | 0 | 0 | 0 |
-| 244 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 0 | 10 | 0 | 0 |
-| 245 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | 0 | 0 | 0 | 0 |
-| 246 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 2 | 15 | 2 | 0 |
-| 247 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 | 0 | 0 | 2 |
-| 248 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 0 | 2 | 0 | 0 |
-| 249 | `frontend/src/components/products/import/BulkImportModal.jsx` | 6 | 1 | 4 | 1 |
-| 250 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 | 0 | 0 | 2 |
-| 251 | `frontend/src/components/products/import/productImportPlanner.ts` | 0 | 11 | 0 | 1 |
-| 252 | `frontend/src/components/products/import/productImportWorker.mjs` | 1 | 0 | 1 | 0 |
-| 253 | `frontend/src/components/products/import/productImportWorker.ts` | 1 | 0 | 1 | 1 |
-| 254 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 6 | 1 | 5 | 1 |
-| 255 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 6 | 1 | 5 | 1 |
-| 256 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | 6 | 1 | 5 | 1 |
-| 257 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | 0 | 0 | 0 | 0 |
-| 258 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 1 | 3 | 1 | 0 |
-| 259 | `frontend/src/components/products/Products.jsx` | 32 | 1 | 30 | 1 |
-| 260 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | 0 | 0 | 0 | 2 |
-| 261 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 1 | 1 | 0 | 0 |
-| 262 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 7 | 1 | 4 | 1 |
-| 263 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | 0 | 0 | 0 | 2 |
-| 264 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 | 1 | 0 | 0 |
-| 265 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | 0 | 0 | 0 | 2 |
-| 266 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 0 | 3 | 0 | 0 |
-| 267 | `frontend/src/components/products/shared/primitives.jsx` | 3 | 0 | 1 | 9 |
-| 268 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 | 1 | 2 | 1 |
-| 269 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 5 | 1 | 4 | 1 |
-| 270 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 3 | 4 | 3 | 0 |
-| 271 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 2 | 1 | 0 | 1 |
-| 272 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
-| 273 | `frontend/src/components/receipt-settings/constants.js` | 0 | 0 | 0 | 4 |
-| 274 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 1 |
-| 275 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
-| 276 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
-| 277 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
-| 278 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 3 | 1 | 2 | 1 |
-| 279 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
-| 280 | `frontend/src/components/receipt-settings/template.js` | 0 | 0 | 0 | 3 |
-| 281 | `frontend/src/components/receipt-settings/template.ts` | 2 | 2 | 2 | 0 |
-| 282 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
-| 283 | `frontend/src/components/returns/EditReturnModal.jsx` | 4 | 1 | 3 | 1 |
-| 284 | `frontend/src/components/returns/NewReturnModal.jsx` | 4 | 1 | 3 | 1 |
-| 285 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 3 | 1 | 2 | 1 |
-| 286 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
-| 287 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
-| 288 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 2 | 1 | 0 | 1 |
-| 289 | `frontend/src/components/sales/ExportModal.jsx` | 5 | 1 | 3 | 1 |
-| 290 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
-| 291 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
-| 292 | `frontend/src/components/sales/SalesImportModal.jsx` | 5 | 1 | 4 | 1 |
-| 293 | `frontend/src/components/sales/salesImportWorker.mjs` | 1 | 0 | 1 | 0 |
-| 294 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 1 |
-| 295 | `frontend/src/components/sales/SalesListSurface.jsx` | 3 | 1 | 1 | 1 |
-| 296 | `frontend/src/components/sales/StatusBadge.jsx` | 0 | 5 | 0 | 6 |
-| 297 | `frontend/src/components/server/ServerPage.jsx` | 5 | 1 | 4 | 1 |
-| 298 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 3 | 1 | 1 | 17 |
-| 299 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 7 | 1 | 5 | 1 |
-| 300 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 7 |
-| 301 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
-| 302 | `frontend/src/components/shared/globalScroll.js` | 0 | 0 | 0 | 2 |
-| 303 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 0 |
-| 304 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
-| 305 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 | 1 | 0 | 6 |
-| 306 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 22 |
-| 307 | `frontend/src/components/shared/navigationConfig.js` | 0 | 0 | 0 | 3 |
-| 308 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 0 |
-| 309 | `frontend/src/components/shared/NotificationCenter.jsx` | 4 | 1 | 1 | 2 |
-| 310 | `frontend/src/components/shared/pageActivity.js` | 0 | 0 | 0 | 15 |
-| 311 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 0 |
-| 312 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
-| 313 | `frontend/src/components/shared/PaginationControls.jsx` | 2 | 4 | 0 | 8 |
-| 314 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 7 |
-| 315 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
-| 316 | `frontend/src/components/shared/SectionSwitcher.jsx` | 1 | 1 | 0 | 4 |
-| 317 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
-| 318 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 3 | 0 | 2 |
-| 319 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
-| 320 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
-| 321 | `frontend/src/components/users/Users.jsx` | 14 | 1 | 12 | 1 |
-| 322 | `frontend/src/components/utils-settings/AuditLog.jsx` | 10 | 1 | 8 | 1 |
-| 323 | `frontend/src/components/utils-settings/Backup.jsx` | 10 | 1 | 8 | 1 |
-| 324 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
-| 325 | `frontend/src/components/utils-settings/index.js` | 0 | 0 | 0 | 0 |
-| 326 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
-| 327 | `frontend/src/components/utils-settings/OtpModal.jsx` | 3 | 1 | 2 | 2 |
-| 328 | `frontend/src/components/utils-settings/ResetData.jsx` | 6 | 0 | 4 | 1 |
-| 329 | `frontend/src/components/utils-settings/Settings.jsx` | 13 | 1 | 11 | 1 |
-| 330 | `frontend/src/components/utils-settings/settingsConflict.js` | 0 | 0 | 0 | 2 |
-| 331 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 0 |
-| 332 | `frontend/src/constants.js` | 0 | 0 | 0 | 8 |
-| 333 | `frontend/src/constants.ts` | 0 | 12 | 0 | 0 |
-| 334 | `frontend/src/index.jsx` | 9 | 0 | 4 | 0 |
-| 335 | `frontend/src/platform/runtime/clientRuntime.js` | 0 | 0 | 0 | 3 |
-| 336 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 0 |
-| 337 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 | 0 | 0 | 0 |
-| 338 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
-| 339 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
-| 340 | `frontend/src/types/jsx-modules.d.ts` | 0 | 3 | 0 | 0 |
-| 341 | `frontend/src/types/mjs-modules.d.ts` | 0 | 3 | 0 | 0 |
-| 342 | `frontend/src/types/react.d.ts` | 0 | 5 | 0 | 0 |
-| 343 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 2 |
-| 344 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
-| 345 | `frontend/src/utils/actionGuards.mjs` | 0 | 0 | 0 | 33 |
-| 346 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 0 |
-| 347 | `frontend/src/utils/actionHistory.mjs` | 0 | 0 | 0 | 16 |
-| 348 | `frontend/src/utils/actionHistory.ts` | 2 | 1 | 1 | 0 |
-| 349 | `frontend/src/utils/appRefresh.d.ts` | 0 | 3 | 0 | 0 |
-| 350 | `frontend/src/utils/appRefresh.js` | 0 | 0 | 0 | 5 |
-| 351 | `frontend/src/utils/appRefresh.ts` | 0 | 3 | 0 | 0 |
-| 352 | `frontend/src/utils/bulkOps.mjs` | 0 | 0 | 0 | 8 |
-| 353 | `frontend/src/utils/bulkOps.ts` | 0 | 1 | 0 | 0 |
-| 354 | `frontend/src/utils/color.js` | 0 | 0 | 0 | 2 |
-| 355 | `frontend/src/utils/color.ts` | 0 | 1 | 0 | 0 |
-| 356 | `frontend/src/utils/csv.d.ts` | 0 | 7 | 0 | 0 |
-| 357 | `frontend/src/utils/csv.js` | 0 | 0 | 0 | 14 |
-| 358 | `frontend/src/utils/csv.ts` | 0 | 8 | 0 | 0 |
-| 359 | `frontend/src/utils/csvExportWorker.mjs` | 1 | 0 | 1 | 0 |
-| 360 | `frontend/src/utils/csvExportWorker.ts` | 1 | 0 | 1 | 1 |
-| 361 | `frontend/src/utils/csvImport.js` | 0 | 0 | 0 | 3 |
-| 362 | `frontend/src/utils/csvImport.ts` | 1 | 11 | 1 | 0 |
-| 363 | `frontend/src/utils/csvRowCounter.ts` | 0 | 1 | 0 | 9 |
-| 364 | `frontend/src/utils/dateHelpers.js` | 0 | 0 | 0 | 2 |
-| 365 | `frontend/src/utils/dateHelpers.ts` | 0 | 2 | 0 | 0 |
-| 366 | `frontend/src/utils/deviceInfo.js` | 0 | 0 | 0 | 7 |
-| 367 | `frontend/src/utils/deviceInfo.ts` | 0 | 2 | 0 | 0 |
-| 368 | `frontend/src/utils/exportPackage.js` | 0 | 0 | 0 | 3 |
-| 369 | `frontend/src/utils/exportPackage.ts` | 1 | 2 | 1 | 0 |
-| 370 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
-| 371 | `frontend/src/utils/favicon.js` | 0 | 0 | 0 | 3 |
-| 372 | `frontend/src/utils/favicon.ts` | 0 | 1 | 0 | 0 |
-| 373 | `frontend/src/utils/formatters.js` | 0 | 0 | 0 | 17 |
-| 374 | `frontend/src/utils/formatters.ts` | 0 | 4 | 0 | 0 |
-| 375 | `frontend/src/utils/groupedRecords.mjs` | 0 | 0 | 0 | 10 |
-| 376 | `frontend/src/utils/groupedRecords.ts` | 1 | 8 | 1 | 0 |
-| 377 | `frontend/src/utils/historyHelpers.mjs` | 0 | 0 | 0 | 11 |
-| 378 | `frontend/src/utils/historyHelpers.ts` | 0 | 3 | 0 | 0 |
-| 379 | `frontend/src/utils/importJobRefresh.js` | 0 | 0 | 0 | 1 |
-| 380 | `frontend/src/utils/importJobRefresh.ts` | 0 | 3 | 0 | 0 |
-| 381 | `frontend/src/utils/index.js` | 0 | 0 | 0 | 0 |
-| 382 | `frontend/src/utils/index.ts` | 0 | 0 | 0 | 0 |
-| 383 | `frontend/src/utils/initials.mjs` | 0 | 0 | 0 | 7 |
-| 384 | `frontend/src/utils/initials.ts` | 0 | 7 | 0 | 0 |
-| 385 | `frontend/src/utils/loaders.mjs` | 0 | 0 | 0 | 19 |
-| 386 | `frontend/src/utils/loaders.ts` | 0 | 9 | 0 | 1 |
-| 387 | `frontend/src/utils/mediaUpload.js` | 0 | 0 | 0 | 3 |
-| 388 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 0 |
-| 389 | `frontend/src/utils/permissions.js` | 0 | 0 | 0 | 2 |
-| 390 | `frontend/src/utils/permissions.ts` | 0 | 1 | 0 | 0 |
-| 391 | `frontend/src/utils/pricing.d.ts` | 0 | 8 | 0 | 0 |
-| 392 | `frontend/src/utils/pricing.js` | 0 | 0 | 0 | 17 |
-| 393 | `frontend/src/utils/pricing.ts` | 0 | 8 | 0 | 0 |
-| 394 | `frontend/src/utils/printReceipt.js` | 0 | 0 | 0 | 2 |
-| 395 | `frontend/src/utils/printReceipt.ts` | 1 | 12 | 1 | 0 |
-| 396 | `frontend/src/utils/productBatches.mjs` | 0 | 0 | 0 | 5 |
-| 397 | `frontend/src/utils/productBatches.ts` | 0 | 2 | 0 | 0 |
-| 398 | `frontend/src/utils/productGrouping.mjs` | 0 | 0 | 0 | 4 |
-| 399 | `frontend/src/utils/productGrouping.ts` | 1 | 4 | 1 | 0 |
-| 400 | `frontend/src/utils/publicAssetUrls.d.ts` | 0 | 1 | 0 | 0 |
-| 401 | `frontend/src/utils/publicAssetUrls.js` | 0 | 0 | 0 | 7 |
-| 402 | `frontend/src/utils/publicAssetUrls.ts` | 1 | 2 | 1 | 0 |
-| 403 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 | 9 | 1 | 3 |
-| 404 | `frontend/src/utils/scriptTypography.js` | 0 | 0 | 0 | 6 |
-| 405 | `frontend/src/utils/scriptTypography.ts` | 0 | 3 | 0 | 0 |
-| 406 | `frontend/src/utils/settingsRefresh.js` | 0 | 0 | 0 | 0 |
-| 407 | `frontend/src/utils/settingsRefresh.ts` | 1 | 3 | 1 | 0 |
-| 408 | `frontend/src/utils/settingsWriteOptions.ts` | 1 | 1 | 1 | 1 |
-| 409 | `frontend/src/web-api.js` | 0 | 0 | 0 | 1 |
-| 410 | `frontend/src/web-api.ts` | 6 | 0 | 6 | 0 |
-| 411 | `frontend/tailwind.config.mjs` | 0 | 0 | 0 | 0 |
-| 412 | `frontend/tests/actionGuards.test.mjs` | 1 | 0 | 0 | 0 |
-| 413 | `frontend/tests/actionStability.test.mjs` | 4 | 0 | 0 | 0 |
-| 414 | `frontend/tests/adminShellMediaGuards.test.mjs` | 2 | 0 | 0 | 0 |
-| 415 | `frontend/tests/apiHttp.test.mjs` | 2 | 0 | 0 | 0 |
-| 416 | `frontend/tests/appRefresh.test.mjs` | 2 | 0 | 1 | 0 |
-| 417 | `frontend/tests/appShellUtils.test.mjs` | 3 | 0 | 1 | 0 |
-| 418 | `frontend/tests/assetCompression.test.mjs` | 3 | 0 | 0 | 0 |
-| 419 | `frontend/tests/backupJobs.test.mjs` | 2 | 0 | 0 | 0 |
-| 420 | `frontend/tests/barcodeImageScanner.test.mjs` | 2 | 0 | 1 | 0 |
-| 421 | `frontend/tests/barcodeScannerState.test.mjs` | 2 | 0 | 1 | 0 |
-| 422 | `frontend/tests/bulkOps.test.mjs` | 2 | 0 | 1 | 0 |
-| 423 | `frontend/tests/contactImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
-| 424 | `frontend/tests/csvImport.test.mjs` | 3 | 0 | 1 | 0 |
-| 425 | `frontend/tests/dashboardDataReliability.test.mjs` | 2 | 0 | 0 | 0 |
-| 426 | `frontend/tests/dateHelpers.test.mjs` | 2 | 0 | 1 | 0 |
-| 427 | `frontend/tests/deviceInfo.test.mjs` | 2 | 0 | 1 | 0 |
-| 428 | `frontend/tests/exportPackages.test.mjs` | 4 | 0 | 2 | 0 |
-| 429 | `frontend/tests/formatters.test.mjs` | 2 | 0 | 1 | 0 |
-| 430 | `frontend/tests/globalScroll.test.mjs` | 2 | 0 | 0 | 0 |
-| 431 | `frontend/tests/globalScrollControls.test.mjs` | 2 | 0 | 1 | 0 |
-| 432 | `frontend/tests/groupedRecords.test.mjs` | 2 | 0 | 1 | 0 |
-| 433 | `frontend/tests/historyHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 434 | `frontend/tests/importJobRefresh.test.mjs` | 1 | 0 | 0 | 0 |
-| 435 | `frontend/tests/initials.test.mjs` | 1 | 0 | 0 | 0 |
-| 436 | `frontend/tests/inventoryImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
-| 437 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 2 | 0 | 0 | 0 |
-| 438 | `frontend/tests/inventoryMovementGroups.test.mjs` | 2 | 0 | 1 | 0 |
-| 439 | `frontend/tests/inventoryRfidSection.test.mjs` | 2 | 0 | 0 | 0 |
-| 440 | `frontend/tests/jsxSyntaxCheck.mjs` | 5 | 0 | 0 | 0 |
-| 441 | `frontend/tests/loaders.test.mjs` | 1 | 0 | 0 | 0 |
-| 442 | `frontend/tests/mediaUploadHelpers.test.mjs` | 2 | 0 | 1 | 0 |
-| 443 | `frontend/tests/navigationConfig.test.mjs` | 2 | 0 | 1 | 0 |
-| 444 | `frontend/tests/notificationBadge.test.mjs` | 2 | 0 | 0 | 0 |
-| 445 | `frontend/tests/offlineSalesQueue.test.mjs` | 2 | 0 | 0 | 0 |
-| 446 | `frontend/tests/offlineSecurityHardening.test.mjs` | 2 | 0 | 0 | 0 |
-| 447 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 2 | 0 | 0 | 0 |
-| 448 | `frontend/tests/ownedGoogleAuth.test.mjs` | 2 | 0 | 0 | 0 |
-| 449 | `frontend/tests/performanceLoadingUx.test.mjs` | 2 | 0 | 0 | 0 |
-| 450 | `frontend/tests/permissionEditor.test.mjs` | 2 | 0 | 0 | 0 |
-| 451 | `frontend/tests/permissions.test.mjs` | 2 | 0 | 1 | 0 |
-| 452 | `frontend/tests/portalCatalogDisplay.test.mjs` | 2 | 0 | 0 | 0 |
-| 453 | `frontend/tests/portalContentI18n.test.mjs` | 1 | 0 | 0 | 0 |
-| 454 | `frontend/tests/portalEditorUtils.test.mjs` | 1 | 0 | 0 | 0 |
-| 455 | `frontend/tests/portalFaqVocabulary.test.mjs` | 1 | 0 | 0 | 0 |
-| 456 | `frontend/tests/portalLanguagePacks.test.mjs` | 1 | 0 | 0 | 0 |
-| 457 | `frontend/tests/portalTranslateController.test.mjs` | 1 | 0 | 0 | 0 |
-| 458 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
-| 459 | `frontend/tests/pricingContacts.test.mjs` | 3 | 0 | 1 | 0 |
-| 460 | `frontend/tests/productBatches.test.mjs` | 2 | 0 | 1 | 0 |
-| 461 | `frontend/tests/productDiscountUx.test.mjs` | 2 | 0 | 0 | 0 |
-| 462 | `frontend/tests/productDisplayHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 463 | `frontend/tests/productFilterHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 464 | `frontend/tests/productGalleryHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 465 | `frontend/tests/productGrouping.test.mjs` | 2 | 0 | 1 | 0 |
-| 466 | `frontend/tests/productGroupViewHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 467 | `frontend/tests/productHistoryHelpers.test.mjs` | 2 | 0 | 1 | 0 |
-| 468 | `frontend/tests/productImportPlanner.test.mjs` | 3 | 0 | 1 | 0 |
-| 469 | `frontend/tests/productImportWorkerFallback.test.mjs` | 3 | 0 | 1 | 0 |
-| 470 | `frontend/tests/productMenuHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 471 | `frontend/tests/productPageHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 472 | `frontend/tests/productSearchPagination.test.mjs` | 2 | 0 | 0 | 0 |
-| 473 | `frontend/tests/productSelectionHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 474 | `frontend/tests/productWriteHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 475 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 | 0 | 0 | 0 |
-| 476 | `frontend/tests/receiptSettingsSync.test.mjs` | 2 | 0 | 0 | 0 |
-| 477 | `frontend/tests/receiptTemplate.test.mjs` | 4 | 0 | 2 | 0 |
-| 478 | `frontend/tests/returnsLayout.test.mjs` | 2 | 0 | 0 | 0 |
-| 479 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 1 | 0 | 0 | 0 |
-| 480 | `frontend/tests/salesImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
-| 481 | `frontend/tests/scanbotScanner.test.mjs` | 2 | 0 | 1 | 0 |
-| 482 | `frontend/tests/scriptTypography.test.mjs` | 2 | 0 | 1 | 0 |
-| 483 | `frontend/tests/sectionNavigation.test.mjs` | 2 | 0 | 0 | 0 |
-| 484 | `frontend/tests/settingsConflictHelpers.test.mjs` | 2 | 0 | 1 | 0 |
-| 485 | `frontend/tests/settingsRefresh.test.mjs` | 1 | 0 | 0 | 0 |
-| 486 | `frontend/tests/storagePolicy.test.mjs` | 1 | 0 | 0 | 0 |
-| 487 | `frontend/tests/utilsSettingsBarrel.test.mjs` | 2 | 0 | 0 | 0 |
-| 488 | `frontend/vite.config.mjs` | 6 | 1 | 0 | 0 |
-| 489 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 6 | 0 | 2 | 0 |
-| 490 | `ops/scripts/architecture/language-runtime-audit.mjs` | 6 | 0 | 2 | 0 |
-| 491 | `ops/scripts/architecture/organization-audit.mjs` | 6 | 0 | 2 | 0 |
-| 492 | `ops/scripts/architecture/phase29-audit.mjs` | 7 | 0 | 2 | 0 |
-| 493 | `ops/scripts/backend/schema-audit.js` | 2 | 0 | 0 | 0 |
-| 494 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | 4 | 0 | 0 | 0 |
-| 495 | `ops/scripts/backend/verify-data-integrity.js` | 3 | 0 | 0 | 0 |
-| 496 | `ops/scripts/frontend/verify-i18n.js` | 2 | 0 | 1 | 0 |
-| 497 | `ops/scripts/frontend/verify-performance.js` | 3 | 0 | 0 | 0 |
-| 498 | `ops/scripts/frontend/verify-ui.js` | 3 | 0 | 1 | 0 |
-| 499 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 13 |
-| 500 | `ops/scripts/lib/report-utils.js` | 1 | 1 | 0 | 5 |
-| 501 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | 5 | 0 | 1 | 0 |
-| 502 | `ops/scripts/runtime/audits/audit-auth.mjs` | 0 | 4 | 0 | 17 |
-| 503 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 0 | 7 | 0 | 2 |
-| 504 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 4 | 3 | 1 | 2 |
-| 505 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 9 | 0 | 3 | 0 |
-| 506 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 9 | 0 | 3 | 0 |
-| 507 | `ops/scripts/runtime/browser-action-smoke.mjs` | 8 | 0 | 0 | 0 |
-| 508 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | 4 | 0 | 0 | 0 |
-| 509 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | 3 | 0 | 0 | 0 |
-| 510 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | 5 | 0 | 1 | 0 |
-| 511 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | 5 | 0 | 0 | 0 |
-| 512 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 0 | 7 | 0 | 14 |
-| 513 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 514 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 515 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 516 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 517 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | 4 | 0 | 0 | 0 |
-| 518 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 519 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 520 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 521 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 522 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 523 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 524 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 525 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | 4 | 0 | 0 | 0 |
-| 526 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 527 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 528 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 529 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 2 | 0 | 0 | 0 |
-| 530 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | 0 | 0 | 0 | 0 |
-| 531 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 | 0 | 0 | 0 |
-| 532 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | 2 | 0 | 0 | 0 |
-| 533 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 4 | 0 | 0 | 0 |
-| 534 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 4 | 0 | 0 | 0 |
-| 535 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | 4 | 0 | 0 | 0 |
-| 536 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | 4 | 0 | 0 | 0 |
-| 537 | `ops/scripts/runtime/storage/prune-storage.mjs` | 5 | 0 | 0 | 0 |
-| 538 | `ops/scripts/runtime/storage/restore-candidates.mjs` | 3 | 0 | 0 | 0 |
-| 539 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | 4 | 0 | 0 | 0 |
-| 540 | `ops/scripts/verification/verify-backup-reliability.js` | 3 | 0 | 1 | 0 |
-| 541 | `ops/scripts/verification/verify-docker-release.js` | 3 | 0 | 1 | 0 |
-| 542 | `ops/scripts/verification/verify-hardening-policy.js` | 4 | 0 | 1 | 0 |
-| 543 | `ops/scripts/verification/verify-runtime-deps.js` | 3 | 0 | 1 | 0 |
-| 544 | `ops/scripts/verification/verify-scale-services.js` | 4 | 0 | 1 | 0 |
-| 545 | `ops/scripts/verification/verify-secret-hygiene.js` | 4 | 0 | 1 | 0 |
+| 175 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 0 | 4 | 0 | 1 |
+| 176 | `frontend/src/components/catalog/portalTranslateController.mjs` | 0 | 0 | 0 | 0 |
+| 177 | `frontend/src/components/catalog/portalTranslateController.ts` | 0 | 19 | 0 | 0 |
+| 178 | `frontend/src/components/contacts/ContactImportModal.jsx` | 8 | 1 | 7 | 4 |
+| 179 | `frontend/src/components/contacts/contactImportWorker.mjs` | 1 | 0 | 1 | 0 |
+| 180 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 | 0 | 1 | 1 |
+| 181 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 | 0 | 0 | 0 |
+| 182 | `frontend/src/components/contacts/contactOptionUtils.ts` | 0 | 9 | 0 | 0 |
+| 183 | `frontend/src/components/contacts/Contacts.jsx` | 12 | 1 | 10 | 1 |
+| 184 | `frontend/src/components/contacts/CustomerFormModal.jsx` | 3 | 1 | 2 | 1 |
+| 185 | `frontend/src/components/contacts/customerMembershipNumber.js` | 0 | 0 | 0 | 2 |
+| 186 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 | 1 | 0 | 0 |
+| 187 | `frontend/src/components/contacts/CustomersTab.jsx` | 17 | 2 | 15 | 2 |
+| 188 | `frontend/src/components/contacts/DeliveryTab.jsx` | 16 | 2 | 14 | 1 |
+| 189 | `frontend/src/components/contacts/shared.jsx` | 7 | 6 | 5 | 3 |
+| 190 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 | 0 | 14 | 1 |
+| 191 | `frontend/src/components/custom-tables/CustomTables.jsx` | 6 | 1 | 5 | 0 |
+| 192 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 3 | 1 | 2 | 0 |
+| 193 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 3 | 1 | 2 | 0 |
+| 194 | `frontend/src/components/dashboard/charts/index.js` | 0 | 0 | 0 | 2 |
+| 195 | `frontend/src/components/dashboard/charts/index.ts` | 0 | 0 | 0 | 0 |
+| 196 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 3 | 1 | 2 | 0 |
+| 197 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 | 1 | 1 | 3 |
+| 198 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 | 1 | 14 | 1 |
+| 199 | `frontend/src/components/dashboard/MiniStat.jsx` | 0 | 1 | 0 | 1 |
+| 200 | `frontend/src/components/files/FilePickerModal.jsx` | 4 | 1 | 3 | 5 |
+| 201 | `frontend/src/components/files/FilesPage.jsx` | 11 | 1 | 10 | 1 |
+| 202 | `frontend/src/components/files/FilesProvidersTab.jsx` | 0 | 1 | 0 | 1 |
+| 203 | `frontend/src/components/files/FilesResponsesTab.jsx` | 0 | 1 | 0 | 1 |
+| 204 | `frontend/src/components/inventory/DualMoney.jsx` | 0 | 1 | 0 | 1 |
+| 205 | `frontend/src/components/inventory/Inventory.jsx` | 30 | 1 | 28 | 1 |
+| 206 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 5 | 1 | 4 | 1 |
+| 207 | `frontend/src/components/inventory/inventoryImportWorker.mjs` | 1 | 0 | 1 | 0 |
+| 208 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 | 0 | 1 | 1 |
+| 209 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 4 | 1 | 2 | 1 |
+| 210 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 4 | 1 | 2 | 1 |
+| 211 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 0 | 1 | 0 | 1 |
+| 212 | `frontend/src/components/inventory/movementGroups.js` | 0 | 0 | 0 | 2 |
+| 213 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 0 |
+| 214 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 | 1 | 2 | 1 |
+| 215 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 7 | 1 | 5 | 1 |
+| 216 | `frontend/src/components/navigation/Sidebar.jsx` | 7 | 1 | 6 | 1 |
+| 217 | `frontend/src/components/pos/CartItem.jsx` | 2 | 1 | 2 | 1 |
+| 218 | `frontend/src/components/pos/FilterPanel.jsx` | 1 | 1 | 0 | 1 |
+| 219 | `frontend/src/components/pos/POS.jsx` | 18 | 1 | 16 | 1 |
+| 220 | `frontend/src/components/pos/posCore.mjs` | 0 | 0 | 0 | 0 |
+| 221 | `frontend/src/components/pos/posCore.ts` | 3 | 9 | 3 | 0 |
+| 222 | `frontend/src/components/pos/ProductImage.jsx` | 1 | 1 | 1 | 1 |
+| 223 | `frontend/src/components/pos/QuickAddModal.jsx` | 0 | 1 | 0 | 1 |
+| 224 | `frontend/src/components/products/config/productPageConfig.mjs` | 0 | 0 | 0 | 0 |
+| 225 | `frontend/src/components/products/config/productPageConfig.ts` | 0 | 9 | 0 | 0 |
+| 226 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 3 | 1 | 2 | 1 |
+| 227 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 3 | 1 | 2 | 1 |
+| 228 | `frontend/src/components/products/forms/ProductForm.jsx` | 9 | 1 | 7 | 1 |
+| 229 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 8 | 1 | 7 | 1 |
+| 230 | `frontend/src/components/products/helpers/productDisplayHelpers.mjs` | 0 | 0 | 0 | 0 |
+| 231 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 1 | 7 | 1 | 0 |
+| 232 | `frontend/src/components/products/helpers/productFilterHelpers.mjs` | 0 | 0 | 0 | 0 |
+| 233 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 2 | 4 | 2 | 0 |
+| 234 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 1 | 8 | 1 | 1 |
+| 235 | `frontend/src/components/products/helpers/productGroupViewHelpers.mjs` | 0 | 0 | 0 | 0 |
+| 236 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 0 | 2 | 0 | 0 |
+| 237 | `frontend/src/components/products/helpers/productMenuHelpers.mjs` | 0 | 0 | 0 | 0 |
+| 238 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 0 | 4 | 0 | 0 |
+| 239 | `frontend/src/components/products/helpers/productPageHelpers.mjs` | 0 | 0 | 0 | 0 |
+| 240 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 1 | 4 | 0 | 0 |
+| 241 | `frontend/src/components/products/helpers/productSelectionHelpers.mjs` | 0 | 0 | 0 | 0 |
+| 242 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 0 | 10 | 0 | 0 |
+| 243 | `frontend/src/components/products/helpers/productWriteHelpers.mjs` | 0 | 0 | 0 | 0 |
+| 244 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 2 | 15 | 2 | 0 |
+| 245 | `frontend/src/components/products/history/productHistoryHelpers.mjs` | 0 | 0 | 0 | 2 |
+| 246 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 0 | 2 | 0 | 0 |
+| 247 | `frontend/src/components/products/import/BulkImportModal.jsx` | 6 | 1 | 4 | 1 |
+| 248 | `frontend/src/components/products/import/productImportPlanner.mjs` | 0 | 0 | 0 | 2 |
+| 249 | `frontend/src/components/products/import/productImportPlanner.ts` | 0 | 11 | 0 | 1 |
+| 250 | `frontend/src/components/products/import/productImportWorker.mjs` | 1 | 0 | 1 | 0 |
+| 251 | `frontend/src/components/products/import/productImportWorker.ts` | 1 | 0 | 1 | 1 |
+| 252 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 6 | 1 | 5 | 1 |
+| 253 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 6 | 1 | 5 | 1 |
+| 254 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | 6 | 1 | 5 | 1 |
+| 255 | `frontend/src/components/products/lookups/productLookupSnapshots.mjs` | 0 | 0 | 0 | 0 |
+| 256 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 1 | 3 | 1 | 0 |
+| 257 | `frontend/src/components/products/Products.jsx` | 32 | 1 | 30 | 1 |
+| 258 | `frontend/src/components/products/scanning/barcodeImageScanner.mjs` | 0 | 0 | 0 | 2 |
+| 259 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 1 | 1 | 0 | 0 |
+| 260 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 7 | 1 | 4 | 1 |
+| 261 | `frontend/src/components/products/scanning/barcodeScannerState.mjs` | 0 | 0 | 0 | 2 |
+| 262 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 | 1 | 0 | 0 |
+| 263 | `frontend/src/components/products/scanning/scanbotScanner.mjs` | 0 | 0 | 0 | 2 |
+| 264 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 0 | 3 | 0 | 0 |
+| 265 | `frontend/src/components/products/shared/primitives.jsx` | 3 | 0 | 1 | 9 |
+| 266 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 | 1 | 2 | 1 |
+| 267 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 5 | 1 | 4 | 1 |
+| 268 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 3 | 4 | 3 | 0 |
+| 269 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 2 | 1 | 0 | 1 |
+| 270 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
+| 271 | `frontend/src/components/receipt-settings/constants.js` | 0 | 0 | 0 | 4 |
+| 272 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 1 |
+| 273 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
+| 274 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
+| 275 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
+| 276 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 3 | 1 | 2 | 1 |
+| 277 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
+| 278 | `frontend/src/components/receipt-settings/template.js` | 0 | 0 | 0 | 3 |
+| 279 | `frontend/src/components/receipt-settings/template.ts` | 2 | 2 | 2 | 0 |
+| 280 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
+| 281 | `frontend/src/components/returns/EditReturnModal.jsx` | 4 | 1 | 3 | 1 |
+| 282 | `frontend/src/components/returns/NewReturnModal.jsx` | 4 | 1 | 3 | 1 |
+| 283 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 3 | 1 | 2 | 1 |
+| 284 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
+| 285 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
+| 286 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 2 | 1 | 0 | 1 |
+| 287 | `frontend/src/components/sales/ExportModal.jsx` | 5 | 1 | 3 | 1 |
+| 288 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
+| 289 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
+| 290 | `frontend/src/components/sales/SalesImportModal.jsx` | 5 | 1 | 4 | 1 |
+| 291 | `frontend/src/components/sales/salesImportWorker.mjs` | 1 | 0 | 1 | 0 |
+| 292 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 1 |
+| 293 | `frontend/src/components/sales/SalesListSurface.jsx` | 3 | 1 | 1 | 1 |
+| 294 | `frontend/src/components/sales/StatusBadge.jsx` | 0 | 5 | 0 | 6 |
+| 295 | `frontend/src/components/server/ServerPage.jsx` | 5 | 1 | 4 | 1 |
+| 296 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 3 | 1 | 1 | 17 |
+| 297 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 7 | 1 | 5 | 1 |
+| 298 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 7 |
+| 299 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
+| 300 | `frontend/src/components/shared/globalScroll.js` | 0 | 0 | 0 | 2 |
+| 301 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 0 |
+| 302 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
+| 303 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 | 1 | 0 | 6 |
+| 304 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 22 |
+| 305 | `frontend/src/components/shared/navigationConfig.js` | 0 | 0 | 0 | 3 |
+| 306 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 0 |
+| 307 | `frontend/src/components/shared/NotificationCenter.jsx` | 4 | 1 | 1 | 2 |
+| 308 | `frontend/src/components/shared/pageActivity.js` | 0 | 0 | 0 | 15 |
+| 309 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 0 |
+| 310 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
+| 311 | `frontend/src/components/shared/PaginationControls.jsx` | 2 | 4 | 0 | 8 |
+| 312 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 7 |
+| 313 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
+| 314 | `frontend/src/components/shared/SectionSwitcher.jsx` | 1 | 1 | 0 | 4 |
+| 315 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
+| 316 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 3 | 0 | 2 |
+| 317 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
+| 318 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
+| 319 | `frontend/src/components/users/Users.jsx` | 14 | 1 | 12 | 1 |
+| 320 | `frontend/src/components/utils-settings/AuditLog.jsx` | 10 | 1 | 8 | 1 |
+| 321 | `frontend/src/components/utils-settings/Backup.jsx` | 10 | 1 | 8 | 1 |
+| 322 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
+| 323 | `frontend/src/components/utils-settings/index.js` | 0 | 0 | 0 | 0 |
+| 324 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
+| 325 | `frontend/src/components/utils-settings/OtpModal.jsx` | 3 | 1 | 2 | 2 |
+| 326 | `frontend/src/components/utils-settings/ResetData.jsx` | 6 | 0 | 4 | 1 |
+| 327 | `frontend/src/components/utils-settings/Settings.jsx` | 13 | 1 | 11 | 1 |
+| 328 | `frontend/src/components/utils-settings/settingsConflict.js` | 0 | 0 | 0 | 2 |
+| 329 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 0 |
+| 330 | `frontend/src/constants.js` | 0 | 0 | 0 | 8 |
+| 331 | `frontend/src/constants.ts` | 0 | 12 | 0 | 0 |
+| 332 | `frontend/src/index.jsx` | 9 | 0 | 4 | 0 |
+| 333 | `frontend/src/platform/runtime/clientRuntime.js` | 0 | 0 | 0 | 3 |
+| 334 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 0 |
+| 335 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 | 0 | 0 | 0 |
+| 336 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
+| 337 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
+| 338 | `frontend/src/types/jsx-modules.d.ts` | 0 | 3 | 0 | 0 |
+| 339 | `frontend/src/types/mjs-modules.d.ts` | 0 | 3 | 0 | 0 |
+| 340 | `frontend/src/types/react.d.ts` | 0 | 5 | 0 | 0 |
+| 341 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 2 |
+| 342 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
+| 343 | `frontend/src/utils/actionGuards.mjs` | 0 | 0 | 0 | 33 |
+| 344 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 0 |
+| 345 | `frontend/src/utils/actionHistory.mjs` | 0 | 0 | 0 | 16 |
+| 346 | `frontend/src/utils/actionHistory.ts` | 2 | 1 | 1 | 0 |
+| 347 | `frontend/src/utils/appRefresh.d.ts` | 0 | 3 | 0 | 0 |
+| 348 | `frontend/src/utils/appRefresh.js` | 0 | 0 | 0 | 5 |
+| 349 | `frontend/src/utils/appRefresh.ts` | 0 | 3 | 0 | 0 |
+| 350 | `frontend/src/utils/bulkOps.mjs` | 0 | 0 | 0 | 8 |
+| 351 | `frontend/src/utils/bulkOps.ts` | 0 | 1 | 0 | 0 |
+| 352 | `frontend/src/utils/color.js` | 0 | 0 | 0 | 2 |
+| 353 | `frontend/src/utils/color.ts` | 0 | 1 | 0 | 0 |
+| 354 | `frontend/src/utils/csv.d.ts` | 0 | 7 | 0 | 0 |
+| 355 | `frontend/src/utils/csv.js` | 0 | 0 | 0 | 14 |
+| 356 | `frontend/src/utils/csv.ts` | 0 | 8 | 0 | 0 |
+| 357 | `frontend/src/utils/csvExportWorker.mjs` | 1 | 0 | 1 | 0 |
+| 358 | `frontend/src/utils/csvExportWorker.ts` | 1 | 0 | 1 | 1 |
+| 359 | `frontend/src/utils/csvImport.js` | 0 | 0 | 0 | 3 |
+| 360 | `frontend/src/utils/csvImport.ts` | 1 | 11 | 1 | 0 |
+| 361 | `frontend/src/utils/csvRowCounter.ts` | 0 | 1 | 0 | 9 |
+| 362 | `frontend/src/utils/dateHelpers.js` | 0 | 0 | 0 | 2 |
+| 363 | `frontend/src/utils/dateHelpers.ts` | 0 | 2 | 0 | 0 |
+| 364 | `frontend/src/utils/deviceInfo.js` | 0 | 0 | 0 | 7 |
+| 365 | `frontend/src/utils/deviceInfo.ts` | 0 | 2 | 0 | 0 |
+| 366 | `frontend/src/utils/exportPackage.js` | 0 | 0 | 0 | 3 |
+| 367 | `frontend/src/utils/exportPackage.ts` | 1 | 2 | 1 | 0 |
+| 368 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
+| 369 | `frontend/src/utils/favicon.js` | 0 | 0 | 0 | 3 |
+| 370 | `frontend/src/utils/favicon.ts` | 0 | 1 | 0 | 0 |
+| 371 | `frontend/src/utils/formatters.js` | 0 | 0 | 0 | 17 |
+| 372 | `frontend/src/utils/formatters.ts` | 0 | 4 | 0 | 0 |
+| 373 | `frontend/src/utils/groupedRecords.ts` | 1 | 8 | 1 | 10 |
+| 374 | `frontend/src/utils/historyHelpers.mjs` | 0 | 0 | 0 | 11 |
+| 375 | `frontend/src/utils/historyHelpers.ts` | 0 | 3 | 0 | 0 |
+| 376 | `frontend/src/utils/importJobRefresh.js` | 0 | 0 | 0 | 1 |
+| 377 | `frontend/src/utils/importJobRefresh.ts` | 0 | 3 | 0 | 0 |
+| 378 | `frontend/src/utils/index.js` | 0 | 0 | 0 | 0 |
+| 379 | `frontend/src/utils/index.ts` | 0 | 0 | 0 | 0 |
+| 380 | `frontend/src/utils/initials.ts` | 0 | 7 | 0 | 7 |
+| 381 | `frontend/src/utils/loaders.mjs` | 0 | 0 | 0 | 19 |
+| 382 | `frontend/src/utils/loaders.ts` | 0 | 9 | 0 | 1 |
+| 383 | `frontend/src/utils/mediaUpload.js` | 0 | 0 | 0 | 3 |
+| 384 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 0 |
+| 385 | `frontend/src/utils/permissions.js` | 0 | 0 | 0 | 2 |
+| 386 | `frontend/src/utils/permissions.ts` | 0 | 1 | 0 | 0 |
+| 387 | `frontend/src/utils/pricing.d.ts` | 0 | 8 | 0 | 0 |
+| 388 | `frontend/src/utils/pricing.js` | 0 | 0 | 0 | 17 |
+| 389 | `frontend/src/utils/pricing.ts` | 0 | 8 | 0 | 0 |
+| 390 | `frontend/src/utils/printReceipt.js` | 0 | 0 | 0 | 2 |
+| 391 | `frontend/src/utils/printReceipt.ts` | 1 | 12 | 1 | 0 |
+| 392 | `frontend/src/utils/productBatches.mjs` | 0 | 0 | 0 | 5 |
+| 393 | `frontend/src/utils/productBatches.ts` | 0 | 2 | 0 | 0 |
+| 394 | `frontend/src/utils/productGrouping.ts` | 1 | 4 | 1 | 4 |
+| 395 | `frontend/src/utils/publicAssetUrls.d.ts` | 0 | 1 | 0 | 0 |
+| 396 | `frontend/src/utils/publicAssetUrls.js` | 0 | 0 | 0 | 7 |
+| 397 | `frontend/src/utils/publicAssetUrls.ts` | 1 | 2 | 1 | 0 |
+| 398 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 | 9 | 1 | 3 |
+| 399 | `frontend/src/utils/scriptTypography.js` | 0 | 0 | 0 | 6 |
+| 400 | `frontend/src/utils/scriptTypography.ts` | 0 | 3 | 0 | 0 |
+| 401 | `frontend/src/utils/settingsRefresh.js` | 0 | 0 | 0 | 0 |
+| 402 | `frontend/src/utils/settingsRefresh.ts` | 1 | 3 | 1 | 0 |
+| 403 | `frontend/src/utils/settingsWriteOptions.ts` | 1 | 1 | 1 | 1 |
+| 404 | `frontend/src/web-api.js` | 0 | 0 | 0 | 1 |
+| 405 | `frontend/src/web-api.ts` | 6 | 0 | 6 | 0 |
+| 406 | `frontend/tailwind.config.mjs` | 0 | 0 | 0 | 0 |
+| 407 | `frontend/tests/actionGuards.test.mjs` | 1 | 0 | 0 | 0 |
+| 408 | `frontend/tests/actionStability.test.mjs` | 4 | 0 | 0 | 0 |
+| 409 | `frontend/tests/adminShellMediaGuards.test.mjs` | 2 | 0 | 0 | 0 |
+| 410 | `frontend/tests/apiHttp.test.mjs` | 2 | 0 | 0 | 0 |
+| 411 | `frontend/tests/appRefresh.test.mjs` | 2 | 0 | 1 | 0 |
+| 412 | `frontend/tests/appShellUtils.test.mjs` | 3 | 0 | 1 | 0 |
+| 413 | `frontend/tests/assetCompression.test.mjs` | 3 | 0 | 0 | 0 |
+| 414 | `frontend/tests/backupJobs.test.mjs` | 2 | 0 | 0 | 0 |
+| 415 | `frontend/tests/barcodeImageScanner.test.mjs` | 2 | 0 | 1 | 0 |
+| 416 | `frontend/tests/barcodeScannerState.test.mjs` | 2 | 0 | 1 | 0 |
+| 417 | `frontend/tests/bulkOps.test.mjs` | 2 | 0 | 1 | 0 |
+| 418 | `frontend/tests/contactImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
+| 419 | `frontend/tests/csvImport.test.mjs` | 3 | 0 | 1 | 0 |
+| 420 | `frontend/tests/dashboardDataReliability.test.mjs` | 2 | 0 | 0 | 0 |
+| 421 | `frontend/tests/dateHelpers.test.mjs` | 2 | 0 | 1 | 0 |
+| 422 | `frontend/tests/deviceInfo.test.mjs` | 2 | 0 | 1 | 0 |
+| 423 | `frontend/tests/exportPackages.test.mjs` | 4 | 0 | 2 | 0 |
+| 424 | `frontend/tests/formatters.test.mjs` | 2 | 0 | 1 | 0 |
+| 425 | `frontend/tests/globalScroll.test.mjs` | 2 | 0 | 0 | 0 |
+| 426 | `frontend/tests/globalScrollControls.test.mjs` | 2 | 0 | 1 | 0 |
+| 427 | `frontend/tests/groupedRecords.test.mjs` | 2 | 0 | 1 | 0 |
+| 428 | `frontend/tests/historyHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 429 | `frontend/tests/importJobRefresh.test.mjs` | 1 | 0 | 0 | 0 |
+| 430 | `frontend/tests/initials.test.mjs` | 1 | 0 | 0 | 0 |
+| 431 | `frontend/tests/inventoryImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
+| 432 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 2 | 0 | 0 | 0 |
+| 433 | `frontend/tests/inventoryMovementGroups.test.mjs` | 2 | 0 | 1 | 0 |
+| 434 | `frontend/tests/inventoryRfidSection.test.mjs` | 2 | 0 | 0 | 0 |
+| 435 | `frontend/tests/jsxSyntaxCheck.mjs` | 5 | 0 | 0 | 0 |
+| 436 | `frontend/tests/loaders.test.mjs` | 1 | 0 | 0 | 0 |
+| 437 | `frontend/tests/mediaUploadHelpers.test.mjs` | 2 | 0 | 1 | 0 |
+| 438 | `frontend/tests/navigationConfig.test.mjs` | 2 | 0 | 1 | 0 |
+| 439 | `frontend/tests/notificationBadge.test.mjs` | 2 | 0 | 0 | 0 |
+| 440 | `frontend/tests/offlineSalesQueue.test.mjs` | 2 | 0 | 0 | 0 |
+| 441 | `frontend/tests/offlineSecurityHardening.test.mjs` | 2 | 0 | 0 | 0 |
+| 442 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 2 | 0 | 0 | 0 |
+| 443 | `frontend/tests/ownedGoogleAuth.test.mjs` | 2 | 0 | 0 | 0 |
+| 444 | `frontend/tests/performanceLoadingUx.test.mjs` | 2 | 0 | 0 | 0 |
+| 445 | `frontend/tests/permissionEditor.test.mjs` | 2 | 0 | 0 | 0 |
+| 446 | `frontend/tests/permissions.test.mjs` | 2 | 0 | 1 | 0 |
+| 447 | `frontend/tests/portalCatalogDisplay.test.mjs` | 2 | 0 | 0 | 0 |
+| 448 | `frontend/tests/portalContentI18n.test.mjs` | 1 | 0 | 0 | 0 |
+| 449 | `frontend/tests/portalEditorUtils.test.mjs` | 1 | 0 | 0 | 0 |
+| 450 | `frontend/tests/portalFaqVocabulary.test.mjs` | 1 | 0 | 0 | 0 |
+| 451 | `frontend/tests/portalLanguagePacks.test.mjs` | 1 | 0 | 0 | 0 |
+| 452 | `frontend/tests/portalTranslateController.test.mjs` | 1 | 0 | 0 | 0 |
+| 453 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
+| 454 | `frontend/tests/pricingContacts.test.mjs` | 3 | 0 | 1 | 0 |
+| 455 | `frontend/tests/productBatches.test.mjs` | 2 | 0 | 1 | 0 |
+| 456 | `frontend/tests/productDiscountUx.test.mjs` | 2 | 0 | 0 | 0 |
+| 457 | `frontend/tests/productDisplayHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 458 | `frontend/tests/productFilterHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 459 | `frontend/tests/productGalleryHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 460 | `frontend/tests/productGrouping.test.mjs` | 2 | 0 | 1 | 0 |
+| 461 | `frontend/tests/productGroupViewHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 462 | `frontend/tests/productHistoryHelpers.test.mjs` | 2 | 0 | 1 | 0 |
+| 463 | `frontend/tests/productImportPlanner.test.mjs` | 3 | 0 | 1 | 0 |
+| 464 | `frontend/tests/productImportWorkerFallback.test.mjs` | 3 | 0 | 1 | 0 |
+| 465 | `frontend/tests/productMenuHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 466 | `frontend/tests/productPageHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 467 | `frontend/tests/productSearchPagination.test.mjs` | 2 | 0 | 0 | 0 |
+| 468 | `frontend/tests/productSelectionHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 469 | `frontend/tests/productWriteHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 470 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 | 0 | 0 | 0 |
+| 471 | `frontend/tests/receiptSettingsSync.test.mjs` | 2 | 0 | 0 | 0 |
+| 472 | `frontend/tests/receiptTemplate.test.mjs` | 4 | 0 | 2 | 0 |
+| 473 | `frontend/tests/returnsLayout.test.mjs` | 2 | 0 | 0 | 0 |
+| 474 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 1 | 0 | 0 | 0 |
+| 475 | `frontend/tests/salesImportWorker.test.mjs` | 3 | 0 | 1 | 0 |
+| 476 | `frontend/tests/scanbotScanner.test.mjs` | 2 | 0 | 1 | 0 |
+| 477 | `frontend/tests/scriptTypography.test.mjs` | 2 | 0 | 1 | 0 |
+| 478 | `frontend/tests/sectionNavigation.test.mjs` | 2 | 0 | 0 | 0 |
+| 479 | `frontend/tests/settingsConflictHelpers.test.mjs` | 2 | 0 | 1 | 0 |
+| 480 | `frontend/tests/settingsRefresh.test.mjs` | 1 | 0 | 0 | 0 |
+| 481 | `frontend/tests/storagePolicy.test.mjs` | 1 | 0 | 0 | 0 |
+| 482 | `frontend/tests/utilsSettingsBarrel.test.mjs` | 2 | 0 | 0 | 0 |
+| 483 | `frontend/vite.config.mjs` | 6 | 1 | 0 | 0 |
+| 484 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 6 | 0 | 2 | 0 |
+| 485 | `ops/scripts/architecture/language-runtime-audit.mjs` | 6 | 0 | 2 | 0 |
+| 486 | `ops/scripts/architecture/organization-audit.mjs` | 6 | 0 | 2 | 0 |
+| 487 | `ops/scripts/architecture/phase29-audit.mjs` | 7 | 0 | 2 | 0 |
+| 488 | `ops/scripts/backend/schema-audit.js` | 2 | 0 | 0 | 0 |
+| 489 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | 4 | 0 | 0 | 0 |
+| 490 | `ops/scripts/backend/verify-data-integrity.js` | 3 | 0 | 0 | 0 |
+| 491 | `ops/scripts/frontend/verify-i18n.js` | 2 | 0 | 1 | 0 |
+| 492 | `ops/scripts/frontend/verify-performance.js` | 3 | 0 | 0 | 0 |
+| 493 | `ops/scripts/frontend/verify-ui.js` | 3 | 0 | 1 | 0 |
+| 494 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 13 |
+| 495 | `ops/scripts/lib/report-utils.js` | 1 | 1 | 0 | 5 |
+| 496 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | 5 | 0 | 1 | 0 |
+| 497 | `ops/scripts/runtime/audits/audit-auth.mjs` | 0 | 4 | 0 | 17 |
+| 498 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 0 | 7 | 0 | 2 |
+| 499 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 4 | 3 | 1 | 2 |
+| 500 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 9 | 0 | 3 | 0 |
+| 501 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 9 | 0 | 3 | 0 |
+| 502 | `ops/scripts/runtime/browser-action-smoke.mjs` | 8 | 0 | 0 | 0 |
+| 503 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | 4 | 0 | 0 | 0 |
+| 504 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | 3 | 0 | 0 | 0 |
+| 505 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | 5 | 0 | 1 | 0 |
+| 506 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | 5 | 0 | 0 | 0 |
+| 507 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 0 | 7 | 0 | 14 |
+| 508 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 509 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 510 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 511 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 512 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | 4 | 0 | 0 | 0 |
+| 513 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 514 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 515 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 516 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 517 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 518 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 519 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 520 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | 4 | 0 | 0 | 0 |
+| 521 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 522 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 523 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 524 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 2 | 0 | 0 | 0 |
+| 525 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | 0 | 0 | 0 | 0 |
+| 526 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 | 0 | 0 | 0 |
+| 527 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | 2 | 0 | 0 | 0 |
+| 528 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 4 | 0 | 0 | 0 |
+| 529 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 4 | 0 | 0 | 0 |
+| 530 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | 4 | 0 | 0 | 0 |
+| 531 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | 4 | 0 | 0 | 0 |
+| 532 | `ops/scripts/runtime/storage/prune-storage.mjs` | 5 | 0 | 0 | 0 |
+| 533 | `ops/scripts/runtime/storage/restore-candidates.mjs` | 3 | 0 | 0 | 0 |
+| 534 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | 4 | 0 | 0 | 0 |
+| 535 | `ops/scripts/verification/verify-backup-reliability.js` | 3 | 0 | 1 | 0 |
+| 536 | `ops/scripts/verification/verify-docker-release.js` | 3 | 0 | 1 | 0 |
+| 537 | `ops/scripts/verification/verify-hardening-policy.js` | 4 | 0 | 1 | 0 |
+| 538 | `ops/scripts/verification/verify-runtime-deps.js` | 3 | 0 | 1 | 0 |
+| 539 | `ops/scripts/verification/verify-scale-services.js` | 4 | 0 | 1 | 0 |
+| 540 | `ops/scripts/verification/verify-secret-hygiene.js` | 4 | 0 | 1 | 0 |
 
 ## 3. Detailed File Dependency Commentary
 
@@ -3467,7 +3462,7 @@ Code files documented: **545**
 
 - Declared exports: `function`
 - Imports (8)
-  - `../../utils/initials.mjs`
+  - `../../utils/initials.ts`
   - `../../utils/scriptTypography.js`
   - `../products/shared/primitives`
   - `../shared/PaginationControls.jsx`
@@ -3480,7 +3475,7 @@ Code files documented: **545**
   - `frontend/src/components/catalog/portalCatalogDisplay.mjs`
   - `frontend/src/components/products/shared/primitives.jsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
-  - `frontend/src/utils/initials.mjs`
+  - `frontend/src/utils/initials.ts`
   - `frontend/src/utils/scriptTypography.js`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
@@ -3543,9 +3538,9 @@ Code files documented: **545**
 
 - Declared exports: `localizePortalConfig`, `localizePortalFaqText`, `localizePortalProduct`, `localizePortalProducts`, `normalizePortalTranslations`, `stringifyPortalTranslations`
 - Imports (1)
-  - `./portalLanguagePacks.mjs`
+  - `./portalLanguagePacks.ts`
 - Internal dependencies (1)
-  - `frontend/src/components/catalog/portalLanguagePacks.mjs`
+  - `frontend/src/components/catalog/portalLanguagePacks.ts`
 - Referenced by (0)
   - none
 
@@ -3569,9 +3564,9 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.175 `frontend/src/components/catalog/portalLanguagePacks.mjs`
+### 3.175 `frontend/src/components/catalog/portalLanguagePacks.ts`
 
-- Declared exports: none detected
+- Declared exports: `FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS`, `getPortalLanguageText`, `isFirstPartyPortalLanguage`, `normalizeFirstPartyPortalLanguage`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -3579,17 +3574,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/catalog/portalContentI18n.ts`
 
-### 3.176 `frontend/src/components/catalog/portalLanguagePacks.ts`
-
-- Declared exports: `FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS`, `getPortalLanguageText`, `isFirstPartyPortalLanguage`, `normalizeFirstPartyPortalLanguage`
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (0)
-  - none
-
-### 3.177 `frontend/src/components/catalog/portalTranslateController.mjs`
+### 3.176 `frontend/src/components/catalog/portalTranslateController.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3599,7 +3584,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.178 `frontend/src/components/catalog/portalTranslateController.ts`
+### 3.177 `frontend/src/components/catalog/portalTranslateController.ts`
 
 - Declared exports: `PORTAL_TRANSLATE_RELOAD_KEY`, `PORTAL_TRANSLATE_SCRIPT_ID`, `PORTAL_TRANSLATE_STORAGE_KEY`, `PORTAL_TRANSLATE_WIDGET_HOST_ID`, `applyGoogleTranslateSelection`, `canonicalTranslateLanguage`, `clearGoogleTranslateCookies`, `ensurePortalTranslateScript`, `ensurePortalTranslateWidgetHost`, `getPortalTranslateCookieTarget`, `hasPortalTranslatedMarker`, `isPortalTranslateApplied`, `normalizeTranslateTarget`, `readStoredTranslateTarget`, `removePortalTranslateWidgetHost`, `requestPortalTranslateReload`, `storePortalTranslatePreference`, `warmPortalTranslateNetwork`, `writePortalTranslateTarget`
 - Imports (0)
@@ -3609,7 +3594,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.179 `frontend/src/components/contacts/ContactImportModal.jsx`
+### 3.178 `frontend/src/components/contacts/ContactImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (8)
@@ -3635,7 +3620,7 @@ Code files documented: **545**
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
 
-### 3.180 `frontend/src/components/contacts/contactImportWorker.mjs`
+### 3.179 `frontend/src/components/contacts/contactImportWorker.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -3645,7 +3630,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.181 `frontend/src/components/contacts/contactImportWorker.ts`
+### 3.180 `frontend/src/components/contacts/contactImportWorker.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -3655,7 +3640,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/contacts/contactImportWorker.mjs`
 
-### 3.182 `frontend/src/components/contacts/contactOptionUtils.js`
+### 3.181 `frontend/src/components/contacts/contactOptionUtils.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3665,7 +3650,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.183 `frontend/src/components/contacts/contactOptionUtils.ts`
+### 3.182 `frontend/src/components/contacts/contactOptionUtils.ts`
 
 - Declared exports: `CONTACT_OPTION_LIMIT`, `buildContactOptionSummary`, `createContactOption`, `getPrimaryContactOption`, `hasContactOptionData`, `limitContactOptions`, `parseContactOptionsFromImportRow`, `parseStoredContactOptions`, `serializeContactOptions`
 - Imports (0)
@@ -3675,7 +3660,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.184 `frontend/src/components/contacts/Contacts.jsx`
+### 3.183 `frontend/src/components/contacts/Contacts.jsx`
 
 - Declared exports: `function`
 - Imports (12)
@@ -3705,7 +3690,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.185 `frontend/src/components/contacts/CustomerFormModal.jsx`
+### 3.184 `frontend/src/components/contacts/CustomerFormModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3718,7 +3703,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/contacts/CustomersTab.jsx`
 
-### 3.186 `frontend/src/components/contacts/customerMembershipNumber.js`
+### 3.185 `frontend/src/components/contacts/customerMembershipNumber.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3729,7 +3714,7 @@ Code files documented: **545**
   - `frontend/src/components/contacts/CustomerFormModal.jsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
 
-### 3.187 `frontend/src/components/contacts/customerMembershipNumber.ts`
+### 3.186 `frontend/src/components/contacts/customerMembershipNumber.ts`
 
 - Declared exports: `generateCustomerMembershipNumber`
 - Imports (0)
@@ -3739,7 +3724,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.188 `frontend/src/components/contacts/CustomersTab.jsx`
+### 3.187 `frontend/src/components/contacts/CustomersTab.jsx`
 
 - Declared exports: `parseContactOptions`, `serializeContactOptions`
 - Imports (17)
@@ -3749,7 +3734,7 @@ Code files documented: **545**
   - `../../utils/bulkOps.mjs`
   - `../../utils/csv`
   - `../../utils/formatters`
-  - `../../utils/groupedRecords.mjs`
+  - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.mjs`
   - `../../utils/loaders.mjs`
   - `../shared/ActionHistoryBar.jsx`
@@ -3773,14 +3758,14 @@ Code files documented: **545**
   - `frontend/src/utils/bulkOps.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/formatters.js`
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/loaders.mjs`
 - Referenced by (2)
   - `frontend/src/components/contacts/Contacts.jsx`
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.189 `frontend/src/components/contacts/DeliveryTab.jsx`
+### 3.188 `frontend/src/components/contacts/DeliveryTab.jsx`
 
 - Declared exports: `parseDeliveryOptions`, `serializeDeliveryOptions`
 - Imports (16)
@@ -3790,7 +3775,7 @@ Code files documented: **545**
   - `../../utils/bulkOps.mjs`
   - `../../utils/csv`
   - `../../utils/formatters`
-  - `../../utils/groupedRecords.mjs`
+  - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.mjs`
   - `../../utils/loaders.mjs`
   - `../shared/ActionHistoryBar.jsx`
@@ -3812,13 +3797,13 @@ Code files documented: **545**
   - `frontend/src/utils/bulkOps.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/formatters.js`
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/loaders.mjs`
 - Referenced by (1)
   - `frontend/src/components/contacts/Contacts.jsx`
 
-### 3.190 `frontend/src/components/contacts/shared.jsx`
+### 3.189 `frontend/src/components/contacts/shared.jsx`
 
 - Declared exports: `ContactTable`, `DetailModal`, `ThreeDotMenu`, `buildSelectedSnapshots`, `countActiveFlags`, `useContactSelection`
 - Imports (7)
@@ -3840,7 +3825,7 @@ Code files documented: **545**
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
 
-### 3.191 `frontend/src/components/contacts/SuppliersTab.jsx`
+### 3.190 `frontend/src/components/contacts/SuppliersTab.jsx`
 
 - Declared exports: none detected
 - Imports (16)
@@ -3850,7 +3835,7 @@ Code files documented: **545**
   - `../../utils/bulkOps.mjs`
   - `../../utils/csv`
   - `../../utils/formatters`
-  - `../../utils/groupedRecords.mjs`
+  - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.mjs`
   - `../../utils/loaders.mjs`
   - `../shared/ActionHistoryBar.jsx`
@@ -3872,13 +3857,13 @@ Code files documented: **545**
   - `frontend/src/utils/bulkOps.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/formatters.js`
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/loaders.mjs`
 - Referenced by (1)
   - `frontend/src/components/contacts/Contacts.jsx`
 
-### 3.192 `frontend/src/components/custom-tables/CustomTables.jsx`
+### 3.191 `frontend/src/components/custom-tables/CustomTables.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -3897,7 +3882,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.193 `frontend/src/components/dashboard/charts/BarChart.jsx`
+### 3.192 `frontend/src/components/dashboard/charts/BarChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3910,7 +3895,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.194 `frontend/src/components/dashboard/charts/DonutChart.jsx`
+### 3.193 `frontend/src/components/dashboard/charts/DonutChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3923,7 +3908,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.195 `frontend/src/components/dashboard/charts/index.js`
+### 3.194 `frontend/src/components/dashboard/charts/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3934,7 +3919,7 @@ Code files documented: **545**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/utils/exportReports.jsx`
 
-### 3.196 `frontend/src/components/dashboard/charts/index.ts`
+### 3.195 `frontend/src/components/dashboard/charts/index.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3944,7 +3929,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.197 `frontend/src/components/dashboard/charts/LineChart.jsx`
+### 3.196 `frontend/src/components/dashboard/charts/LineChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3957,7 +3942,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.198 `frontend/src/components/dashboard/charts/NoData.jsx`
+### 3.197 `frontend/src/components/dashboard/charts/NoData.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -3969,7 +3954,7 @@ Code files documented: **545**
   - `frontend/src/components/dashboard/charts/DonutChart.jsx`
   - `frontend/src/components/dashboard/charts/LineChart.jsx`
 
-### 3.199 `frontend/src/components/dashboard/Dashboard.jsx`
+### 3.198 `frontend/src/components/dashboard/Dashboard.jsx`
 
 - Declared exports: `function`
 - Imports (16)
@@ -4007,7 +3992,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.200 `frontend/src/components/dashboard/MiniStat.jsx`
+### 3.199 `frontend/src/components/dashboard/MiniStat.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -4017,7 +4002,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/dashboard/Dashboard.jsx`
 
-### 3.201 `frontend/src/components/files/FilePickerModal.jsx`
+### 3.200 `frontend/src/components/files/FilePickerModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -4036,7 +4021,7 @@ Code files documented: **545**
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
 
-### 3.202 `frontend/src/components/files/FilesPage.jsx`
+### 3.201 `frontend/src/components/files/FilesPage.jsx`
 
 - Declared exports: `function`
 - Imports (11)
@@ -4065,7 +4050,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.203 `frontend/src/components/files/FilesProvidersTab.jsx`
+### 3.202 `frontend/src/components/files/FilesProvidersTab.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -4075,7 +4060,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/files/FilesPage.jsx`
 
-### 3.204 `frontend/src/components/files/FilesResponsesTab.jsx`
+### 3.203 `frontend/src/components/files/FilesResponsesTab.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -4085,7 +4070,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/files/FilesPage.jsx`
 
-### 3.205 `frontend/src/components/inventory/DualMoney.jsx`
+### 3.204 `frontend/src/components/inventory/DualMoney.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -4095,7 +4080,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
 
-### 3.206 `frontend/src/components/inventory/Inventory.jsx`
+### 3.205 `frontend/src/components/inventory/Inventory.jsx`
 
 - Declared exports: `function`
 - Imports (30)
@@ -4108,12 +4093,12 @@ Code files documented: **545**
   - `../../utils/exportPackage`
   - `../../utils/exportReports`
   - `../../utils/formatters`
-  - `../../utils/groupedRecords.mjs`
+  - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.mjs`
-  - `../../utils/initials.mjs`
+  - `../../utils/initials.ts`
   - `../../utils/pricing.js`
   - `../../utils/productBatches.mjs`
-  - `../../utils/productGrouping.mjs`
+  - `../../utils/productGrouping.ts`
   - `../shared/ActionHistoryBar.jsx`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
@@ -4152,16 +4137,16 @@ Code files documented: **545**
   - `frontend/src/utils/exportPackage.js`
   - `frontend/src/utils/exportReports.jsx`
   - `frontend/src/utils/formatters.js`
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/historyHelpers.mjs`
-  - `frontend/src/utils/initials.mjs`
+  - `frontend/src/utils/initials.ts`
   - `frontend/src/utils/pricing.js`
   - `frontend/src/utils/productBatches.mjs`
-  - `frontend/src/utils/productGrouping.mjs`
+  - `frontend/src/utils/productGrouping.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.207 `frontend/src/components/inventory/InventoryImportModal.jsx`
+### 3.206 `frontend/src/components/inventory/InventoryImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -4178,7 +4163,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.208 `frontend/src/components/inventory/inventoryImportWorker.mjs`
+### 3.207 `frontend/src/components/inventory/inventoryImportWorker.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4188,7 +4173,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.209 `frontend/src/components/inventory/inventoryImportWorker.ts`
+### 3.208 `frontend/src/components/inventory/inventoryImportWorker.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4198,7 +4183,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/inventory/inventoryImportWorker.mjs`
 
-### 3.210 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+### 3.209 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -4212,7 +4197,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.211 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+### 3.210 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -4226,7 +4211,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.212 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
+### 3.211 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -4236,7 +4221,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.213 `frontend/src/components/inventory/movementGroups.js`
+### 3.212 `frontend/src/components/inventory/movementGroups.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4247,7 +4232,7 @@ Code files documented: **545**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/tests/inventoryMovementGroups.test.mjs`
 
-### 3.214 `frontend/src/components/inventory/movementGroups.ts`
+### 3.213 `frontend/src/components/inventory/movementGroups.ts`
 
 - Declared exports: `buildMovementGroups`, `getMovementGroupPage`, `movementGroupHaystack`, `normalizeMovementTimestamp`
 - Imports (0)
@@ -4257,7 +4242,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.215 `frontend/src/components/inventory/ProductDetailModal.jsx`
+### 3.214 `frontend/src/components/inventory/ProductDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -4269,7 +4254,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.216 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+### 3.215 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -4289,7 +4274,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.217 `frontend/src/components/navigation/Sidebar.jsx`
+### 3.216 `frontend/src/components/navigation/Sidebar.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -4310,7 +4295,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.218 `frontend/src/components/pos/CartItem.jsx`
+### 3.217 `frontend/src/components/pos/CartItem.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -4322,7 +4307,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.219 `frontend/src/components/pos/FilterPanel.jsx`
+### 3.218 `frontend/src/components/pos/FilterPanel.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -4332,13 +4317,13 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.220 `frontend/src/components/pos/POS.jsx`
+### 3.219 `frontend/src/components/pos/POS.jsx`
 
 - Declared exports: `function`
 - Imports (18)
   - `../../AppContext`
   - `../../utils/deviceInfo`
-  - `../../utils/initials.mjs`
+  - `../../utils/initials.ts`
   - `../../utils/pricing.js`
   - `../../utils/publicAssetUrls.js`
   - `../../utils/scriptTypography.js`
@@ -4367,14 +4352,14 @@ Code files documented: **545**
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/pageActivity.js`
   - `frontend/src/utils/deviceInfo.js`
-  - `frontend/src/utils/initials.mjs`
+  - `frontend/src/utils/initials.ts`
   - `frontend/src/utils/pricing.js`
   - `frontend/src/utils/publicAssetUrls.js`
   - `frontend/src/utils/scriptTypography.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.221 `frontend/src/components/pos/posCore.mjs`
+### 3.220 `frontend/src/components/pos/posCore.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4384,21 +4369,21 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.222 `frontend/src/components/pos/posCore.ts`
+### 3.221 `frontend/src/components/pos/posCore.ts`
 
 - Declared exports: `buildPosFilterMeta`, `buildProductsById`, `buildVariantChildrenByParentId`, `buildVisibleProductCards`, `findMatchingCartLineIndex`, `getCartLineId`, `getVariantChoices`, `getVariantRootProduct`, `resolveCartPriceValues`
 - Imports (3)
-  - `../../utils/initials.mjs`
+  - `../../utils/initials.ts`
   - `../../utils/pricing.js`
-  - `../../utils/productGrouping.mjs`
+  - `../../utils/productGrouping.ts`
 - Internal dependencies (3)
-  - `frontend/src/utils/initials.mjs`
+  - `frontend/src/utils/initials.ts`
   - `frontend/src/utils/pricing.js`
-  - `frontend/src/utils/productGrouping.mjs`
+  - `frontend/src/utils/productGrouping.ts`
 - Referenced by (0)
   - none
 
-### 3.223 `frontend/src/components/pos/ProductImage.jsx`
+### 3.222 `frontend/src/components/pos/ProductImage.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -4408,7 +4393,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.224 `frontend/src/components/pos/QuickAddModal.jsx`
+### 3.223 `frontend/src/components/pos/QuickAddModal.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -4418,7 +4403,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.225 `frontend/src/components/products/config/productPageConfig.mjs`
+### 3.224 `frontend/src/components/products/config/productPageConfig.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4428,7 +4413,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.226 `frontend/src/components/products/config/productPageConfig.ts`
+### 3.225 `frontend/src/components/products/config/productPageConfig.ts`
 
 - Declared exports: `CREATED_MONTH_OPTIONS`, `DEFAULT_META_PILL_COLOR`, `PRODUCTS_AUX_OPTIONS_TIMEOUT_MS`, `PRODUCTS_BY_ID_TIMEOUT_MS`, `PRODUCTS_FILTER_META_TIMEOUT_MS`, `PRODUCT_DELETE_MUTATION_TIMEOUT_MS`, `PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS`, `PRODUCT_STOCK_MUTATION_TIMEOUT_MS`, `PRODUCT_WRITE_MUTATION_TIMEOUT_MS`
 - Imports (0)
@@ -4438,7 +4423,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.227 `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
+### 3.226 `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4451,7 +4436,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/forms/ProductForm.jsx`
 
-### 3.228 `frontend/src/components/products/forms/BulkAddStockModal.jsx`
+### 3.227 `frontend/src/components/products/forms/BulkAddStockModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4464,7 +4449,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.229 `frontend/src/components/products/forms/ProductForm.jsx`
+### 3.228 `frontend/src/components/products/forms/ProductForm.jsx`
 
 - Declared exports: `function`
 - Imports (9)
@@ -4488,7 +4473,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.230 `frontend/src/components/products/forms/VariantFormModal.jsx`
+### 3.229 `frontend/src/components/products/forms/VariantFormModal.jsx`
 
 - Declared exports: `function`
 - Imports (8)
@@ -4511,7 +4496,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.231 `frontend/src/components/products/helpers/productDisplayHelpers.mjs`
+### 3.230 `frontend/src/components/products/helpers/productDisplayHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4521,7 +4506,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.232 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
+### 3.231 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
 
 - Declared exports: `PRODUCT_STOCK_STATUS_CLASS`, `buildBranchNameByIdMap`, `buildNameLookupMap`, `buildProductBranchSummaryLabel`, `buildProductBrandOptions`, `buildProductRowDisplayState`, `getProductStockStatus`
 - Imports (1)
@@ -4531,7 +4516,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.233 `frontend/src/components/products/helpers/productFilterHelpers.mjs`
+### 3.232 `frontend/src/components/products/helpers/productFilterHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4541,39 +4526,29 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.234 `frontend/src/components/products/helpers/productFilterHelpers.ts`
+### 3.233 `frontend/src/components/products/helpers/productFilterHelpers.ts`
 
 - Declared exports: `buildProductExportRows`, `buildProductSearchTerms`, `filterProductsForPage`, `getProductBranchQuantity`
 - Imports (2)
-  - `../../../utils/groupedRecords.mjs`
+  - `../../../utils/groupedRecords.ts`
   - `../../../utils/pricing.js`
 - Internal dependencies (2)
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/pricing.js`
 - Referenced by (0)
   - none
 
-### 3.235 `frontend/src/components/products/helpers/productGalleryHelpers.mjs`
-
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (1)
-  - `frontend/src/components/products/helpers/productWriteHelpers.ts`
-
-### 3.236 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
+### 3.234 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
 
 - Declared exports: `buildProductLightboxGalleryInput`, `buildProductLightboxState`, `buildProductThumbnailState`, `clampProductLightboxIndex`, `getProductGalleryImages`, `normalizeProductGallery`, `resolveProductImageUrl`, `updateProductLightboxIndex`
 - Imports (1)
   - `../../../utils/publicAssetUrls.js`
 - Internal dependencies (1)
   - `frontend/src/utils/publicAssetUrls.js`
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/src/components/products/helpers/productWriteHelpers.ts`
 
-### 3.237 `frontend/src/components/products/helpers/productGroupViewHelpers.mjs`
+### 3.235 `frontend/src/components/products/helpers/productGroupViewHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4583,7 +4558,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.238 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
+### 3.236 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
 
 - Declared exports: `buildProductGroupPriceLabel`, `buildProductGroupSummaryParts`
 - Imports (0)
@@ -4593,7 +4568,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.239 `frontend/src/components/products/helpers/productMenuHelpers.mjs`
+### 3.237 `frontend/src/components/products/helpers/productMenuHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4603,7 +4578,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.240 `frontend/src/components/products/helpers/productMenuHelpers.ts`
+### 3.238 `frontend/src/components/products/helpers/productMenuHelpers.ts`
 
 - Declared exports: `buildProductExportItems`, `buildProductFilterSections`, `buildProductSupplierOptions`, `countActiveProductFilters`
 - Imports (0)
@@ -4613,7 +4588,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.241 `frontend/src/components/products/helpers/productPageHelpers.mjs`
+### 3.239 `frontend/src/components/products/helpers/productPageHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4623,7 +4598,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.242 `frontend/src/components/products/helpers/productPageHelpers.ts`
+### 3.240 `frontend/src/components/products/helpers/productPageHelpers.ts`
 
 - Declared exports: `normalizeBrandLookup`, `parseBrandColorMap`, `useDebouncedValue`, `waitForNextFrame`
 - Imports (1)
@@ -4633,7 +4608,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.243 `frontend/src/components/products/helpers/productSelectionHelpers.mjs`
+### 3.241 `frontend/src/components/products/helpers/productSelectionHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4643,7 +4618,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.244 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
+### 3.242 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
 
 - Declared exports: `buildJumpTargetIdsByLetter`, `buildParentProductIdSet`, `buildProductIdMap`, `buildProductPaginationState`, `buildSelectedProducts`, `buildSelectedVisibleIds`, `buildVisibleProductIds`, `isSelectionScopeFullySelected`, `isSelectionScopePartiallySelected`, `normalizePositiveProductIds`
 - Imports (0)
@@ -4653,7 +4628,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.245 `frontend/src/components/products/helpers/productWriteHelpers.mjs`
+### 3.243 `frontend/src/components/products/helpers/productWriteHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4663,19 +4638,19 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.246 `frontend/src/components/products/helpers/productWriteHelpers.ts`
+### 3.244 `frontend/src/components/products/helpers/productWriteHelpers.ts`
 
 - Declared exports: `buildDefinedProductUpdates`, `buildDeletedProductIdSet`, `buildProductBranchMovePlan`, `buildProductBranchStockAdjustments`, `buildProductBulkInfoUpdates`, `buildProductBulkPricingUpdates`, `buildProductBulkUpdatePayload`, `buildProductClearStockAdjustments`, `buildProductStockAdjustmentPayload`, `buildProductTransferStockPayload`, `buildProductWritePayload`, `getDefaultProductRestoreBranchId`, `getPreferredProductRestoreBranchId`, `resolveRestoredProductParentId`, `summarizeProductBulkRun`
 - Imports (2)
   - `../../../utils/pricing.js`
-  - `./productGalleryHelpers.mjs`
+  - `./productGalleryHelpers.ts`
 - Internal dependencies (2)
-  - `frontend/src/components/products/helpers/productGalleryHelpers.mjs`
+  - `frontend/src/components/products/helpers/productGalleryHelpers.ts`
   - `frontend/src/utils/pricing.js`
 - Referenced by (0)
   - none
 
-### 3.247 `frontend/src/components/products/history/productHistoryHelpers.mjs`
+### 3.245 `frontend/src/components/products/history/productHistoryHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4686,7 +4661,7 @@ Code files documented: **545**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/productHistoryHelpers.test.mjs`
 
-### 3.248 `frontend/src/components/products/history/productHistoryHelpers.ts`
+### 3.246 `frontend/src/components/products/history/productHistoryHelpers.ts`
 
 - Declared exports: `createProductHistoryRequestId`, `orderProductRestoreSnapshots`
 - Imports (0)
@@ -4696,7 +4671,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.249 `frontend/src/components/products/import/BulkImportModal.jsx`
+### 3.247 `frontend/src/components/products/import/BulkImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -4714,7 +4689,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.250 `frontend/src/components/products/import/productImportPlanner.mjs`
+### 3.248 `frontend/src/components/products/import/productImportPlanner.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4725,7 +4700,7 @@ Code files documented: **545**
   - `frontend/tests/productImportPlanner.test.mjs`
   - `frontend/tests/productImportWorkerFallback.test.mjs`
 
-### 3.251 `frontend/src/components/products/import/productImportPlanner.ts`
+### 3.249 `frontend/src/components/products/import/productImportPlanner.ts`
 
 - Declared exports: `BLOCKING_PRODUCT_IMPORT_ISSUES`, `PRODUCT_MONEY_FIELDS`, `PRODUCT_NUMBER_FIELDS`, `PRODUCT_PERCENT_FIELDS`, `analyzeProductImportRows`, `analyzeProductImportText`, `getProductImportBarcodeIssue`, `getProductImportDetailSignature`, `isBlockingProductImportIssue`, `normalizeImportProductName`, `normalizeProductImportRow`
 - Imports (0)
@@ -4735,7 +4710,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/import/productImportWorker.ts`
 
-### 3.252 `frontend/src/components/products/import/productImportWorker.mjs`
+### 3.250 `frontend/src/components/products/import/productImportWorker.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4745,7 +4720,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.253 `frontend/src/components/products/import/productImportWorker.ts`
+### 3.251 `frontend/src/components/products/import/productImportWorker.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4755,7 +4730,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/import/productImportWorker.mjs`
 
-### 3.254 `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+### 3.252 `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -4774,7 +4749,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.255 `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
+### 3.253 `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -4793,7 +4768,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.256 `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+### 3.254 `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -4812,7 +4787,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.257 `frontend/src/components/products/lookups/productLookupSnapshots.mjs`
+### 3.255 `frontend/src/components/products/lookups/productLookupSnapshots.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4822,7 +4797,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.258 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
+### 3.256 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
 
 - Declared exports: `fetchLookupProductSnapshots`, `normalizeLookup`, `restoreLookupProductSnapshots`
 - Imports (1)
@@ -4832,7 +4807,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.259 `frontend/src/components/products/Products.jsx`
+### 3.257 `frontend/src/components/products/Products.jsx`
 
 - Declared exports: `function`
 - Imports (32)
@@ -4843,10 +4818,10 @@ Code files documented: **545**
   - `../../utils/bulkOps.mjs`
   - `../../utils/color.js`
   - `../../utils/csv`
-  - `../../utils/groupedRecords.mjs`
+  - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.mjs`
-  - `../../utils/initials.mjs`
-  - `../../utils/productGrouping.mjs`
+  - `../../utils/initials.ts`
+  - `../../utils/productGrouping.ts`
   - `../../utils/scriptTypography.js`
   - `../shared/ActionHistoryBar.jsx`
   - `../shared/FilterMenu`
@@ -4894,15 +4869,15 @@ Code files documented: **545**
   - `frontend/src/utils/bulkOps.mjs`
   - `frontend/src/utils/color.js`
   - `frontend/src/utils/csv.js`
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/historyHelpers.mjs`
-  - `frontend/src/utils/initials.mjs`
-  - `frontend/src/utils/productGrouping.mjs`
+  - `frontend/src/utils/initials.ts`
+  - `frontend/src/utils/productGrouping.ts`
   - `frontend/src/utils/scriptTypography.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.260 `frontend/src/components/products/scanning/barcodeImageScanner.mjs`
+### 3.258 `frontend/src/components/products/scanning/barcodeImageScanner.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4913,7 +4888,7 @@ Code files documented: **545**
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
   - `frontend/tests/barcodeImageScanner.test.mjs`
 
-### 3.261 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
+### 3.259 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
 - Declared exports: `scanBarcodeFromImageFile`
 - Imports (1)
@@ -4923,7 +4898,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.262 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+### 3.260 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -4942,7 +4917,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/forms/ProductForm.jsx`
 
-### 3.263 `frontend/src/components/products/scanning/barcodeScannerState.mjs`
+### 3.261 `frontend/src/components/products/scanning/barcodeScannerState.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4953,7 +4928,7 @@ Code files documented: **545**
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
   - `frontend/tests/barcodeScannerState.test.mjs`
 
-### 3.264 `frontend/src/components/products/scanning/barcodeScannerState.ts`
+### 3.262 `frontend/src/components/products/scanning/barcodeScannerState.ts`
 
 - Declared exports: `deriveScannerPresentation`
 - Imports (0)
@@ -4963,7 +4938,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.265 `frontend/src/components/products/scanning/scanbotScanner.mjs`
+### 3.263 `frontend/src/components/products/scanning/scanbotScanner.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4974,7 +4949,7 @@ Code files documented: **545**
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
   - `frontend/tests/scanbotScanner.test.mjs`
 
-### 3.266 `frontend/src/components/products/scanning/scanbotScanner.ts`
+### 3.264 `frontend/src/components/products/scanning/scanbotScanner.ts`
 
 - Declared exports: `getPreferredScannerMode`, `isCameraBlockedByDocumentPolicy`, `scanBarcodeWithScanbot`
 - Imports (0)
@@ -4984,7 +4959,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.267 `frontend/src/components/products/shared/primitives.jsx`
+### 3.265 `frontend/src/components/products/shared/primitives.jsx`
 
 - Declared exports: none detected
 - Imports (3)
@@ -5004,7 +4979,7 @@ Code files documented: **545**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
 
-### 3.268 `frontend/src/components/products/surfaces/HeaderActions.jsx`
+### 3.266 `frontend/src/components/products/surfaces/HeaderActions.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5017,7 +4992,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.269 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+### 3.267 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5034,7 +5009,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.270 `frontend/src/components/products/surfaces/ProductRowParts.jsx`
+### 3.268 `frontend/src/components/products/surfaces/ProductRowParts.jsx`
 
 - Declared exports: `ProductBatchPreview`, `ProductDetailsCell`, `ProductDiscountBadge`, `ProductRowActions`
 - Imports (3)
@@ -5048,7 +5023,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.271 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
+### 3.269 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5059,7 +5034,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.272 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+### 3.270 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5072,7 +5047,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.273 `frontend/src/components/receipt-settings/constants.js`
+### 3.271 `frontend/src/components/receipt-settings/constants.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5085,7 +5060,7 @@ Code files documented: **545**
   - `frontend/src/components/receipt-settings/template.ts`
   - `frontend/tests/receiptTemplate.test.mjs`
 
-### 3.274 `frontend/src/components/receipt-settings/constants.ts`
+### 3.272 `frontend/src/components/receipt-settings/constants.ts`
 
 - Declared exports: `ALL_FIELD_ITEMS`, `DEFAULT_TEMPLATE`, `getFieldItems`
 - Imports (0)
@@ -5095,7 +5070,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/template.ts`
 
-### 3.275 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
+### 3.273 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
 
 - Declared exports: `class`
 - Imports (1)
@@ -5105,7 +5080,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.276 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
+### 3.274 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5116,7 +5091,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.277 `frontend/src/components/receipt-settings/PrintSettings.jsx`
+### 3.275 `frontend/src/components/receipt-settings/PrintSettings.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5128,7 +5103,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.278 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+### 3.276 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5141,7 +5116,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.279 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
+### 3.277 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
 - Declared exports: `function`
 - Imports (12)
@@ -5171,7 +5146,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.280 `frontend/src/components/receipt-settings/template.js`
+### 3.278 `frontend/src/components/receipt-settings/template.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5183,7 +5158,7 @@ Code files documented: **545**
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/tests/receiptTemplate.test.mjs`
 
-### 3.281 `frontend/src/components/receipt-settings/template.ts`
+### 3.279 `frontend/src/components/receipt-settings/template.ts`
 
 - Declared exports: `parseReceiptTemplate`, `serializeReceiptTemplate`
 - Imports (2)
@@ -5195,7 +5170,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.282 `frontend/src/components/receipt/Receipt.jsx`
+### 3.280 `frontend/src/components/receipt/Receipt.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -5217,7 +5192,7 @@ Code files documented: **545**
   - `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.283 `frontend/src/components/returns/EditReturnModal.jsx`
+### 3.281 `frontend/src/components/returns/EditReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -5232,7 +5207,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.284 `frontend/src/components/returns/NewReturnModal.jsx`
+### 3.282 `frontend/src/components/returns/NewReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -5247,7 +5222,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.285 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+### 3.283 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5260,7 +5235,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.286 `frontend/src/components/returns/ReturnDetailModal.jsx`
+### 3.284 `frontend/src/components/returns/ReturnDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5272,7 +5247,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.287 `frontend/src/components/returns/Returns.jsx`
+### 3.285 `frontend/src/components/returns/Returns.jsx`
 
 - Declared exports: `function`
 - Imports (19)
@@ -5281,7 +5256,7 @@ Code files documented: **545**
   - `../../utils/actionHistory.mjs`
   - `../../utils/csv`
   - `../../utils/formatters`
-  - `../../utils/groupedRecords.mjs`
+  - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.mjs`
   - `../shared/ActionHistoryBar.jsx`
   - `../shared/ExportMenu`
@@ -5311,12 +5286,12 @@ Code files documented: **545**
   - `frontend/src/utils/actionHistory.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/formatters.js`
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/historyHelpers.mjs`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.288 `frontend/src/components/returns/ReturnsListSurface.jsx`
+### 3.286 `frontend/src/components/returns/ReturnsListSurface.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5327,7 +5302,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.289 `frontend/src/components/sales/ExportModal.jsx`
+### 3.287 `frontend/src/components/sales/ExportModal.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5343,7 +5318,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.290 `frontend/src/components/sales/SaleDetailModal.jsx`
+### 3.288 `frontend/src/components/sales/SaleDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5356,7 +5331,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.291 `frontend/src/components/sales/Sales.jsx`
+### 3.289 `frontend/src/components/sales/Sales.jsx`
 
 - Declared exports: `function`
 - Imports (21)
@@ -5367,7 +5342,7 @@ Code files documented: **545**
   - `../../utils/csv`
   - `../../utils/deviceInfo`
   - `../../utils/formatters`
-  - `../../utils/groupedRecords.mjs`
+  - `../../utils/groupedRecords.ts`
   - `../receipt/Receipt`
   - `../shared/ActionHistoryBar.jsx`
   - `../shared/ExportMenu`
@@ -5400,11 +5375,11 @@ Code files documented: **545**
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/deviceInfo.js`
   - `frontend/src/utils/formatters.js`
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.292 `frontend/src/components/sales/SalesImportModal.jsx`
+### 3.290 `frontend/src/components/sales/SalesImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5421,7 +5396,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.293 `frontend/src/components/sales/salesImportWorker.mjs`
+### 3.291 `frontend/src/components/sales/salesImportWorker.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -5431,7 +5406,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.294 `frontend/src/components/sales/salesImportWorker.ts`
+### 3.292 `frontend/src/components/sales/salesImportWorker.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -5441,7 +5416,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/sales/salesImportWorker.mjs`
 
-### 3.295 `frontend/src/components/sales/SalesListSurface.jsx`
+### 3.293 `frontend/src/components/sales/SalesListSurface.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5453,7 +5428,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.296 `frontend/src/components/sales/StatusBadge.jsx`
+### 3.294 `frontend/src/components/sales/StatusBadge.jsx`
 
 - Declared exports: `ALL_STATUSES`, `STATUS_COLORS`, `STATUS_LABELS`, `function`, `getStatusLabel`
 - Imports (0)
@@ -5468,7 +5443,7 @@ Code files documented: **545**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/sales/SalesListSurface.jsx`
 
-### 3.297 `frontend/src/components/server/ServerPage.jsx`
+### 3.295 `frontend/src/components/server/ServerPage.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5485,7 +5460,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.298 `frontend/src/components/shared/ActionHistoryBar.jsx`
+### 3.296 `frontend/src/components/shared/ActionHistoryBar.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5513,7 +5488,7 @@ Code files documented: **545**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.299 `frontend/src/components/shared/BackgroundImportTracker.jsx`
+### 3.297 `frontend/src/components/shared/BackgroundImportTracker.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -5533,7 +5508,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.300 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.298 `frontend/src/components/shared/ExportMenu.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5550,7 +5525,7 @@ Code files documented: **545**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.301 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.299 `frontend/src/components/shared/FilterMenu.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5568,7 +5543,7 @@ Code files documented: **545**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.302 `frontend/src/components/shared/globalScroll.js`
+### 3.300 `frontend/src/components/shared/globalScroll.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5579,7 +5554,7 @@ Code files documented: **545**
   - `frontend/src/App.jsx`
   - `frontend/tests/globalScrollControls.test.mjs`
 
-### 3.303 `frontend/src/components/shared/globalScroll.ts`
+### 3.301 `frontend/src/components/shared/globalScroll.ts`
 
 - Declared exports: `getScrollTarget`, `getScrollToPosition`
 - Imports (0)
@@ -5589,7 +5564,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.304 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.302 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5602,7 +5577,7 @@ Code files documented: **545**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
 
-### 3.305 `frontend/src/components/shared/LoadingWatchdog.jsx`
+### 3.303 `frontend/src/components/shared/LoadingWatchdog.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5617,7 +5592,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.306 `frontend/src/components/shared/Modal.jsx`
+### 3.304 `frontend/src/components/shared/Modal.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -5648,7 +5623,7 @@ Code files documented: **545**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.307 `frontend/src/components/shared/navigationConfig.js`
+### 3.305 `frontend/src/components/shared/navigationConfig.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5660,7 +5635,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/tests/navigationConfig.test.mjs`
 
-### 3.308 `frontend/src/components/shared/navigationConfig.ts`
+### 3.306 `frontend/src/components/shared/navigationConfig.ts`
 
 - Declared exports: `DEFAULT_MOBILE_PINNED`, `NAV_ITEMS`, `orderNavItems`, `parseNavSetting`
 - Imports (0)
@@ -5670,7 +5645,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.309 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.307 `frontend/src/components/shared/NotificationCenter.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -5684,7 +5659,7 @@ Code files documented: **545**
   - `frontend/src/App.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.310 `frontend/src/components/shared/pageActivity.js`
+### 3.308 `frontend/src/components/shared/pageActivity.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5708,7 +5683,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.311 `frontend/src/components/shared/pageActivity.ts`
+### 3.309 `frontend/src/components/shared/pageActivity.ts`
 
 - Declared exports: `useIsPageActive`
 - Imports (2)
@@ -5719,7 +5694,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.312 `frontend/src/components/shared/PageHeader.jsx`
+### 3.310 `frontend/src/components/shared/PageHeader.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -5734,7 +5709,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.313 `frontend/src/components/shared/PaginationControls.jsx`
+### 3.311 `frontend/src/components/shared/PaginationControls.jsx`
 
 - Declared exports: `PAGE_SIZE_OPTIONS`, `clampPage`, `function`, `paginateItems`
 - Imports (2)
@@ -5752,7 +5727,7 @@ Code files documented: **545**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.314 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.312 `frontend/src/components/shared/PortalMenu.jsx`
 
 - Declared exports: `ThreeDotPortal`, `function`
 - Imports (3)
@@ -5770,7 +5745,7 @@ Code files documented: **545**
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.315 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.313 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5783,7 +5758,7 @@ Code files documented: **545**
   - `frontend/src/components/auth/Login.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.316 `frontend/src/components/shared/SectionSwitcher.jsx`
+### 3.314 `frontend/src/components/shared/SectionSwitcher.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5796,7 +5771,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.317 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.315 `frontend/src/components/shared/WriteConflictModal.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5806,7 +5781,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.318 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.316 `frontend/src/components/users/PermissionEditor.jsx`
 
 - Declared exports: `PERMISSION_DEFS`, `PERMISSION_SECTIONS`, `function`
 - Imports (0)
@@ -5817,7 +5792,7 @@ Code files documented: **545**
   - `frontend/src/components/users/UserDetailSheet.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.319 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.317 `frontend/src/components/users/UserDetailSheet.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5829,7 +5804,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/users/Users.jsx`
 
-### 3.320 `frontend/src/components/users/UserProfileModal.jsx`
+### 3.318 `frontend/src/components/users/UserProfileModal.jsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -5856,7 +5831,7 @@ Code files documented: **545**
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.321 `frontend/src/components/users/Users.jsx`
+### 3.319 `frontend/src/components/users/Users.jsx`
 
 - Declared exports: `function`
 - Imports (14)
@@ -5890,14 +5865,14 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.322 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.320 `frontend/src/components/utils-settings/AuditLog.jsx`
 
 - Declared exports: `function`
 - Imports (10)
   - `../../AppContext`
   - `../../utils/actionGuards.mjs`
   - `../../utils/csv`
-  - `../../utils/groupedRecords.mjs`
+  - `../../utils/groupedRecords.ts`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
   - `../shared/PaginationControls.jsx`
@@ -5912,11 +5887,11 @@ Code files documented: **545**
   - `frontend/src/components/shared/pageActivity.js`
   - `frontend/src/utils/actionGuards.mjs`
   - `frontend/src/utils/csv.js`
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.323 `frontend/src/components/utils-settings/Backup.jsx`
+### 3.321 `frontend/src/components/utils-settings/Backup.jsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -5942,7 +5917,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.324 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.322 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5952,7 +5927,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.325 `frontend/src/components/utils-settings/index.js`
+### 3.323 `frontend/src/components/utils-settings/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5962,7 +5937,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.326 `frontend/src/components/utils-settings/index.ts`
+### 3.324 `frontend/src/components/utils-settings/index.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5972,7 +5947,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.327 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.325 `frontend/src/components/utils-settings/OtpModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5986,7 +5961,7 @@ Code files documented: **545**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.328 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.326 `frontend/src/components/utils-settings/ResetData.jsx`
 
 - Declared exports: none detected
 - Imports (6)
@@ -6004,7 +5979,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.329 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.327 `frontend/src/components/utils-settings/Settings.jsx`
 
 - Declared exports: `function`
 - Imports (13)
@@ -6036,7 +6011,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.330 `frontend/src/components/utils-settings/settingsConflict.js`
+### 3.328 `frontend/src/components/utils-settings/settingsConflict.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6047,7 +6022,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/tests/settingsConflictHelpers.test.mjs`
 
-### 3.331 `frontend/src/components/utils-settings/settingsConflict.ts`
+### 3.329 `frontend/src/components/utils-settings/settingsConflict.ts`
 
 - Declared exports: `buildSettingsConflictState`, `diffSettingsConflictFields`
 - Imports (0)
@@ -6057,7 +6032,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.332 `frontend/src/constants.js`
+### 3.330 `frontend/src/constants.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6074,7 +6049,7 @@ Code files documented: **545**
   - `frontend/src/platform/runtime/clientRuntime.ts`
   - `frontend/src/web-api.ts`
 
-### 3.333 `frontend/src/constants.ts`
+### 3.331 `frontend/src/constants.ts`
 
 - Declared exports: `CURRENCY`, `DELIVERY_FEE_PAYER`, `EMPTY_CUSTOMER`, `LAYOUT`, `PAYMENT_METHODS`, `STOCK`, `STORAGE_KEYS`, `SYNC`, `WRITE_CHANNELS`, `createEmptyOrder`, `formatDate`, `isNetworkError`
 - Imports (0)
@@ -6084,7 +6059,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.334 `frontend/src/index.jsx`
+### 3.332 `frontend/src/index.jsx`
 
 - Declared exports: none detected
 - Imports (9)
@@ -6105,7 +6080,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.335 `frontend/src/platform/runtime/clientRuntime.js`
+### 3.333 `frontend/src/platform/runtime/clientRuntime.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6117,7 +6092,7 @@ Code files documented: **545**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/web-api.ts`
 
-### 3.336 `frontend/src/platform/runtime/clientRuntime.ts`
+### 3.334 `frontend/src/platform/runtime/clientRuntime.ts`
 
 - Declared exports: `buildQueuedOperationScope`, `doesQueuedScopeMatchCurrent`, `normalizeRuntimeDescriptor`, `readStoredRuntimeDescriptor`, `resetClientRuntimeState`, `sanitizeSyncServerUrl`, `shouldResetForRuntimeChange`, `writeStoredRuntimeDescriptor`
 - Imports (2)
@@ -6129,7 +6104,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.337 `frontend/src/platform/storage/storagePolicy.mjs`
+### 3.335 `frontend/src/platform/storage/storagePolicy.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6139,7 +6114,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.338 `frontend/src/platform/storage/storagePolicy.ts`
+### 3.336 `frontend/src/platform/storage/storagePolicy.ts`
 
 - Declared exports: `DRIVE_SYNC_STATUS_COOLDOWN_KEY`, `DRIVE_SYNC_STATUS_COOLDOWN_MS`, `LIVE_SERVER_SENSITIVE_MIRROR_TABLES`, `NOTIFICATION_SUMMARY_MISSING_TTL_MS`, `NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY`, `isCooldownActive`, `maxStoredNumber`, `shouldPersistLocalMirror`
 - Imports (0)
@@ -6149,7 +6124,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.339 `frontend/src/runtime/runtimeErrorClassifier.ts`
+### 3.337 `frontend/src/runtime/runtimeErrorClassifier.ts`
 
 - Declared exports: `isFirstPartyBuiltAssetSource`, `isGuardableStyleSheetError`, `isKnownBridgeMessage`, `isKnownEvalCspNoise`, `isKnownStyleInjectionNoise`, `isLikelyInjectedRuntimeSource`, `shouldSuppressRuntimeError`, `shouldSuppressSecurityPolicyViolation`
 - Imports (0)
@@ -6159,7 +6134,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.340 `frontend/src/types/jsx-modules.d.ts`
+### 3.338 `frontend/src/types/jsx-modules.d.ts`
 
 - Declared exports: `FactoryReset`, `ResetData`, `component`
 - Imports (0)
@@ -6169,7 +6144,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.341 `frontend/src/types/mjs-modules.d.ts`
+### 3.339 `frontend/src/types/mjs-modules.d.ts`
 
 - Declared exports: `moduleValue`, `shouldSuppressRuntimeError`, `shouldSuppressSecurityPolicyViolation`
 - Imports (0)
@@ -6179,7 +6154,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.342 `frontend/src/types/react.d.ts`
+### 3.340 `frontend/src/types/react.d.ts`
 
 - Declared exports: `useCallback`, `useEffect`, `useMemo`, `useRef`, `useState`
 - Imports (0)
@@ -6189,7 +6164,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.343 `frontend/src/types/receiptContracts.ts`
+### 3.341 `frontend/src/types/receiptContracts.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6200,7 +6175,7 @@ Code files documented: **545**
   - `frontend/src/utils/printReceipt.ts`
   - `frontend/src/utils/receiptAppliedConfig.ts`
 
-### 3.344 `frontend/src/types/settingsContracts.ts`
+### 3.342 `frontend/src/types/settingsContracts.ts`
 
 - Declared exports: `SETTINGS_REFRESH_CHANNELS`
 - Imports (0)
@@ -6210,7 +6185,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/utils/settingsWriteOptions.ts`
 
-### 3.345 `frontend/src/utils/actionGuards.mjs`
+### 3.343 `frontend/src/utils/actionGuards.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6252,7 +6227,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/ResetData.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.346 `frontend/src/utils/actionGuards.ts`
+### 3.344 `frontend/src/utils/actionGuards.ts`
 
 - Declared exports: `beginKeyedAction`, `beginNamedAction`, `beginSingleAction`, `finishKeyedAction`, `finishNamedAction`, `finishSingleAction`
 - Imports (0)
@@ -6262,7 +6237,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.347 `frontend/src/utils/actionHistory.mjs`
+### 3.345 `frontend/src/utils/actionHistory.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6287,7 +6262,7 @@ Code files documented: **545**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.348 `frontend/src/utils/actionHistory.ts`
+### 3.346 `frontend/src/utils/actionHistory.ts`
 
 - Declared exports: `useActionHistory`
 - Imports (2)
@@ -6298,7 +6273,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.349 `frontend/src/utils/appRefresh.d.ts`
+### 3.347 `frontend/src/utils/appRefresh.d.ts`
 
 - Declared exports: `DEFAULT_REFRESH_CHANNELS`, `normalizeRefreshChannels`, `refreshAppData`
 - Imports (0)
@@ -6308,7 +6283,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.350 `frontend/src/utils/appRefresh.js`
+### 3.348 `frontend/src/utils/appRefresh.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6322,7 +6297,7 @@ Code files documented: **545**
   - `frontend/src/utils/settingsRefresh.ts`
   - `frontend/tests/appRefresh.test.mjs`
 
-### 3.351 `frontend/src/utils/appRefresh.ts`
+### 3.349 `frontend/src/utils/appRefresh.ts`
 
 - Declared exports: `DEFAULT_REFRESH_CHANNELS`, `normalizeRefreshChannels`, `refreshAppData`
 - Imports (0)
@@ -6332,7 +6307,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.352 `frontend/src/utils/bulkOps.mjs`
+### 3.350 `frontend/src/utils/bulkOps.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6349,7 +6324,7 @@ Code files documented: **545**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/tests/bulkOps.test.mjs`
 
-### 3.353 `frontend/src/utils/bulkOps.ts`
+### 3.351 `frontend/src/utils/bulkOps.ts`
 
 - Declared exports: `runConcurrentTasks`
 - Imports (0)
@@ -6359,7 +6334,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.354 `frontend/src/utils/color.js`
+### 3.352 `frontend/src/utils/color.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6370,7 +6345,7 @@ Code files documented: **545**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
 
-### 3.355 `frontend/src/utils/color.ts`
+### 3.353 `frontend/src/utils/color.ts`
 
 - Declared exports: `getContrastingTextColor`
 - Imports (0)
@@ -6380,7 +6355,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.356 `frontend/src/utils/csv.d.ts`
+### 3.354 `frontend/src/utils/csv.d.ts`
 
 - Declared exports: `buildCSV`, `buildZip`, `buildZipInWorker`, `downloadBlob`, `downloadCSV`, `downloadZipFiles`, `downloadZipFilesAsync`
 - Imports (0)
@@ -6390,7 +6365,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.357 `frontend/src/utils/csv.js`
+### 3.355 `frontend/src/utils/csv.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6413,7 +6388,7 @@ Code files documented: **545**
   - `frontend/src/utils/exportPackage.ts`
   - `frontend/tests/exportPackages.test.mjs`
 
-### 3.358 `frontend/src/utils/csv.ts`
+### 3.356 `frontend/src/utils/csv.ts`
 
 - Declared exports: `UTF8_BOM`, `buildCSV`, `buildZip`, `buildZipInWorker`, `downloadBlob`, `downloadCSV`, `downloadZipFiles`, `downloadZipFilesAsync`
 - Imports (0)
@@ -6423,7 +6398,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.359 `frontend/src/utils/csvExportWorker.mjs`
+### 3.357 `frontend/src/utils/csvExportWorker.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6433,7 +6408,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.360 `frontend/src/utils/csvExportWorker.ts`
+### 3.358 `frontend/src/utils/csvExportWorker.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6443,7 +6418,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/utils/csvExportWorker.mjs`
 
-### 3.361 `frontend/src/utils/csvImport.js`
+### 3.359 `frontend/src/utils/csvImport.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6455,7 +6430,7 @@ Code files documented: **545**
   - `frontend/src/api/methods.js`
   - `frontend/tests/csvImport.test.mjs`
 
-### 3.362 `frontend/src/utils/csvImport.ts`
+### 3.360 `frontend/src/utils/csvImport.ts`
 
 - Declared exports: `decodeTextBuffer`, `detectCsvDelimiter`, `normalizeCsvKey`, `normalizeCsvMoney`, `normalizeCsvPercent`, `normalizeNumericText`, `parseCsvNumber`, `parseCsvRows`, `parseDelimitedRows`, `parseRequiredCsvNumber`, `splitCsvLine`
 - Imports (1)
@@ -6465,7 +6440,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.363 `frontend/src/utils/csvRowCounter.ts`
+### 3.361 `frontend/src/utils/csvRowCounter.ts`
 
 - Declared exports: `countCsvDataRows`
 - Imports (0)
@@ -6483,7 +6458,7 @@ Code files documented: **545**
   - `frontend/tests/inventoryImportWorker.test.mjs`
   - `frontend/tests/salesImportWorker.test.mjs`
 
-### 3.364 `frontend/src/utils/dateHelpers.js`
+### 3.362 `frontend/src/utils/dateHelpers.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6494,7 +6469,7 @@ Code files documented: **545**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/tests/dateHelpers.test.mjs`
 
-### 3.365 `frontend/src/utils/dateHelpers.ts`
+### 3.363 `frontend/src/utils/dateHelpers.ts`
 
 - Declared exports: `offsetDate`, `todayStr`
 - Imports (0)
@@ -6504,7 +6479,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.366 `frontend/src/utils/deviceInfo.js`
+### 3.364 `frontend/src/utils/deviceInfo.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6520,7 +6495,7 @@ Code files documented: **545**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/tests/deviceInfo.test.mjs`
 
-### 3.367 `frontend/src/utils/deviceInfo.ts`
+### 3.365 `frontend/src/utils/deviceInfo.ts`
 
 - Declared exports: `getClientDeviceInfo`, `getClientMetaHeaders`
 - Imports (0)
@@ -6530,7 +6505,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.368 `frontend/src/utils/exportPackage.js`
+### 3.366 `frontend/src/utils/exportPackage.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6542,7 +6517,7 @@ Code files documented: **545**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/tests/exportPackages.test.mjs`
 
-### 3.369 `frontend/src/utils/exportPackage.ts`
+### 3.367 `frontend/src/utils/exportPackage.ts`
 
 - Declared exports: `buildReportManifestRows`, `buildReportPackageFiles`
 - Imports (1)
@@ -6552,7 +6527,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.370 `frontend/src/utils/exportReports.jsx`
+### 3.368 `frontend/src/utils/exportReports.jsx`
 
 - Declared exports: `buildStandaloneReportHtml`
 - Imports (3)
@@ -6566,7 +6541,7 @@ Code files documented: **545**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.371 `frontend/src/utils/favicon.js`
+### 3.369 `frontend/src/utils/favicon.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6578,7 +6553,7 @@ Code files documented: **545**
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.372 `frontend/src/utils/favicon.ts`
+### 3.370 `frontend/src/utils/favicon.ts`
 
 - Declared exports: `createCircularFaviconDataUrl`
 - Imports (0)
@@ -6588,7 +6563,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.373 `frontend/src/utils/formatters.js`
+### 3.371 `frontend/src/utils/formatters.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6614,7 +6589,7 @@ Code files documented: **545**
   - `frontend/src/utils/exportReports.jsx`
   - `frontend/tests/formatters.test.mjs`
 
-### 3.374 `frontend/src/utils/formatters.ts`
+### 3.372 `frontend/src/utils/formatters.ts`
 
 - Declared exports: `fmtCount`, `fmtDate`, `fmtShort`, `fmtTime`
 - Imports (0)
@@ -6624,13 +6599,13 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.375 `frontend/src/utils/groupedRecords.mjs`
+### 3.373 `frontend/src/utils/groupedRecords.ts`
 
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
+- Declared exports: `buildAlphabetActionSections`, `buildTimeActionSections`, `getAlphabetInitialSection`, `getAvailableYears`, `getTimeGroupingMode`, `getTimeParts`, `matchesYearMonthFilters`, `toggleIdSet`
+- Imports (1)
+  - `./initials.ts`
+- Internal dependencies (1)
+  - `frontend/src/utils/initials.ts`
 - Referenced by (10)
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
@@ -6643,17 +6618,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/tests/groupedRecords.test.mjs`
 
-### 3.376 `frontend/src/utils/groupedRecords.ts`
-
-- Declared exports: `buildAlphabetActionSections`, `buildTimeActionSections`, `getAlphabetInitialSection`, `getAvailableYears`, `getTimeGroupingMode`, `getTimeParts`, `matchesYearMonthFilters`, `toggleIdSet`
-- Imports (1)
-  - `./initials.mjs`
-- Internal dependencies (1)
-  - `frontend/src/utils/initials.mjs`
-- Referenced by (0)
-  - none
-
-### 3.377 `frontend/src/utils/historyHelpers.mjs`
+### 3.374 `frontend/src/utils/historyHelpers.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6673,7 +6638,7 @@ Code files documented: **545**
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.378 `frontend/src/utils/historyHelpers.ts`
+### 3.375 `frontend/src/utils/historyHelpers.ts`
 
 - Declared exports: `cloneHistorySnapshot`, `extractHistoryResultId`, `resolveCreatedHistorySnapshot`
 - Imports (0)
@@ -6683,7 +6648,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.379 `frontend/src/utils/importJobRefresh.js`
+### 3.376 `frontend/src/utils/importJobRefresh.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6693,7 +6658,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/shared/BackgroundImportTracker.jsx`
 
-### 3.380 `frontend/src/utils/importJobRefresh.ts`
+### 3.377 `frontend/src/utils/importJobRefresh.ts`
 
 - Declared exports: `dispatchImportCompletionRefresh`, `getImportCompletionRefreshChannels`, `shouldDispatchImportCompletionRefresh`
 - Imports (0)
@@ -6703,7 +6668,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.381 `frontend/src/utils/index.js`
+### 3.378 `frontend/src/utils/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6713,7 +6678,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.382 `frontend/src/utils/index.ts`
+### 3.379 `frontend/src/utils/index.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6723,9 +6688,9 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.383 `frontend/src/utils/initials.mjs`
+### 3.380 `frontend/src/utils/initials.ts`
 
-- Declared exports: none detected
+- Declared exports: `KHMER_INITIALS`, `aggregateInitialOptions`, `buildInitialOptionsFromProducts`, `compareInitialKeys`, `getInitialKey`, `getInitialType`, `normalizeInitialText`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -6739,17 +6704,7 @@ Code files documented: **545**
   - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/productGrouping.ts`
 
-### 3.384 `frontend/src/utils/initials.ts`
-
-- Declared exports: `KHMER_INITIALS`, `aggregateInitialOptions`, `buildInitialOptionsFromProducts`, `compareInitialKeys`, `getInitialKey`, `getInitialType`, `normalizeInitialText`
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (0)
-  - none
-
-### 3.385 `frontend/src/utils/loaders.mjs`
+### 3.381 `frontend/src/utils/loaders.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6777,7 +6732,7 @@ Code files documented: **545**
   - `frontend/src/components/utils-settings/ResetData.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.386 `frontend/src/utils/loaders.ts`
+### 3.382 `frontend/src/utils/loaders.ts`
 
 - Declared exports: `DEFAULT_LOADER_TIMEOUT_MS`, `beginTrackedRequest`, `createLoaderTimeoutError`, `getFirstLoaderError`, `getLoaderErrorMessage`, `invalidateTrackedRequest`, `isTrackedRequestCurrent`, `settleLoaderMap`, `withLoaderTimeout`
 - Imports (0)
@@ -6787,7 +6742,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/components/products/lookups/productLookupSnapshots.ts`
 
-### 3.387 `frontend/src/utils/mediaUpload.js`
+### 3.383 `frontend/src/utils/mediaUpload.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6799,7 +6754,7 @@ Code files documented: **545**
   - `frontend/src/components/products/forms/ProductForm.jsx`
   - `frontend/tests/mediaUploadHelpers.test.mjs`
 
-### 3.388 `frontend/src/utils/mediaUpload.ts`
+### 3.384 `frontend/src/utils/mediaUpload.ts`
 
 - Declared exports: `buildCacheBustedMediaPath`, `createInitialUploadState`, `isTemporaryPreviewUrl`, `reduceUploadState`, `sanitizePersistedMediaPath`
 - Imports (1)
@@ -6809,7 +6764,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.389 `frontend/src/utils/permissions.js`
+### 3.385 `frontend/src/utils/permissions.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6820,7 +6775,7 @@ Code files documented: **545**
   - `frontend/src/AppContext.jsx`
   - `frontend/tests/permissions.test.mjs`
 
-### 3.390 `frontend/src/utils/permissions.ts`
+### 3.386 `frontend/src/utils/permissions.ts`
 
 - Declared exports: `parsePermissionMap`
 - Imports (0)
@@ -6830,7 +6785,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.391 `frontend/src/utils/pricing.d.ts`
+### 3.387 `frontend/src/utils/pricing.d.ts`
 
 - Declared exports: `calculateProductDiscount`, `formatPriceNumber`, `isProductDiscountActive`, `normalizeDiscountPercent`, `normalizeDiscountType`, `normalizePriceValue`, `roundUpToDecimals`, `toFiniteNumber`
 - Imports (0)
@@ -6840,7 +6795,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.392 `frontend/src/utils/pricing.js`
+### 3.388 `frontend/src/utils/pricing.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6866,7 +6821,7 @@ Code files documented: **545**
   - `frontend/src/utils/csvImport.ts`
   - `frontend/tests/pricingContacts.test.mjs`
 
-### 3.393 `frontend/src/utils/pricing.ts`
+### 3.389 `frontend/src/utils/pricing.ts`
 
 - Declared exports: `calculateProductDiscount`, `formatPriceNumber`, `isProductDiscountActive`, `normalizeDiscountPercent`, `normalizeDiscountType`, `normalizePriceValue`, `roundUpToDecimals`, `toFiniteNumber`
 - Imports (0)
@@ -6876,7 +6831,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.394 `frontend/src/utils/printReceipt.js`
+### 3.390 `frontend/src/utils/printReceipt.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6887,7 +6842,7 @@ Code files documented: **545**
   - `frontend/src/components/receipt-settings/PrintSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
 
-### 3.395 `frontend/src/utils/printReceipt.ts`
+### 3.391 `frontend/src/utils/printReceipt.ts`
 
 - Declared exports: `PRINT_DEFAULTS`, `createReceiptImageBlob`, `createReceiptPdfBlob`, `downloadReceiptImage`, `downloadReceiptPdf`, `getPaperWidthMm`, `getPrintSettings`, `normalizeReceiptContentWidth`, `openPrintableReceiptPreview`, `openReceiptPdf`, `printReceipt`, `savePrintSettings`
 - Imports (1)
@@ -6897,7 +6852,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.396 `frontend/src/utils/productBatches.mjs`
+### 3.392 `frontend/src/utils/productBatches.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6911,7 +6866,7 @@ Code files documented: **545**
   - `frontend/src/components/products/surfaces/ProductRowParts.jsx`
   - `frontend/tests/productBatches.test.mjs`
 
-### 3.397 `frontend/src/utils/productBatches.ts`
+### 3.393 `frontend/src/utils/productBatches.ts`
 
 - Declared exports: `buildBatchPreview`, `getVisibleProductBatches`
 - Imports (0)
@@ -6921,30 +6876,20 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.398 `frontend/src/utils/productGrouping.mjs`
+### 3.394 `frontend/src/utils/productGrouping.ts`
 
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
+- Declared exports: `buildProductGroupSections`, `buildProductGroups`, `getNameInitialSection`, `normalizeProductGroupName`
+- Imports (1)
+  - `./initials.ts`
+- Internal dependencies (1)
+  - `frontend/src/utils/initials.ts`
 - Referenced by (4)
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/pos/posCore.ts`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/productGrouping.test.mjs`
 
-### 3.399 `frontend/src/utils/productGrouping.ts`
-
-- Declared exports: `buildProductGroupSections`, `buildProductGroups`, `getNameInitialSection`, `normalizeProductGroupName`
-- Imports (1)
-  - `./initials.mjs`
-- Internal dependencies (1)
-  - `frontend/src/utils/initials.mjs`
-- Referenced by (0)
-  - none
-
-### 3.400 `frontend/src/utils/publicAssetUrls.d.ts`
+### 3.395 `frontend/src/utils/publicAssetUrls.d.ts`
 
 - Declared exports: `resolvePublicAssetUrl`
 - Imports (0)
@@ -6954,7 +6899,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.401 `frontend/src/utils/publicAssetUrls.js`
+### 3.396 `frontend/src/utils/publicAssetUrls.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6970,7 +6915,7 @@ Code files documented: **545**
   - `frontend/src/components/products/shared/primitives.jsx`
   - `frontend/src/utils/mediaUpload.ts`
 
-### 3.402 `frontend/src/utils/publicAssetUrls.ts`
+### 3.397 `frontend/src/utils/publicAssetUrls.ts`
 
 - Declared exports: `getStoredPublicAssetBaseUrl`, `resolvePublicAssetUrl`
 - Imports (1)
@@ -6980,7 +6925,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.403 `frontend/src/utils/receiptAppliedConfig.ts`
+### 3.398 `frontend/src/utils/receiptAppliedConfig.ts`
 
 - Declared exports: `DEFAULT_RECEIPT_PRINT_SETTINGS`, `DEFAULT_RECEIPT_TEMPLATE`, `RECEIPT_PRINT_SETTINGS_STORAGE_KEY`, `buildAppliedReceiptConfig`, `normalizeReceiptPrintSettings`, `normalizeReceiptTemplate`, `readReceiptPrintSettingsFromSettings`, `serializeReceiptPrintSettings`, `serializeReceiptTemplateValue`
 - Imports (1)
@@ -6992,7 +6937,7 @@ Code files documented: **545**
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
 
-### 3.404 `frontend/src/utils/scriptTypography.js`
+### 3.399 `frontend/src/utils/scriptTypography.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -7007,7 +6952,7 @@ Code files documented: **545**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/scriptTypography.test.mjs`
 
-### 3.405 `frontend/src/utils/scriptTypography.ts`
+### 3.400 `frontend/src/utils/scriptTypography.ts`
 
 - Declared exports: `containsKhmerScript`, `getKhmerTextProps`, `withKhmerTextClass`
 - Imports (0)
@@ -7017,7 +6962,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.406 `frontend/src/utils/settingsRefresh.js`
+### 3.401 `frontend/src/utils/settingsRefresh.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -7027,7 +6972,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.407 `frontend/src/utils/settingsRefresh.ts`
+### 3.402 `frontend/src/utils/settingsRefresh.ts`
 
 - Declared exports: `CATEGORY_REFRESH_CHANNELS`, `UNIT_REFRESH_CHANNELS`, `getSettingsRefreshChannels`
 - Imports (1)
@@ -7037,7 +6982,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.408 `frontend/src/utils/settingsWriteOptions.ts`
+### 3.403 `frontend/src/utils/settingsWriteOptions.ts`
 
 - Declared exports: `normalizeSettingsWriteOptions`
 - Imports (1)
@@ -7047,7 +6992,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/AppContext.jsx`
 
-### 3.409 `frontend/src/web-api.js`
+### 3.404 `frontend/src/web-api.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -7057,7 +7002,7 @@ Code files documented: **545**
 - Referenced by (1)
   - `frontend/src/AppContext.jsx`
 
-### 3.410 `frontend/src/web-api.ts`
+### 3.405 `frontend/src/web-api.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7077,7 +7022,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.411 `frontend/tailwind.config.mjs`
+### 3.406 `frontend/tailwind.config.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -7087,7 +7032,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.412 `frontend/tests/actionGuards.test.mjs`
+### 3.407 `frontend/tests/actionGuards.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7097,7 +7042,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.413 `frontend/tests/actionStability.test.mjs`
+### 3.408 `frontend/tests/actionStability.test.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7110,7 +7055,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.414 `frontend/tests/adminShellMediaGuards.test.mjs`
+### 3.409 `frontend/tests/adminShellMediaGuards.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7121,7 +7066,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.415 `frontend/tests/apiHttp.test.mjs`
+### 3.410 `frontend/tests/apiHttp.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7132,7 +7077,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.416 `frontend/tests/appRefresh.test.mjs`
+### 3.411 `frontend/tests/appRefresh.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7143,7 +7088,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.417 `frontend/tests/appShellUtils.test.mjs`
+### 3.412 `frontend/tests/appShellUtils.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7155,7 +7100,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.418 `frontend/tests/assetCompression.test.mjs`
+### 3.413 `frontend/tests/assetCompression.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7167,7 +7112,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.419 `frontend/tests/backupJobs.test.mjs`
+### 3.414 `frontend/tests/backupJobs.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7178,7 +7123,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.420 `frontend/tests/barcodeImageScanner.test.mjs`
+### 3.415 `frontend/tests/barcodeImageScanner.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7189,7 +7134,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.421 `frontend/tests/barcodeScannerState.test.mjs`
+### 3.416 `frontend/tests/barcodeScannerState.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7200,7 +7145,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.422 `frontend/tests/bulkOps.test.mjs`
+### 3.417 `frontend/tests/bulkOps.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7211,7 +7156,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.423 `frontend/tests/contactImportWorker.test.mjs`
+### 3.418 `frontend/tests/contactImportWorker.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7223,7 +7168,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.424 `frontend/tests/csvImport.test.mjs`
+### 3.419 `frontend/tests/csvImport.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7235,7 +7180,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.425 `frontend/tests/dashboardDataReliability.test.mjs`
+### 3.420 `frontend/tests/dashboardDataReliability.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7246,7 +7191,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.426 `frontend/tests/dateHelpers.test.mjs`
+### 3.421 `frontend/tests/dateHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7257,7 +7202,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.427 `frontend/tests/deviceInfo.test.mjs`
+### 3.422 `frontend/tests/deviceInfo.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7268,7 +7213,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.428 `frontend/tests/exportPackages.test.mjs`
+### 3.423 `frontend/tests/exportPackages.test.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7282,7 +7227,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.429 `frontend/tests/formatters.test.mjs`
+### 3.424 `frontend/tests/formatters.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7293,7 +7238,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.430 `frontend/tests/globalScroll.test.mjs`
+### 3.425 `frontend/tests/globalScroll.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7304,7 +7249,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.431 `frontend/tests/globalScrollControls.test.mjs`
+### 3.426 `frontend/tests/globalScrollControls.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7315,18 +7260,18 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.432 `frontend/tests/groupedRecords.test.mjs`
+### 3.427 `frontend/tests/groupedRecords.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/utils/groupedRecords.mjs`
+  - `../src/utils/groupedRecords.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/groupedRecords.ts`
 - Referenced by (0)
   - none
 
-### 3.433 `frontend/tests/historyHelpers.test.mjs`
+### 3.428 `frontend/tests/historyHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7336,7 +7281,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.434 `frontend/tests/importJobRefresh.test.mjs`
+### 3.429 `frontend/tests/importJobRefresh.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7346,7 +7291,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.435 `frontend/tests/initials.test.mjs`
+### 3.430 `frontend/tests/initials.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7356,7 +7301,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.436 `frontend/tests/inventoryImportWorker.test.mjs`
+### 3.431 `frontend/tests/inventoryImportWorker.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7368,7 +7313,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.437 `frontend/tests/inventoryMobileCardLayout.test.mjs`
+### 3.432 `frontend/tests/inventoryMobileCardLayout.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7379,7 +7324,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.438 `frontend/tests/inventoryMovementGroups.test.mjs`
+### 3.433 `frontend/tests/inventoryMovementGroups.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7390,7 +7335,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.439 `frontend/tests/inventoryRfidSection.test.mjs`
+### 3.434 `frontend/tests/inventoryRfidSection.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7401,7 +7346,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.440 `frontend/tests/jsxSyntaxCheck.mjs`
+### 3.435 `frontend/tests/jsxSyntaxCheck.mjs`
 
 - Declared exports: none detected
 - Imports (5)
@@ -7415,7 +7360,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.441 `frontend/tests/loaders.test.mjs`
+### 3.436 `frontend/tests/loaders.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7425,7 +7370,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.442 `frontend/tests/mediaUploadHelpers.test.mjs`
+### 3.437 `frontend/tests/mediaUploadHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7436,7 +7381,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.443 `frontend/tests/navigationConfig.test.mjs`
+### 3.438 `frontend/tests/navigationConfig.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7447,7 +7392,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.444 `frontend/tests/notificationBadge.test.mjs`
+### 3.439 `frontend/tests/notificationBadge.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7458,7 +7403,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.445 `frontend/tests/offlineSalesQueue.test.mjs`
+### 3.440 `frontend/tests/offlineSalesQueue.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7469,7 +7414,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.446 `frontend/tests/offlineSecurityHardening.test.mjs`
+### 3.441 `frontend/tests/offlineSecurityHardening.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7480,7 +7425,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.447 `frontend/tests/offlineSyncArchitecture.test.mjs`
+### 3.442 `frontend/tests/offlineSyncArchitecture.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7491,7 +7436,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.448 `frontend/tests/ownedGoogleAuth.test.mjs`
+### 3.443 `frontend/tests/ownedGoogleAuth.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7502,7 +7447,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.449 `frontend/tests/performanceLoadingUx.test.mjs`
+### 3.444 `frontend/tests/performanceLoadingUx.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7513,7 +7458,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.450 `frontend/tests/permissionEditor.test.mjs`
+### 3.445 `frontend/tests/permissionEditor.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7524,7 +7469,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.451 `frontend/tests/permissions.test.mjs`
+### 3.446 `frontend/tests/permissions.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7535,7 +7480,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.452 `frontend/tests/portalCatalogDisplay.test.mjs`
+### 3.447 `frontend/tests/portalCatalogDisplay.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7546,7 +7491,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.453 `frontend/tests/portalContentI18n.test.mjs`
+### 3.448 `frontend/tests/portalContentI18n.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7556,7 +7501,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.454 `frontend/tests/portalEditorUtils.test.mjs`
+### 3.449 `frontend/tests/portalEditorUtils.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7566,7 +7511,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.455 `frontend/tests/portalFaqVocabulary.test.mjs`
+### 3.450 `frontend/tests/portalFaqVocabulary.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7576,7 +7521,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.456 `frontend/tests/portalLanguagePacks.test.mjs`
+### 3.451 `frontend/tests/portalLanguagePacks.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7586,7 +7531,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.457 `frontend/tests/portalTranslateController.test.mjs`
+### 3.452 `frontend/tests/portalTranslateController.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7596,7 +7541,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.458 `frontend/tests/posCore.test.mjs`
+### 3.453 `frontend/tests/posCore.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7606,7 +7551,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.459 `frontend/tests/pricingContacts.test.mjs`
+### 3.454 `frontend/tests/pricingContacts.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7618,7 +7563,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.460 `frontend/tests/productBatches.test.mjs`
+### 3.455 `frontend/tests/productBatches.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7629,7 +7574,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.461 `frontend/tests/productDiscountUx.test.mjs`
+### 3.456 `frontend/tests/productDiscountUx.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7640,7 +7585,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.462 `frontend/tests/productDisplayHelpers.test.mjs`
+### 3.457 `frontend/tests/productDisplayHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7650,7 +7595,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.463 `frontend/tests/productFilterHelpers.test.mjs`
+### 3.458 `frontend/tests/productFilterHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7660,7 +7605,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.464 `frontend/tests/productGalleryHelpers.test.mjs`
+### 3.459 `frontend/tests/productGalleryHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7670,18 +7615,18 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.465 `frontend/tests/productGrouping.test.mjs`
+### 3.460 `frontend/tests/productGrouping.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/utils/productGrouping.mjs`
+  - `../src/utils/productGrouping.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/utils/productGrouping.mjs`
+  - `frontend/src/utils/productGrouping.ts`
 - Referenced by (0)
   - none
 
-### 3.466 `frontend/tests/productGroupViewHelpers.test.mjs`
+### 3.461 `frontend/tests/productGroupViewHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7691,7 +7636,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.467 `frontend/tests/productHistoryHelpers.test.mjs`
+### 3.462 `frontend/tests/productHistoryHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7702,7 +7647,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.468 `frontend/tests/productImportPlanner.test.mjs`
+### 3.463 `frontend/tests/productImportPlanner.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7714,7 +7659,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.469 `frontend/tests/productImportWorkerFallback.test.mjs`
+### 3.464 `frontend/tests/productImportWorkerFallback.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7726,7 +7671,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.470 `frontend/tests/productMenuHelpers.test.mjs`
+### 3.465 `frontend/tests/productMenuHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7736,7 +7681,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.471 `frontend/tests/productPageHelpers.test.mjs`
+### 3.466 `frontend/tests/productPageHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7746,7 +7691,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.472 `frontend/tests/productSearchPagination.test.mjs`
+### 3.467 `frontend/tests/productSearchPagination.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7757,7 +7702,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.473 `frontend/tests/productSelectionHelpers.test.mjs`
+### 3.468 `frontend/tests/productSelectionHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7767,7 +7712,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.474 `frontend/tests/productWriteHelpers.test.mjs`
+### 3.469 `frontend/tests/productWriteHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7777,7 +7722,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.475 `frontend/tests/publicErrorRecovery.test.mjs`
+### 3.470 `frontend/tests/publicErrorRecovery.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7787,7 +7732,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.476 `frontend/tests/receiptSettingsSync.test.mjs`
+### 3.471 `frontend/tests/receiptSettingsSync.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7798,7 +7743,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.477 `frontend/tests/receiptTemplate.test.mjs`
+### 3.472 `frontend/tests/receiptTemplate.test.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7812,7 +7757,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.478 `frontend/tests/returnsLayout.test.mjs`
+### 3.473 `frontend/tests/returnsLayout.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7823,7 +7768,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.479 `frontend/tests/runtimeErrorClassifier.test.mjs`
+### 3.474 `frontend/tests/runtimeErrorClassifier.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7833,7 +7778,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.480 `frontend/tests/salesImportWorker.test.mjs`
+### 3.475 `frontend/tests/salesImportWorker.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7845,7 +7790,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.481 `frontend/tests/scanbotScanner.test.mjs`
+### 3.476 `frontend/tests/scanbotScanner.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7856,7 +7801,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.482 `frontend/tests/scriptTypography.test.mjs`
+### 3.477 `frontend/tests/scriptTypography.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7867,7 +7812,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.483 `frontend/tests/sectionNavigation.test.mjs`
+### 3.478 `frontend/tests/sectionNavigation.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7878,7 +7823,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.484 `frontend/tests/settingsConflictHelpers.test.mjs`
+### 3.479 `frontend/tests/settingsConflictHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7889,7 +7834,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.485 `frontend/tests/settingsRefresh.test.mjs`
+### 3.480 `frontend/tests/settingsRefresh.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7899,7 +7844,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.486 `frontend/tests/storagePolicy.test.mjs`
+### 3.481 `frontend/tests/storagePolicy.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7909,7 +7854,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.487 `frontend/tests/utilsSettingsBarrel.test.mjs`
+### 3.482 `frontend/tests/utilsSettingsBarrel.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7920,7 +7865,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.488 `frontend/vite.config.mjs`
+### 3.483 `frontend/vite.config.mjs`
 
 - Declared exports: `defineConfig`
 - Imports (6)
@@ -7935,7 +7880,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.489 `ops/scripts/architecture/generated-bulk-audit.mjs`
+### 3.484 `ops/scripts/architecture/generated-bulk-audit.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7951,7 +7896,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.490 `ops/scripts/architecture/language-runtime-audit.mjs`
+### 3.485 `ops/scripts/architecture/language-runtime-audit.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7967,7 +7912,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.491 `ops/scripts/architecture/organization-audit.mjs`
+### 3.486 `ops/scripts/architecture/organization-audit.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7983,7 +7928,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.492 `ops/scripts/architecture/phase29-audit.mjs`
+### 3.487 `ops/scripts/architecture/phase29-audit.mjs`
 
 - Declared exports: none detected
 - Imports (7)
@@ -8000,7 +7945,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.493 `ops/scripts/backend/schema-audit.js`
+### 3.488 `ops/scripts/backend/schema-audit.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -8011,7 +7956,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.494 `ops/scripts/backend/schema-primary-key-preflight.mjs`
+### 3.489 `ops/scripts/backend/schema-primary-key-preflight.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8024,7 +7969,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.495 `ops/scripts/backend/verify-data-integrity.js`
+### 3.490 `ops/scripts/backend/verify-data-integrity.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8036,7 +7981,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.496 `ops/scripts/frontend/verify-i18n.js`
+### 3.491 `ops/scripts/frontend/verify-i18n.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -8047,7 +7992,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.497 `ops/scripts/frontend/verify-performance.js`
+### 3.492 `ops/scripts/frontend/verify-performance.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8059,7 +8004,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.498 `ops/scripts/frontend/verify-ui.js`
+### 3.493 `ops/scripts/frontend/verify-ui.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8071,7 +8016,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.499 `ops/scripts/lib/fs-utils.js`
+### 3.494 `ops/scripts/lib/fs-utils.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -8094,7 +8039,7 @@ Code files documented: **545**
   - `ops/scripts/verification/verify-scale-services.js`
   - `ops/scripts/verification/verify-secret-hygiene.js`
 
-### 3.500 `ops/scripts/lib/report-utils.js`
+### 3.495 `ops/scripts/lib/report-utils.js`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -8108,7 +8053,7 @@ Code files documented: **545**
   - `ops/scripts/architecture/phase29-audit.mjs`
   - `ops/scripts/runtime/audits/audit-report-html.mjs`
 
-### 3.501 `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs`
+### 3.496 `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs`
 
 - Declared exports: none detected
 - Imports (5)
@@ -8122,7 +8067,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.502 `ops/scripts/runtime/audits/audit-auth.mjs`
+### 3.497 `ops/scripts/runtime/audits/audit-auth.mjs`
 
 - Declared exports: `applySessionToPlaywrightContext`, `buildBrowserStorageState`, `hydratePlaywrightPage`, `loginWithFetch`
 - Imports (0)
@@ -8148,7 +8093,7 @@ Code files documented: **545**
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
 
-### 3.503 `ops/scripts/runtime/audits/audit-manifest.mjs`
+### 3.498 `ops/scripts/runtime/audits/audit-manifest.mjs`
 
 - Declared exports: `ADMIN_ROUTES`, `FULL_AUDIT_ROUTES`, `PUBLIC_ROUTES`, `ROUTE_MANIFEST`, `getAuditProfiles`, `getRouteManifest`, `resolveAuditRoutes`
 - Imports (0)
@@ -8159,7 +8104,7 @@ Code files documented: **545**
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
   - `ops/scripts/runtime/audits/full-app-audit.mjs`
 
-### 3.504 `ops/scripts/runtime/audits/audit-report-html.mjs`
+### 3.499 `ops/scripts/runtime/audits/audit-report-html.mjs`
 
 - Declared exports: `writeBrowserActionHtmlReport`, `writeDeepAuditHtmlReport`, `writeFullAuditHtmlReport`
 - Imports (4)
@@ -8173,7 +8118,7 @@ Code files documented: **545**
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
   - `ops/scripts/runtime/audits/full-app-audit.mjs`
 
-### 3.505 `ops/scripts/runtime/audits/deep-live-audit.mjs`
+### 3.500 `ops/scripts/runtime/audits/deep-live-audit.mjs`
 
 - Declared exports: none detected
 - Imports (9)
@@ -8193,7 +8138,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.506 `ops/scripts/runtime/audits/full-app-audit.mjs`
+### 3.501 `ops/scripts/runtime/audits/full-app-audit.mjs`
 
 - Declared exports: none detected
 - Imports (9)
@@ -8213,7 +8158,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.507 `ops/scripts/runtime/browser-action-smoke.mjs`
+### 3.502 `ops/scripts/runtime/browser-action-smoke.mjs`
 
 - Declared exports: none detected
 - Imports (8)
@@ -8230,7 +8175,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.508 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs`
+### 3.503 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8243,7 +8188,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.509 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs`
+### 3.504 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8255,7 +8200,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.510 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
+### 3.505 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
 
 - Declared exports: none detected
 - Imports (5)
@@ -8269,7 +8214,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.511 `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs`
+### 3.506 `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs`
 
 - Declared exports: none detected
 - Imports (5)
@@ -8283,7 +8228,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.512 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+### 3.507 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
 
 - Declared exports: `attachConsoleCollector`, `closeTopModal`, `isIgnoredConsole`, `latestObservedStatus`, `readJson`, `readJsonStatus`, `waitForRead`
 - Imports (0)
@@ -8306,7 +8251,7 @@ Code files documented: **545**
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
 
-### 3.513 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
+### 3.508 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8322,7 +8267,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.514 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
+### 3.509 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8338,7 +8283,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.515 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
+### 3.510 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8354,7 +8299,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.516 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
+### 3.511 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8370,7 +8315,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.517 `ops/scripts/runtime/live-checks/phase84-live-suite.mjs`
+### 3.512 `ops/scripts/runtime/live-checks/phase84-live-suite.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8383,7 +8328,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.518 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs`
+### 3.513 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8399,7 +8344,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.519 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs`
+### 3.514 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8415,7 +8360,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.520 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
+### 3.515 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8431,7 +8376,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.521 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
+### 3.516 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8447,7 +8392,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.522 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
+### 3.517 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8463,7 +8408,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.523 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs`
+### 3.518 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8479,7 +8424,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.524 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
+### 3.519 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8495,7 +8440,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.525 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
+### 3.520 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8508,7 +8453,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.526 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
+### 3.521 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8524,7 +8469,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.527 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
+### 3.522 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8540,7 +8485,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.528 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
+### 3.523 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8556,7 +8501,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.529 `ops/scripts/runtime/smoke/check-public-url.mjs`
+### 3.524 `ops/scripts/runtime/smoke/check-public-url.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -8567,7 +8512,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.530 `ops/scripts/runtime/smoke/check-route-contract.mjs`
+### 3.525 `ops/scripts/runtime/smoke/check-route-contract.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -8577,7 +8522,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.531 `ops/scripts/runtime/smoke/live-smoke.mjs`
+### 3.526 `ops/scripts/runtime/smoke/live-smoke.mjs`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8592,7 +8537,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.532 `ops/scripts/runtime/smoke/post-start-diagnostics.mjs`
+### 3.527 `ops/scripts/runtime/smoke/post-start-diagnostics.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -8603,7 +8548,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.533 `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs`
+### 3.528 `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8616,7 +8561,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.534 `ops/scripts/runtime/storage/cleanup-test-data.mjs`
+### 3.529 `ops/scripts/runtime/storage/cleanup-test-data.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8629,7 +8574,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.535 `ops/scripts/runtime/storage/dataset-readiness.mjs`
+### 3.530 `ops/scripts/runtime/storage/dataset-readiness.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8642,7 +8587,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.536 `ops/scripts/runtime/storage/post-live-hygiene.mjs`
+### 3.531 `ops/scripts/runtime/storage/post-live-hygiene.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8655,7 +8600,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.537 `ops/scripts/runtime/storage/prune-storage.mjs`
+### 3.532 `ops/scripts/runtime/storage/prune-storage.mjs`
 
 - Declared exports: none detected
 - Imports (5)
@@ -8669,7 +8614,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.538 `ops/scripts/runtime/storage/restore-candidates.mjs`
+### 3.533 `ops/scripts/runtime/storage/restore-candidates.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8681,7 +8626,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.539 `ops/scripts/runtime/storage/restore-rehearsal.mjs`
+### 3.534 `ops/scripts/runtime/storage/restore-rehearsal.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8694,7 +8639,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.540 `ops/scripts/verification/verify-backup-reliability.js`
+### 3.535 `ops/scripts/verification/verify-backup-reliability.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8706,7 +8651,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.541 `ops/scripts/verification/verify-docker-release.js`
+### 3.536 `ops/scripts/verification/verify-docker-release.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8718,7 +8663,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.542 `ops/scripts/verification/verify-hardening-policy.js`
+### 3.537 `ops/scripts/verification/verify-hardening-policy.js`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8731,7 +8676,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.543 `ops/scripts/verification/verify-runtime-deps.js`
+### 3.538 `ops/scripts/verification/verify-runtime-deps.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8743,7 +8688,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.544 `ops/scripts/verification/verify-scale-services.js`
+### 3.539 `ops/scripts/verification/verify-scale-services.js`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8756,7 +8701,7 @@ Code files documented: **545**
 - Referenced by (0)
   - none
 
-### 3.545 `ops/scripts/verification/verify-secret-hygiene.js`
+### 3.540 `ops/scripts/verification/verify-secret-hygiene.js`
 
 - Declared exports: none detected
 - Imports (4)

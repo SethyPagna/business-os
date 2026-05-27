@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-27T22:23:11.950Z
+Generated: 2026-05-27T22:45:19.228Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 623
+- Files scanned: 618
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -15,7 +15,7 @@ Generated: 2026-05-27T22:23:11.950Z
 | Extension | Files |
 | --- | --- |
 | .js | 185 |
-| .mjs | 157 |
+| .mjs | 152 |
 | .jsx | 107 |
 | .ts | 86 |
 | .md | 44 |
@@ -30,12 +30,12 @@ Generated: 2026-05-27T22:23:11.950Z
 
 | Area | Files |
 | --- | --- |
-| frontend/utils | 64 |
-| frontend/components/products | 47 |
+| frontend/utils | 61 |
+| frontend/components/products | 46 |
 | ops/docs/reference | 30 |
 | backend/routes | 24 |
 | frontend/components/shared | 20 |
-| frontend/components/catalog | 18 |
+| frontend/components/catalog | 17 |
 | ops/scripts/runtime/live-checks | 17 |
 | ops/docs | 14 |
 | frontend/components/contacts | 13 |
@@ -65,9 +65,9 @@ Generated: 2026-05-27T22:23:11.950Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 11890 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8772 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7277 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 11941 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8717 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7252 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-ROADMAP.md | 4917 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
@@ -87,14 +87,14 @@ Generated: 2026-05-27T22:23:11.950Z
 | frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |
 | frontend/src/components/products/import/BulkImportModal.jsx | 1907 | frontend/components/products |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1832 | ops/docs/reference |
-| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1764 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1822 | ops/docs/reference |
+| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1769 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1603 | frontend/src/AppContext.jsx |
 | backend/src/routes/sales.js | 1573 | backend/routes |
+| ops/scripts/architecture/language-runtime-audit.mjs | 1566 | ops/scripts/architecture |
 | backend/src/services/googleDriveSync/index.js | 1564 | backend/services |
-| ops/scripts/architecture/language-runtime-audit.mjs | 1561 | ops/scripts/architecture |
 
 ## Relative Import Hotspots
 

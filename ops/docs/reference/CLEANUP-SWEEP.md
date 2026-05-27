@@ -296,10 +296,10 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   live compatibility files until imports are intentionally migrated.
 - Move 115 converts the grouped-record helper to TypeScript while preserving
   the old `.mjs` wrapper. Cleanup must keep that wrapper, plus
-  `initials.d.mts`, until the component/test imports and typed boundary are
+  `retired initials declaration shim`, until the component/test imports and typed boundary are
   intentionally migrated.
 - Move 116 converts the initials helper to TypeScript while preserving the old
-  `.mjs` wrapper. Cleanup must keep both `initials.mjs` and `initials.d.mts`
+  `.mjs` wrapper. Cleanup must keep both `initials.ts` and `retired initials declaration shim`
   while converted TypeScript modules and legacy JavaScript imports share that
   public boundary.
 - Move 117 converts the media upload helper to TypeScript while preserving the
@@ -311,8 +311,8 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   all JavaScript imports and converted TypeScript callers intentionally move to
   a new public boundary.
 - Move 119 converts the product grouping helper to TypeScript while preserving
-  the old `.mjs` wrapper. Cleanup must keep both `productGrouping.mjs` and
-  `productGrouping.d.mts` until Products, Inventory, POS, and tests are
+  the old `.mjs` wrapper. Cleanup must keep both `productGrouping.ts` and
+  `retired productGrouping declaration shim` until Products, Inventory, POS, and tests are
   intentionally moved to a different public grouping boundary.
 - Move 120 converts the product display helper to TypeScript while preserving
   the old `.mjs` wrapper. Cleanup must keep `productDisplayHelpers.mjs` until
@@ -320,7 +320,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   implementation path.
 - Move 121 converts the product filter/export helper to TypeScript while
   preserving the old `.mjs` wrapper. Cleanup must keep
-  `productFilterHelpers.mjs` and `groupedRecords.d.mts` until Products,
+  `productFilterHelpers.mjs` and `retired groupedRecords declaration shim` until Products,
   product search pagination tests, and TypeScript component helpers are
   intentionally moved to a different public boundary.
 - Move 122 converts the product menu helper to TypeScript while preserving the
@@ -329,7 +329,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   tests intentionally move to the `.ts` implementation path.
 - Move 123 converts the product write helper to TypeScript while preserving the
   old `.mjs` wrapper. Cleanup must keep `productWriteHelpers.mjs` and
-  `productGalleryHelpers.d.mts` until Products, write helper tests, action
+  `retired productGalleryHelpers declaration shim` until Products, write helper tests, action
   stability tests, and typed product helper imports intentionally move to a new
   public boundary.
 - Move 124 converts the product import planner to TypeScript while preserving
@@ -381,8 +381,8 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   `productPageConfig.mjs` until Products imports intentionally move to a new
   public boundary or the wrapper audit proves it is unused.
 - Move 137 converts the product gallery helper to TypeScript while preserving
-  the old `.mjs` wrapper. Cleanup must keep `productGalleryHelpers.mjs` and
-  `productGalleryHelpers.d.mts` until Products, product write helpers, and
+  the old `.mjs` wrapper. Cleanup must keep `productGalleryHelpers.ts` and
+  `retired productGalleryHelpers declaration shim` until Products, product write helpers, and
   focused tests intentionally move to a new public boundary or the wrapper
   audit proves they are unused.
 - Move 138 converts the product group view helper to TypeScript while
@@ -432,7 +432,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   a new public boundary or the wrapper audit proves it is unused.
 - Move 148 converts the portal language pack helper to TypeScript while
   preserving the old `.mjs` wrapper. Cleanup must keep
-  `portalLanguagePacks.mjs` and its typed declaration until catalog surfaces,
+  `portalLanguagePacks.ts` and its typed declaration until catalog surfaces,
   portal i18n helpers, and focused portal vocabulary tests intentionally move
   to a new public boundary or the wrapper audit proves it is unused.
 - Move 149 converts the contact option helper to TypeScript while preserving

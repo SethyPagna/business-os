@@ -278,12 +278,12 @@ intentional compatibility, not removable duplicate code, until reference scans
 show every legacy import has moved.
 
 Move 115 converts the grouped-record helper to TypeScript and removes its
-duplicated unused Khmer initial-order constants. `groupedRecords.mjs` remains
+duplicated unused Khmer initial-order constants. `groupedRecords.ts` remains
 an intentional compatibility wrapper until component and test imports are
 migrated deliberately.
 
 Move 116 converts the initials helper to TypeScript while preserving
-`initials.mjs` as an intentional compatibility wrapper. `initials.d.mts` is
+`initials.ts` as an intentional compatibility wrapper. `retired initials declaration shim` is
 live declaration support for converted TypeScript callers, not dead generated
 noise.
 
@@ -297,7 +297,7 @@ Move 118 converts the pricing helper to TypeScript while preserving
 live declaration support for TypeScript modules that import the stable wrapper.
 
 Move 119 converts the product grouping helper to TypeScript while preserving
-`productGrouping.mjs` as an intentional compatibility wrapper. The conversion
+`productGrouping.ts` as an intentional compatibility wrapper. The conversion
 also removes unused Khmer-order constants from that module because initials and
 Khmer sorting are now owned by the shared `initials` helper.
 
@@ -391,7 +391,7 @@ Product page timeout constants and month options now live in one typed config,
 with source-inspection tests reading the implementation instead of the wrapper.
 
 Move 137 converts the product gallery helper to TypeScript while preserving
-`productGalleryHelpers.mjs` as an intentional compatibility wrapper. Gallery
+`productGalleryHelpers.ts` as an intentional compatibility wrapper. Gallery
 normalization, thumbnail state, public URL resolution, and lightbox clamping now
 live in one typed helper used by Products and product write payload builders.
 
@@ -451,7 +451,7 @@ Google Maps embed URL normalization stay centralized instead of duplicating
 editor sanitation behavior inside `CatalogPage.jsx`.
 
 Move 148 converts the portal language pack helper to TypeScript while
-preserving `portalLanguagePacks.mjs` as an intentional compatibility wrapper.
+preserving `portalLanguagePacks.ts` as an intentional compatibility wrapper.
 First-party language options, normalization, membership checks, and translated
 text lookup stay centralized instead of duplicating public portal language
 behavior across `CatalogPage.jsx` and portal i18n helpers.

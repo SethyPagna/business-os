@@ -570,7 +570,7 @@ Continue with Phase 8.4:
   and
   `ops/runtime/reports/phase84-product-scanning-actions-live-check-2026-05-18T07-37-56-183Z/report.json`.
   The thirteenth physical move placed product gallery helper functions at
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`; the
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`; the
   module now owns gallery normalization, product gallery fallback selection, and
   public product image URL resolution. Helper source tests, source checks,
   typecheck, production build, runtime health, Product page action live check,
@@ -661,7 +661,7 @@ Continue with Phase 8.4:
   `ops/runtime/reports/phase84-product-scanning-actions-live-check-2026-05-18T09-05-15-503Z/report.json`.
   The twenty-second organization move placed product lightbox state
   construction in
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`; the
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`; the
   module now also owns lightbox image URL resolution, empty-gallery handling,
   and safe start-index clamping. Focused helper tests, source checks,
   typecheck, production build, runtime health, Product page action live check,
@@ -671,7 +671,7 @@ Continue with Phase 8.4:
   and
   `ops/runtime/reports/phase84-product-scanning-actions-live-check-2026-05-18T09-14-18-477Z/report.json`.
   The twenty-third organization move placed product lightbox index update logic
-  in `frontend/src/components/products/helpers/productGalleryHelpers.mjs`; the
+  in `frontend/src/components/products/helpers/productGalleryHelpers.ts`; the
   module now also owns reusable lightbox index clamping and active lightbox
   index updates. `Products.jsx` delegates gallery index changes to that helper
   and no longer carries the disabled legacy `false && lightbox` overlay branch.
@@ -683,7 +683,7 @@ Continue with Phase 8.4:
   `ops/runtime/reports/phase84-product-scanning-actions-live-check-2026-05-18T09-22-03-500Z/report.json`.
   The twenty-fourth organization move placed product detail lightbox
   gallery-input fallback in
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`; the
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`; the
   module now owns the detail-modal decision to prefer a normalized clicked
   gallery or fall back to the clicked source image. Focused helper tests,
   source checks, typecheck, production build, runtime health, Product page
@@ -694,7 +694,7 @@ Continue with Phase 8.4:
   `ops/runtime/reports/phase84-product-scanning-actions-live-check-2026-05-18T09-29-01-475Z/report.json`.
   The twenty-fifth organization move placed product thumbnail state
   construction in
-  `frontend/src/components/products/helpers/productGalleryHelpers.mjs`; the
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`; the
   module now owns the normalized row gallery, `hasImage` flag, and first
   thumbnail path used by desktop and mobile product rows. Initial live
   verification exposed a stale removed callback dependency that crashed

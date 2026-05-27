@@ -1421,9 +1421,9 @@ Total files documented: **235**
 |---:|---|---:|---:|
 | 1 | `toNumber` | function | 66 |
 | 2 | `getImageGallery` | function | 71 |
-| 3 | `toImageName` | const arrow | 152 |
-| 4 | `toImageUrl` | const arrow | 153 |
-| 5 | `priceCsv` | const arrow | 154 |
+| 3 | `toImageName` | const arrow | 154 |
+| 4 | `toImageUrl` | const arrow | 155 |
+| 5 | `priceCsv` | const arrow | 156 |
 
 ### 3.79 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
 

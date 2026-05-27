@@ -254,15 +254,15 @@ the frontend utility suite. The language audit now lists both completed
 TypeScript slices.
 
 Move 115 completes the grouped-record TypeScript conversion. `groupedRecords.ts`
-now owns the shared time/alphabet grouping implementation, `groupedRecords.mjs`
-stays as the compatibility wrapper for existing imports, and `initials.d.mts`
-documents the typed boundary to the remaining `initials.mjs` helper. The slice
+now owns the shared time/alphabet grouping implementation, `groupedRecords.ts`
+stays as the compatibility wrapper for existing imports, and `retired initials declaration shim`
+documents the typed boundary to the remaining `initials.ts` helper. The slice
 also removes duplicated unused Khmer initial-order constants from
 `groupedRecords`.
 
 Move 116 completes the initials TypeScript conversion. `initials.ts` now owns
 Latin, numeric, symbol, and Khmer initial classification plus aggregation,
-`initials.mjs` remains as the stable import wrapper, and
+`initials.ts` remains as the stable import wrapper, and
 `initials.test.mjs` directly covers the helper instead of relying only on
 grouped-record/product-grouping callers.
 
@@ -281,8 +281,8 @@ tests.
 Move 119 completes the product grouping TypeScript conversion.
 `productGrouping.ts` now owns product family root resolution, same-name option
 grouping, variant ordering, stock/price rollups, and initial-letter sections,
-while `productGrouping.mjs` remains as the compatibility wrapper for Products,
-Inventory, POS, and existing focused tests. `productGrouping.d.mts` preserves a
+while `productGrouping.ts` remains as the compatibility wrapper for Products,
+Inventory, POS, and existing focused tests. `retired productGrouping declaration shim` preserves a
 typed public boundary for converted TypeScript callers.
 
 Move 120 completes the product display helper TypeScript conversion.
@@ -297,7 +297,7 @@ Move 121 completes the product filter/export helper TypeScript conversion.
 `productFilterHelpers.ts` now owns product search terms, branch quantity lookup,
 page filtering, and export-row construction, while `productFilterHelpers.mjs`
 remains as the compatibility wrapper for Products and focused tests. The slice
-also adds `groupedRecords.d.mts` so TypeScript component helpers can consume
+also adds `retired groupedRecords declaration shim` so TypeScript component helpers can consume
 the grouped-record wrapper with typecheck coverage intact.
 
 Move 122 completes the product menu helper TypeScript conversion.
@@ -312,7 +312,7 @@ Move 123 completes the product write helper TypeScript conversion.
 planning, stock adjustment deltas, transfer payloads, bulk update summaries,
 and bulk info/pricing updates, while `productWriteHelpers.mjs` remains as the
 compatibility wrapper for Products and focused tests. The slice also adds
-`productGalleryHelpers.d.mts` so the typed helper can keep using the existing
+`retired productGalleryHelpers declaration shim` so the typed helper can keep using the existing
 gallery helper boundary.
 
 Move 124 completes the product import planner TypeScript conversion.
@@ -398,7 +398,7 @@ action stability and loading timeout contracts stay anchored to one config.
 Move 137 completes the product gallery helper TypeScript conversion.
 `productGalleryHelpers.ts` now owns gallery normalization, thumbnail state,
 public image URL resolution, lightbox input fallback, and lightbox index
-clamping, while `productGalleryHelpers.mjs` remains as the compatibility
+clamping, while `productGalleryHelpers.ts` remains as the compatibility
 wrapper for Products, typed write helpers, and focused tests.
 
 Move 138 completes the product group view helper TypeScript conversion.
@@ -467,8 +467,8 @@ and focused portal editor tests.
 Move 148 completes the portal language pack helper TypeScript conversion.
 `portalLanguagePacks.ts` now owns first-party language options, language
 normalization, language membership checks, and translated text lookup, while
-`portalLanguagePacks.mjs` remains as the compatibility wrapper for catalog
-surfaces and focused portal vocabulary tests. `portalLanguagePacks.d.mts`
+`portalLanguagePacks.ts` remains as the compatibility wrapper for catalog
+surfaces and focused portal vocabulary tests. `retired portalLanguagePacks declaration shim`
 remains as the small declaration shim for TypeScript imports through that
 stable `.mjs` boundary.
 
