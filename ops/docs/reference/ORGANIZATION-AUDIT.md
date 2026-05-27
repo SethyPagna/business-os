@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-27T19:46:19.335Z
+Generated: 2026-05-27T19:57:35.296Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 623
+- Files scanned: 624
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -17,7 +17,7 @@ Generated: 2026-05-27T19:46:19.335Z
 | .js | 185 |
 | .mjs | 161 |
 | .jsx | 107 |
-| .ts | 82 |
+| .ts | 83 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -30,7 +30,7 @@ Generated: 2026-05-27T19:46:19.335Z
 
 | Area | Files |
 | --- | --- |
-| frontend/utils | 64 |
+| frontend/utils | 65 |
 | frontend/components/products | 47 |
 | ops/docs/reference | 30 |
 | backend/routes | 24 |
@@ -73,7 +73,7 @@ Generated: 2026-05-27T19:46:19.335Z
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3443 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2815 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2819 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/lang/km.json | 2715 | frontend/src/lang |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2365 | ops/docs/reference |

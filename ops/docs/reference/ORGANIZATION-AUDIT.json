@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 623,
+  "filesScanned": 624,
   "largeFiles": 71,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -32,7 +32,7 @@
   "largestAreas": [
     [
       "frontend/utils",
-      64
+      65
     ],
     [
       "frontend/components/products",
@@ -199,7 +199,7 @@
     "frontend/src/lang/en.json",
     "frontend/src/lang/km.json",
     "frontend/src/styles/main.css",
-    "frontend/src/utils/printReceipt.js",
+    "frontend/src/utils/printReceipt.ts",
     "frontend/src/web-api.js",
     "frontend/tests/actionStability.test.mjs",
     "frontend/tests/performanceLoadingUx.test.mjs",

@@ -4,7 +4,7 @@ Auto-generated symbol inventory for frontend files. Regenerate with `node ops/sc
 
 ## 1. Coverage Summary
 
-Total files documented: **231**
+Total files documented: **232**
 
 ## 2. Symbol Count by File
 
@@ -222,25 +222,26 @@ Total files documented: **231**
 | 210 | `frontend/src/utils/pricing.d.ts` | 0 |
 | 211 | `frontend/src/utils/pricing.js` | 0 |
 | 212 | `frontend/src/utils/pricing.ts` | 0 |
-| 213 | `frontend/src/utils/printReceipt.js` | 31 |
-| 214 | `frontend/src/utils/productBatches.ts` | 1 |
-| 215 | `frontend/src/utils/productGrouping.ts` | 9 |
-| 216 | `frontend/src/utils/publicAssetUrls.d.ts` | 0 |
-| 217 | `frontend/src/utils/publicAssetUrls.js` | 0 |
-| 218 | `frontend/src/utils/publicAssetUrls.ts` | 6 |
-| 219 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 |
-| 220 | `frontend/src/utils/scriptTypography.js` | 0 |
-| 221 | `frontend/src/utils/scriptTypography.ts` | 0 |
-| 222 | `frontend/src/utils/settingsRefresh.js` | 0 |
-| 223 | `frontend/src/utils/settingsRefresh.ts` | 1 |
-| 224 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
-| 225 | `frontend/src/web-api.js` | 32 |
-| 226 | `ops/scripts/frontend/verify-i18n.js` | 6 |
-| 227 | `ops/scripts/frontend/verify-performance.js` | 4 |
-| 228 | `ops/scripts/frontend/verify-ui.js` | 11 |
-| 229 | `frontend/vite.config.mjs` | 5 |
-| 230 | `frontend/postcss.config.mjs` | 0 |
-| 231 | `frontend/tailwind.config.mjs` | 0 |
+| 213 | `frontend/src/utils/printReceipt.js` | 0 |
+| 214 | `frontend/src/utils/printReceipt.ts` | 30 |
+| 215 | `frontend/src/utils/productBatches.ts` | 1 |
+| 216 | `frontend/src/utils/productGrouping.ts` | 9 |
+| 217 | `frontend/src/utils/publicAssetUrls.d.ts` | 0 |
+| 218 | `frontend/src/utils/publicAssetUrls.js` | 0 |
+| 219 | `frontend/src/utils/publicAssetUrls.ts` | 6 |
+| 220 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 |
+| 221 | `frontend/src/utils/scriptTypography.js` | 0 |
+| 222 | `frontend/src/utils/scriptTypography.ts` | 0 |
+| 223 | `frontend/src/utils/settingsRefresh.js` | 0 |
+| 224 | `frontend/src/utils/settingsRefresh.ts` | 1 |
+| 225 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
+| 226 | `frontend/src/web-api.js` | 32 |
+| 227 | `ops/scripts/frontend/verify-i18n.js` | 6 |
+| 228 | `ops/scripts/frontend/verify-performance.js` | 4 |
+| 229 | `ops/scripts/frontend/verify-ui.js` | 11 |
+| 230 | `frontend/vite.config.mjs` | 5 |
+| 231 | `frontend/postcss.config.mjs` | 0 |
+| 232 | `frontend/tailwind.config.mjs` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -2620,47 +2621,50 @@ Total files documented: **231**
 
 ### 3.213 `frontend/src/utils/printReceipt.js`
 
+- No top-level named function/class symbols detected.
+
+### 3.214 `frontend/src/utils/printReceipt.ts`
+
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `parsePrintNumber` | function | 10 |
-| 2 | `cloneElementWithInlineStyles` | function | 83 |
-| 3 | `escapeHtml` | function | 129 |
-| 4 | `blobToDataUrl` | function | 138 |
-| 5 | `mapReceiptAssets` | function | 147 |
-| 6 | `inlineImageNodeSources` | function | 161 |
-| 7 | `extractUrlsFromCssValue` | function | 184 |
-| 8 | `inlineStyleAssetUrls` | function | 190 |
-| 9 | `normalizePrintableRoot` | function | 224 |
-| 10 | `mmToPt` | function | 241 |
-| 11 | `dataUrlToBytes` | function | 245 |
-| 12 | `joinPdfChunks` | function | 255 |
-| 13 | `buildPdfStream` | function | 266 |
-| 14 | `buildSingleImagePdf` | function | 275 |
-| 15 | `escapePdfText` | function | 313 |
-| 16 | `wrapTextLine` | function | 320 |
-| 17 | `buildTextOnlyPdf` | function | 339 |
-| 18 | `buildReceiptFileName` | function | 392 |
-| 19 | `createTextOnlyReceiptCanvas` | function | 403 |
-| 20 | `canvasToPngBlob` | function | 444 |
-| 21 | `waitForElementAssets` | function | 457 |
-| 22 | `renderElementToCanvas` | function | 486 |
-| 23 | `withReceiptElement` | function | 552 |
-| 24 | `createPrintableReceiptMarkup` | function | 592 |
-| 25 | `buildPrintablePreviewDocument` | function | 607 |
-| 26 | `attachPrintablePreviewActions` | function | 754 |
-| 27 | `schedulePrint` | const arrow | 763 |
-| 28 | `downloadBlob` | function | 781 |
-| 29 | `buildTextOnlyReceiptBlob` | const arrow | 829 |
-| 30 | `renderPdfBlob` | const arrow | 843 |
-| 31 | `extractReceiptLines` | function | 899 |
+| 1 | `parsePrintNumber` | function | 42 |
+| 2 | `cloneElementWithInlineStyles` | function | 115 |
+| 3 | `escapeHtml` | function | 161 |
+| 4 | `blobToDataUrl` | function | 170 |
+| 5 | `inlineImageNodeSources` | function | 193 |
+| 6 | `extractUrlsFromCssValue` | function | 216 |
+| 7 | `inlineStyleAssetUrls` | function | 222 |
+| 8 | `normalizePrintableRoot` | function | 256 |
+| 9 | `mmToPt` | function | 273 |
+| 10 | `dataUrlToBytes` | function | 277 |
+| 11 | `bytesToBlobPart` | function | 287 |
+| 12 | `joinPdfChunks` | function | 291 |
+| 13 | `buildPdfStream` | function | 302 |
+| 14 | `buildSingleImagePdf` | function | 311 |
+| 15 | `escapePdfText` | function | 349 |
+| 16 | `wrapTextLine` | function | 356 |
+| 17 | `buildTextOnlyPdf` | function | 375 |
+| 18 | `buildReceiptFileName` | function | 428 |
+| 19 | `createTextOnlyReceiptCanvas` | function | 439 |
+| 20 | `canvasToPngBlob` | function | 480 |
+| 21 | `waitForElementAssets` | function | 493 |
+| 22 | `renderElementToCanvas` | function | 522 |
+| 23 | `createPrintableReceiptMarkup` | function | 633 |
+| 24 | `buildPrintablePreviewDocument` | function | 648 |
+| 25 | `attachPrintablePreviewActions` | function | 795 |
+| 26 | `schedulePrint` | const arrow | 804 |
+| 27 | `downloadBlob` | function | 822 |
+| 28 | `buildTextOnlyReceiptBlob` | const arrow | 870 |
+| 29 | `renderPdfBlob` | const arrow | 884 |
+| 30 | `extractReceiptLines` | function | 940 |
 
-### 3.214 `frontend/src/utils/productBatches.ts`
+### 3.215 `frontend/src/utils/productBatches.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeBranchId` | function | 26 |
 
-### 3.215 `frontend/src/utils/productGrouping.ts`
+### 3.216 `frontend/src/utils/productGrouping.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2674,15 +2678,15 @@ Total files documented: **231**
 | 8 | `compareProductsWithinGroup` | function | 140 |
 | 9 | `resolveGroupKey` | function | 155 |
 
-### 3.216 `frontend/src/utils/publicAssetUrls.d.ts`
+### 3.217 `frontend/src/utils/publicAssetUrls.d.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.217 `frontend/src/utils/publicAssetUrls.js`
+### 3.218 `frontend/src/utils/publicAssetUrls.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.218 `frontend/src/utils/publicAssetUrls.ts`
+### 3.219 `frontend/src/utils/publicAssetUrls.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2693,35 +2697,35 @@ Total files documented: **231**
 | 5 | `getSafeCurrentOrigin` | function | 42 |
 | 6 | `api` | const arrow | 57 |
 
-### 3.219 `frontend/src/utils/receiptAppliedConfig.ts`
+### 3.220 `frontend/src/utils/receiptAppliedConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `parseObject` | function | 67 |
 
-### 3.220 `frontend/src/utils/scriptTypography.js`
+### 3.221 `frontend/src/utils/scriptTypography.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.221 `frontend/src/utils/scriptTypography.ts`
+### 3.222 `frontend/src/utils/scriptTypography.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.222 `frontend/src/utils/settingsRefresh.js`
+### 3.223 `frontend/src/utils/settingsRefresh.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.223 `frontend/src/utils/settingsRefresh.ts`
+### 3.224 `frontend/src/utils/settingsRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeSettingKeys` | function | 62 |
 
-### 3.224 `frontend/src/utils/settingsWriteOptions.ts`
+### 3.225 `frontend/src/utils/settingsWriteOptions.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.225 `frontend/src/web-api.js`
+### 3.226 `frontend/src/web-api.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2758,7 +2762,7 @@ Total files documented: **231**
 | 31 | `forwardServiceWorkerOutboxEvent` | function | 547 |
 | 32 | `forwardServiceWorkerAppEvent` | function | 641 |
 
-### 3.226 `ops/scripts/frontend/verify-i18n.js`
+### 3.227 `ops/scripts/frontend/verify-i18n.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2769,7 +2773,7 @@ Total files documented: **231**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.227 `ops/scripts/frontend/verify-performance.js`
+### 3.228 `ops/scripts/frontend/verify-performance.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2778,7 +2782,7 @@ Total files documented: **231**
 | 3 | `trackedFiles` | function | 37 |
 | 4 | `assert` | function | 47 |
 
-### 3.228 `ops/scripts/frontend/verify-ui.js`
+### 3.229 `ops/scripts/frontend/verify-ui.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2794,7 +2798,7 @@ Total files documented: **231**
 | 10 | `printAuditSummary` | function | 202 |
 | 11 | `main` | function | 220 |
 
-### 3.229 `frontend/vite.config.mjs`
+### 3.230 `frontend/vite.config.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2804,11 +2808,11 @@ Total files documented: **231**
 | 4 | `shouldDeferModulePreload` | function | 112 |
 | 5 | `manualChunks` | function | 116 |
 
-### 3.230 `frontend/postcss.config.mjs`
+### 3.231 `frontend/postcss.config.mjs`
 
 - No top-level named function/class symbols detected.
 
-### 3.231 `frontend/tailwind.config.mjs`
+### 3.232 `frontend/tailwind.config.mjs`
 
 - No top-level named function/class symbols detected.
 
