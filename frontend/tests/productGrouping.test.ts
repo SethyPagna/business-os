@@ -3,11 +3,13 @@ import { buildProductGroups, buildProductGroupSections, getNameInitialSection, n
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
-  } catch (error) {
+  } catch (error: unknown) {
     failed += 1
     console.error(`FAIL ${name}`)
     console.error(error)
@@ -80,16 +82,16 @@ await runTest('buildProductGroups merges same-name roots into one option group',
 
 await runTest('buildProductGroupSections supports Khmer initial sections', () => {
   const products = [
-    { id: 1, name: 'ក្រែមលាបមុខ', stock_quantity: 1, selling_price_usd: 5 },
+    { id: 1, name: '\u1780\u17D2\u179A\u17C1\u1798\u179B\u17B6\u1794\u1798\u17BB\u1781', stock_quantity: 1, selling_price_usd: 5 },
     { id: 2, name: 'Alpha', stock_quantity: 1, selling_price_usd: 6 },
-    { id: 3, name: 'សាប៊ូ', stock_quantity: 1, selling_price_usd: 7 },
+    { id: 3, name: '\u179F\u17B6\u1794\u17CA\u17BC', stock_quantity: 1, selling_price_usd: 7 },
   ]
   const sections = buildProductGroupSections(products, {
     productsById: new Map(products.map((product) => [product.id, product])),
   })
 
-  assert.equal(getNameInitialSection('ក្រែមលាបមុខ'), 'ក')
-  assert.deepEqual(sections.map((section) => section.label), ['A', 'ក', 'ស'])
+  assert.equal(getNameInitialSection('\u1780\u17D2\u179A\u17C1\u1798\u179B\u17B6\u1794\u1798\u17BB\u1781'), '\u1780')
+  assert.deepEqual(sections.map((section) => section.label), ['A', '\u1780', '\u179F'])
 })
 
 await runTest('buildProductGroups expands a filtered child back to the full product family', () => {

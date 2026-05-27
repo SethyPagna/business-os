@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 397 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 430 in this file.
 
 ## Goal
 
@@ -8,19 +8,24 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 
 ## Current Shape
 
-- Frontend source: 178 files under `frontend/src`.
-  - 106 `.jsx`
+- Frontend source: 261 files under `frontend/src`.
+  - 107 `.jsx`
   - 36 `.js`
-  - 26 `.mjs`
-  - 4 `.ts`
+  - 32 `.mjs`
+  - 86 `.ts`
   - 1 `.css`
-- Backend source: 86 files under `backend/src`.
-  - 82 `.js`
+- Frontend tests: 76 focused test files under `frontend/tests`.
+  - 71 `.mjs`
+  - 5 `.ts`
+- Backend source: 87 files under `backend/src`.
+  - 83 `.js`
   - 1 `.sql`
   - 3 `.md`
-- Runtime/ops scripts: mostly `.mjs`, `.js`, and `.ps1` under `ops/scripts`.
-- TypeScript is currently strict but narrow: `frontend/tsconfig.json` includes only `src/types/**/*.ts` and `src/utils/**/*.ts`.
+- Backend tests: 50 `.js` files under `backend/test`.
+- Runtime/ops scripts: 44 `.mjs`, 16 `.js`, 8 `.ps1`, and 1 `.sql` under `ops/scripts`.
+- TypeScript is strict for converted frontend source and the first converted `frontend/tests/**/*.ts` files.
 - React type packages are not currently declared in `frontend/package.json`, so large `.jsx` to `.tsx` conversion needs a dependency/setup phase first.
+- End-state target: no first-party `.js`, `.jsx`, `.mjs`, or `.cjs` remains outside generated/runtime/vendor folders. Every conversion slice must update imports, scripts, docs, and verification references before deleting the old path.
 
 ## Organization Principles
 
@@ -1062,13 +1067,13 @@ Decision rule:
     `convertedTypeScriptSlices`.
 116. Convert initials helper to TypeScript. Done:
     The shared alphabet/Khmer initial classification implementation moved to
-    `frontend/src/utils/initials.ts`, while
-    `frontend/src/utils/initials.ts` remains as the stable compatibility
-    wrapper for products, POS, inventory, catalog, grouping helpers, and tests.
-    Added `frontend/tests/initials.test.mjs` to cover Latin, Khmer, numeric,
+    `frontend/src/utils/initials.ts`, while products, POS, inventory, catalog,
+    grouping helpers, and tests now import the TypeScript implementation
+    directly.
+    Added `frontend/tests/initials.test.ts` to cover Latin, Khmer, numeric,
     symbol, aggregation, product-derived options, and sort ordering behavior.
-    `frontend/src/utils/initials.ts` now documents the public `.mjs` wrapper
-    boundary used by converted TypeScript callers.
+    `frontend/src/utils/initials.ts` now documents the direct TypeScript
+    boundary used by converted callers.
 117. Convert media upload helper to TypeScript. Done:
     The upload-state and media cache-busting helper moved to
     `frontend/src/utils/mediaUpload.ts`, while
@@ -3425,6 +3430,17 @@ Decision rule:
     unchanged. A backend source scan now reports no callback-chain hits under
     `backend/src`. This was a backend parser/runtime cleanup only; no folder
     move, schema migration, or language conversion was needed.
+430. Start frontend test-runner TypeScript conversion. Done:
+    `frontend/tests/initials.test.ts`, `groupedRecords.test.ts`,
+    `productGrouping.test.ts`, `productGalleryHelpers.test.ts`, and
+    `portalLanguagePacks.test.ts` now run directly through Node 24's native
+    TypeScript stripping and are included in `frontend/tsconfig.json`.
+    `frontend/package.json` now invokes those `.ts` tests, `@types/node` is
+    pinned to the Node 24 line for test globals, and the product grouping test
+    now uses valid Khmer string literals instead of mojibake fixtures. This is
+    the first test-runner slice toward the no-JavaScript end state; the
+    remaining `.mjs` tests stay on the old path until each batch is typed and
+    script references are updated.
 
 ## Safety Gates
 

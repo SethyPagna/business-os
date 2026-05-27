@@ -291,7 +291,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\portalLanguagePacks.test.mjs',
+      'node frontend\\tests\\portalLanguagePacks.test.ts',
       'node frontend\\tests\\portalFaqVocabulary.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -365,7 +365,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\groupedRecords.test.mjs',
+      'node frontend\\tests\\groupedRecords.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -376,7 +376,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\initials.test.mjs',
+      'node frontend\\tests\\initials.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -407,7 +407,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\productGrouping.test.mjs',
+      'node frontend\\tests\\productGrouping.test.ts',
       'node frontend\\tests\\posCore.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -463,7 +463,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/utils/publicAssetUrls.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\productGalleryHelpers.test.mjs',
+      'node frontend\\tests\\productGalleryHelpers.test.ts',
       'node frontend\\tests\\productWriteHelpers.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],

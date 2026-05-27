@@ -2088,8 +2088,8 @@ Cleanup checkpoint:
   duplicated Khmer initial-order constants from the grouping helper.
 - The initials helper slice is now complete:
   `frontend/src/utils/initials.ts` owns alphabet/Khmer initial classification,
-  `initials.ts` remains as the compatibility wrapper for existing imports, and
-  `frontend/tests/initials.test.mjs` covers classification, aggregation,
+  callers import the TypeScript implementation directly, and
+  `frontend/tests/initials.test.ts` covers classification, aggregation,
   product-derived options, and stable sort order. The language audit records the
   implementation, wrapper, declaration, and proof commands as a completed
   TypeScript slice.
@@ -4914,3 +4914,17 @@ Move 439 status:
   now reports no `map()`, `filter()`, `forEach()`, `reduce()`, `find()`,
   `some()`, `every()`, `flatMap()`, or `Array.from()` hits under
   `backend/src`.
+
+Move 440 status:
+- Move 440 starts the frontend test-runner TypeScript conversion. The first
+  five focused helper tests now live at `frontend/tests/initials.test.ts`,
+  `frontend/tests/groupedRecords.test.ts`,
+  `frontend/tests/productGrouping.test.ts`,
+  `frontend/tests/productGalleryHelpers.test.ts`, and
+  `frontend/tests/portalLanguagePacks.test.ts`. `frontend/tsconfig.json`
+  typechecks converted tests, `frontend/package.json` runs the `.ts` files
+  directly with Node 24, and `@types/node` is pinned to the Node 24 line. The
+  product grouping test also replaces mojibake Khmer fixtures with valid Khmer
+  Unicode escapes. This reduces the remaining first-party `.mjs` count while
+  keeping the broader test suite on its existing path until each next batch is
+  typed, imported, and verified.
