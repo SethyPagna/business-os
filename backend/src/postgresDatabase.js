@@ -29,7 +29,9 @@ function loadPgNative() {
 
 function normalizeQueryRows(rows) {
   if (!Array.isArray(rows)) return []
-  return rows.map(coerceRow)
+  const normalized = []
+  for (const row of rows) normalized.push(coerceRow(row))
+  return normalized
 }
 
 function buildRunResult(rows = []) {
@@ -48,6 +50,16 @@ function normalizeStatementArgs(args = []) {
   if (Array.isArray(value)) return value
   if (value && typeof value === 'object') return value
   return [value]
+}
+
+function splitSqlStatements(sql = '') {
+  const statements = []
+  const parts = String(sql || '').split(/;\s*(?=(?:[^']*'[^']*')*[^']*$)/)
+  for (const part of parts) {
+    const statement = part.trim()
+    if (statement) statements.push(statement)
+  }
+  return statements
 }
 
 class PostgresCompatStatement {
@@ -95,14 +107,11 @@ class PostgresCompatDatabase {
   }
 
   exec(sql) {
-    const statements = String(sql || '')
-      .split(/;\s*(?=(?:[^']*'[^']*')*[^']*$)/)
-      .map((statement) => statement.trim())
-      .filter(Boolean)
-    statements.forEach((statement) => {
+    const statements = splitSqlStatements(sql)
+    for (const statement of statements) {
       const translated = translateSql(statement, [], { mode: 'exec' })
       this.queryRows(translated.sql, translated.values)
-    })
+    }
   }
 
   transaction(fn) {
@@ -154,6 +163,56 @@ class PostgresCompatDatabase {
       'CREATE EXTENSION IF NOT EXISTS unaccent',
       'CREATE EXTENSION IF NOT EXISTS btree_gin',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_key_unique ON settings(key)',
+      `DO $$
+      BEGIN
+        IF to_regclass('public.settings') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'public.settings'::regclass
+              AND contype = 'p'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM settings
+            WHERE key IS NULL OR trim(key) = ''
+            LIMIT 1
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM settings
+            GROUP BY key
+            HAVING COUNT(*) > 1
+            LIMIT 1
+          )
+        THEN
+          ALTER TABLE settings ALTER COLUMN key SET NOT NULL;
+          ALTER TABLE settings ADD CONSTRAINT settings_pkey PRIMARY KEY (key);
+        END IF;
+      END $$`,
+      `DO $$
+      BEGIN
+        IF to_regclass('public.import_jobs') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'public.import_jobs'::regclass
+              AND contype = 'p'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM import_jobs
+            WHERE id IS NULL OR trim(id) = ''
+            LIMIT 1
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM import_jobs
+            GROUP BY id
+            HAVING COUNT(*) > 1
+            LIMIT 1
+          )
+        THEN
+          ALTER TABLE import_jobs ALTER COLUMN id SET NOT NULL;
+          ALTER TABLE import_jobs ADD CONSTRAINT import_jobs_pkey PRIMARY KEY (id);
+        END IF;
+      END $$`,
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_roles_code_unique ON roles(code) WHERE code IS NOT NULL',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(lower(trim(username))) WHERE deleted_at IS NULL',
       'ALTER TABLE users ADD COLUMN IF NOT EXISTS google_subject TEXT',
@@ -296,6 +355,7 @@ class PostgresCompatDatabase {
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_rfid_tags_epc_unique ON rfid_tags(epc_id)',
       'CREATE INDEX IF NOT EXISTS idx_rfid_tags_product_branch ON rfid_tags(product_id, branch_id, status)',
       'CREATE INDEX IF NOT EXISTS idx_rfid_events_session_epc ON rfid_events(session_id, epc_id, seen_at DESC)',
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_rfid_events_dedupe_key_unique ON rfid_events(dedupe_key) WHERE dedupe_key IS NOT NULL AND dedupe_key <> ''",
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_rfid_session_items_unique ON rfid_session_items(session_id, epc_id)',
       `CREATE TABLE IF NOT EXISTS system_jobs (
         id TEXT PRIMARY KEY,
@@ -321,6 +381,7 @@ class PostgresCompatDatabase {
       'CREATE INDEX IF NOT EXISTS idx_products_parent_pg ON products (parent_id, is_group)',
       'CREATE INDEX IF NOT EXISTS idx_products_active_stock_name_pg ON products (is_active, stock_quantity, name)',
       'CREATE INDEX IF NOT EXISTS idx_products_supplier_lower_pg ON products (lower(supplier))',
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_client_request_unique_pg ON products(client_request_id) WHERE client_request_id IS NOT NULL AND client_request_id <> ''",
       'CREATE INDEX IF NOT EXISTS idx_branch_stock_branch_qty_product_pg ON branch_stock(branch_id, quantity DESC, product_id)',
       'CREATE INDEX IF NOT EXISTS idx_inventory_movements_product_created_pg ON inventory_movements(product_id, created_at DESC, id DESC)',
       'CREATE INDEX IF NOT EXISTS idx_inventory_movements_created_pg ON inventory_movements(created_at DESC, id DESC)',
@@ -328,20 +389,30 @@ class PostgresCompatDatabase {
       'CREATE INDEX IF NOT EXISTS idx_inventory_movements_user_created_pg ON inventory_movements(user_id, created_at DESC, id DESC)',
       'CREATE INDEX IF NOT EXISTS idx_sales_created_pg ON sales(created_at DESC, id DESC)',
       'CREATE INDEX IF NOT EXISTS idx_sales_status_created_pg ON sales(sale_status, created_at DESC, id DESC)',
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_client_request_unique_pg ON sales(client_request_id) WHERE client_request_id IS NOT NULL AND client_request_id <> ''",
       'CREATE INDEX IF NOT EXISTS idx_sale_items_product_branch_sale_pg ON sale_items(product_id, branch_id, sale_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id_pg ON sale_items(sale_id, id)',
       'CREATE INDEX IF NOT EXISTS idx_returns_created_pg ON returns(created_at DESC, id DESC)',
       'CREATE INDEX IF NOT EXISTS idx_returns_status_created_pg ON returns(status, created_at DESC, id DESC)',
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_returns_client_request_unique_pg ON returns(client_request_id) WHERE client_request_id IS NOT NULL AND client_request_id <> ''",
+      'CREATE INDEX IF NOT EXISTS idx_return_items_return_id_pg ON return_items(return_id, id)',
+      'CREATE INDEX IF NOT EXISTS idx_product_images_product_sort_pg ON product_images(product_id, sort_order, id)',
+      'CREATE INDEX IF NOT EXISTS idx_import_job_files_job_kind_pg ON import_job_files(job_id, kind, id)',
+      'CREATE INDEX IF NOT EXISTS idx_import_job_errors_job_batch_pg ON import_job_errors(job_id, batch_id, id)',
       'CREATE INDEX IF NOT EXISTS idx_customers_membership_lower_pg ON customers(lower(membership_number))',
       'CREATE INDEX IF NOT EXISTS idx_customer_share_submissions_status_created_pg ON customer_share_submissions(status, created_at DESC, id DESC)',
       'CREATE INDEX IF NOT EXISTS idx_action_history_created_pg ON action_history(created_at DESC, id DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_action_history_scope_updated_pg ON action_history(scope, updated_at DESC, id DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_action_history_scope_user_updated_pg ON action_history(scope, created_by_id, updated_at DESC, id DESC)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sessions_token_hash_unique_pg ON user_sessions(token_hash)',
     ]
-    statements.forEach((statement) => {
+    for (const statement of statements) {
       try {
         this.queryRows(statement)
       } catch (error) {
         console.warn(`[postgres] schema/index check skipped for "${statement.slice(0, 80)}": ${error?.message || error}`)
       }
-    })
+    }
     this.ensureDefaultSeedData()
   }
 
@@ -413,7 +484,7 @@ class PostgresCompatDatabase {
       ['Manager', 'manager', 0, DEFAULT_ROLE_PERMISSIONS.manager],
       ['Employee', 'employee', 0, DEFAULT_ROLE_PERMISSIONS.employee],
     ]
-    roleRows.forEach(([name, code, isSystem, permissions]) => {
+    for (const [name, code, isSystem, permissions] of roleRows) {
       const existingRole = this.queryRows('SELECT id, code FROM roles WHERE code = $1 LIMIT 1', [code])[0]
       if (existingRole?.id) {
         this.queryRows(`
@@ -433,7 +504,7 @@ class PostgresCompatDatabase {
           VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
         `, [name, code, isSystem, JSON.stringify(permissions || {})])
       }
-    })
+    }
 
     const adminRole = this.queryRows("SELECT id FROM roles WHERE code = 'admin' LIMIT 1")[0]
     const existingAdmin = this.queryRows("SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1")[0]

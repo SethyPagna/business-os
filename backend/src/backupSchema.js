@@ -1,6 +1,6 @@
 'use strict'
 
-const BACKUP_VERSION = 12
+const BACKUP_VERSION = 13
 
 const BACKUP_TABLES = [
   'categories',
@@ -11,15 +11,20 @@ const BACKUP_TABLES = [
   'products',
   'product_images',
   'branch_stock',
+  'product_batches',
+  'branch_batch_stock',
   'customers',
   'suppliers',
   'delivery_contacts',
   'sales',
   'sale_items',
+  'sale_item_batch_allocations',
   'returns',
   'return_items',
+  'return_item_batch_allocations',
   'inventory_movements',
   'stock_transfers',
+  'stock_row_moves',
   'settings',
   'custom_fields',
   'custom_tables',
@@ -38,12 +43,17 @@ const BACKUP_TABLES = [
 ]
 
 const BACKUP_CLEAR_ORDER = [
+  'return_item_batch_allocations',
   'return_items',
   'returns',
+  'sale_item_batch_allocations',
   'sale_items',
   'sales',
+  'stock_row_moves',
   'inventory_movements',
   'stock_transfers',
+  'branch_batch_stock',
+  'product_batches',
   'branch_stock',
   'product_images',
   'products',
@@ -74,20 +84,24 @@ const BACKUP_CLEAR_ORDER = [
 
 const NON_BACKUP_TABLES = [
   'verification_codes',
+  'system_jobs',
 ]
 
 function countRowsByTable(tables = {}) {
-  return BACKUP_TABLES.reduce((accumulator, tableName) => {
+  const counts = {}
+  for (const tableName of BACKUP_TABLES) {
     const rows = Array.isArray(tables?.[tableName]) ? tables[tableName] : []
-    accumulator[tableName] = rows.length
-    return accumulator
-  }, {})
+    counts[tableName] = rows.length
+  }
+  return counts
 }
 
 function countCustomTableRows(customTableRows = {}) {
-  return Object.values(customTableRows || {}).reduce((total, rows) => (
-    total + (Array.isArray(rows) ? rows.length : 0)
-  ), 0)
+  let total = 0
+  for (const rows of Object.values(customTableRows || {})) {
+    total += Array.isArray(rows) ? rows.length : 0
+  }
+  return total
 }
 
 function buildBackupSummary({ tables = {}, uploads = [], customTableRows = {} } = {}) {
@@ -96,11 +110,13 @@ function buildBackupSummary({ tables = {}, uploads = [], customTableRows = {} } 
 }
 
 function buildBackupSummaryFromCounts({ tableCounts = {}, uploads = [], customTableRows = {} } = {}) {
-  const normalizedCounts = BACKUP_TABLES.reduce((accumulator, tableName) => {
-    accumulator[tableName] = Math.max(0, Number(tableCounts?.[tableName] || 0) || 0)
-    return accumulator
-  }, {})
-  const tableRowCount = Object.values(normalizedCounts).reduce((total, count) => total + count, 0)
+  const normalizedCounts = {}
+  let tableRowCount = 0
+  for (const tableName of BACKUP_TABLES) {
+    const count = Math.max(0, Number(tableCounts?.[tableName] || 0) || 0)
+    normalizedCounts[tableName] = count
+    tableRowCount += count
+  }
   const customTableCount = Object.keys(customTableRows || {}).length
   const customTableRowCount = countCustomTableRows(customTableRows)
   const uploadCount = Array.isArray(uploads) ? uploads.length : 0

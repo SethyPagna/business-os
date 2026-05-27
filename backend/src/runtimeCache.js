@@ -114,6 +114,14 @@ async function deleteByPrefix(prefix) {
   return removed
 }
 
+async function deletePrefixesInOrder(prefixes) {
+  let removed = 0
+  for (const prefix of prefixes) {
+    removed += Number(await deleteByPrefix(prefix) || 0)
+  }
+  return removed
+}
+
 function prefixesForChannel(channel) {
   const value = String(channel || '').trim().toLowerCase()
   if (!value) return []
@@ -138,10 +146,9 @@ function prefixesForChannel(channel) {
 async function invalidateForChannel(channel) {
   const prefixes = prefixesForChannel(channel)
   if (!prefixes.length) return { removed: 0, prefixes: [] }
-  const removed = await Promise.all(prefixes.map((prefix) => deleteByPrefix(prefix)))
   return {
     prefixes,
-    removed: removed.reduce((sum, count) => sum + Number(count || 0), 0),
+    removed: await deletePrefixesInOrder(prefixes),
   }
 }
 

@@ -94,12 +94,24 @@ runTest('startup creates read-path indexes for search and movement history', () 
   for (const indexName of [
     'idx_products_active_stock_name_pg',
     'idx_products_supplier_lower_pg',
+    'idx_products_client_request_unique_pg',
     'idx_branch_stock_branch_qty_product_pg',
     'idx_inventory_movements_branch_created_pg',
     'idx_inventory_movements_user_created_pg',
     'idx_sales_status_created_pg',
+    'idx_sales_client_request_unique_pg',
     'idx_sale_items_product_branch_sale_pg',
+    'idx_sale_items_sale_id_pg',
+    'idx_returns_client_request_unique_pg',
+    'idx_return_items_return_id_pg',
+    'idx_product_images_product_sort_pg',
+    'idx_import_job_files_job_kind_pg',
+    'idx_import_job_errors_job_batch_pg',
     'idx_customers_membership_lower_pg',
+    'idx_action_history_scope_updated_pg',
+    'idx_action_history_scope_user_updated_pg',
+    'idx_user_sessions_token_hash_unique_pg',
+    'idx_rfid_events_dedupe_key_unique',
   ]) {
     assert.match(source, new RegExp(indexName))
   }

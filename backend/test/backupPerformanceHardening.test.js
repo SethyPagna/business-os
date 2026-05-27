@@ -41,6 +41,9 @@ runTest('backup package validation uses streaming checksums for package files', 
   assert.match(source, /function\s+sha256File\(/)
   assert.match(source, /fs\.createReadStream\(filePath\)/)
   assert.match(source, /async\s+function\s+validateLocalBackupPackage/)
+  assert.match(source, /BACKUP_TABLE_CHUNK_SIZE\s*=\s*500/)
+  assert.match(source, /WHERE id > \? ORDER BY id ASC LIMIT \?/)
+  assert.match(source, /lastId\s*=\s*nextLastId !== undefined && nextLastId !== null \? nextLastId : null/)
   assert.doesNotMatch(source, /sha256\(fs\.readFileSync\(filePath\)\)/)
   assert.match(source, /writeJsonLinesFileWithChecksum/)
   assert.match(source, /await\s+pipeline\(object\.body,\s*localStream\)/)
@@ -120,6 +123,36 @@ runTest('backup version listing reads enough objects for recent package pages an
   assert.match(objectStoreSource, /Cloudflare R2 API fallback is not configured/)
   assert.match(objectStoreSource, /shouldFallbackToR2Api\(error\)/)
 })
+
+  runTest('backup package retention keeps local versions bounded and prunes R2 mirrors', () => {
+    const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+    const automation = fs.readFileSync(path.join(__dirname, '../../ops/scripts/runtime/storage/prune-storage.mjs'), 'utf8')
+    const removedWrapperPath = path.join(
+      __dirname,
+      '../../ops/scripts/runtime',
+      ['prune', 'storage.mjs'].join('-'),
+    )
+    assert.match(source, /DEFAULT_LOCAL_BACKUP_KEEP_LATEST/)
+    assert.match(source, /DEFAULT_REMOTE_BACKUP_KEEP_LATEST/)
+    assert.match(source, /function\s+planBackupPackageRetention/)
+    assert.match(source, /async\s+function\s+pruneLocalBackupVersions/)
+  assert.match(source, /async\s+function\s+pruneRemoteBackupVersions/)
+  assert.match(source, /deleteObjects\(keysToDelete\)/)
+  assert.match(source, /pruneBackupVersions\(\{\s*rootDir:\s*destinationDir/)
+  assert.match(automation, /--reports-keep/)
+  assert.match(automation, /--recovery-reports-keep/)
+  assert.match(automation, /--local-backups-keep/)
+    assert.match(automation, /--remote-backups-keep/)
+    assert.match(automation, /--docker-safe-prune/)
+    assert.match(automation, /command:\s*'docker',\s*args:\s*\['container', 'prune', '-f'\]/)
+    assert.match(automation, /command:\s*'docker',\s*args:\s*\['builder', 'prune', '-f'\]/)
+    assert.match(automation, /Volumes and images are never pruned/)
+    assert.doesNotMatch(automation, /docker', \['volume', 'prune'/)
+    assert.doesNotMatch(automation, /docker', \['system', 'prune'/)
+    assert.match(automation, /ops', 'runtime', 'recovery-reports'/)
+    assert.match(automation, /business-os-data', 'organizations'/)
+    assert.equal(fs.existsSync(removedWrapperPath), false)
+  })
 
 runTest('backup packages complete locally when remote mirror upload is slow', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')

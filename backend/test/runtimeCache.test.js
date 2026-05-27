@@ -15,6 +15,7 @@ process.env._BOS_CONFIG_LOGGED = '1'
 const {
   getJson,
   getRuntimeCacheStatus,
+  invalidateForChannel,
   setJson,
 } = require('../src/runtimeCache')
 
@@ -37,6 +38,18 @@ async function main() {
     assert.equal(status.enabled, false)
     assert.equal(await getJson('portal:config'), null)
     assert.equal(await setJson('portal:config', { ok: true }, 5), false)
+    assert.deepEqual(await invalidateForChannel('products'), {
+      prefixes: ['portal:', 'products:', 'inventory:', 'dashboard:'],
+      removed: 0,
+    })
+  })
+
+  await runTest('runtime cache invalidation scans prefixes in order', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../src/runtimeCache.js'), 'utf8')
+    assert.match(source, /async function deletePrefixesInOrder\(prefixes\)/)
+    assert.match(source, /for \(const prefix of prefixes\)/)
+    assert.match(source, /removed: await deletePrefixesInOrder\(prefixes\)/)
+    assert.doesNotMatch(source, /Promise\.all\(prefixes\.map\(\(prefix\) => deleteByPrefix\(prefix\)\)\)/)
   })
 }
 

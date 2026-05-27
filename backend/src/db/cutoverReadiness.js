@@ -68,9 +68,10 @@ function analyzeFile({ repoRoot, filePath }) {
   const source = fs.readFileSync(filePath, 'utf8')
   const lines = source.split(/\r?\n/)
   const blockers = []
-  lines.forEach((line, index) => {
-    FORBIDDEN_PATTERNS.forEach((pattern) => {
-      if (!pattern.regex.test(line)) return
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    for (const pattern of FORBIDDEN_PATTERNS) {
+      if (!pattern.regex.test(line)) continue
       blockers.push({
         file: relativePath,
         line: index + 1,
@@ -78,26 +79,47 @@ function analyzeFile({ repoRoot, filePath }) {
         description: pattern.description,
         snippet: line.trim().slice(0, 240),
       })
-    })
-  })
+    }
+  }
   return blockers
+}
+
+function incrementCount(map, key) {
+  map.set(key, (map.get(key) || 0) + 1)
+}
+
+function mapCountsToRows(map, keyName) {
+  const rows = []
+  for (const [key, count] of map.entries()) {
+    rows.push({ [keyName]: key, count })
+  }
+  return rows
 }
 
 function summarizeBlockers(blockers) {
   const byFile = new Map()
   const byCode = new Map()
-  blockers.forEach((blocker) => {
-    byFile.set(blocker.file, (byFile.get(blocker.file) || 0) + 1)
-    byCode.set(blocker.code, (byCode.get(blocker.code) || 0) + 1)
-  })
-  return {
-    byFile: Array.from(byFile.entries())
-      .map(([file, count]) => ({ file, count }))
-      .sort((a, b) => b.count - a.count || a.file.localeCompare(b.file)),
-    byCode: Array.from(byCode.entries())
-      .map(([code, count]) => ({ code, count }))
-      .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code)),
+  for (const blocker of blockers) {
+    incrementCount(byFile, blocker.file)
+    incrementCount(byCode, blocker.code)
   }
+  const fileRows = mapCountsToRows(byFile, 'file')
+  const codeRows = mapCountsToRows(byCode, 'code')
+  fileRows.sort((a, b) => b.count - a.count || a.file.localeCompare(b.file))
+  codeRows.sort((a, b) => b.count - a.count || a.code.localeCompare(b.code))
+  return {
+    byFile: fileRows,
+    byCode: codeRows,
+  }
+}
+
+function analyzeFiles({ repoRoot, files }) {
+  const blockers = []
+  for (const filePath of files) {
+    const fileBlockers = analyzeFile({ repoRoot, filePath })
+    for (const blocker of fileBlockers) blockers.push(blocker)
+  }
+  return blockers
 }
 
 function analyzePostgresCutoverReadiness(options = {}) {
@@ -113,7 +135,7 @@ function analyzePostgresCutoverReadiness(options = {}) {
         description: 'Final runtime readiness cannot prove retired live routes are gone because source files are not available on disk',
         snippet: 'Source scan found no JavaScript files. Treating runtime as locked.',
       }]
-    : files.flatMap((filePath) => analyzeFile({ repoRoot, filePath }))
+    : analyzeFiles({ repoRoot, files })
 
   if (packagedRuntime && process.env.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED !== '1') {
     blockers = [{

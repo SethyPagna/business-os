@@ -169,6 +169,13 @@ function appendReturning(sql, mode) {
   return trimmed
 }
 
+function isNumericFieldName(field) {
+  for (const pattern of NUMERIC_FIELD_PATTERNS) {
+    if (pattern.test(field)) return true
+  }
+  return false
+}
+
 function getInsertTableName(sql = '') {
   const match = String(sql || '').match(/^\s*INSERT\s+INTO\s+(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))/i)
   return String(match?.[1] || match?.[2] || '').toLowerCase()
@@ -196,7 +203,7 @@ function coerceRowValue(key, value) {
   if (value === null || value === undefined) return value
   const field = String(key || '')
   if (TEXT_NUMERIC_EXCEPTIONS.has(field)) return value
-  if (!NUMERIC_FIELD_PATTERNS.some((pattern) => pattern.test(field))) return value
+  if (!isNumericFieldName(field)) return value
   if (typeof value === 'bigint') return Number(value)
   if (typeof value === 'number') return value
   if (typeof value !== 'string') return value
@@ -207,9 +214,10 @@ function coerceRowValue(key, value) {
 
 function coerceRow(row = {}) {
   const out = {}
-  Object.entries(row || {}).forEach(([key, value]) => {
-    out[key] = coerceRowValue(key, value)
-  })
+  const source = row || {}
+  for (const key of Object.keys(source)) {
+    out[key] = coerceRowValue(key, source[key])
+  }
   return out
 }
 
