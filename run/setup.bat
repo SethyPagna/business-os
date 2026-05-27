@@ -262,8 +262,8 @@ echo OBJECT_STORAGE_DRIVER=r2
     echo MINIO_LICENSE_FILE=
     echo IMPORT_QUEUE_CONCURRENCY=1
     echo MEDIA_QUEUE_CONCURRENCY=4
-    echo IMPORT_WORKER_REPLICAS=2
-    echo MEDIA_WORKER_REPLICAS=2
+    echo IMPORT_WORKER_REPLICAS=1
+    echo MEDIA_WORKER_REPLICAS=1
     echo IMPORT_ROW_BATCH_SIZE=400
     echo IMPORT_BATCH_PAUSE_MS=20
     echo IMPORT_IMAGE_CONCURRENCY=4
@@ -280,7 +280,7 @@ echo.
 echo [INFO] Installing backend dependencies...
 cd /d "%ROOT%\backend"
 set "BACKEND_INSTALL_MODE=install"
-for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$path='%ROOT%\backend'; $stamp=Join-Path $path 'node_modules/.package-lock.json'; $lock=Join-Path $path 'package-lock.json'; $pkg=Join-Path $path 'package.json'; if ((Test-Path $stamp) -and (Test-Path $lock) -and (Test-Path $pkg)) { $latest = @((Get-Item $pkg).LastWriteTimeUtc, (Get-Item $lock).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1; $installed = (Get-Item $stamp).LastWriteTimeUtc; if ($installed -ge $latest) { 'skip' } else { 'install' } } else { 'install' }"`) do set "BACKEND_INSTALL_MODE=%%s"
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\npm-install-mode.ps1" -ProjectPath "%ROOT%\backend"`) do set "BACKEND_INSTALL_MODE=%%s"
 if /i "!BACKEND_INSTALL_MODE!"=="skip" (
     echo [OK] Backend dependencies already up to date
 ) else (
@@ -298,7 +298,7 @@ echo.
 echo [INFO] Installing frontend dependencies...
 cd /d "%ROOT%\frontend"
 set "FRONTEND_INSTALL_MODE=install"
-for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$path='%ROOT%\frontend'; $stamp=Join-Path $path 'node_modules/.package-lock.json'; $lock=Join-Path $path 'package-lock.json'; $pkg=Join-Path $path 'package.json'; if ((Test-Path $stamp) -and (Test-Path $lock) -and (Test-Path $pkg)) { $latest = @((Get-Item $pkg).LastWriteTimeUtc, (Get-Item $lock).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1; $installed = (Get-Item $stamp).LastWriteTimeUtc; if ($installed -ge $latest) { 'skip' } else { 'install' } } else { 'install' }"`) do set "FRONTEND_INSTALL_MODE=%%s"
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\npm-install-mode.ps1" -ProjectPath "%ROOT%\frontend"`) do set "FRONTEND_INSTALL_MODE=%%s"
 if /i "!FRONTEND_INSTALL_MODE!"=="skip" (
     echo [OK] Frontend dependencies already up to date
 ) else (

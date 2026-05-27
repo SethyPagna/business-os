@@ -15,10 +15,18 @@ function Resolve-Root {
 $Root = Resolve-Root
 $PolicyPath = Join-Path $Root 'ops\automation\business-os-automation.json'
 $DockerRelease = Join-Path $Root 'ops\scripts\powershell\docker-release.ps1'
-$CloudflareVerify = Join-Path $Root 'ops\scripts\runtime\verify-cloudflare-automation.mjs'
-$R2Verify = Join-Path $Root 'ops\scripts\runtime\verify-r2-object-store.mjs'
-$HardeningVerify = Join-Path $Root 'ops\scripts\verify-hardening-policy.js'
-$BackupReliabilityVerify = Join-Path $Root 'ops\scripts\verify-backup-reliability.js'
+$CloudflareVerify = Join-Path $Root 'ops\scripts\runtime\cloudflare\verify-cloudflare-automation.mjs'
+$R2Verify = Join-Path $Root 'ops\scripts\runtime\cloudflare\verify-r2-object-store.mjs'
+$StoragePrune = Join-Path $Root 'ops\scripts\runtime\storage\prune-storage.mjs'
+$StoragePruneReport = Join-Path $Root 'ops\runtime\reports\prune-storage-latest.json'
+$TestDataCleanup = Join-Path $Root 'ops\scripts\runtime\storage\cleanup-test-data.mjs'
+$ActionHistoryCheck = Join-Path $Root 'ops\scripts\runtime\audits\action-history-undo-redo-check.mjs'
+$QaCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\test-data-cleanup-postcheck-latest.json'
+$SmokeCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\live-smoke-cleanup-postcheck-latest.json'
+$ActionHistoryCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\action-history-cleanup-postcheck-latest.json'
+$Phase29Audit = Join-Path $Root 'ops\scripts\architecture\phase29-audit.mjs'
+$HardeningVerify = Join-Path $Root 'ops\scripts\verification\verify-hardening-policy.js'
+$BackupReliabilityVerify = Join-Path $Root 'ops\scripts\verification\verify-backup-reliability.js'
 
 function Write-Step($message) { Write-Host "[STEP] $message" }
 function Write-Ok($message) { Write-Host "[OK] $message" }
@@ -49,6 +57,29 @@ function Invoke-CloudflareCheck {
   }
 }
 
+function Invoke-StorageRetentionCleanup {
+  $pruneArgs = @(
+    $StoragePrune,
+    '--policy', $PolicyPath,
+    '--output', $StoragePruneReport
+  )
+  Invoke-Checked 'Runtime report and backup retention cleanup' {
+    node @pruneArgs
+  }
+}
+
+function Invoke-TestDataCleanupPostcheck {
+  Invoke-Checked 'QA audit data cleanup postcheck' {
+    node $TestDataCleanup --all-qa --dry-run --fail-on-match --output $QaCleanupPostcheckReport
+  }
+  Invoke-Checked 'Live smoke data cleanup postcheck' {
+    node $TestDataCleanup --prefix 'QA Smoke' --dry-run --fail-on-match --output $SmokeCleanupPostcheckReport
+  }
+  Invoke-Checked 'Action history data cleanup postcheck' {
+    node $TestDataCleanup --prefix 'QA Action History' --dry-run --fail-on-match --output $ActionHistoryCleanupPostcheckReport
+  }
+}
+
 function Invoke-TestGate {
   Invoke-Checked 'Frontend utility suite' {
     npm.cmd --prefix frontend run test:utils
@@ -68,11 +99,11 @@ function Invoke-TestGate {
   Invoke-Checked 'Frontend production build' {
     npm.cmd --prefix frontend run build
   }
-  Invoke-Checked 'Docker release contract verification' {
-    node ops\scripts\verify-docker-release.js
+  Invoke-Checked 'Phase 29 schema, organization, cleanup, language, and Docker guardrail audit' {
+    node $Phase29Audit
   }
   Invoke-Checked 'Secret hygiene verification' {
-    node ops\scripts\verify-secret-hygiene.js
+    node ops\scripts\verification\verify-secret-hygiene.js
   }
   Invoke-Checked 'Hardening policy verification' {
     node $HardeningVerify
@@ -83,6 +114,10 @@ function Invoke-TestGate {
   Invoke-Checked 'Live R2 object write/read/delete verification' {
     node $R2Verify
   }
+  Invoke-Checked 'Action history undo/redo live verification' {
+    node $ActionHistoryCheck
+  }
+  Invoke-TestDataCleanupPostcheck
   Invoke-Checked 'Git whitespace check' {
     git diff --check
   }
@@ -155,17 +190,19 @@ try {
   switch ($Action) {
     'Check' {
       Invoke-CloudflareCheck
+      Invoke-StorageRetentionCleanup
       Invoke-TestGate
       Invoke-HealthCheck
       Invoke-ServiceWorkerCheck
     }
     'Cloudflare' { Invoke-CloudflareCheck }
-    'Test' { Invoke-TestGate }
-    'Release' { Invoke-TestGate; Invoke-DockerReleaseAndStart }
-    'Start' { Invoke-DockerReleaseAndStart }
+    'Test' { Invoke-StorageRetentionCleanup; Invoke-TestGate }
+    'Release' { Invoke-StorageRetentionCleanup; Invoke-TestGate; Invoke-DockerReleaseAndStart }
+    'Start' { Invoke-StorageRetentionCleanup; Invoke-DockerReleaseAndStart }
     'Git' { Invoke-GitPublish }
     default {
       Invoke-CloudflareCheck
+      Invoke-StorageRetentionCleanup
       Invoke-TestGate
       Invoke-DockerReleaseAndStart
       Invoke-GitPublish

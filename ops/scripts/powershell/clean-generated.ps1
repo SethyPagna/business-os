@@ -33,10 +33,15 @@ $targets = @(
   'frontend\dist',
   'backend\node_modules',
   'backend\frontend-dist',
+  'node_modules',
+  'ops\node_modules',
   'release',
+  'output',
   'dist-bin',
   'ops\runtime\build',
-  'ops\runtime\logs',
+  '.playwright-cli',
+  'ops\.playwright-cli',
+  'run\cv-render-check-word',
   '_release_preserve',
   '_img_tmp',
   '_sharp_tmp',
@@ -131,6 +136,53 @@ function Stop-ProjectProcesses {
   }
 }
 
+function Get-PathSizeBytes {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) { return 0 }
+  $item = Get-Item -LiteralPath $Path -Force
+  if (-not $item.PSIsContainer) { return [int64]$item.Length }
+  $total = (Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue |
+    Measure-Object -Property Length -Sum).Sum
+  if ($null -eq $total) { return 0 }
+  return [int64]$total
+}
+
+function Format-Bytes {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int64]$Bytes
+  )
+
+  if ($Bytes -ge 1GB) { return ('{0:N2} GB' -f ($Bytes / 1GB)) }
+  if ($Bytes -ge 1MB) { return ('{0:N2} MB' -f ($Bytes / 1MB)) }
+  if ($Bytes -ge 1KB) { return ('{0:N2} KB' -f ($Bytes / 1KB)) }
+  return ("$Bytes B")
+}
+
+$cleanupResults = @()
+
+function Add-CleanupResult {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [int64]$Bytes,
+    [Parameter(Mandatory = $true)]
+    [string]$Mode
+  )
+
+  $script:cleanupResults += [pscustomobject]@{
+    Path = $Path
+    Bytes = $Bytes
+    Size = Format-Bytes -Bytes $Bytes
+    Mode = $Mode
+  }
+}
+
 Write-Host ''
 Write-Host 'Business OS generated-artifact cleanup'
 Write-Host '-------------------------------------'
@@ -153,13 +205,16 @@ foreach ($target in $targets) {
   if (-not $resolved.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Refusing to remove path outside workspace: $resolved"
   }
+  $bytes = Get-PathSizeBytes -Path $resolved
   if ($Preview) {
-    Write-Host "Would remove $resolved"
+    Write-Host ("Would remove {0} ({1})" -f $resolved, (Format-Bytes -Bytes $bytes))
+    Add-CleanupResult -Path $resolved -Bytes $bytes -Mode 'preview'
     continue
   }
-  Write-Host "Removing $resolved"
+  Write-Host ("Removing {0} ({1})" -f $resolved, (Format-Bytes -Bytes $bytes))
   try {
     Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop
+    Add-CleanupResult -Path $resolved -Bytes $bytes -Mode 'removed'
   } catch {
     throw "Failed to remove $resolved. Make sure Business OS is not still using this path. Inner error: $($_.Exception.Message)"
   }
@@ -172,19 +227,35 @@ if ($IncludeLockfiles) {
     if (-not $resolved.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
       throw "Refusing to remove path outside workspace: $resolved"
     }
+    $bytes = Get-PathSizeBytes -Path $resolved
     if ($Preview) {
-      Write-Host "Would remove $resolved"
+      Write-Host ("Would remove {0} ({1})" -f $resolved, (Format-Bytes -Bytes $bytes))
+      Add-CleanupResult -Path $resolved -Bytes $bytes -Mode 'preview'
       continue
     }
-    Write-Host "Removing $resolved"
+    Write-Host ("Removing {0} ({1})" -f $resolved, (Format-Bytes -Bytes $bytes))
     try {
       Remove-Item -LiteralPath $resolved -Force -ErrorAction Stop
+      Add-CleanupResult -Path $resolved -Bytes $bytes -Mode 'removed'
     } catch {
       throw "Failed to remove $resolved. Inner error: $($_.Exception.Message)"
     }
   }
 }
 
+Write-Host ''
+$totalBytes = [int64](($cleanupResults | Measure-Object -Property Bytes -Sum).Sum)
+if ($cleanupResults.Count -gt 0) {
+  Write-Host 'Cleanup target summary:'
+  $cleanupResults | Sort-Object -Property Bytes -Descending | Format-Table -AutoSize Path, Size, Mode
+  if ($Preview) {
+    Write-Host ("Total bytes that would be removed: {0}" -f (Format-Bytes -Bytes $totalBytes))
+  } else {
+    Write-Host ("Total bytes removed: {0}" -f (Format-Bytes -Bytes $totalBytes))
+  }
+} else {
+  Write-Host 'No cleanup targets found.'
+}
 Write-Host ''
 if ($Preview) {
   Write-Host 'Preview complete.'

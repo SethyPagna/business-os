@@ -40,3 +40,4 @@ Thumbs.db
 ops/.playwright-cli
 .playwright-cli
 ops/demo
+run/cv-render-check-word

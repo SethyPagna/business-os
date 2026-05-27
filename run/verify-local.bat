@@ -29,40 +29,46 @@ echo.
 
 cd /d "%ROOT%"
 
-echo [1/6] Verifying tracked runtime dependencies...
-node ops\scripts\verify-runtime-deps.js
+echo [preflight 1/6] Verifying tracked runtime dependencies...
+node ops\scripts\verification\verify-runtime-deps.js
 if errorlevel 1 exit /b 1
 echo [OK] Runtime dependency manifest check passed
 echo.
 
-echo [1a/6] Verifying Docker-only release automation...
-node ops\scripts\verify-docker-release.js
+echo [preflight 2/6] Verifying Docker-only release automation...
+node ops\scripts\verification\verify-docker-release.js
 if errorlevel 1 exit /b 1
 echo [OK] Docker-only release automation check passed
 echo.
 
-echo [1b/6] Verifying tracked secret hygiene...
-node ops\scripts\verify-secret-hygiene.js
+echo [preflight 3/6] Verifying tracked secret hygiene...
+node ops\scripts\verification\verify-secret-hygiene.js
 if errorlevel 1 exit /b 1
 echo [OK] Tracked secret hygiene check passed
 echo.
 
-echo [1c/6] Verifying Business OS Docker release runtime...
+echo [preflight 4/6] Verifying Business OS Docker release runtime...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\docker-release.ps1" -Action Doctor
 if errorlevel 1 exit /b 1
 echo [OK] Business OS Docker release diagnostics passed
 echo.
 
-echo [1d/6] Checking running app API route contract when available...
-node ops\scripts\runtime\check-route-contract.mjs http://127.0.0.1:4000 --skip-if-unavailable
+echo [preflight 5/6] Checking running app API route contract when available...
+node ops\scripts\runtime\smoke\check-route-contract.mjs http://127.0.0.1:4000 --skip-if-unavailable
 if errorlevel 1 exit /b 1
 echo [OK] Running app API route contract check passed or was skipped
 echo.
 
+echo [preflight 6/6] Writing running app diagnostics when available...
+node ops\scripts\runtime\smoke\post-start-diagnostics.mjs http://127.0.0.1:4000 --skip-if-unavailable --output ops\runtime\reports\verify-local-post-start-diagnostics.json
+if errorlevel 1 exit /b 1
+echo [OK] Running app diagnostics passed, wrote report, or was skipped
+echo.
+
 cd /d "%ROOT%\frontend"
-echo [2/6] Ensuring frontend dependencies...
+echo [frontend 1/6] Ensuring frontend dependencies...
 set "FRONTEND_INSTALL_MODE=install"
-for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$path='%ROOT%\frontend'; $stamp=Join-Path $path 'node_modules/.package-lock.json'; $lock=Join-Path $path 'package-lock.json'; $pkg=Join-Path $path 'package.json'; if ((Test-Path $stamp) -and (Test-Path $lock) -and (Test-Path $pkg)) { $latest = @((Get-Item $pkg).LastWriteTimeUtc, (Get-Item $lock).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1; $installed = (Get-Item $stamp).LastWriteTimeUtc; if ($installed -ge $latest) { 'skip' } else { 'install' } } else { 'install' }"`) do set "FRONTEND_INSTALL_MODE=%%s"
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\npm-install-mode.ps1" -ProjectPath "%ROOT%\frontend"`) do set "FRONTEND_INSTALL_MODE=%%s"
 if /i "!FRONTEND_INSTALL_MODE!"=="skip" (
   echo [OK] Frontend dependencies already up to date
 ) else (
@@ -72,7 +78,7 @@ if /i "!FRONTEND_INSTALL_MODE!"=="skip" (
 )
 echo.
 if "%SKIP_FRONTEND_BUILD%"=="0" (
-  echo [2b/6] Building frontend...
+  echo [frontend 2/6] Building frontend...
   call npm.cmd run build
   if errorlevel 1 exit /b 1
   if not exist "%ROOT%\frontend\dist\index.html" (
@@ -82,38 +88,38 @@ if "%SKIP_FRONTEND_BUILD%"=="0" (
   echo [OK] Frontend build passed
   echo.
 ) else (
-  echo [2b/6] Skipping frontend build ^(--skip-frontend-build^)
+  echo [frontend 2/6] Skipping frontend build ^(--skip-frontend-build^)
   echo.
 )
 
-echo [3/6] Running frontend utility tests...
+echo [frontend 3/6] Running frontend utility tests...
 call npm.cmd run test:utils
 if errorlevel 1 exit /b 1
 echo [OK] Frontend utility tests passed
 echo.
 
-echo [4/6] Verifying frontend i18n...
+echo [frontend 4/6] Verifying frontend i18n...
 call npm.cmd run verify:i18n
 if errorlevel 1 exit /b 1
 echo [OK] Frontend i18n verification passed
 echo.
 
-echo [4b/6] Verifying frontend UI coverage...
+echo [frontend 5/6] Verifying frontend UI coverage...
 call npm.cmd run verify:ui
 if errorlevel 1 exit /b 1
 echo [OK] Frontend UI coverage verification passed
 echo.
 
-echo [4c/6] Verifying frontend performance guardrails...
+echo [frontend 6/6] Verifying frontend performance guardrails...
 call npm.cmd run verify:performance
 if errorlevel 1 exit /b 1
 echo [OK] Frontend performance guardrails passed
 echo.
 
 cd /d "%ROOT%\backend"
-echo [5a/6] Ensuring backend dependencies...
+echo [backend 1/3] Ensuring backend dependencies...
 set "BACKEND_INSTALL_MODE=install"
-for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$path='%ROOT%\backend'; $stamp=Join-Path $path 'node_modules/.package-lock.json'; $lock=Join-Path $path 'package-lock.json'; $pkg=Join-Path $path 'package.json'; if ((Test-Path $stamp) -and (Test-Path $lock) -and (Test-Path $pkg)) { $latest = @((Get-Item $pkg).LastWriteTimeUtc, (Get-Item $lock).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1; $installed = (Get-Item $stamp).LastWriteTimeUtc; if ($installed -ge $latest) { 'skip' } else { 'install' } } else { 'install' }"`) do set "BACKEND_INSTALL_MODE=%%s"
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\npm-install-mode.ps1" -ProjectPath "%ROOT%\backend"`) do set "BACKEND_INSTALL_MODE=%%s"
 if /i "!BACKEND_INSTALL_MODE!"=="skip" (
   echo [OK] Backend dependencies already up to date
 ) else (
@@ -122,13 +128,13 @@ if /i "!BACKEND_INSTALL_MODE!"=="skip" (
   echo [OK] Backend dependencies installed
 )
 echo.
-echo [5b/6] Running backend utility/security/core tests...
+echo [backend 2/3] Running backend utility/security/core tests...
 call npm.cmd run test:utils
 if errorlevel 1 exit /b 1
 echo [OK] Backend utility/security/core tests passed
 echo.
 
-echo [6/6] Verifying backend data integrity...
+echo [backend 3/3] Verifying backend data integrity...
 call npm.cmd run verify:integrity
 if errorlevel 1 exit /b 1
 echo [OK] Backend data integrity verification passed

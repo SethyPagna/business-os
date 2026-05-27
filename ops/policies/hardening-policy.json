@@ -146,12 +146,12 @@
       "name": "Cloudflare and R2 release automation",
       "files": [
         {
-          "path": "ops/scripts/runtime/verify-cloudflare-automation.mjs",
+          "path": "ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs",
           "mustContain": ["upsertAccessApp", "http_request_firewall_custom", "http_ratelimit", "cf.colo.id", "Business OS Admin", "Business OS obvious injection block"],
           "mustNotContain": ["managed_challenge"]
         },
         {
-          "path": "ops/scripts/runtime/verify-r2-object-store.mjs",
+          "path": "ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs",
           "mustContain": ["PutObjectCommand", "GetObjectCommand", "DeleteObjectCommand", "HeadObjectCommand", "R2 disappearance confirmed"],
           "mustNotContain": ["S3_SECRET_ACCESS_KEY="]
         },

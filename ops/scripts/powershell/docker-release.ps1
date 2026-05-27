@@ -31,8 +31,11 @@ $DockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os'
 $OldDockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os-docker'
 $ReleaseProjectName = 'business-os'
 $OldReleaseProjectName = 'business-os-release'
-$RouteContractScript = Join-Path $Root 'ops\scripts\runtime\check-route-contract.mjs'
+$RouteContractScript = Join-Path $Root 'ops\scripts\runtime\smoke\check-route-contract.mjs'
 $RouteContractLog = Join-Path $RuntimeDir 'route-contract.log'
+$PostStartDiagnosticsScript = Join-Path $Root 'ops\scripts\runtime\smoke\post-start-diagnostics.mjs'
+$PostStartDiagnosticsReport = Join-Path $RuntimeDir 'post-start-diagnostics.json'
+$PostStartDiagnosticsLog = Join-Path $RuntimeDir 'post-start-diagnostics.log'
 
 function Ensure-Dir($path) {
   if (-not (Test-Path -LiteralPath $path)) {
@@ -273,8 +276,8 @@ function Ensure-Env {
     IMPORT_QUEUE_CONCURRENCY = Get-MinIntSetting $existing.IMPORT_QUEUE_CONCURRENCY 2
     MEDIA_QUEUE_CONCURRENCY = Get-MinIntSetting $existing.MEDIA_QUEUE_CONCURRENCY 3
     IMPORT_BATCH_PAUSE_MS = '0'
-    IMPORT_WORKER_REPLICAS = Get-MinIntSetting $existing.IMPORT_WORKER_REPLICAS 2
-    MEDIA_WORKER_REPLICAS = Get-MinIntSetting $existing.MEDIA_WORKER_REPLICAS 2
+    IMPORT_WORKER_REPLICAS = Get-MinIntSetting $existing.IMPORT_WORKER_REPLICAS 1
+    MEDIA_WORKER_REPLICAS = Get-MinIntSetting $existing.MEDIA_WORKER_REPLICAS 1
     GOOGLE_LOGIN_CLIENT_ID = if ($existing.GOOGLE_LOGIN_CLIENT_ID) { $existing.GOOGLE_LOGIN_CLIENT_ID } else { '784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com' }
     GOOGLE_LOGIN_CLIENT_SECRET = if ($existing.GOOGLE_LOGIN_CLIENT_SECRET) { $existing.GOOGLE_LOGIN_CLIENT_SECRET } else { '' }
     GOOGLE_LOGIN_CLIENT_SECRET_FILE = if ($existing.GOOGLE_LOGIN_CLIENT_SECRET_FILE) { $existing.GOOGLE_LOGIN_CLIENT_SECRET_FILE } else { 'ops/runtime/secrets/google-login-client-secret.txt' }
@@ -434,6 +437,43 @@ function Copy-Directory($source, $destination) {
   Copy-Item -Path (Join-Path $source '*') -Destination $destination -Recurse -Force
 }
 
+function Copy-FileEnsuringParent($source, $destination) {
+  $parent = Split-Path -Parent $destination
+  if ($parent) { Ensure-Dir $parent }
+  Copy-Item -LiteralPath $source -Destination $destination -Force
+}
+
+function Remove-ReleaseDirectory($target) {
+  if (-not (Test-Path -LiteralPath $target)) { return }
+  $resolved = (Resolve-Path -LiteralPath $target).Path
+  $releaseRoot = (Join-Path $Root 'release')
+  if (-not $resolved.StartsWith($releaseRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Fail "Refusing to remove release output outside release folder: $resolved"
+  }
+
+  for ($attempt = 1; $attempt -le 5; $attempt += 1) {
+    try {
+      $children = Get-ChildItem -LiteralPath $resolved -Force -ErrorAction SilentlyContinue
+      if ($children) {
+        $children | Remove-Item -Recurse -Force -ErrorAction Stop
+      }
+      break
+    } catch {
+      if ($attempt -eq 5) { throw }
+      Start-Sleep -Milliseconds 500
+    }
+  }
+  for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+    try {
+      Remove-Item -LiteralPath $resolved -Force -ErrorAction Stop
+      return
+    } catch {
+      if ($attempt -eq 3) { throw }
+      Start-Sleep -Milliseconds 250
+    }
+  }
+}
+
 function Remove-RetiredReleaseOutputs {
   $retired = @(
     $OldDockerKitDir,
@@ -446,7 +486,7 @@ function Remove-RetiredReleaseOutputs {
     if (-not $resolved.StartsWith($releaseRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
       Fail "Refusing to remove retired release output outside release folder: $resolved"
     }
-    Remove-Item -LiteralPath $resolved -Recurse -Force
+    Remove-ReleaseDirectory $resolved
     Write-Ok "Removed retired standalone release output: $resolved"
   }
 }
@@ -468,7 +508,7 @@ function Write-DockerReleaseKit($imageName) {
   }
 
   if (Test-Path -LiteralPath $DockerKitDir) {
-    Remove-Item -LiteralPath $DockerKitDir -Recurse -Force
+    Remove-ReleaseDirectory $DockerKitDir
   }
   Ensure-Dir $DockerKitDir
   Ensure-Dir (Join-Path $DockerKitDir 'run\docker')
@@ -476,11 +516,11 @@ function Write-DockerReleaseKit($imageName) {
   Ensure-Dir (Join-Path $DockerKitDir 'ops\scripts\powershell')
   Ensure-Dir (Join-Path $DockerKitDir 'ops\scripts\runtime')
 
-  Copy-Item -LiteralPath (Join-Path $Root 'Start Business OS.bat') -Destination (Join-Path $DockerKitDir 'Start Business OS.bat') -Force
+  Copy-FileEnsuringParent (Join-Path $Root 'Start Business OS.bat') (Join-Path $DockerKitDir 'Start Business OS.bat')
   Copy-Directory (Join-Path $Root 'run\docker') (Join-Path $DockerKitDir 'run\docker')
-  Copy-Item -LiteralPath $ComposeFile -Destination (Join-Path $DockerKitDir 'ops\docker\compose.release.yml') -Force
-  Copy-Item -LiteralPath $Dockerfile -Destination (Join-Path $DockerKitDir 'ops\docker\Dockerfile.release') -Force
-  Copy-Item -LiteralPath (Join-Path $Root 'ops\scripts\powershell\docker-release.ps1') -Destination (Join-Path $DockerKitDir 'ops\scripts\powershell\docker-release.ps1') -Force
+  Copy-FileEnsuringParent $ComposeFile (Join-Path $DockerKitDir 'ops\docker\compose.release.yml')
+  Copy-FileEnsuringParent $Dockerfile (Join-Path $DockerKitDir 'ops\docker\Dockerfile.release')
+  Copy-FileEnsuringParent (Join-Path $Root 'ops\scripts\powershell\docker-release.ps1') (Join-Path $DockerKitDir 'ops\scripts\powershell\docker-release.ps1')
   Copy-Directory (Join-Path $Root 'ops\scripts\runtime') (Join-Path $DockerKitDir 'ops\scripts\runtime')
 
   if (Test-Path -LiteralPath (Join-Path $preserveRuntime 'docker-release')) {
@@ -543,8 +583,8 @@ function Write-DockerReleaseKit($imageName) {
     IMPORT_QUEUE_CONCURRENCY = '2'
     MEDIA_QUEUE_CONCURRENCY = '3'
     IMPORT_BATCH_PAUSE_MS = '0'
-    IMPORT_WORKER_REPLICAS = '2'
-    MEDIA_WORKER_REPLICAS = '2'
+    IMPORT_WORKER_REPLICAS = '1'
+    MEDIA_WORKER_REPLICAS = '1'
     GOOGLE_LOGIN_CLIENT_ID = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_LOGIN_CLIENT_ID' '784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com'
     GOOGLE_LOGIN_CLIENT_SECRET = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_LOGIN_CLIENT_SECRET'
     GOOGLE_LOGIN_CLIENT_SECRET_FILE = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_LOGIN_CLIENT_SECRET_FILE' 'ops/runtime/secrets/google-login-client-secret.txt'
@@ -817,6 +857,24 @@ function Test-ReleaseHealth {
         Fail "Docker release route contract failed. Log: $RouteContractLog"
       }
       Write-Ok 'Docker release API route contract passed.'
+      if (Test-Path -LiteralPath $PostStartDiagnosticsScript) {
+        Write-Step 'Writing Docker release post-start diagnostics checklist...'
+        $publicUrl = if ($envMap.BUSINESS_OS_PUBLIC_URL) { [string]$envMap.BUSINESS_OS_PUBLIC_URL } else { 'https://leangcosmetics.dpdns.org' }
+        $adminUrl = if ($envMap.BUSINESS_OS_ADMIN_URL) { [string]$envMap.BUSINESS_OS_ADMIN_URL } else { 'https://admin.leangcosmetics.dpdns.org' }
+        $diagnostics = Invoke-ProcessWithTimeout $node @(
+          $PostStartDiagnosticsScript,
+          "http://127.0.0.1:$port",
+          '--public-url', $publicUrl,
+          '--admin-url', $adminUrl,
+          '--output', $PostStartDiagnosticsReport
+        ) 45
+        Set-Content -LiteralPath $PostStartDiagnosticsLog -Encoding UTF8 -Value (($diagnostics.Stdout, $diagnostics.Stderr) -join [Environment]::NewLine)
+        if ($diagnostics.ExitCode -ne 0) {
+          if (Test-Path -LiteralPath $PostStartDiagnosticsLog) { Get-Content -LiteralPath $PostStartDiagnosticsLog -Tail 80 }
+          Fail "Docker release post-start diagnostics failed. Report: $PostStartDiagnosticsReport"
+        }
+        Write-Ok "Docker release post-start diagnostics written: $PostStartDiagnosticsReport"
+      }
     } else {
       Write-Warn 'Node.js was not found on the host, so the route contract smoke could not run.'
     }

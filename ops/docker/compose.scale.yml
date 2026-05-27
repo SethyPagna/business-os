@@ -15,6 +15,9 @@ x-node-env: &node-env
   PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-https://leangcosmetics.dpdns.org}"
   CLOUDFLARE_PUBLIC_URL: "${CLOUDFLARE_PUBLIC_URL:-https://leangcosmetics.dpdns.org}"
   CLOUDFLARE_ADMIN_URL: "${CLOUDFLARE_ADMIN_URL:-https://admin.leangcosmetics.dpdns.org}"
+  CLOUDFLARE_ACCOUNT_ID: "${CLOUDFLARE_ACCOUNT_ID:-743e5b727d139e85ed11679097f6f99e}"
+  CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:-}"
+  CLOUDFLARE_API_TOKEN_FILE: "${CLOUDFLARE_API_TOKEN_FILE:-}"
   JOB_QUEUE_DRIVER: bullmq
   REDIS_URL: redis://redis-queue:6379
   RUNTIME_CACHE_ENABLED: "${RUNTIME_CACHE_ENABLED:-1}"
@@ -22,10 +25,12 @@ x-node-env: &node-env
   DATABASE_DRIVER: "${DATABASE_DRIVER:-postgres}"
   DATABASE_URL: "${DATABASE_URL:-postgres://business_os:business_os_dev_password@postgres:5432/business_os}"
   OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-r2}"
-  S3_ENDPOINT: http://minio:9000
-  S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"
-  S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-businessos-dev-password}"
+  S3_ENDPOINT: "${S3_ENDPOINT:-https://743e5b727d139e85ed11679097f6f99e.r2.cloudflarestorage.com}"
+  S3_REGION: "${S3_REGION:-auto}"
+  S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:-businessos}"
+  S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:-businessos-dev-password}"
   S3_BUCKET: "${S3_BUCKET:-business-os-assets}"
+  R2_PUBLIC_BASE_URL: "${R2_PUBLIC_BASE_URL:-}"
   IMPORT_QUEUE_CONCURRENCY: "${IMPORT_QUEUE_CONCURRENCY:-1}"
   MEDIA_QUEUE_CONCURRENCY: "${MEDIA_QUEUE_CONCURRENCY:-2}"
   IMPORT_ROW_BATCH_SIZE: "${IMPORT_ROW_BATCH_SIZE:-400}"
@@ -219,7 +224,7 @@ services:
       <<: *node-env
       WORKER_RUNTIME: docker
       NODE_OPTIONS: "--max-old-space-size=768"
-    command: ["sh", "-lc", "set -e; cd /app/frontend; if [ ! -d node_modules/vite ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --include=dev --no-audit --prefer-offline --loglevel=warn; fi; if [ ! -f dist/index.html ]; then npm run build; fi; cd /app/backend; if [ ! -d node_modules/cors ] || [ ! -f node_modules/pg/package.json ] || [ ! -f node_modules/bcryptjs/package.json ] || [ ! -f node_modules/pg-native/package.json ] || [ ! -f node_modules/libpq/build/Release/addon.node ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start"]
+    command: ["sh", "-lc", "set -e; cd /app/frontend; if [ ! -f dist/index.html ]; then if [ ! -d node_modules/vite ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --include=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run build; fi; cd /app/backend; if [ ! -d node_modules/cors ] || [ ! -f node_modules/pg/package.json ] || [ ! -f node_modules/bcryptjs/package.json ] || [ ! -f node_modules/pg-native/package.json ] || [ ! -f node_modules/libpq/build/Release/addon.node ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start"]
     ports:
       - "${APP_BIND_HOST:-127.0.0.1}:${PORT:-4000}:4000"
     volumes:

@@ -3,6 +3,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { readJson, readUtf8 } = require('../lib/fs-utils.js')
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../..')
 const FRONTEND_ROOT = path.join(PROJECT_ROOT, 'frontend')
@@ -57,14 +58,6 @@ const INTENTIONAL_PUBLIC_TERMS = [
   /^https?:\/\//,
   /^[A-Z_]+$/,
 ]
-
-function readText(file) {
-  return fs.readFileSync(file, 'utf8')
-}
-
-function readJson(file) {
-  return JSON.parse(readText(file))
-}
 
 function flatten(input, prefix = '', target = {}) {
   if (!input || typeof input !== 'object') return target
@@ -130,8 +123,8 @@ function checkKhmerQuality() {
 }
 
 function checkPortalDarkModeContracts() {
-  const css = readText(MAIN_CSS_PATH)
-  const catalogPage = readText(path.join(COMPONENT_ROOT, 'catalog', 'CatalogPage.jsx'))
+  const css = readUtf8(MAIN_CSS_PATH)
+  const catalogPage = readUtf8(path.join(COMPONENT_ROOT, 'catalog', 'CatalogPage.jsx'))
   const requiredCssTokens = [
     "[data-portal-root='true'].dark .bg-white",
     ".dark [data-portal-root='true'] .bg-white",
@@ -163,7 +156,7 @@ function checkPortalVisibleStrings() {
   ]
 
   for (const file of PORTAL_FILES) {
-    const text = readText(file)
+    const text = readUtf8(file)
     for (const { pattern, message } of literalPatterns) {
       if (pattern.test(text)) {
         issues.push(`${path.relative(PROJECT_ROOT, file)}: ${message}`)
@@ -176,7 +169,7 @@ function checkPortalVisibleStrings() {
 function checkFormControlLabels() {
   const issues = []
   for (const file of PORTAL_FILES) {
-    const text = readText(file)
+    const text = readUtf8(file)
     const lines = text.split(/\r?\n/)
     lines.forEach((line, index) => {
       if (!/<label\b/.test(line) || /htmlFor=/.test(line)) return
@@ -195,7 +188,7 @@ function checkFormControlLabels() {
 
 function checkVerificationWiring() {
   const pkg = readJson(PACKAGE_PATH)
-  const verifyBat = readText(VERIFY_BAT_PATH)
+  const verifyBat = readUtf8(VERIFY_BAT_PATH)
   const issues = []
   if (pkg.scripts?.['verify:ui'] !== 'node ../ops/scripts/frontend/verify-ui.js') {
     issues.push('frontend/package.json must expose verify:ui.')
@@ -211,7 +204,7 @@ function printAuditSummary() {
   const rawFallbacks = []
   const lightOnlyClasses = []
   for (const file of sourceFiles) {
-    const text = readText(file)
+    const text = readUtf8(file)
     const fallbackCount = (text.match(/\|\|\s*['"`][^'"`]*[A-Za-z]/g) || []).length
     const lightOnlyCount = (text.match(/\b(bg-white|bg-slate-50|bg-slate-100|text-slate-[0-9]{3})\b/g) || []).length
     if (fallbackCount) rawFallbacks.push([file, fallbackCount])

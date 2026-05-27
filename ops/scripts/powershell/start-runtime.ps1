@@ -21,13 +21,17 @@ $LogDir = Join-Path $Root 'ops\runtime\logs'
 $RunLog = Join-Path $LogDir 'start-server.log'
 $ComposeFile = Join-Path $Root 'ops\docker\compose.scale.yml'
 $DockerEnv = Join-Path $Root 'ops\runtime\docker-scale.env'
+$DockerReleaseEnv = Join-Path $Root 'ops\runtime\docker-release\docker-release.env'
 $DockerConfig = Join-Path $Root 'ops\runtime\docker-config'
 $DockerAppLog = Join-Path $LogDir 'docker-compose-app.log'
 $DockerWorkerLog = Join-Path $LogDir 'docker-compose-workers.log'
 $CloudflaredLog = Join-Path $LogDir 'cloudflared.log'
 $RouteContractLog = Join-Path $LogDir 'route-contract.log'
+$PostStartDiagnosticsScript = Join-Path $Root 'ops\scripts\runtime\smoke\post-start-diagnostics.mjs'
+$PostStartDiagnosticsReport = Join-Path $LogDir 'post-start-diagnostics.json'
+$PostStartDiagnosticsLog = Join-Path $LogDir 'post-start-diagnostics.log'
 $Bootstrap = Join-Path $Root 'ops\scripts\powershell\runtime-bootstrap.ps1'
-$RouteContractScript = Join-Path $Root 'ops\scripts\runtime\check-route-contract.mjs'
+$RouteContractScript = Join-Path $Root 'ops\scripts\runtime\smoke\check-route-contract.mjs'
 
 New-Item -ItemType Directory -Force -Path $LogDir, $DockerConfig | Out-Null
 Add-Content -LiteralPath $RunLog -Value "[$(Get-Date -Format s)] Runtime start requested"
@@ -216,6 +220,7 @@ function Test-PublicUrl($baseUrl) {
 }
 
 $envMap = Read-EnvFile $EnvFile
+$releaseEnvMap = Read-EnvFile $DockerReleaseEnv
 $port = if ($envMap.PORT) { $envMap.PORT } else { '4000' }
 $localApi = "http://127.0.0.1:$port"
 $publicUrl = if ($envMap.CLOUDFLARE_PUBLIC_URL) { $envMap.CLOUDFLARE_PUBLIC_URL.TrimEnd('/') } else { 'https://leangcosmetics.dpdns.org' }
@@ -234,8 +239,8 @@ Write-Step 'Preparing Docker services and runtime profile...'
 & powershell -NoProfile -ExecutionPolicy Bypass -File $Bootstrap -Mode Start -InstallMissing -StartServices -RequireServices
 if ($LASTEXITCODE -ne 0) { Fail 'Runtime bootstrap failed. Open Docker Desktop, wait until it is running, then retry.' }
 $dockerEnvMap = Read-EnvFile $DockerEnv
-$importWorkerReplicas = if ($dockerEnvMap.IMPORT_WORKER_REPLICAS) { [int]$dockerEnvMap.IMPORT_WORKER_REPLICAS } else { 2 }
-$mediaWorkerReplicas = if ($dockerEnvMap.MEDIA_WORKER_REPLICAS) { [int]$dockerEnvMap.MEDIA_WORKER_REPLICAS } else { 2 }
+$importWorkerReplicas = if ($dockerEnvMap.IMPORT_WORKER_REPLICAS) { [int]$dockerEnvMap.IMPORT_WORKER_REPLICAS } else { 1 }
+$mediaWorkerReplicas = if ($dockerEnvMap.MEDIA_WORKER_REPLICAS) { [int]$dockerEnvMap.MEDIA_WORKER_REPLICAS } else { 1 }
 $databaseDriver = if ($dockerEnvMap.DATABASE_DRIVER) { [string]$dockerEnvMap.DATABASE_DRIVER } else { 'postgres' }
 if ($databaseDriver.Trim().ToLowerInvariant() -ne 'postgres') {
   Fail 'Postgres plus R2 or emergency MinIO object storage is the only supported runtime. Use Start Business OS.bat or run\docker\start.bat.'
@@ -254,6 +259,25 @@ $env:BUSINESS_OS_REMOTE_PROVIDER = 'cloudflare'
 $env:PUBLIC_BASE_URL = $publicUrl
 $env:CLOUDFLARE_PUBLIC_URL = $publicUrl
 $env:CLOUDFLARE_ADMIN_URL = $adminUrl
+
+foreach ($name in @(
+  'S3_ENDPOINT',
+  'S3_REGION',
+  'S3_ACCESS_KEY_ID',
+  'S3_SECRET_ACCESS_KEY',
+  'S3_BUCKET',
+  'R2_PUBLIC_BASE_URL',
+  'CLOUDFLARE_ACCOUNT_ID',
+  'CLOUDFLARE_API_TOKEN',
+  'CLOUDFLARE_API_TOKEN_FILE'
+)) {
+  if ($releaseEnvMap[$name]) {
+    [Environment]::SetEnvironmentVariable($name, [string]$releaseEnvMap[$name], 'Process')
+  }
+}
+if (-not $env:S3_ENDPOINT -and $env:OBJECT_STORAGE_DRIVER -eq 'r2') {
+  $env:S3_ENDPOINT = 'https://743e5b727d139e85ed11679097f6f99e.r2.cloudflarestorage.com'
+}
 
 Write-Step 'Starting Docker app container with source/runtime refresh...'
 $code = Invoke-ProcessLogged $docker @('compose', '--env-file', $DockerEnv, '-f', $ComposeFile, '--progress', 'quiet', '--profile', 'runtime', 'up', '-d', '--remove-orphans', '--force-recreate', 'app') $DockerAppLog
@@ -275,6 +299,22 @@ if ($routeCode -ne 0) {
   Fail "Business OS started, but required API routes are missing or stale. Log: $RouteContractLog"
 }
 Write-Ok 'Required API route contract passed.'
+
+if (Test-Path -LiteralPath $PostStartDiagnosticsScript) {
+  Write-Step 'Writing post-start diagnostics checklist...'
+  $diagnosticsCode = Invoke-ProcessLogged 'node' @(
+    $PostStartDiagnosticsScript,
+    $localApi,
+    '--public-url', $publicUrl,
+    '--admin-url', $adminUrl,
+    '--output', $PostStartDiagnosticsReport
+  ) $PostStartDiagnosticsLog
+  if ($diagnosticsCode -ne 0) {
+    if (Test-Path -LiteralPath $PostStartDiagnosticsLog) { Get-Content -LiteralPath $PostStartDiagnosticsLog -Tail 80 }
+    Fail "Post-start diagnostics failed. Report: $PostStartDiagnosticsReport"
+  }
+  Write-Ok "Post-start diagnostics written: $PostStartDiagnosticsReport"
+}
 
 Write-Step 'Starting Docker import/media workers...'
 $code = Invoke-ProcessLogged $docker @('compose', '--env-file', $DockerEnv, '-f', $ComposeFile, '--progress', 'quiet', '--profile', 'runtime', 'up', '-d', '--force-recreate', '--scale', "import-worker=$importWorkerReplicas", '--scale', "media-worker=$mediaWorkerReplicas", 'import-worker', 'media-worker') $DockerWorkerLog

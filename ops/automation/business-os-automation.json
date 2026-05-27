@@ -9,6 +9,8 @@
     "tunnelTokenFile": "ops/runtime/secrets/cloudflare-business-os-leangcosmetics.token",
     "allowedCountries": ["KH", "HK", "AU"],
     "allowedEmailsFile": "ops/runtime/automation/access-emails.txt",
+    "adminAccessMode": "app-auth-only",
+    "accessSessionDuration": "720h",
     "rateLimitProfile": "normal",
     "requiredPermissions": [
       "Zone DNS Edit",
@@ -33,7 +35,17 @@
     "googleDrive": true,
     "cloudflareR2": true,
     "retentionDays": 7,
-    "deleteExpiredBackupVersions": true
+    "deleteExpiredBackupVersions": true,
+    "localKeepLatest": 3,
+    "cloudflareR2KeepLatest": 1
+  },
+  "cleanup": {
+    "runtimeReportsKeepLatest": 20,
+    "recoveryReportsKeepLatest": 5,
+    "runtimeLogFileMaxBytes": 1048576,
+    "deleteIgnoredDemoArtifacts": false,
+    "dockerSafePrune": true,
+    "generatedBulkCandidateMaxBytes": 536870912
   },
   "media": {
     "objectStorage": "r2",

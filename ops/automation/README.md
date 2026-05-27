@@ -49,7 +49,19 @@ The automation does not commit secret files or personal email allowlists. It rea
 
 ## Backup And Retention
 
-The policy keeps backup versions for 7 days. Google Drive datasync versions older than 7 days are selected for deletion by timestamp. Cloudflare R2 is the object-storage target for optimized media and backup storage.
+The policy keeps Google Drive backup versions for 7 days, keeps the latest 3 local backup packages, and keeps only the latest Cloudflare R2 backup package mirror. Runtime Playwright/report artifacts are capped at the latest 20 folders.
+
+Run the cleanup directly with:
+
+```powershell
+npm --prefix ops run prune-storage
+```
+
+Use `-- --dry-run` to preview. Add `-- --delete-demo` only when you also want to remove ignored demo/video build artifacts under `ops/demo`.
+
+## Cloudflare Access Convenience
+
+The admin domain uses `cloudflare.adminAccessMode`. Set it to `app-auth-only` when the app's own login, permissions, OTP, rate limits, and Cloudflare WAF should protect the admin UI without an extra Cloudflare email gate. Set it to `cloudflare-access` to restore the email allowlist policy. The Access app still uses the 720 hour session duration from `cloudflare.accessSessionDuration` when Cloudflare Access mode is enabled.
 
 ## What The Full Run Does
 

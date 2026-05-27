@@ -53,3 +53,4 @@ scanbot-web-sdk-*/
 # Browser verification artifacts
 .playwright-cli/
 /ops/.playwright-cli/
+/run/cv-render-check-word/

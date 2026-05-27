@@ -21,7 +21,7 @@ if /I not "%MODE%"=="host" if /I not "%MODE%"=="docker" (
 )
 
 shift
-node "%ROOT%\ops\scripts\runtime\update-cloudflare-tunnel-origin.mjs" --mode "%MODE%" %*
+node "%ROOT%\ops\scripts\runtime\cloudflare\update-cloudflare-tunnel-origin.mjs" --mode "%MODE%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 echo.
 if "%EXIT_CODE%"=="0" (

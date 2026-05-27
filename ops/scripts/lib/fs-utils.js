@@ -55,14 +55,58 @@ function readJson(filePath, fallback = {}) {
   }
 }
 
+async function readUtf8Async(filePath, fallback = '') {
+  try {
+    return await fs.promises.readFile(filePath, 'utf8')
+  } catch (_) {
+    return fallback
+  }
+}
+
+async function readJsonAsync(filePath, fallback = {}) {
+  try {
+    return JSON.parse(await fs.promises.readFile(filePath, 'utf8'))
+  } catch (_) {
+    return fallback
+  }
+}
+
 function lineCount(text) {
   if (!text) return 0
   return String(text).split(/\r?\n/).length
 }
 
+async function pathExists(filePath) {
+  try {
+    await fs.promises.access(filePath)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+async function mapLimit(items, limit, mapper) {
+  const output = new Array(items.length)
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex
+      nextIndex += 1
+      output[currentIndex] = await mapper(items[currentIndex], currentIndex)
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker)
+  await Promise.all(workers)
+  return output
+}
+
 /**
  * 1.4 File collection helpers
  */
+function shouldSkipDirectory(entryName, excludeDirs) {
+  return excludeDirs.has(String(entryName || '').toLowerCase())
+}
+
 function walkFilesRecursive(startDir, options = {}) {
   const {
     excludeDirs = new Set(['node_modules', 'dist', '.git', '.pm2', 'release']),
@@ -77,7 +121,7 @@ function walkFilesRecursive(startDir, options = {}) {
     entries.forEach((entry) => {
       const abs = path.join(current, entry.name)
       if (entry.isDirectory()) {
-        if (!excludeDirs.has(entry.name)) stack.push(abs)
+        if (!shouldSkipDirectory(entry.name, excludeDirs)) stack.push(abs)
         return
       }
       if (extensions instanceof Set) {
@@ -88,6 +132,35 @@ function walkFilesRecursive(startDir, options = {}) {
     })
   }
   return out
+}
+
+function collectFilesAndFolders(startDir, options = {}) {
+  const {
+    excludeDirs = new Set(['node_modules', 'dist', '.git', '.pm2', 'release']),
+    extensions = null,
+  } = options
+  const files = []
+  const folders = []
+  if (!fs.existsSync(startDir)) return { files, folders }
+  const stack = [startDir]
+  while (stack.length) {
+    const current = stack.pop()
+    folders.push(current)
+    const entries = fs.readdirSync(current, { withFileTypes: true })
+    entries.forEach((entry) => {
+      const abs = path.join(current, entry.name)
+      if (entry.isDirectory()) {
+        if (!shouldSkipDirectory(entry.name, excludeDirs)) stack.push(abs)
+        return
+      }
+      if (extensions instanceof Set) {
+        const ext = path.extname(entry.name).toLowerCase()
+        if (!extensions.has(ext)) return
+      }
+      files.push(abs)
+    })
+  }
+  return { files, folders }
 }
 
 function collectRootFiles(rootDir, options = {}) {
@@ -109,13 +182,32 @@ function collectRootFiles(rootDir, options = {}) {
   return out
 }
 
+function isProbablyText(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r')
+    const size = Math.min(4096, fs.statSync(filePath).size)
+    const buffer = Buffer.alloc(size)
+    fs.readSync(fd, buffer, 0, size, 0)
+    fs.closeSync(fd)
+    return !buffer.includes(0)
+  } catch (_) {
+    return false
+  }
+}
+
 module.exports = {
   toPosix,
   resolveProjectRoot,
   relFrom,
   readUtf8,
   readJson,
+  readUtf8Async,
+  readJsonAsync,
   lineCount,
+  pathExists,
+  mapLimit,
   walkFilesRecursive,
+  collectFilesAndFolders,
   collectRootFiles,
+  isProbablyText,
 }
