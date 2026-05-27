@@ -131,11 +131,11 @@ async function main() {
     await stockButtons.first().click()
 
     await Promise.race([
-      page.getByText('Total product', { exact: false }).first().waitFor({ state: 'visible', timeout: 15_000 }),
+      page.getByRole('button', { name: /transfer stock/i }).first().waitFor({ state: 'visible', timeout: 15_000 }),
       page.getByText('No stock in this branch', { exact: false }).first().waitFor({ state: 'visible', timeout: 15_000 }),
     ])
 
-    const expandedStockPanelVisible = await page.getByText('Total product', { exact: false }).first().isVisible()
+    const expandedStockPanelVisible = await page.getByRole('button', { name: /transfer stock/i }).first().isVisible()
       || await page.getByText('No stock in this branch', { exact: false }).first().isVisible()
     assert(expandedStockPanelVisible, 'Branch stock panel did not render after clicking Stock')
 
