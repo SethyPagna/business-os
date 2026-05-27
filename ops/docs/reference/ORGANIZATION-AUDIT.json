@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 621,
+  "filesScanned": 622,
   "largeFiles": 71,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -48,7 +48,7 @@
     ],
     [
       "frontend/components/shared",
-      19
+      20
     ],
     [
       "frontend/components/catalog",
