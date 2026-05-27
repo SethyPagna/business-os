@@ -15,7 +15,7 @@ async function runTest(name, fn) {
 }
 
 const swSource = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
-const webApiSource = fs.readFileSync(new URL('../src/web-api.js', import.meta.url), 'utf8')
+const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
 
 await runTest('service worker replays the IndexedDB outbox through secure authenticated background sync', () => {
@@ -40,7 +40,7 @@ await runTest('service worker preserves conflicts and auth failures instead of o
 
 await runTest('browser registers background sync without sharing auth tokens with the worker', () => {
   assert.match(webApiSource, /function registerOutboxBackgroundSync/)
-  assert.match(webApiSource, /registration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
+  assert.match(webApiSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
   assert.match(webApiSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
   assert.match(webApiSource, /queueBusinessOutboxOperation/)
   assert.match(webApiSource, /encrypted_payload/)
@@ -62,8 +62,8 @@ await runTest('offline file chunk failure status writes are bounded', () => {
   assert.match(webApiSource, /const OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3/)
   assert.match(webApiSource, /async function mapOfflineFileChunkStatusUpdates/)
   assert.match(webApiSource, /Math\.min\(OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY, list\.length\)/)
-  assert.match(webApiSource, /await mapOfflineFileChunkStatusUpdates\(rows, \(row\) => dexieDb\.offline_file_chunks\.update/)
-  assert.doesNotMatch(webApiSource, /Promise\.all\(rows\.map\(\(row\) => dexieDb\.offline_file_chunks\.update/)
+  assert.match(webApiSource, /await mapOfflineFileChunkStatusUpdates\(rows, \(row\) => offlineDb\.offline_file_chunks\.update/)
+  assert.doesNotMatch(webApiSource, /Promise\.all\(rows\.map\(\(row\) => (dexieDb|offlineDb)\.offline_file_chunks\.update/)
 })
 
 await runTest('online maintenance keeps the offline mirror and app shell fresh without blocking the UI', () => {

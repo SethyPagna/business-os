@@ -43,7 +43,7 @@ function main() {
     systemRoutes: { file: 'backend/src/routes/system/index.js', text: read('backend/src/routes/system/index.js') },
     backupUi: { file: 'frontend/src/components/utils-settings/Backup.jsx', text: read('frontend/src/components/utils-settings/Backup.jsx') },
     apiMethods: { file: 'frontend/src/api/methods.js', text: read('frontend/src/api/methods.js') },
-    offlineApi: { file: 'frontend/src/web-api.js', text: read('frontend/src/web-api.js') },
+    offlineApi: { file: 'frontend/src/web-api.ts', text: read('frontend/src/web-api.ts') },
     fullAutomation: { file: 'ops/scripts/powershell/full-automation.ps1', text: read('ops/scripts/powershell/full-automation.ps1') },
   }
 
@@ -71,7 +71,8 @@ function main() {
       'async function validateLocalBackupPackage',
       'function sha256File',
       'OBJECT_COPY_CONCURRENCY = 2',
-      'Array.from({ length: OBJECT_COPY_CONCURRENCY }, () => worker())',
+      'function startWorkerPromises',
+      'startWorkerPromises(OBJECT_COPY_CONCURRENCY, worker)',
       'objects-errors.json',
       'fs.createReadStream',
       'throwIfCancelled',

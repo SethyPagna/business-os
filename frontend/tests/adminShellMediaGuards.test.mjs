@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 const indexSource = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
 const swSource = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 const runtimeSource = readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
-const webApiSource = readFileSync(new URL('../src/web-api.js', import.meta.url), 'utf8')
+const webApiSource = readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const localDbSource = readFileSync(new URL('../src/api/localDb.ts', import.meta.url), 'utf8')
 const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
 const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')

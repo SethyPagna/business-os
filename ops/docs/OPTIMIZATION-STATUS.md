@@ -1,43 +1,49 @@
 # Business OS Optimization Status
 
-Last updated: 2026-05-16
+Last updated: 2026-05-28
 
 ## Phase Board
 
-- Phase 0: strong
-- Phase 1: strong
-- Phase 2: in progress
-- Phase 3: in progress
-- Phase 4: ongoing
+- Phase 8.4: active live verification and UI/runtime checks
+- Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
+- Phase 28: active, with R2 prune follow-up still open
+- Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash: `989b285f0957ef6e`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 
 Latest verified reports:
 
-- deep audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T09-10-25-077Z\summary.html`
-- route-scoped dashboard/products/inventory audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\deep-live-audit-2026-05-16T09-08-49-057Z\summary.html`
-- full-app audit:
-  `C:\Users\user\Downloads\business-os\.codex-worktrees\pos-background-filter-meta\ops\runtime\reports\full-app-audit-2026-05-16T09-12-46-013Z\summary.html`
+- broad Phase 8.4 UI live check:
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-27T20-28-46-340Z/report.json`
+- post-live hygiene:
+  `ops/runtime/reports/post-live-hygiene-latest.json`
+- Phase 29 repeated audit:
+  `ops/docs/reference/PHASE29-AUDIT.md`
 
 Current honest pockets:
 
-- no repeatable app-side hard findings on the latest warm exhaustive rerun
-- the previous `api/notifications/summary` pressure on inventory is no longer a
-  live warm-baseline finding after the backend cache pass
-- the remaining mobile inventory browser-action nav miss is harness-shaped and
-  did not reproduce as a deep-audit route failure
+- broad Phase 8.4 UI live check passed with 72 checked signals, no relevant
+  console messages, and no framework overlay
+- post-live hygiene passed with loaded dataset status and zero generated
+  integrity matches
+- the public Cloudflare portal check still failed because
+  `https://leangcosmetics.dpdns.org/public` did not render expected customer
+  content; keep that as the next public tunnel/runtime issue instead of mixing
+  it into local TypeScript migration work
 
 Recent route-level win:
 
-- `inventory`
-- `dashboard/products/inventory` shared summary path
+- browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
+  dispatch, typed offline vault rows, typed service-worker message handlers,
+  typed timers, and an explicit background-sync registration boundary
+- core frontend transport modules are now TypeScript:
+  `frontend/src/api/http.ts`, `frontend/src/api/websocket.ts`,
+  `frontend/src/api/localDb.ts`, and `frontend/src/web-api.ts`
 
 ## Current Working Rules
 
@@ -45,7 +51,11 @@ Recent route-level win:
 - Prefer hidden-work reduction, derived-data tightening, and helper reuse.
 - Use route-scoped audits before whole-app reruns.
 - Reject any route-local win that wakes unrelated warm whole-app findings.
-- Preserve the dirty local workspace; use the clean worktree for validation.
+- Keep `.js` compatibility wrappers stable until all JSX callers and source
+  inspection tests have moved to TypeScript-aware paths.
+- TypeScript conversions must add real safety, not only rename files: type
+  public boundaries, payloads, timers, event details, dynamic imports, and
+  browser/runtime gateways.
 
 ## Recently Accepted Wins
 
@@ -63,6 +73,10 @@ Recent route-level win:
 - POS global filter metadata now waits until Filters opens.
 - Dashboard export helpers now load on demand.
 - Backup version list and route hot paths were hardened in earlier passes.
+- API HTTP, local Dexie, websocket, and browser API bootstrap were converted to
+  TypeScript and verified through frontend utility tests, JSX scan, production
+  build, Phase 29 audit, schema audit, organization audit, and runtime
+  dependency guardrails.
 
 ## Recently Rejected Candidates
 
@@ -83,7 +97,9 @@ Recent route-level win:
 
 ## Next Best Moves
 
-1. Reconfirm the next repeatable shared hotspot before touching code again.
-2. Favor helper-level or dead-state cleanup over route-specific guesswork.
-3. Keep trimming hidden work and repeated derived-data assembly before broader
-   refactors.
+1. Split `frontend/src/api/methods.js` into typed sections or convert bounded
+   helper clusters first; it is the next high-impact API gateway target.
+2. Update source-inspection tests and ops verification scripts whenever a real
+   implementation moves behind a compatibility wrapper.
+3. Refresh Phase 29 references after each migration and keep the public
+   Cloudflare portal failure separate until the tunnel/runtime path is fixed.

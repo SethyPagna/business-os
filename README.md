@@ -2,6 +2,14 @@
 
 Business OS is Windows business software: one launcher starts the app, Docker services, workers, backups, and Cloudflare access.
 
+## Current Version And Engineering Status
+
+- App/package version: `6.0.0`.
+- Active roadmap position: Phase 8.4 live verification active; Phase 26 remains at 51 completed organization moves; Phase 28 remains active with the R2 prune follow-up; Phase 29 is active for repeated schema, cleanup, TypeScript, runtime, and performance sweeps.
+- Frontend migration status: core transport/bootstrap modules are now TypeScript (`api/http.ts`, `api/websocket.ts`, `api/localDb.ts`, and `web-api.ts`) with `.js` compatibility wrappers kept for existing JSX imports.
+- Remaining high-risk JavaScript target: `frontend/src/api/methods.js`, the large domain API registry. Convert it in smaller typed sections so request payloads, retries, cache invalidation, import jobs, and offline mirrors stay verifiable.
+- Latest local verification scope includes strict frontend typecheck, utility tests, JSX syntax scan, production build, Phase 29 repeated audit, schema audit, organization audit, runtime dependency guardrail, and Phase 8.4 live UI check. The public Cloudflare portal check still depends on the remote tunnel responding correctly.
+
 ## Which File Do I Use?
 
 Use **`Start Business OS.bat`** in the root folder.

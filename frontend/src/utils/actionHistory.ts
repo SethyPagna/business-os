@@ -60,6 +60,7 @@ type ActionHistoryOptions = {
 }
 
 type ActionHistoryApi = {
+  [key: string]: any
   getActionHistory?: (
     scope: string,
     limit: number,

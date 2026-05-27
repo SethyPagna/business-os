@@ -7,7 +7,7 @@ This folder contains the React SPA used by Business OS.
 1. `index.jsx` boots React.
 2. `AppContext.jsx` restores session/settings and exposes global helpers.
 3. `App.jsx` mounts the shell, lazy-loads pages, and renders shared notification/sync UI.
-4. `web-api.js` wires `window.api` to the shared API facade.
+4. `web-api.ts` wires `window.api` to the shared API facade, with `web-api.js` kept as the stable import wrapper.
 5. `api/` owns HTTP, WebSocket, local IndexedDB fallbacks, and domain wrappers.
 6. `components/` owns page-level workflows and UI composition.
 7. `lang/` provides translation dictionaries.
@@ -16,7 +16,7 @@ This folder contains the React SPA used by Business OS.
 ## Key Rules
 
 1. Business correctness belongs to the backend; the frontend should guide workflows and validate UX inputs.
-2. Components should call `api/methods.js` rather than custom fetch calls.
+2. Components should call `api/methods.js` rather than custom fetch calls; `methods.js` remains the large domain registry while transport, websocket, local cache, and browser bootstrap code migrate to TypeScript.
 3. User-facing strings should use translation keys in both `en.json` and `km.json`.
 4. New pages should include permission-aware UI, loading/error states, and responsive layouts.
 
@@ -32,6 +32,5 @@ Regenerate them with:
 
 ```bash
 node ops/scripts/docs/generate-doc-reference.js
-node ops/scripts/docs/generate-full-project-docs.js
-node ops/scripts/docs/performance-scan.js
+npm --prefix ops run phase29:audit:repeat
 ```
