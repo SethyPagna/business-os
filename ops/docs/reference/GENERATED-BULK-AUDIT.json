@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T19:57:34.549Z",
+  "generatedAt": "2026-05-27T20:06:02.487Z",
   "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
   "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
   "measurementMode": "bounded-parallel-targets",
@@ -9,9 +9,9 @@
   "fileStatConcurrency": 32,
   "targets": 15,
   "existingTargets": 8,
-  "totalBytes": 537513034,
+  "totalBytes": 537513036,
   "protectedBytes": 215267530,
-  "cleanupCandidateBytes": 322245504,
+  "cleanupCandidateBytes": 322245506,
   "nestedTargetOverlaps": [
     {
       "parent": "business-os-data",
@@ -31,9 +31,9 @@
     }
   ],
   "nestedOverlapBytes": 15496556,
-  "adjustedTotalBytes": 522016478,
+  "adjustedTotalBytes": 522016480,
   "adjustedProtectedBytes": 199770974,
-  "adjustedCleanupCandidateBytes": 322245504,
+  "adjustedCleanupCandidateBytes": 322245506,
   "largestProtectedTargets": [
     {
       "path": "business-os-data",
@@ -87,7 +87,7 @@
     },
     {
       "path": "frontend/dist",
-      "bytes": 31624940,
+      "bytes": 31624942,
       "files": 123,
       "folders": 6,
       "category": "build output",
@@ -105,7 +105,7 @@
   "slowestTargetMeasurements": [
     {
       "path": "backend/node_modules",
-      "measureMs": 752,
+      "measureMs": 720,
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
@@ -114,7 +114,7 @@
     },
     {
       "path": "frontend/node_modules",
-      "measureMs": 471,
+      "measureMs": 459,
       "bytes": 156252794,
       "files": 11241,
       "folders": 985,
@@ -123,7 +123,7 @@
     },
     {
       "path": "ops/node_modules",
-      "measureMs": 43,
+      "measureMs": 41,
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
@@ -151,7 +151,7 @@
     {
       "path": "frontend/dist",
       "measureMs": 3,
-      "bytes": 31624940,
+      "bytes": 31624942,
       "files": 123,
       "folders": 6,
       "category": "build output",
@@ -202,7 +202,7 @@
       "targets": 1
     },
     "regenerable": {
-      "bytes": 31624940,
+      "bytes": 31624942,
       "files": 123,
       "folders": 6,
       "targets": 1
@@ -264,7 +264,7 @@
       "bytes": 156252794,
       "files": 11241,
       "folders": 985,
-      "measureMs": 471,
+      "measureMs": 459,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -278,7 +278,7 @@
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
-      "measureMs": 752,
+      "measureMs": 720,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -303,7 +303,7 @@
     {
       "path": "frontend/dist",
       "exists": true,
-      "bytes": 31624940,
+      "bytes": 31624942,
       "files": 123,
       "folders": 6,
       "measureMs": 3,
@@ -334,7 +334,7 @@
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
-      "measureMs": 43,
+      "measureMs": 41,
       "category": "dependencies",
       "disposition": "safe cleanup",
       "protected": false,
@@ -390,7 +390,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 0,
+      "measureMs": 1,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,

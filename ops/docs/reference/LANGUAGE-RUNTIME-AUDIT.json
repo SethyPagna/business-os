@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T19:57:34.973Z",
+  "generatedAt": "2026-05-27T20:06:02.862Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 525,
+  "sourceFiles": 526,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -33,7 +33,7 @@
     ],
     [
       "TypeScript",
-      81
+      82
     ],
     [
       "Windows batch",
@@ -75,7 +75,7 @@
     ],
     [
       ".ts",
-      81
+      82
     ],
     [
       ".bat",
