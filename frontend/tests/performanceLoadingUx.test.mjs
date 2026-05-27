@@ -51,7 +51,7 @@ const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserPr
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.jsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.jsx', import.meta.url), 'utf8')
 const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.mjs', import.meta.url), 'utf8')
-const loaders = fs.readFileSync(new URL('../src/utils/loaders.mjs', import.meta.url), 'utf8')
+const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 const apiMethods = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
 
 assert.match(app, /const WARMUP_PAGE_IDS = \[\s*'products',[\s\S]*'pos',[\s\S]*'inventory',[\s\S]*\]/, 'background chunk warmup should target the primary day-to-day pages only')

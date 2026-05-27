@@ -12,6 +12,7 @@
   },
   "include": [
     "src/app/**/*.ts",
+    "src/runtime/**/*.ts",
     "src/types/**/*.ts",
     "src/components/catalog/**/*.ts",
     "src/components/contacts/**/*.ts",
