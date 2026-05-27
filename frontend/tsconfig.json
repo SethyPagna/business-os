@@ -28,6 +28,7 @@
     "src/components/products/helpers/**/*.ts",
     "src/components/products/history/**/*.ts",
     "src/components/products/import/**/*.ts",
+    "src/components/products/lookups/**/*.ts",
     "src/components/products/scanning/**/*.ts"
   ],
   "exclude": [
