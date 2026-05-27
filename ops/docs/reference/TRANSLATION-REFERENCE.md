@@ -4,9 +4,9 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 
 ## 1. Coverage Summary
 
-- English keys: **1999**
+- English keys: **2014**
 - Khmer keys: **2009**
-- Missing in Khmer: **0**
+- Missing in Khmer: **15**
 - Missing in English: **10**
 
 ## 2. English Key Groups (by prefix)
@@ -56,8 +56,8 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 | 41 | `best` | 2 |
 | 42 | `border` | 1 |
 | 43 | `both` | 1 |
-| 44 | `branch` | 20 |
-| 45 | `branches` | 4 |
+| 44 | `branch` | 31 |
+| 45 | `branches` | 5 |
 | 46 | `brand` | 2 |
 | 47 | `btn` | 2 |
 | 48 | `bulk` | 9 |
@@ -171,7 +171,7 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 | 156 | `import` | 52 |
 | 157 | `imported` | 3 |
 | 158 | `importing` | 2 |
-| 159 | `in` | 2 |
+| 159 | `in` | 3 |
 | 160 | `initial` | 1 |
 | 161 | `insert` | 1 |
 | 162 | `insufficient` | 1 |
@@ -319,7 +319,7 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 | 304 | `starts` | 1 |
 | 305 | `status` | 11 |
 | 306 | `still` | 1 |
-| 307 | `stock` | 20 |
+| 307 | `stock` | 21 |
 | 308 | `store` | 4 |
 | 309 | `submit` | 1 |
 | 310 | `summary` | 4 |
@@ -339,7 +339,7 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 | 324 | `to` | 1 |
 | 325 | `today` | 1 |
 | 326 | `top` | 5 |
-| 327 | `total` | 8 |
+| 327 | `total` | 9 |
 | 328 | `totals` | 1 |
 | 329 | `transfer` | 10 |
 | 330 | `transfers` | 1 |
@@ -739,7 +739,21 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 
 ## 4. Missing in Khmer
 
-- None
+1. `branch_stat_branches_detail`
+2. `branch_stat_in_stock_detail`
+3. `branch_stat_low_stock_detail`
+4. `branch_stat_out_stock_detail`
+5. `branch_stat_products_detail`
+6. `branch_stat_value_detail`
+7. `branch_stock_in_detail`
+8. `branch_stock_low_detail`
+9. `branch_stock_out_detail`
+10. `branch_stock_total_detail`
+11. `branch_stock_value_detail`
+12. `branches_short`
+13. `in_stock_short`
+14. `stock_value_short`
+15. `total_short`
 
 ## 5. Missing in English
 

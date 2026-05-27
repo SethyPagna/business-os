@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-27T18:37:28.952Z
+Generated: 2026-05-27T18:55:55.751Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 605
+- Files scanned: 608
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -17,7 +17,7 @@ Generated: 2026-05-27T18:37:28.952Z
 | .js | 185 |
 | .mjs | 161 |
 | .jsx | 107 |
-| .ts | 64 |
+| .ts | 67 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -30,7 +30,7 @@ Generated: 2026-05-27T18:37:28.952Z
 
 | Area | Files |
 | --- | --- |
-| frontend/utils | 58 |
+| frontend/utils | 59 |
 | frontend/components/products | 44 |
 | ops/docs/reference | 30 |
 | backend/routes | 24 |
@@ -54,18 +54,18 @@ Generated: 2026-05-27T18:37:28.952Z
 | ops/scripts/runtime/audits | 6 |
 | ops/scripts/verification | 6 |
 | frontend/api | 5 |
+| frontend/app | 4 |
 | frontend/components/files | 4 |
 | frontend/components/users | 4 |
 | ops/scripts/architecture | 4 |
 | ops/scripts/backend | 4 |
 | ops/scripts/runtime/cloudflare | 4 |
-| ops/scripts/runtime/smoke | 4 |
 
 ## Large Files
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 11644 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 11647 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8249 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6585 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-ROADMAP.md | 4917 | ops/docs |

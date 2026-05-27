@@ -4,7 +4,7 @@ Auto-generated symbol inventory for root-level code files and project scripts.
 
 ## 1. Coverage Summary
 
-Total files documented: **23**
+Total files documented: **24**
 
 ## 2. Symbol Count by File
 
@@ -21,18 +21,19 @@ Total files documented: **23**
 | 9 | `ops/scripts/lib/fs-utils.js` | 16 |
 | 10 | `ops/scripts/lib/report-utils.js` | 5 |
 | 11 | `ops/scripts/powershell/clean-generated.ps1` | 0 |
-| 12 | `ops/scripts/powershell/docker-release.ps1` | 1 |
-| 13 | `ops/scripts/powershell/full-automation.ps1` | 1 |
-| 14 | `ops/scripts/powershell/npm-install-mode.ps1` | 0 |
-| 15 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
-| 16 | `ops/scripts/powershell/start-runtime.ps1` | 1 |
-| 17 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | 0 |
-| 18 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
-| 19 | `ops/scripts/verification/verify-docker-release.js` | 11 |
-| 20 | `ops/scripts/verification/verify-hardening-policy.js` | 9 |
-| 21 | `ops/scripts/verification/verify-runtime-deps.js` | 13 |
-| 22 | `ops/scripts/verification/verify-scale-services.js` | 8 |
-| 23 | `ops/scripts/verification/verify-secret-hygiene.js` | 0 |
+| 12 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | 0 |
+| 13 | `ops/scripts/powershell/docker-release.ps1` | 1 |
+| 14 | `ops/scripts/powershell/full-automation.ps1` | 1 |
+| 15 | `ops/scripts/powershell/npm-install-mode.ps1` | 0 |
+| 16 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
+| 17 | `ops/scripts/powershell/start-runtime.ps1` | 1 |
+| 18 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | 0 |
+| 19 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
+| 20 | `ops/scripts/verification/verify-docker-release.js` | 11 |
+| 21 | `ops/scripts/verification/verify-hardening-policy.js` | 9 |
+| 22 | `ops/scripts/verification/verify-runtime-deps.js` | 13 |
+| 23 | `ops/scripts/verification/verify-scale-services.js` | 8 |
+| 24 | `ops/scripts/verification/verify-secret-hygiene.js` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -226,39 +227,43 @@ Total files documented: **23**
 
 - No top-level named function/class symbols detected.
 
-### 3.12 `ops/scripts/powershell/docker-release.ps1`
+### 3.12 `ops/scripts/powershell/clear-stale-node-processes.ps1`
+
+- No top-level named function/class symbols detected.
+
+### 3.13 `ops/scripts/powershell/docker-release.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 14 |
 
-### 3.13 `ops/scripts/powershell/full-automation.ps1`
+### 3.14 `ops/scripts/powershell/full-automation.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 33 |
 
-### 3.14 `ops/scripts/powershell/npm-install-mode.ps1`
+### 3.15 `ops/scripts/powershell/npm-install-mode.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.15 `ops/scripts/powershell/runtime-bootstrap.ps1`
+### 3.16 `ops/scripts/powershell/runtime-bootstrap.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 25 |
 
-### 3.16 `ops/scripts/powershell/start-runtime.ps1`
+### 3.17 `ops/scripts/powershell/start-runtime.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 11 |
 
-### 3.17 `ops/scripts/powershell/tailscale-health-monitor.ps1`
+### 3.18 `ops/scripts/powershell/tailscale-health-monitor.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.18 `ops/scripts/verification/verify-backup-reliability.js`
+### 3.19 `ops/scripts/verification/verify-backup-reliability.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -269,7 +274,7 @@ Total files documented: **23**
 | 5 | `checkNeedles` | function | 29 |
 | 6 | `main` | function | 36 |
 
-### 3.19 `ops/scripts/verification/verify-docker-release.js`
+### 3.20 `ops/scripts/verification/verify-docker-release.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -285,7 +290,7 @@ Total files documented: **23**
 | 10 | `walk` | function | 314 |
 | 11 | `main` | function | 325 |
 
-### 3.20 `ops/scripts/verification/verify-hardening-policy.js`
+### 3.21 `ops/scripts/verification/verify-hardening-policy.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -299,7 +304,7 @@ Total files documented: **23**
 | 8 | `assertFullAutomationIncludesPolicy` | function | 77 |
 | 9 | `main` | function | 93 |
 
-### 3.21 `ops/scripts/verification/verify-runtime-deps.js`
+### 3.22 `ops/scripts/verification/verify-runtime-deps.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -317,7 +322,7 @@ Total files documented: **23**
 | 12 | `assertCoverageComplete` | function | 233 |
 | 13 | `main` | function | 246 |
 
-### 3.22 `ops/scripts/verification/verify-scale-services.js`
+### 3.23 `ops/scripts/verification/verify-scale-services.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -330,7 +335,7 @@ Total files documented: **23**
 | 7 | `trackedLicenses` | const arrow | 69 |
 | 8 | `main` | function | 95 |
 
-### 3.23 `ops/scripts/verification/verify-secret-hygiene.js`
+### 3.24 `ops/scripts/verification/verify-secret-hygiene.js`
 
 - No top-level named function/class symbols detected.
 
