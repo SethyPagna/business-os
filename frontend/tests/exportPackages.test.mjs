@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { buildZip } from '../src/utils/csv.js'
+import fs from 'node:fs'
+import { buildZip, buildZipInWorker } from '../src/utils/csv.js'
 import { buildReportManifestRows, buildReportPackageFiles } from '../src/utils/exportPackage.js'
 
 let failed = 0
@@ -59,6 +60,41 @@ await runTest('buildReportPackageFiles includes context CSV, manifest CSV, and H
   assert.match(rawText, /inventory-manifest-2026-04-30-120000\.csv/)
   assert.match(rawText, /inventory-report\.html/)
   assert.match(rawText, /Inventory report/)
+})
+
+await runTest('zip builder supports row-based export descriptors', async () => {
+  const zipBlob = buildZip([
+    {
+      filename: 'contacts-customers.csv',
+      rows: [
+        { Name: 'Leang', Phone: '123' },
+        { Name: 'Sophea', Phone: '456' },
+      ],
+    },
+  ])
+
+  assert.ok(zipBlob)
+  const rawText = Buffer.from(await zipBlob.arrayBuffer()).toString('utf8')
+  assert.match(rawText, /contacts-customers\.csv/)
+  assert.match(rawText, /Name,Phone/)
+  assert.match(rawText, /Leang,123/)
+})
+
+await runTest('zip worker path keeps a synchronous fallback oracle', async () => {
+  const zipBlob = await buildZipInWorker([
+    { name: 'fallback.csv', content: 'A,B\n1,2' },
+  ], { timeoutMs: 10 })
+
+  assert.ok(zipBlob)
+  const rawText = Buffer.from(await zipBlob.arrayBuffer()).toString('utf8')
+  assert.match(rawText, /fallback\.csv/)
+
+  const csvSource = fs.readFileSync(new URL('../src/utils/csv.js', import.meta.url), 'utf8')
+  const workerSource = fs.readFileSync(new URL('../src/utils/csvExportWorker.ts', import.meta.url), 'utf8')
+  assert.match(csvSource, /new Worker\(new URL\('\.\/csvExportWorker\.mjs', import\.meta\.url\), \{ type: 'module' \}\)/)
+  assert.match(csvSource, /finish\(buildZip\(files\)\)/)
+  assert.match(csvSource, /ZIP_EXPORT_WORKER_TIMEOUT_MS = 30000/)
+  assert.match(workerSource, /import \{ buildZip \} from '\.\/csv\.js'/)
 })
 
 if (failed > 0) {

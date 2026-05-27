@@ -18,6 +18,8 @@ export default function PageHeader({
   stackOnMobile = true,
 }) {
   const toneClass = TONE_CLASS[tone] || TONE_CLASS.blue
+  const titleText = typeof title === 'string' ? title : ''
+  const subtitleText = typeof subtitle === 'string' ? subtitle.trim() : ''
   const layoutClass = stackOnMobile
     ? 'flex flex-col gap-3 md:flex-row md:items-start md:justify-between'
     : 'flex items-start justify-between gap-3'
@@ -35,8 +37,14 @@ export default function PageHeader({
             </div>
           ) : null}
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{title}</h1>
-            {subtitle ? <p className="mt-1 max-w-4xl text-sm text-gray-500 dark:text-gray-400">{subtitle}</p> : null}
+            <div className="flex min-w-0 items-center gap-2">
+              <h1
+                className="truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl"
+                title={subtitleText || titleText || undefined}
+              >
+                {title}
+              </h1>
+            </div>
           </div>
         </div>
       </div>

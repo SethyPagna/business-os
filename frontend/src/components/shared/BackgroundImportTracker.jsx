@@ -3,6 +3,8 @@ import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, 
 import { useApp } from '../../AppContext'
 import { isTransientGatewayError } from '../../api/http.js'
 import { dispatchImportCompletionRefresh, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.js'
+import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.mjs'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
@@ -13,6 +15,13 @@ const REMOVABLE_STATUSES = new Set(['pending', 'queued', 'running', 'completed',
 const IMPORT_TRACKER_ACTIVE_POLL_MS = 5000
 const IMPORT_TRACKER_IDLE_POLL_MS = 12000
 const IMPORT_TRACKER_MAX_BACKOFF_MS = 60000
+const IMPORT_TRACKER_LOAD_TIMEOUT_MS = 8000
+const IMPORT_TRACKER_PREFLIGHT_TIMEOUT_MS = 15000
+const IMPORT_TRACKER_CANCEL_TIMEOUT_MS = 12000
+const IMPORT_TRACKER_RETRY_TIMEOUT_MS = 12000
+const IMPORT_TRACKER_APPROVE_TIMEOUT_MS = 12000
+const IMPORT_TRACKER_ERRORS_DOWNLOAD_TIMEOUT_MS = 30000
+const IMPORT_TRACKER_REMOVE_TIMEOUT_MS = 12000
 
 function nextImportTrackerBackoff(current = 0) {
   return Math.min(
@@ -175,6 +184,7 @@ export default function BackgroundImportTracker() {
   const timerRef = useRef(null)
   const jobsSignatureRef = useRef('')
   const jobsRef = useRef([])
+  const actionInFlightRef = useRef('')
 
   const visibleJobs = useMemo(() => (
     dedupeJobsById(jobs).filter((job) => {
@@ -191,7 +201,11 @@ export default function BackgroundImportTracker() {
 
   const loadJobs = useCallback(async () => {
     try {
-      const result = await window.api.listImportJobs?.({ limit: 8 })
+      const result = await withLoaderTimeout(
+        () => window.api.listImportJobs?.({ limit: 8 }),
+        'Import tracker',
+        IMPORT_TRACKER_LOAD_TIMEOUT_MS,
+      )
       if (!aliveRef.current) return
       if (result?.unavailable || result?.transient) {
         setPollBackoffMs((current) => nextImportTrackerBackoff(current))
@@ -223,10 +237,7 @@ export default function BackgroundImportTracker() {
         setPollBackoffMs((current) => nextImportTrackerBackoff(current))
         return
       }
-      if (!jobsSignatureRef.current) return
-      jobsSignatureRef.current = ''
-      jobsRef.current = []
-      startTransition(() => setJobs([]))
+      setPollBackoffMs((current) => nextImportTrackerBackoff(current))
     }
   }, [])
 
@@ -289,77 +300,118 @@ export default function BackgroundImportTracker() {
   const progress = primaryProgress.value
   const compactTracker = isCompletedState && !expanded
 
+  const beginTrackerAction = (job, action) => {
+    const jobId = String(job?.id || '').trim()
+    if (!jobId) return null
+    const key = `${action}:${jobId}`
+    if (!beginNamedAction(actionInFlightRef, key, { blocked: !!busyJobId })) return null
+    setBusyJobId(jobId)
+    return { jobId, key }
+  }
+
+  const finishTrackerAction = (action) => {
+    finishNamedAction(actionInFlightRef, action?.key || '')
+    setBusyJobId('')
+  }
+
   const handleCancel = async (job) => {
-    if (!job?.id || busyJobId) return
-    setBusyJobId(job.id)
+    const action = beginTrackerAction(job, 'cancel')
+    if (!action) return
     try {
-      await window.api.cancelImportJob(job.id)
+      await withLoaderTimeout(
+        () => window.api.cancelImportJob(action.jobId),
+        'Cancel import job',
+        IMPORT_TRACKER_CANCEL_TIMEOUT_MS,
+      )
       await loadJobs()
       notify(t('import_cancel_requested') || 'Import cancel requested', 'info')
     } catch (error) {
       notify(error?.message || (t('import_cancel_failed') || 'Could not cancel import'), 'error')
     } finally {
-      setBusyJobId('')
+      finishTrackerAction(action)
     }
   }
 
   const handleRetry = async (job) => {
-    if (!job?.id || busyJobId) return
-    setBusyJobId(job.id)
+    const action = beginTrackerAction(job, 'retry')
+    if (!action) return
     try {
-      await window.api.retryImportJob(job.id)
+      await withLoaderTimeout(
+        () => window.api.retryImportJob(action.jobId),
+        'Retry import job',
+        IMPORT_TRACKER_RETRY_TIMEOUT_MS,
+      )
       await loadJobs()
       notify(t('import_retry_started') || 'Import retry started', 'success')
     } catch (error) {
       notify(error?.message || (t('import_retry_failed') || 'Could not retry import'), 'error')
     } finally {
-      setBusyJobId('')
+      finishTrackerAction(action)
     }
   }
 
   const handleApprove = async (job) => {
-    if (!job?.id || busyJobId) return
-    setBusyJobId(job.id)
+    const action = beginTrackerAction(job, 'approve')
+    if (!action) return
     try {
-      const preflight = await window.api.preflightImportJob?.(job.id)
+      const preflight = await withLoaderTimeout(
+        () => window.api.preflightImportJob?.(action.jobId),
+        'Import preflight',
+        IMPORT_TRACKER_PREFLIGHT_TIMEOUT_MS,
+      )
       if (preflight && preflight.ok === false) {
         const firstFailure = preflight.failures?.[0]
         notify(firstFailure?.message || (t('import_review_needed') || 'Review import decisions before applying.'), 'error')
         await loadJobs()
         return
       }
-      await window.api.approveImportJob(job.id)
+      await withLoaderTimeout(
+        () => window.api.approveImportJob(action.jobId),
+        'Approve import job',
+        IMPORT_TRACKER_APPROVE_TIMEOUT_MS,
+      )
       await loadJobs()
       notify(t('import_apply_started') || 'Import apply started. You can keep using the app.', 'success')
     } catch (error) {
       notify(error?.message || (t('import_apply_failed') || 'Could not approve import'), 'error')
     } finally {
-      setBusyJobId('')
+      finishTrackerAction(action)
     }
   }
 
   const handleDownloadErrors = async (job) => {
-    if (!job?.id || busyJobId) return
-    setBusyJobId(job.id)
+    const action = beginTrackerAction(job, 'download-errors')
+    if (!action) return
     try {
-      await window.api.downloadImportJobErrors(job.id)
+      await withLoaderTimeout(
+        () => window.api.downloadImportJobErrors(action.jobId),
+        'Download import errors',
+        IMPORT_TRACKER_ERRORS_DOWNLOAD_TIMEOUT_MS,
+      )
     } catch (error) {
       notify(error?.message || (t('import_errors_download_failed') || 'Could not download import errors'), 'error')
     } finally {
-      setBusyJobId('')
+      finishTrackerAction(action)
     }
   }
 
   const handleRemove = async (job) => {
-    if (!job?.id || busyJobId) return
+    const action = beginTrackerAction(job, 'remove')
+    if (!action) return
     const okToRemove = window.confirm?.(t('remove_import_confirm') || 'Remove this import from the tracker and delete its uploaded import files?') ?? true
-    if (!okToRemove) return
-    const removedId = String(job.id)
-    setBusyJobId(removedId)
+    if (!okToRemove) {
+      finishTrackerAction(action)
+      return
+    }
+    const removedId = action.jobId
     try {
       const status = normalizeJobStatus(job)
       const force = !['running', 'cancelling'].includes(status)
-      await window.api.deleteImportJob(removedId, { force })
+      await withLoaderTimeout(
+        () => window.api.deleteImportJob(removedId, { force }),
+        'Remove import job',
+        IMPORT_TRACKER_REMOVE_TIMEOUT_MS,
+      )
       const filteredJobs = dedupeJobsById(jobs).filter((item) => String(item?.id || '') !== removedId)
       jobsSignatureRef.current = buildJobsSignature(filteredJobs)
       jobsRef.current = filteredJobs
@@ -375,7 +427,7 @@ export default function BackgroundImportTracker() {
       }
       notify(error?.message || (t('import_remove_failed') || 'Could not remove import'), 'error')
     } finally {
-      setBusyJobId('')
+      finishTrackerAction(action)
     }
   }
 

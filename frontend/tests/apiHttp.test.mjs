@@ -278,6 +278,9 @@ await runTest('read-only 530 pollers use fallback data and backoff hooks', () =>
   assert.match(methodsSource, /transient:\s*true/)
   assert.match(trackerSource, /pollBackoffMs/)
   assert.match(trackerSource, /nextImportTrackerBackoff/)
+  assert.match(trackerSource, /IMPORT_TRACKER_LOAD_TIMEOUT_MS/)
+  assert.match(trackerSource, /IMPORT_TRACKER_PREFLIGHT_TIMEOUT_MS/)
+  assert.match(trackerSource, /withLoaderTimeout\(/)
   assert.match(trackerSource, /DISMISSABLE_STATUSES/)
   assert.match(trackerSource, /handleDismiss/)
   assert.match(appContextSource, /syncErrorLogAtRef/)
@@ -296,7 +299,7 @@ await runTest('app bootstrap converts invalid sessions into an explicit unauthor
 await runTest('paged audit and user-attributed activity APIs expose user filters', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
   assert.match(source, /getAuditLogs\s*=\s*\(params\s*=\s*\{\}\)/)
-  assert.match(source, /\/api\/system\/audit-logs\$\{q \? `\?\$\{q\}` : ''\}/)
+  assert.match(source, /appendQuery\('\/api\/system\/audit-logs', q\)/)
   assert.match(source, /const auditRows = Array\.isArray\(result\) \? result : \(result\?\.items \|\| \[\]\)/)
   assert.match(source, /await mirrorTable\('audit_logs'\)\(auditRows\)\.catch\(\(\) => \{\}\)/)
   assert.match(source, /return result/)
@@ -304,6 +307,46 @@ await runTest('paged audit and user-attributed activity APIs expose user filters
   assert.match(source, /getActionHistory\s*=\s*\([^)]*params\s*=\s*\{\}/)
   assert.match(source, /getInventoryMovements\s*=\s*\([^)]*userId/)
   assert.match(source, /getSales\s*=\s*\(params\)/)
+})
+
+await runTest('client API query strings use one shared builder', () => {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  assert.match(
+    source,
+    /function buildQueryString\(params = \{\}, \{ skipEmpty = true \} = \{\}\)[\s\S]*for \(const key of Object\.keys\(params \|\| \{\}\)\)[\s\S]*const value = params\[key\][\s\S]*query\.append\(key, value\)/,
+  )
+  assert.match(source, /function appendQuery\(path, query\)[\s\S]*return query \? `\$\{path\}\?\$\{query\}` : path/)
+  assert.match(source, /const q = buildQueryString\(params\)/)
+  assert.match(source, /const query = buildQueryString\(\{ scope, limit, \.\.\.\(params \|\| \{\}\) \}\)/)
+  assert.match(source, /getSales\s*=\s*\(params\)[\s\S]*buildQueryString\(params, \{ skipEmpty: false \}\)/)
+  assert.match(source, /getReturns\s*=\s*\(params\)[\s\S]*buildQueryString\(params, \{ skipEmpty: false \}\)/)
+  assert.doesNotMatch(source, /new URLSearchParams\(Object\.entries/)
+  assert.doesNotMatch(source, /\$\{q \? `\?\$\{q\}` : ''\}/)
+  assert.doesNotMatch(source, /\$\{q \? '\?' \+ q : ''\}/)
+})
+
+await runTest('product id lookup normalizes ids without intermediate map/filter arrays', () => {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  assert.match(
+    source,
+    /function normalizePositiveUniqueIds\(ids = \[\], limit = 100\)[\s\S]*const seen = new Set\(\)[\s\S]*for \(const value of ids \|\| \[\]\)[\s\S]*uniqueIds\.push\(id\)[\s\S]*if \(uniqueIds\.length >= limit\) break/,
+  )
+  assert.match(source, /const uniqueIds = normalizePositiveUniqueIds\(ids, 100\)/)
+  assert.doesNotMatch(source, /Array\.from\(new Set\(\(ids \|\| \[\]\)\.map/)
+})
+
+await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  assert.match(
+    source,
+    /function appendActorQuery\(path, extra = \{\}\)[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
+  )
+  assert.match(
+    source,
+    /async function clearCachedQueryResults\(prefixes = \[\]\)[\s\S]*const keys = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,
+  )
+  assert.doesNotMatch(source, /Object\.entries\(extra \|\| \{\}\)\.forEach/)
+  assert.doesNotMatch(source, /\.map\(\(row\) => String\(row\?\.key \|\| ''\)\)\s*\.filter/)
 })
 
 await runTest('empty local mirrors are not treated as usable server read fallback data', () => {
@@ -378,8 +421,8 @@ await runTest('health payload exposes data, storage, queue, cache, and analytics
 
 await runTest('large search methods do not use empty local fallbacks for required APIs', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
-  assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', `\/api\/products\/search/)
-  assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', `\/api\/inventory\/products\/search/)
+  assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', appendQuery\('\/api\/products\/search', q\)/)
+  assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', appendQuery\('\/api\/inventory\/products\/search', q\)/)
   assert.doesNotMatch(source, /products:search:\$\{q\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
   assert.doesNotMatch(source, /inventory:products:search:\$\{q\}`,[\s\S]{0,260}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
 })

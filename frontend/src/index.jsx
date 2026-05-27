@@ -1,5 +1,8 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import '@fontsource/noto-sans-khmer/400.css'
+import '@fontsource/noto-sans-khmer/500.css'
+import '@fontsource/noto-sans-khmer/600.css'
 import App from './App'
 import { AppProvider } from './AppContext'
 import { isPublicCatalogPath } from './app/appShellUtils.mjs'

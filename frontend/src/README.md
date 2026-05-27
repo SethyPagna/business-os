@@ -31,7 +31,7 @@ Generated references live in `ops/docs/reference/`:
 Regenerate them with:
 
 ```bash
-node ops/scripts/generate-doc-reference.js
-node ops/scripts/generate-full-project-docs.js
-node ops/scripts/performance-scan.js
+node ops/scripts/docs/generate-doc-reference.js
+node ops/scripts/docs/generate-full-project-docs.js
+node ops/scripts/docs/performance-scan.js
 ```

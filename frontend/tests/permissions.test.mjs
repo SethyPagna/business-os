@@ -12,5 +12,6 @@ assert.equal(parsePermissionMap(objectPermissions), objectPermissions)
 assert.deepEqual(parsePermissionMap('not-json'), {})
 assert.deepEqual(parsePermissionMap(null), {})
 assert.deepEqual(parsePermissionMap(['products']), {})
+assert.deepEqual(parsePermissionMap('["products"]'), {})
 
 console.log('PASS permission parsing accepts string and object payloads')

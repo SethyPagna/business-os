@@ -58,6 +58,14 @@ await runTest('vault-unlocked foreground sync decrypts outbox payloads and repor
   assert.match(webApiSource, /BUSINESS_OS_OUTBOX_FILE_PROGRESS/)
 })
 
+await runTest('offline file chunk failure status writes are bounded', () => {
+  assert.match(webApiSource, /const OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3/)
+  assert.match(webApiSource, /async function mapOfflineFileChunkStatusUpdates/)
+  assert.match(webApiSource, /Math\.min\(OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY, list\.length\)/)
+  assert.match(webApiSource, /await mapOfflineFileChunkStatusUpdates\(rows, \(row\) => dexieDb\.offline_file_chunks\.update/)
+  assert.doesNotMatch(webApiSource, /Promise\.all\(rows\.map\(\(row\) => dexieDb\.offline_file_chunks\.update/)
+})
+
 await runTest('online maintenance keeps the offline mirror and app shell fresh without blocking the UI', () => {
   assert.match(webApiSource, /const OFFLINE_REFRESH_INTERVAL_MS = 5 \* 60_000/)
   assert.match(webApiSource, /const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000/)

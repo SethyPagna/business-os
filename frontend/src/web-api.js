@@ -30,6 +30,7 @@ const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000
 const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
+const OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3
 let offlineMaintenanceStarted = false
 let lastServiceWorkerUpdateAt = 0
 let offlineSnapshotTimer = 0
@@ -61,6 +62,19 @@ function getLazyApiMethod(name) {
       }))
   }
   return lazyApiMethodCache.get(name)
+}
+
+async function mapOfflineFileChunkStatusUpdates(rows, mapper) {
+  const list = Array.isArray(rows) ? rows : []
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY, list.length) }, async () => {
+    while (nextIndex < list.length) {
+      const currentIndex = nextIndex
+      nextIndex += 1
+      await mapper(list[currentIndex], currentIndex)
+    }
+  })
+  await Promise.all(workers)
 }
 
 function bytesToBase64(bytes) {
@@ -448,11 +462,11 @@ async function syncUnlockedOfflineFileChunks(options = {}) {
     } catch (error) {
       failed += 1
       const paused = Number(error?.status || 0) === 423 || error?.code === 'system_busy'
-      await Promise.all(rows.map((row) => dexieDb.offline_file_chunks.update(row._seq, {
+      await mapOfflineFileChunkStatusUpdates(rows, (row) => dexieDb.offline_file_chunks.update(row._seq, {
         status: row.status === 'synced' ? 'synced' : (paused ? 'pending' : 'failed'),
         error: error?.message || (paused ? 'System maintenance is running. Offline file sync will retry.' : 'Offline file sync failed.'),
         updated_at: new Date().toISOString(),
-      }).catch(() => {})))
+      }).catch(() => {}))
       dispatchOutboxFileProgress({ upload_id: uploadId, status: paused ? 'paused' : 'failed', error: error?.message || (paused ? 'System maintenance is running.' : 'Offline file sync failed.') })
     }
   }
@@ -573,7 +587,7 @@ function forwardServiceWorkerOutboxEvent(event) {
   }))
 }
 
-// ?? Silence Capacitor/vendor bridge noise that fires in plain web context ??????
+// ?€?€ Silence Capacitor/vendor bridge noise that fires in plain web context ?€?€?€?€?€?€
 // vendor.js emits "No Listener: tabs:outgoing.message.ready" as an unhandled
 // rejection when Capacitor's tab-messaging bridge can't find a native listener.
 // This is harmless in web-only mode.
@@ -623,7 +637,7 @@ if (typeof window !== 'undefined') {
   }, true)
 }
 
-// ?? Synchronous window.api installation ??????????????????????????????????????
+// ?€?€ Synchronous window.api installation ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function forwardServiceWorkerAppEvent(event) {
   if (typeof window === 'undefined') return
   if (event?.data?.type !== 'BUSINESS_OS_APP_UPDATE_AVAILABLE') return
@@ -737,7 +751,7 @@ if (typeof window !== 'undefined') {
   startOfflineMaintenanceLoop()
 }
 
-// ?? Bootstrap: read stored token, auto-detect server URL from page origin ?????
+// ?€?€ Bootstrap: read stored token, auto-detect server URL from page origin ?€?€?€?€?€
 // KEY FIX: When not in Vite dev mode the page is served BY the backend, so the
 // current origin is always the correct API/WS server ??regardless of any stale
 // URL that may be saved in localStorage from a previous session or a different

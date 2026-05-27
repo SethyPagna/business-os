@@ -30,6 +30,8 @@ await runTest('frontend uses owned Google OAuth API names and no Supabase OAuth 
   assert.doesNotMatch(methodsSource, /SupabaseOauth/)
   assert.doesNotMatch(appContextSource, /SupabaseOauth/)
   assert.match(appContextSource, /completeGoogleOauth/)
+  assert.match(appContextSource, /const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000/)
+  assert.match(appContextSource, /withLoaderTimeout\(\s*\(\) => window\.api\.completeGoogleOauth\(\{[\s\S]*mode: 'link'[\s\S]*\}\),\s*'Complete Google OAuth',\s*APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS,\s*\)/)
   assert.match(loginSource, /startGoogleOauth/)
   assert.match(profileSource, /startGoogleOauth/)
   assert.match(profileSource, /unlinkGoogleOauth/)

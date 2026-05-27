@@ -54,6 +54,57 @@ function getPortalBaseUrl() {
   return (browserOrigin || getSyncServerUrl() || '').replace(/\/$/, '')
 }
 
+function buildQueryString(params = {}, { skipEmpty = true } = {}) {
+  const query = new URLSearchParams()
+  for (const key of Object.keys(params || {})) {
+    const value = params[key]
+    if (value == null) continue
+    if (skipEmpty && value === '') continue
+    query.append(key, value)
+  }
+  return query.toString()
+}
+
+function appendQuery(path, query) {
+  return query ? `${path}?${query}` : path
+}
+
+function normalizePositiveUniqueIds(ids = [], limit = 100) {
+  const uniqueIds = []
+  const seen = new Set()
+  for (const value of ids || []) {
+    const id = Number(value)
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
+    seen.add(id)
+    uniqueIds.push(id)
+    if (uniqueIds.length >= limit) break
+  }
+  return uniqueIds
+}
+
+const SETTINGS_CONFLICT_META_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'])
+
+function buildAttemptedSettings(updates = {}) {
+  const attempted = {}
+  for (const key of Object.keys(updates || {})) {
+    if (SETTINGS_CONFLICT_META_KEYS.has(key)) continue
+    attempted[key] = updates[key]
+  }
+  return attempted
+}
+
+function buildAttemptedReturnItems(items = []) {
+  const attemptedItems = []
+  for (const item of Array.isArray(items) ? items : []) {
+    attemptedItems.push({
+      product_name: item?.product_name || '',
+      quantity: item?.quantity || 0,
+      return_to_stock: item?.return_to_stock !== false,
+    })
+  }
+  return attemptedItems
+}
+
 function getCurrentUserContext() {
   if (typeof window === 'undefined') return { userId: null, userName: '' }
   try {
@@ -74,7 +125,20 @@ const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
 const OFFLINE_DEVICE_SNAPSHOT_META_KEY = 'offline_device_snapshot_meta'
 const OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
+const DISCARD_SYNC_UPDATE_CHANNELS = ['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard']
+const OFFLINE_SALE_SYNC_UPDATE_CHANNELS = ['sales', 'products', 'inventory', 'dashboard']
+const PENDING_SYNC_PREVIEW_LIMIT = 25
 let offlineDeviceSnapshotPromise = null
+
+function dispatchSyncUpdates(channels = [], reason = '') {
+  if (typeof window === 'undefined') return
+  const ts = Date.now()
+  for (const channel of channels) {
+    window.dispatchEvent(new CustomEvent('sync:update', {
+      detail: { channel, reason, ts },
+    }))
+  }
+}
 
 function registerOutboxBackgroundSync() {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
@@ -108,13 +172,7 @@ export async function discardPendingSyncQueue(reason = 'Offline changes were cle
   const existing = await dexieDb.sync_queue.toArray().catch(() => [])
   await dexieDb.sync_queue.clear().catch(() => {})
   emitSyncQueueChanged({ reason, discarded: existing.length })
-  if (typeof window !== 'undefined') {
-    ;['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard'].forEach((channel) => {
-      window.dispatchEvent(new CustomEvent('sync:update', {
-        detail: { channel, reason: 'discard-pending-sync-queue', ts: Date.now() },
-      }))
-    })
-  }
+  dispatchSyncUpdates(DISCARD_SYNC_UPDATE_CHANNELS, 'discard-pending-sync-queue')
   return {
     success: true,
     discarded: existing.length,
@@ -133,6 +191,29 @@ function ensureClientRequestId(payload, prefix) {
   const current = String(payload?.client_request_id || '').trim()
   if (current) return { ...(payload || {}), client_request_id: current.slice(0, 120) }
   return { ...(payload || {}), client_request_id: createClientRequestId(prefix) }
+}
+
+function serializePendingSyncPreview(items = []) {
+  const preview = []
+  const limit = Math.min(PENDING_SYNC_PREVIEW_LIMIT, items.length)
+  for (let index = 0; index < limit; index += 1) {
+    const item = items[index]
+    preview.push({
+      _seq: item._seq,
+      channel: item.channel,
+      operation: item.operation || null,
+      entity_table: item.entity_table || null,
+      entity_id: item.entity_id ?? null,
+      entity_name: item.entity_name || null,
+      status: item.status || 'pending',
+      created_at: item.created_at || null,
+      updated_at: item.updated_at || null,
+      retry_count: Number(item.retry_count || 0),
+      retry_at: item.retry_at || null,
+      error: item.error || null,
+    })
+  }
+  return preview
 }
 
 export async function getPendingSyncState() {
@@ -159,20 +240,7 @@ export async function getPendingSyncState() {
     ...counts,
     oldest_created_at: oldest,
     writes_require_server: true,
-    items: sorted.slice(0, 25).map((item) => ({
-      _seq: item._seq,
-      channel: item.channel,
-      operation: item.operation || null,
-      entity_table: item.entity_table || null,
-      entity_id: item.entity_id ?? null,
-      entity_name: item.entity_name || null,
-      status: item.status || 'pending',
-      created_at: item.created_at || null,
-      updated_at: item.updated_at || null,
-      retry_count: Number(item.retry_count || 0),
-      retry_at: item.retry_at || null,
-      error: item.error || null,
-    })),
+    items: serializePendingSyncPreview(sorted),
   }
 }
 
@@ -322,12 +390,14 @@ function appendActorQuery(path, extra = {}) {
   const { userId, userName } = getCurrentUserContext()
   if (userId) query.set('userId', String(userId))
   if (userName) query.set('userName', userName)
-  Object.entries(extra || {}).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === '') return
+  for (const key of Object.keys(extra || {})) {
+    const value = extra[key]
+    if (value === undefined || value === null || value === '') continue
     query.set(key, String(value))
-  })
-  if (!query.toString()) return path
-  return `${path}${path.includes('?') ? '&' : '?'}${query.toString()}`
+  }
+  const queryString = query.toString()
+  if (!queryString) return path
+  return `${path}${path.includes('?') ? '&' : '?'}${queryString}`
 }
 
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 10000) {
@@ -384,7 +454,10 @@ function mirrorTable(tableName) {
       await clearLocalMirrorTables([tableName]).catch(() => {})
       return []
     }
-    const incomingRows = Array.isArray(rows) ? rows.map((row) => ({ ...row })) : []
+    const incomingRows = []
+    for (const row of Array.isArray(rows) ? rows : []) {
+      incomingRows.push({ ...row })
+    }
     return replaceTableContents(tableName, incomingRows)
   }
 }
@@ -425,14 +498,24 @@ async function writeCachedQueryResult(key, data) {
 }
 
 async function clearCachedQueryResults(prefixes = []) {
-  const keys = (Array.isArray(prefixes) ? prefixes : []).map((value) => String(value || '').trim()).filter(Boolean)
+  const keys = []
+  for (const value of Array.isArray(prefixes) ? prefixes : []) {
+    const key = String(value || '').trim()
+    if (key) keys.push(key)
+  }
   if (!keys.length) return
   try {
     const rows = await dexieDb.settings.toArray()
-    const matchingKeys = rows
-      .map((row) => String(row?.key || ''))
-      .filter((rowKey) => rowKey.startsWith(QUERY_CACHE_PREFIX))
-      .filter((rowKey) => keys.some((prefix) => rowKey.includes(prefix)))
+    const matchingKeys = []
+    for (const row of rows) {
+      const rowKey = String(row?.key || '')
+      if (!rowKey.startsWith(QUERY_CACHE_PREFIX)) continue
+      for (const prefix of keys) {
+        if (!rowKey.includes(prefix)) continue
+        matchingKeys.push(rowKey)
+        break
+      }
+    }
     if (matchingKeys.length) await dexieDb.settings.bulkDelete(matchingKeys)
   } catch (_) {}
 }
@@ -711,17 +794,13 @@ export async function getSettings(options = {}) {
     cacheInvalidate('settings')
   }
   return routeMirrored('settings:get', async () => {
-    const [settingsResponse, meta] = await Promise.all([
-      apiFetch('GET', '/api/settings'),
-      apiFetch('GET', '/api/settings/meta').catch(() => null),
-    ])
+    const settingsResponse = await apiFetch('GET', '/api/settings')
     const {
       updatedAt: inlineUpdatedAt,
       ...settings
     } = settingsResponse || {}
-    const effectiveUpdatedAt = inlineUpdatedAt || meta?.updatedAt || null
-    if (effectiveUpdatedAt) {
-      await localSaveSettingsMeta(effectiveUpdatedAt).catch(() => {})
+    if (inlineUpdatedAt) {
+      await localSaveSettingsMeta(inlineUpdatedAt).catch(() => {})
     }
     return settings
   }, localGetSettings, async (settings) => {
@@ -733,9 +812,7 @@ let settingsSaveQueue = Promise.resolve()
 
 export async function saveSettings(updates, options = {}) {
   const runSave = async () => {
-    const attempted = Object.fromEntries(
-      Object.entries(updates || {}).filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
-    )
+    const attempted = buildAttemptedSettings(updates)
     const refreshChannels = getSettingsRefreshChannels(attempted, options?.refreshChannels)
     const refreshDetail = {
       reason: String(options?.reason || 'settings-saved').trim() || 'settings-saved',
@@ -840,8 +917,8 @@ export const deleteBranch = async (id, userId, userName) => {
   return route('branches:delete', () => apiFetch('DELETE', `/api/branches/${id}`, payload), null, true)
 }
 export const getBranchStock = (id, params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`branches:stock:${id}:${q}`,  () => apiFetch('GET', `/api/branches/${id}/stock${q ? `?${q}` : ''}`),   () => [])
+  const q = buildQueryString(params)
+  return route(`branches:stock:${id}:${q}`,  () => apiFetch('GET', appendQuery(`/api/branches/${id}/stock`, q)),   () => [])
 }
 export const getTransfers   = ()       => route('transfers:get',   () => apiFetch('GET', '/api/transfers'),              () => dexieDb.stock_transfers.orderBy('created_at').reverse().toArray())
 export const transferStock  = d        => route('branches:transfer', () => apiFetch('POST', '/api/branches/transfer', { ...getDeviceInfo(), ...d }), null, true)
@@ -851,17 +928,17 @@ export const repairBranchStockIntegrity = payload => route('branches:stockIntegr
 // ─── Products ─────────────────────────────────────────────────────────────────
 export const getProducts        = ()       => routeMirrored('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray(), mirrorTable('products'))
 export const searchProducts = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   const cacheKey = `products:search:${q}`
   return routeMirrored(
     cacheKey,
-    () => apiFetch('GET', `/api/products/search${q ? `?${q}` : ''}`),
+    () => apiFetch('GET', appendQuery('/api/products/search', q)),
     () => readCachedQueryResult(cacheKey),
     (result) => writeCachedQueryResult(cacheKey, result),
   )
 }
 export const getProductsByIds = (ids = [], params = {}) => {
-  const uniqueIds = Array.from(new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))).slice(0, 100)
+  const uniqueIds = normalizePositiveUniqueIds(ids, 100)
   if (!uniqueIds.length) return Promise.resolve({ items: [], total: 0, page: 1, pageSize: 0 })
   return searchProducts({
     page: 1,
@@ -872,11 +949,11 @@ export const getProductsByIds = (ids = [], params = {}) => {
   })
 }
 export const getProductFilters = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   const cacheKey = `products:filters:${q}`
   return routeMirrored(
     cacheKey,
-    () => apiFetch('GET', `/api/products/filters${q ? `?${q}` : ''}`),
+    () => apiFetch('GET', appendQuery('/api/products/filters', q)),
     () => readCachedQueryResult(cacheKey),
     (result) => writeCachedQueryResult(cacheKey, result),
   )
@@ -952,10 +1029,10 @@ export async function getPortalCatalogProducts() {
 }
 export async function searchPortalCatalogProducts(params = {}) {
   const base = getPortalBaseUrl()
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   const mismatchError = getApiVersionMismatchCooldown('/api/portal/catalog/products/search')
   if (mismatchError) throw mismatchError
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/catalog/products/search${q ? `?${q}` : ''}`, {
+  const res = await fetchJsonWithTimeout(`${base}${appendQuery('/api/portal/catalog/products/search', q)}`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
   if (res.status === 404) throw markApiVersionMismatch('/api/portal/catalog/products/search', res.status)
@@ -1102,17 +1179,17 @@ const withImportDeviceInfo = (payload = {}) => ({ ...(payload || {}), ...getDevi
 
 export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', withImportDeviceInfo(d)), null, true)
 export const listImportJobs = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   return route(`importJobs:list:${q}`, async () => {
-    const result = await apiFetch('GET', `/api/import-jobs${q ? `?${q}` : ''}`)
+    const result = await apiFetch('GET', appendQuery('/api/import-jobs', q))
     lastImportJobsByQuery.set(q, result)
     return result
   }, () => lastImportJobsByQuery.get(q) || { jobs: [], unavailable: true, transient: true })
 }
 export const getImportJob = id => route(`importJobs:get:${id}`, () => apiFetch('GET', `/api/import-jobs/${id}`), null)
 export const getImportJobReview = (id, params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`importJobs:review:${id}:${q}`, () => apiFetch('GET', `/api/import-jobs/${encodeURIComponent(id)}/review${q ? `?${q}` : ''}`), null)
+  const q = buildQueryString(params)
+  return route(`importJobs:review:${id}:${q}`, () => apiFetch('GET', appendQuery(`/api/import-jobs/${encodeURIComponent(id)}/review`, q)), null)
 }
 export const updateImportJobDecisions = (id, decisions = {}) =>
   route(`importJobs:decisions:${id}`, () => apiFetch('PATCH', `/api/import-jobs/${encodeURIComponent(id)}/decisions`, withImportDeviceInfo({ decisions })), null, true)
@@ -1190,17 +1267,19 @@ export async function uploadImportJobZip({ jobId, file }) {
 
 export async function uploadImportJobImages({ jobId, files = [], onProgress, batchSize = 100 }) {
   const device = getDeviceInfo()
-  const browserFiles = (Array.isArray(files) ? files : [])
-    .filter((entry) => entry?.file instanceof File)
+  const browserFiles = []
+  for (const entry of Array.isArray(files) ? files : []) {
+    if (entry?.file instanceof File) browserFiles.push(entry)
+  }
   const uploaded = []
   for (let offset = 0; offset < browserFiles.length; offset += batchSize) {
     const batch = browserFiles.slice(offset, offset + batchSize)
     const form = new FormData()
     const relativePaths = []
-    batch.forEach((entry) => {
+    for (const entry of batch) {
       form.append('files', entry.file, entry.file.name)
       relativePaths.push(entry.relativePath || entry.file.webkitRelativePath || entry.file.name)
-    })
+    }
     form.append('relative_paths', JSON.stringify(relativePaths))
     if (device.deviceName) form.append('deviceName', String(device.deviceName))
     if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
@@ -1217,8 +1296,8 @@ export async function uploadImportJobImages({ jobId, files = [], onProgress, bat
 }
 
 export async function getFiles(params = {}) {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  const result = await route(`files:get:${q}`, () => apiFetch('GET', `/api/files${q ? `?${q}` : ''}`), () => [])
+  const q = buildQueryString(params)
+  const result = await route(`files:get:${q}`, () => apiFetch('GET', appendQuery('/api/files', q)), () => [])
   const items = Array.isArray(result?.items) ? result.items : (Array.isArray(result) ? result : [])
   if (params?.includeMeta) {
     return {
@@ -1272,10 +1351,11 @@ export async function uploadFileAsset({ file, userId, userName, signal, onProgre
 
     xhr.open('POST', `${base}/api/files/upload`, true)
     xhr.withCredentials = true
-    Object.entries(headers).forEach(([key, value]) => {
-      if (!value) return
+    for (const key of Object.keys(headers)) {
+      const value = headers[key]
+      if (!value) continue
       xhr.setRequestHeader(key, value)
-    })
+    }
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || typeof onProgress !== 'function') return
@@ -1439,8 +1519,8 @@ export const transferInventoryStock = d        => route('inventory:transfer', ()
 export const moveStockRow          = d         => route('inventory:moveRow', () => apiFetch('POST', '/api/inventory/move-row', { ...getDeviceInfo(), ...d }), null, true)
 
 export const getActionHistory = (scope = 'global', limit = 10, params = {}) => {
-  const query = new URLSearchParams(Object.entries({ scope, limit, ...(params || {}) }).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`actionHistory:get:${query}`, () => apiFetch('GET', `/api/action-history?${query}`), () => ({ items: [] }))
+  const query = buildQueryString({ scope, limit, ...(params || {}) })
+  return route(`actionHistory:get:${query}`, () => apiFetch('GET', appendQuery('/api/action-history', query)), () => ({ items: [] }))
 }
 export const createActionHistory = payload =>
   route('actionHistory:create', () => apiFetch('POST', '/api/action-history', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
@@ -1452,15 +1532,15 @@ export const redoActionHistory = id =>
   route(`actionHistory:redo:${id}`, () => apiFetch('POST', `/api/action-history/${id}/redo`, getDeviceInfo()), null, true)
 export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
 export const getInventoryStats = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`inventory:stats:${q}`, () => apiFetch('GET', `/api/inventory/stats${q ? `?${q}` : ''}`), () => ({ item: null }))
+  const q = buildQueryString(params)
+  return route(`inventory:stats:${q}`, () => apiFetch('GET', appendQuery('/api/inventory/stats', q)), () => ({ item: null }))
 }
 export const searchInventoryProducts = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   const cacheKey = `inventory:products:search:v2:${q}`
   return routeMirrored(
     cacheKey,
-    () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`),
+    () => apiFetch('GET', appendQuery('/api/inventory/products/search', q)),
     () => readCachedQueryResult(cacheKey),
     (result) => writeCachedQueryResult(cacheKey, result),
   )
@@ -1468,7 +1548,7 @@ export const searchInventoryProducts = (params = {}) => {
 export const getInventoryMovements = ({ branchId, userId, search, searchMode, startDate, endDate, page = 1, pageSize = 10000 } = {}) => {
   const safePage = Math.max(1, Number(page || 1) || 1)
   const safePageSize = Math.min(Math.max(Number(pageSize || 10000) || 10000, 1), 50000)
-  const q = new URLSearchParams(Object.entries({
+  const q = buildQueryString({
     branchId,
     userId,
     search,
@@ -1477,10 +1557,10 @@ export const getInventoryMovements = ({ branchId, userId, search, searchMode, st
     endDate,
     page: safePage,
     pageSize: safePageSize,
-  }).filter(([, value]) => value != null && value !== '')).toString()
+  })
   return route(
     `inventory:movements:${q}`,
-    () => apiFetch('GET', `/api/inventory/movements?${q}`),
+    () => apiFetch('GET', appendQuery('/api/inventory/movements', q)),
     () => ({
       items: [],
       total: 0,
@@ -1624,11 +1704,7 @@ async function completeQueuedSale(row, result) {
   })
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, synced: 1 })
   if (typeof window !== 'undefined') {
-    ;['sales', 'products', 'inventory', 'dashboard'].forEach((channel) => {
-      window.dispatchEvent(new CustomEvent('sync:update', {
-        detail: { channel, reason: 'offline-sale-synced', ts: Date.now() },
-      }))
-    })
+    dispatchSyncUpdates(OFFLINE_SALE_SYNC_UPDATE_CHANNELS, 'offline-sale-synced')
     window.dispatchEvent(new CustomEvent('sync:offline-sale-synced', {
       detail: {
         channel: OFFLINE_SALE_QUEUE_CHANNEL,
@@ -1683,14 +1759,16 @@ async function syncPendingSalesQueue({ force = false } = {}) {
     .equals(OFFLINE_SALE_QUEUE_CHANNEL)
     .toArray()
     .catch(() => [])
-  const eligible = rows
-    .filter((row) => row && row.payload)
-    .filter((row) => {
-      if (force) return true
+  const eligible = []
+  for (const row of rows) {
+    if (!row?.payload) continue
+    if (!force) {
       const retryAt = row.retry_at ? Date.parse(row.retry_at) : 0
-      return !Number.isFinite(retryAt) || retryAt <= now
-    })
-    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+      if (Number.isFinite(retryAt) && retryAt > now) continue
+    }
+    eligible.push(row)
+  }
+  eligible.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
 
   const result = { success: true, attempted: 0, synced: 0, failed: 0, pending: rows.length }
   for (const row of eligible) {
@@ -1718,14 +1796,14 @@ async function syncPendingSalesQueue({ force = false } = {}) {
 }
 
 export const getRfidStatus = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`inventory:rfid:status:${q}`, () => apiFetch('GET', `/api/inventory/rfid/status${q ? `?${q}` : ''}`), () => ({ item: { connected: false, readerCount: 0, tagCount: 0, exceptionCount: 0 } }))
+  const q = buildQueryString(params)
+  return route(`inventory:rfid:status:${q}`, () => apiFetch('GET', appendQuery('/api/inventory/rfid/status', q)), () => ({ item: { connected: false, readerCount: 0, tagCount: 0, exceptionCount: 0 } }))
 }
 export const createRfidTag = payload =>
   route('inventory:rfid:tags:create', () => apiFetch('POST', '/api/inventory/rfid/tags', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
 export const searchRfidTags = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`inventory:rfid:tags:search:${q}`, () => apiFetch('GET', `/api/inventory/rfid/tags/search${q ? `?${q}` : ''}`), () => ({ items: [] }))
+  const q = buildQueryString(params)
+  return route(`inventory:rfid:tags:search:${q}`, () => apiFetch('GET', appendQuery('/api/inventory/rfid/tags/search', q)), () => ({ items: [] }))
 }
 export const createRfidSession = payload =>
   route('inventory:rfid:sessions:create', () => apiFetch('POST', '/api/inventory/rfid/sessions', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
@@ -1750,24 +1828,24 @@ export async function createSale(d) {
 }
 
 export const getSales   = (params) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null)).toString()
+  const q = buildQueryString(params, { skipEmpty: false })
   const mirror = q ? null : mirrorTable('sales')
-  return routeMirrored(`sales:get:${q}`, () => apiFetch('GET', `/api/sales${q ? '?' + q : ''}`), () => dexieDb.sales.orderBy('created_at').reverse().limit(1000).toArray(), mirror)
+  return routeMirrored(`sales:get:${q}`, () => apiFetch('GET', appendQuery('/api/sales', q)), () => dexieDb.sales.orderBy('created_at').reverse().limit(1000).toArray(), mirror)
 }
 
 // ─── Dashboard & analytics ────────────────────────────────────────────────────
 export const getDashboard = ()       => route('dashboard:get',  () => apiFetch('GET', '/api/dashboard'))
 export const getAnalytics = (params) => {
-  const q = new URLSearchParams(params).toString()
+  const q = buildQueryString(params, { skipEmpty: false })
   // Include the full query string in the cache key so each unique date range
   // gets its own cache entry. Without this, changing the filter (e.g. 7d → 30d)
   // returns the stale cached result instead of re-fetching from the server.
-  return route(`analytics:get:${q}`, () => apiFetch('GET', `/api/analytics?${q}`))
+  return route(`analytics:get:${q}`, () => apiFetch('GET', appendQuery('/api/analytics', q)))
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 export const getCustomers = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   const hasPagination = Object.prototype.hasOwnProperty.call(params || {}, 'page')
     || Object.prototype.hasOwnProperty.call(params || {}, 'pageSize')
   const cacheKey = `customers:get:${q}`
@@ -1775,21 +1853,21 @@ export const getCustomers = (params = {}) => {
   if (!hasPagination) {
     return routeMirrored(
       cacheKey,
-      () => apiFetch('GET', `/api/customers${q ? `?${q}` : ''}`),
+      () => apiFetch('GET', appendQuery('/api/customers', q)),
       () => dexieDb.customers.orderBy('name').toArray(),
       mirror,
     )
   }
   return routeMirrored(
     cacheKey,
-    () => apiFetch('GET', `/api/customers${q ? `?${q}` : ''}`),
+    () => apiFetch('GET', appendQuery('/api/customers', q)),
     () => readCachedQueryResult(cacheKey),
     (result) => writeCachedQueryResult(cacheKey, result),
   )
 }
 export const getCustomerPointSummaries = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`customers:points:${q}`, () => apiFetch('GET', `/api/customers/points-summary${q ? `?${q}` : ''}`), () => [])
+  const q = buildQueryString(params)
+  return route(`customers:points:${q}`, () => apiFetch('GET', appendQuery('/api/customers/points-summary', q)), () => [])
 }
 export async function createCustomer(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'customer')
@@ -1814,9 +1892,9 @@ export const downloadCustomerTemplate = ()  => buildCSVTemplate([
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 export const getSuppliers = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   const mirror = q ? null : mirrorTable('suppliers')
-  return routeMirrored(`suppliers:get:${q}`, () => apiFetch('GET', `/api/suppliers${q ? `?${q}` : ''}`), () => dexieDb.suppliers.orderBy('name').toArray(), mirror)
+  return routeMirrored(`suppliers:get:${q}`, () => apiFetch('GET', appendQuery('/api/suppliers', q)), () => dexieDb.suppliers.orderBy('name').toArray(), mirror)
 }
 export async function createSupplier(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier')
@@ -1841,9 +1919,9 @@ export const downloadSupplierTemplate = ()  => buildCSVTemplate([
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
 export const getDeliveryContacts = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   const mirror = q ? null : mirrorTable('delivery_contacts')
-  return routeMirrored(`deliveryContacts:get:${q}`, () => apiFetch('GET', `/api/delivery-contacts${q ? `?${q}` : ''}`), () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirror)
+  return routeMirrored(`deliveryContacts:get:${q}`, () => apiFetch('GET', appendQuery('/api/delivery-contacts', q)), () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirror)
 }
 export async function createDeliveryContact(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'delivery_contact')
@@ -1890,11 +1968,11 @@ export const deleteCustomRow    = ({ tableName, id, payload })     => route('cus
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
 export const getAuditLogs = (params = {}) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const q = buildQueryString(params)
   return route(
     `audit_log:get:${q}`,
     async () => {
-      const result = await apiFetch('GET', `/api/system/audit-logs${q ? `?${q}` : ''}`)
+      const result = await apiFetch('GET', appendQuery('/api/system/audit-logs', q))
       const auditRows = Array.isArray(result) ? result : (result?.items || [])
       await mirrorTable('audit_logs')(auditRows).catch(() => {})
       return result
@@ -2132,10 +2210,10 @@ export async function openPath(targetPath) {
 
 // ─── Returns ──────────────────────────────────────────────────────────────────
 export const getReturns  = (params) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null)).toString()
+  const q = buildQueryString(params, { skipEmpty: false })
   const cacheKey = q ? `returns:get:${q}` : 'returns:get'
   const mirror = q ? null : mirrorTable('returns')
-  return routeMirrored(cacheKey, () => apiFetch('GET', `/api/returns${q ? '?' + q : ''}`), () => dexieDb.returns.orderBy('created_at').reverse().toArray(), mirror)
+  return routeMirrored(cacheKey, () => apiFetch('GET', appendQuery('/api/returns', q)), () => dexieDb.returns.orderBy('created_at').reverse().toArray(), mirror)
 }
 export async function createReturn(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'return')
@@ -2193,8 +2271,8 @@ export const attachSaleCustomer = async (id, payload) => {
 }
 
 export const getSalesExport = (params) => {
-  const q = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null)).toString()
-  return route('sales:export', () => apiFetch('GET', `/api/sales/export${q ? '?' + q : ''}`), () => ({}))
+  const q = buildQueryString(params, { skipEmpty: false })
+  return route('sales:export', () => apiFetch('GET', appendQuery('/api/sales/export', q)), () => ({}))
 }
 export const updateReturn = async (id, d) => {
   const payload = await withExpectedUpdatedAt('returns', id, { ...getDeviceInfo(), ...(d || {}) })
@@ -2212,13 +2290,7 @@ export const updateReturn = async (id, d) => {
       notes: d?.notes || '',
       total_refund_usd: d?.total_refund_usd || 0,
       total_refund_khr: d?.total_refund_khr || 0,
-      items: Array.isArray(d?.items)
-        ? d.items.map((item) => ({
-            product_name: item?.product_name || '',
-            quantity: item?.quantity || 0,
-            return_to_stock: item?.return_to_stock !== false,
-          }))
-        : [],
+      items: buildAttemptedReturnItems(d?.items),
     }
     throw error
   }

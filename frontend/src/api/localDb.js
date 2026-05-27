@@ -225,20 +225,22 @@ export async function resetLocalMirrorDb() {
 }
 
 export async function clearLocalMirrorTables(tableNames = []) {
-  const names = Array.isArray(tableNames)
-    ? [...new Set(tableNames.map((name) => String(name || '').trim()).filter(Boolean))]
-    : []
+  const names = []
+  const seenNames = new Set()
+  for (const value of Array.isArray(tableNames) ? tableNames : []) {
+    const name = String(value || '').trim()
+    if (!name || seenNames.has(name)) continue
+    seenNames.add(name)
+    names.push(name)
+  }
   if (!names.length) return
 
-  const tables = names
-    .map((name) => {
-      try {
-        return dexieDb.table(name)
-      } catch (_) {
-        return null
-      }
-    })
-    .filter(Boolean)
+  const tables = []
+  for (const name of names) {
+    try {
+      tables.push(dexieDb.table(name))
+    } catch (_) {}
+  }
 
   if (!tables.length) return
 

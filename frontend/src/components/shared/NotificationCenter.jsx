@@ -20,6 +20,7 @@ const DEFAULT_COLLAPSED = {
 
 const NOTIFICATION_FILTER_OPTIONS = ['all', 'danger', 'warning', 'info', 'success']
 const NOTIFICATION_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000
 
 const TONE_CLASS = {
   danger: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -214,7 +215,11 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
     const requestId = beginTrackedRequest(requestRef)
     if (!silent && aliveRef.current) setLoading(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getNotificationSummary(), 'Notifications', 8000)
+      const result = await withLoaderTimeout(
+        () => window.api.getNotificationSummary(),
+        'Notifications',
+        NOTIFICATION_SUMMARY_TIMEOUT_MS,
+      )
       if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
       failureCountRef.current = 0
       const nextSections = Array.isArray(result?.sections) ? result.sections : []

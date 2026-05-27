@@ -36,6 +36,36 @@ assert.match(
 )
 
 assert.match(
+  runtimeSource,
+  /const RUNTIME_CLEANUP_CONCURRENCY = 2/,
+  'Runtime reset cleanup should use a small bounded worker count',
+)
+
+assert.match(
+  runtimeSource,
+  /async function mapRuntimeCleanup/,
+  'Runtime reset cleanup should share a bounded cleanup helper',
+)
+
+assert.match(
+  runtimeSource,
+  /Math\.min\(RUNTIME_CLEANUP_CONCURRENCY, queue\.length\)/,
+  'Runtime reset cleanup should cap service worker and cache cleanup workers',
+)
+
+assert.doesNotMatch(
+  runtimeSource,
+  /Promise\.all\(registrations\.map\(/,
+  'Runtime reset should not unregister every service worker registration at once',
+)
+
+assert.doesNotMatch(
+  runtimeSource,
+  /Promise\.all\(\s*cacheKeys[\s\S]{0,160}\.map\(/,
+  'Runtime reset should not delete every Business OS cache at once',
+)
+
+assert.match(
   webApiSource,
   /import \{[^}]*getSyncServerUrl[^}]*\} from '\.\/api\/http\.js'/s,
   'window.api.getSyncServerUrl must use the synchronous http module export, not the lazy async methods proxy',
@@ -51,6 +81,18 @@ assert.doesNotMatch(
   localDbSource,
   /await dexieDb\.delete\(\)/,
   'Local mirror resets should clear tables in place instead of deleting IndexedDB during normal runtime refreshes',
+)
+
+assert.match(
+  localDbSource,
+  /export async function clearLocalMirrorTables\(tableNames = \[\]\)[\s\S]*const names = \[\][\s\S]*const seenNames = new Set\(\)[\s\S]*for \(const value of Array\.isArray\(tableNames\) \? tableNames : \[\]\)[\s\S]*const tables = \[\][\s\S]*for \(const name of names\)/,
+  'Local mirror table cleanup should normalize and resolve table names with direct loops',
+)
+
+assert.doesNotMatch(
+  localDbSource,
+  /\[\.\.\.new Set\(tableNames\.map\(\(name\) => String\(name \|\| ''\)\.trim\(\)\)\.filter\(Boolean\)\)\]/,
+  'Local mirror table cleanup should not allocate map/filter arrays before de-duping table names',
 )
 
 assert.match(

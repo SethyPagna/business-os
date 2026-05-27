@@ -22,7 +22,7 @@ assert.match(dashboard, /openHourDetail\(h, i \+ 1\)/, 'dashboard best-hour rows
 assert.match(dashboard, /const openInventoryOverview = useCallback\(/, 'dashboard should expose a direct inventory follow-through action')
 assert.match(dashboard, /DASHBOARD_INVENTORY_FOCUS_KEY/, 'dashboard should persist a focused inventory handoff when drilling into stock alerts')
 assert.match(dashboard, /review_in_inventory', 'Review in inventory'/, 'dashboard preview-truncated stock cards should offer an explicit inventory review action')
-assert.match(dashboard, /min-h-10 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold/, 'dashboard range controls should keep the larger tap target sizing')
+assert.match(dashboard, /min-h-7 whitespace-nowrap rounded-md px-2\.5 py-1 text-\[11px\] font-semibold/, 'dashboard range controls should stay compact on mobile')
 assert.match(inventory, /sessionStorage\.getItem\(DASHBOARD_INVENTORY_FOCUS_KEY\)/, 'inventory should consume dashboard handoff focus when navigating from stock previews')
 assert.match(inventory, /setInventorySection\('products'\)/, 'inventory dashboard handoff should reset the section to products')
 assert.match(inventory, /setTab\('products'\)/, 'inventory dashboard handoff should reset the tab to products')

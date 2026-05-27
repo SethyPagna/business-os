@@ -2,7 +2,7 @@ import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp, Bell } from 'lucide-react'
 import { useApp } from './AppContext'
-import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.mjs'
+import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.mjs'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
@@ -89,6 +89,9 @@ const DELAYED_CHUNK_WARMUP_PAGE_IDS = new Set([
 ])
 
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
+const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
+const INTENT_CHUNK_WARMUP_DELAY_MS = 80
+const STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 const PAGE_LOADER_STALL_WARNING_MS = 15000
 const CHUNK_RECOVERY_QUERY_KEYS = ['__bos_reload', '__bos_build', '__bos_reason', '__bos_server_build']
@@ -156,14 +159,25 @@ function buildChunkRecoveryUrl(reason = 'chunk-reload') {
   return url.toString()
 }
 
+async function deleteStaleShellCaches(cacheKeys) {
+  const keys = Array.isArray(cacheKeys) ? cacheKeys : []
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(STALE_SHELL_CACHE_DELETE_CONCURRENCY, keys.length) }, async () => {
+    while (nextIndex < keys.length) {
+      const currentIndex = nextIndex
+      nextIndex += 1
+      await window.caches.delete(keys[currentIndex])
+    }
+  })
+  await Promise.all(workers)
+}
+
 async function clearStaleShellCaches() {
   if (typeof window === 'undefined' || !('caches' in window)) return
   try {
     const keys = await window.caches.keys()
-    await Promise.all(
-      keys
-        .filter((key) => key.startsWith('business-os-app-shell-') || key.startsWith('business-os-static-'))
-        .map((key) => window.caches.delete(key)),
+    await deleteStaleShellCaches(
+      keys.filter((key) => key.startsWith('business-os-app-shell-') || key.startsWith('business-os-static-')),
     )
   } catch (_) {}
 }
@@ -295,6 +309,50 @@ function shouldSkipBackgroundWarmup() {
   if (!connection) return false
   if (connection.saveData) return true
   return ['slow-2g', '2g', '3g'].includes(String(connection.effectiveType || '').toLowerCase())
+}
+
+function shouldSkipIntentWarmup() {
+  if (typeof window === 'undefined') return true
+  if (document.visibilityState === 'hidden') return true
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+  if (!connection) return false
+  if (connection.saveData) return true
+  return ['slow-2g', '2g'].includes(String(connection.effectiveType || '').toLowerCase())
+}
+
+function getIntentPageId(event) {
+  return String(event?.detail?.pageId || '').trim()
+}
+
+function scheduleIntentChunkLoad(pageId, onDone) {
+  const importer = PAGE_IMPORTERS[pageId]
+  if (!importer) return null
+
+  let cancelled = false
+  let idleId = null
+  let timerId = null
+  const run = () => {
+    if (cancelled || shouldSkipIntentWarmup()) return
+    importWithTimeout(importer, pageId, INTENT_CHUNK_IMPORT_TIMEOUT_MS)
+      .catch(() => null)
+      .finally(() => {
+        if (!cancelled) onDone?.(pageId)
+      })
+  }
+
+  timerId = window.setTimeout(() => {
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(run, { timeout: 600 })
+    } else {
+      run()
+    }
+  }, INTENT_CHUNK_WARMUP_DELAY_MS)
+
+  return () => {
+    cancelled = true
+    if (timerId != null) window.clearTimeout(timerId)
+    if (idleId != null && 'cancelIdleCallback' in window) window.cancelIdleCallback(idleId)
+  }
 }
 
 function getDataWarmupLoaders(canAccessPage) {
@@ -530,6 +588,33 @@ function useChunkWarmup(user, activePageId) {
       }
     }
   }, [activePageId, user])
+}
+
+function useIntentChunkWarmup(user, activePageId, canAccessPage) {
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') return undefined
+
+    const warmedPageIds = new Set()
+    let cancelCurrentWarmup = null
+
+    const warmIntentPage = (event) => {
+      const pageId = getIntentPageId(event)
+      if (!pageId || pageId === activePageId || warmedPageIds.has(pageId)) return
+      if (!canAccessPage(pageId) || shouldSkipIntentWarmup()) return
+
+      cancelCurrentWarmup?.()
+      cancelCurrentWarmup = scheduleIntentChunkLoad(pageId, (loadedPageId) => {
+        warmedPageIds.add(loadedPageId)
+        cancelCurrentWarmup = null
+      })
+    }
+
+    window.addEventListener(APP_PAGE_INTENT_EVENT, warmIntentPage)
+    return () => {
+      window.removeEventListener(APP_PAGE_INTENT_EVENT, warmIntentPage)
+      cancelCurrentWarmup?.()
+    }
+  }, [activePageId, canAccessPage, user])
 }
 
 function useDataWarmup(user, canAccessPage) {
@@ -1039,6 +1124,7 @@ export default function App() {
 
   useVisibilityRecovery()
   useChunkWarmup(authReady ? user : null, page)
+  useIntentChunkWarmup(authReady ? user : null, page, canAccessPage)
   useDataWarmup(authReady ? user : null, canAccessPage)
   usePageEntryWarmup(authReady ? user : null, page, canAccessPage)
 

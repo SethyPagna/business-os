@@ -2,6 +2,7 @@ import { STORAGE_KEYS } from '../../constants.js'
 import { resetLocalMirrorDb } from '../../api/localDb.js'
 
 const BUSINESS_OS_STORAGE_PREFIXES = ['businessos_', 'business_os_']
+const RUNTIME_CLEANUP_CONCURRENCY = 2
 
 function canUseBrowserStorage() {
   return typeof window !== 'undefined'
@@ -99,22 +100,46 @@ export function doesQueuedScopeMatchCurrent(scope, currentScope = readStoredRunt
   return true
 }
 
+async function mapRuntimeCleanup(items, worker) {
+  const queue = Array.isArray(items) ? [...items] : []
+  if (!queue.length) return []
+  const results = []
+  const workers = Array.from({ length: Math.min(RUNTIME_CLEANUP_CONCURRENCY, queue.length) }, async () => {
+    while (queue.length) {
+      const item = queue.shift()
+      try {
+        results.push(await worker(item))
+      } catch (_) {
+        results.push(false)
+      }
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+async function unregisterServiceWorkers(registrations) {
+  return mapRuntimeCleanup(registrations, (registration) => registration.unregister().catch(() => false))
+}
+
+async function deleteBusinessOsCaches(cacheKeys) {
+  const keys = (Array.isArray(cacheKeys) ? cacheKeys : [])
+    .filter((key) => String(key || '').toLowerCase().startsWith('business-os-'))
+  return mapRuntimeCleanup(keys, (key) => window.caches.delete(key).catch(() => false))
+}
+
 async function clearServiceWorkersAndCaches() {
   if (typeof window === 'undefined') return
   try {
     if (navigator.serviceWorker?.getRegistrations) {
       const registrations = await navigator.serviceWorker.getRegistrations()
-      await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)))
+      await unregisterServiceWorkers(registrations)
     }
   } catch (_) {}
   try {
     if (window.caches?.keys) {
       const cacheKeys = await window.caches.keys()
-      await Promise.all(
-        cacheKeys
-          .filter((key) => String(key || '').toLowerCase().startsWith('business-os-'))
-          .map((key) => window.caches.delete(key).catch(() => false)),
-      )
+      await deleteBusinessOsCaches(cacheKeys)
     }
   } catch (_) {}
 }

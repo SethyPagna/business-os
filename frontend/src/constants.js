@@ -28,6 +28,7 @@ export const STORAGE_KEYS = {
   CLIENT_RUNTIME: 'businessos_client_runtime',
   OAUTH_LOGIN_PENDING: 'businessos_oauth_login_pending',
   OAUTH_LINK_PENDING: 'businessos_oauth_link_pending',
+  OAUTH_CALLBACK_RESULT: 'businessos_oauth_callback_result',
 }
 
 // ─── Currency defaults ────────────────────────────────────────────────────────

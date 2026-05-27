@@ -1,4 +1,4 @@
-﻿import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, useContext as _useContext } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, useContext as _useContext, startTransition } from 'react'
 import en from './lang/en.json'
 import { STORAGE_KEYS, SYNC } from './constants'
 // web-api.js installs window.api synchronously via static imports.
@@ -25,6 +25,14 @@ import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
  * - track sync/WebSocket status for the whole shell
  * - provide navigation, notifications, and shared formatters
  */
+
+const APP_SETTINGS_LOAD_TIMEOUT_MS = 9000
+const APP_BOOTSTRAP_TIMEOUT_MS = 9000
+const APP_LOGIN_TIMEOUT_MS = 15000
+const APP_LOGOUT_TIMEOUT_MS = 10000
+const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000
+const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000
+const APP_SESSION_DURATION_TIMEOUT_MS = 12000
 
 function flattenTranslationTree(input, target = {}) {
   if (!input || typeof input !== 'object') return target
@@ -120,6 +128,7 @@ function clearPersistedAuthState() {
   safeStorageRemove(localStorage, STORAGE_KEYS.SERVER_START_TIME)
   safeStorageRemove(localStorage, STORAGE_KEYS.OAUTH_LOGIN_PENDING)
   safeStorageRemove(localStorage, STORAGE_KEYS.OAUTH_LINK_PENDING)
+  safeStorageRemove(localStorage, STORAGE_KEYS.OAUTH_CALLBACK_RESULT)
 }
 
 function persistAuthState({ user, expiryTime, sessionDuration }) {
@@ -194,6 +203,23 @@ function clearPendingOauthLink() {
   } catch (_) {}
 }
 
+function readOauthCallbackResult() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.OAUTH_CALLBACK_RESULT) || ''
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch (_) {
+    return null
+  }
+}
+
+function clearOauthCallbackResult() {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.OAUTH_CALLBACK_RESULT)
+  } catch (_) {}
+}
+
 function mergeSettingsWithDeviceOverrides(baseSettings = {}) {
   return { ...baseSettings, ...readDeviceSettings() }
 }
@@ -210,7 +236,8 @@ export function isBrokenLocalizedString(value) {
   if (!trimmed) return false
   if (trimmed.includes('\ufffd')) return true
   if (/[\uE000-\uF8FF]/.test(trimmed)) return true
-  if (/(Ã|Â|â€|â€™|â€œ|â€|áž|áŸ|à¸|áº|Ð|Ñ|Ø|Ù)/.test(trimmed)) return true
+  const mojibakeMarkers = ['\u00C3', '\u00C2', '\u00E2\u20AC', '\u00E1\u0178', '\u00E1\u017E', '\u00E0\u00B8', '\u00E1\u00BA', '\u00D0', '\u00D1', '\u00D8', '\u00D9']
+  if (mojibakeMarkers.some((marker) => trimmed.includes(marker))) return true
   const questionMarks = (trimmed.match(/\?/g) || []).length
   return questionMarks >= Math.max(3, Math.floor(trimmed.length * 0.18))
 }
@@ -224,7 +251,7 @@ function buildRuntimeDescriptorFromBootstrap(payload = {}) {
   })
 }
 
-export const PAGE_PERMISSIONS = {
+const PAGE_PERMISSIONS = {
   dashboard:        null,        // Always accessible
   catalog:          'customer_portal',
   loyalty_points:   'customer_portal',
@@ -296,6 +323,7 @@ export function AppProvider({ children, publicMode = false }) {
   const [notification,        setNotification]        = useState(null)
   const [writeConflict,       setWriteConflict]       = useState(null)
   const [langRevision,        setLangRevision]        = useState(0)
+  const settingsRef = useRef({})
   const authRecoveryRef = useRef(false)
   const authEstablishedAtRef = useRef(0)
   const writeBlockedNoticeAtRef = useRef(0)
@@ -309,12 +337,17 @@ export function AppProvider({ children, publicMode = false }) {
     if (canProbeServerSession) return false
     return true
   })
-  // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
+  // Initialize from actual WS state to avoid showing a disconnected badge
+  // when the websocket connected before AppContext mounted.
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
   const [syncChannel,         setSyncChannel]         = useState(null)
   const [syncServerUnreachable, setSyncServerUnreachable] = useState(false)
 
-  // Sync URL ??when served by the backend the page origin IS the API/WS server.
+  useEffect(() => {
+    settingsRef.current = settings || {}
+  }, [settings])
+
+  // Sync URL: when served by the backend, the page origin is the API/WS server.
   // Always use it (never a stale localhost stored from a previous session) so that
   // Cloudflare Tunnel URLs, LAN IPs and localhost:4000 all connect without manual config.
   const [syncUrl, _setSyncUrl] = useState(() => {
@@ -322,7 +355,7 @@ export function AppProvider({ children, publicMode = false }) {
       const isViteDev = window.location.hostname === 'localhost' &&
         (window.location.port === '5173' || window.location.port === '5174')
       if (!isViteDev) {
-        // Served by the Node backend ??current origin == API server. Always update.
+        // Served by the Node backend: current origin is the API server, so always update.
         const auto = window.location.origin
         try { localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, auto) } catch (_) {}
         return auto
@@ -342,7 +375,16 @@ export function AppProvider({ children, publicMode = false }) {
     return key
   }, [language, langRevision])
 
-  // ?? Settings (defined before any useEffect that uses it) ?????????????????
+  const readAppBootstrap = useCallback((label = 'App bootstrap') => {
+    if (typeof window === 'undefined' || typeof window.api?.getAppBootstrap !== 'function') return Promise.resolve(null)
+    return withLoaderTimeout(
+      () => window.api.getAppBootstrap(),
+      label,
+      APP_BOOTSTRAP_TIMEOUT_MS,
+    ).catch(() => null)
+  }, [])
+
+  // Settings (defined before any useEffect that uses it).
   const loadSettings = useCallback(async (options = {}) => {
     try {
       const hasAuthSession = !!getStoredUserPayload()
@@ -356,7 +398,11 @@ export function AppProvider({ children, publicMode = false }) {
         if (fallbackSettings.theme) setTheme(fallbackSettings.theme)
         return fallbackSettings
       }
-      const serverSettings = await window.api.getSettings({ force: options?.force === true })
+      const serverSettings = await withLoaderTimeout(
+        () => window.api.getSettings({ force: options?.force === true }),
+        'App settings',
+        APP_SETTINGS_LOAD_TIMEOUT_MS,
+      )
       const mergedSettings = mergeSettingsWithDeviceOverrides(serverSettings || {})
       setSettings(mergedSettings)
       if (mergedSettings.login_session_duration) {
@@ -367,8 +413,10 @@ export function AppProvider({ children, publicMode = false }) {
       return mergedSettings
     } catch (e) {
       console.warn('[AppContext] loadSettings failed:', e.message)
-      const fallbackSettings = mergeSettingsWithDeviceOverrides({})
-      setSettings(fallbackSettings)
+      const currentSettings = settingsRef.current && typeof settingsRef.current === 'object' ? settingsRef.current : {}
+      const hasCurrentSettings = Object.keys(currentSettings).length > 0
+      const fallbackSettings = hasCurrentSettings ? currentSettings : mergeSettingsWithDeviceOverrides({})
+      if (!hasCurrentSettings) setSettings(fallbackSettings)
       if (fallbackSettings.login_session_duration) {
         writeStoredSessionDuration(fallbackSettings.login_session_duration)
       }
@@ -380,13 +428,13 @@ export function AppProvider({ children, publicMode = false }) {
 
   const clearLocalBusinessState = useCallback(async (options = {}) => {
     await resetClientRuntimeState({
-      clearAuth: options.clearAuth === true,
+  // Authentication helpers.
       preserveDeviceSettings: true,
       preserveSyncServer: options.preserveSyncServer !== false,
       preserveSessionDuration: options.preserveSessionDuration !== false,
       preserveRuntimeMeta: options.preserveRuntimeMeta === true,
       preserveOrganization: options.preserveOrganization === true,
-      preserveAuth: options.preserveAuth === true,
+  // Authentication helpers.
     }).catch(() => {})
     cacheClearAll()
   }, [])
@@ -466,7 +514,7 @@ export function AppProvider({ children, publicMode = false }) {
     }
   }, [clearLocalBusinessState])
 
-  // ?? Sync event listeners (loadSettings is now defined above) ?????????????
+  // Sync event listeners (loadSettings is defined above).
   const debounceRef = useRef({})
   useEffect(() => {
     if (publicMode) return undefined
@@ -476,7 +524,7 @@ export function AppProvider({ children, publicMode = false }) {
       if (debounceRef.current[channel]) clearTimeout(debounceRef.current[channel])
       debounceRef.current[channel] = setTimeout(async () => {
         delete debounceRef.current[channel]
-        // Settings changes from other devices apply immediately ??no reload needed
+        // Settings changes from other devices apply immediately; no reload needed.
         if (channel === 'settings') loadSettings().catch(() => {})
         if (channel === 'runtime') {
           await clearLocalBusinessState({
@@ -484,7 +532,7 @@ export function AppProvider({ children, publicMode = false }) {
             preserveSyncServer: true,
             preserveSessionDuration: true,
           })
-          const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
+          const bootstrap = await readAppBootstrap('Runtime bootstrap')
           if (bootstrap?.user) {
             await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
           } else if (bootstrap?.unauthorized) {
@@ -518,7 +566,7 @@ export function AppProvider({ children, publicMode = false }) {
         }
         return prev
       })
-      // Slow down once connected ??only need fast polling during initial connect
+      // Slow down once connected; fast polling is only needed during initial connect.
       if (connected && pollRate < 3000) {
         pollRate = 3000
         clearTimeout(quickCheck)
@@ -653,7 +701,7 @@ export function AppProvider({ children, publicMode = false }) {
         authRecoveryRef.current = true
         window.setTimeout(async () => {
           try {
-            const bootstrap = await window.api?.getAppBootstrap?.()
+            const bootstrap = await readAppBootstrap('Auth recovery bootstrap')
             if (bootstrap?.user) {
               await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
               authRecoveryRef.current = false
@@ -696,9 +744,9 @@ export function AppProvider({ children, publicMode = false }) {
       window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)
     }
-  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, publicMode, t, user])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, publicMode, readAppBootstrap, t, user])
 
-  // ?? OTP login event listener ?????????????????????????????????????????????
+  // OTP login event listener.
   useEffect(() => {
     const handleOtpLogin = async (e) => {
       const otpUser = e.detail
@@ -725,7 +773,7 @@ export function AppProvider({ children, publicMode = false }) {
 
       setAuthReady(false)
       authEstablishedAtRef.current = Date.now()
-      const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
+      const bootstrap = await readAppBootstrap('OTP login bootstrap')
       if (bootstrap?.unauthorized) {
         await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
       } else if (bootstrap) {
@@ -739,7 +787,7 @@ export function AppProvider({ children, publicMode = false }) {
     }
     window.addEventListener('otp:login', handleOtpLogin)
     return () => window.removeEventListener('otp:login', handleOtpLogin)
-  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, readAppBootstrap])
 
   useEffect(() => {
     const handleUserUpdated = (e) => {
@@ -764,7 +812,7 @@ export function AppProvider({ children, publicMode = false }) {
     return () => window.removeEventListener('user:updated', handleUserUpdated)
   }, [])
 
-  // ?? Startup: load settings, fetch config, and health-check the server ????
+  // Startup: load settings, fetch config, and health-check the server.
   const startupDone = useRef(false)
   useEffect(() => {
     if (startupDone.current) return
@@ -777,7 +825,7 @@ export function AppProvider({ children, publicMode = false }) {
       return
     }
 
-    // Non-blocking async sync URL discovery ??activates the sync server
+    // Non-blocking async sync URL discovery activates the sync server
     // connection without blocking the initial render.
     const discoverSyncUrl = async () => {
       try {
@@ -813,7 +861,7 @@ export function AppProvider({ children, publicMode = false }) {
               setAuthReady(true)
               loadSettings().catch(() => {})
             }, 10_000)
-            withLoaderTimeout(() => window.api.getAppBootstrap(), 'App bootstrap', 9000)
+            readAppBootstrap('App bootstrap')
               .then(async (bootstrap) => {
                 if (!bootstrap) return
                 if (bootstrap?.unauthorized) {
@@ -868,9 +916,9 @@ export function AppProvider({ children, publicMode = false }) {
     
     // Start discovery in background (no await, doesn't block UI render)
     discoverSyncUrl()
-  }, [applyBootstrapPayload, handleUnauthorizedSession, publicMode, syncUrl, loadSettings])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, publicMode, readAppBootstrap, syncUrl, loadSettings])
 
-  // ?? Theme and CSS variables ???????????????????????????????????????????????
+  // Theme and CSS variables.
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
     document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light'
@@ -900,15 +948,15 @@ export function AppProvider({ children, publicMode = false }) {
     const root = document.documentElement
     const radii  = { sharp: '2px', rounded: '8px', pill: '16px' }
     const fonts  = {
-      system:     "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-      inter:      "'Inter', -apple-system, sans-serif",
-      roboto:     "'Roboto', sans-serif",
-      poppins:    "'Poppins', sans-serif",
-      open_sans:  "'Open Sans', sans-serif",
-      outfit:     "'Outfit', sans-serif",
+      system:     "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Khmer', sans-serif",
+      inter:      "'Inter', -apple-system, 'Noto Sans Khmer', sans-serif",
+      roboto:     "'Roboto', 'Noto Sans Khmer', sans-serif",
+      poppins:    "'Poppins', 'Noto Sans Khmer', sans-serif",
+      open_sans:  "'Open Sans', 'Noto Sans Khmer', sans-serif",
+      outfit:     "'Outfit', 'Noto Sans Khmer', sans-serif",
       mono:       "'Courier New', Courier, monospace",
       serif:      "Georgia, 'Times New Roman', serif",
-      khmer:      "'Noto Sans Khmer', 'Khmer OS', sans-serif",
+      khmer:      "'Noto Sans Khmer', 'Khmer OS Siemreap', 'Battambang', sans-serif",
       hanuman:    "'Hanuman', 'Noto Sans Khmer', serif",
       battambang: "'Battambang', 'Noto Sans Khmer', sans-serif",
     }
@@ -937,7 +985,7 @@ export function AppProvider({ children, publicMode = false }) {
     root.style.setProperty('--ui-accent-hover', ac + 'dd')
     root.style.setProperty('--ui-radius',       radii[br] || '8px')
     const resolvedFontFamily = (language || 'en') === 'km' && ff === 'system'
-      ? fonts.battambang
+      ? fonts.khmer
       : (fonts[ff] || fonts.system)
     root.style.setProperty('--ui-font-family',  resolvedFontFamily)
     root.style.fontSize = '16px'
@@ -949,7 +997,7 @@ export function AppProvider({ children, publicMode = false }) {
     document.body.classList.toggle('lang-km', (language || 'en') === 'km')
     document.body.classList.toggle('lang-en', (language || 'en') !== 'km')
 
-    // ?? Sidebar + page-bg colour overrides ???????????????????????????????
+    // Sidebar and page background color overrides.
     // Dark-mode CSS sets background-color !important on aside/body.
     // Inline styles can't beat !important, so we inject a <style> tag
     // that wins in both light and dark mode without touching the theme rules.
@@ -968,7 +1016,7 @@ export function AppProvider({ children, publicMode = false }) {
     let css = ''
     if (sbc) {
       const border = hexAlpha(sbc, 0.18)
-      // ?? Sidebar colour ?????????????????????????????????????????????????
+      // Sidebar color override.
       // We build both plain and .dark-prefixed selectors so our injected
       // <style> (which is appended to <head> AFTER the compiled stylesheet)
       // beats every !important rule in main.css via source-order, regardless
@@ -989,14 +1037,14 @@ export function AppProvider({ children, publicMode = false }) {
       css += `aside > div, .dark aside > div { border-color: ${border} !important; }\n`
     }
     if (pgb) {
-      // ?? Page background colour ??????????????????????????????????????????
+      // Page background color override.
       // Cover every container that could show a white/dark fallback:
-      //   body            ??root background
-      //   #app-root       ??full-screen flex wrapper (has Tailwind bg-gray-50)
-      //   #app-root > main ??the <main> flex child holding all page divs
-      //   .page-scroll    ??each page's own scrollable root div
+      //   body            - root background
+      //   #app-root       - full-screen flex wrapper (has Tailwind bg-gray-50)
+      //   #app-root > main - the <main> flex child holding all page divs
+      //   .page-scroll    - each page's own scrollable root div
       // Repeating with .dark prefix overrides ".dark .bg-gray-50 { !important }"
-      // in main.css, which uses a class selector (specificity 0-1-0) ??same as
+      // in main.css, which uses a class selector (specificity 0-1-0) - same as
       // ours, so source order wins and ours is later.
       const bgSels = ['body', '#app-root', '#app-root > main', '.page-scroll']
       const allBgSels = [
@@ -1008,7 +1056,7 @@ export function AppProvider({ children, publicMode = false }) {
     styleEl.textContent = css
   }, [language, settings])
 
-  // ?? Sync URL management ???????????????????????????????????????????????????
+  // Sync URL management.
   const updateSyncUrl = useCallback((url) => {
     const clean = sanitizeSyncServerUrl(url)
     try { clean ? localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, clean) : localStorage.removeItem(STORAGE_KEYS.SYNC_SERVER) } catch (_) {}
@@ -1017,7 +1065,7 @@ export function AppProvider({ children, publicMode = false }) {
     if (clean) startHealthCheck()
   }, [])
 
-  // ?? Auth ??????????????????????????????????????????????????????????????????
+  // Authentication helpers.
   const persistAuthenticatedUser = useCallback(async (nextUser, sessionDuration = 'session', sessionExpiresAt = '') => {
     const expiryTime = computeSessionExpiryMs(sessionDuration, sessionExpiresAt)
 
@@ -1046,7 +1094,7 @@ export function AppProvider({ children, publicMode = false }) {
     startHealthCheck()
     authEstablishedAtRef.current = Date.now()
     setUser(nextUser)
-    const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
+    const bootstrap = await readAppBootstrap('Login bootstrap')
     if (bootstrap?.unauthorized) {
       await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
     } else if (bootstrap) {
@@ -1056,18 +1104,22 @@ export function AppProvider({ children, publicMode = false }) {
     }
     setAuthReady(true)
     setPage('dashboard')
-  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, readAppBootstrap])
 
   const login = useCallback(async (username, password, sessionDuration = 'session', organization = '') => {
     try {
       const device = getClientDeviceInfo()
-      const result = await window.api.login({
-        username, password, organization,
-        sessionDuration,
-        clientTime: new Date().toISOString(),
-        deviceTz: device.deviceTz,
-        deviceName: device.deviceName,
-      })
+      const result = await withLoaderTimeout(
+        () => window.api.login({
+          username, password, organization,
+          sessionDuration,
+          clientTime: new Date().toISOString(),
+          deviceTz: device.deviceTz,
+          deviceName: device.deviceName,
+        }),
+        'Login',
+        APP_LOGIN_TIMEOUT_MS,
+      )
       if (result.success) {
         await persistAuthenticatedUser(result.user, sessionDuration, result.sessionExpiresAt || '')
       }
@@ -1078,7 +1130,7 @@ export function AppProvider({ children, publicMode = false }) {
       return {
         success: false,
         error: isNet
-          ? 'Cannot reach sync server. Check the URL in Settings ??Server, or clear it to use local mode.'
+          ? 'Cannot reach sync server. Check the URL in Settings -> Server, or clear it to use local mode.'
           : (e?.message || 'Login failed'),
       }
     }
@@ -1086,7 +1138,7 @@ export function AppProvider({ children, publicMode = false }) {
 
   const logout = useCallback(async () => {
     try {
-      await window.api.logout?.()
+      await withLoaderTimeout(() => window.api.logout?.(), 'Logout', APP_LOGOUT_TIMEOUT_MS)
     } catch (_) {}
     await clearLocalBusinessState({
       clearAuth: true,
@@ -1100,7 +1152,7 @@ export function AppProvider({ children, publicMode = false }) {
     clearPersistedAuthState()
   }, [clearLocalBusinessState])
 
-  // ?? Notifications ?????????????????????????????????????????????????????????
+  // Notifications.
   const notify = useCallback((message, type = 'success', duration = 3500) => {
     const normalizedMessage = String(message || '').trim()
     const now = Date.now()
@@ -1153,7 +1205,11 @@ export function AppProvider({ children, publicMode = false }) {
     const accessToken = hash.get('access_token') || ''
     const provider = String(url.searchParams.get('auth_provider') || '').trim().toLowerCase()
     const errorDescription = hash.get('error_description') || url.searchParams.get('error_description') || ''
-    if (!accessToken && !errorDescription) return undefined
+    const callbackResult = readOauthCallbackResult()
+    const matchingStoredCallback = callbackResult
+      && String(callbackResult.mode || '').trim().toLowerCase() === 'link'
+      && (!provider || String(callbackResult.provider || '').trim().toLowerCase() === provider)
+    if (!accessToken && !errorDescription && !matchingStoredCallback) return undefined
 
     let cancelled = false
     const clearCallbackUrl = () => {
@@ -1165,9 +1221,24 @@ export function AppProvider({ children, publicMode = false }) {
     }
 
     const run = async () => {
+      if (matchingStoredCallback) {
+        clearCallbackUrl()
+        clearPendingLink()
+        clearOauthCallbackResult()
+        if (cancelled) return
+        if (callbackResult.status === 'success' && callbackResult.user) {
+          window.dispatchEvent(new CustomEvent('user:updated', { detail: callbackResult.user }))
+          notify(t('identity_linked_success') || 'Sign-in method connected.', 'success')
+          return
+        }
+        notify(callbackResult.error || (t('identity_link_failed') || 'Failed to connect sign-in method.'), 'error')
+        return
+      }
+
       if (errorDescription) {
         clearCallbackUrl()
         clearPendingLink()
+        clearOauthCallbackResult()
         if (!cancelled) notify(errorDescription, 'error')
         return
       }
@@ -1195,18 +1266,23 @@ export function AppProvider({ children, publicMode = false }) {
           const storedOrg = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
           rememberedOrg = storedOrg?.public_id || storedOrg?.slug || ''
         } catch (_) {}
-        const result = await window.api.completeGoogleOauth({
-          accessToken,
-          provider,
-          mode: 'link',
-          currentUserId: actorId,
-          organization: rememberedOrg,
-          clientTime: new Date().toISOString(),
-          deviceTz: device.deviceTz,
-          deviceName: device.deviceName,
-        })
+        const result = await withLoaderTimeout(
+          () => window.api.completeGoogleOauth({
+            accessToken,
+            provider,
+            mode: 'link',
+            currentUserId: actorId,
+            organization: rememberedOrg,
+            clientTime: new Date().toISOString(),
+            deviceTz: device.deviceTz,
+            deviceName: device.deviceName,
+          }),
+          'Complete Google OAuth',
+          APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS,
+        )
         clearCallbackUrl()
         clearPendingLink()
+        clearOauthCallbackResult()
         if (cancelled) return
         if (result?.success && result?.user) {
           window.dispatchEvent(new CustomEvent('user:updated', { detail: result.user }))
@@ -1217,6 +1293,7 @@ export function AppProvider({ children, publicMode = false }) {
       } catch (error) {
         clearCallbackUrl()
         clearPendingLink()
+        clearOauthCallbackResult()
         if (!cancelled) {
           notify(error?.message || (t('identity_link_failed') || 'Failed to connect sign-in method.'), 'error')
         }
@@ -1246,7 +1323,7 @@ export function AppProvider({ children, publicMode = false }) {
     }
   }, [])
 
-  // ?? Settings save ?????????????????????????????????????????????????????????
+  // Settings save.
   const saveSettings = useCallback(async (newSettings, options = {}) => {
     const normalizedOptions = normalizeSettingsWriteOptions(options)
     try {
@@ -1259,7 +1336,11 @@ export function AppProvider({ children, publicMode = false }) {
       })
 
       if (Object.keys(serverUpdates).length) {
-        const serverResult = await window.api.saveSettings(serverUpdates, normalizedOptions)
+        const serverResult = await withLoaderTimeout(
+          () => window.api.saveSettings(serverUpdates, normalizedOptions),
+          'Save settings',
+          APP_SETTINGS_SAVE_TIMEOUT_MS,
+        )
         if (serverResult?.conflict) return serverResult
       }
       if (Object.keys(deviceUpdates).length) {
@@ -1276,12 +1357,16 @@ export function AppProvider({ children, publicMode = false }) {
         const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
         if (user?.id && typeof window.api?.updateSessionDuration === 'function') {
           const device = getClientDeviceInfo()
-          const refreshed = await window.api.updateSessionDuration({
-            sessionDuration: normalizedSessionDuration,
-            clientTime: new Date().toISOString(),
-            deviceTz: device.deviceTz,
-            deviceName: device.deviceName,
-          })
+          const refreshed = await withLoaderTimeout(
+            () => window.api.updateSessionDuration({
+              sessionDuration: normalizedSessionDuration,
+              clientTime: new Date().toISOString(),
+              deviceTz: device.deviceTz,
+              deviceName: device.deviceName,
+            }),
+            'Refresh session duration',
+            APP_SESSION_DURATION_TIMEOUT_MS,
+          )
           if (refreshed?.success === false) {
             throw new Error(refreshed.error || 'Failed to refresh login session duration')
           }
@@ -1328,7 +1413,7 @@ export function AppProvider({ children, publicMode = false }) {
     applyDeviceSettings({ language: language === 'km' ? 'en' : 'km' })
   }, [applyDeviceSettings, language])
 
-  // ?? Permissions ???????????????????????????????????????????????????????????
+  // Permissions.
   const getPermissions = useCallback(() => {
     if (!user) return {}
     try {
@@ -1353,26 +1438,29 @@ export function AppProvider({ children, publicMode = false }) {
 
   const navigateTo = useCallback((pageId) => {
     if (!canAccessPage(pageId)) return
-    setPage(pageId)
-    if (typeof window === 'undefined') return
-    const nextPath = getAdminPathForPage(pageId)
-    const currentUrl = new URL(window.location.href)
-    if (currentUrl.pathname !== nextPath) {
-      window.history.pushState(window.history.state, '', `${nextPath}${currentUrl.search}${currentUrl.hash}`)
+    if (typeof window !== 'undefined') {
+      const nextPath = getAdminPathForPage(pageId)
+      const currentUrl = new URL(window.location.href)
+      if (nextPath && currentUrl.pathname !== nextPath) {
+        window.history.pushState(window.history.state, '', `${nextPath}${currentUrl.search}${currentUrl.hash}`)
+      }
+      window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
+        detail: {
+          page: pageId,
+          path: nextPath,
+        },
+      }))
     }
-    window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
-      detail: {
-        page: pageId,
-        path: nextPath,
-      },
-    }))
+    startTransition(() => {
+      setPage(pageId)
+    })
   }, [canAccessPage])
 
-  // ?? Currency ??????????????????????????????????????????????????????????????
+  // Currency helpers.
   const exchangeRate    = parseFloat(settings.exchange_rate        || '4100')
   const usdSymbol       = settings.currency_usd_symbol             || '$'
-  const khrSymbol       = settings.currency_khr_symbol             || '៛'
-  const displayCurrency = settings.display_currency                || 'USD'
+  const khrSymbol       = settings.currency_khr_symbol             || 'KHR'
+  const displayCurrency = String(settings.display_currency || 'USD').trim().toLowerCase()
   const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const displayTimezone = settings.display_timezone || deviceTimezone
 
@@ -1385,8 +1473,8 @@ export function AppProvider({ children, publicMode = false }) {
   const formatPrice = useCallback((usd, khr) => {
     const u = usd || 0
     const k = khr != null ? khr : u * exchangeRate
-    if (displayCurrency === 'BOTH') return `${fmtUSD(u)} / ${fmtKHR(k)}`
-    if (displayCurrency === 'KHR')  return fmtKHR(k)
+    if (displayCurrency === 'khr') return fmtKHR(k)
+    if (displayCurrency === 'both') return `${fmtUSD(u)} / ${fmtKHR(k)}`
     return fmtUSD(u)
   }, [displayCurrency, fmtUSD, fmtKHR, exchangeRate])
   const usdToKhr = useCallback((usd) => (usd||0) * exchangeRate, [exchangeRate])
@@ -1407,6 +1495,8 @@ export function AppProvider({ children, publicMode = false }) {
     })
   }, [displayTimezone])
 
+  const canWriteToServer = !!syncUrl && !syncServerUnreachable
+
   const appValue = {
     user, login, logout, persistAuthenticatedUser,
     authReady,
@@ -1426,7 +1516,7 @@ export function AppProvider({ children, publicMode = false }) {
     syncConnected,
     syncChannel,
     syncServerUnreachable,
-    canWriteToServer: !!syncUrl && syncConnected && !syncServerUnreachable,
+    canWriteToServer,
     AccessDenied: () => <AccessDenied t={t} />,
   }
 
