@@ -538,9 +538,9 @@ Total files documented: **569**
 | 526 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | project-scripts | 122 | 5.7 | Project source/support file |
 | 527 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | project-scripts | 855 | 56.5 | Project source/support file |
 | 528 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | project-scripts | 150 | 7.5 | Project source/support file |
-| 529 | `ops/scripts/runtime/smoke/check-public-url.mjs` | project-scripts | 239 | 8.2 | Project source/support file |
+| 529 | `ops/scripts/runtime/smoke/check-public-url.ts` | project-scripts | 239 | 8.2 | Project source/support file |
 | 530 | `ops/scripts/runtime/smoke/check-route-contract.ts` | project-scripts | 86 | 3.9 | Project source/support file |
-| 531 | `ops/scripts/runtime/smoke/live-smoke.mjs` | project-scripts | 319 | 13.5 | Project source/support file |
+| 531 | `ops/scripts/runtime/smoke/live-smoke.ts` | project-scripts | 318 | 13.4 | Project source/support file |
 | 532 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | project-scripts | 213 | 6.9 | Project source/support file |
 | 533 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | project-scripts | 230 | 9.6 | Project source/support file |
 | 534 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | project-scripts | 430 | 18.8 | Project source/support file |

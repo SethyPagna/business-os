@@ -1678,9 +1678,9 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `check-public-url.mjs` | Project source/support file |
+| 1 | `check-public-url.ts` | Project source/support file |
 | 2 | `check-route-contract.ts` | Project source/support file |
-| 3 | `live-smoke.mjs` | Project source/support file |
+| 3 | `live-smoke.ts` | Project source/support file |
 | 4 | `post-start-diagnostics.ts` | Project source/support file |
 
 

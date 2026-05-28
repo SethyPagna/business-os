@@ -499,9 +499,9 @@ Code files scanned: **506**
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 2 |
-| 490 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 11 |
+| 490 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
 | 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
-| 492 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 |
+| 492 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
 | 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
 | 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
 | 495 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
@@ -6840,7 +6840,7 @@ Code files scanned: **506**
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.490 `ops/scripts/runtime/smoke/check-public-url.mjs`
+### 3.490 `ops/scripts/runtime/smoke/check-public-url.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6864,16 +6864,16 @@ Code files scanned: **506**
 | 2 | `checkRoute` | function | 40 |
 | 3 | `main` | function | 67 |
 
-### 3.492 `ops/scripts/runtime/smoke/live-smoke.mjs`
+### 3.492 `ops/scripts/runtime/smoke/live-smoke.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 16 |
-| 2 | `request` | function | 20 |
-| 3 | `login` | function | 49 |
-| 4 | `cleanupLiveSmokeData` | function | 62 |
-| 5 | `main` | function | 87 |
-| 6 | `record` | const arrow | 92 |
+| 1 | `assert` | function | 15 |
+| 2 | `request` | function | 19 |
+| 3 | `login` | function | 48 |
+| 4 | `cleanupLiveSmokeData` | function | 61 |
+| 5 | `main` | function | 86 |
+| 6 | `record` | const arrow | 91 |
 
 ### 3.493 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 

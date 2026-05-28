@@ -499,9 +499,9 @@ Code files documented: **506**
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 490 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 2 | 0 | 0 | 0 |
+| 490 | `ops/scripts/runtime/smoke/check-public-url.ts` | 2 | 0 | 0 | 0 |
 | 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
-| 492 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 | 0 | 0 | 0 |
+| 492 | `ops/scripts/runtime/smoke/live-smoke.ts` | 5 | 0 | 0 | 0 |
 | 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 2 | 0 | 0 | 0 |
 | 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 3 | 0 | 0 | 0 |
 | 495 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 3 | 0 | 0 | 0 |
@@ -8104,7 +8104,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.490 `ops/scripts/runtime/smoke/check-public-url.mjs`
+### 3.490 `ops/scripts/runtime/smoke/check-public-url.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -8125,16 +8125,15 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.492 `ops/scripts/runtime/smoke/live-smoke.mjs`
+### 3.492 `ops/scripts/runtime/smoke/live-smoke.ts`
 
 - Declared exports: none detected
-- Imports (6)
+- Imports (5)
   - `node:child_process`
   - `node:fs/promises`
   - `node:os`
   - `node:path`
   - `node:perf_hooks`
-  - `node:url`
 - Internal dependencies (0)
   - none
 - Referenced by (0)
