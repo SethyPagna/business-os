@@ -1577,20 +1577,20 @@ Decision rule:
     reference-producing checks in parallel, then runs `organization-audit.ts`
     afterward so it scans a coherent docs/reference tree. The audit summary
     records `executionMode: parallel-reference-writers-then-organization`, and
-    `backend/test/fullAutomation.test.js` guards the grouped execution path.
+    `backend/test/fullAutomation.test.ts` guards the grouped execution path.
 184. Preserve performance scan status notes. Done:
     `ops/scripts/docs/performance-scan.ts` now preserves a bounded Phase 29
     manual-notes block when regenerating `ops/docs/reference/PERFORMANCE-SCAN.md`.
     Repeat audit runs can refresh ranked size/chunk metrics without erasing the
     latest performance, cleanup, and orchestration move trail. The JSON summary
     records `manualNotesPreserved` and `manualNotesLines`, and
-    `backend/test/fullAutomation.test.js` guards the preservation path.
+    `backend/test/fullAutomation.test.ts` guards the preservation path.
 185. Compare preserved notes in Phase 29 repeat consistency. Done:
     `ops/scripts/architecture/phase29-audit.ts` now includes
     `manualNotesPreserved` and `manualNotesLines` in the repeated
     `Performance/code-flow scan` consistency table. If future regeneration
     drops or truncates the preserved status block, the three-pass audit reports
-    drift instead of silently accepting the loss. `backend/test/fullAutomation.test.js`
+    drift instead of silently accepting the loss. `backend/test/fullAutomation.test.ts`
     guards the new consistency fields.
 186. Parallelize performance scan file reads. Done:
     `ops/scripts/docs/performance-scan.ts` now reads source files with a bounded
@@ -1604,7 +1604,7 @@ Decision rule:
     helper used by `performance-scan.ts`, `organization-audit.ts`, and
     `generated-bulk-audit.ts`. This removes three local copies of the same
     bounded async loop while preserving each audit's existing concurrency
-    constants and generated summaries. `backend/test/fullAutomation.test.js`
+    constants and generated summaries. `backend/test/fullAutomation.test.ts`
     guards that the architecture audits import the shared helper instead of
     reintroducing local copies.
 188. Share architecture path normalization. Done:
@@ -1613,7 +1613,7 @@ Decision rule:
     `toPosix` from `ops/scripts/lib/fs-utils.ts` as their shared
     `normalizePath` implementation. This removes repeated slash-normalization
     helpers across architecture audits while keeping generated report paths and
-    repeat-consistency fields stable. `backend/test/fullAutomation.test.js`
+    repeat-consistency fields stable. `backend/test/fullAutomation.test.ts`
     guards the shared normalizer import and rejects local `normalizePath`
     redefinitions in those audit scripts.
 189. Bound language-runtime audit source reads. Done:
@@ -2688,7 +2688,7 @@ Decision rule:
     `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
     now distinguishes app-origin report-only CSP regressions from Cloudflare's
     intermittent Page Shield `cdn-cgi/script_monitor` diagnostic header.
-    `backend/test/fullAutomation.test.js` guards the behavior; no folder move
+    `backend/test/fullAutomation.test.ts` guards the behavior; no folder move
     or language conversion was needed.
 323. Reuse Sales selection and filter-count helpers. Done:
     `frontend/src/components/sales/Sales.jsx` now precomputes visible sale IDs,
@@ -3722,6 +3722,13 @@ Decision rule:
     runtime prerequisites (`DATABASE_URL`, pg-native/libpq, or a live server)
     before they can run assertions; this move only changes their source
     extension and package/doc references.
+465. Convert the backend full automation guardrail test to TypeScript. Done:
+    `backend/test/fullAutomation.test.ts` replaces the final `.js` file under
+    `backend/test`. The backend `test:utils` command, language/runtime audit
+    allowlists, and plan references now point at the TypeScript entrypoint.
+    This finishes the backend test-directory conversion while preserving the
+    direct Node/CommonJS execution contract used by the current lightweight
+    test harness.
 
 ## Safety Gates
 

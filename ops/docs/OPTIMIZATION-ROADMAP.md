@@ -3538,7 +3538,7 @@ Move 322 status:
   now still fails app-origin report-only CSP regressions, but recognizes
   Cloudflare's own non-blocking `cdn-cgi/script_monitor` diagnostics when the
   enforced app CSP, rendered products, API statuses, console checks, and page
-  error checks are otherwise clean. `backend/test/fullAutomation.test.js`
+  error checks are otherwise clean. `backend/test/fullAutomation.test.ts`
   guards that distinction. Cloudflare API access can list the zone, but the
   Page Shield settings endpoint returned an authentication error, so source
   disabling remains a Cloudflare dashboard/token-permission follow-up.
@@ -5249,3 +5249,10 @@ Move 474 status:
   gated by their existing runtime prerequisites (`DATABASE_URL`,
   pg-native/libpq, or a live server), so this move records those as residual
   environment requirements rather than source-conversion failures.
+
+Move 475 status:
+- Move 475 converts the backend full automation guardrail test to TypeScript.
+  `backend/test/fullAutomation.test.ts` replaces the last `.js` file in
+  `backend/test`, and the backend `test:utils` command plus language/runtime
+  proof references now call the TypeScript path. This closes the backend test
+  directory conversion without changing backend production runtime packaging.

@@ -918,7 +918,7 @@ const COMPLETED_DATA_PATH_SLICES = [
       'npm.cmd --prefix ops run phase29:audit:repeat',
     ],
     tests: [
-      'backend/test/fullAutomation.test.js',
+      'backend/test/fullAutomation.test.ts',
     ],
   },
   {
@@ -946,7 +946,7 @@ const COMPLETED_DATA_PATH_SLICES = [
       'npm.cmd --prefix ops run phase29:audit:repeat',
     ],
     tests: [
-      'backend/test/fullAutomation.test.js',
+      'backend/test/fullAutomation.test.ts',
       'backend/test/backupPerformanceHardening.test.ts',
       'backend/test/backupRetention.test.ts',
     ],
@@ -1023,7 +1023,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     tests: [
       'backend/test/routeContracts.test.ts',
       'backend/test/systemJobs.test.ts',
-      'backend/test/fullAutomation.test.js',
+      'backend/test/fullAutomation.test.ts',
     ],
   },
 ]
