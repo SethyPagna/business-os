@@ -5323,3 +5323,11 @@ Move 482 status:
   `NoData.tsx`, and receipt-settings `ErrorBoundary.tsx`. The frontend now
   carries real React type packages and the old local hook-only React shim is
   removed, so future JSX-to-TSX moves use the actual React public API.
+
+Move 483 status:
+- Move 483 converts the next small shared UI batch to TSX: shared
+  `ExportMenu.tsx` and `Modal.tsx`, POS `QuickAddModal.tsx`, sales
+  `StatusBadge.tsx`, and dashboard `MiniStat.tsx`. These files now expose
+  typed props for menu triggers, quick-add actions, sale-status labels, KPI
+  stats, and modal sizing, while replacing a stale mojibake modal close glyph
+  with an accessible plain `x`.

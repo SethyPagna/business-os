@@ -3792,6 +3792,11 @@ Decision rule:
     strict TSX. The old local React hook-only declaration shim was removed in
     favor of real React type packages, and TSX compilation is enabled without
     changing runtime routing or page ownership.
+483. Convert the next shared UI component batch to TSX. Done: shared
+    `ExportMenu.tsx` and `Modal.tsx`, POS `QuickAddModal.tsx`, sales
+    `StatusBadge.tsx`, and dashboard `MiniStat.tsx` now carry explicit prop
+    types. The shared modal close control also drops a mojibake glyph for a
+    plain accessible `x` while preserving the modal layout contract.
 
 ## Safety Gates
 
