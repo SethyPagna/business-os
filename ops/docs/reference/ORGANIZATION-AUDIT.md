@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-28T00:18:20.243Z
+Generated: 2026-05-28T00:31:51.429Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 618
+- Files scanned: 585
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -15,10 +15,10 @@ Generated: 2026-05-28T00:18:20.243Z
 | Extension | Files |
 | --- | --- |
 | .js | 185 |
-| .ts | 162 |
+| .ts | 161 |
 | .jsx | 107 |
-| .mjs | 76 |
 | .md | 44 |
+| .mjs | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -30,50 +30,50 @@ Generated: 2026-05-28T00:18:20.243Z
 
 | Area | Files |
 | --- | --- |
-| frontend/utils | 61 |
-| frontend/components/products | 46 |
+| frontend/utils | 54 |
+| frontend/components/products | 31 |
 | ops/docs/reference | 30 |
 | backend/routes | 24 |
 | frontend/components/shared | 20 |
-| frontend/components/catalog | 17 |
 | ops/scripts/runtime/live-checks | 17 |
 | ops/docs | 14 |
-| frontend/components/contacts | 13 |
+| frontend/components/catalog | 13 |
 | backend/services | 12 |
-| frontend/components/inventory | 11 |
+| frontend/components/contacts | 12 |
+| frontend/components/inventory | 10 |
 | frontend/components/receipt-settings | 10 |
 | frontend/components/utils-settings | 10 |
 | run | 9 |
 | run/docker | 9 |
 | frontend/api | 8 |
 | frontend/components/dashboard | 8 |
-| frontend/components/sales | 8 |
 | ops/scripts/powershell | 8 |
-| frontend/components/pos | 7 |
+| frontend/components/sales | 7 |
 | ops/scripts/runtime/storage | 7 |
+| frontend/components/pos | 6 |
 | frontend/components/returns | 6 |
 | ops/scripts/runtime/audits | 6 |
 | ops/scripts/verification | 6 |
-| frontend/src/types | 5 |
 | frontend/components/files | 4 |
 | frontend/components/users | 4 |
-| frontend/src/platform | 4 |
+| frontend/src/types | 4 |
 | ops/scripts/architecture | 4 |
 | ops/scripts/backend | 4 |
+| ops/scripts/runtime/cloudflare | 4 |
 
 ## Large Files
 
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/PHASE29-AUDIT.json | 11956 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8697 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7254 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8341 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7089 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-ROADMAP.md | 4984 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3514 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2833 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2828 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/lang/km.json | 2715 | frontend/src/lang |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2365 | ops/docs/reference |
@@ -87,13 +87,13 @@ Generated: 2026-05-28T00:18:20.243Z
 | frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |
 | frontend/src/components/products/import/BulkImportModal.jsx | 1907 | frontend/components/products |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1822 | ops/docs/reference |
-| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1769 | ops/docs/reference |
+| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1822 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1789 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1603 | frontend/src/AppContext.jsx |
+| ops/scripts/architecture/language-runtime-audit.mjs | 1578 | ops/scripts/architecture |
 | backend/src/routes/sales.js | 1573 | backend/routes |
-| ops/scripts/architecture/language-runtime-audit.mjs | 1566 | ops/scripts/architecture |
 | backend/src/services/googleDriveSync/index.js | 1564 | backend/services |
 
 ## Relative Import Hotspots

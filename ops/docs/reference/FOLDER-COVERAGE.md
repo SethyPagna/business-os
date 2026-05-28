@@ -34,34 +34,34 @@ Total folders documented: **81**
 | 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
 | 23 | `frontend/src` | Project folder | 8 | 9 |
 | 24 | `frontend/src/api` | Frontend API and sync transport | 8 | 0 |
-| 25 | `frontend/src/app` | Project folder | 3 | 0 |
+| 25 | `frontend/src/app` | Project folder | 2 | 0 |
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
 | 28 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
-| 29 | `frontend/src/components/catalog` | UI pages/components domain | 17 | 0 |
-| 30 | `frontend/src/components/contacts` | UI pages/components domain | 13 | 0 |
+| 29 | `frontend/src/components/catalog` | UI pages/components domain | 13 | 0 |
+| 30 | `frontend/src/components/contacts` | UI pages/components domain | 12 | 0 |
 | 31 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
 | 32 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
 | 33 | `frontend/src/components/dashboard/charts` | UI pages/components domain | 6 | 0 |
 | 34 | `frontend/src/components/files` | UI pages/components domain | 4 | 0 |
-| 35 | `frontend/src/components/inventory` | UI pages/components domain | 11 | 0 |
+| 35 | `frontend/src/components/inventory` | UI pages/components domain | 10 | 0 |
 | 36 | `frontend/src/components/loyalty-points` | UI pages/components domain | 1 | 0 |
 | 37 | `frontend/src/components/navigation` | UI pages/components domain | 1 | 0 |
-| 38 | `frontend/src/components/pos` | UI pages/components domain | 7 | 0 |
+| 38 | `frontend/src/components/pos` | UI pages/components domain | 6 | 0 |
 | 39 | `frontend/src/components/products` | UI pages/components domain | 1 | 9 |
-| 40 | `frontend/src/components/products/config` | UI pages/components domain | 2 | 0 |
+| 40 | `frontend/src/components/products/config` | UI pages/components domain | 1 | 0 |
 | 41 | `frontend/src/components/products/forms` | UI pages/components domain | 4 | 0 |
-| 42 | `frontend/src/components/products/helpers` | UI pages/components domain | 15 | 0 |
-| 43 | `frontend/src/components/products/history` | UI pages/components domain | 2 | 0 |
-| 44 | `frontend/src/components/products/import` | UI pages/components domain | 5 | 0 |
-| 45 | `frontend/src/components/products/lookups` | UI pages/components domain | 5 | 0 |
-| 46 | `frontend/src/components/products/scanning` | UI pages/components domain | 7 | 0 |
+| 42 | `frontend/src/components/products/helpers` | UI pages/components domain | 8 | 0 |
+| 43 | `frontend/src/components/products/history` | UI pages/components domain | 1 | 0 |
+| 44 | `frontend/src/components/products/import` | UI pages/components domain | 3 | 0 |
+| 45 | `frontend/src/components/products/lookups` | UI pages/components domain | 4 | 0 |
+| 46 | `frontend/src/components/products/scanning` | UI pages/components domain | 4 | 0 |
 | 47 | `frontend/src/components/products/shared` | UI pages/components domain | 1 | 0 |
 | 48 | `frontend/src/components/products/surfaces` | UI pages/components domain | 4 | 0 |
 | 49 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
 | 50 | `frontend/src/components/receipt-settings` | UI pages/components domain | 10 | 0 |
 | 51 | `frontend/src/components/returns` | UI pages/components domain | 6 | 0 |
-| 52 | `frontend/src/components/sales` | UI pages/components domain | 8 | 0 |
+| 52 | `frontend/src/components/sales` | UI pages/components domain | 7 | 0 |
 | 53 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
 | 54 | `frontend/src/components/shared` | UI pages/components domain | 20 | 0 |
 | 55 | `frontend/src/components/users` | UI pages/components domain | 4 | 0 |
@@ -69,11 +69,11 @@ Total folders documented: **81**
 | 57 | `frontend/src/lang` | Localization resources | 2 | 0 |
 | 58 | `frontend/src/platform` | Project folder | 0 | 2 |
 | 59 | `frontend/src/platform/runtime` | Project folder | 2 | 0 |
-| 60 | `frontend/src/platform/storage` | Project folder | 2 | 0 |
+| 60 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
 | 61 | `frontend/src/runtime` | Project folder | 1 | 0 |
 | 62 | `frontend/src/styles` | Project folder | 1 | 0 |
-| 63 | `frontend/src/types` | Project folder | 5 | 0 |
-| 64 | `frontend/src/utils` | Project folder | 62 | 0 |
+| 63 | `frontend/src/types` | Project folder | 4 | 0 |
+| 64 | `frontend/src/utils` | Project folder | 55 | 0 |
 | 65 | `frontend/tests` | Project folder | 76 | 0 |
 | 66 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
 | 67 | `ops/scripts/architecture` | Project folder | 4 | 0 |
@@ -652,7 +652,7 @@ Total folders documented: **81**
 ### 3.25 Folder: `frontend/src/app`
 
 - Purpose: Project folder
-- Direct files: **3**
+- Direct files: **2**
 - Direct subfolders: **0**
 
 #### 3.25.2 Files
@@ -660,8 +660,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `appShellUtils.ts` | Project source/support file |
-| 2 | `publicErrorRecovery.mjs` | Project source/support file |
-| 3 | `publicErrorRecovery.ts` | Project source/support file |
+| 2 | `publicErrorRecovery.ts` | Project source/support file |
 
 
 ### 3.26 Folder: `frontend/src/components`
@@ -733,7 +732,7 @@ Total folders documented: **81**
 ### 3.29 Folder: `frontend/src/components/catalog`
 
 - Purpose: UI pages/components domain
-- Direct files: **17**
+- Direct files: **13**
 - Direct subfolders: **0**
 
 #### 3.29.2 Files
@@ -748,21 +747,17 @@ Total folders documented: **81**
 | 6 | `CatalogProductsSection.jsx` | UI component/page |
 | 7 | `CatalogSecondaryTabs.jsx` | UI component/page |
 | 8 | `catalogUi.jsx` | UI component/page |
-| 9 | `portalCatalogDisplay.mjs` | UI component/page |
-| 10 | `portalCatalogDisplay.ts` | UI component/page |
-| 11 | `portalContentI18n.mjs` | UI component/page |
-| 12 | `portalContentI18n.ts` | UI component/page |
-| 13 | `portalEditorUtils.mjs` | UI component/page |
-| 14 | `portalEditorUtils.ts` | UI component/page |
-| 15 | `portalLanguagePacks.ts` | UI component/page |
-| 16 | `portalTranslateController.mjs` | UI component/page |
-| 17 | `portalTranslateController.ts` | UI component/page |
+| 9 | `portalCatalogDisplay.ts` | UI component/page |
+| 10 | `portalContentI18n.ts` | UI component/page |
+| 11 | `portalEditorUtils.ts` | UI component/page |
+| 12 | `portalLanguagePacks.ts` | UI component/page |
+| 13 | `portalTranslateController.ts` | UI component/page |
 
 
 ### 3.30 Folder: `frontend/src/components/contacts`
 
 - Purpose: UI pages/components domain
-- Direct files: **13**
+- Direct files: **12**
 - Direct subfolders: **0**
 
 #### 3.30.2 Files
@@ -770,18 +765,17 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `ContactImportModal.jsx` | UI component/page |
-| 2 | `contactImportWorker.mjs` | UI component/page |
-| 3 | `contactImportWorker.ts` | UI component/page |
-| 4 | `contactOptionUtils.js` | UI component/page |
-| 5 | `contactOptionUtils.ts` | UI component/page |
-| 6 | `Contacts.jsx` | UI component/page |
-| 7 | `CustomerFormModal.jsx` | UI component/page |
-| 8 | `customerMembershipNumber.js` | UI component/page |
-| 9 | `customerMembershipNumber.ts` | UI component/page |
-| 10 | `CustomersTab.jsx` | UI component/page |
-| 11 | `DeliveryTab.jsx` | UI component/page |
-| 12 | `shared.jsx` | UI component/page |
-| 13 | `SuppliersTab.jsx` | UI component/page |
+| 2 | `contactImportWorker.ts` | UI component/page |
+| 3 | `contactOptionUtils.js` | UI component/page |
+| 4 | `contactOptionUtils.ts` | UI component/page |
+| 5 | `Contacts.jsx` | UI component/page |
+| 6 | `CustomerFormModal.jsx` | UI component/page |
+| 7 | `customerMembershipNumber.js` | UI component/page |
+| 8 | `customerMembershipNumber.ts` | UI component/page |
+| 9 | `CustomersTab.jsx` | UI component/page |
+| 10 | `DeliveryTab.jsx` | UI component/page |
+| 11 | `shared.jsx` | UI component/page |
+| 12 | `SuppliersTab.jsx` | UI component/page |
 
 
 ### 3.31 Folder: `frontend/src/components/custom-tables`
@@ -854,7 +848,7 @@ Total folders documented: **81**
 ### 3.35 Folder: `frontend/src/components/inventory`
 
 - Purpose: UI pages/components domain
-- Direct files: **11**
+- Direct files: **10**
 - Direct subfolders: **0**
 
 #### 3.35.2 Files
@@ -864,14 +858,13 @@ Total folders documented: **81**
 | 1 | `DualMoney.jsx` | UI component/page |
 | 2 | `Inventory.jsx` | UI component/page |
 | 3 | `InventoryImportModal.jsx` | UI component/page |
-| 4 | `inventoryImportWorker.mjs` | UI component/page |
-| 5 | `inventoryImportWorker.ts` | UI component/page |
-| 6 | `InventoryMovementsSurface.jsx` | UI component/page |
-| 7 | `InventoryProductsSurface.jsx` | UI component/page |
-| 8 | `InventoryRfidSurface.jsx` | UI component/page |
-| 9 | `movementGroups.js` | UI component/page |
-| 10 | `movementGroups.ts` | UI component/page |
-| 11 | `ProductDetailModal.jsx` | UI component/page |
+| 4 | `inventoryImportWorker.ts` | UI component/page |
+| 5 | `InventoryMovementsSurface.jsx` | UI component/page |
+| 6 | `InventoryProductsSurface.jsx` | UI component/page |
+| 7 | `InventoryRfidSurface.jsx` | UI component/page |
+| 8 | `movementGroups.js` | UI component/page |
+| 9 | `movementGroups.ts` | UI component/page |
+| 10 | `ProductDetailModal.jsx` | UI component/page |
 
 
 ### 3.36 Folder: `frontend/src/components/loyalty-points`
@@ -903,7 +896,7 @@ Total folders documented: **81**
 ### 3.38 Folder: `frontend/src/components/pos`
 
 - Purpose: UI pages/components domain
-- Direct files: **7**
+- Direct files: **6**
 - Direct subfolders: **0**
 
 #### 3.38.2 Files
@@ -913,10 +906,9 @@ Total folders documented: **81**
 | 1 | `CartItem.jsx` | UI component/page |
 | 2 | `FilterPanel.jsx` | UI component/page |
 | 3 | `POS.jsx` | UI component/page |
-| 4 | `posCore.mjs` | UI component/page |
-| 5 | `posCore.ts` | UI component/page |
-| 6 | `ProductImage.jsx` | UI component/page |
-| 7 | `QuickAddModal.jsx` | UI component/page |
+| 4 | `posCore.ts` | UI component/page |
+| 5 | `ProductImage.jsx` | UI component/page |
+| 6 | `QuickAddModal.jsx` | UI component/page |
 
 
 ### 3.39 Folder: `frontend/src/components/products`
@@ -949,15 +941,14 @@ Total folders documented: **81**
 ### 3.40 Folder: `frontend/src/components/products/config`
 
 - Purpose: UI pages/components domain
-- Direct files: **2**
+- Direct files: **1**
 - Direct subfolders: **0**
 
 #### 3.40.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `productPageConfig.mjs` | UI component/page |
-| 2 | `productPageConfig.ts` | UI component/page |
+| 1 | `productPageConfig.ts` | UI component/page |
 
 
 ### 3.41 Folder: `frontend/src/components/products/forms`
@@ -979,48 +970,40 @@ Total folders documented: **81**
 ### 3.42 Folder: `frontend/src/components/products/helpers`
 
 - Purpose: UI pages/components domain
-- Direct files: **15**
+- Direct files: **8**
 - Direct subfolders: **0**
 
 #### 3.42.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `productDisplayHelpers.mjs` | UI component/page |
-| 2 | `productDisplayHelpers.ts` | UI component/page |
-| 3 | `productFilterHelpers.mjs` | UI component/page |
-| 4 | `productFilterHelpers.ts` | UI component/page |
-| 5 | `productGalleryHelpers.ts` | UI component/page |
-| 6 | `productGroupViewHelpers.mjs` | UI component/page |
-| 7 | `productGroupViewHelpers.ts` | UI component/page |
-| 8 | `productMenuHelpers.mjs` | UI component/page |
-| 9 | `productMenuHelpers.ts` | UI component/page |
-| 10 | `productPageHelpers.mjs` | UI component/page |
-| 11 | `productPageHelpers.ts` | UI component/page |
-| 12 | `productSelectionHelpers.mjs` | UI component/page |
-| 13 | `productSelectionHelpers.ts` | UI component/page |
-| 14 | `productWriteHelpers.mjs` | UI component/page |
-| 15 | `productWriteHelpers.ts` | UI component/page |
+| 1 | `productDisplayHelpers.ts` | UI component/page |
+| 2 | `productFilterHelpers.ts` | UI component/page |
+| 3 | `productGalleryHelpers.ts` | UI component/page |
+| 4 | `productGroupViewHelpers.ts` | UI component/page |
+| 5 | `productMenuHelpers.ts` | UI component/page |
+| 6 | `productPageHelpers.ts` | UI component/page |
+| 7 | `productSelectionHelpers.ts` | UI component/page |
+| 8 | `productWriteHelpers.ts` | UI component/page |
 
 
 ### 3.43 Folder: `frontend/src/components/products/history`
 
 - Purpose: UI pages/components domain
-- Direct files: **2**
+- Direct files: **1**
 - Direct subfolders: **0**
 
 #### 3.43.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `productHistoryHelpers.mjs` | UI component/page |
-| 2 | `productHistoryHelpers.ts` | UI component/page |
+| 1 | `productHistoryHelpers.ts` | UI component/page |
 
 
 ### 3.44 Folder: `frontend/src/components/products/import`
 
 - Purpose: UI pages/components domain
-- Direct files: **5**
+- Direct files: **3**
 - Direct subfolders: **0**
 
 #### 3.44.2 Files
@@ -1028,16 +1011,14 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `BulkImportModal.jsx` | UI component/page |
-| 2 | `productImportPlanner.mjs` | UI component/page |
-| 3 | `productImportPlanner.ts` | UI component/page |
-| 4 | `productImportWorker.mjs` | UI component/page |
-| 5 | `productImportWorker.ts` | UI component/page |
+| 2 | `productImportPlanner.ts` | UI component/page |
+| 3 | `productImportWorker.ts` | UI component/page |
 
 
 ### 3.45 Folder: `frontend/src/components/products/lookups`
 
 - Purpose: UI pages/components domain
-- Direct files: **5**
+- Direct files: **4**
 - Direct subfolders: **0**
 
 #### 3.45.2 Files
@@ -1047,27 +1028,23 @@ Total folders documented: **81**
 | 1 | `ManageBrandsModal.jsx` | UI component/page |
 | 2 | `ManageCategoriesModal.jsx` | UI component/page |
 | 3 | `ManageUnitsModal.jsx` | UI component/page |
-| 4 | `productLookupSnapshots.mjs` | UI component/page |
-| 5 | `productLookupSnapshots.ts` | UI component/page |
+| 4 | `productLookupSnapshots.ts` | UI component/page |
 
 
 ### 3.46 Folder: `frontend/src/components/products/scanning`
 
 - Purpose: UI pages/components domain
-- Direct files: **7**
+- Direct files: **4**
 - Direct subfolders: **0**
 
 #### 3.46.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `barcodeImageScanner.mjs` | UI component/page |
-| 2 | `barcodeImageScanner.ts` | UI component/page |
-| 3 | `BarcodeScannerModal.jsx` | UI component/page |
-| 4 | `barcodeScannerState.mjs` | UI component/page |
-| 5 | `barcodeScannerState.ts` | UI component/page |
-| 6 | `scanbotScanner.mjs` | UI component/page |
-| 7 | `scanbotScanner.ts` | UI component/page |
+| 1 | `barcodeImageScanner.ts` | UI component/page |
+| 2 | `BarcodeScannerModal.jsx` | UI component/page |
+| 3 | `barcodeScannerState.ts` | UI component/page |
+| 4 | `scanbotScanner.ts` | UI component/page |
 
 
 ### 3.47 Folder: `frontend/src/components/products/shared`
@@ -1155,7 +1132,7 @@ Total folders documented: **81**
 ### 3.52 Folder: `frontend/src/components/sales`
 
 - Purpose: UI pages/components domain
-- Direct files: **8**
+- Direct files: **7**
 - Direct subfolders: **0**
 
 #### 3.52.2 Files
@@ -1166,10 +1143,9 @@ Total folders documented: **81**
 | 2 | `SaleDetailModal.jsx` | UI component/page |
 | 3 | `Sales.jsx` | UI component/page |
 | 4 | `SalesImportModal.jsx` | UI component/page |
-| 5 | `salesImportWorker.mjs` | UI component/page |
-| 6 | `salesImportWorker.ts` | UI component/page |
-| 7 | `SalesListSurface.jsx` | UI component/page |
-| 8 | `StatusBadge.jsx` | UI component/page |
+| 5 | `salesImportWorker.ts` | UI component/page |
+| 6 | `SalesListSurface.jsx` | UI component/page |
+| 7 | `StatusBadge.jsx` | UI component/page |
 
 
 ### 3.53 Folder: `frontend/src/components/server`
@@ -1300,15 +1276,14 @@ Total folders documented: **81**
 ### 3.60 Folder: `frontend/src/platform/storage`
 
 - Purpose: Project folder
-- Direct files: **2**
+- Direct files: **1**
 - Direct subfolders: **0**
 
 #### 3.60.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `storagePolicy.mjs` | Project source/support file |
-| 2 | `storagePolicy.ts` | Project source/support file |
+| 1 | `storagePolicy.ts` | Project source/support file |
 
 
 ### 3.61 Folder: `frontend/src/runtime`
@@ -1340,7 +1315,7 @@ Total folders documented: **81**
 ### 3.63 Folder: `frontend/src/types`
 
 - Purpose: Project folder
-- Direct files: **5**
+- Direct files: **4**
 - Direct subfolders: **0**
 
 #### 3.63.2 Files
@@ -1348,84 +1323,76 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `jsx-modules.d.ts` | Project source/support file |
-| 2 | `mjs-modules.d.ts` | Project source/support file |
-| 3 | `react.d.ts` | Project source/support file |
-| 4 | `receiptContracts.ts` | Project source/support file |
-| 5 | `settingsContracts.ts` | Project source/support file |
+| 2 | `react.d.ts` | Project source/support file |
+| 3 | `receiptContracts.ts` | Project source/support file |
+| 4 | `settingsContracts.ts` | Project source/support file |
 
 
 ### 3.64 Folder: `frontend/src/utils`
 
 - Purpose: Project folder
-- Direct files: **62**
+- Direct files: **55**
 - Direct subfolders: **0**
 
 #### 3.64.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `actionGuards.mjs` | Utility helper |
-| 2 | `actionGuards.ts` | Utility helper |
-| 3 | `actionHistory.mjs` | Utility helper |
-| 4 | `actionHistory.ts` | Utility helper |
-| 5 | `appRefresh.d.ts` | Utility helper |
-| 6 | `appRefresh.js` | Utility helper |
-| 7 | `appRefresh.ts` | Utility helper |
-| 8 | `bulkOps.mjs` | Utility helper |
-| 9 | `bulkOps.ts` | Utility helper |
-| 10 | `color.js` | Utility helper |
-| 11 | `color.ts` | Utility helper |
-| 12 | `csv.d.ts` | Utility helper |
-| 13 | `csv.js` | Utility helper |
-| 14 | `csv.ts` | Utility helper |
-| 15 | `csvExportWorker.mjs` | Utility helper |
-| 16 | `csvExportWorker.ts` | Utility helper |
-| 17 | `csvImport.js` | Utility helper |
-| 18 | `csvImport.ts` | Utility helper |
-| 19 | `csvRowCounter.d.mts` | Utility helper |
-| 20 | `csvRowCounter.ts` | Utility helper |
-| 21 | `dateHelpers.js` | Utility helper |
-| 22 | `dateHelpers.ts` | Utility helper |
-| 23 | `deviceInfo.js` | Utility helper |
-| 24 | `deviceInfo.ts` | Utility helper |
-| 25 | `exportPackage.js` | Utility helper |
-| 26 | `exportPackage.ts` | Utility helper |
-| 27 | `exportReports.jsx` | Utility helper |
-| 28 | `favicon.js` | Utility helper |
-| 29 | `favicon.ts` | Utility helper |
-| 30 | `formatters.js` | Utility helper |
-| 31 | `formatters.ts` | Utility helper |
-| 32 | `groupedRecords.ts` | Utility helper |
-| 33 | `historyHelpers.mjs` | Utility helper |
-| 34 | `historyHelpers.ts` | Utility helper |
-| 35 | `importJobRefresh.js` | Utility helper |
-| 36 | `importJobRefresh.ts` | Utility helper |
-| 37 | `index.js` | Utility helper |
-| 38 | `index.ts` | Utility helper |
-| 39 | `initials.ts` | Utility helper |
-| 40 | `loaders.mjs` | Utility helper |
-| 41 | `loaders.ts` | Utility helper |
-| 42 | `mediaUpload.js` | Utility helper |
-| 43 | `mediaUpload.ts` | Utility helper |
-| 44 | `permissions.js` | Utility helper |
-| 45 | `permissions.ts` | Utility helper |
-| 46 | `pricing.d.ts` | Utility helper |
-| 47 | `pricing.js` | Utility helper |
-| 48 | `pricing.ts` | Utility helper |
-| 49 | `printReceipt.js` | Utility helper |
-| 50 | `printReceipt.ts` | Utility helper |
-| 51 | `productBatches.mjs` | Utility helper |
-| 52 | `productBatches.ts` | Utility helper |
-| 53 | `productGrouping.ts` | Utility helper |
-| 54 | `publicAssetUrls.d.ts` | Utility helper |
-| 55 | `publicAssetUrls.js` | Utility helper |
-| 56 | `publicAssetUrls.ts` | Utility helper |
-| 57 | `receiptAppliedConfig.ts` | Utility helper |
-| 58 | `scriptTypography.js` | Utility helper |
-| 59 | `scriptTypography.ts` | Utility helper |
-| 60 | `settingsRefresh.js` | Utility helper |
-| 61 | `settingsRefresh.ts` | Utility helper |
-| 62 | `settingsWriteOptions.ts` | Utility helper |
+| 1 | `actionGuards.ts` | Utility helper |
+| 2 | `actionHistory.ts` | Utility helper |
+| 3 | `appRefresh.d.ts` | Utility helper |
+| 4 | `appRefresh.js` | Utility helper |
+| 5 | `appRefresh.ts` | Utility helper |
+| 6 | `bulkOps.ts` | Utility helper |
+| 7 | `color.js` | Utility helper |
+| 8 | `color.ts` | Utility helper |
+| 9 | `csv.d.ts` | Utility helper |
+| 10 | `csv.js` | Utility helper |
+| 11 | `csv.ts` | Utility helper |
+| 12 | `csvExportWorker.ts` | Utility helper |
+| 13 | `csvImport.js` | Utility helper |
+| 14 | `csvImport.ts` | Utility helper |
+| 15 | `csvRowCounter.d.mts` | Utility helper |
+| 16 | `csvRowCounter.ts` | Utility helper |
+| 17 | `dateHelpers.js` | Utility helper |
+| 18 | `dateHelpers.ts` | Utility helper |
+| 19 | `deviceInfo.js` | Utility helper |
+| 20 | `deviceInfo.ts` | Utility helper |
+| 21 | `exportPackage.js` | Utility helper |
+| 22 | `exportPackage.ts` | Utility helper |
+| 23 | `exportReports.jsx` | Utility helper |
+| 24 | `favicon.js` | Utility helper |
+| 25 | `favicon.ts` | Utility helper |
+| 26 | `formatters.js` | Utility helper |
+| 27 | `formatters.ts` | Utility helper |
+| 28 | `groupedRecords.ts` | Utility helper |
+| 29 | `historyHelpers.ts` | Utility helper |
+| 30 | `importJobRefresh.js` | Utility helper |
+| 31 | `importJobRefresh.ts` | Utility helper |
+| 32 | `index.js` | Utility helper |
+| 33 | `index.ts` | Utility helper |
+| 34 | `initials.ts` | Utility helper |
+| 35 | `loaders.ts` | Utility helper |
+| 36 | `mediaUpload.js` | Utility helper |
+| 37 | `mediaUpload.ts` | Utility helper |
+| 38 | `permissions.js` | Utility helper |
+| 39 | `permissions.ts` | Utility helper |
+| 40 | `pricing.d.ts` | Utility helper |
+| 41 | `pricing.js` | Utility helper |
+| 42 | `pricing.ts` | Utility helper |
+| 43 | `printReceipt.js` | Utility helper |
+| 44 | `printReceipt.ts` | Utility helper |
+| 45 | `productBatches.ts` | Utility helper |
+| 46 | `productGrouping.ts` | Utility helper |
+| 47 | `publicAssetUrls.d.ts` | Utility helper |
+| 48 | `publicAssetUrls.js` | Utility helper |
+| 49 | `publicAssetUrls.ts` | Utility helper |
+| 50 | `receiptAppliedConfig.ts` | Utility helper |
+| 51 | `scriptTypography.js` | Utility helper |
+| 52 | `scriptTypography.ts` | Utility helper |
+| 53 | `settingsRefresh.js` | Utility helper |
+| 54 | `settingsRefresh.ts` | Utility helper |
+| 55 | `settingsWriteOptions.ts` | Utility helper |
 
 
 ### 3.65 Folder: `frontend/tests`

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T00:18:19.941Z",
+  "generatedAt": "2026-05-28T00:31:51.129Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 520,
+  "sourceFiles": 487,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -25,15 +25,11 @@
     ],
     [
       "TypeScript",
-      160
+      159
     ],
     [
       "React JSX",
       107
-    ],
-    [
-      "JavaScript modules",
-      37
     ],
     [
       "Windows batch",
@@ -42,6 +38,10 @@
     [
       "PowerShell",
       8
+    ],
+    [
+      "JavaScript modules",
+      5
     ],
     [
       "Shell",
@@ -67,15 +67,11 @@
     ],
     [
       ".ts",
-      160
+      159
     ],
     [
       ".jsx",
       107
-    ],
-    [
-      ".mjs",
-      37
     ],
     [
       ".bat",
@@ -84,6 +80,10 @@
     [
       ".ps1",
       8
+    ],
+    [
+      ".mjs",
+      5
     ],
     [
       ".sh",
@@ -558,7 +558,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/components/catalog/portalCatalogDisplay.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -574,7 +575,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/components/catalog/portalContentI18n.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -589,7 +591,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/components/catalog/portalEditorUtils.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -621,6 +624,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -636,6 +640,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -651,6 +656,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -666,6 +672,7 @@
         "node frontend\\tests\\productImportPlanner.test.ts"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -698,6 +705,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -745,6 +753,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -760,6 +769,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -793,6 +803,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -809,6 +820,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -825,6 +837,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -841,6 +854,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -874,6 +888,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -890,6 +905,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -906,6 +922,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -922,6 +939,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -938,6 +956,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -954,7 +973,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/utils/bulkOps.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -970,7 +990,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/components/products/import/productImportPlanner.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -986,7 +1007,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/components/products/import/productImportWorker.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1002,6 +1024,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1018,6 +1041,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1034,6 +1058,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1050,6 +1075,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1066,6 +1092,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1083,6 +1110,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1099,6 +1127,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1115,7 +1144,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/platform/storage/storagePolicy.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1131,7 +1161,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/utils/actionGuards.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1147,6 +1178,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1163,6 +1195,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1179,6 +1212,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1195,6 +1229,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1211,7 +1246,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/utils/historyHelpers.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1226,6 +1262,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1242,6 +1279,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1258,6 +1296,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1274,7 +1313,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/utils/productBatches.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1290,6 +1330,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1306,6 +1347,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
+      "wrapperStatus": "",
       "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1322,7 +1364,8 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperRequired": true,
+      "wrapperStatus": "retired frontend/src/components/products/config/productPageConfig.mjs",
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1345,6 +1388,8 @@
       ],
       "surfaceExists": true,
       "workerExists": true,
+      "wrapperStatus": "retired frontend/src/components/products/import/productImportWorker.mjs",
+      "compatibilityWrapperRequired": false,
       "compatibilityWrapperExists": true,
       "fallbackExists": true,
       "covered": true
@@ -1364,6 +1409,8 @@
       ],
       "surfaceExists": true,
       "workerExists": true,
+      "wrapperStatus": "retired frontend/src/components/contacts/contactImportWorker.mjs",
+      "compatibilityWrapperRequired": false,
       "compatibilityWrapperExists": true,
       "fallbackExists": true,
       "covered": true
@@ -1383,6 +1430,8 @@
       ],
       "surfaceExists": true,
       "workerExists": true,
+      "wrapperStatus": "retired frontend/src/components/inventory/inventoryImportWorker.mjs",
+      "compatibilityWrapperRequired": false,
       "compatibilityWrapperExists": true,
       "fallbackExists": true,
       "covered": true
@@ -1402,6 +1451,8 @@
       ],
       "surfaceExists": true,
       "workerExists": true,
+      "wrapperStatus": "retired frontend/src/components/sales/salesImportWorker.mjs",
+      "compatibilityWrapperRequired": false,
       "compatibilityWrapperExists": true,
       "fallbackExists": true,
       "covered": true
@@ -1420,6 +1471,8 @@
       ],
       "surfaceExists": true,
       "workerExists": true,
+      "wrapperStatus": "retired frontend/src/utils/csvExportWorker.mjs",
+      "compatibilityWrapperRequired": false,
       "compatibilityWrapperExists": true,
       "fallbackExists": true,
       "covered": true

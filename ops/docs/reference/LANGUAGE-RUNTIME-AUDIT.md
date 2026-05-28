@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T00:18:19.941Z
+Generated: 2026-05-28T00:31:51.129Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 520
+- Files scanned: 487
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -23,11 +23,11 @@ Generated: 2026-05-28T00:18:19.941Z
 | Language | Files |
 | --- | --- |
 | JavaScript | 184 |
-| TypeScript | 160 |
+| TypeScript | 159 |
 | React JSX | 107 |
-| JavaScript modules | 37 |
 | Windows batch | 16 |
 | PowerShell | 8 |
+| JavaScript modules | 5 |
 | Shell | 3 |
 | JSON | 2 |
 | SQL | 2 |
@@ -89,9 +89,9 @@ Generated: 2026-05-28T00:18:19.941Z
 | --- | --- | --- | --- | --- | --- | --- |
 | `frontend/src/app/appShellUtils.ts` | yes | retired after callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\appShellUtils.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/runtime/runtimeErrorClassifier.ts` | yes | retired after callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\runtimeErrorClassifier.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/catalog/portalCatalogDisplay.ts` | yes | `frontend/src/components/catalog/portalCatalogDisplay.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalCatalogDisplay.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/catalog/portalContentI18n.ts` | yes | `frontend/src/components/catalog/portalContentI18n.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalContentI18n.test.ts`<br>`node frontend\tests\portalFaqVocabulary.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/catalog/portalEditorUtils.ts` | yes | `frontend/src/components/catalog/portalEditorUtils.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalEditorUtils.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/catalog/portalCatalogDisplay.ts` | yes | retired frontend/src/components/catalog/portalCatalogDisplay.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalCatalogDisplay.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/catalog/portalContentI18n.ts` | yes | retired frontend/src/components/catalog/portalContentI18n.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalContentI18n.test.ts`<br>`node frontend\tests\portalFaqVocabulary.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/catalog/portalEditorUtils.ts` | yes | retired frontend/src/components/catalog/portalEditorUtils.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalEditorUtils.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | yes | retired after catalog surfaces and tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalLanguagePacks.test.ts`<br>`node frontend\tests\portalFaqVocabulary.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/contacts/contactOptionUtils.ts` | yes | `frontend/src/components/contacts/contactOptionUtils.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/inventory/movementGroups.ts` | yes | `frontend/src/components/inventory/movementGroups.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryMovementGroups.test.ts`<br>`npm.cmd --prefix frontend run build` |
@@ -114,9 +114,9 @@ Generated: 2026-05-28T00:18:19.941Z
 | `frontend/src/components/products/history/productHistoryHelpers.ts` | yes | `frontend/src/components/products/history/productHistoryHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productHistoryHelpers.test.ts`<br>`node frontend\tests\historyHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | yes | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\barcodeImageScanner.test.ts`<br>`node frontend\tests\scanbotScanner.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | yes | `frontend/src/components/products/scanning/barcodeScannerState.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\barcodeScannerState.test.ts`<br>`node frontend\tests\scanbotScanner.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/bulkOps.ts` | yes | `frontend/src/utils/bulkOps.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\bulkOps.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/products/import/productImportPlanner.ts` | yes | `frontend/src/components/products/import/productImportPlanner.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/products/import/productImportWorker.ts` | yes | `frontend/src/components/products/import/productImportWorker.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/bulkOps.ts` | yes | retired frontend/src/utils/bulkOps.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\bulkOps.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/products/import/productImportPlanner.ts` | yes | retired frontend/src/components/products/import/productImportPlanner.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/products/import/productImportWorker.ts` | yes | retired frontend/src/components/products/import/productImportWorker.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/receipt-settings/constants.ts` | yes | `frontend/src/components/receipt-settings/constants.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\receiptTemplate.test.ts`<br>`node frontend\tests\receiptSettingsSync.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/contacts/customerMembershipNumber.ts` | yes | `frontend/src/components/contacts/customerMembershipNumber.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/dashboard/charts/index.ts` | yes | `frontend/src/components/dashboard/charts/index.js` | yes | `frontend/src/types/jsx-modules.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
@@ -124,20 +124,20 @@ Generated: 2026-05-28T00:18:19.941Z
 | `frontend/src/components/shared/navigationConfig.ts` | yes | `frontend/src/components/shared/navigationConfig.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\navigationConfig.test.ts`<br>`node frontend\tests\sectionNavigation.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/utils-settings/index.ts` | yes | `frontend/src/components/utils-settings/index.js` | yes | `frontend/src/types/jsx-modules.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\utilsSettingsBarrel.test.ts`<br>`node frontend\tests\sectionNavigation.test.ts`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/utils-settings/settingsConflict.ts` | yes | `frontend/src/components/utils-settings/settingsConflict.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\settingsConflictHelpers.test.ts`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/platform/storage/storagePolicy.ts` | yes | `frontend/src/platform/storage/storagePolicy.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\storagePolicy.test.ts`<br>`node frontend\tests\apiHttp.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/actionGuards.ts` | yes | `frontend/src/utils/actionGuards.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\actionGuards.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/platform/storage/storagePolicy.ts` | yes | retired frontend/src/platform/storage/storagePolicy.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\storagePolicy.test.ts`<br>`node frontend\tests\apiHttp.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/actionGuards.ts` | yes | retired frontend/src/utils/actionGuards.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\actionGuards.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/color.ts` | yes | `frontend/src/utils/color.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`node frontend\tests\productSearchPagination.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/dateHelpers.ts` | yes | `frontend/src/utils/dateHelpers.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\dateHelpers.test.ts`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/deviceInfo.ts` | yes | `frontend/src/utils/deviceInfo.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\deviceInfo.test.ts`<br>`node frontend\tests\apiHttp.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/exportPackage.ts` | yes | `frontend/src/utils/exportPackage.js` | yes | `frontend/src/utils/csv.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\exportPackages.test.ts`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/historyHelpers.ts` | yes | `frontend/src/utils/historyHelpers.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\historyHelpers.test.ts`<br>`node frontend\tests\productHistoryHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/historyHelpers.ts` | yes | retired frontend/src/utils/historyHelpers.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\historyHelpers.test.ts`<br>`node frontend\tests\productHistoryHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/importJobRefresh.ts` | yes | `frontend/src/utils/importJobRefresh.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\importJobRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/index.ts` | yes | `frontend/src/utils/index.js` | yes | `frontend/src/utils/csv.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\formatters.test.ts`<br>`node frontend\tests\dateHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/permissions.ts` | yes | `frontend/src/utils/permissions.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\permissions.test.ts`<br>`node frontend\tests\permissionEditor.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/productBatches.ts` | yes | `frontend/src/utils/productBatches.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productBatches.test.ts`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/productBatches.ts` | yes | retired frontend/src/utils/productBatches.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productBatches.test.ts`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/scriptTypography.ts` | yes | `frontend/src/utils/scriptTypography.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\scriptTypography.test.ts`<br>`node frontend\tests\portalCatalogDisplay.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/settingsRefresh.ts` | yes | `frontend/src/utils/settingsRefresh.js` | yes | `frontend/src/utils/appRefresh.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`node frontend\tests\appRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/products/config/productPageConfig.ts` | yes | `frontend/src/components/products/config/productPageConfig.mjs` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\actionStability.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/products/config/productPageConfig.ts` | yes | retired frontend/src/components/products/config/productPageConfig.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\actionStability.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 
 ## Completed Web Worker Slices
 
