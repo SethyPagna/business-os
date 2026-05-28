@@ -24,7 +24,7 @@ const MANUAL_NOTES_START = '<!-- phase29-manual-notes:start -->'
 const MANUAL_NOTES_END = '<!-- phase29-manual-notes:end -->'
 const DEFAULT_MANUAL_NOTES = `- Move 178 reduces \`writeSystemSettings()\` transaction-loop overhead by
   preparing the settings delete statement once beside the upsert statement.
-- Move 179 leaves \`language-runtime-audit.mjs\` in Node.js and rejects it from
+- Move 179 leaves \`language-runtime-audit.ts\` in Node.js and rejects it from
   the SQL/DuckDB queue because the remaining signal was self-referential report
   metadata, not a runtime data-processing hot path.
 - Move 180 removed the generated root \`output\` folder after exact-path
@@ -32,7 +32,7 @@ const DEFAULT_MANUAL_NOTES = `- Move 178 reduces \`writeSystemSettings()\` trans
   uploads, secrets, dependencies, or source files.
 - Move 181 ran local retention cleanup and removed four old Phase 8.4 report
   folders, freeing 817,705 bytes while skipping remote R2 pruning.
-- Move 182 speeds up \`generated-bulk-audit.mjs\` with a recursive directory
+- Move 182 speeds up \`generated-bulk-audit.ts\` with a recursive directory
   read fast path and the previous stack walker as fallback, preserving exact
   byte/file counts while reducing repeated Phase 29 audit overhead.
 - Move 183 reduces Phase 29 orchestration wall time by running independent

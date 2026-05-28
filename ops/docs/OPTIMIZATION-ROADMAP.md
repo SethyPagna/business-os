@@ -1605,7 +1605,7 @@ Mini phases:
   - runtime reports in `ops/runtime/reports`
 
 Tests and analysis:
-- Run `node ops/scripts/architecture/organization-audit.mjs` before and after
+- Run `node ops/scripts/architecture/organization-audit.ts` before and after
   moves.
 - Use `rg` to update every old path reference.
 - Run `npm.cmd run check:jsx`, focused source tests, `npm.cmd run build`, and
@@ -2048,7 +2048,7 @@ Cleanup checkpoint:
   avoid misreading child targets that are already included inside parent
   folders.
 - Phase 29 now includes an executable language/runtime audit:
-  `ops/scripts/architecture/language-runtime-audit.mjs` writes
+  `ops/scripts/architecture/language-runtime-audit.ts` writes
   `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md` and JSON with language counts,
   TypeScript utility candidates, Web Worker candidates, SQL/DuckDB data-path
   candidates, runtime policy, and rejected Rust/Go/Python/WASM families.
@@ -2475,7 +2475,7 @@ Cleanup checkpoint:
   Null-valued settings still delete inside the same transaction, but repeated
   statement setup is removed.
 - Move 179 closes the self-referential language/runtime candidate:
-  `ops/scripts/architecture/language-runtime-audit.mjs` now rejects itself from
+  `ops/scripts/architecture/language-runtime-audit.ts` now rejects itself from
   the SQL/DuckDB conversion queue. The remaining candidate was the Phase 29
   report generator ranking its own proof strings and completed-slice metadata,
   so the executable queue is clean without introducing a new runtime dependency
@@ -2492,14 +2492,14 @@ Cleanup checkpoint:
   secrets, newest backup packages, Docker volumes, and R2 remote storage were
   left untouched.
 - Move 182 speeds up generated-bulk measurement:
-  `ops/scripts/architecture/generated-bulk-audit.mjs` now uses Node's
+  `ops/scripts/architecture/generated-bulk-audit.ts` now uses Node's
   recursive directory read as the fast path and keeps the old stack walker as a
   fallback. The generated-bulk report kept the same byte/file counts while
   lowering repeated Phase 29 measurement overhead for large generated folders.
 - Move 183 parallelizes safe Phase 29 child checks:
-  `ops/scripts/architecture/phase29-audit.mjs` now runs generated-bulk, schema,
+  `ops/scripts/architecture/phase29-audit.ts` now runs generated-bulk, schema,
   performance, language/runtime, and Docker guardrail checks together, then runs
-  `organization-audit.mjs` after those report writers finish. This reduces
+  `organization-audit.ts` after those report writers finish. This reduces
   orchestration wall time while preserving a coherent docs/reference tree for
   the organization scan.
 - Move 184 preserves performance scan status notes:
@@ -2509,7 +2509,7 @@ Cleanup checkpoint:
   performance, and orchestration move trail, and `PERFORMANCE-SCAN.json`
   records `manualNotesPreserved` plus the retained note-line count.
 - Move 185 compares preserved notes in repeat consistency:
-  `ops/scripts/architecture/phase29-audit.mjs` now compares
+  `ops/scripts/architecture/phase29-audit.ts` now compares
   `manualNotesPreserved` and `manualNotesLines` across the three
   `Performance/code-flow scan` cycles. The repeat audit will flag drift if a
   future performance scan regeneration drops or truncates the Phase 29 status
@@ -2526,12 +2526,12 @@ Cleanup checkpoint:
   removes duplicate bounded async loop implementations while keeping the
   script-specific concurrency limits intact.
 - Move 188 shares architecture path normalization:
-  `generated-bulk-audit.mjs`, `organization-audit.mjs`,
-  `phase29-audit.mjs`, and `language-runtime-audit.mjs` now import `toPosix`
+  `generated-bulk-audit.ts`, `organization-audit.ts`,
+  `phase29-audit.ts`, and `language-runtime-audit.ts` now import `toPosix`
   from `ops/scripts/lib/fs-utils.js` as `normalizePath`, removing repeated
   slash-normalization helpers while preserving report path output.
 - Move 189 bounds language/runtime source reads:
-  `ops/scripts/architecture/language-runtime-audit.mjs` now reads scanned
+  `ops/scripts/architecture/language-runtime-audit.ts` now reads scanned
   source files through the shared bounded `mapLimit()` helper instead of
   unbounded `Promise.all(files.map(...))`. Its summary records `fileReadMode`
   and `fileReadConcurrency`, and Phase 29 repeat consistency compares those
@@ -2542,19 +2542,19 @@ Cleanup checkpoint:
   carrying local `fs.access()` wrappers. This keeps repeat-sweep path checks
   consistent while reducing helper duplication in the audit layer.
 - Move 191 bounds generated-bulk target measurement:
-  `ops/scripts/architecture/generated-bulk-audit.mjs` now measures cleanup and
+  `ops/scripts/architecture/generated-bulk-audit.ts` now measures cleanup and
   generated-bulk targets through the shared bounded `mapLimit()` helper instead
   of an unbounded `Promise.all(TARGETS.map(...))` pass. Its summary records
   `targetMeasureConcurrency`, and Phase 29 repeat consistency compares that
   field with the other generated-bulk measurement settings.
 - Move 192 bounds organization audit root discovery:
-  `ops/scripts/architecture/organization-audit.mjs` now walks scan roots and
+  `ops/scripts/architecture/organization-audit.ts` now walks scan roots and
   root config files through shared bounded `mapLimit()` workers instead of
   unbounded `Promise.all(SCAN_ROOTS.map(...))` and `Promise.all(SCAN_FILES.map(...))`
   passes. Its summary records `rootWalkMode` and `rootWalkConcurrency`, and
   Phase 29 repeat consistency compares those fields.
 - Move 193 bounds language/runtime proof sweeps:
-  `ops/scripts/architecture/language-runtime-audit.mjs` now uses shared bounded
+  `ops/scripts/architecture/language-runtime-audit.ts` now uses shared bounded
   `mapLimit()` workers for scan-root discovery and proof-matrix existence
   checks instead of unbounded `Promise.all(...map(...))` passes over roots,
   focused tests, converted TypeScript slices, completed Worker slices, and data
@@ -2562,7 +2562,7 @@ Cleanup checkpoint:
   `matrixCheckMode`, and `matrixCheckConcurrency`, and Phase 29 repeat
   consistency compares those fields.
 - Move 194 bounds Phase 29 child-check fan-out:
-  `ops/scripts/architecture/phase29-audit.mjs` now runs independent
+  `ops/scripts/architecture/phase29-audit.ts` now runs independent
   reference-producing child checks through shared bounded `mapLimit()` workers
   instead of `Promise.all(checks.map(...))`. The orchestrator keeps the
   organization audit after reference writers, records
@@ -2571,18 +2571,18 @@ Cleanup checkpoint:
 - Move 195 shares report-format helpers:
   `ops/scripts/lib/report-utils.js` now owns the shared Markdown table,
   long-value summary, stable digest, and output-tail helpers used by the
-  architecture audit scripts. `generated-bulk-audit.mjs`,
-  `organization-audit.mjs`, `language-runtime-audit.mjs`, and
-  `phase29-audit.mjs` import the shared helper instead of carrying local
+  architecture audit scripts. `generated-bulk-audit.ts`,
+  `organization-audit.ts`, `language-runtime-audit.ts`, and
+  `phase29-audit.ts` import the shared helper instead of carrying local
   `markdownTable()` copies.
 - Move 196 shares byte formatting:
   `ops/scripts/lib/report-utils.js` now also owns `formatBytes()`, and
-  `generated-bulk-audit.mjs` imports it instead of carrying a local byte-size
+  `generated-bulk-audit.ts` imports it instead of carrying a local byte-size
   formatter. This keeps cleanup-size reporting consistent with the shared
   report utility layer.
 - Move 197 shares async read helpers:
   `ops/scripts/lib/fs-utils.js` now owns `readUtf8Async()` and
-  `readJsonAsync()`, and `generated-bulk-audit.mjs` uses those helpers instead
+  `readJsonAsync()`, and `generated-bulk-audit.ts` uses those helpers instead
   of local `readText()` and `readJsonFile()` wrappers. This keeps generated
   cleanup inventory reads on the shared filesystem utility path.
 - Move 198 shares verification read helpers:
@@ -2611,7 +2611,7 @@ Cleanup checkpoint:
   shared ops filesystem utility layer while preserving the frontend
   `verify:ui` script.
 - Move 202 shares language audit JSON reads:
-  `ops/scripts/architecture/language-runtime-audit.mjs` now imports
+  `ops/scripts/architecture/language-runtime-audit.ts` now imports
   `readJsonAsync()` from `ops/scripts/lib/fs-utils.js` for package manifest
   reads instead of carrying a local async JSON helper. This keeps Phase 29's
   language/runtime audit on the same filesystem utility path as the generated
@@ -2748,7 +2748,7 @@ Cleanup checkpoint:
   metadata, service-worker build hash, frontend mismatch dispatch, AppContext
   listener wiring, backend runtime version route, backend frontend-build
   metadata reads, and frontend performance build-metadata verification.
-  `phase29-audit.mjs` now runs this guardrail as the seventh Phase 29 check and
+  `phase29-audit.ts` now runs this guardrail as the seventh Phase 29 check and
   compares those fields across repeat cycles.
 - Move 220 makes local verification coverage machine-checkable:
   `ops/scripts/verification/verify-runtime-deps.js` now reads
@@ -2778,7 +2778,7 @@ Cleanup checkpoint:
   informational because clean workspaces run this guard before frontend build
   output exists.
 - Move 224 audits dependency topology and removes orphan root dependencies:
-  `ops/scripts/architecture/generated-bulk-audit.mjs` now writes a
+  `ops/scripts/architecture/generated-bulk-audit.ts` now writes a
   `dependencyTopology` section that explains why frontend/backend/ops dependency
   trees remain separate and when root `node_modules` is safe to delete. The
   audit confirmed root `package.json` has no install dependencies, so the
@@ -3327,7 +3327,7 @@ Cleanup checkpoint:
   Focused receipt tests, full frontend utility tests, JSX check, frontend
   performance verifier, and production build pass.
 - Move 299 makes the Phase 29 repeat audit contention-safe:
-  `ops/scripts/architecture/phase29-audit.mjs` now runs reference-producing
+  `ops/scripts/architecture/phase29-audit.ts` now runs reference-producing
   checks one at a time, then runs the small Docker/runtime guardrails with
   bounded parallelism before the organization scan. A live three-cycle repeat
   caught the previous Windows Markdown/JSON report write race, and the updated
@@ -3781,7 +3781,7 @@ Move 338 status:
   report for `import_jobs` and `settings`. The report shape and table payloads
   matched the previous output exactly when compared against the live Postgres
   container, and the same-container timing sample improved from 832.9475 ms to
-  771.5196 ms. `ops/scripts/architecture/language-runtime-audit.mjs` now records
+  771.5196 ms. `ops/scripts/architecture/language-runtime-audit.ts` now records
   this as a completed data-path optimization and classifies
   `ops/scripts/backend/schema-primary-key-rollback.sql` as rollback DDL under
   the schema safety protocol, so the next conversion queue no longer chases
@@ -5023,3 +5023,12 @@ Move 450 status:
   session, response, cleanup, and report contracts. Full automation, Docker
   release guardrails, and the `action-history:check` package script now point
   at the TypeScript entrypoint.
+
+Move 451 status:
+- Move 451 converts the Phase 29 architecture audit entrypoints to TypeScript.
+  `generated-bulk-audit.ts`, `organization-audit.ts`,
+  `language-runtime-audit.ts`, and `phase29-audit.ts` now own the generated
+  bulk, organization, language/runtime, and repeated audit orchestration paths.
+  Package scripts, full automation, backend guardrails, and the Phase 29 child
+  process list now call the TypeScript entrypoints while retaining direct
+  Node execution and bounded audit concurrency.

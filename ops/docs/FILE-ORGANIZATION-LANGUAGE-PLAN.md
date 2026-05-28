@@ -45,11 +45,11 @@ Targets:
 - Add an audit script before moving code so reorganization is measured.
 
 Candidate files:
-- Create `ops/scripts/architecture/organization-audit.mjs`.
+- Create `ops/scripts/architecture/organization-audit.ts`.
 - Create generated report `ops/docs/reference/ORGANIZATION-AUDIT.md`.
 
 Verification:
-- `node ops/scripts/architecture/organization-audit.mjs`
+- `node ops/scripts/architecture/organization-audit.ts`
 - `npm.cmd run test:utils` in `frontend`
 - `npm.cmd run test:utils` in `backend`
 
@@ -166,7 +166,7 @@ Decision rule:
 ## First Execution Slice
 
 1. Add the organization audit script. Done:
-   `ops/scripts/architecture/organization-audit.mjs`.
+   `ops/scripts/architecture/organization-audit.ts`.
 2. Generate `ops/docs/reference/ORGANIZATION-AUDIT.md`. Done: latest scan covers
    334 files and separates `ops/scripts/runtime/live-checks`.
 3. Add roadmap references to Phase 26 and Phase 27. Done in
@@ -730,19 +730,19 @@ Decision rule:
     secret hygiene, and backend auth tests remain the verification gates for
     this deletion.
 68. Teach organization audit about compatibility wrappers. Done:
-    `ops/scripts/architecture/organization-audit.mjs` now detects thin root
+    `ops/scripts/architecture/organization-audit.ts` now detects thin root
     wrappers under `ops/scripts` and `ops/scripts/runtime`, reports their
     grouped implementation targets, and flags broken wrapper targets. This keeps
     the intentional wrapper layer visible while future cleanup continues to move
     callers onto grouped implementation paths.
 69. Promote compatibility-wrapper audit to a failing gate. Done:
-    `ops/scripts/architecture/organization-audit.mjs` now exits nonzero when an
+    `ops/scripts/architecture/organization-audit.ts` now exits nonzero when an
     intentional compatibility wrapper points at a missing grouped
     implementation. The report is still written first, then the audit prints
     every broken wrapper mapping to stderr so future folder moves cannot quietly
     strand old commands or automation entrypoints.
 70. Add wrapper reference and removal-candidate tracking. Done:
-    `ops/scripts/architecture/organization-audit.mjs` now scans `run/` plus
+    `ops/scripts/architecture/organization-audit.ts` now scans `run/` plus
     root/package configuration files, separates active wrapper references from
     generated-reference mentions, and lists wrappers that have no active
     first-party callers. The pre-deletion audit reported 22 intact wrappers and
@@ -847,7 +847,7 @@ Decision rule:
     full-system prune commands in retention cleanup so future optimization work
     cannot accidentally cross the data-loss boundary.
 85. Add repeatable generated-bulk audit. Done:
-    `ops/scripts/architecture/generated-bulk-audit.mjs` now measures generated,
+    `ops/scripts/architecture/generated-bulk-audit.ts` now measures generated,
     runtime, dependency, build, release, and protected data folders without
     parsing them as source. It writes
     `ops/docs/reference/GENERATED-BULK-AUDIT.md`, checks ignore coverage, keeps
@@ -856,12 +856,12 @@ Decision rule:
     generated-bulk-audit`.
 86. Add generated-bulk audit to full automation. Done:
     `ops/scripts/powershell/full-automation.ps1` now runs
-    `ops/scripts/architecture/generated-bulk-audit.mjs` during the test gate,
+    `ops/scripts/architecture/generated-bulk-audit.ts` during the test gate,
     after frontend build and before Docker release verification. Regular
     check/test/release automation now catches generated/runtime ignore drift and
     cleanup-boundary regressions without deleting protected business data.
 87. Add policy threshold and JSON output for generated bulk. Done:
-    `generated-bulk-audit.mjs` now accepts `--policy`, writes
+    `generated-bulk-audit.ts` now accepts `--policy`, writes
     `ops/docs/reference/GENERATED-BULK-AUDIT.json`, and fails when
     non-protected cleanup candidates exceed
     `cleanup.generatedBulkCandidateMaxBytes`. The automation policy sets that
@@ -877,33 +877,33 @@ Decision rule:
     matching `clean-generated.ps1` target, and `ops/package.json` exposes
     `clean-generated:preview` for non-mutating cleanup rehearsals.
 89. Add one-command Phase 29 audit loop. Done:
-    `ops/scripts/architecture/phase29-audit.mjs` now runs the generated-bulk
+    `ops/scripts/architecture/phase29-audit.ts` now runs the generated-bulk
     audit, organization audit, schema audit, and Docker release guardrail as one
     non-mutating sweep. It writes `ops/docs/reference/PHASE29-AUDIT.md` and is
     exposed as `npm --prefix ops run phase29:audit`, giving future sessions one
     stable command for the repeated Phase 29 check loop.
 90. Use the combined Phase 29 audit in full automation. Done:
     `ops/scripts/powershell/full-automation.ps1` now runs
-    `phase29-audit.mjs` as the test-gate cleanup/schema/organization/Docker
+    `phase29-audit.ts` as the test-gate cleanup/schema/organization/Docker
     guardrail step after the frontend production build. This replaces separate
     generated-bulk and Docker release verifier calls in the automation script,
     keeping the workflow easier to run while expanding the regular gate to
     include organization and schema audit coverage.
 91. Add machine-readable Phase 29 audit summary. Done:
-    `phase29-audit.mjs` now writes
+    `phase29-audit.ts` now writes
     `ops/docs/reference/PHASE29-AUDIT.json` alongside the Markdown report. The
     JSON summary records policy path, non-mutating mode, total checks, failures,
     per-check status, duration, command, and report outputs so future automation
     can consume the repeated sweep result without parsing Markdown.
 92. Add executable three-pass Phase 29 repeat loop. Done:
-    `phase29-audit.mjs` now accepts `--repeat`, records cycle numbers in both
+    `phase29-audit.ts` now accepts `--repeat`, records cycle numbers in both
     Markdown and JSON reports, and caps repeat count to prevent accidental
     runaway loops. `ops/package.json` exposes
     `npm --prefix ops run phase29:audit:repeat`, which runs the required
     three-pass sweep loop across generated bulk, organization, schema, and
     Docker release guardrails.
 93. Add cross-cycle drift checks to Phase 29 repeat audit. Done:
-    `phase29-audit.mjs` now parses JSON output from child audits and compares
+    `phase29-audit.ts` now parses JSON output from child audits and compares
     stable generated-bulk and organization fields across repeat cycles. The
     repeat audit fails if cleanup candidate sizes, ignore/cleanup gaps,
     protected cleanup drift, file counts, or wrapper counts change between
@@ -912,7 +912,7 @@ Decision rule:
     `ops/scripts/docs/performance-scan.js` now writes
     `ops/docs/reference/PERFORMANCE-SCAN.json` with source file counts, built
     asset counts, total source bytes/lines, largest source/chunk markers, and
-    oversized source/chunk candidate lists. `phase29-audit.mjs` now runs that
+    oversized source/chunk candidate lists. `phase29-audit.ts` now runs that
     scan as part of the non-mutating audit loop and compares its structured
     fields across repeat cycles, so loop/function and large-module work has a
     stable machine-readable gate before deeper refactors.
@@ -920,7 +920,7 @@ Decision rule:
     `ops/scripts/backend/schema-audit.js` now writes
     `ops/docs/reference/SCHEMA-AUDIT.json` with static/runtime table counts,
     Dexie store counts, backup coverage counts, relationship coverage counts,
-    and stable schema entity lists. `phase29-audit.mjs` now includes that JSON
+    and stable schema entity lists. `phase29-audit.ts` now includes that JSON
     in the report outputs and compares the schema fields across repeated
     cycles, so schema rewires and relationship documentation edits have the
     same deterministic gate as cleanup, organization, and performance work.
@@ -929,11 +929,11 @@ Decision rule:
     `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` with required release
     file counts, missing file lists, wrapper counts, retired artifact lists,
     ignore coverage, Docker-prune safety coverage, and automation policy state.
-    `phase29-audit.mjs` includes that report and compares its structured fields
+    `phase29-audit.ts` includes that report and compares its structured fields
     across repeat cycles, so release cleanup guardrails are no longer only a
     pass/fail text check.
 97. Persist organization audit JSON reference. Done:
-    `ops/scripts/architecture/organization-audit.mjs` now writes
+    `ops/scripts/architecture/organization-audit.ts` now writes
     `ops/docs/reference/ORGANIZATION-AUDIT.json` beside the Markdown report.
     The JSON baseline records scanned file counts, large-file counts,
     compatibility-wrapper counts, scan roots/files, large-file paths, largest
@@ -941,7 +941,7 @@ Decision rule:
     keeping folder/compatibility evidence durable for future folder rewires and
     cleanup decisions.
 98. Compare full organization inventory in Phase 29 repeat audit. Done:
-    `phase29-audit.mjs` now compares organization scan roots, root files,
+    `phase29-audit.ts` now compares organization scan roots, root files,
     large-file threshold, largest-area rows, large-file paths, wrapper files,
     broken wrapper files, and removable wrapper files across repeat cycles.
     This makes folder-rewire and cleanup evidence drift visible before future
@@ -949,92 +949,92 @@ Decision rule:
 99. Persist ranked performance scan rows in Phase 29 repeat audit. Done:
     `ops/scripts/docs/performance-scan.js` now writes ranked
     `topSourceBySize`, `topSourceByLines`, and `topBuiltChunks` rows into
-    `ops/docs/reference/PERFORMANCE-SCAN.json`. `phase29-audit.mjs` compares
+    `ops/docs/reference/PERFORMANCE-SCAN.json`. `phase29-audit.ts` compares
     those ranked rows across repeat cycles, so large-module and chunk
     optimization candidates cannot drift silently between sweeps.
 100. Compact Phase 29 Markdown repeat evidence. Done:
-    `phase29-audit.mjs` now keeps the complete repeat-consistency values in
+    `phase29-audit.ts` now keeps the complete repeat-consistency values in
     `ops/docs/reference/PHASE29-AUDIT.json` while rendering long Markdown
     values as item/key counts, stable SHA-256 digests, and short previews. This
     keeps the human audit report readable and smaller without losing the exact
     machine-readable schema, organization, performance, or cleanup evidence.
 101. Compact Phase 29 console output. Done:
-    `phase29-audit.mjs` now captures child-check output for JSON parsing but
+    `phase29-audit.ts` now captures child-check output for JSON parsing but
     prints only concise pass/fail, duration, and report-path lines by default.
     A `--verbose` flag restores full child stdout/stderr streaming for
     debugging. This makes repeated sweeps easier to read and cheaper to review
     without weakening the generated JSON, Markdown, or drift checks.
 102. Parallelize generated-bulk target measurement. Done:
-    `generated-bulk-audit.mjs` now measures independent generated/runtime/data
+    `generated-bulk-audit.ts` now measures independent generated/runtime/data
     targets with `Promise.all` and records `measurementMode:
     parallel-targets` plus `measuredTargetsInParallel: true` in the JSON
     summary. Phase 29 repeat compares those fields so the faster measurement
     pathway cannot silently regress to sequential target walks.
 103. Persist ranked generated-bulk target summaries. Done:
-    `generated-bulk-audit.mjs` now records `largestProtectedTargets` and
+    `generated-bulk-audit.ts` now records `largestProtectedTargets` and
     `largestCleanupTargets` in `ops/docs/reference/GENERATED-BULK-AUDIT.json`.
     Phase 29 repeat compares those ranked rows so cleanup decisions can focus
     on the largest safe candidates while protected data/runtime growth remains
     visible and stable across sweeps.
 104. Add Phase 29 duration profiling. Done:
-    `phase29-audit.mjs` now records a `durationSummary` with total child-check
+    `phase29-audit.ts` now records a `durationSummary` with total child-check
     time, per-check run totals/averages/max values, and ranked `slowestRuns`.
     The Markdown report includes Duration Summary and Slowest Runs tables so
     future workflow optimization can target the actual bottlenecks without
     treating runtime duration as a drift-stable contract.
 105. Add bounded parallel organization-audit reads. Done:
-    `organization-audit.mjs` now walks scan roots in parallel and reads source
+    `organization-audit.ts` now walks scan roots in parallel and reads source
     files with a deterministic bounded parallel queue (`fileReadMode:
     bounded-parallel`, `fileReadConcurrency: 24`). Phase 29 repeat compares
     those fields so organization sweeps keep the faster read pathway without
     making output order nondeterministic.
 106. Add generated-bulk per-target timing evidence. Done:
-    `generated-bulk-audit.mjs` now records `measureMs` for every target and a
+    `generated-bulk-audit.ts` now records `measureMs` for every target and a
     ranked `slowestTargetMeasurements` list in
     `ops/docs/reference/GENERATED-BULK-AUDIT.json`. The Markdown target table
     also shows each measurement time, giving future cleanup/resource work a
     concrete target list without making variable disk timings part of the drift
     contract.
 107. Add bounded generated-bulk file-stat parallelism. Done:
-    `generated-bulk-audit.mjs` now stats files within each measured directory
+    `generated-bulk-audit.ts` now stats files within each measured directory
     through a bounded per-directory queue (`fileStatMode:
     bounded-per-directory`, `fileStatConcurrency: 32`). This keeps exact byte
     counts while reducing avoidable sequential stat work in large dependency
     folders. Phase 29 repeat compares the stat mode and concurrency fields.
 108. Add overlap-aware generated-bulk totals. Done:
-    `generated-bulk-audit.mjs` now records `nestedTargetOverlaps`,
+    `generated-bulk-audit.ts` now records `nestedTargetOverlaps`,
     `nestedOverlapBytes`, and adjusted non-overlap estimates for total,
     protected, and cleanup-candidate bytes. Raw totals remain unchanged for
     compatibility, while cleanup planning can now see when a child target such
     as uploads or runtime secrets is also counted by a parent target.
 109. Add executable language/runtime audit gate. Done:
-    `ops/scripts/architecture/language-runtime-audit.mjs` now scans maintained
+    `ops/scripts/architecture/language-runtime-audit.ts` now scans maintained
     frontend, backend, ops, and run source roots and writes
     `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md` plus JSON. It records
     language counts, TypeScript utility candidates, Web Worker candidates,
     SQL/DuckDB data-path candidates, explicit runtime policy, and rejected
-    Rust/Go/Python/WASM families. `phase29-audit.mjs` now runs that audit and
+    Rust/Go/Python/WASM families. `phase29-audit.ts` now runs that audit and
     compares its structured fields across repeat cycles, while full automation
     labels Phase 29 as a schema, organization, cleanup, language, and Docker
     guardrail audit.
 110. Add language conversion proof matrix. Done:
-    `language-runtime-audit.mjs` now writes a stable verification matrix and
+    `language-runtime-audit.ts` now writes a stable verification matrix and
     first executable slice list for TypeScript helper conversions, Web Worker
     extraction, and SQL/DuckDB data-path optimization. Each track includes
     required proof commands, rollback expectations, and approval boundaries.
-    `phase29-audit.mjs` compares `verificationMatrix` and
+    `phase29-audit.ts` compares `verificationMatrix` and
     `firstExecutableSlices` across repeat cycles so future language conversion
     work starts from measurable, testable slices instead of broad runtime
     rewrites.
 111. Verify language proof command coverage. Done:
-    `language-runtime-audit.mjs` now resolves proof gates against package
+    `language-runtime-audit.ts` now resolves proof gates against package
     scripts and local script files, records `proofCommandCoverage`, and fails
     with `missingProofCommands` if a command-style proof target disappears.
     Manual proof items remain visible as manual evidence requirements. Phase 29
     repeat compares both fields so future conversion slices cannot keep stale
     verification commands in the plan.
 112. Verify focused test coverage for first conversion slices. Done:
-    `language-runtime-audit.mjs` now records `focusedTestCoverage` for the first
+    `language-runtime-audit.ts` now records `focusedTestCoverage` for the first
     TypeScript helper, Web Worker, and SQL/DuckDB candidates. It verifies the
     candidate file plus focused test files exist, fails with
     `focusedTestCoverageGaps` when coverage disappears, and adds both fields to
@@ -1044,7 +1044,7 @@ Decision rule:
     `frontend/src/utils/csvImport.ts`, while `frontend/src/utils/csvImport.js`
     remains as a tiny compatibility wrapper for existing runtime and Node test
     imports. `frontend/src/utils/pricing.d.ts` documents the pricing helper
-    boundary used by the converted module. `language-runtime-audit.mjs` now
+    boundary used by the converted module. `language-runtime-audit.ts` now
     records `convertedTypeScriptSlices`, ignores thin `.js` wrappers that export
     from `.ts`, and fails with `convertedTypeScriptCoverageGaps` if the
     implementation, wrapper, or declaration support disappears.
@@ -1053,7 +1053,7 @@ Decision rule:
     `frontend/src/utils/formatters.ts`, while `frontend/src/utils/formatters.js`
     remains as the compatibility wrapper for existing extensionless and legacy
     imports. Added `frontend/tests/formatters.test.ts` to the frontend utility
-    suite. `language-runtime-audit.mjs` now records the formatter conversion in
+    suite. `language-runtime-audit.ts` now records the formatter conversion in
     `convertedTypeScriptSlices`, and the next TypeScript utility candidate is
     `frontend/src/utils/groupedRecords.ts`.
 115. Convert grouped-record helper to TypeScript. Done:
@@ -1063,7 +1063,7 @@ Decision rule:
     for existing component and test imports. Removed duplicated unused Khmer
     initial ordering from the grouping helper and documented the remaining
     `initials.ts` boundary with `frontend/src/utils/initials.ts`.
-    `language-runtime-audit.mjs` now records the grouped-record conversion in
+    `language-runtime-audit.ts` now records the grouped-record conversion in
     `convertedTypeScriptSlices`.
 116. Convert initials helper to TypeScript. Done:
     The shared alphabet/Khmer initial classification implementation moved to
@@ -1439,7 +1439,7 @@ Decision rule:
     Phase 29 inspection found that
     `frontend/src/components/shared/BackgroundImportTracker.jsx` is API
     polling and bounded UI orchestration, not file parsing, media decoding, or
-    a CPU-heavy browser loop. `language-runtime-audit.mjs` now records it in
+    a CPU-heavy browser loop. `language-runtime-audit.ts` now records it in
     `rejectedWebWorkerCandidates`, removes it from future worker rankings, and
     promotes the next measurable candidates: `frontend/src/utils/csv.js` for
     browser export/ZIP work and `backend/src/services/backupPackages.js` for
@@ -1501,7 +1501,7 @@ Decision rule:
     be added without another long chain of repeated calls.
 173. Gate canonical schema rewires out of the language/runtime queue. Done:
     `backend/src/db/postgresSchema.sql` is now recorded as a rejected data-path
-    conversion candidate in `language-runtime-audit.mjs`. The file is the
+    conversion candidate in `language-runtime-audit.ts`. The file is the
     canonical schema contract, not an executable hot path, so index, primary-key,
     JSONB, and foreign-key work must continue through
     `ops/docs/SCHEMA-RELATIONSHIPS.md`, schema-audit proof, backup/restore
@@ -1514,7 +1514,7 @@ Decision rule:
     route in Node.js/SQLite because it is request orchestration with audit and
     stock recalculation side effects, but removes avoidable per-row statement
     setup. `backend/test/rfidRoutes.test.js` records the source-level guard,
-    and `language-runtime-audit.mjs` records the completed SQL/data-path slice
+    and `language-runtime-audit.ts` records the completed SQL/data-path slice
     with rollback and proof commands.
 175. Consolidate portal catalog product payload assembly. Done:
     `backend/src/routes/portal.js` now uses `getPortalProductAssets()` and
@@ -1548,7 +1548,7 @@ Decision rule:
     while preserving the existing transaction and settings behavior.
     `backend/test/routeContracts.test.js` guards the source shape.
 179. Close the self-referential language audit candidate. Done:
-    `ops/scripts/architecture/language-runtime-audit.mjs` now records itself as
+    `ops/scripts/architecture/language-runtime-audit.ts` now records itself as
     a rejected SQL/DuckDB conversion candidate. After the backend route and
     service data-path slices were handled, the remaining queue item was the
     meta-audit report generator ranking its own proof strings and completed
@@ -1559,22 +1559,22 @@ Decision rule:
     safe to clean. After exact-path reference checks showed only ignore,
     cleanup, and verification coverage references, the folder was deleted from
     `C:\Users\user\Downloads\business-os\output`, freeing 870,964 bytes.
-    `generated-bulk-audit.mjs` was rerun and now reports `output` as absent.
+    `generated-bulk-audit.ts` was rerun and now reports `output` as absent.
 181. Run local storage retention after cleanup. Done:
     `npm.cmd --prefix ops run prune-storage -- --skip-remote` pruned old local
     Phase 8.4 report folders while preserving business data, uploads, secrets,
     newest backup packages, Docker volumes, and remote R2 state. The run removed
     four old report directories and freed 817,705 bytes.
 182. Speed up generated-bulk measurement. Done:
-    `ops/scripts/architecture/generated-bulk-audit.mjs` now uses Node's
+    `ops/scripts/architecture/generated-bulk-audit.ts` now uses Node's
     recursive directory read as the fast path and falls back to the previous
     stack walker if recursive reads fail. The generated-bulk audit kept the
     same byte/file counts while reducing repeated Phase 29 measurement overhead
     for large generated folders such as `frontend/node_modules`,
     `backend/node_modules`, `frontend/dist`, and `ops/runtime`.
 183. Parallelize safe Phase 29 child checks. Done:
-    `ops/scripts/architecture/phase29-audit.mjs` now runs independent
-    reference-producing checks in parallel, then runs `organization-audit.mjs`
+    `ops/scripts/architecture/phase29-audit.ts` now runs independent
+    reference-producing checks in parallel, then runs `organization-audit.ts`
     afterward so it scans a coherent docs/reference tree. The audit summary
     records `executionMode: parallel-reference-writers-then-organization`, and
     `backend/test/fullAutomation.test.js` guards the grouped execution path.
@@ -1586,7 +1586,7 @@ Decision rule:
     records `manualNotesPreserved` and `manualNotesLines`, and
     `backend/test/fullAutomation.test.js` guards the preservation path.
 185. Compare preserved notes in Phase 29 repeat consistency. Done:
-    `ops/scripts/architecture/phase29-audit.mjs` now includes
+    `ops/scripts/architecture/phase29-audit.ts` now includes
     `manualNotesPreserved` and `manualNotesLines` in the repeated
     `Performance/code-flow scan` consistency table. If future regeneration
     drops or truncates the preserved status block, the three-pass audit reports
@@ -1597,19 +1597,19 @@ Decision rule:
     parallel worker pool and stats built chunks with a separate bounded pool
     instead of synchronously reading each file in sequence. The generated summary
     records `sourceReadMode`, `sourceReadConcurrency`, and
-    `chunkStatConcurrency`; `phase29-audit.mjs` compares those fields across
+    `chunkStatConcurrency`; `phase29-audit.ts` compares those fields across
     repeat cycles so the faster scanner path remains visible and guarded.
 187. Share bounded worker loop helper. Done:
     `ops/scripts/lib/fs-utils.js` now exports the shared `mapLimit()` worker-pool
-    helper used by `performance-scan.js`, `organization-audit.mjs`, and
-    `generated-bulk-audit.mjs`. This removes three local copies of the same
+    helper used by `performance-scan.js`, `organization-audit.ts`, and
+    `generated-bulk-audit.ts`. This removes three local copies of the same
     bounded async loop while preserving each audit's existing concurrency
     constants and generated summaries. `backend/test/fullAutomation.test.js`
     guards that the architecture audits import the shared helper instead of
     reintroducing local copies.
 188. Share architecture path normalization. Done:
-    `generated-bulk-audit.mjs`, `organization-audit.mjs`,
-    `phase29-audit.mjs`, and `language-runtime-audit.mjs` now use
+    `generated-bulk-audit.ts`, `organization-audit.ts`,
+    `phase29-audit.ts`, and `language-runtime-audit.ts` now use
     `toPosix` from `ops/scripts/lib/fs-utils.js` as their shared
     `normalizePath` implementation. This removes repeated slash-normalization
     helpers across architecture audits while keeping generated report paths and
@@ -1617,45 +1617,45 @@ Decision rule:
     guards the shared normalizer import and rejects local `normalizePath`
     redefinitions in those audit scripts.
 189. Bound language-runtime audit source reads. Done:
-    `ops/scripts/architecture/language-runtime-audit.mjs` now uses the shared
+    `ops/scripts/architecture/language-runtime-audit.ts` now uses the shared
     `mapLimit()` helper to read scanned source files with a bounded worker pool
     instead of unbounded `Promise.all(files.map(...))`. The summary records
     `fileReadMode: bounded-parallel` and `fileReadConcurrency: 24`, and
-    `phase29-audit.mjs` compares those fields across repeat cycles so the
+    `phase29-audit.ts` compares those fields across repeat cycles so the
     resource-friendly language/runtime sweep stays guarded.
 190. Share audit existence checks. Done:
     `ops/scripts/lib/fs-utils.js` now exports the shared async `pathExists()`
-    helper, and `organization-audit.mjs`, `language-runtime-audit.mjs`, and
-    `phase29-audit.mjs` reuse it for path checks instead of carrying local
+    helper, and `organization-audit.ts`, `language-runtime-audit.ts`, and
+    `phase29-audit.ts` reuse it for path checks instead of carrying local
     `fs.access()` wrappers. This is a Phase 29 cleanup/optimization move: it
     removes duplicated audit helper code without deleting source files,
     changing runtime behavior, or touching business data.
 191. Bound generated-bulk target measurement. Done:
-    `ops/scripts/architecture/generated-bulk-audit.mjs` now measures the
+    `ops/scripts/architecture/generated-bulk-audit.ts` now measures the
     configured generated/runtime cleanup targets with the shared bounded
     `mapLimit()` helper and `TARGET_MEASURE_CONCURRENCY: 4` instead of an
     unbounded `Promise.all(TARGETS.map(...))` pass. The generated summary now
-    records `targetMeasureConcurrency`, and `phase29-audit.mjs` compares it
+    records `targetMeasureConcurrency`, and `phase29-audit.ts` compares it
     across repeat cycles so cleanup inventory scans stay resource-friendly.
 192. Bound organization audit root discovery. Done:
-    `ops/scripts/architecture/organization-audit.mjs` now uses shared bounded
+    `ops/scripts/architecture/organization-audit.ts` now uses shared bounded
     `mapLimit()` workers for both `SCAN_ROOTS` directory walking and
     `SCAN_FILES` root-config existence checks. The summary records
     `rootWalkMode: bounded-parallel` and `rootWalkConcurrency: 3`, and
-    `phase29-audit.mjs` compares those fields across repeat cycles so the
+    `phase29-audit.ts` compares those fields across repeat cycles so the
     file/folder inventory sweep stays stable without launching every root scan
     at once.
 193. Bound language/runtime proof sweeps. Done:
-    `ops/scripts/architecture/language-runtime-audit.mjs` now bounds scan-root
+    `ops/scripts/architecture/language-runtime-audit.ts` now bounds scan-root
     discovery and proof-matrix existence checks with shared `mapLimit()`
     workers. The audit no longer launches unbounded `Promise.all(...map(...))`
     passes over source roots, focused test coverage, converted TypeScript
     slices, completed Worker slices, or completed data-path slices. The summary
     records `rootWalkMode`, `rootWalkConcurrency`, `matrixCheckMode`, and
-    `matrixCheckConcurrency`, and `phase29-audit.mjs` compares them across
+    `matrixCheckConcurrency`, and `phase29-audit.ts` compares them across
     repeat cycles.
 194. Bound Phase 29 child-check fan-out. Done:
-    `ops/scripts/architecture/phase29-audit.mjs` now runs independent
+    `ops/scripts/architecture/phase29-audit.ts` now runs independent
     reference-producing child checks with shared bounded `mapLimit()` workers
     and `PARALLEL_CHECK_CONCURRENCY: 3` instead of
     `Promise.all(checks.map(...))`. The organization audit still runs after the
@@ -1666,18 +1666,18 @@ Decision rule:
 195. Share report-format helpers. Done:
     `ops/scripts/lib/report-utils.js` now owns the architecture audit Markdown
     table helper plus Phase 29's long-value summary, stable digest, and output
-    tail helpers. `generated-bulk-audit.mjs`, `organization-audit.mjs`,
-    `language-runtime-audit.mjs`, and `phase29-audit.mjs` import the shared
+    tail helpers. `generated-bulk-audit.ts`, `organization-audit.ts`,
+    `language-runtime-audit.ts`, and `phase29-audit.ts` import the shared
     helper instead of carrying local `markdownTable()` implementations, reducing
     duplicate report code while keeping generated references stable.
 196. Share byte formatting. Done:
     `ops/scripts/lib/report-utils.js` now owns `formatBytes()`, and
-    `generated-bulk-audit.mjs` imports it instead of carrying a local byte-size
+    `generated-bulk-audit.ts` imports it instead of carrying a local byte-size
     formatter. This keeps generated-bulk cleanup-size reporting in the shared
     report utility layer and removes another small duplicate report helper.
 197. Share async read helpers. Done:
     `ops/scripts/lib/fs-utils.js` now exports `readUtf8Async()` and
-    `readJsonAsync()`, and `generated-bulk-audit.mjs` uses them for `.gitignore`,
+    `readJsonAsync()`, and `generated-bulk-audit.ts` uses them for `.gitignore`,
     `.dockerignore`, `clean-generated.ps1`, and policy JSON reads instead of
     local `readText()` / `readJsonFile()` wrappers. This keeps generated-bulk
     audit file reads aligned with the shared filesystem utility layer.
@@ -1705,7 +1705,7 @@ Decision rule:
     component, package, and verification-batch reads instead of local reader
     wrappers. The frontend `verify:ui` script remains unchanged.
 202. Share language audit JSON reads. Done:
-    `ops/scripts/architecture/language-runtime-audit.mjs` now reuses
+    `ops/scripts/architecture/language-runtime-audit.ts` now reuses
     `readJsonAsync()` from `ops/scripts/lib/fs-utils.js` for package manifest
     reads instead of carrying a local async JSON helper. This keeps the Phase 29
     language/runtime sweep aligned with the shared filesystem utility layer.
@@ -1752,7 +1752,7 @@ Decision rule:
     backend's Cloudflare API fallback when direct S3-compatible credentials are
     unauthorized.
 210. Reject report utility false-positive from language conversion queue. Done:
-    `ops/scripts/architecture/language-runtime-audit.mjs` now documents
+    `ops/scripts/architecture/language-runtime-audit.ts` now documents
     `ops/scripts/lib/report-utils.js` as a shared Node.js reporting helper, not
     a SQL/DuckDB data-path conversion candidate. The Phase 29 language/runtime
     report now has zero remaining conversion candidates, and the three-cycle
@@ -1818,7 +1818,7 @@ Decision rule:
     `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json`, covering script
     presence, Docker release/start-runtime/local verifier wiring,
     skip-if-unavailable support, and the required health, runtime-version,
-    build-manifest, and service-worker probes. `phase29-audit.mjs` now compares
+    build-manifest, and service-worker probes. `phase29-audit.ts` now compares
     that coverage object across repeat cycles so diagnostics drift fails the
     whole-codebase guardrail.
 219. Add machine-readable runtime dependency guardrail. Done:
@@ -1826,7 +1826,7 @@ Decision rule:
     `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` with package version
     parity, required scanner dependency coverage, forbidden legacy config
     coverage, and `runtimeVersionGuardCoverage` for stale-bundle protection.
-    `phase29-audit.mjs` now runs that verifier as the seventh Phase 29 check
+    `phase29-audit.ts` now runs that verifier as the seventh Phase 29 check
     and compares package, dependency, config, and runtime-version guard fields
     across repeat cycles.
 220. Add machine-readable local verification coverage. Done:
@@ -1859,7 +1859,7 @@ Decision rule:
     flag remains informational because clean workspaces run this verifier before
     the frontend build creates `frontend/dist/business-os-build.json`.
 224. Audit dependency topology and delete orphan root dependencies. Done:
-    `ops/scripts/architecture/generated-bulk-audit.mjs` now records
+    `ops/scripts/architecture/generated-bulk-audit.ts` now records
     `dependencyTopology`, separating active frontend/backend/ops install roots
     from orphan root dependencies. The audit confirmed the root package has no
     install dependencies and root `node_modules` was safe to remove, so the
@@ -2271,7 +2271,7 @@ Decision rule:
     generated-integrity match count. Failure output tails remain available only
     when a child step fails.
 268. Add generated-bulk disposition totals. Done:
-    `generated-bulk-audit.mjs` now records `dispositionTotals` in the JSON
+    `generated-bulk-audit.ts` now records `dispositionTotals` in the JSON
     summary and renders a Markdown "Disposition Totals" table. Phase 29 repeat
     compares this field across cycles, so cleanup planning can distinguish
     preserved data, retention-managed runtime files, reinstallable
@@ -2542,7 +2542,7 @@ Decision rule:
     Focused receipt tests, full frontend utility tests, JSX check, performance
     verifier, and production build pass.
 299. Make Phase 29 repeat audits contention-safe. Done:
-    `ops/scripts/architecture/phase29-audit.mjs` now separates report-writing
+    `ops/scripts/architecture/phase29-audit.ts` now separates report-writing
     checks from small guardrails: generated bulk, schema, performance, and
     language audits run with `REFERENCE_WRITER_CONCURRENCY = 1`; Docker and
     runtime guardrails still run with bounded parallelism; organization audit
@@ -3533,12 +3533,19 @@ Decision rule:
     command and full-automation launcher behavior. The script now has typed
     session, API response, cleanup command, and report shapes while keeping
     its reversible action check and prefix-scoped cleanup/postcheck flow.
+441. Convert the Phase 29 architecture audit entrypoints to TypeScript. Done:
+    `generated-bulk-audit.ts`, `organization-audit.ts`,
+    `language-runtime-audit.ts`, and `phase29-audit.ts` replace their `.mjs`
+    entrypoints while keeping npm command names stable. The Phase 29
+    orchestrator now calls the TypeScript audit paths, and the conversion keeps
+    CommonJS-style loading so direct Node execution avoids typeless ESM
+    reparsing overhead during repeated audit loops.
 
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.
 - No compatibility wrapper move is accepted unless
-  `node ops/scripts/architecture/organization-audit.mjs` reports zero broken
+  `node ops/scripts/architecture/organization-audit.ts` reports zero broken
   wrapper targets.
 - No compatibility wrapper deletion is accepted unless the organization audit
   shows zero active references and the generated references are refreshed after

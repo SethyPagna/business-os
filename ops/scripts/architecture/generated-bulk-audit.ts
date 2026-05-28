@@ -1,13 +1,9 @@
 /* eslint-disable no-console */
-import fs from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const require = createRequire(import.meta.url)
+const fs = require('node:fs/promises')
+const path = require('node:path')
 const { mapLimit, readJsonAsync, readUtf8Async, toPosix: normalizePath } = require('../lib/fs-utils.js')
 const { formatBytes, markdownTable } = require('../lib/report-utils.js')
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../..')
 const REPORT_PATH = path.join(ROOT_DIR, 'ops/docs/reference/GENERATED-BULK-AUDIT.md')
 const SUMMARY_PATH = path.join(ROOT_DIR, 'ops/docs/reference/GENERATED-BULK-AUDIT.json')
 const CLEAN_GENERATED_PATH = 'ops/scripts/powershell/clean-generated.ps1'

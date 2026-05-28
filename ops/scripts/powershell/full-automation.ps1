@@ -24,7 +24,7 @@ $ActionHistoryCheck = Join-Path $Root 'ops\scripts\runtime\audits\action-history
 $QaCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\test-data-cleanup-postcheck-latest.json'
 $SmokeCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\live-smoke-cleanup-postcheck-latest.json'
 $ActionHistoryCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\action-history-cleanup-postcheck-latest.json'
-$Phase29Audit = Join-Path $Root 'ops\scripts\architecture\phase29-audit.mjs'
+$Phase29Audit = Join-Path $Root 'ops\scripts\architecture\phase29-audit.ts'
 $HardeningVerify = Join-Path $Root 'ops\scripts\verification\verify-hardening-policy.js'
 $BackupReliabilityVerify = Join-Path $Root 'ops\scripts\verification\verify-backup-reliability.js'
 

@@ -58,7 +58,7 @@ runTest('full automation launcher and policy are present', () => {
     'npm.cmd --prefix frontend run verify:ui',
     'npm.cmd --prefix frontend run verify:performance',
     'npm.cmd --prefix frontend run build',
-    'phase29-audit.mjs',
+    'phase29-audit.ts',
     'Phase 29 schema, organization, cleanup, language, and Docker guardrail audit',
     'verify-hardening-policy.js',
     'verify-backup-reliability.js',
@@ -339,10 +339,10 @@ runTest('docker release verification protects generated cleanup boundaries', () 
 
 runTest('generated bulk audit measures cleanup candidates without parsing them as source', () => {
   const opsPackage = JSON.parse(read('ops/package.json'))
-  const audit = read('ops/scripts/architecture/generated-bulk-audit.mjs')
+  const audit = read('ops/scripts/architecture/generated-bulk-audit.ts')
   const cleanGenerated = read('ops/scripts/powershell/clean-generated.ps1')
   assert.equal(opsPackage.scripts['clean-generated:preview'], 'powershell -ExecutionPolicy Bypass -File scripts/powershell/clean-generated.ps1 -Preview')
-  assert.equal(opsPackage.scripts['generated-bulk-audit'], 'node scripts/architecture/generated-bulk-audit.mjs')
+  assert.equal(opsPackage.scripts['generated-bulk-audit'], 'node scripts/architecture/generated-bulk-audit.ts')
   ;[
     'business-os-data',
     'ops/runtime/secrets',
@@ -427,10 +427,10 @@ runTest('run files share npm install freshness helper', () => {
 
 runTest('phase 29 audit orchestrates non-mutating sweep gates', () => {
   const opsPackage = JSON.parse(read('ops/package.json'))
-  const audit = read('ops/scripts/architecture/phase29-audit.mjs')
-  assert.equal(opsPackage.scripts['phase29:audit'], 'node scripts/architecture/phase29-audit.mjs')
-  assert.equal(opsPackage.scripts['phase29:audit:repeat'], 'node scripts/architecture/phase29-audit.mjs --repeat 3')
-  assert.equal(opsPackage.scripts['language-runtime-audit'], 'node scripts/architecture/language-runtime-audit.mjs')
+  const audit = read('ops/scripts/architecture/phase29-audit.ts')
+  assert.equal(opsPackage.scripts['phase29:audit'], 'node scripts/architecture/phase29-audit.ts')
+  assert.equal(opsPackage.scripts['phase29:audit:repeat'], 'node scripts/architecture/phase29-audit.ts --repeat 3')
+  assert.equal(opsPackage.scripts['language-runtime-audit'], 'node scripts/architecture/language-runtime-audit.ts')
   ;[
     '--repeat',
     '--verbose',
@@ -443,8 +443,8 @@ runTest('phase 29 audit orchestrates non-mutating sweep gates', () => {
     'verboseChildOutput',
     'Full repeat values are retained',
     'Console output is concise by default',
-    'generated-bulk-audit.mjs',
-    'organization-audit.mjs',
+    'generated-bulk-audit.ts',
+    'organization-audit.ts',
     'ORGANIZATION-AUDIT.json',
     'fileReadMode',
     'rootWalkMode',
@@ -452,7 +452,7 @@ runTest('phase 29 audit orchestrates non-mutating sweep gates', () => {
     'fileReadConcurrency',
     'schema-audit.js',
     'performance-scan.js',
-    'language-runtime-audit.mjs',
+    'language-runtime-audit.ts',
     'verify-docker-release.js',
     'PHASE29-AUDIT.md',
     'PHASE29-AUDIT.json',
@@ -569,10 +569,10 @@ runTest('performance scan preserves phase 29 manual notes', () => {
 })
 
 runTest('architecture audits share bounded worker helper', () => {
-  const generatedBulkAudit = read('ops/scripts/architecture/generated-bulk-audit.mjs')
-  const organizationAudit = read('ops/scripts/architecture/organization-audit.mjs')
-  const phase29Audit = read('ops/scripts/architecture/phase29-audit.mjs')
-  const languageRuntimeAudit = read('ops/scripts/architecture/language-runtime-audit.mjs')
+  const generatedBulkAudit = read('ops/scripts/architecture/generated-bulk-audit.ts')
+  const organizationAudit = read('ops/scripts/architecture/organization-audit.ts')
+  const phase29Audit = read('ops/scripts/architecture/phase29-audit.ts')
+  const languageRuntimeAudit = read('ops/scripts/architecture/language-runtime-audit.ts')
   const hardeningPolicyVerify = read('ops/scripts/verification/verify-hardening-policy.js')
   const runtimeDepsVerify = read('ops/scripts/verification/verify-runtime-deps.js')
   const backupReliabilityVerify = read('ops/scripts/verification/verify-backup-reliability.js')
@@ -586,7 +586,7 @@ runTest('architecture audits share bounded worker helper', () => {
     phase29Audit,
     languageRuntimeAudit,
   ].forEach((source) => {
-    assert.match(source, /createRequire/)
+    assert.match(source, /require\('node:/)
     assert.match(source, /require\('\.\.\/lib\/fs-utils\.js'\)/)
     assert.match(source, /require\('\.\.\/lib\/report-utils\.js'\)/)
     assert.match(source, /toPosix: normalizePath/)

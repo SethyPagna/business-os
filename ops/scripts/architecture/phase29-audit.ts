@@ -1,14 +1,10 @@
 /* eslint-disable no-console */
-import { spawn } from 'node:child_process'
-import fs from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const require = createRequire(import.meta.url)
+const { spawn } = require('node:child_process')
+const fs = require('node:fs/promises')
+const path = require('node:path')
 const { mapLimit, pathExists: filePathExists, toPosix: normalizePath } = require('../lib/fs-utils.js')
 const { markdownTable, outputTail, summarizeReportValue } = require('../lib/report-utils.js')
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../..')
 const REPORT_PATH = path.join(ROOT_DIR, 'ops/docs/reference/PHASE29-AUDIT.md')
 const SUMMARY_PATH = path.join(ROOT_DIR, 'ops/docs/reference/PHASE29-AUDIT.json')
 const POLICY_PATH = path.join(ROOT_DIR, 'ops/automation/business-os-automation.json')
@@ -17,13 +13,13 @@ const CHECKS = [
   {
     label: 'Generated bulk audit',
     command: process.execPath,
-    args: ['ops/scripts/architecture/generated-bulk-audit.mjs', '--policy', 'ops/automation/business-os-automation.json'],
+    args: ['ops/scripts/architecture/generated-bulk-audit.ts', '--policy', 'ops/automation/business-os-automation.json'],
     reports: ['ops/docs/reference/GENERATED-BULK-AUDIT.md', 'ops/docs/reference/GENERATED-BULK-AUDIT.json'],
   },
   {
     label: 'Organization audit',
     command: process.execPath,
-    args: ['ops/scripts/architecture/organization-audit.mjs'],
+    args: ['ops/scripts/architecture/organization-audit.ts'],
     reports: ['ops/docs/reference/ORGANIZATION-AUDIT.md', 'ops/docs/reference/ORGANIZATION-AUDIT.json'],
   },
   {
@@ -41,7 +37,7 @@ const CHECKS = [
   {
     label: 'Language/runtime audit',
     command: process.execPath,
-    args: ['ops/scripts/architecture/language-runtime-audit.mjs'],
+    args: ['ops/scripts/architecture/language-runtime-audit.ts'],
     reports: ['ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md', 'ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json'],
   },
   {

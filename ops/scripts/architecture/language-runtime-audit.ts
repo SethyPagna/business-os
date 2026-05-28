@@ -1,13 +1,9 @@
 /* eslint-disable no-console */
-import fs from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const require = createRequire(import.meta.url)
+const fs = require('node:fs/promises')
+const path = require('node:path')
 const { mapLimit, pathExists, readJsonAsync, toPosix: normalizePath } = require('../lib/fs-utils.js')
 const { markdownTable } = require('../lib/report-utils.js')
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../..')
 const REPORT_PATH = path.join(ROOT_DIR, 'ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md')
 const SUMMARY_PATH = path.join(ROOT_DIR, 'ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json')
 
@@ -1042,7 +1038,7 @@ const REJECTED_DATA_PATH_CANDIDATES = [
     evidence: 'Move 173 inspection found the file ranked because it contains DDL and indexes; ops/docs/SCHEMA-RELATIONSHIPS.md already tracks the safe DDL backlog and migration gates.',
   },
   {
-    file: 'ops/scripts/architecture/language-runtime-audit.mjs',
+    file: 'ops/scripts/architecture/language-runtime-audit.ts',
     decision: 'keep as Node.js meta-audit and exclude from SQL/DuckDB conversion queue',
     reason: 'The script ranks itself because it contains report strings, SQL/data-path proof labels, and completed-slice metadata. It is a small deterministic report generator, not a runtime query or import hot path.',
     evidence: 'Move 179 inspection found the remaining SQL/DuckDB candidate was the audit script itself after backend routes and service data paths were optimized or governed by schema protocol.',
