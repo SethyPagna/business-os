@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 471.
+- Latest completed implementation move in this roadmap: Move 472.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2448,7 +2448,7 @@ Cleanup checkpoint:
   across confirmed product rows in one apply request. The slice avoids a
   language/runtime conversion because the route is still request orchestration
   with audit and stock-recalculation side effects, but it removes repeated
-  statement setup from the loop. `backend/test/rfidRoutes.test.js` guards the
+  statement setup from the loop. `backend/test/rfidRoutes.test.ts` guards the
   structure, and the language/runtime audit records the completed data-path
   optimization plus rollback path.
 - Move 175 consolidates the portal catalog product data flow:
@@ -5210,3 +5210,16 @@ Move 471 status:
   backend `test:utils` command and language/runtime proof references now call
   the TypeScript paths, keeping production backend runtime files stable while
   reducing the remaining JavaScript test surface.
+
+Move 472 status:
+- Move 472 converts the second backend utility test tranche to TypeScript.
+  `runtimeVersion.test.ts`, `postgresCutoverReadiness.test.ts`,
+  `fileAssetStorageReconcile.test.ts`, `uploadSecurity.test.ts`,
+  `rfidRoutes.test.ts`, `inventorySettingsMediaContracts.test.ts`,
+  `runtimeCache.test.ts`, `authOtpGuards.test.ts`, `productExpiry.test.ts`,
+  `productImportPolicies.test.ts`, `importScaleSmoke.test.ts`,
+  `contactOptions.test.ts`, `dataPath.test.ts`, `importCsv.test.ts`, and
+  `offlineSecurity.test.ts` replace their `.js` test entrypoints. Backend
+  `test:utils` and the language/runtime proof matrix now reference the
+  TypeScript paths; production backend runtime files and release packaging are
+  intentionally unchanged in this test-only conversion batch.

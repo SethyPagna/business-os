@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 461 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 462 in this file.
 
 ## Goal
 
@@ -1513,7 +1513,7 @@ Decision rule:
     of preparing statements inside each confirmed product row. This keeps the
     route in Node.js/SQLite because it is request orchestration with audit and
     stock recalculation side effects, but removes avoidable per-row statement
-    setup. `backend/test/rfidRoutes.test.js` records the source-level guard,
+    setup. `backend/test/rfidRoutes.test.ts` records the source-level guard,
     and `language-runtime-audit.ts` records the completed SQL/data-path slice
     with rollback and proof commands.
 175. Consolidate portal catalog product payload assembly. Done:
@@ -3692,6 +3692,16 @@ Decision rule:
     proof references, and related plan notes now point at the TypeScript test
     paths. This keeps production backend source untouched while shrinking the
     remaining `.js` test surface in a verified slice.
+462. Convert the second backend utility test tranche to TypeScript. Done:
+    Fifteen more backend tests now run as `.ts` entrypoints:
+    `runtimeVersion`, `postgresCutoverReadiness`, `fileAssetStorageReconcile`,
+    `uploadSecurity`, `rfidRoutes`, `inventorySettingsMediaContracts`,
+    `runtimeCache`, `authOtpGuards`, `productExpiry`,
+    `productImportPolicies`, `importScaleSmoke`, `contactOptions`,
+    `dataPath`, `importCsv`, and `offlineSecurity`. The backend `test:utils`
+    command and language/runtime proof strings now reference the TypeScript
+    paths, keeping this conversion on the test surface while backend runtime
+    packaging remains unchanged.
 
 ## Safety Gates
 

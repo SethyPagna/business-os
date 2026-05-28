@@ -891,9 +891,9 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
     tests: [
       'backend/test/importDecisionIntegrity.test.js',
-      'backend/test/importScaleSmoke.test.js',
-      'backend/test/importCsv.test.js',
-      'backend/test/productImportPolicies.test.js',
+      'backend/test/importScaleSmoke.test.ts',
+      'backend/test/importCsv.test.ts',
+      'backend/test/productImportPolicies.test.ts',
     ],
   },
   {
@@ -933,7 +933,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     tests: [
       'backend/test/importDecisionIntegrity.test.js',
       'backend/test/routeContracts.test.js',
-      'backend/test/importScaleSmoke.test.js',
+      'backend/test/importScaleSmoke.test.ts',
     ],
   },
   {
@@ -957,11 +957,11 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Inline the RFID apply db.prepare calls inside the product loop again; RFID confirmed quantity, movement, audit, and session status behavior remain unchanged.',
     proof: [
       'npm.cmd --prefix backend run test:utils',
-      'node backend\\test\\rfidRoutes.test.js',
+      'node backend\\test\\rfidRoutes.test.ts',
       'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
-      'backend/test/rfidRoutes.test.js',
+      'backend/test/rfidRoutes.test.ts',
       'backend/test/routeContracts.test.js',
       'backend/test/productBatchHierarchy.test.js',
     ],
