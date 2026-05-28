@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-28T04:03:26.706Z
+Generated: 2026-05-28T05:50:50.193Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 550
+- Files scanned: 546
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -16,7 +16,7 @@ Generated: 2026-05-28T04:03:26.706Z
 | --- | --- |
 | .ts | 267 |
 | .jsx | 107 |
-| .js | 88 |
+| .js | 84 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -42,7 +42,6 @@ Generated: 2026-05-28T04:03:26.706Z
 | frontend/components/inventory | 9 |
 | run | 9 |
 | run/docker | 9 |
-| frontend/api | 8 |
 | frontend/components/receipt-settings | 8 |
 | frontend/components/utils-settings | 8 |
 | ops/scripts/powershell | 8 |
@@ -53,6 +52,7 @@ Generated: 2026-05-28T04:03:26.706Z
 | frontend/components/returns | 6 |
 | ops/scripts/runtime/audits | 6 |
 | ops/scripts/verification | 6 |
+| frontend/api | 5 |
 | frontend/components/files | 4 |
 | frontend/components/users | 4 |
 | frontend/src/types | 4 |
@@ -64,17 +64,17 @@ Generated: 2026-05-28T04:03:26.706Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 12097 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7943 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6887 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5311 | ops/docs |
+| ops/docs/reference/PHASE29-AUDIT.json | 12076 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7899 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6867 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5318 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3799 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3805 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2648 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2628 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
@@ -87,7 +87,7 @@ Generated: 2026-05-28T04:03:26.706Z
 | frontend/src/components/products/import/BulkImportModal.jsx | 1907 | frontend/components/products |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1753 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1749 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1610 | frontend/src/AppContext.jsx |

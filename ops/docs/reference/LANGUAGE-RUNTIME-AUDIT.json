@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T04:03:26.305Z",
+  "generatedAt": "2026-05-28T05:50:49.824Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 453,
+  "sourceFiles": 449,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -29,7 +29,7 @@
     ],
     [
       "JavaScript",
-      88
+      84
     ],
     [
       "Windows batch",
@@ -67,7 +67,7 @@
     ],
     [
       ".js",
-      88
+      84
     ],
     [
       ".bat",

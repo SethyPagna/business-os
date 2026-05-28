@@ -107,7 +107,7 @@ Frontend:
   - `beginSingleAction` / `finishSingleAction`
   - `beginNamedAction` / `finishNamedAction`
   - `beginKeyedAction` / `finishKeyedAction`
-- `frontend/src/api/http.js` dedupes identical in-flight JSON writes while
+- `frontend/src/api/http.ts` dedupes identical in-flight JSON writes while
   ignoring generated request/idempotency keys in the comparison.
 - `frontend/src/utils/loaders.mjs` provides tracked request ids and loader
   timeouts for reads and long-running UI loads.
