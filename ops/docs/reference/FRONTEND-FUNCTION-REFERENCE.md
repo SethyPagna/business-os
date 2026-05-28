@@ -4,7 +4,7 @@ Auto-generated symbol inventory for frontend files. Regenerate with `node ops/sc
 
 ## 1. Coverage Summary
 
-Total files documented: **234**
+Total files documented: **233**
 
 ## 2. Symbol Count by File
 
@@ -241,9 +241,8 @@ Total files documented: **234**
 | 229 | `ops/scripts/frontend/verify-i18n.js` | 6 |
 | 230 | `ops/scripts/frontend/verify-performance.js` | 4 |
 | 231 | `ops/scripts/frontend/verify-ui.js` | 11 |
-| 232 | `frontend/vite.config.mjs` | 5 |
-| 233 | `frontend/postcss.config.mjs` | 0 |
-| 234 | `frontend/tailwind.config.mjs` | 0 |
+| 232 | `frontend/vite.config.ts` | 5 |
+| 233 | `frontend/tailwind.config.ts` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -2807,21 +2806,17 @@ Total files documented: **234**
 | 10 | `printAuditSummary` | function | 202 |
 | 11 | `main` | function | 220 |
 
-### 3.232 `frontend/vite.config.mjs`
+### 3.232 `frontend/vite.config.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `readGitRevision` | function | 8 |
-| 2 | `fixCrossorigin` | function | 46 |
-| 3 | `emitBuildManifest` | function | 71 |
-| 4 | `shouldDeferModulePreload` | function | 112 |
-| 5 | `manualChunks` | function | 116 |
+| 1 | `readGitRevision` | function | 11 |
+| 2 | `fixCrossorigin` | function | 49 |
+| 3 | `emitBuildManifest` | function | 74 |
+| 4 | `shouldDeferModulePreload` | function | 115 |
+| 5 | `manualChunks` | function | 119 |
 
-### 3.233 `frontend/postcss.config.mjs`
-
-- No top-level named function/class symbols detected.
-
-### 3.234 `frontend/tailwind.config.mjs`
+### 3.233 `frontend/tailwind.config.ts`
 
 - No top-level named function/class symbols detected.
 

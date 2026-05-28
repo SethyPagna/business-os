@@ -26,7 +26,7 @@ Total folders documented: **81**
 | 14 | `backend/src/storage` | Backend runtime core | 1 | 0 |
 | 15 | `backend/src/workers` | Backend runtime core | 2 | 0 |
 | 16 | `backend/test` | Project folder | 50 | 0 |
-| 17 | `frontend` | Frontend project root | 9 | 3 |
+| 17 | `frontend` | Frontend project root | 8 | 3 |
 | 18 | `frontend/public` | Project folder | 6 | 1 |
 | 19 | `frontend/public/scanbot-web-sdk` | Project folder | 0 | 1 |
 | 20 | `frontend/public/scanbot-web-sdk/bundle` | Project folder | 2 | 1 |
@@ -479,7 +479,7 @@ Total folders documented: **81**
 ### 3.17 Folder: `frontend`
 
 - Purpose: Frontend project root
-- Direct files: **9**
+- Direct files: **8**
 - Direct subfolders: **3**
 
 #### 3.17.1 Subfolders
@@ -498,11 +498,10 @@ Total folders documented: **81**
 | 2 | `index.html` | Project source/support file |
 | 3 | `package-lock.json` | Configuration/data manifest |
 | 4 | `package.json` | Configuration/data manifest |
-| 5 | `postcss.config.mjs` | Project source/support file |
-| 6 | `README.md` | Documentation |
-| 7 | `tailwind.config.mjs` | Project source/support file |
-| 8 | `tsconfig.json` | Configuration/data manifest |
-| 9 | `vite.config.mjs` | Project source/support file |
+| 5 | `README.md` | Documentation |
+| 6 | `tailwind.config.ts` | Project source/support file |
+| 7 | `tsconfig.json` | Configuration/data manifest |
+| 8 | `vite.config.ts` | Project source/support file |
 
 
 ### 3.18 Folder: `frontend/public`

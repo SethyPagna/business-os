@@ -112,12 +112,12 @@ Total files documented: **24**
 | 7 | `markdownSection` | function | 107 |
 | 8 | `writeBackendReference` | function | 111 |
 | 9 | `writeFrontendReference` | function | 166 |
-| 10 | `groupByPrefix` | function | 209 |
-| 11 | `writeTranslationReference` | function | 218 |
-| 12 | `writeRunReleaseReference` | function | 274 |
-| 13 | `writeModuleNamingGuide` | function | 348 |
-| 14 | `writeProjectCodeReference` | function | 396 |
-| 15 | `main` | function | 437 |
+| 10 | `groupByPrefix` | function | 208 |
+| 11 | `writeTranslationReference` | function | 217 |
+| 12 | `writeRunReleaseReference` | function | 273 |
+| 13 | `writeModuleNamingGuide` | function | 347 |
+| 14 | `writeProjectCodeReference` | function | 395 |
+| 15 | `main` | function | 436 |
 
 ### 3.4 `ops/scripts/docs/generate-full-project-docs.js`
 
@@ -308,19 +308,19 @@ Total files documented: **24**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `assertTrackedFile` | function | 39 |
-| 2 | `rel` | function | 45 |
-| 3 | `requireToken` | function | 49 |
-| 4 | `hasLockDependency` | function | 55 |
-| 5 | `readIncludes` | function | 61 |
-| 6 | `packageLockVersion` | function | 65 |
-| 7 | `buildVersionConsistency` | function | 69 |
-| 8 | `assertVersionConsistency` | function | 95 |
-| 9 | `assertRuntimeVersionGuardWiring` | function | 101 |
-| 10 | `assertBuildManifestShapeWhenPresent` | function | 170 |
-| 11 | `buildLocalVerificationCoverage` | function | 187 |
-| 12 | `assertCoverageComplete` | function | 235 |
-| 13 | `main` | function | 248 |
+| 1 | `assertTrackedFile` | function | 38 |
+| 2 | `rel` | function | 44 |
+| 3 | `requireToken` | function | 48 |
+| 4 | `hasLockDependency` | function | 54 |
+| 5 | `readIncludes` | function | 60 |
+| 6 | `packageLockVersion` | function | 64 |
+| 7 | `buildVersionConsistency` | function | 68 |
+| 8 | `assertVersionConsistency` | function | 94 |
+| 9 | `assertRuntimeVersionGuardWiring` | function | 100 |
+| 10 | `assertBuildManifestShapeWhenPresent` | function | 169 |
+| 11 | `buildLocalVerificationCoverage` | function | 186 |
+| 12 | `assertCoverageComplete` | function | 234 |
+| 13 | `main` | function | 247 |
 
 ### 3.23 `ops/scripts/verification/verify-scale-services.js`
 

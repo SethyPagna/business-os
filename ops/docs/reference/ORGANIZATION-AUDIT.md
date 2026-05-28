@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-28T00:31:51.429Z
+Generated: 2026-05-28T00:46:13.759Z
 
 ## Summary
 
@@ -65,15 +65,15 @@ Generated: 2026-05-28T00:31:51.429Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 11956 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8341 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7089 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 4984 | ops/docs |
+| ops/docs/reference/PHASE29-AUDIT.json | 12115 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8332 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7084 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 4994 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3514 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3524 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2828 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2823 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/lang/km.json | 2715 | frontend/src/lang |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2365 | ops/docs/reference |
@@ -88,7 +88,7 @@ Generated: 2026-05-28T00:31:51.429Z
 | frontend/src/components/products/import/BulkImportModal.jsx | 1907 | frontend/components/products |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1822 | ops/docs/reference |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1789 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1788 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1603 | frontend/src/AppContext.jsx |

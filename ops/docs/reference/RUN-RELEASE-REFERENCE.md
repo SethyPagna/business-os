@@ -161,7 +161,7 @@ Total scripts documented: **23**
 ## ops/scripts/docs/generate-doc-reference.js
 
 - File type: `.js`
-- Total lines: **449**
+- Total lines: **448**
 
 ## ops/scripts/docs/generate-full-project-docs.js
 

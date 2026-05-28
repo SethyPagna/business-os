@@ -31,6 +31,7 @@
   "runtimeVersionGuardCoverage": {
     "viteBuildManifest": true,
     "viteDefinesFrontendBuild": true,
+    "viteOwnsPostcssPipeline": true,
     "serviceWorkerBuildHash": true,
     "frontendMismatchDispatch": true,
     "appContextMismatchListener": true,
