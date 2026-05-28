@@ -5,4 +5,5 @@ declare module '*.jsx' {
   export const ProductImagePlaceholder: unknown
   export const PERMISSION_DEFS: unknown
   export const useApp: unknown
+  export const useSync: unknown
 }

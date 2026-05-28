@@ -40,7 +40,7 @@ const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventor
 const productForm = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.jsx', import.meta.url), 'utf8')
 const bulkImportModal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
 const manageCategoriesModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageCategoriesModal.jsx', import.meta.url), 'utf8')
-const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageUnitsModal.jsx', import.meta.url), 'utf8')
+const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageUnitsModal.tsx', import.meta.url), 'utf8')
 const manageBrandsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageBrandsModal.jsx', import.meta.url), 'utf8')
 const productLookupSnapshots = fs.readFileSync(new URL('../src/components/products/lookups/productLookupSnapshots.ts', import.meta.url), 'utf8')
 const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.jsx', import.meta.url), 'utf8')
@@ -1941,7 +1941,7 @@ assert.match(
 )
 assert.match(
   manageUnitsModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getUnits\(\),\s*'Unit lookup options',\s*PRODUCT_UNIT_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getUnitApi\(\)\.getUnits\(\),\s*'Unit lookup options',\s*PRODUCT_UNIT_LOOKUP_TIMEOUT_MS,\s*\)/,
   'unit lookup manager undo lookups should timeout slow unit reads',
 )
 assert.match(
@@ -1961,7 +1961,7 @@ assert.doesNotMatch(
 )
 assert.match(
   manageUnitsModal,
-  /withLoaderTimeout\(\(\) => Promise\.all\(\[[\s\S]{0,140}window\.api\.getUnits\(\),[\s\S]{0,140}window\.api\.getProductLookupUsage\(\),[\s\S]{0,80}\]\), 'Units', PRODUCT_UNIT_LOOKUP_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => Promise\.all\(\[[\s\S]{0,140}getUnitApi\(\)\.getUnits\(\),[\s\S]{0,140}getUnitApi\(\)\.getProductLookupUsage\(\),[\s\S]{0,80}\]\), 'Units', PRODUCT_UNIT_LOOKUP_TIMEOUT_MS\)/,
   'unit lookup manager should timeout unit and usage reads',
 )
 assert.doesNotMatch(

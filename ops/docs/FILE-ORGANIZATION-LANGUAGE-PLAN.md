@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 494 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 495 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 66 `.jsx`
+  - 65 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 41 `.tsx`
+  - 42 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -2603,7 +2603,7 @@ Decision rule:
     runtime-cache tests guard the pathway.
 305. Index lookup-manager bulk delete snapshots. Done:
     `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` and
-    `ManageUnitsModal.jsx` now build stable id maps for category/unit rows and
+    `ManageUnitsModal.tsx` now build stable id maps for category/unit rows and
     reuse them for single and bulk delete snapshots. This removes repeated
     `find()` scans from bulk lookup cleanup while preserving undo/redo
     behavior and expected-updated-at guards.
@@ -3890,6 +3890,13 @@ Decision rule:
     call through a typed `getProductVariantApi` boundary, preserves the shared
     single-action guard and loader timeout, and keeps numeric form fields
     sanitized before mutation.
+495. Convert product unit lookup manager to TSX. Done:
+    `ManageUnitsModal.tsx` now types unit rows, usage rows, virtual cleanup
+    rows, selected ids, app sync context, lookup snapshot APIs, and unit
+    create/update/delete mutation responses. The conversion keeps the direct
+    loops for bulk delete and undo/redo paths, routes unit API calls through a
+    typed `getUnitApi` boundary, and keeps the action-stability tests pointed
+    at the TSX source.
 
 ## Safety Gates
 

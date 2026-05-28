@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
-import { useApp, useSync } from '../../../AppContext'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../../AppContext.jsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import {
@@ -21,9 +22,113 @@ const PRODUCT_UNIT_LOOKUP_TIMEOUT_MS = 10000
 const PRODUCT_UNIT_PRODUCTS_TIMEOUT_MS = 12000
 const PRODUCT_UNIT_MUTATION_TIMEOUT_MS = 12000
 
-function mergeUnitUsage(units = [], usageEntries = []) {
+type EntityId = string | number
+
+interface UnitRow {
+  id: EntityId
+  name: string
+  color?: string | null
+  usage_count?: number
+  unresolved_count?: number
+  sample_products?: ProductSample[]
+  updated_at?: unknown
+  virtual?: boolean
+}
+
+interface UnitUsageEntry {
+  name?: string
+  usage_count?: unknown
+  unresolved_count?: unknown
+  sample_products?: ProductSample[]
+}
+
+type ProductRow = Record<string, unknown> & {
+  id?: unknown
+  name?: unknown
+}
+
+type ProductPayload = ProductRow[] | {
+  items?: ProductRow[]
+  total?: unknown
+  pageSize?: unknown
+  totalPages?: unknown
+}
+
+interface ProductSample {
+  name?: string
+}
+
+interface UnitMutationResult {
+  success?: boolean
+  error?: string
+  merged?: boolean
+}
+
+interface UnitApi {
+  getUnits: () => Promise<UnitRow[] | unknown>
+  getProductLookupUsage: () => Promise<{ units?: UnitUsageEntry[] } | unknown>
+  createUnit: (payload: UnitPayload) => Promise<UnitMutationResult | undefined>
+  updateUnit: (id: EntityId, payload: UnitPayload) => Promise<UnitMutationResult | undefined>
+  deleteUnit: (id: EntityId, payload?: { expectedUpdatedAt?: unknown }) => Promise<UnitMutationResult | undefined>
+  searchProducts?: (params: Record<string, unknown>) => Promise<ProductPayload> | ProductPayload
+  getProductsByIds?: (ids: number[], options: { include: string }) => Promise<ProductPayload> | ProductPayload
+  updateProduct?: (id: number, payload: Record<string, unknown>) => Promise<unknown> | unknown
+}
+
+interface UnitPayload {
+  name: string
+  color: string
+  expectedUpdatedAt?: unknown
+}
+
+interface ReviewSelection {
+  type: 'unit'
+  value: string
+}
+
+interface ManageUnitsModalProps {
+  onClose: () => void
+  onReviewSelection?: (selection: ReviewSelection) => void
+  t: (key: string) => string
+}
+
+interface AppContextValue {
+  notify: (message: string, type?: string) => void
+}
+
+interface SyncContextValue {
+  syncChannel?: { channel?: string } | null
+}
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+
+function getUnitApi(): UnitApi {
+  return (window as unknown as { api: UnitApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function normalizeUnitRows(rows: unknown): UnitRow[] {
+  if (!Array.isArray(rows)) return []
+  return rows
+    .map((row) => {
+      const source = row as Partial<UnitRow> | null | undefined
+      return {
+        ...source,
+        id: source?.id ?? 0,
+        name: String(source?.name || ''),
+        color: source?.color || DEFAULT_UNIT_COLOR,
+      } as UnitRow
+    })
+    .filter((unit) => unit.name.trim())
+}
+
+function mergeUnitUsage(units: UnitRow[] = [], usageEntries: UnitUsageEntry[] = []): UnitRow[] {
   const usageMap = new Map((usageEntries || []).map((entry) => [normalizeLookup(entry?.name), entry]))
-  const merged = new Map()
+  const merged = new Map<string, UnitRow>()
   ;(units || []).forEach((unit) => {
     const key = normalizeLookup(unit?.name)
     const usage = usageMap.get(key)
@@ -39,7 +144,7 @@ function mergeUnitUsage(units = [], usageEntries = []) {
     if (!key || merged.has(key)) return
     merged.set(key, {
       id: `virtual:${key}`,
-      name: entry.name,
+      name: String(entry.name || ''),
       color: DEFAULT_UNIT_COLOR,
       usage_count: Number(entry?.usage_count || 0),
       unresolved_count: Number(entry?.unresolved_count || 0),
@@ -50,16 +155,16 @@ function mergeUnitUsage(units = [], usageEntries = []) {
   return Array.from(merged.values()).sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || '')))
 }
 
-export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
-  const [units, setUnits] = useState([])
+export default function ManageUnitsModal({ onClose, onReviewSelection, t }: ManageUnitsModalProps) {
+  const [units, setUnits] = useState<UnitRow[]>([])
   const [newName, setNewName] = useState('')
   const [newColor, setNewColor] = useState(DEFAULT_UNIT_COLOR)
-  const [editing, setEditing] = useState(null)
+  const [editing, setEditing] = useState<UnitRow | null>(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [deletingId, setDeletingId] = useState(null)
-  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [deletingId, setDeletingId] = useState<EntityId | 'selected' | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const { notify } = useApp()
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
     ? t('review_products')
@@ -70,8 +175,9 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-units' })
+  const actionHistoryForBar = actionHistory as unknown as ComponentProps<typeof ActionHistoryBar>['history']
   const unitsById = useMemo(() => {
-    const index = new Map()
+    const index = new Map<number, UnitRow>()
     for (const unit of units) {
       const id = Number(unit?.id || 0)
       if (id) index.set(id, unit)
@@ -79,30 +185,30 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
     return index
   }, [units])
 
-  const fetchUnits = useCallback(async () => {
+  const fetchUnits = useCallback(async (): Promise<UnitRow[]> => {
     const rows = await withLoaderTimeout(
-      () => window.api.getUnits(),
+      () => getUnitApi().getUnits(),
       'Unit lookup options',
       PRODUCT_UNIT_LOOKUP_TIMEOUT_MS,
     )
-    return Array.isArray(rows) ? rows : []
+    return normalizeUnitRows(rows)
   }, [])
 
-  const findUnitById = useCallback(async (id) => {
+  const findUnitById = useCallback(async (id: EntityId): Promise<UnitRow | null> => {
     const rows = await fetchUnits()
     return rows.find((entry) => Number(entry?.id || 0) === Number(id)) || null
   }, [fetchUnits])
 
-  const findUnitByName = useCallback(async (name) => {
+  const findUnitByName = useCallback(async (name: string): Promise<UnitRow | null> => {
     const key = normalizeLookup(name)
     if (!key) return null
     const rows = await fetchUnits()
     return rows.find((entry) => normalizeLookup(entry?.name) === key) || null
   }, [fetchUnits])
 
-  const fetchUnitProductSnapshots = useCallback(async (names = []) => {
+  const fetchUnitProductSnapshots = useCallback(async (names: string[] = []) => {
     return fetchLookupProductSnapshots({
-      api: window.api,
+      api: getUnitApi(),
       field: 'unit',
       names,
       label: 'Unit product snapshots',
@@ -110,53 +216,56 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
     })
   }, [])
 
-  const restoreUnitProductSnapshots = useCallback(async (snapshots = []) => {
+  const restoreUnitProductSnapshots = useCallback(async (snapshots: Record<string, unknown>[] = []) => {
     await restoreLookupProductSnapshots({
-      api: window.api,
+      api: getUnitApi(),
       field: 'unit',
       snapshots,
       label: 'Unit product restore',
       timeoutMs: PRODUCT_UNIT_PRODUCTS_TIMEOUT_MS,
     })
   }, [])
-  const runUnitMutation = useCallback((loader, label) => (
+  const runUnitMutation = useCallback((loader: () => Promise<UnitMutationResult | undefined>, label: string) => (
     withLoaderTimeout(loader, label, PRODUCT_UNIT_MUTATION_TIMEOUT_MS)
   ), [])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
     const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     try {
       const [data, usage] = await withLoaderTimeout(() => Promise.all([
-        window.api.getUnits(),
-        window.api.getProductLookupUsage(),
+        getUnitApi().getUnits(),
+        getUnitApi().getProductLookupUsage(),
       ]), 'Units', PRODUCT_UNIT_LOOKUP_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setUnits(mergeUnitUsage(Array.isArray(data) ? data : [], usage?.units || []))
+      const usageRows = (usage as { units?: UnitUsageEntry[] } | null | undefined)?.units || []
+      setUnits(mergeUnitUsage(normalizeUnitRows(data), usageRows))
       setSelectedIds(new Set())
       setErr('')
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setErr(error?.message || 'Failed to load units')
+      setErr(getErrorMessage(error, 'Failed to load units'))
     } finally {
       if (isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
   useEffect(() => {
-    if (syncChannel?.channel === 'units') load()
-  }, [load, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+    if (syncChannel?.channel === 'units') void load()
+  }, [load, syncChannel])
+  useEffect(() => () => {
+    invalidateTrackedRequest(loadRequestRef)
+  }, [])
 
-  const handleAdd = async () => {
+  const handleAdd = async (): Promise<void> => {
     if (!newName.trim() || saving) return
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
     setErr('')
     setSaving(true)
     try {
       const payload = { name: newName.trim(), color: newColor }
-      const res = await runUnitMutation(() => window.api.createUnit(payload), 'Create unit')
+      const res = await runUnitMutation(() => getUnitApi().createUnit(payload), 'Create unit')
       if (res?.success === false) {
         setErr(res.error || 'Failed')
         return
@@ -169,31 +278,31 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
         undo: async () => {
           const latest = await findUnitByName(payload.name)
           if (!latest) throw new Error('Unit no longer exists.')
-          await runUnitMutation(() => window.api.deleteUnit(latest.id, { expectedUpdatedAt: latest.updated_at || undefined }), 'Undo unit creation')
+          await runUnitMutation(() => getUnitApi().deleteUnit(latest.id, { expectedUpdatedAt: latest.updated_at || undefined }), 'Undo unit creation')
           await load()
         },
         redo: async () => {
-          await runUnitMutation(() => window.api.createUnit(payload), 'Redo unit creation')
+          await runUnitMutation(() => getUnitApi().createUnit(payload), 'Redo unit creation')
           await load()
         },
       })
     } catch (error) {
-      setErr(error?.message || 'Failed')
+      setErr(getErrorMessage(error, 'Failed'))
     } finally {
       finishSingleAction(saveInFlightRef)
       setSaving(false)
     }
   }
 
-  const handleUpdate = async (unit) => {
+  const handleUpdate = async (unit: UnitRow): Promise<void> => {
     if (saving) return
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
     setErr('')
     setSaving(true)
     try {
       const previousSnapshot = units.find((entry) => Number(entry?.id || 0) === Number(unit?.id || 0))
-      const payload = { name: unit.name, color: unit.color, expectedUpdatedAt: unit.updated_at || undefined }
-      const res = await runUnitMutation(() => window.api.updateUnit(unit.id, payload), 'Update unit')
+      const payload = { name: unit.name, color: unit.color || DEFAULT_UNIT_COLOR, expectedUpdatedAt: unit.updated_at || undefined }
+      const res = await runUnitMutation(() => getUnitApi().updateUnit(unit.id, payload), 'Update unit')
       if (res?.success === false) {
         setErr(res.error || 'Failed')
         return
@@ -207,7 +316,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
           undo: async () => {
             const latest = await findUnitById(previousSnapshot.id)
             if (!latest) throw new Error('Unit no longer exists.')
-            await runUnitMutation(() => window.api.updateUnit(previousSnapshot.id, {
+            await runUnitMutation(() => getUnitApi().updateUnit(previousSnapshot.id, {
               name: previousSnapshot.name,
               color: previousSnapshot.color || DEFAULT_UNIT_COLOR,
               expectedUpdatedAt: latest.updated_at || undefined,
@@ -217,7 +326,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
           redo: async () => {
             const latest = await findUnitById(previousSnapshot.id)
             if (!latest) throw new Error('Unit no longer exists.')
-            await runUnitMutation(() => window.api.updateUnit(previousSnapshot.id, {
+            await runUnitMutation(() => getUnitApi().updateUnit(previousSnapshot.id, {
               name: payload.name,
               color: payload.color || DEFAULT_UNIT_COLOR,
               expectedUpdatedAt: latest.updated_at || undefined,
@@ -227,14 +336,14 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
         })
       }
     } catch (error) {
-      setErr(error?.message || 'Failed')
+      setErr(getErrorMessage(error, 'Failed'))
     } finally {
       finishSingleAction(saveInFlightRef)
       setSaving(false)
     }
   }
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: EntityId): Promise<void> => {
     if (saving || deletingId) return
     if (!beginSingleAction(deleteInFlightRef, { blocked: deletingId != null })) return
     if (!confirm(t('confirm_delete'))) {
@@ -246,7 +355,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
       const unit = unitsById.get(Number(id))
       const deletedEntries = unit ? [{ id: Number(unit.id), name: unit.name, color: unit.color || DEFAULT_UNIT_COLOR }] : []
       const productSnapshots = await fetchUnitProductSnapshots(deletedEntries.map((entry) => entry.name))
-      await runUnitMutation(() => window.api.deleteUnit(id, { expectedUpdatedAt: unit?.updated_at || undefined }), 'Delete unit')
+      await runUnitMutation(() => getUnitApi().deleteUnit(id, { expectedUpdatedAt: unit?.updated_at || undefined }), 'Delete unit')
       setSelectedIds((current) => {
         const next = new Set(current)
         next.delete(Number(id))
@@ -259,7 +368,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
           undo: async () => {
             for (const entry of deletedEntries) {
               const existing = await findUnitByName(entry.name)
-              if (!existing) await runUnitMutation(() => window.api.createUnit({ name: entry.name, color: entry.color || DEFAULT_UNIT_COLOR }), 'Undo unit deletion')
+              if (!existing) await runUnitMutation(() => getUnitApi().createUnit({ name: entry.name, color: entry.color || DEFAULT_UNIT_COLOR }), 'Undo unit deletion')
             }
             await restoreUnitProductSnapshots(productSnapshots)
             await load()
@@ -268,21 +377,21 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
             for (const entry of deletedEntries) {
               const existing = await findUnitByName(entry.name)
               if (!existing) continue
-              await runUnitMutation(() => window.api.deleteUnit(existing.id, { expectedUpdatedAt: existing.updated_at || undefined }), 'Redo unit deletion')
+              await runUnitMutation(() => getUnitApi().deleteUnit(existing.id, { expectedUpdatedAt: existing.updated_at || undefined }), 'Redo unit deletion')
             }
             await load()
           },
         })
       }
     } catch (error) {
-      notify(error?.message || 'Failed', 'error')
+      notify(getErrorMessage(error, 'Failed'), 'error')
     } finally {
       finishSingleAction(deleteInFlightRef)
       setDeletingId(null)
     }
   }
 
-  const toggleSelected = (id) => {
+  const toggleSelected = (id: EntityId): void => {
     const numericId = Number(id)
     setSelectedIds((current) => {
       const next = new Set(current)
@@ -292,7 +401,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
     })
   }
 
-  const toggleAllVisible = () => {
+  const toggleAllVisible = (): void => {
     setSelectedIds((current) => {
       const visibleIds = units.map((unit) => Number(unit.id))
       const allSelected = visibleIds.length > 0 && visibleIds.every((id) => current.has(id))
@@ -305,7 +414,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
     })
   }
 
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = async (): Promise<void> => {
     if (saving || deletingId || selectedIds.size === 0) return
     if (!beginSingleAction(bulkDeleteInFlightRef, { blocked: deletingId != null })) return
     if (!confirm(`Delete ${selectedIds.size} selected unit${selectedIds.size === 1 ? '' : 's'}?`)) {
@@ -317,7 +426,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
     try {
       const deletedEntries = ids
         .map((id) => unitsById.get(Number(id)))
-        .filter(Boolean)
+        .filter((unit): unit is UnitRow => Boolean(unit))
         .map((unit) => ({
           id: Number(unit.id),
           name: unit.name,
@@ -326,7 +435,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
         }))
       const productSnapshots = await fetchUnitProductSnapshots(deletedEntries.map((entry) => entry.name))
       for (const unit of deletedEntries) {
-        await runUnitMutation(() => window.api.deleteUnit(unit.id, { expectedUpdatedAt: unit.updated_at || undefined }), 'Bulk delete units')
+        await runUnitMutation(() => getUnitApi().deleteUnit(unit.id, { expectedUpdatedAt: unit.updated_at || undefined }), 'Bulk delete units')
       }
       notify(`Deleted ${ids.length} unit${ids.length === 1 ? '' : 's'}`, 'success')
       setSelectedIds(new Set())
@@ -337,7 +446,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
           undo: async () => {
             for (const entry of deletedEntries) {
               const existing = await findUnitByName(entry.name)
-              if (!existing) await runUnitMutation(() => window.api.createUnit({ name: entry.name, color: entry.color || DEFAULT_UNIT_COLOR }), 'Undo unit bulk deletion')
+              if (!existing) await runUnitMutation(() => getUnitApi().createUnit({ name: entry.name, color: entry.color || DEFAULT_UNIT_COLOR }), 'Undo unit bulk deletion')
             }
             await restoreUnitProductSnapshots(productSnapshots)
             await load()
@@ -346,14 +455,14 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
             for (const entry of deletedEntries) {
               const existing = await findUnitByName(entry.name)
               if (!existing) continue
-              await runUnitMutation(() => window.api.deleteUnit(existing.id, { expectedUpdatedAt: existing.updated_at || undefined }), 'Redo unit bulk deletion')
+              await runUnitMutation(() => getUnitApi().deleteUnit(existing.id, { expectedUpdatedAt: existing.updated_at || undefined }), 'Redo unit bulk deletion')
             }
             await load()
           },
         })
       }
     } catch (error) {
-      notify(error?.message || 'Failed to delete selected units', 'error')
+      notify(getErrorMessage(error, 'Failed to delete selected units'), 'error')
     } finally {
       finishSingleAction(bulkDeleteInFlightRef)
       setDeletingId(null)
@@ -364,7 +473,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
     <Modal title={t('manage_units') || 'Manage Units'} onClose={onClose}>
       <div className="space-y-4">
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
-        <ActionHistoryBar history={actionHistory} />
+        <ActionHistoryBar history={actionHistoryForBar} />
 
         <div className="flex items-end gap-2">
           <div className="flex-1">
@@ -376,7 +485,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
               placeholder={t('unit_example_placeholder') || 'e.g. bottle, bag...'}
-              onKeyDown={(event) => { if (event.key === 'Enter') handleAdd() }}
+              onKeyDown={(event) => { if (event.key === 'Enter') void handleAdd() }}
             />
           </div>
           <div>
@@ -390,7 +499,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
               className="h-10 w-10 cursor-pointer rounded-lg border border-gray-300"
             />
           </div>
-          <button className="btn-primary" onClick={handleAdd} disabled={saving}>{saving ? (t('saving') || 'Saving...') : (t('add') || 'Add')}</button>
+          <button className="btn-primary" onClick={() => void handleAdd()} disabled={saving}>{saving ? (t('saving') || 'Saving...') : (t('add') || 'Add')}</button>
         </div>
 
         <div className="max-h-80 space-y-2 overflow-auto">
@@ -408,7 +517,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
               <button
                 type="button"
                 className="text-xs font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400"
-                onClick={handleDeleteSelected}
+                onClick={() => void handleDeleteSelected()}
                 disabled={!selectedIds.size || saving || deletingId != null}
               >
                 {deletingId === 'selected' ? (t('deleting') || 'Deleting...') : 'Delete selected'}
@@ -424,7 +533,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
                     name={`unit_color_${unit.id}`}
                     type="color"
                     value={editing.color || DEFAULT_UNIT_COLOR}
-                    onChange={(event) => setEditing((current) => ({ ...current, color: event.target.value }))}
+                    onChange={(event) => setEditing((current) => current ? { ...current, color: event.target.value } : current)}
                     className="h-8 w-8 cursor-pointer rounded border border-gray-300"
                   />
                   <input
@@ -432,9 +541,9 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
                     name={`unit_name_${unit.id}`}
                     className="input flex-1 py-1"
                     value={editing.name}
-                    onChange={(event) => setEditing((current) => ({ ...current, name: event.target.value }))}
+                    onChange={(event) => setEditing((current) => current ? { ...current, name: event.target.value } : current)}
                   />
-                  <button className="btn-primary px-3 py-1 text-xs" onClick={() => handleUpdate(editing)} disabled={saving}>
+                  <button className="btn-primary px-3 py-1 text-xs" onClick={() => void handleUpdate(editing)} disabled={saving}>
                     {saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
                   </button>
                   <button className="btn-secondary px-2 py-1 text-xs" onClick={() => setEditing(null)} disabled={saving}>
@@ -479,7 +588,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }) {
                       {reviewProductsLabel}
                     </button>
                   ) : null}
-                  <button onClick={() => handleDelete(unit.id)} className="text-xs text-red-500 hover:underline" disabled={saving || !!deletingId || unit.virtual}>
+                  <button onClick={() => void handleDelete(unit.id)} className="text-xs text-red-500 hover:underline" disabled={saving || !!deletingId || unit.virtual}>
                     {deletingId === unit.id ? (t('deleting') || 'Deleting...') : (t('delete') || 'Delete')}
                   </button>
                 </>

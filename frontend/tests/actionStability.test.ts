@@ -536,17 +536,17 @@ await runTest('product category manager actions use shared guards and bounded mu
 })
 
 await runTest('product unit manager actions use shared guards and bounded mutations', () => {
-  const source = readFrontend('src/components/products/lookups/ManageUnitsModal.jsx')
+  const source = readFrontend('src/components/products/lookups/ManageUnitsModal.tsx')
   const mutationLines = source
     .split('\n')
-    .filter((line) => /window\.api\.(createUnit|updateUnit|deleteUnit)\(/.test(line))
+    .filter((line) => /getUnitApi\(\)\.(createUnit|updateUnit|deleteUnit)\(/.test(line))
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const PRODUCT_UNIT_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
   assert.match(source, /const deleteInFlightRef = useRef\(false\)/)
   assert.match(source, /const bulkDeleteInFlightRef = useRef\(false\)/)
-  assert.match(source, /const runUnitMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_UNIT_MUTATION_TIMEOUT_MS\)/)
+  assert.match(source, /const runUnitMutation = useCallback\(\(loader: \(\) => Promise<UnitMutationResult \| undefined>, label: string\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_UNIT_MUTATION_TIMEOUT_MS\)/)
   assert.match(source, /if \(!beginSingleAction\(saveInFlightRef, \{ blocked: saving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(deleteInFlightRef, \{ blocked: deletingId != null \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(bulkDeleteInFlightRef, \{ blocked: deletingId != null \}\)\) return/)
