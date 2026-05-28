@@ -1,1 +1,0 @@
-export * from './portalTranslateController.ts'

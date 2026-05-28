@@ -864,8 +864,8 @@ const COMPLETED_WEB_WORKER_SLICES = [
 const COMPLETED_WEB_WORKER_FILES = new Set(COMPLETED_WEB_WORKER_SLICES.flatMap((entry) => [
   entry.surface,
   entry.worker,
-  entry.compatibilityWrapper,
   entry.fallback,
+  ...(entry.compatibilityWrapper ? [entry.compatibilityWrapper] : []),
 ]))
 
 const COMPLETED_DATA_PATH_SLICES = [
@@ -1122,14 +1122,17 @@ async function collectFocusedTestCoverage() {
 async function collectConvertedTypeScriptSlices() {
   return mapLimit(CONVERTED_TYPESCRIPT_SLICES, MATRIX_CHECK_CONCURRENCY, async (entry) => {
     const implementationExists = await pathExists(path.join(ROOT_DIR, entry.implementation))
-    const wrapperRequired = Boolean(entry.compatibilityWrapper)
+    const wrapperRequired = Boolean(entry.compatibilityWrapper) && !entry.compatibilityWrapper.endsWith('.mjs')
     const compatibilityWrapperExists = wrapperRequired
       ? await pathExists(path.join(ROOT_DIR, entry.compatibilityWrapper))
       : true
     const declarationSupportExists = entry.declarationSupport ? await pathExists(path.join(ROOT_DIR, entry.declarationSupport)) : true
+    const wrapperStatus = entry.wrapperStatus
+      || (!wrapperRequired && entry.compatibilityWrapper ? `retired ${entry.compatibilityWrapper}` : '')
     return {
       ...entry,
       implementationExists,
+      wrapperStatus,
       wrapperRequired,
       compatibilityWrapperExists,
       declarationSupportExists,
@@ -1142,12 +1145,19 @@ async function collectCompletedWebWorkerSlices() {
   return mapLimit(COMPLETED_WEB_WORKER_SLICES, MATRIX_CHECK_CONCURRENCY, async (entry) => {
     const surfaceExists = await pathExists(path.join(ROOT_DIR, entry.surface))
     const workerExists = await pathExists(path.join(ROOT_DIR, entry.worker))
-    const compatibilityWrapperExists = await pathExists(path.join(ROOT_DIR, entry.compatibilityWrapper))
+    const compatibilityWrapperRequired = Boolean(entry.compatibilityWrapper) && !entry.compatibilityWrapper.endsWith('.mjs')
+    const compatibilityWrapperExists = compatibilityWrapperRequired
+      ? await pathExists(path.join(ROOT_DIR, entry.compatibilityWrapper))
+      : true
     const fallbackExists = await pathExists(path.join(ROOT_DIR, entry.fallback))
+    const wrapperStatus = entry.wrapperStatus
+      || (!compatibilityWrapperRequired && entry.compatibilityWrapper ? `retired ${entry.compatibilityWrapper}` : '')
     return {
       ...entry,
       surfaceExists,
       workerExists,
+      wrapperStatus,
+      compatibilityWrapperRequired,
       compatibilityWrapperExists,
       fallbackExists,
       covered: surfaceExists && workerExists && compatibilityWrapperExists && fallbackExists,
@@ -1289,7 +1299,9 @@ function renderReport(summary) {
   const convertedRows = summary.convertedTypeScriptSlices.map((entry) => [
     `\`${entry.implementation}\``,
     entry.implementationExists ? 'yes' : 'no',
-    entry.compatibilityWrapper ? `\`${entry.compatibilityWrapper}\`` : entry.wrapperStatus || 'none',
+    entry.wrapperRequired
+      ? `\`${entry.compatibilityWrapper}\``
+      : entry.wrapperStatus || 'none',
     entry.wrapperRequired ? (entry.compatibilityWrapperExists ? 'yes' : 'no') : 'n/a',
     entry.declarationSupport ? `\`${entry.declarationSupport}\`` : 'none',
     entry.declarationSupportExists ? 'yes' : 'no',

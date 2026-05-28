@@ -9,8 +9,8 @@ import { createCircularFaviconDataUrl } from '../../utils/favicon'
 import PageHeader from '../shared/PageHeader'
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
-import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.mjs'
-import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
+import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.js'
 import {
   buildCacheBustedMediaPath,

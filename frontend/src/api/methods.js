@@ -47,7 +47,7 @@ import {
   shouldPersistLocalMirror as shouldPersistLocalMirrorByPolicy,
   maxStoredNumber,
   isCooldownActive,
-} from '../platform/storage/storagePolicy.mjs'
+} from '../platform/storage/storagePolicy.ts'
 
 function getPortalBaseUrl() {
   const browserOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : ''

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { CalendarRange, Eye, FileSpreadsheet, Upload } from 'lucide-react'
 import Modal from '../shared/Modal'
 import StatusBadge from './StatusBadge'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { withLoaderTimeout } from '../../utils/loaders.ts'
 
 const SALES_EXPORT_PREVIEW_TIMEOUT_MS = 20000
 const SALES_EXPORT_CSV_TIMEOUT_MS = 30000

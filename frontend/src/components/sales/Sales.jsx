@@ -10,16 +10,16 @@ import PaginationControls, { clampPage, paginateItems } from '../shared/Paginati
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
+import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
-import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const SaleDetailModal = lazy(() => import('./SaleDetailModal'))
 const ExportModal = lazy(() => import('./ExportModal'))

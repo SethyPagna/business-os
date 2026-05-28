@@ -7,8 +7,8 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+} from '../../utils/loaders.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 const RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 10000

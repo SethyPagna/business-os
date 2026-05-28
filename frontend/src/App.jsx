@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp, Bell } from 'lucide-react'
 import { useApp } from './AppContext'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.ts'
-import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
+import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.js'
 import { createCircularFaviconDataUrl } from './utils/favicon'
-import { withLoaderTimeout } from './utils/loaders.mjs'
+import { withLoaderTimeout } from './utils/loaders.ts'
 
 /**
  * Frontend application shell.

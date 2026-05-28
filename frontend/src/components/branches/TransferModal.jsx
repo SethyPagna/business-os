@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000

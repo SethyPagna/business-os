@@ -4,7 +4,7 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
 const RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS = 12000

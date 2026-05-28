@@ -1,7 +1,7 @@
 // ── BulkAddStockModal ────────────────────────────────────────────────────────
 import { useCallback, useRef, useState } from 'react'
-import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.mjs'
-import { withLoaderTimeout } from '../../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
+import { withLoaderTimeout } from '../../../utils/loaders.ts'
 
 const BULK_ADD_STOCK_MUTATION_TIMEOUT_MS = 12000
 

@@ -12,8 +12,8 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+} from '../../utils/loaders.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
 const DEFAULT_ACTION_CLASS = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
 const AUDIT_LOG_LOAD_TIMEOUT_MS = 20000

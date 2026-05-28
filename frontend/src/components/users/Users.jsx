@@ -9,15 +9,15 @@ import PermissionEditor, { PERMISSION_DEFS } from './PermissionEditor'
 import UserDetailSheet from './UserDetailSheet'
 import UserProfileModal from './UserProfileModal'
 import { useIsPageActive } from '../shared/pageActivity'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 
 /**
  * 1. Users Page Module

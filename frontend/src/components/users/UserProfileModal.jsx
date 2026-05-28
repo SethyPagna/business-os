@@ -6,8 +6,8 @@ import FilePickerModal from '../files/FilePickerModal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { STORAGE_KEYS } from '../../constants'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
-import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.mjs'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
+import { useActionHistory } from '../../utils/actionHistory.ts'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Camera, CheckCircle2, Keyboard, ScanLine, ShieldAlert } from 'lucide-react'
 import Modal from '../../shared/Modal'
-import { deriveScannerPresentation } from './barcodeScannerState.mjs'
-import { isCameraBlockedByDocumentPolicy } from './scanbotScanner.mjs'
-import { scanBarcodeFromImageFile } from './barcodeImageScanner.mjs'
+import { deriveScannerPresentation } from './barcodeScannerState.ts'
+import { isCameraBlockedByDocumentPolicy } from './scanbotScanner.ts'
+import { scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
 
 const KNOWN_FORMATS = [
   'aztec',

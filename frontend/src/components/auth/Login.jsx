@@ -20,7 +20,7 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 

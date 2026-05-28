@@ -69,7 +69,7 @@ await runTest('POS quick-add customer and delivery writes are bounded', () => {
 await runTest('bulk product import actions use a synchronous in-flight guard', () => {
   const source = readFrontend('src/components/products/import/BulkImportModal.jsx')
 
-  assert.match(source, /import \{ beginNamedAction, finishNamedAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginNamedAction, finishNamedAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const actionInFlightRef = useRef\(''\)/)
   assert.match(source, /const beginImportAction = \(action, options = \{\}\) => \{[\s\S]*if \(!beginNamedAction\(actionInFlightRef, action, \{ blocked: loading \}\)\) return false/)
   assert.match(source, /const finishImportAction = \(action\) => \{[\s\S]*finishNamedAction\(actionInFlightRef, action\)[\s\S]*setLoading\(false\)/)
@@ -88,7 +88,7 @@ await runTest('bulk product import actions use a synchronous in-flight guard', (
 await runTest('background import tracker actions use a synchronous action guard', () => {
   const source = readFrontend('src/components/shared/BackgroundImportTracker.jsx')
 
-  assert.match(source, /import \{ beginNamedAction, finishNamedAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginNamedAction, finishNamedAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const actionInFlightRef = useRef\(''\)/)
   assert.match(source, /const beginTrackerAction = \(job, action\) => \{[\s\S]*if \(!beginNamedAction\(actionInFlightRef, key, \{ blocked: !!busyJobId \}\)\) return null/)
   assert.match(source, /const finishTrackerAction = \(action\) => \{[\s\S]*finishNamedAction\(actionInFlightRef, action\?\.key \|\| ''\)[\s\S]*setBusyJobId\(''\)/)
@@ -126,7 +126,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   const returnsRoute = readRepo('backend/src/routes/returns.js')
 
   for (const source of [newReturn, editReturn, supplierReturn]) {
-    assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+    assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
     assert.match(source, /const submitInFlightRef = useRef\(false\)/)
     assert.match(source, /if \(!beginSingleAction\(submitInFlightRef\)\) return/)
     assert.match(source, /beginSingleAction\(submitInFlightRef\)[\s\S]*setSubmitting\(true\)/)
@@ -143,7 +143,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(newReturn, /const searchInFlightRef = useRef\(false\)/)
   assert.match(newReturn, /if \(!beginSingleAction\(searchInFlightRef\)\) return/)
   assert.match(newReturn, /finally \{[\s\S]*finishSingleAction\(searchInFlightRef\)[\s\S]*setSearching\(false\)/)
-  assert.match(returns, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(returns, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(returns, /const RETURNS_HISTORY_RESTORE_TIMEOUT_MS = 15000/)
   assert.match(returns, /const historyRestoreInFlightRef = useRef\(false\)/)
   assert.match(returns, /if \(!beginSingleAction\(historyRestoreInFlightRef\)\) return/)
@@ -208,7 +208,7 @@ await runTest('product form image upload and save keep synchronous guards', () =
 await runTest('catalog portal media upload keeps a per-target synchronous guard', () => {
   const source = readFrontend('src/components/catalog/CatalogPage.jsx')
 
-  assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const mediaUploadInFlightTargetsRef = useRef\(new Set\(\)\)/)
   assert.match(source, /const CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS = 30000/)
   assert.match(source, /async function uploadPortalMedia\(target, accept = 'image\/\*'\) \{[\s\S]*if \(!beginKeyedAction\(mediaUploadInFlightTargetsRef, targetKey\)\) return ''/)
@@ -221,7 +221,7 @@ await runTest('catalog portal media upload keeps a per-target synchronous guard'
 await runTest('catalog portal submission writes use guarded bounded actions', () => {
   const source = readFrontend('src/components/catalog/CatalogPage.jsx')
 
-  assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000/)
   assert.match(source, /const CATALOG_PORTAL_REVIEW_TIMEOUT_MS = 12000/)
   assert.match(source, /const submissionSavingRef = useRef\(false\)/)
@@ -255,7 +255,7 @@ await runTest('settings save and app favicon upload keep synchronous guards', ()
   const source = readFrontend('src/components/utils-settings/Settings.jsx')
   const methods = readFrontend('src/api/methods.js')
 
-  assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const \[savingSettings, setSavingSettings\] = useState\(false\)/)
   assert.match(source, /const settingsSaveInFlightRef = useRef\(false\)/)
   assert.match(source, /const uploadInFlightKeysRef = useRef\(new Set\(\)\)/)
@@ -275,8 +275,8 @@ await runTest('settings save and app favicon upload keep synchronous guards', ()
 await runTest('reset data and factory reset use guarded bounded actions', () => {
   const source = readFrontend('src/components/utils-settings/ResetData.jsx')
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
-  assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/utils\/loaders\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
+  assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/utils\/loaders\.ts'/)
   assert.match(source, /const RESET_DATA_TIMEOUT_MS = 60000/)
   assert.match(source, /const FACTORY_RESET_TIMEOUT_MS = 90000/)
   assert.match(source, /const resetInFlightRef = useRef\(false\)/)
@@ -292,7 +292,7 @@ await runTest('reset data and factory reset use guarded bounded actions', () => 
 await runTest('server queue and connection actions use guarded bounded actions', () => {
   const source = readFrontend('src/components/server/ServerPage.jsx')
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS = 12000/)
   assert.match(source, /const SERVER_SYNC_TEST_TIMEOUT_MS = 12000/)
   assert.match(source, /const queueActionInFlightRef = useRef\(false\)/)
@@ -309,7 +309,7 @@ await runTest('server queue and connection actions use guarded bounded actions',
 await runTest('audit log retention cleanup uses a guarded bounded action', () => {
   const source = readFrontend('src/components/utils-settings/AuditLog.jsx')
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS = 12000/)
   assert.match(source, /const \[clearingOldLogs, setClearingOldLogs\] = useState\(false\)/)
   assert.match(source, /const clearOldLogsInFlightRef = useRef\(false\)/)
@@ -327,7 +327,7 @@ await runTest('secondary import modals use the shared single-action guard', () =
   ]
 
   for (const [label, source] of sources) {
-    assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+    assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
     assert.match(source, /const .*inFlightRef = useRef\(false\)|const importInFlightRef = useRef\(false\)/)
     assert.match(source, /if \(!beginSingleAction\((?:inFlightRef|importInFlightRef)\)\) return/)
     assert.match(source, /finally \{[\s\S]*finishSingleAction\((?:inFlightRef|importInFlightRef)\)/)
@@ -340,7 +340,7 @@ await runTest('secondary import modals use the shared single-action guard', () =
 await runTest('OTP confirm and disable use the shared single-action guard', () => {
   const source = readFrontend('src/components/utils-settings/OtpModal.jsx')
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const actionInFlightRef = useRef\(false\)/)
   assert.match(source, /const handleConfirm = useCallback\(async \(\) => \{[\s\S]*if \(!beginSingleAction\(actionInFlightRef\)\) return/)
   assert.match(source, /const handleDisable = useCallback\(async \(\) => \{[\s\S]*if \(!beginSingleAction\(actionInFlightRef\)\) return/)
@@ -351,7 +351,7 @@ await runTest('OTP confirm and disable use the shared single-action guard', () =
 await runTest('loyalty point rule save uses the shared single-action guard', () => {
   const source = readFrontend('src/components/loyalty-points/LoyaltyPointsPage.jsx')
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
   assert.match(source, /async function handleSave\(\) \{[\s\S]*if \(!beginSingleAction\(saveInFlightRef\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)[\s\S]*setSaving\(false\)/)
@@ -360,7 +360,7 @@ await runTest('loyalty point rule save uses the shared single-action guard', () 
 await runTest('custom tables bound reads and same-tick row mutations', () => {
   const source = readFrontend('src/components/custom-tables/CustomTables.jsx')
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const CUSTOM_TABLES_LOAD_TIMEOUT_MS = 8000/)
   assert.match(source, /const CUSTOM_TABLE_ROWS_LOAD_TIMEOUT_MS = 10000/)
   assert.match(source, /const CUSTOM_TABLE_MUTATION_TIMEOUT_MS = 12000/)
@@ -410,7 +410,7 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
   ]
 
   for (const target of targets) {
-    assert.match(target.source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/, `${target.label} should import shared action guards`)
+    assert.match(target.source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/, `${target.label} should import shared action guards`)
     assert.match(target.source, new RegExp(`const ${target.constant} = 12000`), `${target.label} should define a mutation timeout`)
     assert.match(target.source, /const saveInFlightRef = useRef\(false\)/, `${target.label} should guard save`)
     assert.match(target.source, /const deleteInFlightRef = useRef\(false\)/, `${target.label} should guard delete`)
@@ -429,7 +429,7 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
 await runTest('sales status and membership actions use shared guards and bounded mutations', () => {
   const source = readFrontend('src/components/sales/Sales.jsx')
 
-  assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const statusActionRef = useRef\(new Set\(\)\)/)
@@ -454,7 +454,7 @@ await runTest('branch CRUD and transfer actions use shared guards and bounded mu
   const branches = readFrontend('src/components/branches/Branches.jsx')
   const transfer = readFrontend('src/components/branches/TransferModal.jsx')
 
-  assert.match(branches, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(branches, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(branches, /const BRANCH_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(branches, /const \[bulkDeleteBusy, setBulkDeleteBusy\] = useState\(false\)/)
   assert.match(branches, /const saveInFlightRef = useRef\(false\)/)
@@ -473,7 +473,7 @@ await runTest('branch CRUD and transfer actions use shared guards and bounded mu
   assert.match(branches, /finally \{[\s\S]*finishSingleAction\(bulkDeleteInFlightRef\)[\s\S]*setBulkDeleteBusy\(false\)/)
   assert.match(branches, /disabled=\{bulkDeleteBusy\}/)
 
-  assert.match(transfer, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(transfer, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(transfer, /const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(transfer, /const transferInFlightRef = useRef\(false\)/)
   assert.match(transfer, /if \(!beginSingleAction\(transferInFlightRef, \{ blocked: saving \}\)\) return/)
@@ -487,7 +487,7 @@ await runTest('inventory adjust, move, transfer, and batch actions use shared gu
     .split('\n')
     .filter((line) => /window\.api\.(adjustStock|moveStockRow|transferInventoryStock)\(/.test(line))
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const adjustStockInFlightRef = useRef\(false\)/)
   assert.match(source, /const moveStockInFlightRef = useRef\(false\)/)
@@ -515,7 +515,7 @@ await runTest('product category manager actions use shared guards and bounded mu
     .split('\n')
     .filter((line) => /window\.api\.(createCategory|updateCategory|deleteCategory)\(/.test(line))
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const PRODUCT_CATEGORY_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
   assert.match(source, /const deleteInFlightRef = useRef\(false\)/)
@@ -541,7 +541,7 @@ await runTest('product unit manager actions use shared guards and bounded mutati
     .split('\n')
     .filter((line) => /window\.api\.(createUnit|updateUnit|deleteUnit)\(/.test(line))
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const PRODUCT_UNIT_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
   assert.match(source, /const deleteInFlightRef = useRef\(false\)/)
@@ -567,7 +567,7 @@ await runTest('product brand manager actions use shared guards and bounded mutat
     .split('\n')
     .filter((line) => /window\.api\.(saveSettings|replaceProductLookupValues)\(/.test(line))
 
-  assert.match(source, /import \{ beginNamedAction, finishNamedAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginNamedAction, finishNamedAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const PRODUCT_BRAND_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const actionInFlightRef = useRef\(''\)/)
   assert.match(source, /const runBrandMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_BRAND_MUTATION_TIMEOUT_MS\)/)
@@ -591,8 +591,8 @@ await runTest('product variant creation uses shared guard and bounded mutation',
     .split('\n')
     .filter((line) => /window\.api\.createProductVariant\(/.test(line))
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
-  assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
+  assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.ts'/)
   assert.match(source, /const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
   assert.match(source, /const runVariantMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_VARIANT_MUTATION_TIMEOUT_MS\)/)
@@ -610,7 +610,7 @@ await runTest('product page save and delete actions use shared guards and bounde
   const source = readFrontend('src/components/products/Products.jsx')
   const config = readFrontend('src/components/products/config/productPageConfig.ts')
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(config, /export const PRODUCT_WRITE_MUTATION_TIMEOUT_MS = 15000/)
   assert.match(config, /export const PRODUCT_DELETE_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(config, /export const PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS = 30000/)
@@ -649,8 +649,8 @@ await runTest('product stock helper modals use shared guards and bounded mutatio
     ['bulk stock add', bulk, 'BULK_ADD_STOCK_MUTATION_TIMEOUT_MS', 'runBulkStockMutation'],
     ['branch stock adjuster', branch, 'BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS', 'runBranchStockMutation'],
   ]) {
-    assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.mjs'/, `${label} should import shared action guards`)
-    assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.mjs'/, `${label} should import loader timeout helper`)
+    assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/, `${label} should import shared action guards`)
+    assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.ts'/, `${label} should import loader timeout helper`)
     assert.match(source, new RegExp(`const ${constant} = 12000`), `${label} should define a stock mutation timeout`)
     assert.match(source, /const saveInFlightRef = useRef\(false\)/, `${label} should keep a same-tick save guard`)
     assert.match(source, new RegExp(`const ${runner} = useCallback\\(\\(loader, label\\) => \\([\\s\\S]*withLoaderTimeout\\(loader, label, ${constant}\\)`), `${label} should route mutations through a timeout helper`)
@@ -668,7 +668,7 @@ await runTest('files AI provider actions use shared guards and bounded mutations
     .split('\n')
     .filter((line) => /window\.api\.(createAiProvider|updateAiProvider|deleteAiProvider|testAiProvider)\(/.test(line))
 
-  assert.match(page, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(page, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(page, /const AI_PROVIDER_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(page, /const AI_PROVIDER_TEST_TIMEOUT_MS = 30000/)
   assert.match(page, /const saveProviderInFlightRef = useRef\(false\)/)
@@ -699,7 +699,7 @@ await runTest('users and roles security mutations use shared guards and bounded 
     .split('\n')
     .filter((line) => /window\.api\.(createUser|updateUser|changeUserPassword|createRole|updateRole|deleteRole)\(/.test(line))
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.mjs'/)
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const USER_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const ROLE_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const saveUserInFlightRef = useRef\(false\)/)

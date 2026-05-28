@@ -9,7 +9,7 @@ import { CustomersTab } from './CustomersTab'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'
-import { getFirstLoaderError, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.mjs'
+import { getFirstLoaderError, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
 
 const CONTACTS_EXPORT_LOAD_TIMEOUT_MS = 12000
 

@@ -3,9 +3,9 @@ import { useApp } from '../../../AppContext'
 import Modal from '../../shared/Modal'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.js'
-import { extractHistoryResultId } from '../../../utils/historyHelpers.mjs'
-import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.mjs'
-import { withLoaderTimeout } from '../../../utils/loaders.mjs'
+import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
+import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
+import { withLoaderTimeout } from '../../../utils/loaders.ts'
 
 const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000
 

@@ -7,10 +7,10 @@ import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
-import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
+import { runConcurrentTasks } from '../../utils/bulkOps.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -18,7 +18,7 @@ import {
   isTrackedRequestCurrent,
   settleLoaderMap,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 
 /**
  * 1. Branches Page

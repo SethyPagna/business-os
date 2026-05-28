@@ -3,8 +3,8 @@ import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, 
 import { useApp } from '../../AppContext'
 import { isTransientGatewayError } from '../../api/http.js'
 import { dispatchImportCompletionRefresh, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.js'
-import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.mjs'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.ts'
+import { withLoaderTimeout } from '../../utils/loaders.ts'
 
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])

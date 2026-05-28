@@ -10,7 +10,7 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../../utils/loaders.mjs'
+} from '../../../utils/loaders.ts'
 
 const FilePickerModal = lazy(() => import('../../files/FilePickerModal'))
 const BarcodeScannerModal = lazy(() => import('../scanning/BarcodeScannerModal'))

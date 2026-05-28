@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, useSync } from '../../AppContext'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+} from '../../utils/loaders.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
 const COLUMN_TYPES = ['text', 'long_text', 'number', 'decimal', 'boolean', 'date', 'timestamp', 'dropdown']
 const CUSTOM_TABLES_LOAD_TIMEOUT_MS = 8000

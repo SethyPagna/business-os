@@ -15,16 +15,16 @@ import { useApp, useSync } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 
 const loadFilesProvidersTab = () => import('./FilesProvidersTab.jsx')
 const loadFilesResponsesTab = () => import('./FilesResponsesTab.jsx')

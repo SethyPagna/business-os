@@ -7,7 +7,7 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 
 const DEFAULT_COLLAPSED = {
   inventory: false,

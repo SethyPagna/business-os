@@ -33,8 +33,8 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
-import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+} from '../../utils/loaders.ts'
+import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { SectionShell } from './catalogUi'
 import {
   createAboutBlock,
@@ -44,13 +44,13 @@ import {
   normalizePromoItems,
   serializeAboutBlocks,
   serializePromoItems,
-} from './portalEditorUtils.mjs'
+} from './portalEditorUtils.ts'
 import {
   getPortalGridClass,
   getPortalMobileGridClass,
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
-} from './portalCatalogDisplay.mjs'
+} from './portalCatalogDisplay.ts'
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
 import { ProductImg } from '../products/shared/primitives'
 import {
@@ -64,7 +64,7 @@ import {
   localizePortalProducts,
   normalizePortalTranslations,
   stringifyPortalTranslations,
-} from './portalContentI18n.mjs'
+} from './portalContentI18n.ts'
 import {
   applyGoogleTranslateSelection,
   ensurePortalTranslateScript,
@@ -78,7 +78,7 @@ import {
   storePortalTranslatePreference,
   writePortalTranslateTarget,
   clearGoogleTranslateCookies,
-} from './portalTranslateController.mjs'
+} from './portalTranslateController.ts'
 import {
   buildCacheBustedMediaPath,
   createInitialUploadState,

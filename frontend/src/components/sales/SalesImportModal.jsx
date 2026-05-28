@@ -6,8 +6,8 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+} from '../../utils/loaders.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 
 const SALES_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
@@ -22,7 +22,7 @@ function countSalesCsvRowsInWorker(text) {
 
   return new Promise((resolve, reject) => {
     const id = `sales-import-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const worker = new Worker(new URL('./salesImportWorker.mjs', import.meta.url), { type: 'module' })
+    const worker = new Worker(new URL('./salesImportWorker.ts', import.meta.url), { type: 'module' })
     const timeoutId = window.setTimeout(() => {
       cleanup()
       reject(new Error('Sales import row count timed out'))

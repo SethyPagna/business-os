@@ -1,8 +1,8 @@
 // ── EditReturnModal ──────────────────────────────────────────────────────────
 import { useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { withLoaderTimeout } from '../../utils/loaders.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
 

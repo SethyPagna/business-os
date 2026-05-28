@@ -9,7 +9,7 @@ import FieldOrderManager from './FieldOrderManager'
 import AllFieldsPanel    from './AllFieldsPanel'
 import ReceiptPreview    from './ReceiptPreview'
 import PrintSettings     from './PrintSettings'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
 const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000

@@ -12,7 +12,7 @@ import { APP_NAVIGATION_EVENT, getAdminPathForPage } from './app/appShellUtils.t
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
 import { parsePermissionMap } from './utils/permissions.js'
 import { normalizePriceValue } from './utils/pricing.js'
-import { withLoaderTimeout } from './utils/loaders.mjs'
+import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.js'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
 

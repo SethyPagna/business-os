@@ -17,8 +17,8 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+} from '../../utils/loaders.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
 const SERVER_PENDING_SYNC_TIMEOUT_MS = 8000
 const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000

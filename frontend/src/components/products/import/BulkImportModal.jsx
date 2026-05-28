@@ -7,9 +7,9 @@ import {
   getProductImportBarcodeIssue,
   isBlockingProductImportIssue,
   normalizeImportProductName,
-} from './productImportPlanner.mjs'
-import { beginNamedAction, finishNamedAction } from '../../../utils/actionGuards.mjs'
-import { withLoaderTimeout } from '../../../utils/loaders.mjs'
+} from './productImportPlanner.ts'
+import { beginNamedAction, finishNamedAction } from '../../../utils/actionGuards.ts'
+import { withLoaderTimeout } from '../../../utils/loaders.ts'
 
 const IMAGE_CONFLICT_OPTIONS = [
   { value: 'keep_existing', label: 'Keep existing images' },
@@ -102,7 +102,7 @@ function analyzeProductCsvInWorker({ text, existingProducts, onProgress }) {
       })
     }
     try {
-      worker = new Worker(new URL('./productImportWorker.mjs', import.meta.url), { type: 'module' })
+      worker = new Worker(new URL('./productImportWorker.ts', import.meta.url), { type: 'module' })
       timeoutId = setTimeout(() => {
         runFallback(new Error('Import analysis worker timed out'))
       }, PRODUCT_IMPORT_ANALYSIS_TIMEOUT_MS)

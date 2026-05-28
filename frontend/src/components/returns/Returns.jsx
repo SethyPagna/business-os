@@ -8,16 +8,16 @@ import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
+import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+} from '../../utils/loaders.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 const ReturnDetailModal = lazy(() => import('./ReturnDetailModal'))
 const EditReturnModal = lazy(() => import('./EditReturnModal'))
 const NewReturnModal = lazy(() => import('./NewReturnModal'))

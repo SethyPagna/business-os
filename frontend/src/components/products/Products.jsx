@@ -20,13 +20,13 @@ import {
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildProductGroupSections } from '../../utils/productGrouping.ts'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.mjs'
-import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
+import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
+import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.ts'
 import { getAvailableYears, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.ts'
-import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { runConcurrentTasks } from '../../utils/bulkOps.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.js'
 import {
@@ -36,7 +36,7 @@ import {
   isTrackedRequestCurrent,
   settleLoaderMap,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 import { getContrastingTextColor } from '../../utils/color.js'
 import {
   CREATED_MONTH_OPTIONS,
@@ -48,13 +48,13 @@ import {
   PRODUCT_DELETE_MUTATION_TIMEOUT_MS,
   PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
   PRODUCT_STOCK_MUTATION_TIMEOUT_MS,
-} from './config/productPageConfig.mjs'
+} from './config/productPageConfig.ts'
 import {
   normalizeBrandLookup,
   parseBrandColorMap,
   useDebouncedValue,
   waitForNextFrame,
-} from './helpers/productPageHelpers.mjs'
+} from './helpers/productPageHelpers.ts'
 import {
   buildProductLightboxGalleryInput,
   buildProductLightboxState,
@@ -67,7 +67,7 @@ import {
   buildProductSearchTerms,
   filterProductsForPage,
   getProductBranchQuantity,
-} from './helpers/productFilterHelpers.mjs'
+} from './helpers/productFilterHelpers.ts'
 import {
   buildJumpTargetIdsByLetter,
   buildParentProductIdSet,
@@ -79,11 +79,11 @@ import {
   isSelectionScopeFullySelected as isSelectionScopeFullySelectedHelper,
   isSelectionScopePartiallySelected as isSelectionScopePartiallySelectedHelper,
   normalizePositiveProductIds,
-} from './helpers/productSelectionHelpers.mjs'
+} from './helpers/productSelectionHelpers.ts'
 import {
   buildProductGroupPriceLabel,
   buildProductGroupSummaryParts,
-} from './helpers/productGroupViewHelpers.mjs'
+} from './helpers/productGroupViewHelpers.ts'
 import {
   buildDeletedProductIdSet,
   buildDefinedProductUpdates,
@@ -100,7 +100,7 @@ import {
   getPreferredProductRestoreBranchId,
   resolveRestoredProductParentId,
   summarizeProductBulkRun,
-} from './helpers/productWriteHelpers.mjs'
+} from './helpers/productWriteHelpers.ts'
 import {
   buildBranchNameByIdMap,
   buildNameLookupMap,
@@ -108,13 +108,13 @@ import {
   buildProductBranchSummaryLabel,
   buildProductBrandOptions,
   getProductStockStatus,
-} from './helpers/productDisplayHelpers.mjs'
+} from './helpers/productDisplayHelpers.ts'
 import {
   buildProductExportItems,
   buildProductFilterSections,
   buildProductSupplierOptions,
   countActiveProductFilters,
-} from './helpers/productMenuHelpers.mjs'
+} from './helpers/productMenuHelpers.ts'
 
 const ManageCategoriesModal = lazy(() => import('./lookups/ManageCategoriesModal'))
 const ManageBrandsModal = lazy(() => import('./lookups/ManageBrandsModal'))

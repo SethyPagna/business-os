@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
-import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.mjs'
-import { withLoaderTimeout } from '../../../utils/loaders.mjs'
+import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
+import { withLoaderTimeout } from '../../../utils/loaders.ts'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
 

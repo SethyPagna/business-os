@@ -203,7 +203,7 @@ export function buildZipInWorker(files: ZipFileInput[] = [], options: { timeoutM
     }
     timeout = globalThis.setTimeout(() => finish(buildZip(files)), timeoutMs)
     try {
-      worker = new Worker(new URL('./csvExportWorker.mjs', import.meta.url), { type: 'module' })
+      worker = new Worker(new URL('./csvExportWorker.ts', import.meta.url), { type: 'module' })
       worker.onmessage = (event) => {
         const message = event?.data || {}
         finish(message.type === 'result' ? message.blob : null)

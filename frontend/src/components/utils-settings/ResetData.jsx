@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
 import { AlertTriangle, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react'
 import { useApp } from '../../AppContext'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { withLoaderTimeout } from '../../utils/loaders.ts'
 
 const RESET_DATA_TIMEOUT_MS = 60000
 const FACTORY_RESET_TIMEOUT_MS = 90000

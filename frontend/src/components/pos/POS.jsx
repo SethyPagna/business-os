@@ -40,7 +40,7 @@ import {
   resolveCartPriceValues,
   getCartLineId,
   findMatchingCartLineIndex,
-} from './posCore.mjs'
+} from './posCore.ts'
 import { getStatusLabel } from '../sales/StatusBadge'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import {
@@ -48,7 +48,7 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'

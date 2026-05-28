@@ -18,14 +18,14 @@ const InventoryMovementsSurface = lazy(() => import('./InventoryMovementsSurface
 const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface'))
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
+import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { aggregateInitialOptions, buildInitialOptionsFromProducts } from '../../utils/initials.ts'
 import { buildProductGroupSections } from '../../utils/productGrouping.ts'
-import { buildBatchPreview } from '../../utils/productBatches.mjs'
-import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { buildBatchPreview } from '../../utils/productBatches.ts'
+import { runConcurrentTasks } from '../../utils/bulkOps.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
@@ -34,7 +34,7 @@ import {
   isTrackedRequestCurrent,
   settleLoaderMap,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 
 const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 const INVENTORY_USER_OPTIONS_TIMEOUT_MS = 8000

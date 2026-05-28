@@ -2,19 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../../shared/Modal'
 import ActionHistoryBar from '../../shared/ActionHistoryBar.jsx'
 import { useApp } from '../../../AppContext'
-import { useActionHistory } from '../../../utils/actionHistory.mjs'
-import { beginNamedAction, finishNamedAction } from '../../../utils/actionGuards.mjs'
+import { useActionHistory } from '../../../utils/actionHistory.ts'
+import { beginNamedAction, finishNamedAction } from '../../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../../utils/loaders.mjs'
+} from '../../../utils/loaders.ts'
 import {
   fetchLookupProductSnapshots,
   normalizeLookup,
   restoreLookupProductSnapshots,
-} from './productLookupSnapshots.mjs'
+} from './productLookupSnapshots.ts'
 
 const DEFAULT_BRAND_COLOR = '#f97316'
 const PRODUCT_BRAND_LOOKUP_TIMEOUT_MS = 10000

@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
 import { useApp } from '../../AppContext'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 
 const CONTACT_IMPORT_CONFIG = {
@@ -37,7 +37,7 @@ function countCsvDataRowsInWorker(text) {
 
   return new Promise((resolve, reject) => {
     const id = `contact-import-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const worker = new Worker(new URL('./contactImportWorker.mjs', import.meta.url), { type: 'module' })
+    const worker = new Worker(new URL('./contactImportWorker.ts', import.meta.url), { type: 'module' })
     const timeoutId = window.setTimeout(() => {
       cleanup()
       reject(new Error('Contact import row count timed out'))

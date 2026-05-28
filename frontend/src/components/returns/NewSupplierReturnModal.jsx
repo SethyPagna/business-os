@@ -5,8 +5,8 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.mjs'
+} from '../../utils/loaders.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS = 12000

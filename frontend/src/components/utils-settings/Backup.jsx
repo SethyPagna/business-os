@@ -2,14 +2,14 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { ArchiveRestore, CheckCircle2, Cloud, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
-import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { useActionHistory } from '../../utils/actionHistory.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-} from '../../utils/loaders.mjs'
+} from '../../utils/loaders.ts'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
