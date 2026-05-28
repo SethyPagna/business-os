@@ -2871,7 +2871,7 @@ Cleanup checkpoint:
   movements, 610 audit import jobs, 752 action-history rows, 752 audit-log rows,
   related dependent rows, and 396 generated audit import directories while
   preserving imported/core data. Postcheck dry-runs report zero QA database
-  matches and zero audit import files. `full-app-audit.mjs` now runs this
+  matches and zero audit import files. `full-app-audit.ts` now runs this
   cleanup in `finally`, and a live undo/redo action-history check passed before
   its QA verification row was removed.
 - Move 236 adds machine-readable QA/smoke cleanup guardrails:
@@ -2880,7 +2880,7 @@ Cleanup checkpoint:
   `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json`. The coverage verifies the
   cleanup script/package entry, dry-run default, explicit apply gate,
   QA-bounded selectors, dependent-row deletion coverage, workspace-bounded
-  generated import cleanup, report output support, and `full-app-audit.mjs`
+  generated import cleanup, report output support, and `full-app-audit.ts`
   `finally` cleanup wiring. Phase 29 repeat compares this coverage object so
   future smoke/live-test changes must preserve cleanup behavior.
 - Move 237 makes live smoke tests self-cleaning by prefix:
@@ -5142,3 +5142,10 @@ Move 464 status:
   notification, branch stock, sales, product, portal, POS, inventory,
   contacts, loyalty, users, profile, audit/settings, backup, and sync-server
   probes while `phase84-live-suite.ts` now points at the TypeScript entrypoint.
+
+Move 465 status:
+- Move 465 converts the full app audit to TypeScript. `full-app-audit.ts`
+  preserves the HTML route, API read, FEFO, import, file, backup, cleanup,
+  remote public, health, and HTML-report audit flow while Docker release
+  verification, backend source assertions, and the deep live audit launcher now
+  reference the TypeScript entrypoint.

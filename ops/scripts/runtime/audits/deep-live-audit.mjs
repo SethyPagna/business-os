@@ -251,7 +251,7 @@ async function runFullApiAudit() {
   const fullAuditDir = path.join(REPORT_DIR, 'api-system')
   artifacts.fullAuditReportDir = fullAuditDir
   await fs.mkdir(fullAuditDir, { recursive: true })
-  const result = await runCommand(process.execPath, [path.join(ROOT_DIR, 'ops/scripts/runtime/audits/full-app-audit.mjs')], {
+  const result = await runCommand(process.execPath, [path.join(ROOT_DIR, 'ops/scripts/runtime/audits/full-app-audit.ts')], {
     cwd: path.join(ROOT_DIR, 'backend'),
     env: {
       BOS_BASE_URL: BASE_URL,
@@ -263,7 +263,7 @@ async function runFullApiAudit() {
     stream: false,
   })
   summary.fullAudit = {
-    command: 'node ../ops/scripts/runtime/audits/full-app-audit.mjs',
+    command: 'node ../ops/scripts/runtime/audits/full-app-audit.ts',
     code: result.code,
     ms: result.ms,
     stdoutTail: result.stdout.slice(-4000),

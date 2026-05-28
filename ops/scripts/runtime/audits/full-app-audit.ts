@@ -24,7 +24,26 @@ const CLEANUP_TEST_DATA = String(process.env.BOS_AUDIT_CLEANUP || '1').trim() !=
 
 const ROUTES = FULL_AUDIT_ROUTES
 
-const summary = {
+type AuditState = { cookie?: string }
+type RequestOptions = { timeoutMs?: number }
+type RequestResult = {
+  ok: boolean
+  status: number
+  ms: number
+  payload: any
+  error?: string
+}
+type FullAuditSummary = {
+  audit: Record<string, any>
+  health: Record<string, any>
+  routes: any[]
+  api: any[]
+  writeFlows: Record<string, any>
+  findings: any[]
+  artifacts: Record<string, any>
+}
+
+const summary: FullAuditSummary = {
   audit: {
     baseUrl: BASE_URL,
     reportDir: REPORT_DIR,
@@ -39,11 +58,11 @@ const summary = {
   artifacts: {},
 }
 
-function wait(ms) {
+function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function pushFinding(priority, area, message, extra = {}) {
+function pushFinding(priority: number, area: string, message: string, extra: Record<string, any> = {}): void {
   summary.findings.push({
     priority,
     area,
@@ -52,15 +71,15 @@ function pushFinding(priority, area, message, extra = {}) {
   })
 }
 
-function assert(condition, message) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
-function isJsonResponse(response) {
+function isJsonResponse(response: Response): boolean {
   return String(response.headers.get('content-type') || '').toLowerCase().includes('application/json')
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(new Error(`Request timed out after ${timeoutMs}ms`)), timeoutMs)
   try {
@@ -70,7 +89,14 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
   }
 }
 
-async function request(state, method, pathname, body = null, extraHeaders = {}, options = {}) {
+async function request(
+  state: AuditState | null,
+  method: string,
+  pathname: string,
+  body: any = null,
+  extraHeaders: Record<string, string> = {},
+  options: RequestOptions = {},
+): Promise<RequestResult> {
   const started = performance.now()
   const headers = {
     ...(state?.cookie ? { cookie: state.cookie } : {}),
@@ -109,7 +135,7 @@ async function request(state, method, pathname, body = null, extraHeaders = {}, 
   }
 }
 
-function recordApi(name, result, critical = true) {
+function recordApi(name: string, result: RequestResult, critical = true): any {
   const entry = {
     name,
     status: result.status,
@@ -127,7 +153,7 @@ function recordApi(name, result, critical = true) {
   return result.payload
 }
 
-async function login() {
+async function login(): Promise<AuditState> {
   const started = performance.now()
   const session = await loginWithFetch({
     baseUrl: BASE_URL,
@@ -140,7 +166,7 @@ async function login() {
   return { cookie: session.cookieHeader }
 }
 
-async function captureHealth(state, phase) {
+async function captureHealth(state: AuditState, phase: string): Promise<any> {
   const response = await request(state, 'GET', '/health')
   const health = recordApi(`health ${phase}`, response)
   assert(health.status === 'ok', `Health check is not ok during ${phase}`)
@@ -154,7 +180,7 @@ async function captureHealth(state, phase) {
   return health
 }
 
-async function auditHtmlRoutes(state, health) {
+async function auditHtmlRoutes(state: AuditState, health: any): Promise<void> {
   const serverHash = health?.runtime?.frontend?.hash || ''
   for (const route of ROUTES) {
     const started = performance.now()
@@ -181,7 +207,7 @@ async function auditHtmlRoutes(state, health) {
   }
 }
 
-async function auditReadEndpoints(state) {
+async function auditReadEndpoints(state: AuditState): Promise<void> {
   for (const route of ROUTES) {
     for (const endpoint of route.api) {
       const payload = recordApi(`${route.name} ${endpoint}`, await request(state, 'GET', endpoint))
@@ -215,7 +241,7 @@ async function auditReadEndpoints(state) {
   assert(Array.isArray(analytics.periodData), 'Analytics periodData missing')
 }
 
-async function getActiveBranches(state) {
+async function getActiveBranches(state: AuditState): Promise<any[]> {
   const branches = recordApi('branches for write flow', await request(state, 'GET', '/api/branches'))
   const activeBranches = (Array.isArray(branches) ? branches : []).filter((branch) => Number(branch?.is_active ?? 1) === 1)
   const branchId = Number(activeBranches?.[0]?.id || 0)
@@ -224,7 +250,7 @@ async function getActiveBranches(state) {
   return { branchId, secondaryBranchId }
 }
 
-async function runFefoWriteFlow(state) {
+async function runFefoWriteFlow(state: AuditState): Promise<any> {
   const { branchId, secondaryBranchId } = await getActiveBranches(state)
   const seed = SMOKE_PREFIX
   const artifacts = {}
@@ -379,7 +405,7 @@ async function runFefoWriteFlow(state) {
   return { branchId, variantA, variantB, seed, artifacts }
 }
 
-async function runImportFlow(state, seed) {
+async function runImportFlow(state: AuditState, seed: string): Promise<void> {
   const tmpCsv = path.join(os.tmpdir(), `business-os-full-audit-${Date.now()}.csv`)
   const importedName = `${seed} Imported`
   const barcode = `QAIMP${Date.now()}`
@@ -429,14 +455,14 @@ async function runImportFlow(state, seed) {
   }
 }
 
-function tinyPngBytes() {
+function tinyPngBytes(): Uint8Array {
   return Uint8Array.from(Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
     'base64',
   ))
 }
 
-async function runFilesFlow(state, seed) {
+async function runFilesFlow(state: AuditState, seed: string): Promise<void> {
   const fileName = `${seed.replace(/[^A-Za-z0-9_-]+/g, '-')}.png`.slice(0, 90)
   const formData = new FormData()
   formData.append('file', new Blob([tinyPngBytes()], { type: 'image/png' }), fileName)
@@ -451,7 +477,7 @@ async function runFilesFlow(state, seed) {
   summary.writeFlows.files = { ok: true, uploadedId: uploaded.id, fileName }
 }
 
-async function runBackupFlow(state) {
+async function runBackupFlow(state: AuditState): Promise<void> {
   const status = recordApi('drive sync status before queue', await request(state, 'GET', '/api/system/drive-sync/status'))
   const item = status?.item || {}
   const versionsBefore = recordApi('backup versions before queue', await request(state, 'GET', '/api/system/backups/versions?limit=5'))
@@ -488,7 +514,12 @@ async function runBackupFlow(state) {
   }
 }
 
-async function pollSystemJob(state, jobId, label, options = {}) {
+async function pollSystemJob(
+  state: AuditState,
+  jobId: string,
+  label: string,
+  options: { allowLongRunning?: boolean } = {},
+): Promise<any> {
   const deadline = Date.now() + (options.allowLongRunning ? 20_000 : JOB_TIMEOUT_MS)
   let latest = null
   while (Date.now() < deadline) {
@@ -501,7 +532,7 @@ async function pollSystemJob(state, jobId, label, options = {}) {
   return latest
 }
 
-async function cleanupAuditData() {
+async function cleanupAuditData(): Promise<void> {
   if (!CLEANUP_TEST_DATA) {
     summary.writeFlows.cleanup = { ok: true, skipped: true, reason: 'BOS_AUDIT_CLEANUP=0' }
     return
@@ -532,7 +563,7 @@ async function cleanupAuditData() {
   }
 }
 
-async function auditRemotePublic() {
+async function auditRemotePublic(): Promise<void> {
   const checks = [
     { name: 'remote public website', url: 'https://leangcosmetics.dpdns.org/public', redirect: 'follow' },
     { name: 'remote admin entry', url: 'https://admin.leangcosmetics.dpdns.org/', redirect: 'manual' },
@@ -567,7 +598,7 @@ async function auditRemotePublic() {
   }
 }
 
-async function writeSummary() {
+async function writeSummary(): Promise<void> {
   summary.audit.finishedAt = new Date().toISOString()
   summary.audit.durationMs = Math.round(performance.now() - startMs)
   summary.audit.ok = !summary.findings.some((finding) => Number(finding.priority || 0) <= 1)
@@ -578,7 +609,7 @@ async function writeSummary() {
 
 const startMs = performance.now()
 
-async function main() {
+async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
   const state = await login()
   const healthBefore = await captureHealth(state, 'before')
@@ -610,7 +641,7 @@ async function main() {
   }
 }
 
-main().catch(async (error) => {
+main().catch(async (error: any) => {
   pushFinding(0, 'audit', error?.message || String(error), {
     stack: error?.stack || '',
   })

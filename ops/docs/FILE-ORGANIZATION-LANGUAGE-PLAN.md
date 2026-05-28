@@ -1960,7 +1960,7 @@ Decision rule:
     QA products, 596 sales, 596 returns, 6,444 inventory movements, 610 audit
     import jobs, 752 action-history rows, 752 audit-log rows, and 396 generated
     audit import directories. A postcheck dry-run now reports zero remaining QA
-    matches. `ops/scripts/runtime/audits/full-app-audit.mjs` calls the cleanup
+    matches. `ops/scripts/runtime/audits/full-app-audit.ts` calls the cleanup
     in a `finally` block, so future write-heavy audits remove their own test
     records. A live action-history check created a QA row, exercised
     `/undo` and `/redo`, verified the final `undoable` status, and then removed
@@ -3636,6 +3636,12 @@ Decision rule:
     product import/search, portal, POS, inventory, contacts, loyalty, users,
     profile, audit/settings, backup, and sync-server browser probes while
     adding typed health, console-entry, and observed-request boundaries.
+455. Convert the full app audit to TypeScript. Done:
+    `full-app-audit.ts` replaces the `.mjs` full audit entrypoint. Docker
+    release verification, backend source assertions, and the deep live audit
+    launcher now point at the TypeScript path while the audit keeps its HTML
+    route checks, read endpoint checks, FEFO/import/file/backup write flows,
+    final cleanup, remote public probes, and HTML report generation.
 
 ## Safety Gates
 
