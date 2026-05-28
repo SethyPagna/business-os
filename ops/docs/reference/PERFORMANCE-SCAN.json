@@ -1,10 +1,10 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 354,
+  "sourceFiles": 358,
   "distAssets": 87,
-  "totalSourceBytes": 5577982,
-  "totalSourceLines": 123110,
+  "totalSourceBytes": 5708584,
+  "totalSourceLines": 126240,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 250756,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -29,7 +29,8 @@
     "frontend/src/components/products/import/BulkImportModal.jsx",
     "frontend/src/components/utils-settings/Settings.jsx",
     "frontend/src/lang/en.json",
-    "frontend/src/lang/km.json"
+    "frontend/src/lang/km.json",
+    "ops/scripts/architecture/language-runtime-audit.ts"
   ],
   "oversizedBuiltChunks": [
     "frontend/dist/assets/catalog-CGuX6TkN.js",
@@ -115,6 +116,11 @@
       "lines": 1490
     },
     {
+      "file": "ops/scripts/architecture/language-runtime-audit.ts",
+      "size": 69562,
+      "lines": 1574
+    },
+    {
       "file": "backend/src/routes/system/index.js",
       "size": 66845,
       "lines": 1659
@@ -158,11 +164,6 @@
       "file": "backend/src/routes/portal.js",
       "size": 52672,
       "lines": 1407
-    },
-    {
-      "file": "frontend/src/components/users/Users.jsx",
-      "size": 51650,
-      "lines": 1036
     }
   ],
   "topSourceByLines": [
@@ -242,6 +243,11 @@
       "lines": 1603
     },
     {
+      "file": "ops/scripts/architecture/language-runtime-audit.ts",
+      "size": 69562,
+      "lines": 1574
+    },
+    {
       "file": "backend/src/routes/sales.js",
       "size": 66182,
       "lines": 1573
@@ -285,11 +291,6 @@
       "file": "frontend/src/components/utils-settings/AuditLog.jsx",
       "size": 57543,
       "lines": 1198
-    },
-    {
-      "file": "frontend/src/components/users/UserProfileModal.jsx",
-      "size": 63938,
-      "lines": 1158
     }
   ],
   "topBuiltChunks": [

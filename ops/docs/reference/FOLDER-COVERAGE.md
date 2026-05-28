@@ -1511,10 +1511,10 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `generated-bulk-audit.mjs` | Project source/support file |
-| 2 | `language-runtime-audit.mjs` | Project source/support file |
-| 3 | `organization-audit.mjs` | Project source/support file |
-| 4 | `phase29-audit.mjs` | Project source/support file |
+| 1 | `generated-bulk-audit.ts` | Project source/support file |
+| 2 | `language-runtime-audit.ts` | Project source/support file |
+| 3 | `organization-audit.ts` | Project source/support file |
+| 4 | `phase29-audit.ts` | Project source/support file |
 
 
 ### 3.68 Folder: `ops/scripts/backend`

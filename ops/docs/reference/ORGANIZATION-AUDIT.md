@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-28T01:08:43.240Z
+Generated: 2026-05-28T01:14:13.687Z
 
 ## Summary
 
@@ -15,10 +15,10 @@ Generated: 2026-05-28T01:08:43.240Z
 | Extension | Files |
 | --- | --- |
 | .js | 185 |
-| .ts | 168 |
+| .ts | 172 |
 | .jsx | 107 |
 | .md | 44 |
-| .mjs | 37 |
+| .mjs | 33 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -65,13 +65,13 @@ Generated: 2026-05-28T01:08:43.240Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 12118 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8328 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 9355 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8327 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7085 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5026 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5035 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3552 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3559 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2823 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
@@ -87,12 +87,12 @@ Generated: 2026-05-28T01:08:43.240Z
 | frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |
 | frontend/src/components/products/import/BulkImportModal.jsx | 1907 | frontend/components/products |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
-| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1822 | ops/docs/reference |
+| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1814 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1788 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1603 | frontend/src/AppContext.jsx |
-| ops/scripts/architecture/language-runtime-audit.mjs | 1578 | ops/scripts/architecture |
+| ops/scripts/architecture/language-runtime-audit.ts | 1574 | ops/scripts/architecture |
 | backend/src/routes/sales.js | 1573 | backend/routes |
 | backend/src/services/googleDriveSync/index.js | 1564 | backend/services |
 

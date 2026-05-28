@@ -29,6 +29,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/inventory.js` | 83.8 | 1881 |
 | `frontend/src/components/utils-settings/Settings.jsx` | 80.6 | 1730 |
 | `frontend/src/components/utils-settings/Backup.jsx` | 70.6 | 1490 |
+| `ops/scripts/architecture/language-runtime-audit.ts` | 67.9 | 1574 |
 | `backend/src/routes/system/index.js` | 65.3 | 1659 |
 | `backend/src/routes/sales.js` | 64.6 | 1573 |
 | `frontend/src/AppContext.jsx` | 64.2 | 1603 |
@@ -38,7 +39,6 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/utils-settings/AuditLog.jsx` | 56.2 | 1198 |
 | `frontend/src/App.jsx` | 53.2 | 1387 |
 | `backend/src/routes/portal.js` | 51.4 | 1407 |
-| `frontend/src/components/users/Users.jsx` | 50.4 | 1036 |
 
 ## 3. Largest Source Files (by lines)
 
@@ -59,6 +59,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/utils-settings/Settings.jsx` | 1730 | 80.6 |
 | `backend/src/routes/system/index.js` | 1659 | 65.3 |
 | `frontend/src/AppContext.jsx` | 1603 | 64.2 |
+| `ops/scripts/architecture/language-runtime-audit.ts` | 1574 | 67.9 |
 | `backend/src/routes/sales.js` | 1573 | 64.6 |
 | `backend/src/services/googleDriveSync/index.js` | 1564 | 57.8 |
 | `frontend/src/components/utils-settings/Backup.jsx` | 1490 | 70.6 |
@@ -68,7 +69,6 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1295 | 95.9 |
 | `backend/src/fileAssets.js` | 1261 | 43.9 |
 | `frontend/src/components/utils-settings/AuditLog.jsx` | 1198 | 56.2 |
-| `frontend/src/components/users/UserProfileModal.jsx` | 1158 | 62.4 |
 
 ## 4. Largest Built Chunks
 

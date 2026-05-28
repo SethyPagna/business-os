@@ -459,10 +459,10 @@ Code files documented: **506**
 | 447 | `frontend/tests/storagePolicy.test.ts` | 1 | 0 | 0 | 0 |
 | 448 | `frontend/tests/utilsSettingsBarrel.test.ts` | 2 | 0 | 0 | 0 |
 | 449 | `frontend/vite.config.ts` | 8 | 1 | 0 | 0 |
-| 450 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 6 | 0 | 2 | 0 |
-| 451 | `ops/scripts/architecture/language-runtime-audit.mjs` | 6 | 0 | 2 | 0 |
-| 452 | `ops/scripts/architecture/organization-audit.mjs` | 6 | 0 | 2 | 0 |
-| 453 | `ops/scripts/architecture/phase29-audit.mjs` | 7 | 0 | 2 | 0 |
+| 450 | `ops/scripts/architecture/generated-bulk-audit.ts` | 4 | 0 | 2 | 0 |
+| 451 | `ops/scripts/architecture/language-runtime-audit.ts` | 4 | 0 | 2 | 0 |
+| 452 | `ops/scripts/architecture/organization-audit.ts` | 4 | 0 | 2 | 0 |
+| 453 | `ops/scripts/architecture/phase29-audit.ts` | 5 | 0 | 2 | 0 |
 | 454 | `ops/scripts/backend/schema-audit.js` | 2 | 0 | 0 | 0 |
 | 455 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
 | 456 | `ops/scripts/backend/verify-data-integrity.js` | 3 | 0 | 0 | 0 |
@@ -7495,65 +7495,57 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.450 `ops/scripts/architecture/generated-bulk-audit.mjs`
+### 3.450 `ops/scripts/architecture/generated-bulk-audit.ts`
 
 - Declared exports: none detected
-- Imports (6)
+- Imports (4)
   - `../lib/fs-utils.js`
   - `../lib/report-utils.js`
   - `node:fs/promises`
-  - `node:module`
   - `node:path`
-  - `node:url`
 - Internal dependencies (2)
   - `ops/scripts/lib/fs-utils.js`
   - `ops/scripts/lib/report-utils.js`
 - Referenced by (0)
   - none
 
-### 3.451 `ops/scripts/architecture/language-runtime-audit.mjs`
+### 3.451 `ops/scripts/architecture/language-runtime-audit.ts`
 
 - Declared exports: none detected
-- Imports (6)
+- Imports (4)
   - `../lib/fs-utils.js`
   - `../lib/report-utils.js`
   - `node:fs/promises`
-  - `node:module`
   - `node:path`
-  - `node:url`
 - Internal dependencies (2)
   - `ops/scripts/lib/fs-utils.js`
   - `ops/scripts/lib/report-utils.js`
 - Referenced by (0)
   - none
 
-### 3.452 `ops/scripts/architecture/organization-audit.mjs`
+### 3.452 `ops/scripts/architecture/organization-audit.ts`
 
 - Declared exports: none detected
-- Imports (6)
+- Imports (4)
   - `../lib/fs-utils.js`
   - `../lib/report-utils.js`
   - `node:fs/promises`
-  - `node:module`
   - `node:path`
-  - `node:url`
 - Internal dependencies (2)
   - `ops/scripts/lib/fs-utils.js`
   - `ops/scripts/lib/report-utils.js`
 - Referenced by (0)
   - none
 
-### 3.453 `ops/scripts/architecture/phase29-audit.mjs`
+### 3.453 `ops/scripts/architecture/phase29-audit.ts`
 
 - Declared exports: none detected
-- Imports (7)
+- Imports (5)
   - `../lib/fs-utils.js`
   - `../lib/report-utils.js`
   - `node:child_process`
   - `node:fs/promises`
-  - `node:module`
   - `node:path`
-  - `node:url`
 - Internal dependencies (2)
   - `ops/scripts/lib/fs-utils.js`
   - `ops/scripts/lib/report-utils.js`
@@ -7639,10 +7631,10 @@ Code files documented: **506**
 - Internal dependencies (0)
   - none
 - Referenced by (13)
-  - `ops/scripts/architecture/generated-bulk-audit.mjs`
-  - `ops/scripts/architecture/language-runtime-audit.mjs`
-  - `ops/scripts/architecture/organization-audit.mjs`
-  - `ops/scripts/architecture/phase29-audit.mjs`
+  - `ops/scripts/architecture/generated-bulk-audit.ts`
+  - `ops/scripts/architecture/language-runtime-audit.ts`
+  - `ops/scripts/architecture/organization-audit.ts`
+  - `ops/scripts/architecture/phase29-audit.ts`
   - `ops/scripts/frontend/verify-i18n.js`
   - `ops/scripts/frontend/verify-ui.js`
   - `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
@@ -7661,10 +7653,10 @@ Code files documented: **506**
 - Internal dependencies (0)
   - none
 - Referenced by (5)
-  - `ops/scripts/architecture/generated-bulk-audit.mjs`
-  - `ops/scripts/architecture/language-runtime-audit.mjs`
-  - `ops/scripts/architecture/organization-audit.mjs`
-  - `ops/scripts/architecture/phase29-audit.mjs`
+  - `ops/scripts/architecture/generated-bulk-audit.ts`
+  - `ops/scripts/architecture/language-runtime-audit.ts`
+  - `ops/scripts/architecture/organization-audit.ts`
+  - `ops/scripts/architecture/phase29-audit.ts`
   - `ops/scripts/runtime/audits/audit-report-html.mjs`
 
 ### 3.462 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`

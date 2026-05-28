@@ -218,7 +218,7 @@
     "ops/docs/reference/TRANSLATION-REFERENCE.md",
     "ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md",
     "ops/docs/whole-app-hardening.md",
-    "ops/scripts/architecture/language-runtime-audit.mjs",
+    "ops/scripts/architecture/language-runtime-audit.ts",
     "ops/scripts/powershell/docker-release.ps1",
     "ops/scripts/runtime/audits/deep-live-audit.mjs",
     "ops/scripts/runtime/browser-action-smoke.mjs",

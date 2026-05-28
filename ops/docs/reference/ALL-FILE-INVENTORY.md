@@ -489,10 +489,10 @@ Total files documented: **569**
 | 477 | `frontend/tests/utilsSettingsBarrel.test.ts` | frontend-root | 19 | 1.1 | Project source/support file |
 | 478 | `frontend/tsconfig.json` | frontend-root | 45 | 1.2 | Configuration/data manifest |
 | 479 | `frontend/vite.config.ts` | frontend-root | 246 | 9.5 | Project source/support file |
-| 480 | `ops/scripts/architecture/generated-bulk-audit.mjs` | project-scripts | 607 | 23.0 | Project source/support file |
-| 481 | `ops/scripts/architecture/language-runtime-audit.mjs` | project-scripts | 1578 | 68.1 | Project source/support file |
-| 482 | `ops/scripts/architecture/organization-audit.mjs` | project-scripts | 385 | 17.1 | Project source/support file |
-| 483 | `ops/scripts/architecture/phase29-audit.mjs` | project-scripts | 576 | 20.1 | Project source/support file |
+| 480 | `ops/scripts/architecture/generated-bulk-audit.ts` | project-scripts | 603 | 22.8 | Project source/support file |
+| 481 | `ops/scripts/architecture/language-runtime-audit.ts` | project-scripts | 1574 | 67.9 | Project source/support file |
+| 482 | `ops/scripts/architecture/organization-audit.ts` | project-scripts | 381 | 16.9 | Project source/support file |
+| 483 | `ops/scripts/architecture/phase29-audit.ts` | project-scripts | 572 | 19.9 | Project source/support file |
 | 484 | `ops/scripts/backend/schema-audit.js` | project-scripts | 496 | 16.9 | Project source/support file |
 | 485 | `ops/scripts/backend/schema-primary-key-preflight.ts` | project-scripts | 216 | 8.3 | Project source/support file |
 | 486 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |

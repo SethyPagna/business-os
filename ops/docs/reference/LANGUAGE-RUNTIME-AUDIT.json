@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T01:08:42.951Z",
+  "generatedAt": "2026-05-28T01:14:13.348Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -25,7 +25,7 @@
     ],
     [
       "TypeScript",
-      160
+      164
     ],
     [
       "React JSX",
@@ -38,10 +38,6 @@
     [
       "PowerShell",
       8
-    ],
-    [
-      "JavaScript modules",
-      4
     ],
     [
       "Shell",
@@ -67,7 +63,7 @@
     ],
     [
       ".ts",
-      160
+      164
     ],
     [
       ".jsx",
@@ -80,10 +76,6 @@
     [
       ".ps1",
       8
-    ],
-    [
-      ".mjs",
-      4
     ],
     [
       ".sh",
@@ -163,7 +155,7 @@
       "evidence": "Move 173 inspection found the file ranked because it contains DDL and indexes; ops/docs/SCHEMA-RELATIONSHIPS.md already tracks the safe DDL backlog and migration gates."
     },
     {
-      "file": "ops/scripts/architecture/language-runtime-audit.mjs",
+      "file": "ops/scripts/architecture/language-runtime-audit.ts",
       "decision": "keep as Node.js meta-audit and exclude from SQL/DuckDB conversion queue",
       "reason": "The script ranks itself because it contains report strings, SQL/data-path proof labels, and completed-slice metadata. It is a small deterministic report generator, not a runtime query or import hot path.",
       "evidence": "Move 179 inspection found the remaining SQL/DuckDB candidate was the audit script itself after backend routes and service data paths were optimized or governed by schema protocol."

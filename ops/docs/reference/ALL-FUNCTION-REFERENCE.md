@@ -459,10 +459,10 @@ Code files scanned: **506**
 | 447 | `frontend/tests/storagePolicy.test.ts` | 1 |
 | 448 | `frontend/tests/utilsSettingsBarrel.test.ts` | 0 |
 | 449 | `frontend/vite.config.ts` | 5 |
-| 450 | `ops/scripts/architecture/generated-bulk-audit.mjs` | 18 |
-| 451 | `ops/scripts/architecture/language-runtime-audit.mjs` | 20 |
-| 452 | `ops/scripts/architecture/organization-audit.mjs` | 15 |
-| 453 | `ops/scripts/architecture/phase29-audit.mjs` | 13 |
+| 450 | `ops/scripts/architecture/generated-bulk-audit.ts` | 18 |
+| 451 | `ops/scripts/architecture/language-runtime-audit.ts` | 20 |
+| 452 | `ops/scripts/architecture/organization-audit.ts` | 15 |
+| 453 | `ops/scripts/architecture/phase29-audit.ts` | 13 |
 | 454 | `ops/scripts/backend/schema-audit.js` | 25 |
 | 455 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 5 |
 | 456 | `ops/scripts/backend/verify-data-integrity.js` | 27 |
@@ -6251,91 +6251,91 @@ Code files scanned: **506**
 | 4 | `shouldDeferModulePreload` | function | 115 |
 | 5 | `manualChunks` | function | 119 |
 
-### 3.450 `ops/scripts/architecture/generated-bulk-audit.mjs`
+### 3.450 `ops/scripts/architecture/generated-bulk-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 161 |
-| 2 | `walkPathStats` | function | 175 |
-| 3 | `recursivePathStats` | function | 212 |
-| 4 | `pathStats` | function | 241 |
-| 5 | `hasAnyToken` | function | 262 |
-| 6 | `toPowerShellTargetToken` | function | 266 |
-| 7 | `compactTargetRows` | function | 270 |
-| 8 | `compactTimedRows` | function | 285 |
-| 9 | `summarizeByDisposition` | function | 301 |
-| 10 | `dispositionRows` | function | 316 |
-| 11 | `isNestedTarget` | function | 328 |
-| 12 | `collectTargetOverlaps` | function | 334 |
-| 13 | `manifestHasInstallDeps` | function | 350 |
-| 14 | `recordExists` | function | 359 |
-| 15 | `buildDependencyTopology` | function | 363 |
-| 16 | `buildSummary` | function | 397 |
-| 17 | `renderReport` | function | 457 |
-| 18 | `main` | function | 538 |
+| 1 | `parseArgs` | function | 157 |
+| 2 | `walkPathStats` | function | 171 |
+| 3 | `recursivePathStats` | function | 208 |
+| 4 | `pathStats` | function | 237 |
+| 5 | `hasAnyToken` | function | 258 |
+| 6 | `toPowerShellTargetToken` | function | 262 |
+| 7 | `compactTargetRows` | function | 266 |
+| 8 | `compactTimedRows` | function | 281 |
+| 9 | `summarizeByDisposition` | function | 297 |
+| 10 | `dispositionRows` | function | 312 |
+| 11 | `isNestedTarget` | function | 324 |
+| 12 | `collectTargetOverlaps` | function | 330 |
+| 13 | `manifestHasInstallDeps` | function | 346 |
+| 14 | `recordExists` | function | 355 |
+| 15 | `buildDependencyTopology` | function | 359 |
+| 16 | `buildSummary` | function | 393 |
+| 17 | `renderReport` | function | 453 |
+| 18 | `main` | function | 534 |
 
-### 3.451 `ops/scripts/architecture/language-runtime-audit.mjs`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `walkFiles` | function | 39 |
-| 2 | `countBy` | function | 61 |
-| 3 | `hasReactOrDomBoundary` | function | 70 |
-| 4 | `hasWorkerCandidateWork` | function | 74 |
-| 5 | `hasSqlOrAnalyticsWork` | function | 78 |
-| 6 | `scoreTypeScriptCandidate` | function | 82 |
-| 7 | `scoreWorkerCandidate` | function | 97 |
-| 8 | `scoreSqlCandidate` | function | 107 |
-| 9 | `compactCandidates` | function | 116 |
-| 10 | `verificationMatrix` | function | 124 |
-| 11 | `buildFirstExecutableSlices` | function | 162 |
-| 12 | `collectFocusedTestCoverage` | function | 1107 |
-| 13 | `collectConvertedTypeScriptSlices` | function | 1122 |
-| 14 | `collectCompletedWebWorkerSlices` | function | 1144 |
-| 15 | `collectCompletedDataPathSlices` | function | 1168 |
-| 16 | `collectProofCommandCoverage` | function | 1184 |
-| 17 | `collectRecords` | function | 1238 |
-| 18 | `renderReport` | function | 1255 |
-| 19 | `buildSummary` | function | 1414 |
-| 20 | `main` | function | 1493 |
-
-### 3.452 `ops/scripts/architecture/organization-audit.mjs`
+### 3.451 `ops/scripts/architecture/language-runtime-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `walkFiles` | function | 27 |
-| 2 | `getArea` | function | 48 |
-| 3 | `countBy` | function | 79 |
-| 4 | `extractRelativeImports` | function | 88 |
-| 5 | `collectFileRecords` | function | 103 |
-| 6 | `nonEmptyLines` | function | 137 |
-| 7 | `extractWrapperTarget` | function | 141 |
-| 8 | `collectCompatibilityWrappers` | function | 154 |
-| 9 | `countOccurrences` | function | 177 |
-| 10 | `wrapperReferenceCandidates` | function | 188 |
-| 11 | `collectWrapperReferenceDetails` | function | 208 |
-| 12 | `renderReferenceFiles` | function | 235 |
-| 13 | `renderReport` | function | 243 |
-| 14 | `buildSummary` | function | 332 |
-| 15 | `main` | function | 360 |
+| 1 | `walkFiles` | function | 35 |
+| 2 | `countBy` | function | 57 |
+| 3 | `hasReactOrDomBoundary` | function | 66 |
+| 4 | `hasWorkerCandidateWork` | function | 70 |
+| 5 | `hasSqlOrAnalyticsWork` | function | 74 |
+| 6 | `scoreTypeScriptCandidate` | function | 78 |
+| 7 | `scoreWorkerCandidate` | function | 93 |
+| 8 | `scoreSqlCandidate` | function | 103 |
+| 9 | `compactCandidates` | function | 112 |
+| 10 | `verificationMatrix` | function | 120 |
+| 11 | `buildFirstExecutableSlices` | function | 158 |
+| 12 | `collectFocusedTestCoverage` | function | 1103 |
+| 13 | `collectConvertedTypeScriptSlices` | function | 1118 |
+| 14 | `collectCompletedWebWorkerSlices` | function | 1140 |
+| 15 | `collectCompletedDataPathSlices` | function | 1164 |
+| 16 | `collectProofCommandCoverage` | function | 1180 |
+| 17 | `collectRecords` | function | 1234 |
+| 18 | `renderReport` | function | 1251 |
+| 19 | `buildSummary` | function | 1410 |
+| 20 | `main` | function | 1489 |
 
-### 3.453 `ops/scripts/architecture/phase29-audit.mjs`
+### 3.452 `ops/scripts/architecture/organization-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 76 |
-| 2 | `parseLastJsonObject` | function | 93 |
-| 3 | `runChildProcess` | function | 105 |
-| 4 | `runCheck` | function | 133 |
-| 5 | `runCheckGroup` | function | 158 |
-| 6 | `flattenCycles` | function | 162 |
-| 7 | `buildDurationSummary` | function | 166 |
-| 8 | `renderReport` | function | 201 |
-| 9 | `comparableValue` | function | 292 |
-| 10 | `collectParsedByCycle` | function | 304 |
-| 11 | `buildRepeatConsistency` | function | 310 |
-| 12 | `buildSummary` | function | 502 |
-| 13 | `main` | function | 540 |
+| 1 | `walkFiles` | function | 23 |
+| 2 | `getArea` | function | 44 |
+| 3 | `countBy` | function | 75 |
+| 4 | `extractRelativeImports` | function | 84 |
+| 5 | `collectFileRecords` | function | 99 |
+| 6 | `nonEmptyLines` | function | 133 |
+| 7 | `extractWrapperTarget` | function | 137 |
+| 8 | `collectCompatibilityWrappers` | function | 150 |
+| 9 | `countOccurrences` | function | 173 |
+| 10 | `wrapperReferenceCandidates` | function | 184 |
+| 11 | `collectWrapperReferenceDetails` | function | 204 |
+| 12 | `renderReferenceFiles` | function | 231 |
+| 13 | `renderReport` | function | 239 |
+| 14 | `buildSummary` | function | 328 |
+| 15 | `main` | function | 356 |
+
+### 3.453 `ops/scripts/architecture/phase29-audit.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseArgs` | function | 72 |
+| 2 | `parseLastJsonObject` | function | 89 |
+| 3 | `runChildProcess` | function | 101 |
+| 4 | `runCheck` | function | 129 |
+| 5 | `runCheckGroup` | function | 154 |
+| 6 | `flattenCycles` | function | 158 |
+| 7 | `buildDurationSummary` | function | 162 |
+| 8 | `renderReport` | function | 197 |
+| 9 | `comparableValue` | function | 288 |
+| 10 | `collectParsedByCycle` | function | 300 |
+| 11 | `buildRepeatConsistency` | function | 306 |
+| 12 | `buildSummary` | function | 498 |
+| 13 | `main` | function | 536 |
 
 ### 3.454 `ops/scripts/backend/schema-audit.js`
 
