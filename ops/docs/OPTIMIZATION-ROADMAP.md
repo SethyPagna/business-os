@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 444.
+- Latest completed implementation move in this roadmap: Move 445.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4970,3 +4970,14 @@ Move 444 status:
   and app refresh events. Frontend tests now stand at 23 `.mjs` and 53 `.ts`,
   and the batch keeps fake browser-event globals and intentionally malformed
   import fixtures typed without relaxing strict compiler checks.
+
+Move 445 status:
+- Move 445 converts the layout, receipt, permission, product UX, inventory
+  movement, pricing/contact, notification, and scroll test cluster to
+  TypeScript in one session. The converted `.ts` tests cover Returns layout,
+  notification badge persistence, inventory mobile cards and movement groups,
+  product/POS pagination and discount surfaces, permission labels, receipt
+  template/settings/print behavior, pricing/contact helpers, and global scroll
+  targeting. Frontend tests now stand at 11 `.mjs` and 65 `.ts`, with helper
+  assertions pointed at TypeScript implementations where wrappers already
+  exist.

@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../src/utils/pricing.js'
+import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../src/utils/pricing.ts'
 import {
   CONTACT_OPTION_LIMIT,
   parseContactOptionsFromImportRow,
   parseStoredContactOptions,
   serializeContactOptions,
-} from '../src/components/contacts/contactOptionUtils.js'
+} from '../src/components/contacts/contactOptionUtils.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -86,8 +88,8 @@ await runTest('serializeContactOptions round-trips structured contact options', 
 
   const parsed = parseStoredContactOptions(raw, { legacyField: 'address' })
   assert.equal(parsed.length, 2)
-  assert.equal(parsed[0].name, 'Alice')
-  assert.equal(parsed[1].phone, '456')
+  assert.equal(parsed[0]?.name, 'Alice')
+  assert.equal(parsed[1]?.phone, '456')
 })
 
 await runTest('customer membership generation always uses the LCMN prefix', () => {

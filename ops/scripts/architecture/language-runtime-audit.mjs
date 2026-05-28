@@ -302,7 +302,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\pricingContacts.test.mjs',
+      'node frontend\\tests\\pricingContacts.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -312,7 +312,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\inventoryMovementGroups.test.mjs',
+      'node frontend\\tests\\inventoryMovementGroups.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -396,7 +396,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: 'frontend/src/utils/pricing.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\pricingContacts.test.mjs',
+      'node frontend\\tests\\pricingContacts.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -430,7 +430,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productFilterHelpers.test.ts',
-      'node frontend\\tests\\productSearchPagination.test.mjs',
+      'node frontend\\tests\\productSearchPagination.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -441,7 +441,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productMenuHelpers.test.ts',
-      'node frontend\\tests\\productSearchPagination.test.mjs',
+      'node frontend\\tests\\productSearchPagination.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -486,7 +486,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productSelectionHelpers.test.ts',
-      'node frontend\\tests\\productSearchPagination.test.mjs',
+      'node frontend\\tests\\productSearchPagination.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -562,8 +562,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\receiptTemplate.test.mjs',
-      'node frontend\\tests\\receiptSettingsSync.test.mjs',
+      'node frontend\\tests\\receiptTemplate.test.ts',
+      'node frontend\\tests\\receiptSettingsSync.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -573,7 +573,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\pricingContacts.test.mjs',
+      'node frontend\\tests\\pricingContacts.test.ts',
       'node frontend\\tests\\performanceLoadingUx.test.mjs',
       'npm.cmd --prefix frontend run build',
     ],
@@ -595,8 +595,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\receiptTemplate.test.mjs',
-      'node frontend\\tests\\receiptSettingsSync.test.mjs',
+      'node frontend\\tests\\receiptTemplate.test.ts',
+      'node frontend\\tests\\receiptSettingsSync.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -663,7 +663,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productPageHelpers.test.ts',
-      'node frontend\\tests\\productSearchPagination.test.mjs',
+      'node frontend\\tests\\productSearchPagination.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -739,7 +739,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\permissions.test.ts',
-      'node frontend\\tests\\permissionEditor.test.mjs',
+      'node frontend\\tests\\permissionEditor.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },

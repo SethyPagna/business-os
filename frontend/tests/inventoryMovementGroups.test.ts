@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { buildMovementGroups, getMovementGroupPage, normalizeMovementTimestamp } from '../src/components/inventory/movementGroups.js'
+import { buildMovementGroups, getMovementGroupPage, normalizeMovementTimestamp } from '../src/components/inventory/movementGroups.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -21,13 +23,13 @@ await runTest('transfer in and out rows with same reference become one net-zero 
   ])
 
   assert.equal(groups.length, 1)
-  assert.equal(groups[0].recordCount, 2)
-  assert.equal(groups[0].productCount, 1)
-  assert.equal(groups[0].signedQuantity, 0)
-  assert.equal(groups[0].signedCostUsd, 0)
-  assert.equal(groups[0].totalQuantity, 4)
-  assert.equal(groups[0].totalCostUsd, 12)
-  assert.equal(groups[0].branchSummary, 'A +1')
+  assert.equal(groups[0]?.recordCount, 2)
+  assert.equal(groups[0]?.productCount, 1)
+  assert.equal(groups[0]?.signedQuantity, 0)
+  assert.equal(groups[0]?.signedCostUsd, 0)
+  assert.equal(groups[0]?.totalQuantity, 4)
+  assert.equal(groups[0]?.totalCostUsd, 12)
+  assert.equal(groups[0]?.branchSummary, 'A +1')
 })
 
 await runTest('movement timestamp falls back to server created_at when imported date is invalid', () => {
@@ -50,9 +52,10 @@ await runTest('expanded movement groups paginate without changing totals', () =>
     created_at: '2026-05-05 10:00:00',
   })))[0]
 
+  assert.ok(group)
   const page = getMovementGroupPage(group, { page: 2, pageSize: 10 })
-  assert.equal(group.recordCount, 25)
-  assert.equal(group.totalQuantity, 25)
+  assert.equal(group?.recordCount, 25)
+  assert.equal(group?.totalQuantity, 25)
   assert.equal(page.items.length, 10)
   assert.equal(page.page, 2)
   assert.equal(page.totalPages, 3)

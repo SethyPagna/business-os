@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { DEFAULT_TEMPLATE } from '../src/components/receipt-settings/constants.js'
-import { parseReceiptTemplate, serializeReceiptTemplate } from '../src/components/receipt-settings/template.js'
+import { DEFAULT_TEMPLATE } from '../src/components/receipt-settings/constants.ts'
+import { parseReceiptTemplate, serializeReceiptTemplate } from '../src/components/receipt-settings/template.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)

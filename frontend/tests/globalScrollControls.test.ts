@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { getScrollTarget, getScrollToPosition } from '../src/components/shared/globalScroll.js'
+import { getScrollTarget, getScrollToPosition } from '../src/components/shared/globalScroll.ts'
 
 let failed = 0
 
-async function runTest(name, fn) {
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -15,9 +17,9 @@ async function runTest(name, fn) {
 }
 
 await runTest('getScrollTarget prefers active page-scroll container', () => {
-  const active = { classList: { contains: (name) => name === 'page-scroll' }, scrollHeight: 2000, clientHeight: 400 }
+  const active = { classList: { contains: (name: string) => name === 'page-scroll' }, scrollHeight: 2000, clientHeight: 400 }
   const fallbackWindow = { document: { querySelector: () => active } }
-  assert.equal(getScrollTarget(fallbackWindow), active)
+  assert.equal(getScrollTarget(fallbackWindow as unknown as Window), active)
 })
 
 await runTest('getScrollToPosition computes bottom offset for elements and windows', () => {

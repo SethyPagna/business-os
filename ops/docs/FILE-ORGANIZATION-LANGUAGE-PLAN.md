@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 434 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 435 in this file.
 
 ## Goal
 
@@ -15,8 +15,8 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
   - 86 `.ts`
   - 1 `.css`
 - Frontend tests: 76 focused test files under `frontend/tests`.
-  - 23 `.mjs`
-  - 53 `.ts`
+  - 11 `.mjs`
+  - 65 `.ts`
 - Backend source: 87 files under `backend/src`.
   - 83 `.js`
   - 1 `.sql`
@@ -1320,7 +1320,7 @@ Decision rule:
     `frontend/src/components/inventory/movementGroups.ts`, while
     `movementGroups.js` remains as the compatibility wrapper for
     `Inventory.jsx` and focused movement-group tests. The existing
-    `inventoryMovementGroups.test.mjs` is now part of `test:utils` so movement
+    `inventoryMovementGroups.test.ts` is now part of `test:utils` so movement
     grouping stays inside the regular Phase 29 frontend gate.
 151. Convert POS core helper to TypeScript. Done:
     The POS product grouping, variant-choice, cart price, cart line identity,
@@ -3483,6 +3483,18 @@ Decision rule:
     keeps worker fallback assertions intact, narrows fake browser events, and
     leaves malformed product-import fixtures behind explicit `unknown` casts
     so strict TypeScript checks prove the harness without hiding edge cases.
+435. Convert layout, receipt, permission, and scroll tests to TypeScript. Done:
+    Twelve more focused tests now run as `.ts`: `returnsLayout`,
+    `notificationBadge`, `inventoryMobileCardLayout`,
+    `inventoryMovementGroups`, `productSearchPagination`,
+    `productDiscountUx`, `pricingContacts`, `permissionEditor`,
+    `receiptTemplate`, `receiptSettingsSync`, `globalScroll`, and
+    `globalScrollControls`. The batch points helper assertions at TypeScript
+    implementations for inventory movement grouping, pricing/contact options,
+    receipt templates, and global scroll behavior while keeping JSX UI
+    contract checks as source inspections. Strict compiler checks now cover
+    those fake scroll targets, parsed receipt/template values, and contact
+    option round trips.
 
 ## Safety Gates
 
