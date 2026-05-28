@@ -2286,7 +2286,7 @@ Decision rule:
     `idx_settings_key_unique` and ready for a cautious primary-key migration
     only after duplicate/null checks and rollback SQL.
 270. Add read-only primary-key migration preflight. Done:
-    `ops/scripts/backend/schema-primary-key-preflight.mjs` checks the current
+    `ops/scripts/backend/schema-primary-key-preflight.ts` checks the current
     Docker Postgres data for the `import_jobs.id` and `settings.key` migration
     candidates without applying DDL. It reports row counts, null-key counts,
     duplicate-key groups, duplicate samples, current primary-key state, unique
@@ -2740,7 +2740,7 @@ Decision rule:
     changed.
 328. Optimize schema primary-key preflight and close the related runtime
     candidate. Done:
-    `ops/scripts/backend/schema-primary-key-preflight.mjs` now folds repeated
+    `ops/scripts/backend/schema-primary-key-preflight.ts` now folds repeated
     row/null counts, duplicate-group counts, and unique-index discovery into
     shared CTEs reused by the JSON report. The before/after live report values
     matched exactly, and a same-container timing sample improved from
@@ -3505,6 +3505,13 @@ Decision rule:
     `tsx` source only, and `frontend/tsconfig.json` includes the typed root
     config files. Runtime dependency and performance guard scripts now validate
     the `.ts` config paths instead of the retired `.mjs` names.
+437. Convert schema primary-key preflight entrypoint to TypeScript. Done:
+    `ops/scripts/backend/schema-primary-key-preflight.ts` replaces the `.mjs`
+    preflight script and keeps the existing `npm --prefix ops run
+    schema-pk-preflight` command stable. The script now has typed argument,
+    table-result, and summary shapes while preserving the read-only Docker
+    `psql` query and workspace-safe output guard. Backend full-automation tests
+    and the language/runtime audit now reference the TypeScript path.
 
 ## Safety Gates
 

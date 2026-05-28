@@ -1,13 +1,33 @@
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+const fs = require('node:fs')
+const path = require('node:path')
+const { spawnSync } = require('node:child_process')
 
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../..')
 const DEFAULT_OUTPUT = 'ops/runtime/reports/schema-primary-key-preflight-latest.json'
 
-function parseArgs(argv = process.argv.slice(2)) {
+type PreflightArgs = {
+  output: string
+  failOnBlocker: boolean
+  container: string
+  user: string
+  database: string
+}
+
+type PreflightTableResult = {
+  targetColumn?: string
+  rowCount?: number
+  nullKeys?: number
+  duplicateKeyGroups?: number
+  duplicateSamples?: unknown[]
+  hasPrimaryKey?: boolean
+  uniqueIndexNames?: string[]
+  readyForPrimaryKey?: boolean
+}
+
+type PreflightResult = Record<'import_jobs' | 'settings', PreflightTableResult>
+
+function parseArgs(argv = process.argv.slice(2)): PreflightArgs {
   const args = {
     output: DEFAULT_OUTPUT,
     failOnBlocker: false,
@@ -30,13 +50,13 @@ function parseArgs(argv = process.argv.slice(2)) {
   return args
 }
 
-function assertInsideWorkspace(target) {
+function assertInsideWorkspace(target: string): string {
   const relative = path.relative(ROOT_DIR, target)
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Refusing output outside workspace: ${target}`)
   return target
 }
 
-function runPsql(args, sql) {
+function runPsql(args: PreflightArgs, sql: string): PreflightResult {
   const result = spawnSync('docker', [
     'exec', '-i', args.container, 'psql', '-U', args.user, '-d', args.database,
     '-v', 'ON_ERROR_STOP=1', '-t', '-A', '-c', sql,
@@ -44,10 +64,10 @@ function runPsql(args, sql) {
   if (result.status !== 0) throw new Error((result.stderr || result.stdout || `psql exited with ${result.status}`).trim())
   const line = String(result.stdout || '').split(/\r?\n/).map((entry) => entry.trim()).find((entry) => entry.startsWith('{'))
   if (!line) throw new Error(`Primary-key preflight query did not return JSON. Output: ${result.stdout}`)
-  return JSON.parse(line)
+  return JSON.parse(line) as PreflightResult
 }
 
-function buildPreflightSql() {
+function buildPreflightSql(): string {
   return `
 WITH
   import_jobs_duplicate_keys AS (
@@ -155,8 +175,8 @@ SELECT json_build_object(
 `
 }
 
-function summarize(result) {
-  const tables = ['import_jobs', 'settings']
+function summarize(result: PreflightResult): { ok: boolean, blockers: string[], readyTables: string[] } {
+  const tables = ['import_jobs', 'settings'] as const
   const blockers = tables.flatMap((table) => {
     const row = result[table] || {}
     return [

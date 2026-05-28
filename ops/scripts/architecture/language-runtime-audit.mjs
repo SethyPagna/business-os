@@ -912,7 +912,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     tests: [],
   },
   {
-    target: 'ops/scripts/backend/schema-primary-key-preflight.mjs',
+    target: 'ops/scripts/backend/schema-primary-key-preflight.ts',
     optimization: 'Primary-key preflight now materializes table row/null metrics, duplicate-key counts, and unique-index names once in shared CTEs, then reuses those values in the read-only JSON report.',
     rollback: 'Restore the per-field COUNT and pg_index subqueries inside each json_build_object table block; the output schema remains unchanged.',
     proof: [

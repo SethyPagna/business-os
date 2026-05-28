@@ -883,15 +883,15 @@ runTest('phase 8.4 live suite runs UI, public portal, then hygiene', () => {
 })
 
 runTest('schema primary-key preflight is read-only and blocker aware', () => {
-  const preflight = read('ops/scripts/backend/schema-primary-key-preflight.mjs')
+  const preflight = read('ops/scripts/backend/schema-primary-key-preflight.ts')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(
     opsPackage.scripts['schema-pk-preflight'],
-    'node scripts/backend/schema-primary-key-preflight.mjs',
+    'node scripts/backend/schema-primary-key-preflight.ts',
   )
   assert.equal(
     opsPackage.scripts['schema-pk-preflight:strict'],
-    'node scripts/backend/schema-primary-key-preflight.mjs --fail-on-blocker',
+    'node scripts/backend/schema-primary-key-preflight.ts --fail-on-blocker',
   )
   ;[
     'schema-primary-key-preflight-latest.json',

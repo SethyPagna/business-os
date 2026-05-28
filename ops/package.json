@@ -27,8 +27,8 @@
     "restore-candidates": "node scripts/runtime/storage/restore-candidates.mjs --output ops/runtime/reports/restore-candidates-latest.json",
     "restore-candidates:loaded": "node scripts/runtime/storage/restore-candidates.mjs --fail-if-no-loaded --output ops/runtime/reports/restore-candidates-latest.json",
     "restore-rehearsal": "node scripts/runtime/storage/restore-rehearsal.mjs --output ops/runtime/reports/restore-rehearsal-latest.json",
-    "schema-pk-preflight": "node scripts/backend/schema-primary-key-preflight.mjs",
-    "schema-pk-preflight:strict": "node scripts/backend/schema-primary-key-preflight.mjs --fail-on-blocker",
+    "schema-pk-preflight": "node scripts/backend/schema-primary-key-preflight.ts",
+    "schema-pk-preflight:strict": "node scripts/backend/schema-primary-key-preflight.ts --fail-on-blocker",
     "phase29:audit:repeat": "node scripts/architecture/phase29-audit.mjs --repeat 3",
     "prune-storage": "node scripts/runtime/storage/prune-storage.mjs",
     "prune-storage:preview": "node scripts/runtime/storage/prune-storage.mjs --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json"

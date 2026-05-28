@@ -3775,7 +3775,7 @@ Move 337 status:
 
 Move 338 status:
 - Move 338 optimizes the schema primary-key preflight data path surfaced by the
-  Phase 29 language/runtime audit. `ops/scripts/backend/schema-primary-key-preflight.mjs`
+  Phase 29 language/runtime audit. `ops/scripts/backend/schema-primary-key-preflight.ts`
   now materializes row/null counts, duplicate-key group counts, and unique-index
   names once through shared CTEs, then reuses those values in the read-only JSON
   report for `import_jobs` and `settings`. The report shape and table payloads
@@ -4991,3 +4991,11 @@ Move 446 status:
   points at retired `.mjs` helper wrappers, Tailwind no longer scans `.mjs`
   source globs, and the runtime dependency/performance guard scripts now
   verify the `.ts` config paths.
+
+Move 447 status:
+- Move 447 converts the schema primary-key preflight entrypoint to TypeScript.
+  `ops/scripts/backend/schema-primary-key-preflight.ts` keeps the same
+  read-only Docker `psql` behavior and npm command names, but now carries typed
+  argument parsing, table-result payloads, and summary output. Backend
+  automation tests and the language/runtime audit now point at the `.ts`
+  entrypoint.
