@@ -349,7 +349,7 @@ Total files documented: **529**
 | 337 | `frontend/src/utils/dateHelpers.ts` | frontend-utils | 18 | 0.6 | Utility helper |
 | 338 | `frontend/src/utils/deviceInfo.ts` | frontend-utils | 54 | 1.5 | Utility helper |
 | 339 | `frontend/src/utils/exportPackage.ts` | frontend-utils | 61 | 1.4 | Utility helper |
-| 340 | `frontend/src/utils/exportReports.jsx` | frontend-utils | 366 | 9.9 | Utility helper |
+| 340 | `frontend/src/utils/exportReports.tsx` | frontend-utils | 423 | 11.2 | Utility helper |
 | 341 | `frontend/src/utils/favicon.ts` | frontend-utils | 101 | 3.1 | Utility helper |
 | 342 | `frontend/src/utils/formatters.ts` | frontend-utils | 89 | 2.7 | Utility helper |
 | 343 | `frontend/src/utils/groupedRecords.ts` | frontend-utils | 330 | 11.2 | Utility helper |

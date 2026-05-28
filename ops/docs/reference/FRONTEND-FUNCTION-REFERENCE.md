@@ -177,7 +177,7 @@ Total files documented: **193**
 | 165 | `frontend/src/utils/dateHelpers.ts` | 1 |
 | 166 | `frontend/src/utils/deviceInfo.ts` | 2 |
 | 167 | `frontend/src/utils/exportPackage.ts` | 0 |
-| 168 | `frontend/src/utils/exportReports.jsx` | 8 |
+| 168 | `frontend/src/utils/exportReports.tsx` | 8 |
 | 169 | `frontend/src/utils/favicon.ts` | 3 |
 | 170 | `frontend/src/utils/formatters.ts` | 1 |
 | 171 | `frontend/src/utils/groupedRecords.ts` | 3 |
@@ -2367,18 +2367,18 @@ Total files documented: **193**
 
 - No top-level named function/class symbols detected.
 
-### 3.168 `frontend/src/utils/exportReports.jsx`
+### 3.168 `frontend/src/utils/exportReports.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `escapeHtml` | function | 198 |
-| 2 | `formatCellValue` | function | 207 |
-| 3 | `renderChartMarkup` | function | 212 |
-| 4 | `renderMetadataGroups` | function | 228 |
-| 5 | `renderSummaryCards` | function | 250 |
-| 6 | `renderCharts` | function | 265 |
-| 7 | `renderTables` | function | 283 |
-| 8 | `renderNotes` | function | 317 |
+| 1 | `escapeHtml` | function | 255 |
+| 2 | `formatCellValue` | function | 264 |
+| 3 | `renderChartMarkup` | function | 269 |
+| 4 | `renderMetadataGroups` | function | 285 |
+| 5 | `renderSummaryCards` | function | 307 |
+| 6 | `renderCharts` | function | 322 |
+| 7 | `renderTables` | function | 340 |
+| 8 | `renderNotes` | function | 374 |
 
 ### 3.169 `frontend/src/utils/favicon.ts`
 

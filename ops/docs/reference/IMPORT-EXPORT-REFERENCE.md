@@ -320,7 +320,7 @@ Code files documented: **466**
 | 308 | `frontend/src/utils/dateHelpers.ts` | 0 | 2 | 0 | 2 |
 | 309 | `frontend/src/utils/deviceInfo.ts` | 0 | 2 | 0 | 7 |
 | 310 | `frontend/src/utils/exportPackage.ts` | 1 | 2 | 1 | 3 |
-| 311 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
+| 311 | `frontend/src/utils/exportReports.tsx` | 4 | 1 | 2 | 2 |
 | 312 | `frontend/src/utils/favicon.ts` | 0 | 1 | 0 | 3 |
 | 313 | `frontend/src/utils/formatters.ts` | 0 | 4 | 0 | 17 |
 | 314 | `frontend/src/utils/groupedRecords.ts` | 1 | 8 | 1 | 10 |
@@ -3721,7 +3721,7 @@ Code files documented: **466**
   - none
 - Referenced by (2)
   - `frontend/src/components/dashboard/Dashboard.jsx`
-  - `frontend/src/utils/exportReports.jsx`
+  - `frontend/src/utils/exportReports.tsx`
 
 ### 3.183 `frontend/src/components/dashboard/charts/LineChart.tsx`
 
@@ -3779,7 +3779,7 @@ Code files documented: **466**
   - `frontend/src/utils/csv.ts`
   - `frontend/src/utils/dateHelpers.ts`
   - `frontend/src/utils/exportPackage.ts`
-  - `frontend/src/utils/exportReports.jsx`
+  - `frontend/src/utils/exportReports.tsx`
   - `frontend/src/utils/formatters.ts`
   - `frontend/src/utils/loaders.ts`
   - `frontend/src/utils/pricing.ts`
@@ -3929,7 +3929,7 @@ Code files documented: **466**
   - `frontend/src/utils/bulkOps.ts`
   - `frontend/src/utils/csv.ts`
   - `frontend/src/utils/exportPackage.ts`
-  - `frontend/src/utils/exportReports.jsx`
+  - `frontend/src/utils/exportReports.tsx`
   - `frontend/src/utils/formatters.ts`
   - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/historyHelpers.ts`
@@ -5889,12 +5889,13 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/tests/exportPackages.test.ts`
 
-### 3.311 `frontend/src/utils/exportReports.jsx`
+### 3.311 `frontend/src/utils/exportReports.tsx`
 
 - Declared exports: `buildStandaloneReportHtml`
-- Imports (3)
+- Imports (4)
   - `../components/dashboard/charts`
   - `./formatters`
+  - `react`
   - `react-dom/server`
 - Internal dependencies (2)
   - `frontend/src/components/dashboard/charts/index.ts`
@@ -5938,7 +5939,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/users/UserDetailSheet.tsx`
   - `frontend/src/components/users/Users.jsx`
-  - `frontend/src/utils/exportReports.jsx`
+  - `frontend/src/utils/exportReports.tsx`
   - `frontend/tests/formatters.test.ts`
 
 ### 3.314 `frontend/src/utils/groupedRecords.ts`
