@@ -191,7 +191,7 @@ await runTest('file picker and library upload/delete flows keep synchronous acti
 })
 
 await runTest('product form image upload and save keep synchronous guards', () => {
-  const source = readFrontend('src/components/products/forms/ProductForm.jsx')
+  const source = readFrontend('src/components/products/forms/ProductForm.tsx')
 
   assert.match(source, /const imageUploadInFlightRef = useRef\(false\)/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
@@ -199,10 +199,10 @@ await runTest('product form image upload and save keep synchronous guards', () =
   assert.match(source, /imageUploadInFlightRef\.current = true/)
   assert.match(source, /finally \{[\s\S]*imageUploadInFlightRef\.current = false[\s\S]*setImageUploading\(false\)/)
   assert.match(source, /if \(saving \|\| saveInFlightRef\.current\) return/)
-  assert.match(source, /saveInFlightRef\.current = true[\s\S]*const payload = \{/)
+  assert.match(source, /saveInFlightRef\.current = true[\s\S]*const payload(?:: ProductSavePayload)? = \{/)
   assert.match(source, /finally \{[\s\S]*saveInFlightRef\.current = false[\s\S]*setSaving\(false\)/)
   assert.match(source, /const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.uploadProductImage\(\{[\s\S]*productId: currentProductId \|\| null,[\s\S]*file,[\s\S]*fileName: file\.name \|\| 'product\.jpg',[\s\S]*\}\),\s*'Upload product form image',\s*PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.uploadProductImage\(\{[\s\S]*productId: currentProductId \|\| null,[\s\S]*file,[\s\S]*fileName: file\.name \|\| 'product\.jpg',[\s\S]*\}\),\s*'Upload product form image',\s*PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/)
 })
 
 await runTest('catalog portal media upload keeps a per-target synchronous guard', () => {

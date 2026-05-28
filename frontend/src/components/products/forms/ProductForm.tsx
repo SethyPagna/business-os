@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentType } from 'react'
 import { ScanLine } from 'lucide-react'
 import Modal from '../../shared/Modal'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
@@ -12,17 +13,192 @@ import {
   withLoaderTimeout,
 } from '../../../utils/loaders.ts'
 
-const FilePickerModal = lazy(() => import('../../files/FilePickerModal'))
 const BarcodeScannerModal = lazy(() => import('../scanning/BarcodeScannerModal'))
 const PRODUCT_SUPPLIERS_TIMEOUT_MS = 8000
 const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
-function normalizeGallery(product) {
+type EntityId = string | number
+type EditableNumber = string | number | null | undefined
+type ProductFormTab = 'basic' | 'pricing' | 'stock'
+type ScannerField = 'sku' | 'barcode'
+type Translate = (key: string) => string
+
+interface CategoryOption {
+  id: EntityId
+  name: string
+}
+
+interface UnitOption {
+  id: EntityId
+  name: string
+}
+
+interface BranchOption {
+  id: EntityId
+  name: string
+  is_default?: boolean | number | null
+}
+
+interface ProductUser {
+  id?: EntityId
+  name?: string
+}
+
+interface GroupCandidate {
+  id?: EntityId | null
+  name?: string | null
+  parent_id?: EntityId | null
+}
+
+interface SupplierOption {
+  id: EntityId
+  name?: string | null
+  company?: string | null
+}
+
+interface ProductFormState extends GroupCandidate {
+  name?: string
+  sku?: string
+  barcode?: string
+  category?: string
+  brand?: string
+  description?: string
+  purchase_price_usd?: EditableNumber
+  purchase_price_khr?: EditableNumber
+  selling_price_usd?: EditableNumber
+  selling_price_khr?: EditableNumber
+  special_price_usd?: EditableNumber
+  special_price_khr?: EditableNumber
+  discount_enabled?: number | boolean
+  discount_type?: 'percent' | 'fixed' | string
+  discount_percent?: EditableNumber
+  discount_amount_usd?: EditableNumber
+  discount_amount_khr?: EditableNumber
+  discount_label?: string
+  discount_badge_color?: string
+  discount_starts_at?: string | null
+  discount_ends_at?: string | null
+  cost_price_usd?: EditableNumber
+  cost_price_khr?: EditableNumber
+  stock_quantity?: EditableNumber
+  low_stock_threshold?: EditableNumber
+  out_of_stock_threshold?: EditableNumber
+  expiry_date?: string | null
+  expiry_alert_days?: EditableNumber
+  unit?: string
+  supplier?: string
+  image_path?: string
+  image_gallery?: unknown[]
+  branch_stock?: Array<{ branch_id?: EntityId; quantity?: number }>
+  branch_id?: EntityId | ''
+  is_group?: number | boolean
+}
+
+interface ProductSavePayload extends ProductFormState {
+  purchase_price_usd: number
+  purchase_price_khr: number
+  selling_price_usd: number
+  selling_price_khr: number
+  special_price_usd: number
+  special_price_khr: number
+  discount_enabled: 0 | 1
+  discount_type: 'percent' | 'fixed'
+  discount_percent: number
+  discount_amount_usd: number
+  discount_amount_khr: number
+  discount_label: string
+  discount_badge_color: string
+  discount_starts_at: string | null
+  discount_ends_at: string | null
+  cost_price_usd: number
+  cost_price_khr: number
+  stock_quantity: number
+  low_stock_threshold: number
+  out_of_stock_threshold: number
+  expiry_date: string | null
+  expiry_alert_days: number
+  image_gallery: string[]
+  image_path: string
+  is_group: 0 | 1
+  parent_id: number | null
+}
+
+interface ProductImageUploadResult {
+  public_path?: unknown
+  path?: unknown
+  cache_version?: unknown
+  asset?: {
+    public_path?: unknown
+    updated_at?: unknown
+    created_at?: unknown
+  } | null
+  data?: {
+    path?: unknown
+  } | null
+}
+
+interface ProductFormApi {
+  getSuppliers?: () => Promise<unknown>
+  uploadProductImage: (payload: {
+    productId: number | null
+    file: File
+    fileName: string
+  }) => Promise<ProductImageUploadResult | undefined>
+}
+
+interface FilePickerModalProps {
+  open: boolean
+  mediaType: string
+  title: string
+  onClose: () => void
+  onSelect: (publicPath: string) => void
+}
+
+interface ProductFormProps {
+  product?: ProductFormState | null
+  categories: CategoryOption[]
+  units: UnitOption[]
+  branches: BranchOption[]
+  brandOptions?: string[]
+  groupCandidates?: GroupCandidate[]
+  onSave: (payload?: ProductSavePayload) => unknown | Promise<unknown>
+  onClose: () => void
+  t: Translate
+  usdSymbol: string
+  khrSymbol: string
+  exchangeRate: number
+  user?: ProductUser | null
+  initialTab?: ProductFormTab
+}
+
+interface PickImageFilesOptions {
+  accept?: string
+  capture?: string
+}
+
+interface NumericInputOptions {
+  allowDecimal?: boolean
+  allowNegative?: boolean
+}
+
+const FilePickerModal = lazy(async () => ({
+  default: (await import('../../files/FilePickerModal.jsx')).default as ComponentType<FilePickerModalProps>,
+}))
+
+function getProductFormApi(): ProductFormApi | undefined {
+  return (window as Window & { api?: ProductFormApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function normalizeGallery(product?: ProductFormState | null): string[] {
   const source = Array.isArray(product?.image_gallery)
     ? product.image_gallery
     : (product?.image_path ? [product.image_path] : [])
-  const seen = new Set()
-  const list = []
+  const seen = new Set<string>()
+  const list: string[] = []
   for (const entry of source) {
     const value = String(entry || '').trim()
     if (!value || seen.has(value)) continue
@@ -33,17 +209,17 @@ function normalizeGallery(product) {
   return list
 }
 
-function editablePrice(value, fallback = 0) {
+function editablePrice(value: unknown, fallback = 0): string {
   if (value === '' || value === null || typeof value === 'undefined') return formatPriceNumber(fallback)
   return formatPriceNumber(value)
 }
 
-function pickImageFiles(maxCount = 1, options = {}) {
+function pickImageFiles(maxCount = 1, options: PickImageFilesOptions = {}): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = options.accept || 'image/*'
-    if (options.capture) input.capture = options.capture
+    if (options.capture) input.setAttribute('capture', options.capture)
     input.multiple = maxCount > 1
     input.onchange = () => {
       const files = Array.from(input.files || []).slice(0, maxCount)
@@ -72,13 +248,13 @@ export default function ProductForm({
   exchangeRate,
   user,
   initialTab = 'basic',
-}) {
+}: ProductFormProps) {
   const defaultBranchId = branches.find((branch) => branch.is_default)?.id?.toString()
     || branches[0]?.id?.toString()
     || ''
   const currentProductId = Number(product?.id || 0)
 
-  const initialForm = useMemo(() => {
+  const initialForm = useMemo<ProductFormState>(() => {
     if (product) {
       return { ...product }
     }
@@ -128,14 +304,14 @@ export default function ProductForm({
       .sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' }))
   ), [currentProductId, groupCandidates])
 
-  const [form, setForm] = useState(initialForm)
+  const [form, setForm] = useState<ProductFormState>(initialForm)
   const [imageList, setImageList] = useState(() => normalizeGallery(initialForm))
-  const [activeTab, setActiveTab] = useState(initialTab || 'basic')
-  const [supplierList, setSupplierList] = useState([])
+  const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
+  const [supplierList, setSupplierList] = useState<SupplierOption[]>([])
   const [supplierDrop, setSupplierDrop] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
-  const [scannerField, setScannerField] = useState('')
-  const [scannerLaunchingField, setScannerLaunchingField] = useState('')
+  const [scannerField, setScannerField] = useState<ScannerField | ''>('')
+  const [scannerLaunchingField, setScannerLaunchingField] = useState<ScannerField | ''>('')
   const [saving, setSaving] = useState(false)
   const [imageUploading, setImageUploading] = useState(false)
   const supplierRequestRef = useRef(0)
@@ -144,7 +320,7 @@ export default function ProductForm({
   const saveInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
 
-  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
@@ -184,22 +360,27 @@ export default function ProductForm({
   }, [])
 
   useEffect(() => {
-    if (!window.api?.getSuppliers) {
+    const api = getProductFormApi()
+    const getSuppliers = api?.getSuppliers
+    if (!getSuppliers) {
       setSupplierList([])
       return undefined
     }
+    const loadSuppliersFromApi: () => Promise<unknown> = getSuppliers
     const requestId = beginTrackedRequest(supplierRequestRef)
     async function loadSuppliers() {
       try {
-        const data = await withLoaderTimeout(() => window.api.getSuppliers(), 'Product suppliers', PRODUCT_SUPPLIERS_TIMEOUT_MS)
+        const data = await withLoaderTimeout(() => loadSuppliersFromApi(), 'Product suppliers', PRODUCT_SUPPLIERS_TIMEOUT_MS)
         if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
-        setSupplierList(Array.isArray(data) ? data : [])
+        setSupplierList(Array.isArray(data) ? data as SupplierOption[] : [])
       } catch {
         if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
       }
     }
     loadSuppliers()
-    return () => invalidateTrackedRequest(supplierRequestRef)
+    return () => {
+      invalidateTrackedRequest(supplierRequestRef)
+    }
   }, [])
 
   useEffect(() => {
@@ -208,25 +389,25 @@ export default function ProductForm({
     }
   }, [product, form.branch_id, defaultBranchId])
 
-  function setField(key, value) {
+  function setField(key: keyof ProductFormState, value: unknown): void {
     setForm((current) => ({ ...current, [key]: value }))
   }
 
-  function setNumericField(key, value, options) {
+  function setNumericField(key: keyof ProductFormState, value: unknown, options?: NumericInputOptions): void {
     setField(key, sanitizeNumericInput(value, options))
   }
 
-  async function addImages() {
+  async function addImages(): Promise<void> {
     if (saving || imageUploading) return
     await uploadPickedImages({})
   }
 
-  async function addPhoto() {
+  async function addPhoto(): Promise<void> {
     if (saving || imageUploading) return
     await uploadPickedImages({ capture: 'environment' })
   }
 
-  async function uploadPickedImages(options = {}) {
+  async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
     if (imageUploading || imageUploadInFlightRef.current) return
     imageUploadInFlightRef.current = true
     try {
@@ -241,10 +422,12 @@ export default function ProductForm({
         return
       }
       setImageUploading(true)
-      const stagedImages = []
+      const api = getProductFormApi()
+      if (!api?.uploadProductImage) throw new Error(tr('image_upload_failed', 'Image upload failed', 'Image upload failed'))
+      const stagedImages: string[] = []
       for (const file of files) {
         const uploaded = await withLoaderTimeout(
-          () => window.api.uploadProductImage({
+          () => api.uploadProductImage({
             productId: currentProductId || null,
             file,
             fileName: file.name || 'product.jpg',
@@ -264,18 +447,18 @@ export default function ProductForm({
         return next
       })
     } catch (error) {
-      alert(error?.message || tr('image_upload_failed', 'Image upload failed', 'ការបង្ហោះរូបភាពបានបរាជ័យ'))
+      alert(getErrorMessage(error, tr('image_upload_failed', 'Image upload failed', 'ការបង្ហោះរូបភាពបានបរាជ័យ')))
     } finally {
       imageUploadInFlightRef.current = false
       setImageUploading(false)
     }
   }
 
-  function removeImage(index) {
+  function removeImage(index: number): void {
     setImageList((current) => current.filter((_, idx) => idx !== index))
   }
 
-  function setPrimaryImage(index) {
+  function setPrimaryImage(index: number): void {
     setImageList((current) => {
       if (index < 0 || index >= current.length) return current
       const next = [...current]
@@ -285,7 +468,7 @@ export default function ProductForm({
     })
   }
 
-  async function saveForm() {
+  async function saveForm(): Promise<void> {
     if (saving || saveInFlightRef.current) return
     if (!String(form.name || '').trim()) {
       alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
@@ -296,7 +479,7 @@ export default function ProductForm({
       return
     }
     saveInFlightRef.current = true
-    const payload = {
+    const payload: ProductSavePayload = {
       ...form,
       purchase_price_usd: normalizePriceValue(parseNumericInput(form.purchase_price_usd)),
       purchase_price_khr: normalizePriceValue(parseNumericInput(form.purchase_price_khr)),
@@ -310,7 +493,7 @@ export default function ProductForm({
       discount_amount_usd: normalizePriceValue(parseNumericInput(form.discount_amount_usd)),
       discount_amount_khr: normalizePriceValue(parseNumericInput(form.discount_amount_khr)),
       discount_label: String(form.discount_label || '').trim(),
-      discount_badge_color: /^#[0-9a-f]{6}$/i.test(String(form.discount_badge_color || '')) ? form.discount_badge_color : '#e11d48',
+      discount_badge_color: /^#[0-9a-f]{6}$/i.test(String(form.discount_badge_color || '')) ? String(form.discount_badge_color) : '#e11d48',
       discount_starts_at: form.discount_starts_at || null,
       discount_ends_at: form.discount_ends_at || null,
       cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd ?? form.purchase_price_usd)),
@@ -329,23 +512,23 @@ export default function ProductForm({
     try {
       await Promise.resolve(onSave(payload))
     } catch (error) {
-      alert(error?.message || tr('failed', 'Failed', 'បរាជ័យ'))
+      alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
       saveInFlightRef.current = false
       setSaving(false)
     }
   }
 
-  async function openScanner(field) {
+  async function openScanner(field: ScannerField): Promise<void> {
     if (saving || scannerLaunchingField) return
     setScannerField(field)
   }
 
-  function closeScanner() {
+  function closeScanner(): void {
     setScannerField('')
   }
 
-  function applyScannedValue(value) {
+  function applyScannedValue(value: string): void {
     const nextValue = String(value || '').trim()
     if (!nextValue || !scannerField) return
     setField(scannerField, nextValue)
@@ -357,7 +540,7 @@ export default function ProductForm({
   const scanSkuLabel = tr('scan_sku', 'Scan SKU', 'ស្កេន SKU')
   const scanBarcodeLabel = tr('scan_barcode', 'Scan barcode', 'ស្កេនបាកូដ')
 
-  const tabs = [
+  const tabs: Array<{ id: ProductFormTab; label: string }> = [
     { id: 'basic', label: tr('basic_info', 'Basic Info', 'ព័ត៌មានមូលដ្ឋាន') },
     { id: 'pricing', label: tr('pricing', 'Pricing', 'តម្លៃ') },
     { id: 'stock', label: tr('stock', 'Stock', 'ស្តុក') },
@@ -531,7 +714,7 @@ export default function ProductForm({
               >
                 <option value="">{tr('group_parent_none', 'No group parent (standalone or root item)', 'គ្មានក្រុមមេ (ឯករាជ្យ ឬ ជាឫសក្រុម)')}</option>
                 {availableGroupParents.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
+                  <option key={String(candidate.id || '')} value={String(candidate.id || '')}>
                     {candidate.name}
                   </option>
                 ))}
@@ -894,7 +1077,13 @@ export default function ProductForm({
 
           {product && branches.length > 0 ? (
             <BranchStockAdjuster
-              product={product}
+              product={{
+                ...product,
+                id: product.id || currentProductId,
+                name: product.name || '',
+                purchase_price_usd: parseNumericInput(product.purchase_price_usd),
+                purchase_price_khr: parseNumericInput(product.purchase_price_khr),
+              }}
               branches={branches}
               user={user}
               onDone={onSave}

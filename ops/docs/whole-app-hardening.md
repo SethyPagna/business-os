@@ -386,7 +386,7 @@ Last updated: 2026-05-18
     action live check, and the broad Phase 8.4 UI live check passed on frontend
     hash `21bd97f0b6d8a0df`.
   - Tenth Phase 26 physical move complete: Main product form
-    `ProductForm.jsx` now lives in `frontend/src/components/products/forms`.
+    `ProductForm.tsx` now lives in `frontend/src/components/products/forms`.
     Lazy imports, action-stability source tests, performance-loading source
     tests, and the performance verifier were rewired; source checks, typecheck,
     production build, runtime health, focused Product page action live check,
@@ -659,7 +659,7 @@ Last updated: 2026-05-18
     under `frontend/src/components/products/history`, and product presentation
     surfaces under `frontend/src/components/products/surfaces`, and product
     shared primitives under `frontend/src/components/products/shared`. The
-    forms split now includes the main `ProductForm.jsx`, and product page
+    forms split now includes the main `ProductForm.tsx`, and product page
     constants now live under `frontend/src/components/products/config`, and
     product page helpers and gallery helpers now live under
     `frontend/src/components/products/helpers`, and product row presentation
@@ -711,7 +711,7 @@ Last updated: 2026-05-18
     `frontend/src/components/utils-settings/Settings.jsx` and
     `frontend/src/components/catalog/CatalogPage.jsx`. Product form image
     uploads now have explicit timeout contracts in
-    `frontend/src/components/products/forms/ProductForm.jsx`. App shell login,
+    `frontend/src/components/products/forms/ProductForm.tsx`. App shell login,
     logout, Google OAuth completion, settings save, and session-duration refresh
     now have explicit timeout contracts in `frontend/src/AppContext.jsx`.
     POS quick-add customer, quick-add delivery contact, and checkout sale writes

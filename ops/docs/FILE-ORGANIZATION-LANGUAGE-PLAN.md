@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 498 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 499 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 62 `.jsx`
+  - 61 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 45 `.tsx`
+  - 46 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -222,7 +222,7 @@ Decision rule:
     the broad Phase 8.4 UI Playwright check passed on frontend hash
     `21bd97f0b6d8a0df`.
 14. Move the main product form into the forms cluster. Done:
-    `ProductForm.jsx` now lives in `frontend/src/components/products/forms`,
+    `ProductForm.tsx` now lives in `frontend/src/components/products/forms`,
     with lazy imports, source tests, and performance verifier paths rewired.
     Performance/action-stability source tests, source checks, typecheck,
     production build, runtime health, focused Product page Playwright, and
@@ -540,7 +540,7 @@ Decision rule:
     Settings upload/search/delete cleanup loop passed on frontend hash
     `e0a84171cdaad979`.
 47. Harden Product form image upload pathway. Done:
-    `frontend/src/components/products/forms/ProductForm.jsx` now wraps the Add
+    `frontend/src/components/products/forms/ProductForm.tsx` now wraps the Add
     Product/Edit Product direct `window.api.uploadProductImage(...)` file upload
     path in an explicit 30s timeout contract while preserving the existing
     same-tick upload guard, five-image limit, staged gallery behavior, and
@@ -3916,6 +3916,13 @@ Decision rule:
     camera/manual/photo scan paths in the main browser thread, preserves the
     existing scanner presentation helper, and removes loose optional error
     access from camera and photo failure handling.
+499. Convert main product form to TSX. Done: `ProductForm.tsx` now types the
+    product form state, save payload, category/unit/branch/group candidates,
+    supplier suggestions, product image upload API, file-picker boundary,
+    scanner fields, and tab state. The conversion keeps multipart File uploads,
+    synchronous image/save in-flight guards, scanner modal behavior, and branch
+    stock adjustment wiring intact while replacing loose error-message access
+    with a typed helper.
 
 ## Safety Gates
 

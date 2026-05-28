@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 498.
+- Latest completed implementation move in this roadmap: Move 499.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -1042,7 +1042,7 @@ Current checkpoint:
   live check, and the broad Phase 8.4 UI live check passed on frontend hash
   `21bd97f0b6d8a0df`.
 - Tenth Phase 26 physical move complete: Main product form
-  `ProductForm.jsx` now lives under `frontend/src/components/products/forms`.
+  `ProductForm.tsx` now lives under `frontend/src/components/products/forms`.
   Lazy imports, action-stability source tests, performance-loading source tests,
   and the performance verifier were rewired. Source checks, typecheck,
   production build, runtime health, focused Product page action live check, and
@@ -5445,3 +5445,12 @@ Move 498 status:
   scanner labels, and state-badge rendering. The conversion keeps camera,
   manual, and photo scan flows in the browser UI lifecycle and preserves the
   existing scanner presentation helper.
+
+Move 499 status:
+- Move 499 converts the main product form `ProductForm.tsx`. The typed boundary
+  now covers product form state, save payload normalization, category/unit/
+  branch/group candidates, supplier suggestion rows, product image upload API
+  responses, the file-picker modal contract, scanner fields, and tab state. The
+  conversion keeps multipart File uploads, synchronous upload/save refs,
+  scanner modal behavior, branch stock adjustment wiring, and product discount
+  preview logic intact.

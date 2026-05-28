@@ -37,7 +37,7 @@ const catalogPage = fs.readFileSync(new URL('../src/components/catalog/CatalogPa
 const products = fs.readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
 const productPageConfig = fs.readFileSync(new URL('../src/components/products/config/productPageConfig.ts', import.meta.url), 'utf8')
 const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.jsx', import.meta.url), 'utf8')
-const productForm = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.jsx', import.meta.url), 'utf8')
+const productForm = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
 const bulkImportModal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
 const manageCategoriesModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageCategoriesModal.tsx', import.meta.url), 'utf8')
 const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageUnitsModal.tsx', import.meta.url), 'utf8')
@@ -1480,7 +1480,7 @@ assert.match(
 )
 assert.match(
   productForm,
-  /withLoaderTimeout\(\(\) => window\.api\.getSuppliers\(\), 'Product suppliers', PRODUCT_SUPPLIERS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => loadSuppliersFromApi\(\), 'Product suppliers', PRODUCT_SUPPLIERS_TIMEOUT_MS\)/,
   'product supplier options should timeout slow supplier reads',
 )
 assert.match(
@@ -1490,7 +1490,7 @@ assert.match(
 )
 assert.match(
   productForm,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadProductImage\(\{[\s\S]*productId: currentProductId \|\| null,[\s\S]*file,[\s\S]*fileName: file\.name \|\| 'product\.jpg',[\s\S]*\}\),\s*'Upload product form image',\s*PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.uploadProductImage\(\{[\s\S]*productId: currentProductId \|\| null,[\s\S]*file,[\s\S]*fileName: file\.name \|\| 'product\.jpg',[\s\S]*\}\),\s*'Upload product form image',\s*PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
   'product form image uploads should timeout slow uploads',
 )
 assert.match(
