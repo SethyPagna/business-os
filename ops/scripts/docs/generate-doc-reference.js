@@ -167,9 +167,8 @@ function writeFrontendReference() {
   const frontendFiles = [
     ...getFilesRecursive(path.join(ROOT, 'frontend', 'src'), FRONTEND_EXTENSIONS),
     ...getFilesRecursive(path.join(ROOT, 'ops', 'scripts', 'frontend'), FRONTEND_EXTENSIONS),
-    path.join(ROOT, 'frontend', 'vite.config.mjs'),
-    path.join(ROOT, 'frontend', 'postcss.config.mjs'),
-    path.join(ROOT, 'frontend', 'tailwind.config.mjs'),
+    path.join(ROOT, 'frontend', 'vite.config.ts'),
+    path.join(ROOT, 'frontend', 'tailwind.config.ts'),
   ].filter((filePath) => fs.existsSync(filePath))
   let md = markdownHeader(
     'Frontend Function Reference',

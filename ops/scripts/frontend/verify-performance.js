@@ -51,7 +51,7 @@ function assert(condition, message) {
 const tracked = trackedFiles()
 assert(!tracked.some((file) => file.toLowerCase().endsWith('.cjs')), 'Tracked .cjs files are not allowed; use .js or .mjs.')
 
-const sourceFiles = walk(SRC_ROOT).filter((filePath) => /\.(js|jsx|mjs)$/.test(filePath))
+const sourceFiles = walk(SRC_ROOT).filter((filePath) => /\.(js|jsx|ts|tsx)$/.test(filePath))
 for (const filePath of sourceFiles) {
   const source = read(filePath)
   const relative = path.relative(PROJECT_ROOT, filePath).replace(/\\/g, '/')
@@ -75,7 +75,7 @@ const contactImport = read(path.join(SRC_ROOT, 'components', 'contacts', 'shared
 const catalogPage = read(path.join(SRC_ROOT, 'components', 'catalog', 'CatalogPage.jsx'))
 const appShell = read(path.join(SRC_ROOT, 'App.jsx'))
 const sidebar = read(path.join(SRC_ROOT, 'components', 'navigation', 'Sidebar.jsx'))
-assert(fs.existsSync(path.join(SRC_ROOT, 'components', 'products', 'import', 'productImportWorker.mjs')), 'Product import worker is missing.')
+assert(fs.existsSync(path.join(SRC_ROOT, 'components', 'products', 'import', 'productImportWorker.ts')), 'Product import worker is missing.')
 assert(bulkImport.includes('new Worker(new URL'), 'Product import analysis must use a Vite module worker.')
 assert(bulkImport.includes('visibleConflicts'), 'Product import preview must keep conflict rendering bounded.')
 assert(!/Promise\.all\(files\.map/.test(bulkImport), 'Image directory selection must not eagerly base64-read every file.')
@@ -92,14 +92,14 @@ assert(appShell.includes('INTENT_CHUNK_IMPORT_TIMEOUT_MS'), 'Route intent chunk 
 assert(appShell.includes('shouldSkipIntentWarmup'), 'Route intent chunk warmup must respect slow-network and visibility signals.')
 assert(sidebar.includes('announcePageIntent') && sidebar.includes('onPointerEnter') && sidebar.includes('onTouchStart'), 'Navigation must publish pointer/touch intent before route clicks.')
 assert(!/from ['"]\.\.\/\.\.\/lang\/(?:en|km)\.json['"]/.test(catalogPage), 'Catalog route must not import full app language JSON packs; use portalLanguagePacks plus local fallbacks.')
-assert(read(path.join(FRONTEND_ROOT, 'vite.config.mjs')).includes('vendor-zxing'), 'Heavy barcode scanner dependencies must be split out of the startup vendor chunk.')
+assert(read(path.join(FRONTEND_ROOT, 'vite.config.ts')).includes('vendor-zxing'), 'Heavy barcode scanner dependencies must be split out of the startup vendor chunk.')
 
 const apiMethods = read(path.join(SRC_ROOT, 'api', 'methods.js'))
 assert(apiMethods.includes('uploadImportJobImages'), 'Import job image batch uploader is missing.')
 assert(!/imageFiles:\s*imagePayload/.test(apiMethods + bulkImport), 'Bulk image imports must not send imageFiles JSON payloads.')
 assert(apiMethods.includes("const settingsResponse = await apiFetch('GET', '/api/settings')"), 'Settings reads must use /api/settings inline updatedAt.')
 assert(!apiMethods.includes("apiFetch('GET', '/api/settings/meta')"), 'Settings reads must not add a redundant /api/settings/meta waterfall.')
-assert(read(path.join(SRC_ROOT, 'utils', 'csv.js')).includes('UTF8_BOM'), 'CSV downloads/templates must include UTF-8 BOM for Khmer Excel compatibility.')
+assert(read(path.join(SRC_ROOT, 'utils', 'csv.ts')).includes('UTF8_BOM'), 'CSV downloads/templates must include UTF-8 BOM for Khmer Excel compatibility.')
 
 const backendImportCsv = read(path.join(PROJECT_ROOT, 'backend', 'src', 'importCsv.js'))
 const backendImportJobs = read(path.join(PROJECT_ROOT, 'backend', 'src', 'services', 'importJobs.js'))

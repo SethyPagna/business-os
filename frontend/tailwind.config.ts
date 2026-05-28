@@ -1,5 +1,7 @@
+import type { Config } from 'tailwindcss'
+
 export default {
-  content: ['./index.html', './src/**/*.{js,jsx,mjs,ts}'],
+  content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   darkMode: 'class',
   theme: {
     extend: {
@@ -13,4 +15,4 @@ export default {
     },
   },
   plugins: [],
-}
+} satisfies Config

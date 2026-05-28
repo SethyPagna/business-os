@@ -3495,6 +3495,16 @@ Decision rule:
     contract checks as source inspections. Strict compiler checks now cover
     those fake scroll targets, parsed receipt/template values, and contact
     option round trips.
+436. Convert frontend build configuration to TypeScript. Done:
+    `frontend/vite.config.ts` and `frontend/tailwind.config.ts` replace the
+    remaining frontend-root `.mjs` config files. PostCSS is now owned by the
+    typed Vite config instead of a separate config file, avoiding an extra
+    `ts-node` loader dependency just to build CSS. The Vite config now has
+    explicit plugin/dependency helper types, stale manual chunk references now
+    point at the TypeScript helper files, Tailwind scans `js`, `jsx`, `ts`, and
+    `tsx` source only, and `frontend/tsconfig.json` includes the typed root
+    config files. Runtime dependency and performance guard scripts now validate
+    the `.ts` config paths instead of the retired `.mjs` names.
 
 ## Safety Gates
 

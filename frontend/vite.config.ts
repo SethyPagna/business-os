@@ -1,15 +1,18 @@
 import { defineConfig } from 'vite'
+import type { IndexHtmlTransformContext, Plugin, UserConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import autoprefixer from 'autoprefixer'
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import tailwindcss from 'tailwindcss'
 
-function readGitRevision() {
+function readGitRevision(): string {
   if (process.env.BUSINESS_OS_BUILD_REVISION) return process.env.BUSINESS_OS_BUILD_REVISION
   try {
     return execSync('git rev-parse --short=12 HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
-  } catch (_) {
+  } catch {
     return 'dev'
   }
 }
@@ -19,7 +22,7 @@ const buildHash = process.env.BUSINESS_OS_BUILD_HASH
   || createHash('sha256').update(`frontend:${buildRevision}:${Date.now()}`).digest('hex').slice(0, 16)
 
 /**
- * vite.config.mjs
+ * vite.config.ts
  *
  * KEY FIXES (Tailscale + cross-origin compatibility):
  *
@@ -43,7 +46,7 @@ const buildHash = process.env.BUSINESS_OS_BUILD_HASH
  *    can cause "data:..." URLs to be treated as cross-origin by strict browsers.
  */
 
-function fixCrossorigin() {
+function fixCrossorigin(): Plugin {
   return {
     name: 'fix-crossorigin',
     /**
@@ -56,7 +59,7 @@ function fixCrossorigin() {
      * by the Fonts API spec) — that tag uses crossorigin without an = value so the
      * regex below (which only matches crossorigin=" or crossorigin ") won't touch it.
      */
-    transformIndexHtml(html) {
+    transformIndexHtml(html: string, _ctx?: IndexHtmlTransformContext): string {
       return html
         // Remove crossorigin="anonymous" and crossorigin="" from script/link tags
         .replace(/(<(?:link|script)[^>]*)\s+crossorigin(?:="[^"]*")?\s*/g, '$1 ')
@@ -68,7 +71,7 @@ function fixCrossorigin() {
   }
 }
 
-function emitBuildManifest() {
+function emitBuildManifest(): Plugin {
   return {
     name: 'business-os-build-manifest',
     generateBundle() {
@@ -82,7 +85,7 @@ function emitBuildManifest() {
         }, null, 2),
       })
     },
-    writeBundle(options) {
+    writeBundle(options): void {
       const outDir = path.resolve(options.dir || 'dist')
       const serviceWorkerPath = path.join(outDir, 'sw.js')
       try {
@@ -93,7 +96,7 @@ function emitBuildManifest() {
           source.replaceAll('__BUSINESS_OS_BUILD_HASH__', buildHash),
           'utf8',
         )
-      } catch (_) {
+      } catch {
         // Ignore missing service worker output during non-standard builds.
       }
     },
@@ -109,11 +112,11 @@ const deferredModulePreloadPrefixes = [
   'assets/vendor-zxing-',
 ]
 
-function shouldDeferModulePreload(dep) {
+function shouldDeferModulePreload(dep: string): boolean {
   return deferredModulePreloadPrefixes.some((prefix) => dep.includes(prefix))
 }
 
-function manualChunks(id) {
+function manualChunks(id: string): string | undefined {
   // Keep the shared vendor graph stable while still letting route chunks stay
   // small enough that first-open admin pages do not drag the whole app shell
   // over the wire up front.
@@ -153,16 +156,16 @@ function manualChunks(id) {
     if (
       normalized.includes('/src/components/shared/PortalMenu.jsx')
       || normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
-      || normalized.includes('/src/components/catalog/portalContentI18n.mjs')
-      || normalized.includes('/src/components/catalog/portalTranslateController.mjs')
-      || normalized.includes('/src/components/catalog/portalEditorUtils.mjs')
+      || normalized.includes('/src/components/catalog/portalContentI18n.ts')
+      || normalized.includes('/src/components/catalog/portalTranslateController.ts')
+      || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
     ) {
       return 'portal-tools'
     }
     if (
       normalized.includes('/src/components/products/ProductDetailModal.jsx')
       || normalized.includes('/src/components/inventory/ProductDetailModal.jsx')
-      || normalized.includes('/src/utils/productBatches.mjs')
+      || normalized.includes('/src/utils/productBatches.ts')
     ) {
       return 'product-detail'
     }
@@ -192,7 +195,7 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     modulePreload: {
-      resolveDependencies(_filename, deps) {
+      resolveDependencies(_filename: string, deps: string[]): string[] {
         return deps.filter((dep) => !shouldDeferModulePreload(dep))
       },
     },
@@ -206,12 +209,21 @@ export default defineConfig({
         // after rebuilds. Stale tabs heal through lazy chunk reload handling.
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
-        assetFileNames(assetInfo) {
+        assetFileNames(assetInfo): string {
           const name = String(assetInfo?.name || '')
           if (name.endsWith('.css')) return 'assets/[name]-[hash][extname]'
           return 'assets/[name]-[hash][extname]'
         },
       },
+    },
+  },
+
+  css: {
+    postcss: {
+      plugins: [
+        tailwindcss(),
+        autoprefixer(),
+      ],
     },
   },
 
@@ -230,4 +242,4 @@ export default defineConfig({
     __FRONTEND_BUILD_HASH__: JSON.stringify(buildHash),
     __FRONTEND_BUILD_REVISION__: JSON.stringify(buildRevision),
   },
-})
+} satisfies UserConfig)

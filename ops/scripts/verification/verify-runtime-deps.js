@@ -12,7 +12,7 @@ const FRONTEND_PACKAGE_JSON = path.join(ROOT, 'frontend', 'package.json')
 const FRONTEND_PACKAGE_LOCK = path.join(ROOT, 'frontend', 'package-lock.json')
 const OPS_PACKAGE_JSON = path.join(ROOT, 'ops', 'package.json')
 const OPS_PACKAGE_LOCK = path.join(ROOT, 'ops', 'package-lock.json')
-const FRONTEND_VITE_CONFIG = path.join(ROOT, 'frontend', 'vite.config.mjs')
+const FRONTEND_VITE_CONFIG = path.join(ROOT, 'frontend', 'vite.config.ts')
 const FRONTEND_API_HTTP = path.join(ROOT, 'frontend', 'src', 'api', 'http.js')
 const FRONTEND_API_HTTP_SOURCE = path.join(ROOT, 'frontend', 'src', 'api', 'http.ts')
 const FRONTEND_APP_CONTEXT = path.join(ROOT, 'frontend', 'src', 'AppContext.jsx')
@@ -21,8 +21,7 @@ const FRONTEND_DIST_BUILD_MANIFEST = path.join(ROOT, 'frontend', 'dist', 'busine
 const BACKEND_RUNTIME_VERSION = path.join(ROOT, 'backend', 'src', 'runtimeVersion.js')
 const BACKEND_RUNTIME_ROUTE = path.join(ROOT, 'backend', 'src', 'routes', 'runtime.js')
 const FRONTEND_PERFORMANCE_VERIFY = path.join(ROOT, 'ops', 'scripts', 'frontend', 'verify-performance.js')
-const FRONTEND_POSTCSS_CONFIG = path.join(ROOT, 'frontend', 'postcss.config.mjs')
-const FRONTEND_TAILWIND_CONFIG = path.join(ROOT, 'frontend', 'tailwind.config.mjs')
+const FRONTEND_TAILWIND_CONFIG = path.join(ROOT, 'frontend', 'tailwind.config.ts')
 const VERIFY_LOCAL_BAT = path.join(ROOT, 'run', 'verify-local.bat')
 const NPM_INSTALL_MODE_HELPER = path.join(ROOT, 'ops', 'scripts', 'powershell', 'npm-install-mode.ps1')
 const SUMMARY_PATH = path.join(ROOT, 'ops', 'docs', 'reference', 'RUNTIME-DEPS-GUARDRAIL.json')
@@ -252,7 +251,6 @@ function main() {
   assertTrackedFile(FRONTEND_PACKAGE_LOCK)
   assertTrackedFile(OPS_PACKAGE_JSON)
   assertTrackedFile(OPS_PACKAGE_LOCK)
-  assertTrackedFile(FRONTEND_POSTCSS_CONFIG)
   assertTrackedFile(FRONTEND_TAILWIND_CONFIG)
 
   const rootPackage = fs.existsSync(ROOT_PACKAGE_JSON) ? readJson(ROOT_PACKAGE_JSON) : null
@@ -303,6 +301,9 @@ function main() {
       readIncludes(FRONTEND_VITE_CONFIG, 'business-os-build.json'),
     viteDefinesFrontendBuild: readIncludes(FRONTEND_VITE_CONFIG, '__FRONTEND_BUILD_HASH__') &&
       readIncludes(FRONTEND_VITE_CONFIG, '__FRONTEND_BUILD_REVISION__'),
+    viteOwnsPostcssPipeline: readIncludes(FRONTEND_VITE_CONFIG, "from 'tailwindcss'") &&
+      readIncludes(FRONTEND_VITE_CONFIG, "from 'autoprefixer'") &&
+      readIncludes(FRONTEND_VITE_CONFIG, 'postcss'),
     serviceWorkerBuildHash: readIncludes(FRONTEND_SERVICE_WORKER, '__BUSINESS_OS_BUILD_HASH__') &&
       readIncludes(FRONTEND_SERVICE_WORKER, 'APP_SHELL_VERSION') &&
       readIncludes(FRONTEND_SERVICE_WORKER, 'STATIC_CACHE'),

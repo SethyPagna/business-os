@@ -4981,3 +4981,13 @@ Move 445 status:
   targeting. Frontend tests now stand at 11 `.mjs` and 65 `.ts`, with helper
   assertions pointed at TypeScript implementations where wrappers already
   exist.
+
+Move 446 status:
+- Move 446 converts the frontend build configuration from `.mjs` to
+  TypeScript. `frontend/vite.config.ts` and `frontend/tailwind.config.ts` are
+  now the canonical config files, and `frontend/tsconfig.json` typechecks
+  them. The Vite config owns the PostCSS pipeline directly, avoiding a new
+  `ts-node` dependency for CSS builds. The Vite manual chunk map no longer
+  points at retired `.mjs` helper wrappers, Tailwind no longer scans `.mjs`
+  source globs, and the runtime dependency/performance guard scripts now
+  verify the `.ts` config paths.
