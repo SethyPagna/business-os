@@ -172,7 +172,7 @@ Code files documented: **466**
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 6 | 1 | 4 | 1 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 8 | 1 | 6 | 1 |
 | 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 2 | 1 | 1 | 1 |
-| 163 | `frontend/src/components/catalog/catalogUi.jsx` | 1 | 3 | 0 | 4 |
+| 163 | `frontend/src/components/catalog/catalogUi.tsx` | 1 | 3 | 0 | 4 |
 | 164 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 1 | 7 | 1 | 1 |
 | 165 | `frontend/src/components/catalog/portalContentI18n.ts` | 1 | 6 | 1 | 0 |
 | 166 | `frontend/src/components/catalog/portalEditorUtils.ts` | 0 | 9 | 0 | 0 |
@@ -3256,7 +3256,7 @@ Code files documented: **466**
 - Internal dependencies (4)
   - `frontend/src/components/catalog/CatalogImageField.jsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
-  - `frontend/src/components/catalog/catalogUi.jsx`
+  - `frontend/src/components/catalog/catalogUi.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
@@ -3295,7 +3295,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
-  - `frontend/src/components/catalog/catalogUi.jsx`
+  - `frontend/src/components/catalog/catalogUi.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
@@ -3345,7 +3345,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (6)
-  - `frontend/src/components/catalog/catalogUi.jsx`
+  - `frontend/src/components/catalog/catalogUi.tsx`
   - `frontend/src/components/catalog/portalCatalogDisplay.ts`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/PaginationControls.tsx`
@@ -3361,11 +3361,11 @@ Code files documented: **466**
   - `./catalogUi`
   - `react`
 - Internal dependencies (1)
-  - `frontend/src/components/catalog/catalogUi.jsx`
+  - `frontend/src/components/catalog/catalogUi.tsx`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.163 `frontend/src/components/catalog/catalogUi.jsx`
+### 3.163 `frontend/src/components/catalog/catalogUi.tsx`
 
 - Declared exports: `SectionShell`, `StatusPill`, `SummaryTile`
 - Imports (1)

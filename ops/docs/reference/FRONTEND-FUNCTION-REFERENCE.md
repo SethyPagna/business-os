@@ -29,7 +29,7 @@ Total files documented: **193**
 | 17 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 2 |
 | 18 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 |
 | 19 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
-| 20 | `frontend/src/components/catalog/catalogUi.jsx` | 1 |
+| 20 | `frontend/src/components/catalog/catalogUi.tsx` | 1 |
 | 21 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 2 |
 | 22 | `frontend/src/components/catalog/portalContentI18n.ts` | 14 |
 | 23 | `frontend/src/components/catalog/portalEditorUtils.ts` | 2 |
@@ -774,11 +774,11 @@ Total files documented: **193**
 | 5 | `CatalogAiSection` | function | 644 |
 | 6 | `CatalogSecondaryTabs` | component/function | 830 |
 
-### 3.20 `frontend/src/components/catalog/catalogUi.jsx`
+### 3.20 `frontend/src/components/catalog/catalogUi.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `statusClass` | function | 3 |
+| 1 | `statusClass` | function | 22 |
 
 ### 3.21 `frontend/src/components/catalog/portalCatalogDisplay.ts`
 

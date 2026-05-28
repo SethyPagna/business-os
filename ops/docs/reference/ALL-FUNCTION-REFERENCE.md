@@ -172,7 +172,7 @@ Code files scanned: **466**
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 2 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 |
 | 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
-| 163 | `frontend/src/components/catalog/catalogUi.jsx` | 4 |
+| 163 | `frontend/src/components/catalog/catalogUi.tsx` | 4 |
 | 164 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 9 |
 | 165 | `frontend/src/components/catalog/portalContentI18n.ts` | 18 |
 | 166 | `frontend/src/components/catalog/portalEditorUtils.ts` | 10 |
@@ -3499,14 +3499,14 @@ Code files scanned: **466**
 | 5 | `CatalogAiSection` | function | 644 |
 | 6 | `CatalogSecondaryTabs` | export default function | 830 |
 
-### 3.163 `frontend/src/components/catalog/catalogUi.jsx`
+### 3.163 `frontend/src/components/catalog/catalogUi.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `statusClass` | function | 3 |
-| 2 | `SectionShell` | export function | 10 |
-| 3 | `SummaryTile` | export function | 26 |
-| 4 | `StatusPill` | export function | 50 |
+| 1 | `statusClass` | function | 22 |
+| 2 | `SectionShell` | export function | 29 |
+| 3 | `SummaryTile` | export function | 45 |
+| 4 | `StatusPill` | export function | 69 |
 
 ### 3.164 `frontend/src/components/catalog/portalCatalogDisplay.ts`
 
