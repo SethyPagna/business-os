@@ -267,9 +267,9 @@ Total files documented: **529**
 | 255 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | frontend-ui | 82 | 2.5 | UI component/page |
 | 256 | `frontend/src/components/products/scanning/scanbotScanner.ts` | frontend-ui | 180 | 6.0 | UI component/page |
 | 257 | `frontend/src/components/products/shared/primitives.tsx` | frontend-ui | 250 | 8.1 | UI component/page |
-| 258 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | frontend-ui | 140 | 5.9 | UI component/page |
+| 258 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | frontend-ui | 154 | 5.8 | UI component/page |
 | 259 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | frontend-ui | 241 | 12.2 | UI component/page |
-| 260 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | frontend-ui | 84 | 4.5 | UI component/page |
+| 260 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | frontend-ui | 196 | 6.4 | UI component/page |
 | 261 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | frontend-ui | 334 | 18.7 | UI component/page |
 | 262 | `frontend/src/components/README.md` | frontend-ui | 37 | 1.9 | UI component/page |
 | 263 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | frontend-ui | 121 | 4.5 | UI component/page |

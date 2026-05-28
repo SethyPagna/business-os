@@ -244,9 +244,9 @@ Code files scanned: **466**
 | 232 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
 | 233 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 9 |
 | 234 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
-| 235 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 |
+| 235 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 2 |
 | 236 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
-| 237 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 5 |
+| 237 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 5 |
 | 238 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
 | 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
 | 240 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
@@ -4479,13 +4479,12 @@ Code files scanned: **466**
 | 11 | `handleUsdChange` | const arrow | 210 |
 | 12 | `handleKhrChange` | const arrow | 211 |
 
-### 3.235 `frontend/src/components/products/surfaces/HeaderActions.jsx`
+### 3.235 `frontend/src/components/products/surfaces/HeaderActions.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductsHeaderActions` | export default function | 5 |
-| 2 | `cleanFallback` | const arrow | 16 |
-| 3 | `tr` | const arrow | 22 |
+| 1 | `ProductsHeaderActions` | export default function | 19 |
+| 2 | `tr` | const arrow | 29 |
 
 ### 3.236 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
 
@@ -4495,15 +4494,15 @@ Code files scanned: **466**
 | 2 | `T` | const arrow | 23 |
 | 3 | `Row` | const arrow | 43 |
 
-### 3.237 `frontend/src/components/products/surfaces/ProductRowParts.jsx`
+### 3.237 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductDiscountBadge` | export function | 5 |
-| 2 | `ProductRowActions` | export function | 19 |
-| 3 | `label` | const arrow | 20 |
-| 4 | `ProductBatchPreview` | export function | 42 |
-| 5 | `ProductDetailsCell` | export function | 65 |
+| 1 | `ProductDiscountBadge` | export function | 74 |
+| 2 | `ProductRowActions` | export function | 94 |
+| 3 | `label` | const arrow | 103 |
+| 4 | `ProductBatchPreview` | export function | 127 |
+| 5 | `ProductDetailsCell` | export function | 161 |
 
 ### 3.238 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
 

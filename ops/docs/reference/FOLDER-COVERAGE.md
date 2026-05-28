@@ -1060,9 +1060,9 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `HeaderActions.jsx` | UI component/page |
+| 1 | `HeaderActions.tsx` | UI component/page |
 | 2 | `ProductDetailModal.jsx` | UI component/page |
-| 3 | `ProductRowParts.jsx` | UI component/page |
+| 3 | `ProductRowParts.tsx` | UI component/page |
 | 4 | `ProductsListSurface.jsx` | UI component/page |
 
 

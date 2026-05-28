@@ -101,9 +101,9 @@ Total files documented: **193**
 | 89 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 |
 | 90 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 6 |
 | 91 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
-| 92 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 |
+| 92 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 2 |
 | 93 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
-| 94 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 1 |
+| 94 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 1 |
 | 95 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
 | 96 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
 | 97 | `frontend/src/components/receipt-settings/constants.ts` | 1 |
@@ -1611,13 +1611,12 @@ Total files documented: **193**
 | 11 | `handleUsdChange` | const arrow | 210 |
 | 12 | `handleKhrChange` | const arrow | 211 |
 
-### 3.92 `frontend/src/components/products/surfaces/HeaderActions.jsx`
+### 3.92 `frontend/src/components/products/surfaces/HeaderActions.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ProductsHeaderActions` | component/function | 5 |
-| 2 | `cleanFallback` | const arrow | 16 |
-| 3 | `tr` | const arrow | 22 |
+| 1 | `ProductsHeaderActions` | component/function | 19 |
+| 2 | `tr` | const arrow | 29 |
 
 ### 3.93 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
 
@@ -1627,11 +1626,11 @@ Total files documented: **193**
 | 2 | `T` | const arrow | 23 |
 | 3 | `Row` | const arrow | 43 |
 
-### 3.94 `frontend/src/components/products/surfaces/ProductRowParts.jsx`
+### 3.94 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `label` | const arrow | 20 |
+| 1 | `label` | const arrow | 103 |
 
 ### 3.95 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
 
