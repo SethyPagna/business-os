@@ -221,7 +221,7 @@ Code files documented: **466**
 | 209 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 3 | 1 | 2 | 1 |
 | 210 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 3 | 1 | 2 | 1 |
 | 211 | `frontend/src/components/products/forms/ProductForm.jsx` | 9 | 1 | 7 | 1 |
-| 212 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 8 | 1 | 7 | 1 |
+| 212 | `frontend/src/components/products/forms/VariantFormModal.tsx` | 8 | 1 | 7 | 1 |
 | 213 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 1 | 7 | 1 | 0 |
 | 214 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 2 | 4 | 2 | 0 |
 | 215 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 1 | 8 | 1 | 1 |
@@ -3140,7 +3140,7 @@ Code files documented: **466**
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/pos/POS.jsx`
-  - `frontend/src/components/products/forms/VariantFormModal.jsx`
+  - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
@@ -4228,11 +4228,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.212 `frontend/src/components/products/forms/VariantFormModal.jsx`
+### 3.212 `frontend/src/components/products/forms/VariantFormModal.tsx`
 
 - Declared exports: `function`
 - Imports (8)
-  - `../../../AppContext`
+  - `../../../AppContext.jsx`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/historyHelpers.ts`
   - `../../../utils/loaders.ts`
@@ -4494,7 +4494,7 @@ Code files documented: **466**
   - `frontend/src/api/http.ts`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/ProductForm.jsx`
-  - `frontend/src/components/products/forms/VariantFormModal.jsx`
+  - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/history/productHistoryHelpers.ts`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
@@ -4591,7 +4591,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/pos/ProductImage.tsx`
   - `frontend/src/components/products/forms/ProductForm.jsx`
-  - `frontend/src/components/products/forms/VariantFormModal.jsx`
+  - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
@@ -5190,7 +5190,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
   - `frontend/src/components/products/forms/ProductForm.jsx`
-  - `frontend/src/components/products/forms/VariantFormModal.jsx`
+  - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
@@ -5699,7 +5699,7 @@ Code files documented: **466**
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
-  - `frontend/src/components/products/forms/VariantFormModal.jsx`
+  - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
@@ -5975,7 +5975,7 @@ Code files documented: **466**
   - `frontend/src/components/custom-tables/CustomTables.jsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/products/forms/VariantFormModal.jsx`
+  - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/users/Users.jsx`
@@ -6034,7 +6034,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
-  - `frontend/src/components/products/forms/VariantFormModal.jsx`
+  - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/productLookupSnapshots.ts`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
@@ -6085,7 +6085,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/pos/posCore.ts`
   - `frontend/src/components/products/forms/ProductForm.jsx`
-  - `frontend/src/components/products/forms/VariantFormModal.jsx`
+  - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/helpers/productDisplayHelpers.ts`
   - `frontend/src/components/products/helpers/productFilterHelpers.ts`
   - `frontend/src/components/products/helpers/productWriteHelpers.ts`

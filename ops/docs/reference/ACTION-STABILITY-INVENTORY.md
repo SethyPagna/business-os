@@ -467,7 +467,7 @@ Continue with Phase 8.4:
   verification opens Products > Manage > Brand and checks Add/Delete selected/
   Edit/Delete controls without mutating brands.
   Product variant creation now uses a same-tick save guard and 12s mutation
-  timeout around `createProductVariant`. `VariantFormModal.jsx` now lives under
+  timeout around `createProductVariant`. `VariantFormModal.tsx` now lives under
   `frontend/src/components/products/forms`. Live verification opens a product
   row action menu, opens Add Variant, and checks the core variant form fields
   and submit button without creating a variant. Latest verified frontend hash:
@@ -511,7 +511,7 @@ Continue with Phase 8.4:
   category, unit, and brand live checks passed against frontend hash
   `3296f6327bd7aa53`.
   The third physical move started `frontend/src/components/products/forms` with
-  `VariantFormModal.jsx`; the Product variant live check passed against
+  `VariantFormModal.tsx`; the Product variant live check passed against
   frontend hash `42378a84fc53ab2f`.
   The fourth physical move continued `frontend/src/components/products/forms`
   with `BulkAddStockModal.tsx` and `BranchStockAdjuster.tsx`; the Product

@@ -221,7 +221,7 @@ Code files scanned: **466**
 | 209 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 6 |
 | 210 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 6 |
 | 211 | `frontend/src/components/products/forms/ProductForm.jsx` | 17 |
-| 212 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 5 |
+| 212 | `frontend/src/components/products/forms/VariantFormModal.tsx` | 3 |
 | 213 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 6 |
 | 214 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 9 |
 | 215 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 8 |
@@ -4133,15 +4133,13 @@ Code files scanned: **466**
 | 16 | `closeScanner` | function | 344 |
 | 17 | `applyScannedValue` | function | 348 |
 
-### 3.212 `frontend/src/components/products/forms/VariantFormModal.jsx`
+### 3.212 `frontend/src/components/products/forms/VariantFormModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `VariantFormModal` | export default function | 12 |
-| 2 | `tr` | const arrow | 14 |
-| 3 | `setField` | const arrow | 41 |
-| 4 | `setNumeric` | const arrow | 42 |
-| 5 | `handleSave` | const arrow | 47 |
+| 1 | `getProductVariantApi` | function | 104 |
+| 2 | `getErrorMessage` | function | 108 |
+| 3 | `VariantFormModal` | export default function | 112 |
 
 ### 3.213 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
 

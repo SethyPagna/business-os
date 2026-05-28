@@ -244,7 +244,7 @@ Total files documented: **529**
 | 232 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | frontend-ui | 193 | 6.5 | UI component/page |
 | 233 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | frontend-ui | 180 | 6.2 | UI component/page |
 | 234 | `frontend/src/components/products/forms/ProductForm.jsx` | frontend-ui | 940 | 46.9 | UI component/page |
-| 235 | `frontend/src/components/products/forms/VariantFormModal.jsx` | frontend-ui | 274 | 13.4 | UI component/page |
+| 235 | `frontend/src/components/products/forms/VariantFormModal.tsx` | frontend-ui | 376 | 15.7 | UI component/page |
 | 236 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | frontend-ui | 156 | 5.8 | UI component/page |
 | 237 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | frontend-ui | 216 | 9.0 | UI component/page |
 | 238 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | frontend-ui | 101 | 3.1 | UI component/page |
@@ -372,7 +372,7 @@ Total files documented: **529**
 | 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 731 | 58.7 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 731 | 58.8 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T08:56:46.090Z",
+  "generatedAt": "2026-05-28T09:20:24.883Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -29,11 +29,11 @@
     ],
     [
       "React JSX",
-      67
+      66
     ],
     [
       "React TSX",
-      40
+      41
     ],
     [
       "Windows batch",
@@ -71,11 +71,11 @@
     ],
     [
       ".jsx",
-      67
+      66
     ],
     [
       ".tsx",
-      40
+      41
     ],
     [
       ".bat",
