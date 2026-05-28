@@ -505,11 +505,11 @@ Code files scanned: **506**
 | 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | 6 |
 | 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 8 |
 | 495 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 21 |
-| 496 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | 5 |
+| 496 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
 | 497 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | 11 |
 | 498 | `ops/scripts/runtime/storage/prune-storage.mjs` | 17 |
-| 499 | `ops/scripts/runtime/storage/restore-candidates.mjs` | 8 |
-| 500 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | 14 |
+| 499 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
+| 500 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
 | 501 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
 | 502 | `ops/scripts/verification/verify-docker-release.js` | 11 |
 | 503 | `ops/scripts/verification/verify-hardening-policy.js` | 9 |
@@ -6925,15 +6925,15 @@ Code files scanned: **506**
 | 20 | `cleanupAuditImportFiles` | function | 377 |
 | 21 | `countMatchedRows` | function | 400 |
 
-### 3.496 `ops/scripts/runtime/storage/dataset-readiness.mjs`
+### 3.496 `ops/scripts/runtime/storage/dataset-readiness.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 9 |
-| 2 | `assertInsideWorkspace` | function | 30 |
-| 3 | `runPsql` | function | 36 |
-| 4 | `buildCountsSql` | function | 47 |
-| 5 | `summarizeDataset` | function | 65 |
+| 1 | `parseArgs` | function | 18 |
+| 2 | `assertInsideWorkspace` | function | 39 |
+| 3 | `runPsql` | function | 45 |
+| 4 | `buildCountsSql` | function | 56 |
+| 5 | `summarizeDataset` | function | 74 |
 
 ### 3.497 `ops/scripts/runtime/storage/post-live-hygiene.mjs`
 
@@ -6973,37 +6973,37 @@ Code files scanned: **506**
 | 16 | `findBackupRoots` | function | 359 |
 | 17 | `main` | function | 373 |
 
-### 3.499 `ops/scripts/runtime/storage/restore-candidates.mjs`
+### 3.499 `ops/scripts/runtime/storage/restore-candidates.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 24 |
-| 2 | `assertInsideWorkspace` | function | 43 |
-| 3 | `readJson` | function | 49 |
-| 4 | `countSqlCopyRows` | function | 61 |
-| 5 | `summarizeCounts` | function | 82 |
-| 6 | `inspectBackupPackage` | function | 92 |
-| 7 | `findBackupPackages` | function | 112 |
-| 8 | `chooseRecommendation` | function | 126 |
+| 1 | `parseArgs` | function | 48 |
+| 2 | `assertInsideWorkspace` | function | 67 |
+| 3 | `readJson` | function | 73 |
+| 4 | `countSqlCopyRows` | function | 85 |
+| 5 | `summarizeCounts` | function | 106 |
+| 6 | `inspectBackupPackage` | function | 116 |
+| 7 | `findBackupPackages` | function | 136 |
+| 8 | `chooseRecommendation` | function | 150 |
 
-### 3.500 `ops/scripts/runtime/storage/restore-rehearsal.mjs`
+### 3.500 `ops/scripts/runtime/storage/restore-rehearsal.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 21 |
-| 2 | `assertInsideWorkspace` | function | 45 |
-| 3 | `readJson` | function | 51 |
-| 4 | `resolveRecommendedBackupPath` | function | 59 |
-| 5 | `countSqlCopyRows` | function | 69 |
-| 6 | `runDocker` | function | 89 |
-| 7 | `runPsql` | function | 101 |
-| 8 | `createTempDatabaseName` | function | 108 |
-| 9 | `quoteIdentifier` | function | 112 |
-| 10 | `createDatabase` | function | 116 |
-| 11 | `dropDatabase` | function | 120 |
-| 12 | `restoreSql` | function | 129 |
-| 13 | `countRestoredTables` | function | 137 |
-| 14 | `compareCounts` | function | 144 |
+| 1 | `parseArgs` | function | 36 |
+| 2 | `assertInsideWorkspace` | function | 60 |
+| 3 | `readJson` | function | 66 |
+| 4 | `resolveRecommendedBackupPath` | function | 74 |
+| 5 | `countSqlCopyRows` | function | 84 |
+| 6 | `runDocker` | function | 104 |
+| 7 | `runPsql` | function | 116 |
+| 8 | `createTempDatabaseName` | function | 123 |
+| 9 | `quoteIdentifier` | function | 127 |
+| 10 | `createDatabase` | function | 131 |
+| 11 | `dropDatabase` | function | 135 |
+| 12 | `restoreSql` | function | 144 |
+| 13 | `countRestoredTables` | function | 152 |
+| 14 | `compareCounts` | function | 159 |
 
 ### 3.501 `ops/scripts/verification/verify-backup-reliability.js`
 

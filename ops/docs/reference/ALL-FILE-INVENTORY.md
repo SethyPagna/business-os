@@ -544,11 +544,11 @@ Total files documented: **569**
 | 532 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | project-scripts | 175 | 5.8 | Project source/support file |
 | 533 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | project-scripts | 231 | 9.7 | Project source/support file |
 | 534 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | project-scripts | 431 | 18.8 | Project source/support file |
-| 535 | `ops/scripts/runtime/storage/dataset-readiness.mjs` | project-scripts | 108 | 4.2 | Project source/support file |
+| 535 | `ops/scripts/runtime/storage/dataset-readiness.ts` | project-scripts | 117 | 4.5 | Project source/support file |
 | 536 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | project-scripts | 212 | 6.8 | Project source/support file |
 | 537 | `ops/scripts/runtime/storage/prune-storage.mjs` | project-scripts | 466 | 15.8 | Project source/support file |
-| 538 | `ops/scripts/runtime/storage/restore-candidates.mjs` | project-scripts | 189 | 6.9 | Project source/support file |
-| 539 | `ops/scripts/runtime/storage/restore-rehearsal.mjs` | project-scripts | 204 | 7.3 | Project source/support file |
+| 538 | `ops/scripts/runtime/storage/restore-candidates.ts` | project-scripts | 213 | 7.5 | Project source/support file |
+| 539 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | project-scripts | 219 | 7.9 | Project source/support file |
 | 540 | `ops/scripts/verification/verify-backup-reliability.js` | project-scripts | 140 | 5.0 | Project source/support file |
 | 541 | `ops/scripts/verification/verify-docker-release.js` | project-scripts | 651 | 30.7 | Project source/support file |
 | 542 | `ops/scripts/verification/verify-hardening-policy.js` | project-scripts | 140 | 5.5 | Project source/support file |
