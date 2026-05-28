@@ -5098,3 +5098,12 @@ Move 459 status:
   adding typed profile, route, summary, health, action, finding, navigation,
   and console-entry records. The ops package command now calls the TypeScript
   entrypoint directly.
+
+Move 460 status:
+- Move 460 converts the focused product lookup live checks to TypeScript.
+  `phase84-product-categories-actions-live-check.ts`,
+  `phase84-product-units-actions-live-check.ts`, and
+  `phase84-product-brands-actions-live-check.ts` preserve the product Manage
+  modal, lookup usage, action-history, row controls, screenshot, and console
+  assertions while adding typed health, console-entry, observed-request, and
+  request-context shapes.

@@ -4,27 +4,48 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from '../audits/audit-auth.ts'
-import { readJson, isIgnoredConsole, waitForRead, attachConsoleCollector } from './live-check-utils.ts'
+import { readJson, isIgnoredConsole, latestObservedStatus, waitForRead, attachConsoleCollector } from './live-check-utils.ts'
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
 const USERNAME = process.env.BOS_USERNAME || 'admin'
 const PASSWORD = process.env.BOS_PASSWORD || 'Admin123456!'
 const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, '-')
-const REPORT_DIR = path.join(ROOT_DIR, 'ops/runtime/reports', `phase84-product-categories-actions-live-check-${TIMESTAMP}`)
+const REPORT_DIR = path.join(ROOT_DIR, 'ops/runtime/reports', `phase84-product-brands-actions-live-check-${TIMESTAMP}`)
 const REPORT_PATH = path.join(REPORT_DIR, 'report.json')
-const SCREENSHOT_PATH = path.join(REPORT_DIR, 'product-categories-actions.png')
+const SCREENSHOT_PATH = path.join(REPORT_DIR, 'product-brands-actions.png')
 
-function assert(condition, message) {
+type ConsoleEntry = { type: string; text: string }
+type ObservedRequest = { status: number; url: string }
+type RuntimeHealth = {
+  status?: string
+  runtime?: {
+    frontend?: { hash?: string }
+    sourceHash?: string
+  }
+}
+type RequestContext = {
+  request: {
+    get: (url: string, options: { timeout: number }) => Promise<{ status: () => number }>
+  }
+}
+
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
 
 
+async function verifiedContextGet(context: RequestContext, url: string, label: string): Promise<number> {
+  const response = await context.request.get(url, { timeout: 20_000 })
+  assert(response.status() === 200, `${label} returned HTTP ${response.status()}`)
+  return response.status()
+}
 
-async function main() {
+
+async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
-  const health = await readJson(`${BASE_URL}/health`)
+  const health = await readJson(`${BASE_URL}/health`) as RuntimeHealth
   const build = await readJson(`${BASE_URL}/business-os-build.json`)
   assert(health.status === 'ok', 'Runtime health is not ok')
 
@@ -34,12 +55,12 @@ async function main() {
     const context = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1366, height: 900 } })
     const storageState = await applySessionToPlaywrightContext(context, session, BASE_URL)
     const page = await context.newPage()
-    const consoleMessages = []
-    const observedRequests = []
+    const consoleMessages: ConsoleEntry[] = []
+    const observedRequests: ObservedRequest[] = []
     attachConsoleCollector(page, consoleMessages)
     page.on('response', (response) => {
       const url = response.url()
-      if (/\/api\/(products|categories|units|branches|action-history)/i.test(url)) {
+      if (/\/api\/(products|categories|units|branches|action-history|settings)/i.test(url)) {
         observedRequests.push({ status: response.status(), url })
       }
     })
@@ -51,26 +72,24 @@ async function main() {
     await page.getByText('Products', { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     const productsStatus = await productsRead
 
-    const categoriesRead = waitForRead(page, observedRequests, /\/api\/categories(?:\?|$)/i, 'Categories read')
-    const lookupUsageRead = waitForRead(page, observedRequests, /\/api\/products\/lookups\/usage/i, 'Product lookup usage read')
     await page.getByRole('button', { name: /^Manage$/i }).first().click()
-    await page.getByRole('button', { name: /^Categories$/i }).click()
+    await page.getByRole('button', { name: /^Brand$/i }).click()
     const modal = page.locator('.fixed.inset-0').last()
-    await modal.getByRole('heading', { name: /Manage Categories/i }).waitFor({ state: 'visible', timeout: 20_000 })
-    const categoriesStatus = await categoriesRead
-    const lookupUsageStatus = await lookupUsageRead
+    await modal.getByRole('heading', { name: /Brand\s+Manage|Manage\s+Brand/i }).waitFor({ state: 'visible', timeout: 20_000 })
+    const lookupUsageStatus = await verifiedContextGet(context, `${BASE_URL}/api/products/lookups/usage`, 'Product lookup usage direct read')
+    const actionHistoryStatus = await verifiedContextGet(context, `${BASE_URL}/api/action-history?scope=product-brands&limit=5&all=1`, 'Brand action-history direct read')
 
-    await modal.locator('#new-category-name').waitFor({ state: 'visible', timeout: 15_000 })
-    await modal.locator('#new-category-color').waitFor({ state: 'visible', timeout: 15_000 })
+    await modal.getByPlaceholder("e.g. L'Oreal").waitFor({ state: 'visible', timeout: 15_000 })
+    await modal.getByLabel(/Brand color/i).waitFor({ state: 'visible', timeout: 15_000 })
     const addButtonVisible = await modal.getByRole('button', { name: /^Add$/i }).isVisible()
-    assert(addButtonVisible, 'Category add button did not render')
-    const categoryRows = await modal.locator('input[type="checkbox"]').count()
-    assert(categoryRows > 0, 'Category modal did not render selectable rows or select-visible control')
+    assert(addButtonVisible, 'Brand add button did not render')
+    const brandRows = await modal.locator('input[type="checkbox"]').count()
+    assert(brandRows > 0, 'Brand modal did not render selectable rows or select-visible control')
     const deleteSelectedButtonVisible = await modal.getByRole('button', { name: /Delete selected/i }).isVisible()
-    assert(deleteSelectedButtonVisible, 'Delete selected category button did not render')
+    assert(deleteSelectedButtonVisible, 'Delete selected brand button did not render')
     const editButtons = await modal.getByRole('button', { name: /^Edit$/i }).count()
     const deleteButtons = await modal.getByRole('button', { name: /^Delete$/i }).count()
-    assert(editButtons + deleteButtons > 0, 'Category row edit/delete controls did not render')
+    assert(editButtons + deleteButtons > 0, 'Brand row edit/delete controls did not render')
 
     const frameworkOverlayVisible = await page.locator('#vite-error-overlay, [data-nextjs-dialog-overlay]').count()
     assert(frameworkOverlayVisible === 0, 'A framework error overlay is visible')
@@ -89,11 +108,13 @@ async function main() {
       checks: {
         productsPageVisible: true,
         productsStatus,
-        categoriesStatus,
         lookupUsageStatus,
-        categoriesModalOpened: true,
+        actionHistoryStatus,
+        observedLookupUsageStatus: latestObservedStatus(observedRequests, /\/api\/products\/lookups\/usage/i),
+        observedActionHistoryStatus: latestObservedStatus(observedRequests, /\/api\/action-history\?scope=product-brands/i),
+        brandsModalOpened: true,
         addButtonVisible,
-        categoryRows,
+        brandRows,
         deleteSelectedButtonVisible,
         editButtons,
         deleteButtons,
@@ -102,7 +123,7 @@ async function main() {
       },
       observedRequests,
       screenshots: {
-        productCategories: SCREENSHOT_PATH,
+        productBrands: SCREENSHOT_PATH,
       },
     }
     await fs.writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
@@ -112,7 +133,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch((error: any) => {
   console.error(error?.stack || error?.message || String(error))
   process.exitCode = 1
 })

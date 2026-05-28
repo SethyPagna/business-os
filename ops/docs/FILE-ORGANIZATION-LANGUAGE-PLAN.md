@@ -3597,6 +3597,14 @@ Decision rule:
     typed profile, route, summary, health, action, finding, navigation, and
     console-entry shapes while continuing to exercise manifest-driven route
     navigation, searches, menus, dialogs, and screenshot/report generation.
+450. Convert product lookup focused live checks to TypeScript. Done:
+    `phase84-product-categories-actions-live-check.ts`,
+    `phase84-product-units-actions-live-check.ts`, and
+    `phase84-product-brands-actions-live-check.ts` replace their `.mjs`
+    entrypoints. The checks keep the same Manage modal, lookup-usage,
+    action-history, row action, console, screenshot, and report assertions
+    while adding typed health, console-entry, observed-request, and direct
+    request-context boundaries.
 
 ## Safety Gates
 
