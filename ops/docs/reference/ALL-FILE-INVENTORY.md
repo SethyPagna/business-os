@@ -189,7 +189,7 @@ Total files documented: **529**
 | 177 | `frontend/src/components/branches/BranchForm.jsx` | frontend-ui | 190 | 6.4 | UI component/page |
 | 178 | `frontend/src/components/branches/TransferModal.jsx` | frontend-ui | 346 | 14.2 | UI component/page |
 | 179 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | frontend-ui | 1295 | 95.9 | UI component/page |
-| 180 | `frontend/src/components/catalog/CatalogImageField.jsx` | frontend-ui | 91 | 4.0 | UI component/page |
+| 180 | `frontend/src/components/catalog/CatalogImageField.tsx` | frontend-ui | 115 | 4.6 | UI component/page |
 | 181 | `frontend/src/components/catalog/CatalogPage.jsx` | frontend-ui | 3218 | 139.2 | UI component/page |
 | 182 | `frontend/src/components/catalog/CatalogPageContext.tsx` | frontend-ui | 25 | 0.6 | UI component/page |
 | 183 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | frontend-ui | 354 | 19.0 | UI component/page |

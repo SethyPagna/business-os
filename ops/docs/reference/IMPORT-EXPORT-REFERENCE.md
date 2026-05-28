@@ -166,7 +166,7 @@ Code files documented: **466**
 | 154 | `frontend/src/components/branches/BranchForm.jsx` | 2 | 1 | 1 | 1 |
 | 155 | `frontend/src/components/branches/TransferModal.jsx` | 3 | 1 | 2 | 1 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 5 | 1 | 4 | 1 |
-| 157 | `frontend/src/components/catalog/CatalogImageField.jsx` | 2 | 1 | 1 | 1 |
+| 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 2 | 1 | 1 | 1 |
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 12 | 1 | 11 | 1 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 | 2 | 0 | 2 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 6 | 1 | 4 | 1 |
@@ -3254,14 +3254,14 @@ Code files documented: **466**
   - `./catalogUi`
   - `lucide-react`
 - Internal dependencies (4)
-  - `frontend/src/components/catalog/CatalogImageField.jsx`
+  - `frontend/src/components/catalog/CatalogImageField.tsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
   - `frontend/src/components/catalog/catalogUi.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.157 `frontend/src/components/catalog/CatalogImageField.jsx`
+### 3.157 `frontend/src/components/catalog/CatalogImageField.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -6053,7 +6053,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/utils/publicAssetUrls.ts`
 - Referenced by (3)
-  - `frontend/src/components/catalog/CatalogImageField.jsx`
+  - `frontend/src/components/catalog/CatalogImageField.tsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/tests/mediaUploadHelpers.test.ts`
 

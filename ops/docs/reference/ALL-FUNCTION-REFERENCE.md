@@ -166,7 +166,7 @@ Code files scanned: **466**
 | 154 | `frontend/src/components/branches/BranchForm.jsx` | 3 |
 | 155 | `frontend/src/components/branches/TransferModal.jsx` | 4 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
-| 157 | `frontend/src/components/catalog/CatalogImageField.jsx` | 1 |
+| 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 2 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 2 |
@@ -3339,11 +3339,11 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `CatalogEditorSurface` | export default function | 7 |
 
-### 3.157 `frontend/src/components/catalog/CatalogImageField.jsx`
+### 3.157 `frontend/src/components/catalog/CatalogImageField.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `CatalogImageField` | export default function | 4 |
+| 1 | `CatalogImageField` | export default function | 28 |
 
 ### 3.158 `frontend/src/components/catalog/CatalogPage.jsx`
 

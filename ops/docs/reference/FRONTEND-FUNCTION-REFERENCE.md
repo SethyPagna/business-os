@@ -23,7 +23,7 @@ Total files documented: **193**
 | 11 | `frontend/src/components/branches/BranchForm.jsx` | 3 |
 | 12 | `frontend/src/components/branches/TransferModal.jsx` | 4 |
 | 13 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
-| 14 | `frontend/src/components/catalog/CatalogImageField.jsx` | 1 |
+| 14 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 15 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
 | 16 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
 | 17 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 2 |
@@ -617,11 +617,11 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `CatalogEditorSurface` | component/function | 7 |
 
-### 3.14 `frontend/src/components/catalog/CatalogImageField.jsx`
+### 3.14 `frontend/src/components/catalog/CatalogImageField.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `CatalogImageField` | component/function | 4 |
+| 1 | `CatalogImageField` | component/function | 28 |
 
 ### 3.15 `frontend/src/components/catalog/CatalogPage.jsx`
 
