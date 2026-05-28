@@ -15,16 +15,27 @@ const REPORT_DIR = path.join(ROOT_DIR, 'ops/runtime/reports', `phase84-files-pro
 const REPORT_PATH = path.join(REPORT_DIR, 'report.json')
 const SCREENSHOT_PATH = path.join(REPORT_DIR, 'files-providers-actions.png')
 
-function assert(condition, message) {
+type ConsoleEntry = { type: string; text: string }
+type ObservedRequest = { status: number; url: string }
+type RuntimeHealth = {
+  status?: string
+  runtime?: {
+    frontend?: { hash?: string }
+    sourceHash?: string
+  }
+}
+type AiProvidersResponse = { items?: unknown[] }
+
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
 
 
 
-async function main() {
+async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
-  const health = await readJson(`${BASE_URL}/health`)
+  const health = await readJson(`${BASE_URL}/health`) as RuntimeHealth
   const build = await readJson(`${BASE_URL}/business-os-build.json`)
   assert(health.status === 'ok', 'Runtime health is not ok')
 
@@ -34,8 +45,8 @@ async function main() {
     const context = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1366, height: 900 } })
     const storageState = await applySessionToPlaywrightContext(context, session, BASE_URL)
     const page = await context.newPage()
-    const consoleMessages = []
-    const observedRequests = []
+    const consoleMessages: ConsoleEntry[] = []
+    const observedRequests: ObservedRequest[] = []
     attachConsoleCollector(page, consoleMessages)
     page.on('response', (response) => {
       const url = response.url()
@@ -66,7 +77,7 @@ async function main() {
     const saveProviderButtonVisible = await page.getByRole('button', { name: /Add provider|Save provider/i }).isVisible()
     assert(saveProviderButtonVisible, 'Provider save button did not render')
 
-    const providers = await page.evaluate(async () => window.api.getAiProviders())
+    const providers = await page.evaluate(async () => window.api.getAiProviders()) as AiProvidersResponse
     const providerCount = Array.isArray(providers?.items) ? providers.items.length : 0
     const providerActionButtons = {
       edit: await page.getByRole('button', { name: /^Edit$/i }).count(),
@@ -118,7 +129,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch((error: any) => {
   console.error(error?.stack || error?.message || String(error))
   process.exitCode = 1
 })

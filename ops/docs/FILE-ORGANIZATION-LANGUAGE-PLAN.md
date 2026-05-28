@@ -3621,6 +3621,14 @@ Decision rule:
     non-mutating delete-confirmation, manual barcode scanner, bulk stock,
     branch stock, and add-variant browser workflows while adding typed health,
     console-entry, observed-request, dialog, and Playwright page boundaries.
+453. Convert operational focused live checks to TypeScript. Done:
+    `phase84-files-providers-actions-live-check.ts`,
+    `phase84-inventory-actions-live-check.ts`, and
+    `phase84-sales-actions-live-check.ts` replace their `.mjs` entrypoints.
+    The checks keep the same Library provider, Inventory adjust/transfer/move
+    and batch, and Sales bulk/detail browser workflows while adding typed
+    health, console-entry, observed-request, evaluated provider, sale
+    candidate, and Playwright page boundaries.
 
 ## Safety Gates
 

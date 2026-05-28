@@ -5126,3 +5126,12 @@ Move 462 status:
   action menu, delete-confirm dismissal, manual barcode, bulk stock, branch
   stock, and variant modal workflows while adding typed health, console-entry,
   observed-request, dialog, and Playwright page shapes.
+
+Move 463 status:
+- Move 463 converts the Library, Inventory, and Sales focused live checks to
+  TypeScript. `phase84-files-providers-actions-live-check.ts`,
+  `phase84-inventory-actions-live-check.ts`, and
+  `phase84-sales-actions-live-check.ts` preserve provider management,
+  inventory adjust/transfer/move/batch controls, and sales bulk/detail
+  workflows while adding typed health, console-entry, observed-request,
+  provider response, sale candidate, and Playwright page shapes.

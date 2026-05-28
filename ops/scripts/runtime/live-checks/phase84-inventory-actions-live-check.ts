@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import type { Locator, Page } from 'playwright'
 import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from '../audits/audit-auth.ts'
 import { readJson, isIgnoredConsole, waitForRead, closeTopModal, attachConsoleCollector } from './live-check-utils.ts'
 
@@ -15,7 +16,17 @@ const REPORT_DIR = path.join(ROOT_DIR, 'ops/runtime/reports', `phase84-inventory
 const REPORT_PATH = path.join(REPORT_DIR, 'report.json')
 const SCREENSHOT_PATH = path.join(REPORT_DIR, 'inventory-actions.png')
 
-function assert(condition, message) {
+type ConsoleEntry = { type: string; text: string }
+type ObservedRequest = { status: number; url: string }
+type RuntimeHealth = {
+  status?: string
+  runtime?: {
+    frontend?: { hash?: string }
+    sourceHash?: string
+  }
+}
+
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
@@ -23,7 +34,7 @@ function assert(condition, message) {
 
 
 
-async function openFirstProductDetail(page) {
+async function openFirstProductDetail(page: Page): Promise<Locator> {
   const firstRow = page.locator('tbody tr.table-row').first()
   await firstRow.waitFor({ state: 'visible', timeout: 20_000 })
   await firstRow.click()
@@ -32,9 +43,9 @@ async function openFirstProductDetail(page) {
   return detailModal
 }
 
-async function main() {
+async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
-  const health = await readJson(`${BASE_URL}/health`)
+  const health = await readJson(`${BASE_URL}/health`) as RuntimeHealth
   const build = await readJson(`${BASE_URL}/business-os-build.json`)
   assert(health.status === 'ok', 'Runtime health is not ok')
 
@@ -44,8 +55,8 @@ async function main() {
     const context = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1366, height: 900 } })
     const storageState = await applySessionToPlaywrightContext(context, session, BASE_URL)
     const page = await context.newPage()
-    const consoleMessages = []
-    const observedRequests = []
+    const consoleMessages: ConsoleEntry[] = []
+    const observedRequests: ObservedRequest[] = []
     attachConsoleCollector(page, consoleMessages)
     page.on('response', (response) => {
       const url = response.url()
@@ -147,7 +158,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch((error: any) => {
   console.error(error?.stack || error?.message || String(error))
   process.exitCode = 1
 })
