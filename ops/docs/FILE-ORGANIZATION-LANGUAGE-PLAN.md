@@ -3642,6 +3642,13 @@ Decision rule:
     launcher now point at the TypeScript path while the audit keeps its HTML
     route checks, read endpoint checks, FEFO/import/file/backup write flows,
     final cleanup, remote public probes, and HTML report generation.
+456. Convert the deep live audit to TypeScript. Done:
+    `deep-live-audit.ts` replaces the final runtime audit `.mjs` entrypoint
+    and the ops package `deep-live-audit` command now calls the TypeScript
+    path. The script keeps the same route profiling, browser interactions,
+    remote read-only checks, full app audit launch, Docker log scan, baseline
+    comparison, and HTML report generation while adding typed summary, command,
+    request, route, collector, and finding boundaries.
 
 ## Safety Gates
 

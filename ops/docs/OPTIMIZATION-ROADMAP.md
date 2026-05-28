@@ -5149,3 +5149,9 @@ Move 465 status:
   remote public, health, and HTML-report audit flow while Docker release
   verification, backend source assertions, and the deep live audit launcher now
   reference the TypeScript entrypoint.
+
+Move 466 status:
+- Move 466 converts the deep live audit to TypeScript. `deep-live-audit.ts`
+  preserves the route profiling, browser interaction, remote read-only,
+  full-app audit launch, Docker log scan, baseline comparison, and HTML-report
+  flow while the ops package command now references the TypeScript entrypoint.

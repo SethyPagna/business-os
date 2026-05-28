@@ -8,7 +8,7 @@
     "cleanup-node-processes": "powershell -ExecutionPolicy Bypass -File scripts/powershell/clear-stale-node-processes.ps1 -Apply",
     "cleanup-node-processes:codex": "powershell -ExecutionPolicy Bypass -File scripts/powershell/clear-stale-node-processes.ps1 -Apply -IncludeCodexHelpers",
     "action-history:check": "node scripts/runtime/audits/action-history-undo-redo-check.ts",
-    "deep-live-audit": "node scripts/runtime/audits/deep-live-audit.mjs --profile exhaustive",
+    "deep-live-audit": "node scripts/runtime/audits/deep-live-audit.ts --profile exhaustive",
     "browser-action-smoke": "node scripts/runtime/browser-action-smoke.ts --profile exhaustive",
     "generated-bulk-audit": "node scripts/architecture/generated-bulk-audit.ts",
     "language-runtime-audit": "node scripts/architecture/language-runtime-audit.ts",

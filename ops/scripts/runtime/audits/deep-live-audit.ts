@@ -38,7 +38,24 @@ const ROUTE_CONTEXT_COOLDOWN_MS = 500
 
 const PROFILES = getAuditProfiles(PROFILE)
 
-const summary = {
+type RequestJsonOptions = { redirect?: RequestRedirect; timeoutMs?: number }
+type CommandOptions = {
+  cwd?: string
+  env?: Record<string, string>
+  stream?: boolean
+}
+type DeepAuditSummary = {
+  audit: Record<string, any>
+  health: Record<string, any>
+  docker: Record<string, any>
+  fullAudit: Record<string, any>
+  browser: Record<string, any>
+  remote: Record<string, any>
+  findings: any[]
+  artifacts: Record<string, any>
+}
+
+const summary: DeepAuditSummary = {
   audit: {
     baseUrl: BASE_URL,
     remotePublicUrl: REMOTE_PUBLIC_URL,
@@ -56,27 +73,27 @@ const summary = {
   findings: [],
   artifacts: {},
 }
-const reportedAssetBudgetKeys = new Set()
+const reportedAssetBudgetKeys = new Set<string>()
 
-const networkReport = []
-const performanceReport = []
-const consoleReport = []
-const fullAuditRouteMap = new Map()
+const networkReport: any[] = []
+const performanceReport: any[] = []
+const consoleReport: any[] = []
+const fullAuditRouteMap = new Map<string, any>()
 const artifacts = {
   fullAuditReportDir: '',
-  screenshots: [],
-  traces: [],
+  screenshots: [] as string[],
+  traces: [] as string[],
 }
 
-function readArg(name) {
+function readArg(name: string): string {
   const index = process.argv.indexOf(name)
   if (index >= 0) return process.argv[index + 1] || ''
   const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`))
   return prefixed ? prefixed.slice(name.length + 1) : ''
 }
 
-function readArgs(name) {
-  const values = []
+function readArgs(name: string): string[] {
+  const values: string[] = []
   for (let index = 0; index < process.argv.length; index += 1) {
     const arg = process.argv[index]
     if (arg === name) {
@@ -91,15 +108,15 @@ function readArgs(name) {
   return values
 }
 
-function safeName(value) {
+function safeName(value: unknown): string {
   return String(value || 'artifact').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'artifact'
 }
 
-function escapeRegExp(value = '') {
+function escapeRegExp(value = ''): string {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function addFinding(priority, area, message, extra = {}) {
+function addFinding(priority: number, area: string, message: string, extra: Record<string, any> = {}): void {
   summary.findings.push({
     priority,
     area,
@@ -108,7 +125,7 @@ function addFinding(priority, area, message, extra = {}) {
   })
 }
 
-function assetFileName(url) {
+function assetFileName(url: string): string {
   try {
     return path.basename(new URL(url).pathname)
   } catch {
@@ -116,7 +133,7 @@ function assetFileName(url) {
   }
 }
 
-function getScriptBudgetBytes(script) {
+function getScriptBudgetBytes(script: any): Record<string, any> {
   const transferBytes = Number(script.transferSize || 0)
   const encodedBytes = Number(script.encodedBodySize || 0)
   const decodedBytes = Number(script.decodedBodySize || 0)
@@ -137,11 +154,11 @@ function getScriptBudgetBytes(script) {
   }
 }
 
-function isFailingFinding(finding) {
+function isFailingFinding(finding: any): boolean {
   return Number(finding.priority || 0) <= 1
 }
 
-function appOwnedUrl(url) {
+function appOwnedUrl(url: unknown): boolean {
   const value = String(url || '')
   return value.startsWith(BASE_URL)
     || value.startsWith('/api/')
@@ -151,29 +168,29 @@ function appOwnedUrl(url) {
     || value.includes('leangcosmetics.dpdns.org')
 }
 
-function externalNoise(message) {
+function externalNoise(message: unknown): boolean {
   return /chrome-extension:|ab\.chatgpt\.com|Statsig|No Listener: tabs:outgoing|ERR_BLOCKED_BY_CLIENT/i.test(String(message || ''))
 }
 
-function isAppConsoleIssue(entry) {
+function isAppConsoleIssue(entry: any): boolean {
   const message = String(entry.text || entry.message || '')
   if (externalNoise(message)) return false
   if (!['error', 'warning', 'warn'].includes(String(entry.type || entry.level || '').toLowerCase())) return false
   return /PageErrorBoundary|ChunkReloadStall|methods is not defined|ReferenceError|TypeError|Dashboard .*failed|PageLoader|502|524|Bad Gateway|WebSocket connection|incomplete data|failed/i.test(message)
 }
 
-function isNavigationAbort(entry) {
+function isNavigationAbort(entry: any): boolean {
   const failure = String(entry.failureText || entry.failure || '')
   if (!/net::ERR_ABORTED/i.test(failure)) return false
   const status = Number(entry.status || 0)
   return status === 0 || status === 200
 }
 
-async function writeJson(filename, value) {
+async function writeJson(filename: string, value: unknown): Promise<void> {
   await fs.writeFile(path.join(REPORT_DIR, filename), `${JSON.stringify(value, null, 2)}\n`)
 }
 
-async function requestJson(url, options = {}) {
+async function requestJson(url: string, options: RequestJsonOptions = {}): Promise<any> {
   const started = performance.now()
   const response = await fetch(url, {
     redirect: options.redirect || 'follow',
@@ -194,7 +211,7 @@ async function requestJson(url, options = {}) {
   }
 }
 
-async function runCommand(command, args, options = {}) {
+async function runCommand(command: string, args: string[], options: CommandOptions = {}): Promise<any> {
   const started = performance.now()
   return await new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -231,7 +248,7 @@ async function runCommand(command, args, options = {}) {
   })
 }
 
-async function captureHealth(phase) {
+async function captureHealth(phase: string): Promise<any> {
   const health = await requestJson(`${BASE_URL}/health`, { timeoutMs: 20_000 })
   summary.health[phase] = {
     status: health.body?.status || null,
@@ -247,7 +264,7 @@ async function captureHealth(phase) {
   return health.body || {}
 }
 
-async function runFullApiAudit() {
+async function runFullApiAudit(): Promise<void> {
   const fullAuditDir = path.join(REPORT_DIR, 'api-system')
   artifacts.fullAuditReportDir = fullAuditDir
   await fs.mkdir(fullAuditDir, { recursive: true })
@@ -317,7 +334,7 @@ async function runFullApiAudit() {
   }
 }
 
-async function primeDirectRouteProbeMap() {
+async function primeDirectRouteProbeMap(): Promise<void> {
   fullAuditRouteMap.clear()
   const session = await loginWithFetch({
     baseUrl: BASE_URL,
@@ -356,7 +373,7 @@ async function primeDirectRouteProbeMap() {
   }
 }
 
-async function loginForAudit(context, page = null) {
+async function loginForAudit(context: any, page: any = null): Promise<any> {
   const session = await loginWithFetch({
     baseUrl: BASE_URL,
     username: USERNAME,
@@ -370,13 +387,13 @@ async function loginForAudit(context, page = null) {
   return storageState
 }
 
-async function isLoginScreen(page) {
+async function isLoginScreen(page: any): Promise<boolean> {
   return page.evaluate(() => {
     return !!document.querySelector('#login-username, #login-password')
   }).catch(() => false)
 }
 
-async function ensureAuditLogin(page, authState = null) {
+async function ensureAuditLogin(page: any, authState: any = null): Promise<void> {
   if (authState?.userJson) {
     await hydratePlaywrightPage(page, { ...authState, baseUrl: BASE_URL })
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {})
@@ -410,7 +427,7 @@ async function ensureAuditLogin(page, authState = null) {
   throw new Error('Deep audit browser login did not complete successfully')
 }
 
-async function installPerfObservers(page) {
+async function installPerfObservers(page: any): Promise<void> {
   await page.addInitScript(() => {
     const bosSelectorFor = (element) => {
       if (!element || typeof element !== 'object' || !('nodeType' in element) || element.nodeType !== 1) return ''
@@ -514,7 +531,7 @@ async function installPerfObservers(page) {
   })
 }
 
-async function createBrowserHarness(profile) {
+async function createBrowserHarness(profile: any): Promise<any> {
   const browser = await chromium.launch({
     headless: process.env.BOS_DEEP_AUDIT_HEADED === '1' ? false : true,
   })
@@ -529,7 +546,7 @@ async function createBrowserHarness(profile) {
   return { browser, createContext }
 }
 
-async function attachCollectors(page) {
+async function attachCollectors(page: any): Promise<any> {
   const consoleEntries = []
   const failedRequests = []
   const cdpEntries = new Map()
@@ -617,7 +634,7 @@ async function attachCollectors(page) {
   }
 }
 
-async function resetBrowserState(page) {
+async function resetBrowserState(page: any): Promise<void> {
   await page.goto(`${BASE_URL}/?__bos_deep_reset=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.evaluate(() => {
     const stalePrefixes = [
@@ -633,7 +650,7 @@ async function resetBrowserState(page) {
   })
 }
 
-async function waitForRouteReady(page, route) {
+async function waitForRouteReady(page: any, route: any): Promise<any> {
   const started = performance.now()
   try {
     await page.waitForFunction(({ readyTexts, routeName }) => {
@@ -660,7 +677,7 @@ async function waitForRouteReady(page, route) {
   return Math.round(performance.now() - started)
 }
 
-async function collectPerfSnapshot(page) {
+async function collectPerfSnapshot(page: any): Promise<any> {
   return await page.evaluate(() => {
     const nav = performance.getEntriesByType('navigation')[0]
     const resources = performance.getEntriesByType('resource').map((entry) => ({
@@ -720,14 +737,14 @@ async function collectPerfSnapshot(page) {
   })
 }
 
-async function saveScreenshot(page, name) {
+async function saveScreenshot(page: any, name: string): Promise<string> {
   const file = path.join(SCREENSHOT_DIR, `${safeName(name)}.png`)
   await page.screenshot({ path: file, fullPage: false })
   artifacts.screenshots.push(file)
   return file
 }
 
-async function performSearchInteraction(page, routeName) {
+async function performSearchInteraction(page: any, routeName: string): Promise<any> {
   const started = performance.now()
   const candidates = [
     'input[type="search"]',
@@ -762,7 +779,7 @@ async function performSearchInteraction(page, routeName) {
   }
 }
 
-async function dismissTransientUi(page) {
+async function dismissTransientUi(page: any): Promise<void> {
   await page.keyboard.press('Escape').catch(() => {})
   await page.waitForTimeout(120)
   const closeButtons = [
@@ -780,7 +797,7 @@ async function dismissTransientUi(page) {
   }
 }
 
-async function clickNamedButton(page, label, routeName) {
+async function clickNamedButton(page: any, label: string, routeName: string): Promise<any> {
   await dismissTransientUi(page)
   const button = page.getByRole('button', { name: label }).first()
   if (!(await button.count().catch(() => 0))) {
@@ -815,7 +832,12 @@ async function clickNamedButton(page, label, routeName) {
   }
 }
 
-async function clickTestIdButton(page, testId, routeName, { waitForProgress = false } = {}) {
+async function clickTestIdButton(
+  page: any,
+  testId: string,
+  routeName: string,
+  { waitForProgress = false }: { waitForProgress?: boolean } = {},
+): Promise<any> {
   await dismissTransientUi(page)
   const button = page.locator(`[data-testid="${testId}"]`).first()
   if (!(await button.count().catch(() => 0))) {
@@ -855,8 +877,8 @@ async function clickTestIdButton(page, testId, routeName, { waitForProgress = fa
   }
 }
 
-async function runRouteInteractions(page, route) {
-  const interactions = []
+async function runRouteInteractions(page: any, route: any): Promise<any[]> {
+  const interactions: any[] = []
   if (route?.interactions?.search) {
     interactions.push(await performSearchInteraction(page, route.name))
   }
@@ -871,7 +893,16 @@ async function runRouteInteractions(page, route) {
   return interactions
 }
 
-function analyzeRoute(profileName, route, routeResult, networkEntries, perf, consoleEntries, failedRequests, interactions) {
+function analyzeRoute(
+  profileName: string,
+  route: any,
+  routeResult: any,
+  networkEntries: any[],
+  perf: any,
+  consoleEntries: any[],
+  failedRequests: any[],
+  interactions: any[],
+): void {
   if (routeResult.readyMs > ROUTE_READY_FAIL_MS) {
     addFinding(0, 'browser-ready', `${profileName}/${route.name} exceeded route ready fail budget`, routeResult)
   } else if (routeResult.readyMs > ROUTE_READY_WARN_MS) {
@@ -970,7 +1001,14 @@ function analyzeRoute(profileName, route, routeResult, networkEntries, perf, con
   }
 }
 
-async function auditRoute(page, collectors, profileName, route, authenticated = true, authState = null) {
+async function auditRoute(
+  page: any,
+  collectors: any,
+  profileName: string,
+  route: any,
+  authenticated = true,
+  authState: any = null,
+): Promise<any> {
   collectors.reset()
   await page.evaluate(() => {
     window.__bosResetPerf?.()
@@ -1166,7 +1204,7 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
   return routeResult
 }
 
-async function auditBrowserProfile(profile) {
+async function auditBrowserProfile(profile: any): Promise<void> {
   const routeSelection = resolveAuditRoutes(readArgs('--route'))
   if (routeSelection.unknownRoutes.length) {
     throw new Error(`Unknown audit route(s): ${routeSelection.unknownRoutes.join(', ')}`)
@@ -1197,7 +1235,7 @@ async function auditBrowserProfile(profile) {
     await bootstrapPage.close().catch(() => {})
     await bootstrapContext.close().catch(() => {})
 
-    const runIsolatedRoute = async (route, authenticated = true) => {
+    const runIsolatedRoute = async (route: any, authenticated = true): Promise<any> => {
       const routeContext = await createContext()
       const authState = await applySessionToPlaywrightContext(routeContext, session, BASE_URL)
       const page = await routeContext.newPage()
@@ -1230,7 +1268,7 @@ async function auditBrowserProfile(profile) {
   summary.browser[profile.name] = profileResult
 }
 
-async function auditRemoteReadOnly() {
+async function auditRemoteReadOnly(): Promise<void> {
   let publicResult = null
   try {
     publicResult = await requestJson(REMOTE_PUBLIC_URL, { timeoutMs: 30_000 })
@@ -1268,7 +1306,7 @@ async function auditRemoteReadOnly() {
   }
 }
 
-async function captureDockerStateAndLogs() {
+async function captureDockerStateAndLogs(): Promise<void> {
   const ps = await runCommand('docker', [
     'compose',
     '--env-file',
@@ -1316,9 +1354,9 @@ async function captureDockerStateAndLogs() {
   }
 }
 
-async function compareWithPreviousBaseline() {
+async function compareWithPreviousBaseline(): Promise<void> {
   const reportsDir = path.join(ROOT_DIR, 'ops/runtime/reports')
-  let previous = []
+  let previous: string[] = []
   try {
     previous = (await fs.readdir(reportsDir, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && /^deep-live-audit-/.test(entry.name) && entry.name !== path.basename(REPORT_DIR))
@@ -1326,7 +1364,7 @@ async function compareWithPreviousBaseline() {
   } catch {
     return
   }
-  const candidates = []
+  const candidates: any[] = []
   for (const dir of previous) {
     try {
       const stat = await fs.stat(dir)
@@ -1364,7 +1402,7 @@ async function compareWithPreviousBaseline() {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   await fs.mkdir(SCREENSHOT_DIR, { recursive: true })
   await captureHealth('before')
   await primeDirectRouteProbeMap()
@@ -1406,7 +1444,7 @@ async function main() {
   if (!summary.audit.ok) process.exitCode = 1
 }
 
-main().catch(async (error) => {
+main().catch(async (error: any) => {
   addFinding(0, 'deep-audit', error?.message || String(error), {
     stack: error?.stack || '',
   })
