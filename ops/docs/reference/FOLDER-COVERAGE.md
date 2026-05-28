@@ -813,10 +813,10 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `BarChart.jsx` | UI component/page |
-| 2 | `DonutChart.jsx` | UI component/page |
+| 1 | `BarChart.tsx` | UI component/page |
+| 2 | `DonutChart.tsx` | UI component/page |
 | 3 | `index.ts` | UI component/page |
-| 4 | `LineChart.jsx` | UI component/page |
+| 4 | `LineChart.tsx` | UI component/page |
 | 5 | `NoData.tsx` | UI component/page |
 
 
@@ -1171,11 +1171,11 @@ Total folders documented: **81**
 | 10 | `NotificationCenter.jsx` | UI component/page |
 | 11 | `pageActivity.ts` | UI component/page |
 | 12 | `PageHeader.tsx` | UI component/page |
-| 13 | `PaginationControls.jsx` | UI component/page |
+| 13 | `PaginationControls.tsx` | UI component/page |
 | 14 | `PortalMenu.tsx` | UI component/page |
 | 15 | `QuickPreferenceToggles.tsx` | UI component/page |
 | 16 | `SectionSwitcher.tsx` | UI component/page |
-| 17 | `WriteConflictModal.jsx` | UI component/page |
+| 17 | `WriteConflictModal.tsx` | UI component/page |
 
 
 ### 3.55 Folder: `frontend/src/components/users`

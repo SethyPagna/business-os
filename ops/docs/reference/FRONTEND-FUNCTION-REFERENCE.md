@@ -46,10 +46,10 @@ Total files documented: **193**
 | 34 | `frontend/src/components/contacts/shared.jsx` | 3 |
 | 35 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
 | 36 | `frontend/src/components/custom-tables/CustomTables.jsx` | 11 |
-| 37 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 5 |
-| 38 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 1 |
+| 37 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
+| 38 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 1 |
 | 39 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
-| 40 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 7 |
+| 40 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 7 |
 | 41 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
 | 42 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
 | 43 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
@@ -140,11 +140,11 @@ Total files documented: **193**
 | 128 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
 | 129 | `frontend/src/components/shared/pageActivity.ts` | 0 |
 | 130 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
-| 131 | `frontend/src/components/shared/PaginationControls.jsx` | 3 |
+| 131 | `frontend/src/components/shared/PaginationControls.tsx` | 3 |
 | 132 | `frontend/src/components/shared/PortalMenu.tsx` | 6 |
 | 133 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 |
 | 134 | `frontend/src/components/shared/SectionSwitcher.tsx` | 3 |
-| 135 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
+| 135 | `frontend/src/components/shared/WriteConflictModal.tsx` | 10 |
 | 136 | `frontend/src/components/users/PermissionEditor.jsx` | 5 |
 | 137 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
 | 138 | `frontend/src/components/users/UserProfileModal.jsx` | 21 |
@@ -977,37 +977,37 @@ Total files documented: **193**
 | 10 | `openAddRow` | const arrow | 369 |
 | 11 | `openEditRow` | const arrow | 376 |
 
-### 3.37 `frontend/src/components/dashboard/charts/BarChart.jsx`
+### 3.37 `frontend/src/components/dashboard/charts/BarChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `chartLabelsNeedYear` | function | 14 |
-| 2 | `formatAxisLabel` | function | 23 |
-| 3 | `BarChart` | component/function | 36 |
-| 4 | `updateWidth` | const arrow | 44 |
-| 5 | `yPx` | function | 79 |
+| 1 | `chartLabelsNeedYear` | function | 23 |
+| 2 | `formatAxisLabel` | function | 32 |
+| 3 | `BarChart` | component/function | 45 |
+| 4 | `updateWidth` | const arrow | 53 |
+| 5 | `yPx` | function | 89 |
 
-### 3.38 `frontend/src/components/dashboard/charts/DonutChart.jsx`
+### 3.38 `frontend/src/components/dashboard/charts/DonutChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `DonutChart` | component/function | 14 |
+| 1 | `DonutChart` | component/function | 22 |
 
 ### 3.39 `frontend/src/components/dashboard/charts/index.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.40 `frontend/src/components/dashboard/charts/LineChart.jsx`
+### 3.40 `frontend/src/components/dashboard/charts/LineChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `chartLabelsNeedYear` | function | 13 |
-| 2 | `formatAxisLabel` | function | 22 |
-| 3 | `LineChart` | component/function | 35 |
-| 4 | `updateWidth` | const arrow | 43 |
-| 5 | `xPx` | function | 83 |
-| 6 | `yPx` | function | 84 |
-| 7 | `handleMouseMove` | const arrow | 92 |
+| 1 | `chartLabelsNeedYear` | function | 28 |
+| 2 | `formatAxisLabel` | function | 37 |
+| 3 | `LineChart` | component/function | 50 |
+| 4 | `updateWidth` | const arrow | 58 |
+| 5 | `xPx` | function | 100 |
+| 6 | `yPx` | function | 104 |
+| 7 | `handleMouseMove` | const arrow | 114 |
 
 ### 3.41 `frontend/src/components/dashboard/charts/NoData.tsx`
 
@@ -1998,13 +1998,13 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `PageHeader` | component/function | 26 |
 
-### 3.131 `frontend/src/components/shared/PaginationControls.jsx`
+### 3.131 `frontend/src/components/shared/PaginationControls.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `PaginationControls` | component/function | 20 |
-| 2 | `commitPageDraft` | const arrow | 50 |
-| 3 | `handlePageInputKeyDown` | const arrow | 61 |
+| 1 | `PaginationControls` | component/function | 40 |
+| 2 | `commitPageDraft` | const arrow | 70 |
+| 3 | `handlePageInputKeyDown` | const arrow | 81 |
 
 ### 3.132 `frontend/src/components/shared/PortalMenu.tsx`
 
@@ -2033,15 +2033,20 @@ Total files documented: **193**
 | 2 | `SectionSwitcher` | component/function | 28 |
 | 3 | `selectValue` | const arrow | 55 |
 
-### 3.135 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.135 `frontend/src/components/shared/WriteConflictModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `formatConflictTime` | function | 3 |
-| 2 | `summarizeCurrentValue` | function | 10 |
-| 3 | `formatValue` | function | 66 |
-| 4 | `getConflictFieldRows` | function | 73 |
-| 5 | `WriteConflictModal` | component/function | 171 |
+| 1 | `asConflictRecord` | function | 34 |
+| 2 | `isConflictSummaryRow` | function | 38 |
+| 3 | `isVisibleFieldRow` | function | 42 |
+| 4 | `formatConflictTime` | function | 46 |
+| 5 | `valueToString` | function | 53 |
+| 6 | `summarizeCurrentValue` | function | 57 |
+| 7 | `formatValue` | function | 114 |
+| 8 | `formatItemSummary` | function | 121 |
+| 9 | `getConflictFieldRows` | function | 132 |
+| 10 | `WriteConflictModal` | component/function | 226 |
 
 ### 3.136 `frontend/src/components/users/PermissionEditor.jsx`
 

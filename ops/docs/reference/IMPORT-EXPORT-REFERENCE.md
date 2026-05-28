@@ -189,10 +189,10 @@ Code files documented: **466**
 | 177 | `frontend/src/components/contacts/shared.jsx` | 7 | 6 | 5 | 3 |
 | 178 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 | 0 | 14 | 1 |
 | 179 | `frontend/src/components/custom-tables/CustomTables.jsx` | 6 | 1 | 5 | 0 |
-| 180 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 3 | 1 | 2 | 0 |
-| 181 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 3 | 1 | 2 | 0 |
+| 180 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 3 | 1 | 2 | 0 |
+| 181 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 3 | 1 | 2 | 0 |
 | 182 | `frontend/src/components/dashboard/charts/index.ts` | 0 | 0 | 0 | 2 |
-| 183 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 3 | 1 | 2 | 0 |
+| 183 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 3 | 1 | 2 | 0 |
 | 184 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 | 1 | 1 | 3 |
 | 185 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 | 1 | 14 | 1 |
 | 186 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 | 1 | 0 | 1 |
@@ -283,11 +283,11 @@ Code files documented: **466**
 | 271 | `frontend/src/components/shared/NotificationCenter.jsx` | 4 | 1 | 1 | 2 |
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
 | 273 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
-| 274 | `frontend/src/components/shared/PaginationControls.jsx` | 2 | 4 | 0 | 8 |
+| 274 | `frontend/src/components/shared/PaginationControls.tsx` | 2 | 4 | 0 | 8 |
 | 275 | `frontend/src/components/shared/PortalMenu.tsx` | 3 | 2 | 0 | 7 |
 | 276 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 | 1 | 1 | 3 |
 | 277 | `frontend/src/components/shared/SectionSwitcher.tsx` | 1 | 1 | 0 | 4 |
-| 278 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
+| 278 | `frontend/src/components/shared/WriteConflictModal.tsx` | 1 | 1 | 1 | 1 |
 | 279 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 3 | 0 | 2 |
 | 280 | `frontend/src/components/users/UserDetailSheet.tsx` | 2 | 1 | 2 | 1 |
 | 281 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
@@ -3050,7 +3050,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/BackgroundImportTracker.jsx`
   - `frontend/src/components/shared/NotificationCenter.jsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
-  - `frontend/src/components/shared/WriteConflictModal.jsx`
+  - `frontend/src/components/shared/WriteConflictModal.tsx`
   - `frontend/src/components/shared/globalScroll.ts`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
@@ -3339,7 +3339,7 @@ Code files documented: **466**
   - `../../utils/initials.ts`
   - `../../utils/scriptTypography.ts`
   - `../products/shared/primitives`
-  - `../shared/PaginationControls.jsx`
+  - `../shared/PaginationControls`
   - `./catalogUi`
   - `./portalCatalogDisplay.ts`
   - `lucide-react`
@@ -3348,7 +3348,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/catalogUi.jsx`
   - `frontend/src/components/catalog/portalCatalogDisplay.ts`
   - `frontend/src/components/products/shared/primitives.jsx`
-  - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/utils/initials.ts`
   - `frontend/src/utils/scriptTypography.ts`
 - Referenced by (1)
@@ -3614,7 +3614,7 @@ Code files documented: **466**
   - `../../AppContext`
   - `../shared/LoadingWatchdog`
   - `../shared/Modal`
-  - `../shared/PaginationControls.jsx`
+  - `../shared/PaginationControls`
   - `../shared/PortalMenu`
   - `lucide-react`
   - `react`
@@ -3622,7 +3622,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/Modal.tsx`
-  - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (3)
   - `frontend/src/components/contacts/CustomersTab.jsx`
@@ -3686,7 +3686,7 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.180 `frontend/src/components/dashboard/charts/BarChart.jsx`
+### 3.180 `frontend/src/components/dashboard/charts/BarChart.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3699,7 +3699,7 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.181 `frontend/src/components/dashboard/charts/DonutChart.jsx`
+### 3.181 `frontend/src/components/dashboard/charts/DonutChart.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3723,7 +3723,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/utils/exportReports.jsx`
 
-### 3.183 `frontend/src/components/dashboard/charts/LineChart.jsx`
+### 3.183 `frontend/src/components/dashboard/charts/LineChart.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3744,9 +3744,9 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
 - Referenced by (3)
-  - `frontend/src/components/dashboard/charts/BarChart.jsx`
-  - `frontend/src/components/dashboard/charts/DonutChart.jsx`
-  - `frontend/src/components/dashboard/charts/LineChart.jsx`
+  - `frontend/src/components/dashboard/charts/BarChart.tsx`
+  - `frontend/src/components/dashboard/charts/DonutChart.tsx`
+  - `frontend/src/components/dashboard/charts/LineChart.tsx`
 
 ### 3.185 `frontend/src/components/dashboard/Dashboard.jsx`
 
@@ -3897,7 +3897,7 @@ Code files documented: **466**
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
   - `../shared/LoadingWatchdog`
-  - `../shared/PaginationControls.jsx`
+  - `../shared/PaginationControls`
   - `../shared/SectionSwitcher`
   - `../shared/pageActivity`
   - `./InventoryImportModal`
@@ -3921,7 +3921,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
-  - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/components/shared/SectionSwitcher.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
@@ -4105,7 +4105,7 @@ Code files documented: **466**
   - `../receipt/Receipt`
   - `../sales/StatusBadge`
   - `../shared/ImageGalleryLightbox`
-  - `../shared/PaginationControls.jsx`
+  - `../shared/PaginationControls`
   - `../shared/pageActivity`
   - `./CartItem`
   - `./FilterPanel`
@@ -4123,7 +4123,7 @@ Code files documented: **466**
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/src/components/sales/StatusBadge.tsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
-  - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/deviceInfo.ts`
   - `frontend/src/utils/initials.ts`
@@ -4473,7 +4473,7 @@ Code files documented: **466**
   - `../shared/FilterMenu`
   - `../shared/ImageGalleryLightbox`
   - `../shared/Modal`
-  - `../shared/PaginationControls.jsx`
+  - `../shared/PaginationControls`
   - `../shared/pageActivity`
   - `./forms/BulkAddStockModal`
   - `./forms/ProductForm`
@@ -4508,7 +4508,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/Modal.tsx`
-  - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -4855,7 +4855,7 @@ Code files documented: **466**
   - `../shared/ActionHistoryBar`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
-  - `../shared/PaginationControls.jsx`
+  - `../shared/PaginationControls`
   - `../shared/pageActivity`
   - `./EditReturnModal`
   - `./NewReturnModal`
@@ -4874,7 +4874,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
-  - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -4941,7 +4941,7 @@ Code files documented: **466**
   - `../shared/ActionHistoryBar`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
-  - `../shared/PaginationControls.jsx`
+  - `../shared/PaginationControls`
   - `../shared/pageActivity`
   - `./ExportModal`
   - `./SaleDetailModal`
@@ -4961,7 +4961,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
-  - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -5195,7 +5195,7 @@ Code files documented: **466**
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
   - `frontend/src/components/sales/ExportModal.jsx`
   - `frontend/src/components/sales/SalesImportModal.jsx`
-  - `frontend/src/components/shared/WriteConflictModal.jsx`
+  - `frontend/src/components/shared/WriteConflictModal.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
 
@@ -5265,7 +5265,7 @@ Code files documented: **466**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.274 `frontend/src/components/shared/PaginationControls.jsx`
+### 3.274 `frontend/src/components/shared/PaginationControls.tsx`
 
 - Declared exports: `PAGE_SIZE_OPTIONS`, `clampPage`, `function`, `paginateItems`
 - Imports (2)
@@ -5328,7 +5328,7 @@ Code files documented: **466**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.278 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.278 `frontend/src/components/shared/WriteConflictModal.tsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5432,7 +5432,7 @@ Code files documented: **466**
   - `../../utils/groupedRecords.ts`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
-  - `../shared/PaginationControls.jsx`
+  - `../shared/PaginationControls`
   - `../shared/pageActivity`
   - `lucide-react`
   - `react`
@@ -5440,7 +5440,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
-  - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/csv.ts`
@@ -5920,9 +5920,9 @@ Code files documented: **466**
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
-  - `frontend/src/components/dashboard/charts/BarChart.jsx`
-  - `frontend/src/components/dashboard/charts/DonutChart.jsx`
-  - `frontend/src/components/dashboard/charts/LineChart.jsx`
+  - `frontend/src/components/dashboard/charts/BarChart.tsx`
+  - `frontend/src/components/dashboard/charts/DonutChart.tsx`
+  - `frontend/src/components/dashboard/charts/LineChart.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
