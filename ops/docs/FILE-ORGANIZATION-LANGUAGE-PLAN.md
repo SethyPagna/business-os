@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 464 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 485 in this file.
 
 ## Goal
 
@@ -2713,7 +2713,7 @@ Decision rule:
     language conversion was needed.
 324. Compact admin page-title information and reduce Docker worker replicas.
     Done:
-    `frontend/src/components/shared/PageHeader.jsx` now places page information
+    `frontend/src/components/shared/PageHeader.tsx` now places page information
     on the title hover state instead of rendering a separate info button.
     Branches, Audit Log, Receipt Settings, Backup, Settings, Library, and Sync
     Server were verified with Playwright for title-hover information and no
@@ -3797,6 +3797,24 @@ Decision rule:
     `StatusBadge.tsx`, and dashboard `MiniStat.tsx` now carry explicit prop
     types. The shared modal close control also drops a mojibake glyph for a
     plain accessible `x` while preserving the modal layout contract.
+484. Convert shared preference, loader, header, and section controls to TSX.
+    Done: `QuickPreferenceToggles.tsx`, `LoadingWatchdog.tsx`,
+    `PageHeader.tsx`, and `SectionSwitcher.tsx` now carry explicit prop types,
+    storage/value boundary types, typed icon/title/action contracts, and typed
+    app preference access while preserving the existing Vite resolver contract.
+    Exact `.jsx` extension imports were removed from Inventory, Contacts,
+    Loyalty Points, Settings, and Backup callers.
+485. Prune generated runtime reports and record framework config guardrails.
+    Done: `npm.cmd --prefix ops run prune-storage` removed only generated
+    report/check artifacts under `ops/runtime/reports`, freeing 149,507,117
+    bytes. Uploads, secrets, local backups, Docker images, Docker volumes, and
+    current release data were preserved. The user-provided Next.js guardrail is
+    now folded into the language policy as a future-framework rule: if a Next
+    app/config ever appears, keep `next.config.mjs` as `.mjs`, keep direct Node
+    config files such as PostCSS/Tailwind JavaScript unless proven safe, and do
+    not add production runtime TypeScript loaders. This repository remains a
+    Vite React frontend plus Node backend, so no Next-specific folder layout is
+    introduced.
 
 ## Safety Gates
 
@@ -3813,3 +3831,6 @@ Decision rule:
 - No backend language conversion until packaging/release scripts are updated and tested.
 - No source deletion from Phase 29 cleanup findings without reference proof,
   focused tests, build, and affected live checks.
+- No framework-specific config rename unless the framework's production build
+  proves it. In particular, keep `next.config.mjs` as `.mjs` for any future
+  Next.js surface unless a separate production-build proof replaces this rule.

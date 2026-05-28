@@ -1,10 +1,26 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 
-function readStoredSection(storageKey, fallback) {
+type SectionOption = {
+  value: string
+  label: ReactNode
+  hint?: string
+}
+
+type SectionSwitcherProps = {
+  options?: Array<SectionOption | null | undefined | false>
+  value?: string
+  onChange?: (value: string) => void
+  storageKey?: string
+  className?: string
+  label?: ReactNode
+}
+
+function readStoredSection(storageKey: string, fallback: string): string {
   if (!storageKey || typeof window === 'undefined') return fallback
   try {
     return window.localStorage.getItem(storageKey) || fallback
-  } catch (_) {
+  } catch {
     return fallback
   }
 }
@@ -16,9 +32,9 @@ export default function SectionSwitcher({
   storageKey = '',
   className = '',
   label = 'Sections',
-}) {
+}: SectionSwitcherProps) {
   const safeOptions = useMemo(() => {
-    const normalized = Array.isArray(options) ? options.filter(Boolean) : []
+    const normalized = Array.isArray(options) ? options.filter(Boolean) as SectionOption[] : []
     const hasAll = normalized.some((option) => option.value === 'all')
     return hasAll ? normalized : [{ value: 'all', label: 'All' }, ...normalized]
   }, [options])
@@ -36,12 +52,12 @@ export default function SectionSwitcher({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, safeOptions])
 
-  const selectValue = (nextValue) => {
+  const selectValue = (nextValue: string) => {
     const safeValue = safeOptions.some((option) => option.value === nextValue) ? nextValue : 'all'
     if (storageKey && typeof window !== 'undefined') {
       try {
         window.localStorage.setItem(storageKey, safeValue)
-      } catch (_) {
+      } catch {
         // Ignore private-mode storage failures; section navigation still works in memory.
       }
     }
@@ -58,7 +74,7 @@ export default function SectionSwitcher({
             key={option.value}
             type="button"
             className={`h-8 rounded-lg px-3 font-semibold transition ${activeValue === option.value ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
-            title={option.hint || option.label}
+            title={option.hint || (typeof option.label === 'string' ? option.label : undefined)}
             aria-pressed={activeValue === option.value}
             onClick={() => selectValue(option.value)}
           >

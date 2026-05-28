@@ -9,8 +9,8 @@ import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
-import SectionSwitcher from '../shared/SectionSwitcher.jsx'
-import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
+import SectionSwitcher from '../shared/SectionSwitcher'
+import LoadingWatchdog from '../shared/LoadingWatchdog'
 import InventoryProductsSurface from './InventoryProductsSurface'
 const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
 const InventoryImportModal = lazy(() => import('./InventoryImportModal'))

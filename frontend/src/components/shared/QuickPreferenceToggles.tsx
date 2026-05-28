@@ -1,7 +1,27 @@
 import { Languages, Moon, Sun } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import type { MouseEventHandler, ReactNode } from 'react'
+import { useApp as useAppFromContext } from '../../AppContext.jsx'
 
-function ToggleButton({ active = false, children, label, onClick }) {
+type ToggleButtonProps = {
+  active?: boolean
+  children: ReactNode
+  label: string
+  onClick?: MouseEventHandler<HTMLButtonElement>
+}
+
+type AppPreferenceContext = {
+  language?: string
+  theme?: string
+  toggleLanguage?: MouseEventHandler<HTMLButtonElement>
+  toggleTheme?: MouseEventHandler<HTMLButtonElement>
+  t?: (key: string) => string
+}
+
+type QuickPreferenceTogglesProps = {
+  className?: string
+}
+
+function ToggleButton({ active = false, children, label, onClick }: ToggleButtonProps) {
   return (
     <button
       type="button"
@@ -20,9 +40,10 @@ function ToggleButton({ active = false, children, label, onClick }) {
   )
 }
 
-export default function QuickPreferenceToggles({ className = '' }) {
+export default function QuickPreferenceToggles({ className = '' }: QuickPreferenceTogglesProps) {
+  const useApp = useAppFromContext as () => AppPreferenceContext
   const { language, theme, toggleLanguage, toggleTheme, t } = useApp()
-  const tr = (key, fallback) => {
+  const tr = (key: string, fallback: string) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
   }

@@ -1,9 +1,26 @@
+import type { ComponentType, ReactNode, SVGProps } from 'react'
+
 const TONE_CLASS = {
   blue: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
   amber: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
   emerald: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
   violet: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
   slate: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+}
+
+type Tone = keyof typeof TONE_CLASS
+type HeaderIcon = ComponentType<SVGProps<SVGSVGElement>>
+
+type PageHeaderProps = {
+  icon?: HeaderIcon
+  title: ReactNode
+  subtitle?: ReactNode
+  actions?: ReactNode
+  tone?: Tone
+  className?: string
+  iconClassName?: string
+  actionsClassName?: string
+  stackOnMobile?: boolean
 }
 
 export default function PageHeader({
@@ -16,7 +33,7 @@ export default function PageHeader({
   iconClassName = '',
   actionsClassName = '',
   stackOnMobile = true,
-}) {
+}: PageHeaderProps) {
   const toneClass = TONE_CLASS[tone] || TONE_CLASS.blue
   const titleText = typeof title === 'string' ? title : ''
   const subtitleText = typeof subtitle === 'string' ? subtitle.trim() : ''

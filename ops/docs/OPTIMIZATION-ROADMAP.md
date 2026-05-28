@@ -3709,7 +3709,7 @@ Move 334 status:
   title surfaces and keeps the context on native title hover text instead:
   Branches, Audit Log, Receipt Settings, Backup, Settings, Library, and Sync
   Server now keep page explanations off the visible layout and expose them on
-  the page title. `frontend/src/components/shared/PageHeader.jsx` no longer
+  the page title. `frontend/src/components/shared/PageHeader.tsx` no longer
   renders the circular page-info button; the direct Audit Log and Receipt
   Settings headers use the same title-hover pattern. The branch and receipt
   inline hint rows were removed from the visible body. A targeted Playwright

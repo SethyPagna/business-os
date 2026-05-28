@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react'
 
+type LoadingWatchdogProps = {
+  loading?: boolean
+  timeoutMs?: number
+  label?: string
+  details?: string
+  detailsMode?: 'slow' | 'always'
+  showAfterMs?: number
+  onRetry?: () => void
+  className?: string
+}
+
 export default function LoadingWatchdog({
   loading = false,
   timeoutMs = 10000,
@@ -9,7 +20,7 @@ export default function LoadingWatchdog({
   showAfterMs = 0,
   onRetry,
   className = '',
-}) {
+}: LoadingWatchdogProps) {
   const [slow, setSlow] = useState(false)
   const [visible, setVisible] = useState(showAfterMs <= 0)
 

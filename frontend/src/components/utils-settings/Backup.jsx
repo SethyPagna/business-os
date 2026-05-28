@@ -12,8 +12,8 @@ import {
 } from '../../utils/loaders.ts'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import SectionSwitcher from '../shared/SectionSwitcher.jsx'
-import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
+import SectionSwitcher from '../shared/SectionSwitcher'
+import LoadingWatchdog from '../shared/LoadingWatchdog'
 
 const QUICK_BACKUP_SECTIONS = [
   'Products + inventory',

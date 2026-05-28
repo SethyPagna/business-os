@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BadgeDollarSign, Gift, Save, Search, Ticket } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { useIsPageActive } from '../shared/pageActivity'
-import SectionSwitcher from '../shared/SectionSwitcher.jsx'
-import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
+import SectionSwitcher from '../shared/SectionSwitcher'
+import LoadingWatchdog from '../shared/LoadingWatchdog'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,

@@ -3,7 +3,7 @@ import { MoreHorizontal, X } from 'lucide-react'
 import Modal from '../shared/Modal'
 import PortalMenu from '../shared/PortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
-import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
+import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { useApp } from '../../AppContext'
 
 /**
