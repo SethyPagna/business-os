@@ -1089,12 +1089,12 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `AllFieldsPanel.jsx` | UI component/page |
+| 1 | `AllFieldsPanel.tsx` | UI component/page |
 | 2 | `constants.ts` | UI component/page |
 | 3 | `ErrorBoundary.tsx` | UI component/page |
 | 4 | `FieldOrderManager.jsx` | UI component/page |
 | 5 | `PrintSettings.jsx` | UI component/page |
-| 6 | `ReceiptPreview.jsx` | UI component/page |
+| 6 | `ReceiptPreview.tsx` | UI component/page |
 | 7 | `ReceiptSettings.jsx` | UI component/page |
 | 8 | `template.ts` | UI component/page |
 
@@ -1162,9 +1162,9 @@ Total folders documented: **81**
 | 1 | `ActionHistoryBar.jsx` | UI component/page |
 | 2 | `BackgroundImportTracker.jsx` | UI component/page |
 | 3 | `ExportMenu.tsx` | UI component/page |
-| 4 | `FilterMenu.jsx` | UI component/page |
+| 4 | `FilterMenu.tsx` | UI component/page |
 | 5 | `globalScroll.ts` | UI component/page |
-| 6 | `ImageGalleryLightbox.jsx` | UI component/page |
+| 6 | `ImageGalleryLightbox.tsx` | UI component/page |
 | 7 | `LoadingWatchdog.tsx` | UI component/page |
 | 8 | `Modal.tsx` | UI component/page |
 | 9 | `navigationConfig.ts` | UI component/page |

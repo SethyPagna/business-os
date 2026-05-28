@@ -605,7 +605,7 @@ permissions, video refs, native `BarcodeDetector`, zxing browser controls, and
 React UI state.
 
 Move 169 clears the remaining false-positive Web Worker candidates from the
-current audit ranking. `ImageGalleryLightbox.jsx` is presentation and keyboard
+current audit ranking. `ImageGalleryLightbox.tsx` is presentation and keyboard
 navigation around already-rendered browser images. `importJobRefresh.js` is a
 small import-completion channel mapper plus `window.dispatchEvent` helper. Both
 stay on the main browser path so future worker work targets actual transferable

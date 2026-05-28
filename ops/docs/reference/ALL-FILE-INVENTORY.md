@@ -272,12 +272,12 @@ Total files documented: **529**
 | 260 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | frontend-ui | 84 | 4.5 | UI component/page |
 | 261 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | frontend-ui | 334 | 18.7 | UI component/page |
 | 262 | `frontend/src/components/README.md` | frontend-ui | 37 | 1.9 | UI component/page |
-| 263 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | frontend-ui | 95 | 3.8 | UI component/page |
+| 263 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | frontend-ui | 121 | 4.5 | UI component/page |
 | 264 | `frontend/src/components/receipt-settings/constants.ts` | frontend-ui | 156 | 7.9 | UI component/page |
 | 265 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | frontend-ui | 45 | 1.2 | UI component/page |
 | 266 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | frontend-ui | 190 | 9.4 | UI component/page |
 | 267 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | frontend-ui | 245 | 11.0 | UI component/page |
-| 268 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | frontend-ui | 104 | 3.6 | UI component/page |
+| 268 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | frontend-ui | 130 | 4.2 | UI component/page |
 | 269 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | frontend-ui | 443 | 26.3 | UI component/page |
 | 270 | `frontend/src/components/receipt-settings/template.ts` | frontend-ui | 33 | 0.9 | UI component/page |
 | 271 | `frontend/src/components/receipt/Receipt.jsx` | frontend-ui | 470 | 22.3 | UI component/page |
@@ -298,9 +298,9 @@ Total files documented: **529**
 | 286 | `frontend/src/components/shared/ActionHistoryBar.jsx` | frontend-ui | 151 | 8.1 | UI component/page |
 | 287 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | frontend-ui | 546 | 24.4 | UI component/page |
 | 288 | `frontend/src/components/shared/ExportMenu.tsx` | frontend-ui | 56 | 1.9 | UI component/page |
-| 289 | `frontend/src/components/shared/FilterMenu.jsx` | frontend-ui | 113 | 4.8 | UI component/page |
+| 289 | `frontend/src/components/shared/FilterMenu.tsx` | frontend-ui | 153 | 5.9 | UI component/page |
 | 290 | `frontend/src/components/shared/globalScroll.ts` | frontend-ui | 72 | 2.7 | UI component/page |
-| 291 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | frontend-ui | 119 | 4.9 | UI component/page |
+| 291 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | frontend-ui | 140 | 5.5 | UI component/page |
 | 292 | `frontend/src/components/shared/LoadingWatchdog.tsx` | frontend-ui | 74 | 2.2 | UI component/page |
 | 293 | `frontend/src/components/shared/Modal.tsx` | frontend-ui | 38 | 1.3 | UI component/page |
 | 294 | `frontend/src/components/shared/navigationConfig.ts` | frontend-ui | 66 | 2.3 | UI component/page |
@@ -516,7 +516,7 @@ Total files documented: **529**
 | 504 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
 | 505 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
 | 506 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
-| 507 | `README.md` | project-root | 159 | 11.6 | Project documentation entrypoint |
+| 507 | `README.md` | project-root | 159 | 11.7 | Project documentation entrypoint |
 | 508 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
 | 509 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
 | 510 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |

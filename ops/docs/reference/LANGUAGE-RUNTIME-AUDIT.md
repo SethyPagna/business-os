@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T06:32:01.264Z
+Generated: 2026-05-28T06:43:07.473Z
 
 ## Summary
 
@@ -23,10 +23,10 @@ Generated: 2026-05-28T06:32:01.264Z
 | Language | Files |
 | --- | --- |
 | TypeScript | 225 |
-| React JSX | 93 |
+| React JSX | 89 |
 | JavaScript | 84 |
+| React TSX | 18 |
 | Windows batch | 16 |
-| React TSX | 14 |
 | PowerShell | 8 |
 | Shell | 3 |
 | JSON | 2 |
@@ -199,7 +199,7 @@ Generated: 2026-05-28T06:32:01.264Z
 | `frontend/src/utils/csvImport.ts` | keep as shared parser and fallback oracle | The heavy product import analysis already runs in productImportWorker, contact/inventory/sales row checks already use focused workers, and the remaining generic parseCSV surface has no direct UI caller. | Move 167 inspection found parseCsvRows used by productImportPlanner inside a Worker and by an unused localDb.parseCSV compatibility helper. |
 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | keep on main browser path | Photo barcode scanning depends on FileReader, Image elements, native BarcodeDetector, and zxing BrowserMultiFormatReader image-element decoding; broad Worker extraction would duplicate the path and lose browser compatibility. | Move 168 inspection found DOM image loading and browser detector/zxing boundaries rather than a pure CPU loop that can move safely to a Worker. |
 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | keep on React/browser camera path | The modal owns camera permission state, media streams, video refs, requestAnimationFrame scanning, and manual-entry UI. These are DOM and user-permission workflows, not transferable Worker computation. | Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle. |
-| `frontend/src/components/shared/ImageGalleryLightbox.jsx` | keep as React presentation component | The lightbox filters a small image list, clamps an index, handles keyboard navigation, and renders images/thumbnails. It has no decoding, resizing, or heavy image processing loop to transfer. | Move 169 inspection found React state/control rendering and event handlers only; image loading remains normal browser rendering. |
+| `frontend/src/components/shared/ImageGalleryLightbox.tsx` | keep as React presentation component | The lightbox filters a small image list, clamps an index, handles keyboard navigation, and renders images/thumbnails. It has no decoding, resizing, or heavy image processing loop to transfer. | Move 169 inspection found React state/control rendering and event handlers only; image loading remains normal browser rendering. |
 | `frontend/src/utils/importJobRefresh.ts` | keep as main-thread event dispatcher | The helper maps completed import-job types to refresh channels and dispatches sync:update browser events. Moving it to a Worker would add message overhead and lose direct window event dispatch. | Move 169 inspection found small status/type normalization, Set dedupe, and CustomEvent dispatch only; Move 385 converted the helper to TypeScript but kept the same main-thread event boundary. |
 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | keep on React main thread | Polls import-job state, dedupes a bounded eight-row list, dispatches completion refreshes, and coordinates UI actions; it has no file parsing, media decoding, or CPU-heavy browser loop worth moving to a Worker. | Move 165 inspection of BackgroundImportTracker.jsx found API orchestration and tiny list transforms only. |
 

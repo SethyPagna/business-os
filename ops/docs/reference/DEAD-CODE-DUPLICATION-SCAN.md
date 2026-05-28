@@ -118,7 +118,7 @@ family, `supplierMap` avoids repeated supplier existence checks, and
 or updated during the job. The barcode image scanner files remain live browser
 scanner code and should not be treated as dead Worker candidates.
 
-Move 169 records `ImageGalleryLightbox.jsx` and `importJobRefresh.js` as live
+Move 169 records `ImageGalleryLightbox.tsx` and `importJobRefresh.js` as live
 UI/event helpers rather than Worker or deletion candidates. The lightbox is
 shared by Products, POS, and Catalog image views; the import refresh helper is
 the small channel mapper used by the background import tracker to dispatch

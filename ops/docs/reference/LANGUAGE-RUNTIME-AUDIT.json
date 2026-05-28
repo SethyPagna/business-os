@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T06:32:01.264Z",
+  "generatedAt": "2026-05-28T06:43:07.473Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -25,19 +25,19 @@
     ],
     [
       "React JSX",
-      93
+      89
     ],
     [
       "JavaScript",
       84
     ],
     [
-      "Windows batch",
-      16
+      "React TSX",
+      18
     ],
     [
-      "React TSX",
-      14
+      "Windows batch",
+      16
     ],
     [
       "PowerShell",
@@ -67,19 +67,19 @@
     ],
     [
       ".jsx",
-      93
+      89
     ],
     [
       ".js",
       84
     ],
     [
-      ".bat",
-      16
+      ".tsx",
+      18
     ],
     [
-      ".tsx",
-      14
+      ".bat",
+      16
     ],
     [
       ".ps1",
@@ -201,7 +201,7 @@
       "evidence": "Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle."
     },
     {
-      "file": "frontend/src/components/shared/ImageGalleryLightbox.jsx",
+      "file": "frontend/src/components/shared/ImageGalleryLightbox.tsx",
       "decision": "keep as React presentation component",
       "reason": "The lightbox filters a small image list, clamps an index, handles keyboard navigation, and renders images/thumbnails. It has no decoding, resizing, or heavy image processing loop to transfer.",
       "evidence": "Move 169 inspection found React state/control rendering and event handlers only; image loading remains normal browser rendering."

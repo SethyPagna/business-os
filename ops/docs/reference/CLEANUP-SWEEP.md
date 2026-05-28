@@ -523,7 +523,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   cleanup or Worker-move targets. They depend on browser image/camera APIs and
   React permission UI. Cleanup should keep the `.mjs` scanner wrapper and
   scanner tests until a future scanner replacement proves equal browser support.
-- Move 169 marks `ImageGalleryLightbox.jsx` and `importJobRefresh.js` as
+- Move 169 marks `ImageGalleryLightbox.tsx` and `importJobRefresh.js` as
   intentionally live main-thread UI/event code. Cleanup should keep the
   lightbox while Products, POS, and Catalog surfaces lazy-load it, and should
   keep the import refresh helper while `BackgroundImportTracker` dispatches

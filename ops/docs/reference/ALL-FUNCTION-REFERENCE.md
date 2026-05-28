@@ -248,12 +248,12 @@ Code files scanned: **466**
 | 236 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
 | 237 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 5 |
 | 238 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
-| 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 4 |
+| 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
 | 240 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
 | 241 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 |
 | 242 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 9 |
 | 243 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 9 |
-| 244 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 |
+| 244 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
 | 245 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
 | 246 | `frontend/src/components/receipt-settings/template.ts` | 4 |
 | 247 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
@@ -274,9 +274,9 @@ Code files scanned: **466**
 | 262 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 4 |
 | 263 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
 | 264 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
-| 265 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
+| 265 | `frontend/src/components/shared/FilterMenu.tsx` | 2 |
 | 266 | `frontend/src/components/shared/globalScroll.ts` | 5 |
-| 267 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
+| 267 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 5 |
 | 268 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
 | 269 | `frontend/src/components/shared/Modal.tsx` | 1 |
 | 270 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
@@ -4512,14 +4512,14 @@ Code files scanned: **466**
 | 2 | `renderDesktopTableHead` | const arrow | 47 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 76 |
 
-### 3.239 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+### 3.239 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `Toggle` | function | 5 |
-| 2 | `AllFieldsPanel` | export default function | 21 |
-| 3 | `T` | const arrow | 23 |
-| 4 | `toggleSection` | const arrow | 42 |
+| 1 | `Toggle` | function | 30 |
+| 2 | `AllFieldsPanel` | export default function | 46 |
+| 3 | `T` | const arrow | 49 |
+| 4 | `toggleSection` | const arrow | 68 |
 
 ### 3.240 `frontend/src/components/receipt-settings/constants.ts`
 
@@ -4562,12 +4562,13 @@ Code files scanned: **466**
 | 8 | `resetMargins` | const arrow | 94 |
 | 9 | `getPreviewSource` | const arrow | 110 |
 
-### 3.244 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+### 3.244 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ReceiptPreview` | export default function | 12 |
-| 2 | `loadPreview` | function | 23 |
+| 1 | `formatLoadError` | function | 33 |
+| 2 | `ReceiptPreview` | export default function | 38 |
+| 3 | `loadPreview` | function | 49 |
 
 ### 3.245 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
@@ -4811,12 +4812,12 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `ExportMenu` | export default function | 24 |
 
-### 3.265 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.265 `frontend/src/components/shared/FilterMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `sectionButtonClass` | function | 4 |
-| 2 | `FilterMenu` | export default function | 10 |
+| 1 | `sectionButtonClass` | function | 44 |
+| 2 | `FilterMenu` | export default function | 50 |
 
 ### 3.266 `frontend/src/components/shared/globalScroll.ts`
 
@@ -4828,15 +4829,15 @@ Code files scanned: **466**
 | 4 | `getScrollTarget` | export function | 46 |
 | 5 | `getScrollToPosition` | export function | 63 |
 
-### 3.267 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.267 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ImageGalleryLightbox` | export default function | 8 |
-| 2 | `formatLabel` | function | 30 |
-| 3 | `setIndex` | function | 34 |
-| 4 | `renderGalleryImage` | function | 40 |
-| 5 | `onKeyDown` | function | 47 |
+| 1 | `ImageGalleryLightbox` | export default function | 29 |
+| 2 | `formatLabel` | function | 51 |
+| 3 | `setIndex` | function | 55 |
+| 4 | `renderGalleryImage` | function | 61 |
+| 5 | `onKeyDown` | function | 68 |
 
 ### 3.268 `frontend/src/components/shared/LoadingWatchdog.tsx`
 

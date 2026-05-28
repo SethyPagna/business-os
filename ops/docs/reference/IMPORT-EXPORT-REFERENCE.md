@@ -248,12 +248,12 @@ Code files documented: **466**
 | 236 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 5 | 1 | 4 | 1 |
 | 237 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 3 | 4 | 3 | 0 |
 | 238 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 2 | 1 | 0 | 1 |
-| 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
+| 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 3 | 1 | 2 | 1 |
 | 240 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 4 |
 | 241 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 | 1 | 0 | 1 |
 | 242 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
 | 243 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
-| 244 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 3 | 1 | 2 | 1 |
+| 244 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 | 1 | 2 | 1 |
 | 245 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
 | 246 | `frontend/src/components/receipt-settings/template.ts` | 1 | 2 | 1 | 3 |
 | 247 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
@@ -274,9 +274,9 @@ Code files documented: **466**
 | 262 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 3 | 1 | 1 | 17 |
 | 263 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 7 | 1 | 5 | 1 |
 | 264 | `frontend/src/components/shared/ExportMenu.tsx` | 3 | 1 | 1 | 7 |
-| 265 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
+| 265 | `frontend/src/components/shared/FilterMenu.tsx` | 3 | 1 | 1 | 8 |
 | 266 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 2 |
-| 267 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
+| 267 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 2 | 1 | 0 | 3 |
 | 268 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 6 |
 | 269 | `frontend/src/components/shared/Modal.tsx` | 1 | 1 | 0 | 22 |
 | 270 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
@@ -3145,7 +3145,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+  - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/src/components/returns/EditReturnModal.jsx`
@@ -3327,7 +3327,7 @@ Code files documented: **466**
 - Internal dependencies (4)
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/products/shared/primitives.jsx`
-  - `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+  - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/PortalMenu.jsx`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
@@ -3556,7 +3556,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/customerMembershipNumber.ts`
   - `frontend/src/components/contacts/shared.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/bulkOps.ts`
@@ -3594,7 +3594,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/contacts/shared.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -3654,7 +3654,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/contacts/shared.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -3919,7 +3919,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/movementGroups.ts`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/SectionSwitcher.tsx`
@@ -4122,7 +4122,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/QuickAddModal.tsx`
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/src/components/sales/StatusBadge.tsx`
-  - `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+  - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/deviceInfo.ts`
@@ -4505,8 +4505,8 @@ Code files documented: **466**
   - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
   - `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
-  - `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
+  - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/pageActivity.ts`
@@ -4650,11 +4650,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.239 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+### 3.239 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `./constants`
   - `react`
 - Internal dependencies (2)
@@ -4671,7 +4671,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (4)
-  - `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+  - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt-settings/template.ts`
   - `frontend/tests/receiptTemplate.test.ts`
@@ -4709,12 +4709,12 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.244 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+### 3.244 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
 
 - Declared exports: `function`
 - Imports (3)
   - `../../utils/receiptAppliedConfig.ts`
-  - `../receipt/Receipt`
+  - `../receipt/Receipt.jsx`
   - `react`
 - Internal dependencies (2)
   - `frontend/src/components/receipt/Receipt.jsx`
@@ -4740,11 +4740,11 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (10)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+  - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
   - `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
   - `frontend/src/components/receipt-settings/PrintSettings.jsx`
-  - `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+  - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
   - `frontend/src/components/receipt-settings/constants.ts`
   - `frontend/src/components/receipt-settings/template.ts`
   - `frontend/src/utils/loaders.ts`
@@ -4783,7 +4783,7 @@ Code files documented: **466**
   - `frontend/src/utils/receiptAppliedConfig.ts`
 - Referenced by (3)
   - `frontend/src/components/pos/POS.jsx`
-  - `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+  - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
   - `frontend/src/components/sales/Sales.jsx`
 
 ### 3.248 `frontend/src/components/returns/EditReturnModal.jsx`
@@ -4873,7 +4873,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/ReturnsListSurface.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
@@ -4960,7 +4960,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/StatusBadge.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
@@ -5110,12 +5110,13 @@ Code files documented: **466**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.265 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.265 `frontend/src/components/shared/FilterMenu.tsx`
 
 - Declared exports: `function`
-- Imports (2)
-  - `./PortalMenu`
+- Imports (3)
+  - `./PortalMenu.jsx`
   - `lucide-react`
+  - `react`
 - Internal dependencies (1)
   - `frontend/src/components/shared/PortalMenu.jsx`
 - Referenced by (8)
@@ -5139,7 +5140,7 @@ Code files documented: **466**
   - `frontend/src/App.jsx`
   - `frontend/tests/globalScrollControls.test.ts`
 
-### 3.267 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.267 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5297,7 +5298,7 @@ Code files documented: **466**
   - `frontend/src/components/products/surfaces/HeaderActions.jsx`
   - `frontend/src/components/products/surfaces/ProductRowParts.jsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/users/Users.jsx`
 
 ### 3.276 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
@@ -5438,7 +5439,7 @@ Code files documented: **466**
 - Internal dependencies (8)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
-  - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
@@ -6149,7 +6150,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/types/receiptContracts.ts`
 - Referenced by (3)
-  - `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+  - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
 
