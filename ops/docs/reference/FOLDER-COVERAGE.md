@@ -1558,8 +1558,8 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `fs-utils.js` | Project source/support file |
-| 2 | `report-utils.js` | Project source/support file |
+| 1 | `fs-utils.ts` | Project source/support file |
+| 2 | `report-utils.ts` | Project source/support file |
 
 
 ### 3.71 Folder: `ops/scripts/powershell`

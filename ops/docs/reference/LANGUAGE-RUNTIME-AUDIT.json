@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T02:50:55.103Z",
+  "generatedAt": "2026-05-28T03:01:16.817Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,11 +21,11 @@
   "languageCounts": [
     [
       "TypeScript",
-      176
+      178
     ],
     [
       "JavaScript",
-      172
+      170
     ],
     [
       "React JSX",
@@ -59,11 +59,11 @@
   "extensionCounts": [
     [
       ".ts",
-      176
+      178
     ],
     [
       ".js",
-      172
+      170
     ],
     [
       ".jsx",
@@ -161,7 +161,7 @@
       "evidence": "Move 179 inspection found the remaining SQL/DuckDB candidate was the audit script itself after backend routes and service data paths were optimized or governed by schema protocol."
     },
     {
-      "file": "ops/scripts/lib/report-utils.js",
+      "file": "ops/scripts/lib/report-utils.ts",
       "decision": "keep as a shared Node.js report helper and exclude from SQL/DuckDB conversion queue",
       "reason": "The helper only formats Markdown tables, digests, output tails, and byte labels. It is flagged by path/text report keywords, not by query-heavy runtime behavior or data-volume processing.",
       "evidence": "Move 210 inspection found no database reads, joins, imports, exports, backup streaming, or analytics loops in the file; converting it would add churn without measurable speed, stability, or packaging benefit."

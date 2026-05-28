@@ -469,8 +469,8 @@ Code files documented: **506**
 | 457 | `ops/scripts/frontend/verify-i18n.ts` | 2 | 0 | 1 | 0 |
 | 458 | `ops/scripts/frontend/verify-performance.ts` | 3 | 0 | 0 | 0 |
 | 459 | `ops/scripts/frontend/verify-ui.ts` | 3 | 0 | 1 | 0 |
-| 460 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 13 |
-| 461 | `ops/scripts/lib/report-utils.js` | 1 | 1 | 0 | 5 |
+| 460 | `ops/scripts/lib/fs-utils.ts` | 2 | 1 | 0 | 13 |
+| 461 | `ops/scripts/lib/report-utils.ts` | 1 | 1 | 0 | 5 |
 | 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 4 | 0 | 1 | 0 |
 | 463 | `ops/scripts/runtime/audits/audit-auth.ts` | 0 | 4 | 0 | 18 |
 | 464 | `ops/scripts/runtime/audits/audit-manifest.ts` | 0 | 7 | 0 | 3 |
@@ -7499,13 +7499,13 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../lib/fs-utils.js`
-  - `../lib/report-utils.js`
+  - `../lib/fs-utils.ts`
+  - `../lib/report-utils.ts`
   - `node:fs/promises`
   - `node:path`
 - Internal dependencies (2)
-  - `ops/scripts/lib/fs-utils.js`
-  - `ops/scripts/lib/report-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
+  - `ops/scripts/lib/report-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7513,13 +7513,13 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../lib/fs-utils.js`
-  - `../lib/report-utils.js`
+  - `../lib/fs-utils.ts`
+  - `../lib/report-utils.ts`
   - `node:fs/promises`
   - `node:path`
 - Internal dependencies (2)
-  - `ops/scripts/lib/fs-utils.js`
-  - `ops/scripts/lib/report-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
+  - `ops/scripts/lib/report-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7527,13 +7527,13 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../lib/fs-utils.js`
-  - `../lib/report-utils.js`
+  - `../lib/fs-utils.ts`
+  - `../lib/report-utils.ts`
   - `node:fs/promises`
   - `node:path`
 - Internal dependencies (2)
-  - `ops/scripts/lib/fs-utils.js`
-  - `ops/scripts/lib/report-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
+  - `ops/scripts/lib/report-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7541,14 +7541,14 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (5)
-  - `../lib/fs-utils.js`
-  - `../lib/report-utils.js`
+  - `../lib/fs-utils.ts`
+  - `../lib/report-utils.ts`
   - `node:child_process`
   - `node:fs/promises`
   - `node:path`
 - Internal dependencies (2)
-  - `ops/scripts/lib/fs-utils.js`
-  - `ops/scripts/lib/report-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
+  - `ops/scripts/lib/report-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7591,10 +7591,10 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../lib/fs-utils`
+  - `../lib/fs-utils.ts`
   - `path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7614,15 +7614,15 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../lib/fs-utils.js`
+  - `../lib/fs-utils.ts`
   - `fs`
   - `path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 
-### 3.460 `ops/scripts/lib/fs-utils.js`
+### 3.460 `ops/scripts/lib/fs-utils.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -7645,7 +7645,7 @@ Code files documented: **506**
   - `ops/scripts/verification/verify-scale-services.ts`
   - `ops/scripts/verification/verify-secret-hygiene.ts`
 
-### 3.461 `ops/scripts/lib/report-utils.js`
+### 3.461 `ops/scripts/lib/report-utils.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -7715,12 +7715,12 @@ Code files documented: **506**
 
 - Declared exports: `writeBrowserActionHtmlReport`, `writeDeepAuditHtmlReport`, `writeFullAuditHtmlReport`
 - Imports (4)
-  - `../../lib/report-utils.js`
+  - `../../lib/report-utils.ts`
   - `node:fs/promises`
   - `node:module`
   - `node:path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/report-utils.js`
+  - `ops/scripts/lib/report-utils.ts`
 - Referenced by (3)
   - `ops/scripts/runtime/audits/deep-live-audit.ts`
   - `ops/scripts/runtime/audits/full-app-audit.ts`
@@ -7814,12 +7814,12 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../../lib/fs-utils.js`
+  - `../../lib/fs-utils.ts`
   - `node:fs`
   - `node:https`
   - `node:path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8243,11 +8243,11 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../lib/fs-utils.js`
+  - `../lib/fs-utils.ts`
   - `node:fs`
   - `node:path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8255,11 +8255,11 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../lib/fs-utils.js`
+  - `../lib/fs-utils.ts`
   - `fs`
   - `path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8267,12 +8267,12 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../lib/fs-utils.js`
+  - `../lib/fs-utils.ts`
   - `node:child_process`
   - `node:fs`
   - `node:path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8280,11 +8280,11 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../lib/fs-utils.js`
+  - `../lib/fs-utils.ts`
   - `fs`
   - `path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8292,12 +8292,12 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../lib/fs-utils.js`
+  - `../lib/fs-utils.ts`
   - `child_process`
   - `fs`
   - `path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8305,12 +8305,12 @@ Code files documented: **506**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../lib/fs-utils.js`
+  - `../lib/fs-utils.ts`
   - `child_process`
   - `fs`
   - `path`
 - Internal dependencies (1)
-  - `ops/scripts/lib/fs-utils.js`
+  - `ops/scripts/lib/fs-utils.ts`
 - Referenced by (0)
   - none
 

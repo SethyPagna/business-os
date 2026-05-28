@@ -469,8 +469,8 @@ Code files scanned: **506**
 | 457 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 458 | `ops/scripts/frontend/verify-performance.ts` | 4 |
 | 459 | `ops/scripts/frontend/verify-ui.ts` | 11 |
-| 460 | `ops/scripts/lib/fs-utils.js` | 16 |
-| 461 | `ops/scripts/lib/report-utils.js` | 5 |
+| 460 | `ops/scripts/lib/fs-utils.ts` | 16 |
+| 461 | `ops/scripts/lib/report-utils.ts` | 5 |
 | 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 5 |
 | 463 | `ops/scripts/runtime/audits/audit-auth.ts` | 6 |
 | 464 | `ops/scripts/runtime/audits/audit-manifest.ts` | 3 |
@@ -6445,36 +6445,36 @@ Code files scanned: **506**
 | 10 | `printAuditSummary` | function | 202 |
 | 11 | `main` | function | 220 |
 
-### 3.460 `ops/scripts/lib/fs-utils.js`
+### 3.460 `ops/scripts/lib/fs-utils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toPosix` | function | 16 |
-| 2 | `resolveProjectRoot` | function | 20 |
-| 3 | `relFrom` | function | 35 |
-| 4 | `readUtf8` | function | 42 |
-| 5 | `readJson` | function | 50 |
-| 6 | `readUtf8Async` | function | 58 |
-| 7 | `readJsonAsync` | function | 66 |
-| 8 | `lineCount` | function | 74 |
-| 9 | `pathExists` | function | 79 |
-| 10 | `mapLimit` | function | 88 |
-| 11 | `worker` | function | 91 |
-| 12 | `shouldSkipDirectory` | function | 106 |
-| 13 | `walkFilesRecursive` | function | 110 |
-| 14 | `collectFilesAndFolders` | function | 137 |
-| 15 | `collectRootFiles` | function | 166 |
-| 16 | `isProbablyText` | function | 185 |
+| 1 | `toPosix` | function | 26 |
+| 2 | `resolveProjectRoot` | function | 34 |
+| 3 | `relFrom` | function | 54 |
+| 4 | `readUtf8` | function | 66 |
+| 5 | `readJson` | function | 80 |
+| 6 | `readUtf8Async` | function | 93 |
+| 7 | `readJsonAsync` | function | 107 |
+| 8 | `lineCount` | function | 119 |
+| 9 | `pathExists` | function | 128 |
+| 10 | `mapLimit` | function | 145 |
+| 11 | `worker` | function | 148 |
+| 12 | `shouldSkipDirectory` | function | 168 |
+| 13 | `walkFilesRecursive` | function | 177 |
+| 14 | `collectFilesAndFolders` | function | 210 |
+| 15 | `collectRootFiles` | function | 245 |
+| 16 | `isProbablyText` | function | 268 |
 
-### 3.461 `ops/scripts/lib/report-utils.js`
+### 3.461 `ops/scripts/lib/report-utils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `markdownTable` | function | 5 |
-| 2 | `stableDigest` | function | 13 |
-| 3 | `summarizeReportValue` | function | 17 |
-| 4 | `outputTail` | function | 31 |
-| 5 | `formatBytes` | function | 38 |
+| 1 | `markdownTable` | function | 14 |
+| 2 | `stableDigest` | function | 26 |
+| 3 | `summarizeReportValue` | function | 34 |
+| 4 | `outputTail` | function | 53 |
+| 5 | `formatBytes` | function | 64 |
 
 ### 3.462 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
 

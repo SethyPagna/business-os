@@ -500,8 +500,8 @@ Total files documented: **569**
 | 488 | `ops/scripts/frontend/verify-i18n.ts` | project-scripts | 145 | 4.3 | Project source/support file |
 | 489 | `ops/scripts/frontend/verify-performance.ts` | project-scripts | 144 | 9.6 | Project source/support file |
 | 490 | `ops/scripts/frontend/verify-ui.ts` | project-scripts | 243 | 8.7 | Project source/support file |
-| 491 | `ops/scripts/lib/fs-utils.js` | project-scripts | 214 | 5.3 | Project source/support file |
-| 492 | `ops/scripts/lib/report-utils.js` | project-scripts | 57 | 1.5 | Project source/support file |
+| 491 | `ops/scripts/lib/fs-utils.ts` | project-scripts | 297 | 7.0 | Project source/support file |
+| 492 | `ops/scripts/lib/report-utils.ts` | project-scripts | 83 | 2.0 | Project source/support file |
 | 493 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 265 | 7.9 | Project source/support file |
 | 494 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | project-scripts | 92 | 2.8 | Project source/support file |
 | 495 | `ops/scripts/powershell/docker-release.ps1` | project-scripts | 1011 | 48.0 | Project source/support file |
