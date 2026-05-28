@@ -511,9 +511,9 @@ Total files documented: **569**
 | 499 | `ops/scripts/powershell/start-runtime.ps1` | project-scripts | 377 | 16.3 | Project source/support file |
 | 500 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | project-scripts | 240 | 7.8 | Project source/support file |
 | 501 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | project-scripts | 206 | 7.1 | Project source/support file |
-| 502 | `ops/scripts/runtime/audits/audit-auth.mjs` | project-scripts | 127 | 4.5 | Project source/support file |
-| 503 | `ops/scripts/runtime/audits/audit-manifest.mjs` | project-scripts | 253 | 7.6 | Project source/support file |
-| 504 | `ops/scripts/runtime/audits/audit-report-html.mjs` | project-scripts | 356 | 14.0 | Project source/support file |
+| 502 | `ops/scripts/runtime/audits/audit-auth.ts` | project-scripts | 191 | 6.0 | Project source/support file |
+| 503 | `ops/scripts/runtime/audits/audit-manifest.ts` | project-scripts | 301 | 8.6 | Project source/support file |
+| 504 | `ops/scripts/runtime/audits/audit-report-html.ts` | project-scripts | 446 | 15.9 | Project source/support file |
 | 505 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | project-scripts | 1425 | 53.8 | Project source/support file |
 | 506 | `ops/scripts/runtime/audits/full-app-audit.mjs` | project-scripts | 621 | 27.5 | Project source/support file |
 | 507 | `ops/scripts/runtime/browser-action-smoke.mjs` | project-scripts | 775 | 28.5 | Project source/support file |

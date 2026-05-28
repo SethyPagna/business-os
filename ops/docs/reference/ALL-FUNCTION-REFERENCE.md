@@ -472,9 +472,9 @@ Code files scanned: **506**
 | 460 | `ops/scripts/lib/fs-utils.js` | 16 |
 | 461 | `ops/scripts/lib/report-utils.js` | 5 |
 | 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 5 |
-| 463 | `ops/scripts/runtime/audits/audit-auth.mjs` | 6 |
-| 464 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 3 |
-| 465 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 11 |
+| 463 | `ops/scripts/runtime/audits/audit-auth.ts` | 6 |
+| 464 | `ops/scripts/runtime/audits/audit-manifest.ts` | 3 |
+| 465 | `ops/scripts/runtime/audits/audit-report-html.ts` | 11 |
 | 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 43 |
 | 467 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 22 |
 | 468 | `ops/scripts/runtime/browser-action-smoke.mjs` | 32 |
@@ -6486,40 +6486,40 @@ Code files scanned: **506**
 | 4 | `cleanupActionHistoryData` | function | 108 |
 | 5 | `main` | function | 141 |
 
-### 3.463 `ops/scripts/runtime/audits/audit-auth.mjs`
+### 3.463 `ops/scripts/runtime/audits/audit-auth.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSetCookieHeaders` | function | 3 |
-| 2 | `extractSessionCookie` | function | 12 |
-| 3 | `buildBrowserStorageState` | export function | 22 |
-| 4 | `loginWithFetch` | export function | 30 |
-| 5 | `applySessionToPlaywrightContext` | export function | 95 |
-| 6 | `hydratePlaywrightPage` | export function | 117 |
+| 1 | `getSetCookieHeaders` | function | 63 |
+| 2 | `extractSessionCookie` | function | 72 |
+| 3 | `buildBrowserStorageState` | export function | 82 |
+| 4 | `loginWithFetch` | export function | 90 |
+| 5 | `applySessionToPlaywrightContext` | export function | 155 |
+| 6 | `hydratePlaywrightPage` | export function | 181 |
 
-### 3.464 `ops/scripts/runtime/audits/audit-manifest.mjs`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getRouteManifest` | export function | 204 |
-| 2 | `resolveAuditRoutes` | export function | 211 |
-| 3 | `getAuditProfiles` | export function | 248 |
-
-### 3.465 `ops/scripts/runtime/audits/audit-report-html.mjs`
+### 3.464 `ops/scripts/runtime/audits/audit-manifest.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `escapeHtml` | function | 8 |
-| 2 | `formatMs` | function | 17 |
-| 3 | `formatCls` | function | 23 |
-| 4 | `formatCount` | function | 29 |
-| 5 | `toRelativeLink` | function | 34 |
-| 6 | `inferHotPath` | function | 40 |
-| 7 | `renderFindings` | function | 60 |
-| 8 | `renderSummaryCards` | function | 84 |
-| 9 | `writeDeepAuditHtmlReport` | export function | 99 |
-| 10 | `writeFullAuditHtmlReport` | export function | 217 |
-| 11 | `writeBrowserActionHtmlReport` | export function | 278 |
+| 1 | `getRouteManifest` | export function | 248 |
+| 2 | `resolveAuditRoutes` | export function | 255 |
+| 3 | `getAuditProfiles` | export function | 296 |
+
+### 3.465 `ops/scripts/runtime/audits/audit-report-html.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `escapeHtml` | function | 98 |
+| 2 | `formatMs` | function | 107 |
+| 3 | `formatCls` | function | 113 |
+| 4 | `formatCount` | function | 119 |
+| 5 | `toRelativeLink` | function | 124 |
+| 6 | `inferHotPath` | function | 130 |
+| 7 | `renderFindings` | function | 150 |
+| 8 | `renderSummaryCards` | function | 174 |
+| 9 | `writeDeepAuditHtmlReport` | export function | 189 |
+| 10 | `writeFullAuditHtmlReport` | export function | 307 |
+| 11 | `writeBrowserActionHtmlReport` | export function | 368 |
 
 ### 3.466 `ops/scripts/runtime/audits/deep-live-audit.mjs`
 

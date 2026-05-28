@@ -626,8 +626,8 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   zero broken targets, and zero wrapper-removal candidates.
 - Wrapper reference scanning now includes backend and frontend tests after
   backend verification caught stale test references to deleted wrapper paths.
-- Deleted `ops/scripts/runtime/audit-auth.mjs` after live-check imports were
-  rewired to `ops/scripts/runtime/audits/audit-auth.mjs` and the organization
+- Deleted `ops/scripts/runtime/audit-auth.ts` after live-check imports were
+  rewired to `ops/scripts/runtime/audits/audit-auth.ts` and the organization
   audit reported zero active references to the wrapper.
 - Deleted the old root runtime storage cleanup wrapper after `ops/package.json`,
   full automation, and backend retention tests used the grouped
