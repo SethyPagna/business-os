@@ -1,10 +1,11 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import type { ComponentType, ReactNode } from 'react'
 import '@fontsource/noto-sans-khmer/400.css'
 import '@fontsource/noto-sans-khmer/500.css'
 import '@fontsource/noto-sans-khmer/600.css'
-import App from './App'
-import { AppProvider } from './AppContext'
+import App from './App.jsx'
+import { AppProvider as AppProviderBase } from './AppContext.jsx'
 import { isPublicCatalogPath } from './app/appShellUtils.ts'
 import './styles/main.css'
 import {
@@ -12,6 +13,11 @@ import {
   shouldSuppressRuntimeError,
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier.ts'
+
+type GuardedInsertRule = CSSStyleSheet['insertRule'] & { __businessOsGuarded?: boolean }
+type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }
+const BusinessOsApp = App as ComponentType
+const AppProvider = AppProviderBase as ComponentType<{ publicMode: boolean; children: ReactNode }>
 
 function registerOfflineAppShell() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
@@ -37,12 +43,12 @@ function installFormFieldAccessibility() {
 
   let generatedFieldCount = 0
   const fieldSelector = 'input, select, textarea'
-  const escapeSelectorValue = (value) => {
+  const escapeSelectorValue = (value: string) => {
     if (typeof window.CSS?.escape === 'function') return window.CSS.escape(value)
     return String(value).replace(/["\\]/g, '\\$&')
   }
 
-  const wireField = (field) => {
+  const wireField = (field: Element) => {
     if (!(field instanceof HTMLElement)) return
     if (!field.matches(fieldSelector)) return
     if (!field.id) {
@@ -64,13 +70,13 @@ function installFormFieldAccessibility() {
     siblingLabel.setAttribute('for', field.id)
   }
 
-  const scan = (root) => {
+  const scan = (root: Document | Element | Node | null) => {
     if (!root) return
     if (root instanceof HTMLElement && root.matches(fieldSelector)) {
       wireField(root)
       return
     }
-    if (typeof root.querySelectorAll !== 'function') return
+    if (!(root instanceof Document || root instanceof Element)) return
     root.querySelectorAll(fieldSelector).forEach(wireField)
   }
 
@@ -100,9 +106,9 @@ function installFormFieldAccessibility() {
 // Keep known browser-extension and CSS-injection noise away from React startup.
 if (typeof window !== 'undefined') {
   const sheetPrototype = window.CSSStyleSheet?.prototype
-  const nativeInsertRule = sheetPrototype?.insertRule
+  const nativeInsertRule = sheetPrototype?.insertRule as GuardedInsertRule | undefined
   if (typeof nativeInsertRule === 'function' && !nativeInsertRule.__businessOsGuarded) {
-    const safeInsertRule = function safeInsertRule(rule, index) {
+    const safeInsertRule = function safeInsertRule(this: CSSStyleSheet, rule: string, index?: number) {
       try {
         return nativeInsertRule.call(this, rule, index)
       } catch (error) {
@@ -117,9 +123,10 @@ if (typeof window !== 'undefined') {
   const cssRulesDescriptor = sheetPrototype
     ? Object.getOwnPropertyDescriptor(sheetPrototype, 'cssRules')
     : null
-  if (cssRulesDescriptor?.get && !cssRulesDescriptor.get.__businessOsGuarded) {
-    const nativeCssRulesGetter = cssRulesDescriptor.get
-    const safeCssRulesGetter = function safeCssRulesGetter() {
+  const descriptorGetter = cssRulesDescriptor?.get as GuardedGetter | undefined
+  if (descriptorGetter && !descriptorGetter.__businessOsGuarded) {
+    const nativeCssRulesGetter = descriptorGetter
+    const safeCssRulesGetter = function safeCssRulesGetter(this: CSSStyleSheet) {
       try {
         return nativeCssRulesGetter.call(this) || []
       } catch (error) {
@@ -130,17 +137,19 @@ if (typeof window !== 'undefined') {
     safeCssRulesGetter.__businessOsGuarded = true
     Object.defineProperty(sheetPrototype, 'cssRules', {
       configurable: true,
-      enumerable: cssRulesDescriptor.enumerable,
+      enumerable: Boolean(cssRulesDescriptor?.enumerable),
       get: safeCssRulesGetter,
     })
   }
 
-  const stopKnownStartupNoise = (event, value) => {
-    const filename = String(event?.filename || '')
-    const source = String(event?.target?.src || event?.target?.href || '')
+  const stopKnownStartupNoise = (event: Event, value: unknown) => {
+    const errorEvent = event as ErrorEvent
+    const target = event.target as (EventTarget & { src?: string; href?: string }) | null
+    const filename = String(errorEvent.filename || '')
+    const source = String(target?.src || target?.href || '')
     const error = value && typeof value === 'object' ? value : null
-    const message = String(error?.message || value || '')
-    const stack = String(error?.stack || '')
+    const message = String(error && 'message' in error ? error.message : value || '')
+    const stack = String(error && 'stack' in error ? error.stack : '')
     const baseOrigin = window.location?.origin || ''
     if (!shouldSuppressRuntimeError({ message, error, filename: filename || source, stack, baseOrigin })) return false
     event.preventDefault()
@@ -184,10 +193,13 @@ const publicCatalogMode = typeof window !== 'undefined'
   ? isPublicCatalogPath(window.location.pathname)
   : false
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+const rootElement = document.getElementById('root')
+if (!rootElement) throw new Error('Missing root element')
+
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <AppProvider publicMode={publicCatalogMode}>
-      <App />
+      <BusinessOsApp />
     </AppProvider>
   </React.StrictMode>
 )

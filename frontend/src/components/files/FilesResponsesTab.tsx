@@ -8,6 +8,61 @@ import {
   Sparkles,
 } from 'lucide-react'
 
+type TranslateFunction = (key: string, fallback: string, fallbackKm?: string) => string
+
+type AiCitation = {
+  title?: string | null
+  source?: string | null
+  url?: string | null
+  note?: string | null
+}
+
+type AiRecommendation = {
+  product_id?: string | number | null
+  image_path?: string | null
+  name?: string | null
+  brand?: string | null
+  category?: string | null
+  reason?: string | null
+  fit_summary?: string | null
+  how_to_use?: string | null
+  cautions?: string | null
+  citations?: AiCitation[] | null
+}
+
+type CandidateProduct = {
+  id: string | number
+  name?: string | null
+  brand?: string | null
+  category?: string | null
+}
+
+type AiResponseEntry = {
+  id: string | number
+  provider_name?: string | null
+  provider?: string | null
+  model?: string | null
+  surface?: string | null
+  question_text?: string | null
+  answer_text?: string | null
+  actor_label?: string | null
+  actor_user_name?: string | null
+  created_at?: string | number | Date | null
+  profile?: Record<string, unknown> | null
+  candidate_products?: CandidateProduct[] | null
+  recommendations?: AiRecommendation[] | null
+}
+
+type FilesResponsesTabProps = {
+  tr: TranslateFunction
+  loadResponses: () => void
+  loadingResponses: boolean
+  responses: AiResponseEntry[]
+  expandedResponseId: AiResponseEntry['id'] | null
+  setExpandedResponseId: (updater: (current: AiResponseEntry['id'] | null) => AiResponseEntry['id'] | null) => void
+  formatDateTime: (value: AiResponseEntry['created_at']) => string
+}
+
 export default function FilesResponsesTab({
   tr,
   loadResponses,
@@ -16,7 +71,7 @@ export default function FilesResponsesTab({
   expandedResponseId,
   setExpandedResponseId,
   formatDateTime,
-}) {
+}: FilesResponsesTabProps) {
   return (
     <section className="card p-4 sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -96,7 +151,7 @@ export default function FilesResponsesTab({
                           <div key={`${entry.id}-${recommendation.product_id || index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="flex items-start gap-3">
                               {recommendation.image_path ? (
-                                <img src={recommendation.image_path} alt={recommendation.name} className="h-14 w-14 rounded-2xl object-cover" />
+                                <img src={recommendation.image_path} alt={recommendation.name || ''} className="h-14 w-14 rounded-2xl object-cover" />
                               ) : (
                                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-slate-400">
                                   <ImageIcon className="h-5 w-5" />

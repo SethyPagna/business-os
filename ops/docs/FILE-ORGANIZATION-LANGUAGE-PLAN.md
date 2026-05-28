@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 504 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 505 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 54 `.jsx`
+  - 51 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 53 `.tsx`
+  - 56 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -3959,6 +3959,15 @@ Decision rule:
     `PermissionEditor.tsx` now types permission sections, definitions,
     sensitivity labels, parsed permission state, and change callbacks while
     `UserDetailSheet.tsx` imports the TSX permission source directly.
+505. Convert app entry, inventory RFID, and file response leaves to TSX. Done:
+    `index.tsx` now types the React root, service-worker registration,
+    form-field accessibility wiring, CSSStyleSheet extension-noise guards,
+    runtime-error filters, and JSX app/provider boundaries while `index.html`,
+    app-shell tests, and docs read the TSX entry path. `InventoryRfidSurface.tsx`
+    now types RFID gateway state, workflow cards, section switcher contracts,
+    and requirements. `FilesResponsesTab.tsx` now types AI response rows,
+    profile fields, candidate products, recommendations, citations, expansion
+    state, and refresh/date callbacks.
 
 ## Safety Gates
 

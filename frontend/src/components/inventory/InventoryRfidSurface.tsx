@@ -1,3 +1,57 @@
+import type { ComponentType } from 'react'
+
+type TranslateFunction = (key: string, fallback: string, fallbackKm?: string) => string
+
+type RfidWorkflow = {
+  id: string
+  labelKey: string
+  label: string
+  descriptionKey: string
+  description: string
+}
+
+type RfidRequirement = {
+  id: string
+  key: string
+  text: string
+}
+
+type SectionOption = {
+  id?: string
+  key?: string
+  value?: string
+  label?: string
+}
+
+type RfidGatewayStatus = {
+  connected: boolean
+  label: string
+  readerCount: number | string
+  lastHeartbeat: string
+  activeSession: string
+  branchName: string
+  queuedReads: number | string
+  unknownTags: number | string
+}
+
+type InventoryRfidSurfaceProps = {
+  ClipboardList: ComponentType<{ className?: string }>
+  RFID_INVENTORY_WORKFLOWS: RfidWorkflow[]
+  RFID_READER_REQUIREMENTS: RfidRequirement[]
+  SectionSwitcher: ComponentType<{
+    label: string
+    options: SectionOption[]
+    value: string
+    onChange: (value: string) => void
+    storageKey: string
+  }>
+  rfidGatewayStatus: RfidGatewayStatus
+  rfidSection: string
+  rfidSectionOptions: SectionOption[]
+  setRfidSection: (value: string) => void
+  tr: TranslateFunction
+}
+
 export default function InventoryRfidSurface({
   ClipboardList,
   RFID_INVENTORY_WORKFLOWS,
@@ -8,7 +62,7 @@ export default function InventoryRfidSurface({
   rfidSectionOptions,
   setRfidSection,
   tr,
-}) {
+}: InventoryRfidSurfaceProps) {
   return (
         <div className="space-y-3">
           <SectionSwitcher

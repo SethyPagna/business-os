@@ -246,7 +246,7 @@ function resolveInternalImport(fromFile, spec) {
     `${base}.mjs`,
     `${base}.json`,
     path.join(base, 'index.js'),
-    path.join(base, 'index.jsx'),
+    path.join(base, 'index.tsx'),
     path.join(base, 'index.ts'),
     path.join(base, 'index.tsx'),
     path.join(base, 'index.mjs'),

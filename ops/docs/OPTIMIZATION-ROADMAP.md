@@ -5498,3 +5498,13 @@ Move 504 status:
   sensitivity labels, parsed permission state, and change callbacks. The branch
   form also removes the stale visible default-branch helper text, and
   `UserDetailSheet.tsx` imports the TSX permission definitions directly.
+
+Move 505 status:
+- Move 505 converts the app entry, inventory RFID surface, and file response
+  tab: `index.tsx`, `InventoryRfidSurface.tsx`, and `FilesResponsesTab.tsx`.
+  The typed boundaries now cover React root bootstrapping, service-worker
+  registration, form-field accessibility wiring, CSSStyleSheet startup-noise
+  guards, app/provider JSX shims, RFID gateway/workflow state, section switcher
+  contracts, AI response rows, recommendation citations, expansion state, and
+  refresh/date callbacks. `index.html`, app-shell tests, and frontend source
+  docs now point at the TSX entry path.

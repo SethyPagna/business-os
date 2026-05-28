@@ -27,7 +27,7 @@ import {
 } from '../../utils/loaders.ts'
 
 const loadFilesProvidersTab = () => import('./FilesProvidersTab.jsx')
-const loadFilesResponsesTab = () => import('./FilesResponsesTab.jsx')
+const loadFilesResponsesTab = () => import('./FilesResponsesTab')
 const FilesProvidersTab = lazy(loadFilesProvidersTab)
 const FilesResponsesTab = lazy(loadFilesResponsesTab)
 

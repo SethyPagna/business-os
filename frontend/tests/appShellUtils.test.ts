@@ -74,7 +74,7 @@ runTest('app shell does not render floating page info help', () => {
 })
 
 runTest('startup registers the offline app shell service worker', () => {
-  const source = readFileSync(new URL('../src/index.jsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/index.tsx', import.meta.url), 'utf8')
   assert.match(source, /registerOfflineAppShell/)
   assert.doesNotMatch(source, /disableServiceWorkerCaching/)
   assert.doesNotMatch(source, /getRegistrations\(\)[\s\S]*unregister/)
