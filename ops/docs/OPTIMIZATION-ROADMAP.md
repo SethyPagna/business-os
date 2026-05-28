@@ -5135,3 +5135,10 @@ Move 463 status:
   inventory adjust/transfer/move/batch controls, and sales bulk/detail
   workflows while adding typed health, console-entry, observed-request,
   provider response, sale candidate, and Playwright page shapes.
+
+Move 464 status:
+- Move 464 converts the broad Phase 8.4 UI live check to TypeScript.
+  `phase84-ui-live-check.ts` preserves the route-suite dashboard,
+  notification, branch stock, sales, product, portal, POS, inventory,
+  contacts, loyalty, users, profile, audit/settings, backup, and sync-server
+  probes while `phase84-live-suite.ts` now points at the TypeScript entrypoint.

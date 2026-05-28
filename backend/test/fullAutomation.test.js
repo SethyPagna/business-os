@@ -859,7 +859,7 @@ runTest('phase 8.4 live suite runs UI, public portal, then hygiene', () => {
     'node scripts/runtime/live-checks/phase84-live-suite.ts',
   )
   ;[
-    'phase84-ui-live-check.mjs',
+    'phase84-ui-live-check.ts',
     'phase84-public-portal-cloudflare-check.ts',
     'post-live-hygiene.ts',
     '--skip-ui',

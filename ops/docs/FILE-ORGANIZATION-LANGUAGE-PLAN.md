@@ -2229,7 +2229,7 @@ Decision rule:
     40 product cards render, portal API calls return 200, restored upload assets
     return 200, enforced CSP is present, no report-only CSP header is present,
     and there are no relevant console/page errors. The branch-transfer portion
-    of `phase84-ui-live-check.mjs` now falls back to an authenticated direct
+    of `phase84-ui-live-check.ts` now falls back to an authenticated direct
     branch-stock read if the modal response arrives before Playwright attaches
     its waiter.
 264. Remove regenerated release kit after live image verification. Done:
@@ -3629,6 +3629,13 @@ Decision rule:
     and batch, and Sales bulk/detail browser workflows while adding typed
     health, console-entry, observed-request, evaluated provider, sale
     candidate, and Playwright page boundaries.
+454. Convert the broad Phase 8.4 UI live check to TypeScript. Done:
+    `phase84-ui-live-check.ts` replaces the broad route-suite `.mjs`
+    entrypoint and `phase84-live-suite.ts` now calls the TypeScript path. The
+    conversion keeps the same dashboard, notifications, branch stock, sales,
+    product import/search, portal, POS, inventory, contacts, loyalty, users,
+    profile, audit/settings, backup, and sync-server browser probes while
+    adding typed health, console-entry, and observed-request boundaries.
 
 ## Safety Gates
 

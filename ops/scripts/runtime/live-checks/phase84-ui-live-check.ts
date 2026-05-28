@@ -16,17 +16,27 @@ const SCREENSHOT_PATH = path.join(REPORT_DIR, 'branches-stock-read.png')
 const NOTIFICATION_SCREENSHOT_PATH = path.join(REPORT_DIR, 'notification-summary.png')
 const REPORT_PATH = path.join(REPORT_DIR, 'report.json')
 
-function assert(condition, message) {
+type ConsoleEntry = { type: string; text: string }
+type ObservedRequest = { status: number; url: string }
+type RuntimeHealth = {
+  status?: string
+  runtime?: {
+    frontend?: { hash?: string }
+    sourceHash?: string
+  }
+}
+
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
 
 
 
-async function main() {
+async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
   console.log('[phase84] reading health/build metadata')
-  const health = await readJson(`${BASE_URL}/health`)
+  const health = await readJson(`${BASE_URL}/health`) as RuntimeHealth
   const build = await readJson(`${BASE_URL}/business-os-build.json`)
   assert(health.status === 'ok', 'Runtime health is not ok')
 
@@ -44,8 +54,8 @@ async function main() {
     const storageState = await applySessionToPlaywrightContext(context, session, BASE_URL)
     const page = await context.newPage()
 
-    const consoleMessages = []
-    const chunkRequests = []
+    const consoleMessages: ConsoleEntry[] = []
+    const chunkRequests: ObservedRequest[] = []
     attachConsoleCollector(page, consoleMessages)
     page.on('response', (response) => {
       const url = response.url()
@@ -848,7 +858,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch((error: any) => {
   console.error(error?.stack || error?.message || String(error))
   process.exitCode = 1
 })

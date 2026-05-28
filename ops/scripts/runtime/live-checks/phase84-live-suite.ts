@@ -57,7 +57,7 @@ type StepResult = {
 const SUITE_STEPS: SuiteStep[] = [
   {
     name: 'broad Phase 8.4 UI live check',
-    script: 'ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs',
+    script: 'ops/scripts/runtime/live-checks/phase84-ui-live-check.ts',
     flag: 'skipUi',
     reportPrefix: 'phase84-ui-live-check-',
   },
