@@ -218,8 +218,8 @@ Code files documented: **466**
 | 206 | `frontend/src/components/pos/ProductImage.tsx` | 1 | 1 | 1 | 1 |
 | 207 | `frontend/src/components/pos/QuickAddModal.tsx` | 1 | 1 | 0 | 1 |
 | 208 | `frontend/src/components/products/config/productPageConfig.ts` | 0 | 9 | 0 | 0 |
-| 209 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 3 | 1 | 2 | 1 |
-| 210 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 3 | 1 | 2 | 1 |
+| 209 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 3 | 1 | 2 | 1 |
+| 210 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 3 | 1 | 2 | 1 |
 | 211 | `frontend/src/components/products/forms/ProductForm.jsx` | 9 | 1 | 7 | 1 |
 | 212 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 8 | 1 | 7 | 1 |
 | 213 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 1 | 7 | 1 | 0 |
@@ -4178,7 +4178,7 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.209 `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
+### 3.209 `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4191,7 +4191,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/products/forms/ProductForm.jsx`
 
-### 3.210 `frontend/src/components/products/forms/BulkAddStockModal.jsx`
+### 3.210 `frontend/src/components/products/forms/BulkAddStockModal.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4219,7 +4219,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (7)
   - `frontend/src/components/files/FilePickerModal.jsx`
-  - `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
+  - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/Modal.tsx`
@@ -4492,7 +4492,7 @@ Code files documented: **466**
 - Internal dependencies (30)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/api/http.ts`
-  - `frontend/src/components/products/forms/BulkAddStockModal.jsx`
+  - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/ProductForm.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.jsx`
   - `frontend/src/components/products/history/productHistoryHelpers.ts`
@@ -5697,8 +5697,8 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
-  - `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
-  - `frontend/src/components/products/forms/BulkAddStockModal.jsx`
+  - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
+  - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.jsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
@@ -6032,8 +6032,8 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
-  - `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
-  - `frontend/src/components/products/forms/BulkAddStockModal.jsx`
+  - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
+  - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.jsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/productLookupSnapshots.ts`

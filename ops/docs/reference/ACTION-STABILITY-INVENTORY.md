@@ -474,7 +474,7 @@ Continue with Phase 8.4:
   `42378a84fc53ab2f`; latest report:
   `ops/runtime/reports/phase84-product-variant-actions-live-check-2026-05-18T06-07-30-407Z/report.json`.
   Product stock-helper mutations still use same-tick guards and 12s mutation
-  timeouts after `BulkAddStockModal.jsx` and `BranchStockAdjuster.jsx` moved
+  timeouts after `BulkAddStockModal.tsx` and `BranchStockAdjuster.tsx` moved
   under `frontend/src/components/products/forms`. Live verification opens the
   Products bulk Add Stock modal and a product stock tab with branch-stock inputs
   without submitting stock mutations. Latest verified frontend hash:
@@ -514,7 +514,7 @@ Continue with Phase 8.4:
   `VariantFormModal.jsx`; the Product variant live check passed against
   frontend hash `42378a84fc53ab2f`.
   The fourth physical move continued `frontend/src/components/products/forms`
-  with `BulkAddStockModal.jsx` and `BranchStockAdjuster.jsx`; the Product
+  with `BulkAddStockModal.tsx` and `BranchStockAdjuster.tsx`; the Product
   stock-helper live check passed against frontend hash `b79c04b453d1b469`.
   The fifth physical move created `frontend/src/components/products/import`
   for `BulkImportModal.jsx`, `productImportPlanner.mjs`, and

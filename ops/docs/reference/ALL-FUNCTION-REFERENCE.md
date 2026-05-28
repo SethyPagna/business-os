@@ -218,8 +218,8 @@ Code files scanned: **466**
 | 206 | `frontend/src/components/pos/ProductImage.tsx` | 1 |
 | 207 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
 | 208 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
-| 209 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 4 |
-| 210 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 2 |
+| 209 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 6 |
+| 210 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 6 |
 | 211 | `frontend/src/components/products/forms/ProductForm.jsx` | 17 |
 | 212 | `frontend/src/components/products/forms/VariantFormModal.jsx` | 5 |
 | 213 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 6 |
@@ -4089,21 +4089,27 @@ Code files scanned: **466**
 
 - No top-level named symbols detected.
 
-### 3.209 `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
+### 3.209 `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `BranchStockAdjuster` | export default function | 7 |
-| 2 | `T` | const arrow | 28 |
-| 3 | `setRow` | const arrow | 34 |
-| 4 | `handleSave` | const arrow | 40 |
+| 1 | `getProductApi` | function | 72 |
+| 2 | `parseStockDelta` | function | 76 |
+| 3 | `BranchStockAdjuster` | export default function | 81 |
+| 4 | `T` | const arrow | 102 |
+| 5 | `setRow` | const arrow | 108 |
+| 6 | `handleSave` | const arrow | 114 |
 
-### 3.210 `frontend/src/components/products/forms/BulkAddStockModal.jsx`
+### 3.210 `frontend/src/components/products/forms/BulkAddStockModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `BulkAddStockModal` | function | 9 |
-| 2 | `handleSave` | const arrow | 20 |
+| 1 | `getProductApi` | function | 68 |
+| 2 | `parsePositiveQuantity` | function | 72 |
+| 3 | `normalizeBranchId` | function | 77 |
+| 4 | `normalizeProductId` | function | 83 |
+| 5 | `BulkAddStockModal` | export default function | 88 |
+| 6 | `handleSave` | const arrow | 101 |
 
 ### 3.211 `frontend/src/components/products/forms/ProductForm.jsx`
 

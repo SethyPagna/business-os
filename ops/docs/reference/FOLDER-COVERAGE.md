@@ -951,8 +951,8 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `BranchStockAdjuster.jsx` | UI component/page |
-| 2 | `BulkAddStockModal.jsx` | UI component/page |
+| 1 | `BranchStockAdjuster.tsx` | UI component/page |
+| 2 | `BulkAddStockModal.tsx` | UI component/page |
 | 3 | `ProductForm.jsx` | UI component/page |
 | 4 | `VariantFormModal.jsx` | UI component/page |
 

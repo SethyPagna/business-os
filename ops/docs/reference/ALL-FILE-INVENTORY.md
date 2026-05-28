@@ -241,8 +241,8 @@ Total files documented: **529**
 | 229 | `frontend/src/components/pos/ProductImage.tsx` | frontend-ui | 12 | 0.3 | UI component/page |
 | 230 | `frontend/src/components/pos/QuickAddModal.tsx` | frontend-ui | 49 | 1.8 | UI component/page |
 | 231 | `frontend/src/components/products/config/productPageConfig.ts` | frontend-ui | 24 | 0.7 | UI component/page |
-| 232 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | frontend-ui | 119 | 5.0 | UI component/page |
-| 233 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | frontend-ui | 91 | 4.3 | UI component/page |
+| 232 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | frontend-ui | 193 | 6.5 | UI component/page |
+| 233 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | frontend-ui | 180 | 6.2 | UI component/page |
 | 234 | `frontend/src/components/products/forms/ProductForm.jsx` | frontend-ui | 940 | 46.9 | UI component/page |
 | 235 | `frontend/src/components/products/forms/VariantFormModal.jsx` | frontend-ui | 274 | 13.4 | UI component/page |
 | 236 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | frontend-ui | 156 | 5.8 | UI component/page |
