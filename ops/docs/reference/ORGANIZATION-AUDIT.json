@@ -222,7 +222,7 @@
     "ops/scripts/powershell/docker-release.ps1",
     "ops/scripts/runtime/audits/deep-live-audit.mjs",
     "ops/scripts/runtime/browser-action-smoke.ts",
-    "ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs"
+    "ops/scripts/runtime/live-checks/phase84-ui-live-check.ts"
   ],
   "wrapperFiles": [],
   "brokenWrapperFiles": [],

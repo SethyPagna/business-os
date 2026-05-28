@@ -497,7 +497,7 @@ Code files scanned: **506**
 | 485 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 3 |
 | 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 2 |
-| 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
+| 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 2 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
 | 490 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
 | 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
@@ -6826,12 +6826,12 @@ Code files scanned: **506**
 | 1 | `assert` | function | 33 |
 | 2 | `main` | function | 40 |
 
-### 3.488 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
+### 3.488 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 19 |
-| 2 | `main` | function | 26 |
+| 1 | `assert` | function | 29 |
+| 2 | `main` | function | 36 |
 
 ### 3.489 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 

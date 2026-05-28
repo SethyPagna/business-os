@@ -1,10 +1,10 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 388,
+  "sourceFiles": 389,
   "distAssets": 87,
-  "totalSourceBytes": 5987573,
-  "totalSourceLines": 133138,
+  "totalSourceBytes": 6045707,
+  "totalSourceLines": 134003,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 250756,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -151,6 +151,11 @@
       "lines": 1564
     },
     {
+      "file": "ops/scripts/runtime/live-checks/phase84-ui-live-check.ts",
+      "size": 58141,
+      "lines": 865
+    },
+    {
       "file": "frontend/src/components/utils-settings/AuditLog.jsx",
       "size": 57543,
       "lines": 1198
@@ -159,11 +164,6 @@
       "file": "frontend/src/App.jsx",
       "size": 54426,
       "lines": 1387
-    },
-    {
-      "file": "backend/src/routes/portal.js",
-      "size": 52672,
-      "lines": 1407
     }
   ],
   "topSourceByLines": [

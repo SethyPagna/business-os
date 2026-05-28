@@ -1664,7 +1664,7 @@ Total folders documented: **81**
 | 13 | `phase84-product-variant-actions-live-check.ts` | Project source/support file |
 | 14 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
 | 15 | `phase84-sales-actions-live-check.ts` | Project source/support file |
-| 16 | `phase84-ui-live-check.mjs` | Project source/support file |
+| 16 | `phase84-ui-live-check.ts` | Project source/support file |
 | 17 | `phase84-users-actions-live-check.ts` | Project source/support file |
 
 

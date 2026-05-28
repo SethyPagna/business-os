@@ -497,7 +497,7 @@ Code files documented: **506**
 | 485 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 6 | 0 | 2 | 0 |
 | 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 4 | 0 | 0 | 0 |
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 6 | 0 | 2 | 0 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 6 | 0 | 2 | 0 |
 | 490 | `ops/scripts/runtime/smoke/check-public-url.ts` | 2 | 0 | 0 | 0 |
 | 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
@@ -7696,7 +7696,7 @@ Code files documented: **506**
   - `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
-  - `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 ### 3.464 `ops/scripts/runtime/audits/audit-manifest.ts`
@@ -7856,7 +7856,7 @@ Code files documented: **506**
   - `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
-  - `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 ### 3.474 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
@@ -8077,7 +8077,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.488 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
+### 3.488 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
