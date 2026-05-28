@@ -529,11 +529,11 @@ Total files documented: **569**
 | 517 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | project-scripts | 247 | 7.6 | Project source/support file |
 | 518 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | project-scripts | 140 | 6.7 | Project source/support file |
 | 519 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | project-scripts | 129 | 6.1 | Project source/support file |
-| 520 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | project-scripts | 132 | 6.1 | Project source/support file |
-| 521 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | project-scripts | 117 | 5.7 | Project source/support file |
-| 522 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | project-scripts | 129 | 6.4 | Project source/support file |
+| 520 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | project-scripts | 144 | 6.6 | Project source/support file |
+| 521 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | project-scripts | 127 | 6.0 | Project source/support file |
+| 522 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | project-scripts | 139 | 6.7 | Project source/support file |
 | 523 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | project-scripts | 129 | 6.0 | Project source/support file |
-| 524 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | project-scripts | 128 | 5.6 | Project source/support file |
+| 524 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | project-scripts | 139 | 6.0 | Project source/support file |
 | 525 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | project-scripts | 176 | 7.3 | Project source/support file |
 | 526 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | project-scripts | 122 | 5.7 | Project source/support file |
 | 527 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | project-scripts | 855 | 56.5 | Project source/support file |

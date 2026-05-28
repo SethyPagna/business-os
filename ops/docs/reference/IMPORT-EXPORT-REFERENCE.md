@@ -490,11 +490,11 @@ Code files documented: **506**
 | 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 4 | 0 | 0 | 0 |
 | 479 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 6 | 0 | 2 | 0 |
 | 480 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 481 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 482 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 483 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 481 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 482 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 483 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 6 | 0 | 2 | 0 |
 | 484 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 485 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 485 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 6 | 0 | 2 | 0 |
 | 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 4 | 0 | 0 | 0 |
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 6 | 0 | 2 | 0 |
@@ -7690,11 +7690,11 @@ Code files documented: **506**
   - `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
-  - `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
-  - `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
-  - `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
+  - `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
+  - `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
-  - `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
@@ -7850,11 +7850,11 @@ Code files documented: **506**
   - `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
-  - `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
-  - `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
-  - `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
+  - `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
+  - `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
-  - `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
@@ -7968,7 +7968,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.481 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
+### 3.481 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7984,7 +7984,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.482 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs`
+### 3.482 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8000,7 +8000,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.483 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs`
+### 3.483 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8032,7 +8032,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.485 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
+### 3.485 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
