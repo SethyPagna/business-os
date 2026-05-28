@@ -500,9 +500,9 @@ Code files scanned: **506**
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 2 |
 | 490 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 11 |
-| 491 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | 3 |
+| 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
 | 492 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 |
-| 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | 6 |
+| 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
 | 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 8 |
 | 495 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 21 |
 | 496 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
@@ -6856,13 +6856,13 @@ Code files scanned: **506**
 | 10 | `checkHttpsViaIp` | function | 123 |
 | 11 | `main` | function | 160 |
 
-### 3.491 `ops/scripts/runtime/smoke/check-route-contract.mjs`
+### 3.491 `ops/scripts/runtime/smoke/check-route-contract.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `fail` | function | 27 |
-| 2 | `checkRoute` | function | 32 |
-| 3 | `main` | function | 59 |
+| 1 | `fail` | function | 35 |
+| 2 | `checkRoute` | function | 40 |
+| 3 | `main` | function | 67 |
 
 ### 3.492 `ops/scripts/runtime/smoke/live-smoke.mjs`
 
@@ -6875,16 +6875,17 @@ Code files scanned: **506**
 | 5 | `main` | function | 87 |
 | 6 | `record` | const arrow | 92 |
 
-### 3.493 `ops/scripts/runtime/smoke/post-start-diagnostics.mjs`
+### 3.493 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 7 |
-| 2 | `readResponse` | function | 33 |
-| 3 | `hasBuildInfo` | function | 66 |
-| 4 | `mkdirForFile` | function | 75 |
-| 5 | `writeReport` | function | 80 |
-| 6 | `main` | function | 86 |
+| 1 | `parseArgs` | function | 38 |
+| 2 | `readResponse` | function | 64 |
+| 3 | `hasBuildInfo` | function | 97 |
+| 4 | `asRecord` | function | 106 |
+| 5 | `mkdirForFile` | function | 110 |
+| 6 | `writeReport` | function | 115 |
+| 7 | `main` | function | 121 |
 
 ### 3.494 `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs`
 

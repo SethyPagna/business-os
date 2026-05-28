@@ -500,9 +500,9 @@ Code files documented: **506**
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 490 | `ops/scripts/runtime/smoke/check-public-url.mjs` | 2 | 0 | 0 | 0 |
-| 491 | `ops/scripts/runtime/smoke/check-route-contract.mjs` | 0 | 0 | 0 | 0 |
+| 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
 | 492 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 | 0 | 0 | 0 |
-| 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` | 2 | 0 | 0 | 0 |
+| 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 2 | 0 | 0 | 0 |
 | 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 4 | 0 | 0 | 0 |
 | 495 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 4 | 0 | 0 | 0 |
 | 496 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 3 | 0 | 0 | 0 |
@@ -8126,7 +8126,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.491 `ops/scripts/runtime/smoke/check-route-contract.mjs`
+### 3.491 `ops/scripts/runtime/smoke/check-route-contract.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -8151,7 +8151,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.493 `ops/scripts/runtime/smoke/post-start-diagnostics.mjs`
+### 3.493 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 
 - Declared exports: none detected
 - Imports (2)
