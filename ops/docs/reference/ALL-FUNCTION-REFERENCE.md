@@ -495,7 +495,7 @@ Code files scanned: **506**
 | 483 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 2 |
 | 484 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 2 |
 | 485 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 3 |
-| 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | 5 |
+| 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 2 |
@@ -6809,15 +6809,15 @@ Code files scanned: **506**
 | 2 | `openFirstVariantModal` | function | 25 |
 | 3 | `main` | function | 42 |
 
-### 3.486 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
+### 3.486 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 14 |
-| 2 | `isRelevantConsole` | function | 18 |
-| 3 | `isCloudflareScriptMonitorReportOnlyCsp` | function | 22 |
-| 4 | `endpointStatus` | function | 27 |
-| 5 | `main` | function | 31 |
+| 1 | `assert` | function | 57 |
+| 2 | `isRelevantConsole` | function | 61 |
+| 3 | `isCloudflareScriptMonitorReportOnlyCsp` | function | 65 |
+| 4 | `endpointStatus` | function | 70 |
+| 5 | `main` | function | 74 |
 
 ### 3.487 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
 

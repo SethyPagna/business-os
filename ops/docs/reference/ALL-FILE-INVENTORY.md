@@ -534,7 +534,7 @@ Total files documented: **569**
 | 522 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | project-scripts | 129 | 6.4 | Project source/support file |
 | 523 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | project-scripts | 119 | 5.7 | Project source/support file |
 | 524 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | project-scripts | 128 | 5.6 | Project source/support file |
-| 525 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | project-scripts | 133 | 6.3 | Project source/support file |
+| 525 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | project-scripts | 176 | 7.3 | Project source/support file |
 | 526 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | project-scripts | 122 | 5.7 | Project source/support file |
 | 527 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | project-scripts | 855 | 56.5 | Project source/support file |
 | 528 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | project-scripts | 150 | 7.5 | Project source/support file |

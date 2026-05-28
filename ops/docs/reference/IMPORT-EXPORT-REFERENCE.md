@@ -495,7 +495,7 @@ Code files documented: **506**
 | 483 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 484 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 485 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs` | 4 | 0 | 0 | 0 |
+| 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 4 | 0 | 0 | 0 |
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
@@ -8048,7 +8048,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.486 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
+### 3.486 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
 
 - Declared exports: none detected
 - Imports (4)
