@@ -5,7 +5,7 @@ import PaginationControls, { paginateItems } from '../shared/PaginationControls.
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
-import { getKhmerTextProps } from '../../utils/scriptTypography.js'
+import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
 function getBadgeIcon(badge) {
   if (badge?.key === 'promotion') return BadgePercent

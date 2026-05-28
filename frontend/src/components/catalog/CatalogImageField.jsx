@@ -1,5 +1,5 @@
 import { Eye, Upload } from 'lucide-react'
-import { createInitialUploadState } from '../../utils/mediaUpload.js'
+import { createInitialUploadState } from '../../utils/mediaUpload.ts'
 
 export default function CatalogImageField({
   label,

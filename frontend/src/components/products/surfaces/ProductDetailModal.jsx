@@ -1,6 +1,6 @@
 import { X } from 'lucide-react'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
-import { getContrastingTextColor } from '../../../utils/color.js'
+import { getContrastingTextColor } from '../../../utils/color.ts'
 import { calculateProductDiscount } from '../../../utils/pricing.js'
 import { buildBatchPreview, getVisibleProductBatches } from '../../../utils/productBatches.ts'
 

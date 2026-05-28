@@ -17,7 +17,7 @@ import {
   createInitialUploadState,
   reduceUploadState,
   sanitizePersistedMediaPath,
-} from '../../utils/mediaUpload.js'
+} from '../../utils/mediaUpload.ts'
 
 const SETTINGS_OTP_STATUS_TIMEOUT_MS = 8000
 const SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS = 8000

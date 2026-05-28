@@ -1,7 +1,7 @@
 import { Fragment } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import DualMoney from './DualMoney'
-import { getKhmerTextProps } from '../../utils/scriptTypography.js'
+import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
 export default function InventoryProductsSurface({
   InventoryBatchPreview,

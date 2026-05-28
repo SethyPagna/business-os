@@ -12,7 +12,7 @@
  */
 
 import { SYNC } from '../constants.js'
-import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.js'
+import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 declare const __FRONTEND_BUILD_REVISION__: string | undefined

@@ -4,7 +4,7 @@ import Modal from '../../shared/Modal'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import BranchStockAdjuster from './BranchStockAdjuster'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.js'
-import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.js'
+import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,

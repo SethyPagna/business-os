@@ -84,7 +84,7 @@ import {
   createInitialUploadState,
   reduceUploadState,
   sanitizePersistedMediaPath,
-} from '../../utils/mediaUpload.js'
+} from '../../utils/mediaUpload.ts'
 import { CatalogPageProvider } from './CatalogPageContext'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')

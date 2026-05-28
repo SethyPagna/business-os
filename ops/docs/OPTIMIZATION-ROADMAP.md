@@ -5264,3 +5264,10 @@ Move 476 status:
   React, API, media, product-gallery, and settings callers directly, while
   `appRefresh.js`, `settingsRefresh.js`, `publicAssetUrls.js`, and
   `favicon.js` plus obsolete declaration shims are removed.
+
+Move 477 status:
+- Move 477 retires seven leaf frontend utility wrappers after callers moved to
+  TypeScript source imports. `color.ts`, `dateHelpers.ts`, `deviceInfo.ts`,
+  `formatters.ts`, `mediaUpload.ts`, `permissions.ts`, and
+  `scriptTypography.ts` now serve callers directly, while their one-line `.js`
+  wrappers are removed.

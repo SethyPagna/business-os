@@ -3736,6 +3736,13 @@ Decision rule:
     `.js` wrappers and the obsolete declaration-only shims for app refresh and
     public asset URLs were deleted after reference scans showed each caller
     could move to the TypeScript source path.
+467. Retire leaf frontend utility JavaScript wrappers. Done:
+    `color.ts`, `dateHelpers.ts`, `deviceInfo.ts`, `formatters.ts`,
+    `mediaUpload.ts`, `permissions.ts`, and `scriptTypography.ts` are now
+    imported directly by frontend callers. Their one-line `.js` compatibility
+    wrappers were removed after targeted import rewrites, keeping the utility
+    behavior in the typed source files and reducing the remaining JavaScript
+    surface without touching React component ownership.
 
 ## Safety Gates
 

@@ -346,7 +346,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/formatters.ts',
-    compatibilityWrapper: 'frontend/src/utils/formatters.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after frontend callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -378,7 +379,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/mediaUpload.ts',
-    compatibilityWrapper: 'frontend/src/utils/mediaUpload.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after frontend callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -654,7 +656,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/color.ts',
-    compatibilityWrapper: 'frontend/src/utils/color.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after frontend callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -665,7 +668,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/dateHelpers.ts',
-    compatibilityWrapper: 'frontend/src/utils/dateHelpers.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after frontend callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -676,7 +680,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/deviceInfo.ts',
-    compatibilityWrapper: 'frontend/src/utils/deviceInfo.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after frontend callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -730,7 +735,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/permissions.ts',
-    compatibilityWrapper: 'frontend/src/utils/permissions.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after frontend callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -752,7 +758,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/scriptTypography.ts',
-    compatibilityWrapper: 'frontend/src/utils/scriptTypography.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after frontend callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',

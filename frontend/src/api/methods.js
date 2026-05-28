@@ -31,7 +31,7 @@ import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, loc
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.js'
 import { STORAGE_KEYS, SYNC } from '../constants'
 import { decodeTextBuffer } from '../utils/csvImport.js'
-import { getClientDeviceInfo } from '../utils/deviceInfo.js'
+import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
 import {
   CATEGORY_REFRESH_CHANNELS,

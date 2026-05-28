@@ -52,7 +52,7 @@ import {
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
-import { getKhmerTextProps } from '../../utils/scriptTypography.js'
+import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 

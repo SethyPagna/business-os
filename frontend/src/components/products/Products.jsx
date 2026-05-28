@@ -28,7 +28,7 @@ import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initial
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { isApiVersionMismatchError } from '../../api/http.js'
-import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.js'
+import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -37,7 +37,7 @@ import {
   settleLoaderMap,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
-import { getContrastingTextColor } from '../../utils/color.js'
+import { getContrastingTextColor } from '../../utils/color.ts'
 import {
   CREATED_MONTH_OPTIONS,
   DEFAULT_META_PILL_COLOR,

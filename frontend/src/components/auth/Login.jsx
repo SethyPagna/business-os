@@ -14,7 +14,7 @@ import {
 import { useApp } from '../../AppContext'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import { STORAGE_KEYS } from '../../constants'
-import { getClientDeviceInfo } from '../../utils/deviceInfo.js'
+import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
