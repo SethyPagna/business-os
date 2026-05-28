@@ -5473,3 +5473,10 @@ Move 501 status:
   props, actions, and children. The conversion keeps the shared catalog
   presentation behavior unchanged while updating UI verification to the TSX
   source path.
+
+Move 502 status:
+- Move 502 converts the catalog image field `CatalogImageField.tsx`. The typed
+  boundary now covers catalog image labels, values, upload/choose/clear/preview
+  callbacks, upload progress state, processing state, cancellation hooks, and
+  preview image rendering. The conversion keeps data/blob masking, upload
+  status messages, error display, and catalog editor imports unchanged.

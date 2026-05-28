@@ -1,6 +1,30 @@
 import { Eye, Upload } from 'lucide-react'
 import { createInitialUploadState } from '../../utils/mediaUpload.ts'
 
+type CatalogUploadState = ReturnType<typeof createInitialUploadState>
+type CatalogImageFieldProps = {
+  label: string
+  value?: string | null
+  onUpload: () => void
+  onChooseExisting?: (() => void) | null
+  onChange: (value: string) => void
+  onClear: () => void
+  onPreview: () => void
+  fieldId: string
+  uploadLabel?: string
+  chooseLabel?: string
+  clearLabel?: string
+  previewLabel?: string
+  placeholder?: string
+  hint?: string
+  uploadState?: CatalogUploadState
+  onCancelUpload?: (() => void) | null
+  cancelLabel?: string
+  uploadingLabel?: string
+  uploadedQueuedLabel?: string
+  uploadedReadyLabel?: string
+}
+
 export default function CatalogImageField({
   label,
   value,
@@ -22,7 +46,7 @@ export default function CatalogImageField({
   uploadingLabel = 'Uploading...',
   uploadedQueuedLabel = 'Uploaded. Background optimization is running now.',
   uploadedReadyLabel = 'Uploaded and ready.',
-}) {
+}: CatalogImageFieldProps) {
   const rawValue = String(value || '')
   const displayValue = rawValue.startsWith('data:image/') || rawValue.startsWith('blob:')
     ? 'uploaded-image-preview'
