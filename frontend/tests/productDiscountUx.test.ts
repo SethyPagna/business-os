@@ -18,7 +18,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 
 await runTest('products table separates product identity from operational details', () => {
   const source = fs.readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
-  const surface = fs.readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.jsx', import.meta.url), 'utf8')
+  const surface = fs.readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
   assert.match(source, /ProductDiscountBadge/)
   assert.match(source, /ProductDetailsCell/)
   assert.match(surface, /t\('details'\)\s*\|\|\s*'Details'/)

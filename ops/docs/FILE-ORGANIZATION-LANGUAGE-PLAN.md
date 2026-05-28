@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 491 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 492 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 71 `.jsx`
+  - 69 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 36 `.tsx`
+  - 38 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -209,7 +209,7 @@ Decision rule:
     Product page Playwright action check passed on frontend hash
     `db2bde8c13de0d64`.
 12. Move the product presentation surface cluster. Done: `HeaderActions.tsx`,
-    `ProductsListSurface.jsx`, and `ProductDetailModal.jsx` now live in
+    `ProductsListSurface.tsx`, and `ProductDetailModal.tsx` now live in
     `frontend/src/components/products/surfaces`. Product discount and product
     pagination source tests, source checks, typecheck, production build,
     runtime health, and a focused Product page Playwright action check passed
@@ -3868,6 +3868,14 @@ Decision rule:
     row action menu callbacks, money formatting, and detail-pill rendering.
     `ProductDetailsCell` now uses an explicit typed pill accumulator instead
     of relying on loose `filter(Boolean)` inference.
+492. Convert product list and detail surfaces to TSX. Done:
+    `ProductsListSurface.tsx` now types product sections, grouped rows,
+    selection-scope callbacks, desktop select-all refs, and render callbacks
+    for desktop rows and mobile cards. `ProductDetailModal.tsx` now types
+    product detail records, category/unit/brand color maps, branch stock rows,
+    image lightbox callbacks, and formatter/action callbacks. The conversion
+    keeps valid Khmer refresh fallback text and normalizes nullable gallery,
+    branch quantity, and batch preview values before rendering.
 
 ## Safety Gates
 

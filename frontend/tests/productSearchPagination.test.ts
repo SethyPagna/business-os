@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 const productsPage = readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
 const productFilterHelpers = readFileSync(new URL('../src/components/products/helpers/productFilterHelpers.ts', import.meta.url), 'utf8')
 const productMenuHelpers = readFileSync(new URL('../src/components/products/helpers/productMenuHelpers.ts', import.meta.url), 'utf8')
-const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.jsx', import.meta.url), 'utf8')
+const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
 const posPage = readFileSync(new URL('../src/components/pos/POS.jsx', import.meta.url), 'utf8')
 const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
 const apiMethods = readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')

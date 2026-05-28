@@ -1029,7 +1029,7 @@ Current checkpoint:
   source checks, typecheck, production build, runtime health, and the focused
   Product page action live check passed on frontend hash `db2bde8c13de0d64`.
 - Eighth Phase 26 physical move complete: Product presentation surfaces
-  `HeaderActions.tsx`, `ProductsListSurface.jsx`, and `ProductDetailModal.jsx`
+  `HeaderActions.tsx`, `ProductsListSurface.tsx`, and `ProductDetailModal.tsx`
   now live under `frontend/src/components/products/surfaces`. Product discount
   and product pagination source tests, source checks, typecheck, production
   build, runtime health, and the focused Product page action live check passed
@@ -3734,7 +3734,7 @@ Move 334 status:
 
 Move 335 status:
 - Move 335 fixes the Products and POS mid-width layout pressure found during
-  live UI review. `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
+  live UI review. `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
   now gives the desktop Products table a real minimum width and fixed column
   widths, with nowrap headers, so medium desktop widths use local horizontal
   scrolling instead of squeezing Product Details, Cost In, Selling Price, Stock,
@@ -5391,3 +5391,11 @@ Move 491 status:
   pill rendering. The conversion also removes corrupted fallback strings from
   the product header and replaces loose detail-pill filtering with an explicit
   typed accumulator.
+
+Move 492 status:
+- Move 492 converts `ProductsListSurface.tsx` and `ProductDetailModal.tsx`.
+  The list surface now has typed product section/group contracts, selection
+  callbacks, desktop select-all refs, and row/card render callbacks. The detail
+  modal now has typed product, color-map, formatter, branch-stock, lightbox,
+  and action contracts, with nullable gallery, batch preview, and branch
+  quantity values normalized before rendering.

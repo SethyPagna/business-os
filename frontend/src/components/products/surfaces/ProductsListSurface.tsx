@@ -1,5 +1,62 @@
 import { Fragment } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+
+type Translate = (key: string) => string | undefined
+type TranslateWithFallback = (key: string, fallback: string, khmerFallback?: string) => string
+type ProductId = string | number
+
+type ProductLike = {
+  id?: ProductId
+  [key: string]: unknown
+}
+
+type ProductGroup = {
+  key: string
+  name: string
+  anchorId?: string
+  ids: ProductId[]
+  items: ProductLike[]
+  hasMultipleItems: boolean
+}
+
+type ProductSection = {
+  id: string
+  label: string
+  ids: ProductId[]
+  items: ProductLike[]
+  groups: ProductGroup[]
+}
+
+type ProductRowRenderOptions = {
+  indented: boolean
+}
+
+type ProductsListSurfaceProps = {
+  allVisibleProducts: ProductLike[]
+  collapsedProductGroups: Set<string>
+  collapsedProductSections: Set<string>
+  desktopSelectAllRef: RefObject<HTMLInputElement | null>
+  getGroupSummaryParts: (group: ProductGroup, options?: { includeCount?: boolean }) => string[]
+  initialDesktopRevealReady: boolean
+  isSelectionScopeFullySelected: (ids: ProductId[]) => boolean
+  isSelectionScopePartiallySelected: (ids: ProductId[]) => boolean
+  loading: boolean
+  productSections: ProductSection[]
+  productTotal?: number
+  refreshingProducts: boolean
+  renderDesktopProductRow: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
+  renderMobileProductCard: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
+  selectedVisibleCount: number
+  t: Translate
+  toggleProductGroup: (key: string) => void
+  toggleProductSection: (id: string) => void
+  toggleSelectAll: (checked: boolean) => void
+  toggleSelectionScope: (ids: ProductId[], checked: boolean) => void
+  tr: TranslateWithFallback
+  visibleIds: ProductId[]
+  visibleProducts: ProductLike[]
+}
 
 export default function ProductsListSurface({
   allVisibleProducts,
@@ -25,7 +82,7 @@ export default function ProductsListSurface({
   tr,
   visibleIds,
   visibleProducts,
-}) {
+}: ProductsListSurfaceProps) {
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const showDesktopLoadingOverlay = !initialDesktopRevealReady
 
@@ -44,7 +101,7 @@ export default function ProductsListSurface({
     </colgroup>
   )
 
-  const renderDesktopTableHead = (showSelectionControl) => (
+  const renderDesktopTableHead = (showSelectionControl: boolean) => (
     <thead className="sticky top-0 z-10">
       <tr>
         <th className="w-8 px-3 py-3">

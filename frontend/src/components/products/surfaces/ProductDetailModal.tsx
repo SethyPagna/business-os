@@ -1,8 +1,80 @@
 import { X } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
 import { getContrastingTextColor } from '../../../utils/color.ts'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../../utils/productBatches.ts'
+
+type Translate = (key: string) => string | undefined
+type FormatMoney = (value: number) => string
+
+type ColorLookupEntry = {
+  color?: string
+}
+
+type ColorLookup = Record<string, ColorLookupEntry | undefined>
+type BrandColorLookup = Record<string, string | undefined>
+
+type BranchStockEntry = {
+  branch_id?: string | number
+  branch_name?: string
+  quantity?: number
+}
+
+type ProductDetailProduct = {
+  name: string
+  sku?: string
+  barcode?: string
+  category?: string
+  brand?: string
+  supplier?: string
+  unit?: string
+  description?: string
+  stock_quantity: number
+  out_of_stock_threshold?: number
+  low_stock_threshold?: number
+  purchase_price_usd?: number
+  cost_price_usd?: number
+  purchase_price_khr?: number
+  cost_price_khr?: number
+  selling_price_usd: number
+  selling_price_khr?: number
+  special_price_usd?: number
+  special_price_khr?: number
+  discount_badge_color?: string
+  discount_label?: string
+  expiry_date?: string
+  created_at?: string
+  image_path?: string
+  image_gallery?: Array<string | null | undefined>
+  batches?: unknown
+  branch_stock?: BranchStockEntry[]
+  [key: string]: unknown
+}
+
+type ProductDetailModalProps = {
+  p: ProductDetailProduct
+  catMap?: ColorLookup
+  unitMap?: ColorLookup
+  brandColorMap?: BrandColorLookup
+  fmtUSD: FormatMoney
+  fmtKHR: FormatMoney
+  onEdit: () => void
+  onAddVariant?: () => void
+  onDiscount: () => void
+  onAdjustStock: () => void
+  onDelete: () => void
+  onClose: () => void
+  onImageClick?: (imagePath: string, gallery: string[], index: number) => void
+  t?: Translate
+}
+
+type DetailRowProps = {
+  label: string
+  children: ReactNode
+}
+
+const MS_PER_DAY = 86400000
 
 export default function ProductDetailModal({
   p,
@@ -19,28 +91,29 @@ export default function ProductDetailModal({
   onClose,
   onImageClick,
   t,
-}) {
-  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+}: ProductDetailModalProps) {
+  const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key) : fallback) || fallback
   const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
   const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
   const specialUsd = p.special_price_usd || 0
   const specialKhr = p.special_price_khr || 0
+  const sellingKhr = p.selling_price_khr || 0
   const promotion = calculateProductDiscount(p)
   const marginUsd = p.selling_price_usd - purchaseUsd
   const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd) * 100 : 0
   const gallery = Array.isArray(p?.image_gallery) && p.image_gallery.length
-    ? p.image_gallery.filter(Boolean).slice(0, 5)
+    ? p.image_gallery.filter((imagePath): imagePath is string => Boolean(imagePath)).slice(0, 5)
     : (p?.image_path ? [p.image_path] : [])
   const primaryImage = gallery[0] || ''
-  const unitColor = unitMap?.[p.unit]?.color || ''
-  const categoryColor = catMap?.[p.category]?.color || '#6b7280'
+  const unitColor = p.unit ? unitMap?.[p.unit]?.color || '' : ''
+  const categoryColor = p.category ? catMap?.[p.category]?.color || '#6b7280' : '#6b7280'
   const brandColor = brandColorMap?.[String(p.brand || '').trim().replace(/\s+/g, ' ').toLowerCase()] || ''
   const expiryDate = String(p.expiry_date || '').trim()
-  const expiryDaysLeft = expiryDate ? Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - Date.now()) / 86400000) : null
+  const expiryDaysLeft = expiryDate ? Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - Date.now()) / MS_PER_DAY) : null
   const visibleBatches = getVisibleProductBatches(p)
   const batchPreview = buildBatchPreview(p, 'all', { limit: 6 })
 
-  const Row = ({ label, children }) => (
+  const Row = ({ label, children }: DetailRowProps) => (
     <div className="flex gap-3">
       <span className="w-28 flex-shrink-0 pt-0.5 text-xs text-gray-400">{label}</span>
       <span className="flex-1 text-sm text-gray-800 dark:text-gray-200">{children}</span>
@@ -140,12 +213,12 @@ export default function ProductDetailModal({
             </Row>
             <Row label={T('label_selling_price', 'Selling Price')}>
               <span className="text-green-600">{fmtUSD(p.selling_price_usd)}</span>
-              {p.selling_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</span> : null}
+              {sellingKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
             </Row>
             {(specialUsd > 0 || specialKhr > 0) ? (
               <Row label={T('special_price', 'Special Price')}>
                 <span className="text-blue-600">{fmtUSD(specialUsd || p.selling_price_usd || 0)}</span>
-                {(specialKhr > 0 || p.selling_price_khr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || p.selling_price_khr || 0)}</span> : null}
+                {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
               </Row>
             ) : null}
             {promotion.active ? (
@@ -168,18 +241,21 @@ export default function ProductDetailModal({
             <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
               <div className="mb-1.5 text-xs text-gray-400">{T('label_branches', 'Branch Stock')}</div>
               <div className="flex flex-wrap gap-1.5">
-                {(p.branch_stock || []).map((bs) => (
+                {(p.branch_stock || []).map((bs) => {
+                  const branchQuantity = bs.quantity || 0
+                  return (
                   <span
-                    key={bs.branch_id}
+                    key={bs.branch_id || bs.branch_name}
                     className={`rounded-full px-2 py-0.5 text-xs ${
-                      bs.quantity > 0
+                      branchQuantity > 0
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30'
                         : 'bg-gray-100 text-gray-400 dark:bg-gray-700'
                     }`}
                   >
-                    {bs.branch_name}: {bs.quantity}
+                    {bs.branch_name}: {branchQuantity}
                   </span>
-                ))}
+                  )
+                })}
               </div>
             </div>
           ) : null}
@@ -188,17 +264,22 @@ export default function ProductDetailModal({
             <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
               <div className="mb-1.5 text-xs text-gray-400">{T('batches', 'Batches')}</div>
               <div className="space-y-1.5">
-                {batchPreview.items.map((batch) => (
-                  <div key={batch.id || batch.batch_id} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
+                {batchPreview.items.map((batch, index) => {
+                  const batchKey = String(batch.id || batch.batch_id || `batch-${index}`)
+                  const lotCode = String(batch.lot_code || '')
+                  const expiry = String(batch.expiry_date || '')
+                  return (
+                  <div key={batchKey} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batch.lot_code || T('batch', 'Batch')}</span>
+                      <span className="font-semibold text-amber-700 dark:text-amber-200">{lotCode || T('batch', 'Batch')}</span>
                       <span className="text-gray-500 dark:text-gray-300">{batch.quantity}</span>
                     </div>
                     <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-300">
-                      {batch.expiry_date || T('no_expiry', 'No expiry')}
+                      {expiry || T('no_expiry', 'No expiry')}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
                 {batchPreview.extraCount ? (
                   <div className="text-[11px] text-gray-400">+{batchPreview.extraCount} {T('more', 'more')}</div>
                 ) : null}
