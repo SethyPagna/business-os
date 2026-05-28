@@ -11,7 +11,7 @@
  * Call setSyncServerUrl() and setSyncToken() from AppContext or web-api bootstrap.
  */
 
-import { SYNC } from '../constants.js'
+import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined

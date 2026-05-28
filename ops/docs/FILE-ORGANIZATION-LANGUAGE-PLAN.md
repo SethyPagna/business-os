@@ -1345,9 +1345,11 @@ Decision rule:
 153. Convert receipt settings constants to TypeScript. Done:
     The receipt default template and translated field metadata moved to
     `frontend/src/components/receipt-settings/constants.ts`, while
-    `constants.js` remains as the compatibility wrapper for receipt settings,
-    receipt template helpers, and focused receipt tests. The typed boundary
-    now makes receipt template keys and field item shapes explicit.
+    `constants.js` initially remained as the compatibility wrapper for receipt
+    settings, receipt template helpers, and focused receipt tests, then was
+    retired in Move 478 after callers moved to the TypeScript source. The
+    typed boundary now makes receipt template keys and field item shapes
+    explicit.
 154. Convert customer membership number helper to TypeScript. Done:
     The customer membership generator moved to
     `frontend/src/components/contacts/customerMembershipNumber.ts`, while
@@ -1365,18 +1367,20 @@ Decision rule:
 156. Convert receipt template helper to TypeScript. Done:
     The receipt template parser and serializer moved to
     `frontend/src/components/receipt-settings/template.ts`, while
-    `template.js` remains as the compatibility wrapper for receipt settings
-    imports and focused receipt tests. The typed boundary now treats incoming
-    persisted settings as `unknown`, narrows object payloads, and keeps corrupt
-    JSON recovery on the default-template path.
+    `template.js` initially remained as the compatibility wrapper for receipt
+    settings imports and focused receipt tests, then was retired in Move 478
+    after callers moved to the TypeScript source. The typed boundary now treats
+    incoming persisted settings as `unknown`, narrows object payloads, and keeps
+    corrupt JSON recovery on the default-template path.
 157. Convert shared navigation configuration to TypeScript. Done:
     The app navigation item registry, mobile pinned defaults, stored-setting
     parser, and saved-order helper moved to
     `frontend/src/components/shared/navigationConfig.ts`, while
-    `navigationConfig.js` remains as the stable compatibility wrapper for
-    sidebar and settings imports. The typed boundary now names the known
-    permission keys and keeps malformed persisted navigation settings on their
-    existing fallback path.
+    `navigationConfig.js` initially remained as the stable compatibility
+    wrapper for sidebar and settings imports, then was retired in Move 478
+    after callers moved to the TypeScript source. The typed boundary now names
+    the known permission keys and keeps malformed persisted navigation settings
+    on their existing fallback path.
 158. Convert utils-settings barrel to TypeScript. Done:
     The admin utility component barrel moved to
     `frontend/src/components/utils-settings/index.ts`, while `index.js`
@@ -2572,7 +2576,7 @@ Decision rule:
     burst. Performance guards, full frontend utility tests, JSX check,
     performance verifier, and production build pass.
 303. Bound full runtime-reset cleanup. Done:
-    `frontend/src/platform/runtime/clientRuntime.js` now routes service-worker
+    `frontend/src/platform/runtime/clientRuntime.ts` now routes service-worker
     unregisters and Business OS cache deletion through `mapRuntimeCleanup()`
     with `RUNTIME_CLEANUP_CONCURRENCY = 2`. This preserves the reset pathway
     while preventing runtime recovery from launching every unregister/delete
@@ -3743,6 +3747,13 @@ Decision rule:
     wrappers were removed after targeted import rewrites, keeping the utility
     behavior in the typed source files and reducing the remaining JavaScript
     surface without touching React component ownership.
+478. Retire frontend shared/runtime/config wrappers. Done:
+    `globalScroll.ts`, `navigationConfig.ts`, `pageActivity.ts`,
+    `constants.ts`, `clientRuntime.ts`, `receipt-settings/constants.ts`, and
+    `receipt-settings/template.ts` now serve direct TypeScript imports. The
+    previous one-line `.js` wrappers were deleted after exact caller rewrites
+    and reference scans, keeping app shell scroll controls, navigation order,
+    runtime reset metadata, and receipt template parsing on typed source paths.
 
 ## Safety Gates
 

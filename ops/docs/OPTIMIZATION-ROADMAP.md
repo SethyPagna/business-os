@@ -2303,9 +2303,11 @@ Cleanup checkpoint:
   intact while adding typechecked worker payload shapes.
 - The receipt settings constants slice is now complete:
   `frontend/src/components/receipt-settings/constants.ts` owns the receipt
-  default template and translated field metadata, while `constants.js` remains
-  as the compatibility wrapper for receipt settings and template tests. The
-  typed boundary makes receipt template keys and field item rows explicit.
+  default template and translated field metadata, while `constants.js`
+  initially remained as the compatibility wrapper for receipt settings and
+  template tests, then was retired in Move 478 after callers moved to the
+  TypeScript source. The typed boundary makes receipt template keys and field
+  item rows explicit.
 - The customer membership number helper slice is now complete:
   `frontend/src/components/contacts/customerMembershipNumber.ts` owns the
   `LCMN` membership generator, while `customerMembershipNumber.js` remains as
@@ -2320,17 +2322,19 @@ Cleanup checkpoint:
   converted as separate visual slices.
 - The receipt template helper slice is now complete:
   `frontend/src/components/receipt-settings/template.ts` owns parsing and
-  serialization of persisted receipt templates, while `template.js` remains as
-  the compatibility wrapper for receipt settings imports and tests. The typed
-  boundary accepts `unknown`, narrows object payloads, and keeps malformed
-  stored JSON on the default-template recovery path.
+  serialization of persisted receipt templates, while `template.js` initially
+  remained as the compatibility wrapper for receipt settings imports and tests,
+  then was retired in Move 478 after callers moved to the TypeScript source.
+  The typed boundary accepts `unknown`, narrows object payloads, and keeps
+  malformed stored JSON on the default-template recovery path.
 - The shared navigation configuration slice is now complete:
   `frontend/src/components/shared/navigationConfig.ts` owns the navigation item
   registry, mobile pinned defaults, stored-setting parser, and saved-order
-  helper, while `navigationConfig.js` remains as the compatibility wrapper for
-  sidebar and settings imports. The typed boundary names the allowed permission
-  keys and keeps corrupt stored navigation settings on the existing fallback
-  path.
+  helper, while `navigationConfig.js` initially remained as the compatibility
+  wrapper for sidebar and settings imports, then was retired in Move 478 after
+  callers moved to the TypeScript source. The typed boundary names the allowed
+  permission keys and keeps corrupt stored navigation settings on the existing
+  fallback path.
 - The utils-settings barrel slice is now complete:
   `frontend/src/components/utils-settings/index.ts` owns the admin utility
   component re-export boundary, while `index.js` remains as the compatibility
@@ -3360,7 +3364,7 @@ Cleanup checkpoint:
   full frontend utility tests, JSX check, performance verifier, and production
   build pass.
 - Move 303 bounds full runtime-reset cleanup:
-  `frontend/src/platform/runtime/clientRuntime.js` now unregisters service
+  `frontend/src/platform/runtime/clientRuntime.ts` now unregisters service
   workers and deletes Business OS browser caches through `mapRuntimeCleanup()`
   with `RUNTIME_CLEANUP_CONCURRENCY = 2`. This keeps manual/runtime reset
   recovery from fanning out every service-worker unregister and cache delete at
@@ -5271,3 +5275,10 @@ Move 477 status:
   `formatters.ts`, `mediaUpload.ts`, `permissions.ts`, and
   `scriptTypography.ts` now serve callers directly, while their one-line `.js`
   wrappers are removed.
+
+Move 478 status:
+- Move 478 retires seven frontend shared/runtime/config wrappers after exact
+  caller rewrites. `globalScroll.ts`, `navigationConfig.ts`, `pageActivity.ts`,
+  root `constants.ts`, `clientRuntime.ts`, and receipt settings
+  `constants.ts`/`template.ts` now serve direct TypeScript imports, while the
+  matching one-line `.js` wrappers are removed.

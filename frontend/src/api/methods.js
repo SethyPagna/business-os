@@ -28,7 +28,7 @@ import {
   markApiVersionMismatch,
 } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.js'
-import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.js'
+import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { STORAGE_KEYS, SYNC } from '../constants'
 import { decodeTextBuffer } from '../utils/csvImport.js'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'

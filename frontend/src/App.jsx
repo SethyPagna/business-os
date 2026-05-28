@@ -7,7 +7,7 @@ import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
-import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.js'
+import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { createCircularFaviconDataUrl } from './utils/favicon.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 

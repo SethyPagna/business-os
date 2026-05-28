@@ -6,7 +6,14 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // is available before any React render cycle runs.
 import './web-api.js'
 import { cacheClearAll, FRONTEND_BUILD_INFO, isCloudflareAccessRedirectResponse, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.js'
-import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
+import {
+  normalizeRuntimeDescriptor,
+  readStoredRuntimeDescriptor,
+  resetClientRuntimeState,
+  sanitizeSyncServerUrl,
+  shouldResetForRuntimeChange,
+  writeStoredRuntimeDescriptor,
+} from './platform/runtime/clientRuntime.ts'
 import { isWSConnected, reconnectWS } from './api/websocket.js'
 import { APP_NAVIGATION_EVENT, getAdminPathForPage } from './app/appShellUtils.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'

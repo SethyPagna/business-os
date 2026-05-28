@@ -7,7 +7,7 @@
  *   sync:status  { connected: boolean }
  */
 
-import { SYNC } from '../constants.js'
+import { SYNC } from '../constants.ts'
 import { getSyncServerUrl } from './http.js'
 
 let ws: WebSocket | null = null

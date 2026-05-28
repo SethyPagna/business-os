@@ -556,7 +556,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/receipt-settings/constants.ts',
-    compatibilityWrapper: 'frontend/src/components/receipt-settings/constants.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after receipt settings callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -589,7 +590,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/receipt-settings/template.ts',
-    compatibilityWrapper: 'frontend/src/components/receipt-settings/template.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after receipt settings callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -600,7 +602,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/shared/navigationConfig.ts',
-    compatibilityWrapper: 'frontend/src/components/shared/navigationConfig.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after navigation callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',

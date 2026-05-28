@@ -1,4 +1,4 @@
-import { DEFAULT_TEMPLATE } from './constants.js'
+import { DEFAULT_TEMPLATE } from './constants.ts'
 import type { ReceiptTemplate } from './constants.ts'
 
 type ReceiptTemplateInput = Partial<ReceiptTemplate> | Record<string, unknown>
