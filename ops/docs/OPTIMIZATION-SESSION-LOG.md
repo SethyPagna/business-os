@@ -53,7 +53,7 @@ This is a concise running log of what actually happened in recent sessions.
     Branches document time got much worse in the real route audit
 
 - Notification-center delayed summary fetch
-  - area: `frontend/src/components/shared/NotificationCenter.jsx`
+  - area: `frontend/src/components/shared/NotificationCenter.tsx`
   - result: rejected
   - note: looked like a shared-background win, but Products route timing
     regressed once it was validated live

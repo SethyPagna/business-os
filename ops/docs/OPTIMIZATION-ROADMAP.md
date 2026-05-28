@@ -2392,7 +2392,7 @@ Cleanup checkpoint:
   counting on one quoted-record-aware parser. `SalesImportModal.jsx` preserves
   the existing background import job contract and blocks submit while a row
   check is still in flight.
-- Move 165 rejects `frontend/src/components/shared/BackgroundImportTracker.jsx`
+- Move 165 rejects `frontend/src/components/shared/BackgroundImportTracker.tsx`
   as a false-positive worker candidate. The tracker polls a bounded import-job
   list, dedupes a maximum of eight visible rows, dispatches completion
   refreshes, and coordinates UI actions, so moving it into a Worker would add
@@ -5525,3 +5525,12 @@ Move 507 status:
   conversion keeps dynamic report imports extensionless, renders the existing
   dashboard SVG charts through typed component boundaries, and tightens HTML
   escaping for generated self-contained reports.
+
+Move 508 status:
+- Move 508 converts the shared notification and background import trackers:
+  `NotificationCenter.tsx` and `BackgroundImportTracker.tsx`. The typed
+  boundaries now cover notification summary sections/items, tone dictionaries,
+  localized copy renderers, visibility state, import-job rows, progress labels,
+  import action guards, and API result normalization. The conversion preserves
+  app-shell lazy imports and keeps shared background polling/refresh behavior
+  unchanged.

@@ -98,14 +98,14 @@ await (async function finalBackupRemovesInlineJsonDownloadPath() {
 })()
 
 await (async function notificationsShouldRenderThroughPortal() {
-  const source = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
   assert.match(source, /createPortal/)
   assert.match(source, /z-\[1000\]/)
   console.log('PASS notifications render above page controls')
 })()
 
 await (async function notificationsUseIconsAndKeepUnavailableAlerts() {
-  const source = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
   assert.match(source, /TONE_ICON_COMPONENT/)
   assert.match(source, /function\s+NotificationSeverityIcon/)
   assert.match(source, /data-notification-severity-icon/)
@@ -119,7 +119,8 @@ await (async function notificationsUseIconsAndKeepUnavailableAlerts() {
   assert.match(source, /haystack\.includes\(normalizedNotificationSearch\)/)
   assert.match(source, /result\?\.unavailable && !nextSections\.length/)
   const itemRows = source.slice(source.indexOf('{section.items.map'), source.indexOf('<ExternalLink', source.indexOf('{section.items.map')))
-  assert.match(itemRows, /<NotificationSeverityIcon\s+tone=\{item\.tone\}\s+label=\{label\}/)
+  assert.match(itemRows, /const itemTone = item\.tone \|\| 'info'/)
+  assert.match(itemRows, /<NotificationSeverityIcon\s+tone=\{itemTone\}\s+label=\{label\}/)
   assert.doesNotMatch(itemRows, />\s*\{label\}\s*</)
   assert.doesNotMatch(source, /TONE_LABEL_KEYS\[item\.tone\][\s\S]{0,120}\{TONE_LABEL_KEYS\[item\.tone\]/)
   console.log('PASS notifications use icon severity chips and preserve active alerts during unavailable refreshes')

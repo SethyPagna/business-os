@@ -1,10 +1,83 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, Trash2, XCircle } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import { isTransientGatewayError } from '../../api/http.ts'
 import { dispatchImportCompletionRefresh, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.ts'
 import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
+
+type NotifyTone = 'info' | 'success' | 'warning' | 'error'
+type NotifyFn = (message: string, tone?: NotifyTone) => void
+type TranslateFn = (key: string) => string
+
+type AppContextValue = {
+  notify: NotifyFn
+  t: TranslateFn
+}
+
+type ImportJobSummary = {
+  analyzed_rows?: unknown
+  rows?: unknown
+  imported?: unknown
+  updated?: unknown
+  duplicates?: unknown
+  images_matched?: unknown
+  skipped_images?: unknown
+  failed?: unknown
+}
+
+type ImportJob = {
+  id?: unknown
+  status?: unknown
+  phase?: unknown
+  type?: unknown
+  summary?: ImportJobSummary
+  total_rows?: unknown
+  processed_rows?: unknown
+  failed_rows?: unknown
+  total_images?: unknown
+  processed_images?: unknown
+  failed_images?: unknown
+  created_at?: unknown
+  updated_at?: unknown
+  finished_at?: unknown
+  last_error?: unknown
+}
+
+type ImportJobListResult = {
+  jobs?: ImportJob[]
+  unavailable?: unknown
+  transient?: unknown
+}
+
+type ImportPreflightResult = {
+  ok?: boolean
+  failures?: Array<{ message?: unknown }>
+}
+
+type ImportTrackerApi = {
+  listImportJobs?: (options: { limit: number }) => Promise<ImportJobListResult | ImportJob[]>
+  cancelImportJob: (jobId: string) => Promise<unknown>
+  retryImportJob: (jobId: string) => Promise<unknown>
+  preflightImportJob?: (jobId: string) => Promise<ImportPreflightResult>
+  approveImportJob: (jobId: string) => Promise<unknown>
+  downloadImportJobErrors: (jobId: string) => Promise<unknown>
+  deleteImportJob: (jobId: string, options: { force: boolean }) => Promise<unknown>
+}
+
+type ProgressLabels = Partial<Record<
+  'analyzed' | 'rows' | 'reviewReady' | 'analyzingFile' | 'cancelled' | 'queued' | 'cancelRequested' | 'finalCleanup' | 'waitingForWorker' | 'readyToAnalyze',
+  string
+>>
+
+type ResultLabels = Partial<Record<'created' | 'updated' | 'duplicate' | 'imageMatched' | 'imageSkipped' | 'rowIssue', string>>
+
+type TrackerAction = {
+  jobId: string
+  key: string
+}
+
+const useApp = useAppHook as () => AppContextValue
 
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
@@ -23,20 +96,29 @@ const IMPORT_TRACKER_APPROVE_TIMEOUT_MS = 12000
 const IMPORT_TRACKER_ERRORS_DOWNLOAD_TIMEOUT_MS = 30000
 const IMPORT_TRACKER_REMOVE_TIMEOUT_MS = 12000
 
-function nextImportTrackerBackoff(current = 0) {
+function getImportTrackerApi(): ImportTrackerApi {
+  if (!window.api) throw new Error('Import tracker API is not available.')
+  return window.api as ImportTrackerApi
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || '')
+}
+
+function nextImportTrackerBackoff(current = 0): number {
   return Math.min(
     IMPORT_TRACKER_MAX_BACKOFF_MS,
     Math.max(IMPORT_TRACKER_IDLE_POLL_MS, current ? current * 2 : IMPORT_TRACKER_IDLE_POLL_MS),
   )
 }
 
-function normalizeJobStatus(job) {
+function normalizeJobStatus(job: ImportJob | null | undefined): string {
   return String(job?.status || '').trim().toLowerCase()
 }
 
-function dedupeJobsById(jobs = []) {
-  const seen = new Set()
-  const result = []
+function dedupeJobsById(jobs: ImportJob[] = []): ImportJob[] {
+  const seen = new Set<string>()
+  const result: ImportJob[] = []
   for (const job of Array.isArray(jobs) ? jobs : []) {
     const id = String(job?.id || '').trim()
     if (!id || seen.has(id)) continue
@@ -46,13 +128,28 @@ function dedupeJobsById(jobs = []) {
   return result
 }
 
-function isRecent(job, maxAgeMs = 2 * 60 * 60 * 1000) {
-  const stamp = Date.parse(job?.updated_at || job?.finished_at || job?.created_at || '')
+function isRecent(job: ImportJob, maxAgeMs = 2 * 60 * 60 * 1000): boolean {
+  const stamp = Date.parse(String(job?.updated_at || job?.finished_at || job?.created_at || ''))
   if (!Number.isFinite(stamp)) return true
   return Date.now() - stamp <= maxAgeMs
 }
 
-function getJobProgressDetails(job, labels = {}) {
+function normalizeImportJobListResult(result: ImportJobListResult | ImportJob[] | undefined): {
+  jobs: ImportJob[]
+  unavailable: boolean
+  transient: boolean
+} {
+  if (Array.isArray(result)) {
+    return { jobs: result, unavailable: false, transient: false }
+  }
+  return {
+    jobs: Array.isArray(result?.jobs) ? result.jobs : [],
+    unavailable: !!result?.unavailable,
+    transient: !!result?.transient,
+  }
+}
+
+function getJobProgressDetails(job: ImportJob, labels: ProgressLabels = {}) {
   const status = normalizeJobStatus(job)
   const phase = String(job?.phase || '').toLowerCase()
   const summary = job?.summary || {}
@@ -120,16 +217,16 @@ function getJobProgressDetails(job, labels = {}) {
   return { value, label: `${value}%`, indeterminate: false }
 }
 
-function getJobLabel(job) {
+function getJobLabel(job: ImportJob): string {
   const type = String(job?.type || 'import').replaceAll('_', ' ')
   const phase = String(job?.phase || job?.status || '').replaceAll('_', ' ')
   return `${type} import${phase ? ` - ${phase}` : ''}`
 }
 
-function getJobResultSummary(job, labels = {}) {
+function getJobResultSummary(job: ImportJob, labels: ResultLabels = {}): string {
   const summary = job?.summary || {}
-  const parts = []
-  const add = (key, label) => {
+  const parts: string[] = []
+  const add = (key: keyof ImportJobSummary, label: string) => {
     const value = Number(summary?.[key] || 0)
     if (value > 0) parts.push(`${value.toLocaleString()} ${label}`)
   }
@@ -142,7 +239,7 @@ function getJobResultSummary(job, labels = {}) {
   return parts.join(' - ')
 }
 
-function getRowsDisplay(job, rowsLabel, analyzedLabel = 'Analyzed') {
+function getRowsDisplay(job: ImportJob, rowsLabel: string, analyzedLabel = 'Analyzed'): string {
   const status = normalizeJobStatus(job)
   const phase = String(job?.phase || '').toLowerCase()
   const summary = job?.summary || {}
@@ -158,7 +255,7 @@ function getRowsDisplay(job, rowsLabel, analyzedLabel = 'Analyzed') {
   return `${Number(job?.processed_rows || 0).toLocaleString()} / ${Number(job?.total_rows || 0).toLocaleString()} ${rowsLabel}`
 }
 
-function buildJobsSignature(jobs = []) {
+function buildJobsSignature(jobs: ImportJob[] = []): string {
   return jobs.map((job) => [
     job.id,
     job.status,
@@ -175,15 +272,15 @@ function buildJobsSignature(jobs = []) {
 
 export default function BackgroundImportTracker() {
   const { notify, t } = useApp()
-  const [jobs, setJobs] = useState([])
+  const [jobs, setJobs] = useState<ImportJob[]>([])
   const [expanded, setExpanded] = useState(false)
   const [busyJobId, setBusyJobId] = useState('')
-  const [hiddenJobIds, setHiddenJobIds] = useState(() => new Set())
+  const [hiddenJobIds, setHiddenJobIds] = useState<Set<string>>(() => new Set())
   const [pollBackoffMs, setPollBackoffMs] = useState(0)
   const aliveRef = useRef(true)
-  const timerRef = useRef(null)
+  const timerRef = useRef<number | null>(null)
   const jobsSignatureRef = useRef('')
-  const jobsRef = useRef([])
+  const jobsRef = useRef<ImportJob[]>([])
   const actionInFlightRef = useRef('')
 
   const visibleJobs = useMemo(() => (
@@ -201,18 +298,20 @@ export default function BackgroundImportTracker() {
 
   const loadJobs = useCallback(async () => {
     try {
+      const api = getImportTrackerApi()
       const result = await withLoaderTimeout(
-        () => window.api.listImportJobs?.({ limit: 8 }),
+        () => api.listImportJobs?.({ limit: 8 }),
         'Import tracker',
         IMPORT_TRACKER_LOAD_TIMEOUT_MS,
       )
       if (!aliveRef.current) return
-      if (result?.unavailable || result?.transient) {
+      const normalizedResult = normalizeImportJobListResult(result)
+      if (normalizedResult.unavailable || normalizedResult.transient) {
         setPollBackoffMs((current) => nextImportTrackerBackoff(current))
       } else {
         setPollBackoffMs(0)
       }
-      const nextJobs = dedupeJobsById(Array.isArray(result?.jobs) ? result.jobs : (Array.isArray(result) ? result : []))
+      const nextJobs = dedupeJobsById(normalizedResult.jobs)
       const nextSignature = buildJobsSignature(nextJobs)
       if (nextSignature === jobsSignatureRef.current) return
       const previousJobsById = new Map(
@@ -233,7 +332,8 @@ export default function BackgroundImportTracker() {
       startTransition(() => setJobs(nextJobs))
     } catch (error) {
       if (!aliveRef.current) return
-      if (isTransientGatewayError(error?.status)) {
+      const status = typeof error === 'object' && error && 'status' in error ? error.status : undefined
+      if (isTransientGatewayError(status)) {
         setPollBackoffMs((current) => nextImportTrackerBackoff(current))
         return
       }
@@ -300,7 +400,7 @@ export default function BackgroundImportTracker() {
   const progress = primaryProgress.value
   const compactTracker = isCompletedState && !expanded
 
-  const beginTrackerAction = (job, action) => {
+  const beginTrackerAction = (job: ImportJob, action: string): TrackerAction | null => {
     const jobId = String(job?.id || '').trim()
     if (!jobId) return null
     const key = `${action}:${jobId}`
@@ -309,93 +409,97 @@ export default function BackgroundImportTracker() {
     return { jobId, key }
   }
 
-  const finishTrackerAction = (action) => {
+  const finishTrackerAction = (action: TrackerAction | null) => {
     finishNamedAction(actionInFlightRef, action?.key || '')
     setBusyJobId('')
   }
 
-  const handleCancel = async (job) => {
+  const handleCancel = async (job: ImportJob) => {
     const action = beginTrackerAction(job, 'cancel')
     if (!action) return
     try {
+      const api = getImportTrackerApi()
       await withLoaderTimeout(
-        () => window.api.cancelImportJob(action.jobId),
+        () => api.cancelImportJob(action.jobId),
         'Cancel import job',
         IMPORT_TRACKER_CANCEL_TIMEOUT_MS,
       )
       await loadJobs()
       notify(t('import_cancel_requested') || 'Import cancel requested', 'info')
     } catch (error) {
-      notify(error?.message || (t('import_cancel_failed') || 'Could not cancel import'), 'error')
+      notify(getErrorMessage(error) || (t('import_cancel_failed') || 'Could not cancel import'), 'error')
     } finally {
       finishTrackerAction(action)
     }
   }
 
-  const handleRetry = async (job) => {
+  const handleRetry = async (job: ImportJob) => {
     const action = beginTrackerAction(job, 'retry')
     if (!action) return
     try {
+      const api = getImportTrackerApi()
       await withLoaderTimeout(
-        () => window.api.retryImportJob(action.jobId),
+        () => api.retryImportJob(action.jobId),
         'Retry import job',
         IMPORT_TRACKER_RETRY_TIMEOUT_MS,
       )
       await loadJobs()
       notify(t('import_retry_started') || 'Import retry started', 'success')
     } catch (error) {
-      notify(error?.message || (t('import_retry_failed') || 'Could not retry import'), 'error')
+      notify(getErrorMessage(error) || (t('import_retry_failed') || 'Could not retry import'), 'error')
     } finally {
       finishTrackerAction(action)
     }
   }
 
-  const handleApprove = async (job) => {
+  const handleApprove = async (job: ImportJob) => {
     const action = beginTrackerAction(job, 'approve')
     if (!action) return
     try {
+      const api = getImportTrackerApi()
       const preflight = await withLoaderTimeout(
-        () => window.api.preflightImportJob?.(action.jobId),
+        () => api.preflightImportJob?.(action.jobId),
         'Import preflight',
         IMPORT_TRACKER_PREFLIGHT_TIMEOUT_MS,
       )
       if (preflight && preflight.ok === false) {
         const firstFailure = preflight.failures?.[0]
-        notify(firstFailure?.message || (t('import_review_needed') || 'Review import decisions before applying.'), 'error')
+        notify(String(firstFailure?.message || '') || (t('import_review_needed') || 'Review import decisions before applying.'), 'error')
         await loadJobs()
         return
       }
       await withLoaderTimeout(
-        () => window.api.approveImportJob(action.jobId),
+        () => api.approveImportJob(action.jobId),
         'Approve import job',
         IMPORT_TRACKER_APPROVE_TIMEOUT_MS,
       )
       await loadJobs()
       notify(t('import_apply_started') || 'Import apply started. You can keep using the app.', 'success')
     } catch (error) {
-      notify(error?.message || (t('import_apply_failed') || 'Could not approve import'), 'error')
+      notify(getErrorMessage(error) || (t('import_apply_failed') || 'Could not approve import'), 'error')
     } finally {
       finishTrackerAction(action)
     }
   }
 
-  const handleDownloadErrors = async (job) => {
+  const handleDownloadErrors = async (job: ImportJob) => {
     const action = beginTrackerAction(job, 'download-errors')
     if (!action) return
     try {
+      const api = getImportTrackerApi()
       await withLoaderTimeout(
-        () => window.api.downloadImportJobErrors(action.jobId),
+        () => api.downloadImportJobErrors(action.jobId),
         'Download import errors',
         IMPORT_TRACKER_ERRORS_DOWNLOAD_TIMEOUT_MS,
       )
     } catch (error) {
-      notify(error?.message || (t('import_errors_download_failed') || 'Could not download import errors'), 'error')
+      notify(getErrorMessage(error) || (t('import_errors_download_failed') || 'Could not download import errors'), 'error')
     } finally {
       finishTrackerAction(action)
     }
   }
 
-  const handleRemove = async (job) => {
+  const handleRemove = async (job: ImportJob) => {
     const action = beginTrackerAction(job, 'remove')
     if (!action) return
     const okToRemove = window.confirm?.(t('remove_import_confirm') || 'Remove this import from the tracker and delete its uploaded import files?') ?? true
@@ -405,10 +509,11 @@ export default function BackgroundImportTracker() {
     }
     const removedId = action.jobId
     try {
+      const api = getImportTrackerApi()
       const status = normalizeJobStatus(job)
       const force = !['running', 'cancelling'].includes(status)
       await withLoaderTimeout(
-        () => window.api.deleteImportJob(removedId, { force }),
+        () => api.deleteImportJob(removedId, { force }),
         'Remove import job',
         IMPORT_TRACKER_REMOVE_TIMEOUT_MS,
       )
@@ -420,18 +525,19 @@ export default function BackgroundImportTracker() {
       await loadJobs()
       notify(t('import_removed') || 'Import removed', 'success')
     } catch (error) {
-      if (/remove route is unavailable|Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(String(error?.message || ''))) {
+      const message = getErrorMessage(error)
+      if (/remove route is unavailable|Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(message)) {
         setHiddenJobIds((current) => new Set([...current, removedId]))
         notify(t('import_hidden_restart_server') || 'Import hidden locally. Restart/update the server to finish deleting its stored files.', 'warning')
         return
       }
-      notify(error?.message || (t('import_remove_failed') || 'Could not remove import'), 'error')
+      notify(message || (t('import_remove_failed') || 'Could not remove import'), 'error')
     } finally {
       finishTrackerAction(action)
     }
   }
 
-  const handleDismiss = (job) => {
+  const handleDismiss = (job: ImportJob) => {
     const dismissedId = String(job?.id || '').trim()
     if (!dismissedId) return
     const filteredJobs = dedupeJobsById(jobs).filter((item) => String(item?.id || '') !== dismissedId)
@@ -488,7 +594,7 @@ export default function BackgroundImportTracker() {
             const lastError = String(job.last_error || '').trim()
             const resultSummary = getJobResultSummary(job, resultLabels)
             return (
-              <div key={job.id} className="rounded-xl border border-current/15 bg-white/65 p-2 dark:bg-slate-950/45">
+              <div key={String(job.id || '')} className="rounded-xl border border-current/15 bg-white/65 p-2 dark:bg-slate-950/45">
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">{getJobLabel(job)}</div>

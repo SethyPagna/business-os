@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { LucideIcon } from 'lucide-react'
 import { AlertCircle, AlertTriangle, Bell, CheckCircle2, ChevronDown, ExternalLink, Info, Search, Settings2, X } from 'lucide-react'
-import { useApp, useSync } from '../../AppContext'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -9,7 +10,104 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 
-const DEFAULT_COLLAPSED = {
+type Tone = 'danger' | 'warning' | 'success' | 'info'
+type ToneFilter = Tone | 'all'
+type VisibilityMode = 'always' | 'desktop' | 'mobile'
+type LabelTuple = [key: string, fallbackEn: string, fallbackKm: string]
+type CopyParams = Record<string, unknown>
+type LocalizedCopy = {
+  en: (params: CopyParams) => string
+  km: (params: CopyParams) => string
+}
+
+type NotificationItem = {
+  id: string
+  label?: string
+  meta?: string
+  metaKey?: string
+  metaParams?: CopyParams
+  kind?: string
+  tone?: Tone
+  pageId?: string
+}
+
+type DecoratedNotificationItem = NotificationItem & {
+  displayMeta: string
+}
+
+type NotificationSection = {
+  id: string
+  label?: string
+  summary?: string
+  summaryKey?: string
+  summaryParams?: CopyParams
+  items?: NotificationItem[]
+  count?: number
+  pageId?: string
+  enabledKey?: string
+}
+
+type EffectiveNotificationSection = Omit<NotificationSection, 'items'> & {
+  displayLabel: string
+  displaySummary: string
+  items: DecoratedNotificationItem[]
+  hiddenItemCount: number
+  filteredItemCount: number
+  page: number
+  totalPages: number
+  enabled: boolean
+}
+
+type NotificationSummary = {
+  unreadCount: number
+  sections: NotificationSection[]
+  preferences: Record<string, unknown>
+  unavailable?: boolean
+  cooldownUntil?: number
+}
+
+type NotificationApi = {
+  getNotificationSummary: () => Promise<Partial<NotificationSummary>>
+}
+
+type AppContextValue = {
+  navigateTo: (pageId: string) => void
+  notify: (message: string, tone?: 'error' | 'info' | 'success' | 'warning') => void
+  saveSettings: (settings: Record<string, string>) => Promise<unknown>
+  settings: Record<string, unknown>
+  t: (key: string) => string
+}
+
+type SyncContextValue = {
+  syncChannel?: {
+    channel?: string
+    ts?: unknown
+  }
+}
+
+type NotificationCenterProps = {
+  compact?: boolean
+  visibility?: VisibilityMode
+}
+
+type NotificationSeverityIconProps = {
+  tone?: Tone
+  label: string
+}
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+
+function getNotificationApi(): NotificationApi {
+  if (!window.api) throw new Error('Notification API is not available.')
+  return window.api as NotificationApi
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || '')
+}
+
+const DEFAULT_COLLAPSED: Record<string, boolean> = {
   inventory: false,
   sales: false,
   loyalty: true,
@@ -18,32 +116,32 @@ const DEFAULT_COLLAPSED = {
   expiry: false,
 }
 
-const NOTIFICATION_FILTER_OPTIONS = ['all', 'danger', 'warning', 'info', 'success']
+const NOTIFICATION_FILTER_OPTIONS: ToneFilter[] = ['all', 'danger', 'warning', 'info', 'success']
 const NOTIFICATION_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000
 
-const TONE_CLASS = {
+const TONE_CLASS: Record<Tone, string> = {
   danger: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
   warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
   success: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
   info: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
 }
 
-const TONE_ICON_RING_CLASS = {
+const TONE_ICON_RING_CLASS: Record<Tone, string> = {
   danger: 'ring-red-200 dark:ring-red-800/70',
   warning: 'ring-amber-200 dark:ring-amber-800/70',
   success: 'ring-emerald-200 dark:ring-emerald-800/70',
   info: 'ring-sky-200 dark:ring-sky-800/70',
 }
 
-const TONE_ICON_COMPONENT = {
+const TONE_ICON_COMPONENT: Record<Tone, LucideIcon> = {
   danger: AlertCircle,
   warning: AlertTriangle,
   success: CheckCircle2,
   info: Info,
 }
 
-const SECTION_LABEL_KEYS = {
+const SECTION_LABEL_KEYS: Record<string, LabelTuple> = {
   inventory: ['notification_inventory', 'Inventory', 'ស្តុកទំនិញ'],
   sales: ['sales', 'Sales', 'ការលក់'],
   loyalty: ['loyalty_points', 'Loyalty', 'ពិន្ទុស្មោះត្រង់'],
@@ -53,14 +151,14 @@ const SECTION_LABEL_KEYS = {
 
 SECTION_LABEL_KEYS.expiry = ['notification_expiry_title', 'Product expiry', 'ផុតកំណត់ផលិតផល']
 
-const TONE_LABEL_KEYS = {
+const TONE_LABEL_KEYS: Record<Tone, LabelTuple> = {
   danger: ['status_danger', 'Danger', 'បន្ទាន់'],
   warning: ['status_warning', 'Warning', 'ប្រុងប្រយ័ត្ន'],
   success: ['status_success', 'Success', 'ជោគជ័យ'],
   info: ['status_info', 'Info', 'ព័ត៌មាន'],
 }
 
-const SECTION_SUMMARY_COPY = {
+const SECTION_SUMMARY_COPY: Record<string, LocalizedCopy> = {
   notification_inventory_summary: {
     en: ({ outCount, lowCount }) => [outCount ? `${outCount} out of stock` : null, lowCount ? `${lowCount} low stock` : null].filter(Boolean).join(' • '),
     km: ({ outCount, lowCount }) => [outCount ? `${outCount} អស់ស្តុក` : null, lowCount ? `${lowCount} ស្តុកទាប` : null].filter(Boolean).join(' • '),
@@ -88,7 +186,7 @@ SECTION_SUMMARY_COPY.notification_expiry_summary = {
   km: ({ expiredCount, expiringCount, days }) => [expiredCount ? `${expiredCount} ផុតកំណត់` : null, expiringCount ? `${expiringCount} នឹងផុតកំណត់ក្នុង ${days} ថ្ងៃ` : null].filter(Boolean).join(' • '),
 }
 
-const ITEM_META_COPY = {
+const ITEM_META_COPY: Record<string, LocalizedCopy> = {
   notification_inventory_out_of_stock: {
     en: () => 'Out of stock',
     km: () => 'អស់ស្តុក',
@@ -132,21 +230,22 @@ ITEM_META_COPY.notification_product_expiring = {
   km: ({ days, expiryDate }) => `នឹងផុតកំណត់ក្នុង ${days} ថ្ងៃ • ${expiryDate}`,
 }
 
-function preferenceValue(key, settings = {}, fallback = true) {
+function preferenceValue(key: string | undefined, settings: Record<string, unknown> = {}, fallback = true): boolean {
+  if (!key) return fallback
   const raw = settings?.[key]
   if (raw === undefined || raw === null || raw === '') return fallback
   if (typeof raw === 'boolean') return raw
   return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase())
 }
 
-function matchesVisibilityMode(mode) {
+function matchesVisibilityMode(mode: VisibilityMode): boolean {
   if (typeof window === 'undefined' || !window.matchMedia) return true
   if (mode === 'desktop') return window.matchMedia('(min-width: 768px)').matches
   if (mode === 'mobile') return window.matchMedia('(max-width: 767px)').matches
   return true
 }
 
-function NotificationSeverityIcon({ tone = 'info', label }) {
+function NotificationSeverityIcon({ tone = 'info', label }: NotificationSeverityIconProps) {
   const safeTone = TONE_ICON_COMPONENT[tone] ? tone : 'info'
   const ToneIcon = TONE_ICON_COMPONENT[safeTone]
   return (
@@ -161,16 +260,16 @@ function NotificationSeverityIcon({ tone = 'info', label }) {
   )
 }
 
-export default function NotificationCenter({ compact = false, visibility = 'always' }) {
+export default function NotificationCenter({ compact = false, visibility = 'always' }: NotificationCenterProps) {
   const { navigateTo, notify, saveSettings, settings, t } = useApp()
   const { syncChannel } = useSync()
   const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
-  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t?.(key)
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
-  const formatCopy = useCallback((key, params, fallbackEn, fallbackKm = fallbackEn) => {
+  const formatCopy = useCallback((key: string, params: CopyParams, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const template = tr(key, fallbackEn, fallbackKm)
     return Object.entries(params || {}).reduce(
       (message, [paramKey, value]) => message.replaceAll(`{${paramKey}}`, String(value)),
@@ -178,20 +277,20 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
     )
   }, [tr])
   const [open, setOpen] = useState(false)
-  const [summary, setSummary] = useState({ unreadCount: 0, sections: [], preferences: {} })
+  const [summary, setSummary] = useState<NotificationSummary>({ unreadCount: 0, sections: [], preferences: {} })
   const [loading, setLoading] = useState(false)
-  const [collapsed, setCollapsed] = useState(DEFAULT_COLLAPSED)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(DEFAULT_COLLAPSED)
   const [savingKey, setSavingKey] = useState('')
-  const [toneFilter, setToneFilter] = useState('all')
+  const [toneFilter, setToneFilter] = useState<ToneFilter>('all')
   const [notificationSearch, setNotificationSearch] = useState('')
   const [itemLimit, setItemLimit] = useState(20)
-  const [sectionPages, setSectionPages] = useState({})
+  const [sectionPages, setSectionPages] = useState<Record<string, number>>({})
   const [visibilityActive, setVisibilityActive] = useState(() => matchesVisibilityMode(visibility))
-  const containerRef = useRef(null)
-  const panelRef = useRef(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const requestRef = useRef(0)
   const aliveRef = useRef(true)
-  const refreshTimerRef = useRef(null)
+  const refreshTimerRef = useRef<number | null>(null)
   const failureCountRef = useRef(0)
 
   useEffect(() => {
@@ -201,7 +300,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
     return () => window.removeEventListener('resize', syncVisibility)
   }, [visibility])
 
-  const scheduleRefresh = useCallback((delayMs) => {
+  const scheduleRefresh = useCallback((delayMs: number) => {
     if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
     refreshTimerRef.current = window.setTimeout(() => {
       refreshTimerRef.current = null
@@ -215,14 +314,15 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
     const requestId = beginTrackedRequest(requestRef)
     if (!silent && aliveRef.current) setLoading(true)
     try {
+      const api = getNotificationApi()
       const result = await withLoaderTimeout(
-        () => window.api.getNotificationSummary(),
+        () => api.getNotificationSummary(),
         'Notifications',
         NOTIFICATION_SUMMARY_TIMEOUT_MS,
       )
       if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
       failureCountRef.current = 0
-      const nextSections = Array.isArray(result?.sections) ? result.sections : []
+      const nextSections: NotificationSection[] = Array.isArray(result?.sections) ? result.sections : []
       setSummary((current) => {
         if (result?.unavailable && !nextSections.length && (current?.sections || []).length) {
           return {
@@ -251,7 +351,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
       failureCountRef.current += 1
       scheduleRefresh(Math.min(90000, 15000 * failureCountRef.current))
       if (!silent) {
-        console.error('[NotificationCenter] load failed:', error?.message || error)
+        console.error('[NotificationCenter] load failed:', getErrorMessage(error) || error)
       }
     } finally {
       if (!silent && aliveRef.current && isTrackedRequestCurrent(requestRef, requestId)) {
@@ -291,9 +391,9 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
   }, [loadSummary, syncChannel?.channel, syncChannel?.ts, visibilityActive])
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target
-      if (!containerRef.current?.contains(target) && !panelRef.current?.contains(target)) {
+      if (target instanceof Node && !containerRef.current?.contains(target) && !panelRef.current?.contains(target)) {
         setOpen(false)
       }
     }
@@ -305,7 +405,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
     }
   }, [])
 
-  const renderStructuredCopy = useCallback((key, params, fallback) => {
+  const renderStructuredCopy = useCallback((key: string, params: CopyParams = {}, fallback = ''): string => {
     const entry = SECTION_SUMMARY_COPY[key] || ITEM_META_COPY[key]
     if (!entry) return fallback || ''
     const renderer = isKhmer ? entry.km : entry.en
@@ -314,20 +414,20 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
 
   const normalizedNotificationSearch = notificationSearch.trim().toLowerCase()
 
-  const effectiveSections = useMemo(() => (
+  const effectiveSections = useMemo<EffectiveNotificationSection[]>(() => (
     (summary.sections || []).map((section) => {
       const displayLabel = SECTION_LABEL_KEYS[section.id]
         ? tr(...SECTION_LABEL_KEYS[section.id])
-        : section.label
+        : (section.label || '')
       const displaySummary = section.summaryKey
-        ? renderStructuredCopy(section.summaryKey, section.summaryParams, section.summary)
-        : section.summary
-      const decoratedItems = Array.isArray(section.items)
+        ? renderStructuredCopy(section.summaryKey, section.summaryParams, section.summary || '')
+        : (section.summary || '')
+      const decoratedItems: DecoratedNotificationItem[] = Array.isArray(section.items)
         ? section.items.map((item) => ({
           ...item,
           displayMeta: item.metaKey
-            ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta)
-            : item.meta,
+            ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
+            : (item.meta || ''),
         }))
         : []
       const filteredItems = decoratedItems.filter((item) => {
@@ -353,15 +453,15 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
       const page = Math.max(1, Math.min(totalPages, Number(sectionPages[section.id] || 1)))
       const startIndex = (page - 1) * itemLimit
       return {
-      ...section,
-      displayLabel,
-      displaySummary,
-      items: filteredItems.slice(startIndex, startIndex + itemLimit),
-      hiddenItemCount: Math.max(0, filteredItems.length - (startIndex + itemLimit)),
-      filteredItemCount: filteredItems.length,
-      page,
-      totalPages,
-      enabled: preferenceValue(section.enabledKey, settings, true),
+        ...section,
+        displayLabel,
+        displaySummary,
+        items: filteredItems.slice(startIndex, startIndex + itemLimit),
+        hiddenItemCount: Math.max(0, filteredItems.length - (startIndex + itemLimit)),
+        filteredItemCount: filteredItems.length,
+        page,
+        totalPages,
+        enabled: preferenceValue(section.enabledKey, settings, true),
       }
     }).filter((section) => section.filteredItemCount > 0 || (toneFilter === 'all' && !normalizedNotificationSearch))
   ), [itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
@@ -370,7 +470,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
     setSectionPages({})
   }, [itemLimit, normalizedNotificationSearch, toneFilter])
 
-  const toggleSectionPreference = useCallback(async (section) => {
+  const toggleSectionPreference = useCallback(async (section: EffectiveNotificationSection) => {
     if (!section?.enabledKey || savingKey) return
     const nextValue = !preferenceValue(section.enabledKey, settings, true)
     setSavingKey(section.enabledKey)
@@ -378,7 +478,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
       await saveSettings({ [section.enabledKey]: nextValue ? 'true' : 'false' })
       void loadSummary(true)
     } catch (error) {
-      notify(error?.message || tr('notification_setting_update_failed', 'Failed to update notification setting', 'បរាជ័យក្នុងការកែប្រែការជូនដំណឹង'), 'error')
+      notify(getErrorMessage(error) || tr('notification_setting_update_failed', 'Failed to update notification setting', 'បរាជ័យក្នុងការកែប្រែការជូនដំណឹង'), 'error')
     } finally {
       if (aliveRef.current) setSavingKey('')
     }
@@ -545,9 +645,10 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
                               className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
                             >
                               {(() => {
-                                const label = TONE_LABEL_KEYS[item.tone] ? tr(...TONE_LABEL_KEYS[item.tone]) : (item.tone || 'info')
+                                const itemTone = item.tone || 'info'
+                                const label = TONE_LABEL_KEYS[itemTone] ? tr(...TONE_LABEL_KEYS[itemTone]) : itemTone
                                 return (
-                                  <NotificationSeverityIcon tone={item.tone} label={label} />
+                                  <NotificationSeverityIcon tone={itemTone} label={label} />
                                 )
                               })()}
                               <span className="min-w-0 flex-1">

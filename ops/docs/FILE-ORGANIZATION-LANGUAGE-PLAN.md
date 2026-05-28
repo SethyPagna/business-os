@@ -1455,7 +1455,7 @@ Decision rule:
     guard, and disabled import state while row checking is in flight.
 165. Reject the background import tracker as a Web Worker candidate. Done:
     Phase 29 inspection found that
-    `frontend/src/components/shared/BackgroundImportTracker.jsx` is API
+    `frontend/src/components/shared/BackgroundImportTracker.tsx` is API
     polling and bounded UI orchestration, not file parsing, media decoding, or
     a CPU-heavy browser loop. `language-runtime-audit.ts` now records it in
     `rejectedWebWorkerCandidates`, removes it from future worker rankings, and
@@ -3983,6 +3983,13 @@ Decision rule:
     renders existing SVG chart components through typed component boundaries,
     and fixes HTML escaping so ampersands are emitted as `&amp;` in generated
     self-contained reports.
+508. Convert shared notification and background import trackers to TSX. Done:
+    `BackgroundImportTracker.tsx` now types import jobs, progress labels,
+    result summaries, tracker actions, API methods, and list-result
+    normalization. `NotificationCenter.tsx` now types notification tone
+    dictionaries, section/item payloads, summary state, copy renderers, app
+    context access, and notification API calls. The conversion keeps the lazy
+    app-shell imports extensionless while reducing dynamic shared-shell state.
 
 ## Safety Gates
 

@@ -48,8 +48,8 @@ const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePic
 const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.jsx', import.meta.url), 'utf8')
 const usersPage = fs.readFileSync(new URL('../src/components/users/Users.jsx', import.meta.url), 'utf8')
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
-const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.jsx', import.meta.url), 'utf8')
-const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.jsx', import.meta.url), 'utf8')
+const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
+const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
 const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 const apiMethods = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
@@ -216,7 +216,7 @@ for (const [name, source] of [
 
 assert.match(
   backgroundImportTracker,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.listImportJobs\?\.\(\{ limit: 8 \}\),\s*'Import tracker',\s*IMPORT_TRACKER_LOAD_TIMEOUT_MS,\s*\)/,
+  /const api = getImportTrackerApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.listImportJobs\?\.\(\{ limit: 8 \}\),\s*'Import tracker',\s*IMPORT_TRACKER_LOAD_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow poll reads',
 )
 assert.doesNotMatch(catalogPage, /from '..\/..\/lang\/(?:en|km)\.json'/, 'Catalog route should not import full app language JSON packs')
@@ -260,32 +260,32 @@ assert.match(
 )
 assert.match(
   backgroundImportTracker,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.preflightImportJob\?\.\(action\.jobId\),\s*'Import preflight',\s*IMPORT_TRACKER_PREFLIGHT_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.preflightImportJob\?\.\(action\.jobId\),\s*'Import preflight',\s*IMPORT_TRACKER_PREFLIGHT_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow preflight reads before approval',
 )
 assert.match(
   backgroundImportTracker,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.cancelImportJob\(action\.jobId\),\s*'Cancel import job',\s*IMPORT_TRACKER_CANCEL_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.cancelImportJob\(action\.jobId\),\s*'Cancel import job',\s*IMPORT_TRACKER_CANCEL_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow cancel actions',
 )
 assert.match(
   backgroundImportTracker,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.retryImportJob\(action\.jobId\),\s*'Retry import job',\s*IMPORT_TRACKER_RETRY_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.retryImportJob\(action\.jobId\),\s*'Retry import job',\s*IMPORT_TRACKER_RETRY_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow retry actions',
 )
 assert.match(
   backgroundImportTracker,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.approveImportJob\(action\.jobId\),\s*'Approve import job',\s*IMPORT_TRACKER_APPROVE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.approveImportJob\(action\.jobId\),\s*'Approve import job',\s*IMPORT_TRACKER_APPROVE_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow approve actions',
 )
 assert.match(
   backgroundImportTracker,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.downloadImportJobErrors\(action\.jobId\),\s*'Download import errors',\s*IMPORT_TRACKER_ERRORS_DOWNLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.downloadImportJobErrors\(action\.jobId\),\s*'Download import errors',\s*IMPORT_TRACKER_ERRORS_DOWNLOAD_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow error downloads',
 )
 assert.match(
   backgroundImportTracker,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.deleteImportJob\(removedId, \{ force \}\),\s*'Remove import job',\s*IMPORT_TRACKER_REMOVE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.deleteImportJob\(removedId, \{ force \}\),\s*'Remove import job',\s*IMPORT_TRACKER_REMOVE_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow remove actions',
 )
 assert.doesNotMatch(
@@ -335,7 +335,7 @@ assert.match(
 )
 assert.match(
   notificationCenter,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getNotificationSummary\(\),\s*'Notifications',\s*NOTIFICATION_SUMMARY_TIMEOUT_MS,\s*\)/,
+  /const api = getNotificationApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.getNotificationSummary\(\),\s*'Notifications',\s*NOTIFICATION_SUMMARY_TIMEOUT_MS,\s*\)/,
   'notification center should timeout slow summary reads',
 )
 assert.match(
