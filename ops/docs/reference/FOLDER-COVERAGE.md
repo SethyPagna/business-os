@@ -73,7 +73,7 @@ Total folders documented: **81**
 | 61 | `frontend/src/runtime` | Project folder | 1 | 0 |
 | 62 | `frontend/src/styles` | Project folder | 1 | 0 |
 | 63 | `frontend/src/types` | Project folder | 4 | 0 |
-| 64 | `frontend/src/utils` | Project folder | 49 | 0 |
+| 64 | `frontend/src/utils` | Project folder | 42 | 0 |
 | 65 | `frontend/tests` | Project folder | 76 | 0 |
 | 66 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
 | 67 | `ops/scripts/architecture` | Project folder | 4 | 0 |
@@ -1330,7 +1330,7 @@ Total folders documented: **81**
 ### 3.64 Folder: `frontend/src/utils`
 
 - Purpose: Project folder
-- Direct files: **49**
+- Direct files: **42**
 - Direct subfolders: **0**
 
 #### 3.64.2 Files
@@ -1341,51 +1341,44 @@ Total folders documented: **81**
 | 2 | `actionHistory.ts` | Utility helper |
 | 3 | `appRefresh.ts` | Utility helper |
 | 4 | `bulkOps.ts` | Utility helper |
-| 5 | `color.js` | Utility helper |
-| 6 | `color.ts` | Utility helper |
-| 7 | `csv.d.ts` | Utility helper |
-| 8 | `csv.js` | Utility helper |
-| 9 | `csv.ts` | Utility helper |
-| 10 | `csvExportWorker.ts` | Utility helper |
-| 11 | `csvImport.js` | Utility helper |
-| 12 | `csvImport.ts` | Utility helper |
-| 13 | `csvRowCounter.d.mts` | Utility helper |
-| 14 | `csvRowCounter.ts` | Utility helper |
-| 15 | `dateHelpers.js` | Utility helper |
-| 16 | `dateHelpers.ts` | Utility helper |
-| 17 | `deviceInfo.js` | Utility helper |
-| 18 | `deviceInfo.ts` | Utility helper |
-| 19 | `exportPackage.js` | Utility helper |
-| 20 | `exportPackage.ts` | Utility helper |
-| 21 | `exportReports.jsx` | Utility helper |
-| 22 | `favicon.ts` | Utility helper |
-| 23 | `formatters.js` | Utility helper |
-| 24 | `formatters.ts` | Utility helper |
-| 25 | `groupedRecords.ts` | Utility helper |
-| 26 | `historyHelpers.ts` | Utility helper |
-| 27 | `importJobRefresh.js` | Utility helper |
-| 28 | `importJobRefresh.ts` | Utility helper |
-| 29 | `index.js` | Utility helper |
-| 30 | `index.ts` | Utility helper |
-| 31 | `initials.ts` | Utility helper |
-| 32 | `loaders.ts` | Utility helper |
-| 33 | `mediaUpload.js` | Utility helper |
-| 34 | `mediaUpload.ts` | Utility helper |
-| 35 | `permissions.js` | Utility helper |
-| 36 | `permissions.ts` | Utility helper |
-| 37 | `pricing.d.ts` | Utility helper |
-| 38 | `pricing.js` | Utility helper |
-| 39 | `pricing.ts` | Utility helper |
-| 40 | `printReceipt.js` | Utility helper |
-| 41 | `printReceipt.ts` | Utility helper |
-| 42 | `productBatches.ts` | Utility helper |
-| 43 | `productGrouping.ts` | Utility helper |
-| 44 | `publicAssetUrls.ts` | Utility helper |
-| 45 | `receiptAppliedConfig.ts` | Utility helper |
-| 46 | `scriptTypography.js` | Utility helper |
-| 47 | `scriptTypography.ts` | Utility helper |
-| 48 | `settingsRefresh.ts` | Utility helper |
-| 49 | `settingsWriteOptions.ts` | Utility helper |
+| 5 | `color.ts` | Utility helper |
+| 6 | `csv.d.ts` | Utility helper |
+| 7 | `csv.js` | Utility helper |
+| 8 | `csv.ts` | Utility helper |
+| 9 | `csvExportWorker.ts` | Utility helper |
+| 10 | `csvImport.js` | Utility helper |
+| 11 | `csvImport.ts` | Utility helper |
+| 12 | `csvRowCounter.d.mts` | Utility helper |
+| 13 | `csvRowCounter.ts` | Utility helper |
+| 14 | `dateHelpers.ts` | Utility helper |
+| 15 | `deviceInfo.ts` | Utility helper |
+| 16 | `exportPackage.js` | Utility helper |
+| 17 | `exportPackage.ts` | Utility helper |
+| 18 | `exportReports.jsx` | Utility helper |
+| 19 | `favicon.ts` | Utility helper |
+| 20 | `formatters.ts` | Utility helper |
+| 21 | `groupedRecords.ts` | Utility helper |
+| 22 | `historyHelpers.ts` | Utility helper |
+| 23 | `importJobRefresh.js` | Utility helper |
+| 24 | `importJobRefresh.ts` | Utility helper |
+| 25 | `index.js` | Utility helper |
+| 26 | `index.ts` | Utility helper |
+| 27 | `initials.ts` | Utility helper |
+| 28 | `loaders.ts` | Utility helper |
+| 29 | `mediaUpload.ts` | Utility helper |
+| 30 | `permissions.ts` | Utility helper |
+| 31 | `pricing.d.ts` | Utility helper |
+| 32 | `pricing.js` | Utility helper |
+| 33 | `pricing.ts` | Utility helper |
+| 34 | `printReceipt.js` | Utility helper |
+| 35 | `printReceipt.ts` | Utility helper |
+| 36 | `productBatches.ts` | Utility helper |
+| 37 | `productGrouping.ts` | Utility helper |
+| 38 | `publicAssetUrls.ts` | Utility helper |
+| 39 | `receiptAppliedConfig.ts` | Utility helper |
+| 40 | `scriptTypography.ts` | Utility helper |
+| 41 | `settingsRefresh.ts` | Utility helper |
+| 42 | `settingsWriteOptions.ts` | Utility helper |
 
 
 ### 3.65 Folder: `frontend/tests`

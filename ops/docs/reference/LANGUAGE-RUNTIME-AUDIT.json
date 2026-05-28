@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:35:59.010Z",
+  "generatedAt": "2026-05-28T03:40:03.382Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 481,
+  "sourceFiles": 474,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -25,7 +25,7 @@
     ],
     [
       "JavaScript",
-      114
+      107
     ],
     [
       "React JSX",
@@ -63,7 +63,7 @@
     ],
     [
       ".js",
-      114
+      107
     ],
     [
       ".jsx",
@@ -689,7 +689,8 @@
     },
     {
       "implementation": "frontend/src/utils/formatters.ts",
-      "compatibilityWrapper": "frontend/src/utils/formatters.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after frontend callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -697,8 +698,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -737,7 +737,8 @@
     },
     {
       "implementation": "frontend/src/utils/mediaUpload.ts",
-      "compatibilityWrapper": "frontend/src/utils/mediaUpload.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after frontend callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -745,8 +746,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1161,7 +1161,8 @@
     },
     {
       "implementation": "frontend/src/utils/color.ts",
-      "compatibilityWrapper": "frontend/src/utils/color.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after frontend callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1170,15 +1171,15 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
     },
     {
       "implementation": "frontend/src/utils/dateHelpers.ts",
-      "compatibilityWrapper": "frontend/src/utils/dateHelpers.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after frontend callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1187,15 +1188,15 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
     },
     {
       "implementation": "frontend/src/utils/deviceInfo.ts",
-      "compatibilityWrapper": "frontend/src/utils/deviceInfo.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after frontend callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1204,8 +1205,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1279,7 +1279,8 @@
     },
     {
       "implementation": "frontend/src/utils/permissions.ts",
-      "compatibilityWrapper": "frontend/src/utils/permissions.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after frontend callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1288,8 +1289,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1313,7 +1313,8 @@
     },
     {
       "implementation": "frontend/src/utils/scriptTypography.ts",
-      "compatibilityWrapper": "frontend/src/utils/scriptTypography.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after frontend callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1322,8 +1323,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
