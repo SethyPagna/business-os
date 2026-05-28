@@ -259,7 +259,7 @@ Total files documented: **529**
 | 247 | `frontend/src/components/products/import/productImportWorker.ts` | frontend-ui | 68 | 1.9 | UI component/page |
 | 248 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | frontend-ui | 680 | 28.4 | UI component/page |
 | 249 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | frontend-ui | 502 | 21.7 | UI component/page |
-| 250 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | frontend-ui | 494 | 21.0 | UI component/page |
+| 250 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | frontend-ui | 603 | 24.0 | UI component/page |
 | 251 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
 | 252 | `frontend/src/components/products/Products.jsx` | frontend-ui | 2006 | 96.3 | UI component/page |
 | 253 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | frontend-ui | 125 | 4.1 | UI component/page |
@@ -333,7 +333,7 @@ Total files documented: **529**
 | 321 | `frontend/src/README.md` | frontend-core | 37 | 1.5 | Documentation |
 | 322 | `frontend/src/runtime/runtimeErrorClassifier.ts` | frontend-core | 154 | 5.4 | Project source/support file |
 | 323 | `frontend/src/styles/main.css` | frontend-style | 741 | 29.9 | Project source/support file |
-| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 9 | 0.2 | Project source/support file |
+| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 10 | 0.3 | Project source/support file |
 | 325 | `frontend/src/types/receiptContracts.ts` | frontend-core | 67 | 1.6 | Project source/support file |
 | 326 | `frontend/src/types/settingsContracts.ts` | frontend-core | 27 | 0.5 | Project source/support file |
 | 327 | `frontend/src/utils/actionGuards.ts` | frontend-utils | 76 | 2.2 | Utility helper |
@@ -372,7 +372,7 @@ Total files documented: **529**
 | 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 731 | 58.8 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 731 | 58.9 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |

@@ -236,7 +236,7 @@ Code files documented: **466**
 | 224 | `frontend/src/components/products/import/productImportWorker.ts` | 1 | 0 | 1 | 0 |
 | 225 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 6 | 1 | 5 | 1 |
 | 226 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 6 | 1 | 5 | 1 |
-| 227 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | 6 | 1 | 5 | 1 |
+| 227 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 6 | 1 | 5 | 1 |
 | 228 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 1 | 3 | 1 | 0 |
 | 229 | `frontend/src/components/products/Products.jsx` | 32 | 1 | 30 | 1 |
 | 230 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 1 | 1 | 0 | 2 |
@@ -305,7 +305,7 @@ Code files documented: **466**
 | 293 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 2 |
 | 294 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
 | 295 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
-| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 5 | 0 | 0 |
+| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 6 | 0 | 0 |
 | 297 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 3 |
 | 298 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
 | 299 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
@@ -3143,7 +3143,7 @@ Code files documented: **466**
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
-  - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
@@ -4424,11 +4424,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.227 `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+### 3.227 `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
 
 - Declared exports: `function`
 - Imports (6)
-  - `../../../AppContext`
+  - `../../../AppContext.jsx`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/actionHistory.ts`
   - `../../shared/ActionHistoryBar`
@@ -4499,7 +4499,7 @@ Code files documented: **466**
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
-  - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/products/surfaces/HeaderActions.tsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
@@ -5068,7 +5068,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
-  - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
@@ -5194,7 +5194,7 @@ Code files documented: **466**
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
-  - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
   - `frontend/src/components/sales/ExportModal.jsx`
@@ -5647,7 +5647,7 @@ Code files documented: **466**
 
 ### 3.296 `frontend/src/types/jsx-modules.d.ts`
 
-- Declared exports: `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `component`, `useApp`
+- Declared exports: `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `component`, `useApp`, `useSync`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -5703,7 +5703,7 @@ Code files documented: **466**
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
-  - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/EditReturnModal.jsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
@@ -5737,7 +5737,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
-  - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`

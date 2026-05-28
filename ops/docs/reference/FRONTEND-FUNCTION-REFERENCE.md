@@ -93,7 +93,7 @@ Total files documented: **193**
 | 81 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
 | 82 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 16 |
 | 83 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 8 |
-| 84 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | 8 |
+| 84 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
 | 85 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 7 |
 | 86 | `frontend/src/components/products/Products.jsx` | 15 |
 | 87 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 4 |
@@ -1519,18 +1519,15 @@ Total files documented: **193**
 | 7 | `toggleAllVisible` | const arrow | 301 |
 | 8 | `handleDeleteSelected` | const arrow | 314 |
 
-### 3.84 `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
+### 3.84 `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `mergeUnitUsage` | function | 24 |
-| 2 | `ManageUnitsModal` | component/function | 53 |
-| 3 | `handleAdd` | const arrow | 152 |
-| 4 | `handleUpdate` | const arrow | 188 |
-| 5 | `handleDelete` | const arrow | 237 |
-| 6 | `toggleSelected` | const arrow | 285 |
-| 7 | `toggleAllVisible` | const arrow | 295 |
-| 8 | `handleDeleteSelected` | const arrow | 308 |
+| 1 | `getUnitApi` | function | 106 |
+| 2 | `getErrorMessage` | function | 110 |
+| 3 | `normalizeUnitRows` | function | 114 |
+| 4 | `mergeUnitUsage` | function | 129 |
+| 5 | `ManageUnitsModal` | component/function | 158 |
 
 ### 3.85 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
 
