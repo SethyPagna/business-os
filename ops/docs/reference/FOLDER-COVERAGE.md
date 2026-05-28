@@ -1016,7 +1016,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `ManageBrandsModal.jsx` | UI component/page |
-| 2 | `ManageCategoriesModal.jsx` | UI component/page |
+| 2 | `ManageCategoriesModal.tsx` | UI component/page |
 | 3 | `ManageUnitsModal.tsx` | UI component/page |
 | 4 | `productLookupSnapshots.ts` | UI component/page |
 

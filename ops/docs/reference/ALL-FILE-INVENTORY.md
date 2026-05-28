@@ -258,7 +258,7 @@ Total files documented: **529**
 | 246 | `frontend/src/components/products/import/productImportPlanner.ts` | frontend-ui | 634 | 25.3 | UI component/page |
 | 247 | `frontend/src/components/products/import/productImportWorker.ts` | frontend-ui | 68 | 1.9 | UI component/page |
 | 248 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | frontend-ui | 680 | 28.4 | UI component/page |
-| 249 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | frontend-ui | 502 | 21.7 | UI component/page |
+| 249 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | frontend-ui | 603 | 25.0 | UI component/page |
 | 250 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | frontend-ui | 603 | 24.0 | UI component/page |
 | 251 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
 | 252 | `frontend/src/components/products/Products.jsx` | frontend-ui | 2006 | 96.3 | UI component/page |

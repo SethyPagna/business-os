@@ -235,7 +235,7 @@ Code files scanned: **466**
 | 223 | `frontend/src/components/products/import/productImportPlanner.ts` | 18 |
 | 224 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
 | 225 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 16 |
-| 226 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | 8 |
+| 226 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
 | 227 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
 | 228 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
 | 229 | `frontend/src/components/products/Products.jsx` | 15 |
@@ -4365,18 +4365,15 @@ Code files scanned: **466**
 | 15 | `toggleSelectedBrand` | const arrow | 450 |
 | 16 | `toggleAllVisibleBrands` | const arrow | 459 |
 
-### 3.226 `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
+### 3.226 `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `mergeCategoryUsage` | function | 24 |
-| 2 | `ManageCategoriesModal` | export default function | 53 |
-| 3 | `handleAdd` | const arrow | 152 |
-| 4 | `handleUpdate` | const arrow | 188 |
-| 5 | `handleDelete` | const arrow | 243 |
-| 6 | `toggleSelected` | const arrow | 291 |
-| 7 | `toggleAllVisible` | const arrow | 301 |
-| 8 | `handleDeleteSelected` | const arrow | 314 |
+| 1 | `getCategoryApi` | function | 106 |
+| 2 | `getErrorMessage` | function | 110 |
+| 3 | `normalizeCategoryRows` | function | 114 |
+| 4 | `mergeCategoryUsage` | function | 129 |
+| 5 | `ManageCategoriesModal` | export default function | 158 |
 
 ### 3.227 `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
 
