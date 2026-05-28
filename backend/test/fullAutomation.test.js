@@ -450,7 +450,7 @@ runTest('phase 29 audit orchestrates non-mutating sweep gates', () => {
     'rootWalkConcurrency',
     'fileReadConcurrency',
     'schema-audit.js',
-    'performance-scan.js',
+    'performance-scan.ts',
     'language-runtime-audit.ts',
     'verify-docker-release.ts',
     'PHASE29-AUDIT.md',
@@ -538,7 +538,7 @@ runTest('phase 29 audit orchestrates non-mutating sweep gates', () => {
 })
 
 runTest('performance scan preserves phase 29 manual notes', () => {
-  const script = read('ops/scripts/docs/performance-scan.js')
+  const script = read('ops/scripts/docs/performance-scan.ts')
 
   ;[
     'MANUAL_NOTES_START',
@@ -575,7 +575,7 @@ runTest('architecture audits share bounded worker helper', () => {
   const hardeningPolicyVerify = read('ops/scripts/verification/verify-hardening-policy.ts')
   const runtimeDepsVerify = read('ops/scripts/verification/verify-runtime-deps.ts')
   const backupReliabilityVerify = read('ops/scripts/verification/verify-backup-reliability.ts')
-  const frontendVerifyUi = read('ops/scripts/frontend/verify-ui.js')
+  const frontendVerifyUi = read('ops/scripts/frontend/verify-ui.ts')
   const auditReportHtml = read('ops/scripts/runtime/audits/audit-report-html.ts')
   const reportUtils = read('ops/scripts/lib/report-utils.js')
 

@@ -31,7 +31,7 @@ const CHECKS = [
   {
     label: 'Performance/code-flow scan',
     command: process.execPath,
-    args: ['ops/scripts/docs/performance-scan.js'],
+    args: ['ops/scripts/docs/performance-scan.ts'],
     reports: ['ops/docs/reference/PERFORMANCE-SCAN.md', 'ops/docs/reference/PERFORMANCE-SCAN.json'],
   },
   {

@@ -31,6 +31,6 @@ Generated references live in `ops/docs/reference/`:
 Regenerate them with:
 
 ```bash
-node ops/scripts/docs/generate-doc-reference.js
+node ops/scripts/docs/generate-doc-reference.ts
 npm --prefix ops run phase29:audit:repeat
 ```

@@ -117,7 +117,7 @@ function writeBackendReference() {
 
   let md = markdownHeader(
     'Backend Function Reference',
-    'Auto-generated symbol and route inventory for backend files. Regenerate with `node ops/scripts/docs/generate-doc-reference.js`.'
+    'Auto-generated symbol and route inventory for backend files. Regenerate with `node ops/scripts/docs/generate-doc-reference.ts`.'
   )
   md += '## 1. Coverage Summary\n\n'
   md += `Total files documented: **${backendFiles.length}**\n\n`
@@ -172,7 +172,7 @@ function writeFrontendReference() {
   ].filter((filePath) => fs.existsSync(filePath))
   let md = markdownHeader(
     'Frontend Function Reference',
-    'Auto-generated symbol inventory for frontend files. Regenerate with `node ops/scripts/docs/generate-doc-reference.js`.'
+    'Auto-generated symbol inventory for frontend files. Regenerate with `node ops/scripts/docs/generate-doc-reference.ts`.'
   )
   md += '## 1. Coverage Summary\n\n'
   md += `Total files documented: **${frontendFiles.length}**\n\n`
@@ -290,11 +290,11 @@ function writeRunReleaseReference() {
     'run/sh/setup.sh',
     'run/sh/start-server.sh',
     'run/sh/stop-server.sh',
-    'ops/scripts/frontend/verify-i18n.js',
+    'ops/scripts/frontend/verify-i18n.ts',
     'ops/scripts/backend/verify-data-integrity.js',
-    'ops/scripts/docs/generate-doc-reference.js',
-    'ops/scripts/docs/generate-full-project-docs.js',
-    'ops/scripts/docs/performance-scan.js',
+    'ops/scripts/docs/generate-doc-reference.ts',
+    'ops/scripts/docs/generate-full-project-docs.ts',
+    'ops/scripts/docs/performance-scan.ts',
   ]
     .map((rel) => path.join(ROOT, rel))
     .filter((filePath) => fs.existsSync(filePath))

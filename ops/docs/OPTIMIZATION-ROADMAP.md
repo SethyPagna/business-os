@@ -2503,7 +2503,7 @@ Cleanup checkpoint:
   orchestration wall time while preserving a coherent docs/reference tree for
   the organization scan.
 - Move 184 preserves performance scan status notes:
-  `ops/scripts/docs/performance-scan.js` now carries forward a bounded Phase 29
+  `ops/scripts/docs/performance-scan.ts` now carries forward a bounded Phase 29
   manual-notes block when `PERFORMANCE-SCAN.md` is regenerated. Repeat audits
   can refresh file-size and chunk metrics without losing the recent cleanup,
   performance, and orchestration move trail, and `PERFORMANCE-SCAN.json`
@@ -2515,7 +2515,7 @@ Cleanup checkpoint:
   future performance scan regeneration drops or truncates the Phase 29 status
   notes.
 - Move 186 parallelizes performance scan file reads:
-  `ops/scripts/docs/performance-scan.js` now uses bounded parallel workers for
+  `ops/scripts/docs/performance-scan.ts` now uses bounded parallel workers for
   source file stat/read work and built-chunk stat work. The generated summary
   records `sourceReadMode`, `sourceReadConcurrency`, and
   `chunkStatConcurrency`, and Phase 29 repeat consistency compares those fields
@@ -2605,7 +2605,7 @@ Cleanup checkpoint:
   reader. This keeps verification scripts on the shared filesystem utility
   path while preserving the `run/verify-local.bat` entrypoint.
 - Move 201 shares frontend UI verifier reads:
-  `ops/scripts/frontend/verify-ui.js` now imports `readJson()` and
+  `ops/scripts/frontend/verify-ui.ts` now imports `readJson()` and
   `readUtf8()` from `ops/scripts/lib/fs-utils.js` instead of carrying local
   text/JSON readers. This keeps UI verification file reads aligned with the
   shared ops filesystem utility layer while preserving the frontend
@@ -5165,3 +5165,13 @@ Move 467 status:
   secret hygiene verification while run wrappers, full automation, Phase 29,
   backend source assertions, and generated audits reference the TypeScript
   entrypoints.
+
+Move 468 status:
+- Move 468 converts docs and frontend verification utilities to TypeScript.
+  `generate-doc-reference.ts`, `generate-full-project-docs.ts`,
+  `performance-scan.ts`, `verify-i18n.ts`, `verify-ui.ts`, and
+  `verify-performance.ts` preserve reference generation, performance scan,
+  i18n, UI, and performance checks while frontend package scripts, Phase 29,
+  runtime dependency guards, docs, and backend source assertions now reference
+  the TypeScript entrypoints. The converted i18n verifier also closed the
+  missing Khmer branch stat/detail keys it exposed.

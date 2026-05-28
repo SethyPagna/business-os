@@ -786,14 +786,14 @@ Decision rule:
     generator, and performance-scan wrapper were deleted after reference scans
     showed no first-party callers outside stale generated output.
 76. Share docs filesystem scan helpers. Done:
-    `ops/scripts/docs/generate-full-project-docs.js` now uses the shared
+    `ops/scripts/docs/generate-full-project-docs.ts` now uses the shared
     `ops/scripts/lib/fs-utils.js` helpers for project-root resolution,
     POSIX-relative paths, UTF-8 reads, JSON reads, line counts, root-file
     collection, recursive file/folder collection, and text detection. The
     shared walker now handles excluded directory names case-insensitively, so
     documentation and performance scans follow the same skip behavior.
 77. Share function-reference docs scan helpers. Done:
-    `ops/scripts/docs/generate-doc-reference.js` now uses the shared
+    `ops/scripts/docs/generate-doc-reference.ts` now uses the shared
     filesystem helper library for project-root resolution, POSIX-relative
     paths, UTF-8 reads, JSON reads, root-file collection, and recursive file
     discovery. This removes the second local docs walker and keeps the backend,
@@ -909,7 +909,7 @@ Decision rule:
     protected cleanup drift, file counts, or wrapper counts change between
     cycles. Schema and Docker checks remain pass/fail text gates.
 94. Add performance/code-flow scan to Phase 29 repeat audit. Done:
-    `ops/scripts/docs/performance-scan.js` now writes
+    `ops/scripts/docs/performance-scan.ts` now writes
     `ops/docs/reference/PERFORMANCE-SCAN.json` with source file counts, built
     asset counts, total source bytes/lines, largest source/chunk markers, and
     oversized source/chunk candidate lists. `phase29-audit.ts` now runs that
@@ -947,7 +947,7 @@ Decision rule:
     This makes folder-rewire and cleanup evidence drift visible before future
     source moves, wrapper deletion, or large-module refactors proceed.
 99. Persist ranked performance scan rows in Phase 29 repeat audit. Done:
-    `ops/scripts/docs/performance-scan.js` now writes ranked
+    `ops/scripts/docs/performance-scan.ts` now writes ranked
     `topSourceBySize`, `topSourceByLines`, and `topBuiltChunks` rows into
     `ops/docs/reference/PERFORMANCE-SCAN.json`. `phase29-audit.ts` compares
     those ranked rows across repeat cycles, so large-module and chunk
@@ -1579,7 +1579,7 @@ Decision rule:
     records `executionMode: parallel-reference-writers-then-organization`, and
     `backend/test/fullAutomation.test.js` guards the grouped execution path.
 184. Preserve performance scan status notes. Done:
-    `ops/scripts/docs/performance-scan.js` now preserves a bounded Phase 29
+    `ops/scripts/docs/performance-scan.ts` now preserves a bounded Phase 29
     manual-notes block when regenerating `ops/docs/reference/PERFORMANCE-SCAN.md`.
     Repeat audit runs can refresh ranked size/chunk metrics without erasing the
     latest performance, cleanup, and orchestration move trail. The JSON summary
@@ -1593,7 +1593,7 @@ Decision rule:
     drift instead of silently accepting the loss. `backend/test/fullAutomation.test.js`
     guards the new consistency fields.
 186. Parallelize performance scan file reads. Done:
-    `ops/scripts/docs/performance-scan.js` now reads source files with a bounded
+    `ops/scripts/docs/performance-scan.ts` now reads source files with a bounded
     parallel worker pool and stats built chunks with a separate bounded pool
     instead of synchronously reading each file in sequence. The generated summary
     records `sourceReadMode`, `sourceReadConcurrency`, and
@@ -1601,7 +1601,7 @@ Decision rule:
     repeat cycles so the faster scanner path remains visible and guarded.
 187. Share bounded worker loop helper. Done:
     `ops/scripts/lib/fs-utils.js` now exports the shared `mapLimit()` worker-pool
-    helper used by `performance-scan.js`, `organization-audit.ts`, and
+    helper used by `performance-scan.ts`, `organization-audit.ts`, and
     `generated-bulk-audit.ts`. This removes three local copies of the same
     bounded async loop while preserving each audit's existing concurrency
     constants and generated summaries. `backend/test/fullAutomation.test.js`
@@ -1700,7 +1700,7 @@ Decision rule:
     instead of carrying a local JSON reader. The public `run/verify-local.bat`
     verification path remains unchanged.
 201. Share frontend UI verifier reads. Done:
-    `ops/scripts/frontend/verify-ui.js` now reuses `readJson()` and
+    `ops/scripts/frontend/verify-ui.ts` now reuses `readJson()` and
     `readUtf8()` from `ops/scripts/lib/fs-utils.js` for translation, CSS,
     component, package, and verification-batch reads instead of local reader
     wrappers. The frontend `verify:ui` script remains unchanged.
@@ -2362,7 +2362,7 @@ Decision rule:
     request during every settings load. The saved local settings metadata path
     is preserved for write-conflict protection, but app startup and later
     settings refreshes now use one authenticated settings request instead of
-    two. `performanceLoadingUx.test.ts` and `verify-performance.js` now guard
+    two. `performanceLoadingUx.test.ts` and `verify-performance.ts` now guard
     against reintroducing that waterfall. Focused performance guards,
     frontend typecheck, JSX check, full frontend utility tests, and production
     build pass.
@@ -3657,6 +3657,13 @@ Decision rule:
     backend source assertions, and organization/language audits now point at
     the TypeScript paths while preserving the same Docker, runtime dependency,
     hardening, backup, scale-service, and secret hygiene checks.
+458. Convert docs and frontend verification utilities to TypeScript. Done:
+    `generate-doc-reference.ts`, `generate-full-project-docs.ts`,
+    `performance-scan.ts`, `verify-i18n.ts`, `verify-ui.ts`, and
+    `verify-performance.ts` replace their `.js` entrypoints. Frontend package
+    scripts, Phase 29, runtime dependency guards, docs, and backend source
+    assertions now point at the TypeScript paths. The batch also adds the
+    missing Khmer branch stat/detail keys found by the converted i18n verifier.
 
 ## Safety Gates
 

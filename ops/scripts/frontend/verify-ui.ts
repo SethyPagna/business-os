@@ -190,7 +190,7 @@ function checkVerificationWiring() {
   const pkg = readJson(PACKAGE_PATH)
   const verifyBat = readUtf8(VERIFY_BAT_PATH)
   const issues = []
-  if (pkg.scripts?.['verify:ui'] !== 'node ../ops/scripts/frontend/verify-ui.js') {
+  if (pkg.scripts?.['verify:ui'] !== 'node ../ops/scripts/frontend/verify-ui.ts') {
     issues.push('frontend/package.json must expose verify:ui.')
   }
   if (!verifyBat.includes('npm.cmd run verify:ui')) {
