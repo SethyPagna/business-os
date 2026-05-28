@@ -719,7 +719,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Branches.jsx` | UI component/page |
-| 2 | `BranchForm.jsx` | UI component/page |
+| 2 | `BranchForm.tsx` | UI component/page |
 | 3 | `TransferModal.jsx` | UI component/page |
 
 
@@ -1112,7 +1112,7 @@ Total folders documented: **81**
 | 1 | `EditReturnModal.jsx` | UI component/page |
 | 2 | `NewReturnModal.jsx` | UI component/page |
 | 3 | `NewSupplierReturnModal.jsx` | UI component/page |
-| 4 | `ReturnDetailModal.jsx` | UI component/page |
+| 4 | `ReturnDetailModal.tsx` | UI component/page |
 | 5 | `Returns.jsx` | UI component/page |
 | 6 | `ReturnsListSurface.jsx` | UI component/page |
 
@@ -1188,7 +1188,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `PermissionEditor.jsx` | UI component/page |
+| 1 | `PermissionEditor.tsx` | UI component/page |
 | 2 | `UserDetailSheet.tsx` | UI component/page |
 | 3 | `UserProfileModal.jsx` | UI component/page |
 | 4 | `Users.jsx` | UI component/page |

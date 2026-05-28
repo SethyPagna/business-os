@@ -163,7 +163,7 @@ Code files documented: **466**
 | 151 | `frontend/src/AppContext.jsx` | 14 | 5 | 13 | 52 |
 | 152 | `frontend/src/components/auth/Login.jsx` | 5 | 1 | 4 | 1 |
 | 153 | `frontend/src/components/branches/Branches.jsx` | 13 | 1 | 11 | 1 |
-| 154 | `frontend/src/components/branches/BranchForm.jsx` | 2 | 1 | 1 | 1 |
+| 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 | 1 | 1 | 1 |
 | 155 | `frontend/src/components/branches/TransferModal.jsx` | 3 | 1 | 2 | 1 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 5 | 1 | 4 | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 2 | 1 | 1 | 1 |
@@ -260,7 +260,7 @@ Code files documented: **466**
 | 248 | `frontend/src/components/returns/EditReturnModal.jsx` | 4 | 1 | 3 | 1 |
 | 249 | `frontend/src/components/returns/NewReturnModal.jsx` | 4 | 1 | 3 | 1 |
 | 250 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 3 | 1 | 2 | 1 |
-| 251 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
+| 251 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
 | 252 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
 | 253 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 2 | 1 | 0 | 1 |
 | 254 | `frontend/src/components/sales/ExportModal.jsx` | 5 | 1 | 3 | 1 |
@@ -288,7 +288,7 @@ Code files documented: **466**
 | 276 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 | 1 | 1 | 3 |
 | 277 | `frontend/src/components/shared/SectionSwitcher.tsx` | 1 | 1 | 0 | 4 |
 | 278 | `frontend/src/components/shared/WriteConflictModal.tsx` | 1 | 1 | 1 | 1 |
-| 279 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 3 | 0 | 2 |
+| 279 | `frontend/src/components/users/PermissionEditor.tsx` | 0 | 3 | 0 | 2 |
 | 280 | `frontend/src/components/users/UserDetailSheet.tsx` | 2 | 1 | 2 | 1 |
 | 281 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
 | 282 | `frontend/src/components/users/Users.jsx` | 14 | 1 | 12 | 1 |
@@ -3121,7 +3121,7 @@ Code files documented: **466**
   - `frontend/src/App.jsx`
   - `frontend/src/components/auth/Login.jsx`
   - `frontend/src/components/branches/Branches.jsx`
-  - `frontend/src/components/branches/BranchForm.jsx`
+  - `frontend/src/components/branches/BranchForm.tsx`
   - `frontend/src/components/branches/TransferModal.jsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/ContactImportModal.jsx`
@@ -3151,7 +3151,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/EditReturnModal.jsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
-  - `frontend/src/components/returns/ReturnDetailModal.jsx`
+  - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/sales/SalesImportModal.jsx`
@@ -3207,7 +3207,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (11)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/branches/BranchForm.jsx`
+  - `frontend/src/components/branches/BranchForm.tsx`
   - `frontend/src/components/branches/TransferModal.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
@@ -3220,11 +3220,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.154 `frontend/src/components/branches/BranchForm.jsx`
+### 3.154 `frontend/src/components/branches/BranchForm.tsx`
 
 - Declared exports: `function`
 - Imports (2)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `react`
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
@@ -4833,12 +4833,12 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.251 `frontend/src/components/returns/ReturnDetailModal.jsx`
+### 3.251 `frontend/src/components/returns/ReturnDetailModal.tsx`
 
 - Declared exports: `function`
 - Imports (2)
-  - `../../AppContext`
-  - `../../utils/formatters`
+  - `../../AppContext.jsx`
+  - `../../utils/formatters.ts`
 - Internal dependencies (2)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/utils/formatters.ts`
@@ -4873,7 +4873,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/EditReturnModal.jsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
-  - `frontend/src/components/returns/ReturnDetailModal.jsx`
+  - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/ReturnsListSurface.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
@@ -5342,7 +5342,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.279 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.279 `frontend/src/components/users/PermissionEditor.tsx`
 
 - Declared exports: `PERMISSION_DEFS`, `PERMISSION_SECTIONS`, `function`
 - Imports (0)
@@ -5358,9 +5358,9 @@ Code files documented: **466**
 - Declared exports: `function`
 - Imports (2)
   - `../../utils/formatters`
-  - `./PermissionEditor.jsx`
+  - `./PermissionEditor`
 - Internal dependencies (2)
-  - `frontend/src/components/users/PermissionEditor.jsx`
+  - `frontend/src/components/users/PermissionEditor.tsx`
   - `frontend/src/utils/formatters.ts`
 - Referenced by (1)
   - `frontend/src/components/users/Users.jsx`
@@ -5416,7 +5416,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PortalMenu.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
-  - `frontend/src/components/users/PermissionEditor.jsx`
+  - `frontend/src/components/users/PermissionEditor.tsx`
   - `frontend/src/components/users/UserDetailSheet.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/utils/actionGuards.ts`
@@ -5932,7 +5932,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
-  - `frontend/src/components/returns/ReturnDetailModal.jsx`
+  - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/SaleDetailModal.jsx`
   - `frontend/src/components/sales/Sales.jsx`

@@ -186,7 +186,7 @@ Total files documented: **529**
 | 174 | `frontend/src/AppContext.jsx` | frontend-core | 1610 | 64.3 | Global app state/context provider |
 | 175 | `frontend/src/components/auth/Login.jsx` | frontend-ui | 1084 | 49.4 | UI component/page |
 | 176 | `frontend/src/components/branches/Branches.jsx` | frontend-ui | 907 | 43.4 | UI component/page |
-| 177 | `frontend/src/components/branches/BranchForm.jsx` | frontend-ui | 190 | 6.4 | UI component/page |
+| 177 | `frontend/src/components/branches/BranchForm.tsx` | frontend-ui | 202 | 6.4 | UI component/page |
 | 178 | `frontend/src/components/branches/TransferModal.jsx` | frontend-ui | 346 | 14.2 | UI component/page |
 | 179 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | frontend-ui | 1295 | 95.9 | UI component/page |
 | 180 | `frontend/src/components/catalog/CatalogImageField.tsx` | frontend-ui | 115 | 4.6 | UI component/page |
@@ -284,7 +284,7 @@ Total files documented: **529**
 | 272 | `frontend/src/components/returns/EditReturnModal.jsx` | frontend-ui | 241 | 12.9 | UI component/page |
 | 273 | `frontend/src/components/returns/NewReturnModal.jsx` | frontend-ui | 492 | 27.9 | UI component/page |
 | 274 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | frontend-ui | 394 | 20.8 | UI component/page |
-| 275 | `frontend/src/components/returns/ReturnDetailModal.jsx` | frontend-ui | 132 | 6.8 | UI component/page |
+| 275 | `frontend/src/components/returns/ReturnDetailModal.tsx` | frontend-ui | 186 | 8.5 | UI component/page |
 | 276 | `frontend/src/components/returns/Returns.jsx` | frontend-ui | 888 | 38.8 | UI component/page |
 | 277 | `frontend/src/components/returns/ReturnsListSurface.jsx` | frontend-ui | 328 | 17.6 | UI component/page |
 | 278 | `frontend/src/components/sales/ExportModal.jsx` | frontend-ui | 250 | 11.2 | UI component/page |
@@ -312,7 +312,7 @@ Total files documented: **529**
 | 300 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | frontend-ui | 77 | 2.5 | UI component/page |
 | 301 | `frontend/src/components/shared/SectionSwitcher.tsx` | frontend-ui | 88 | 3.2 | UI component/page |
 | 302 | `frontend/src/components/shared/WriteConflictModal.tsx` | frontend-ui | 321 | 12.5 | UI component/page |
-| 303 | `frontend/src/components/users/PermissionEditor.jsx` | frontend-ui | 152 | 7.3 | UI component/page |
+| 303 | `frontend/src/components/users/PermissionEditor.tsx` | frontend-ui | 192 | 8.3 | UI component/page |
 | 304 | `frontend/src/components/users/UserDetailSheet.tsx` | frontend-ui | 145 | 6.0 | UI component/page |
 | 305 | `frontend/src/components/users/UserProfileModal.jsx` | frontend-ui | 1158 | 62.4 | UI component/page |
 | 306 | `frontend/src/components/users/Users.jsx` | frontend-ui | 1036 | 50.4 | UI component/page |

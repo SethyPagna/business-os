@@ -163,7 +163,7 @@ Code files scanned: **466**
 | 151 | `frontend/src/AppContext.jsx` | 41 |
 | 152 | `frontend/src/components/auth/Login.jsx` | 23 |
 | 153 | `frontend/src/components/branches/Branches.jsx` | 11 |
-| 154 | `frontend/src/components/branches/BranchForm.jsx` | 3 |
+| 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
 | 155 | `frontend/src/components/branches/TransferModal.jsx` | 4 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
@@ -260,7 +260,7 @@ Code files scanned: **466**
 | 248 | `frontend/src/components/returns/EditReturnModal.jsx` | 5 |
 | 249 | `frontend/src/components/returns/NewReturnModal.jsx` | 10 |
 | 250 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 6 |
-| 251 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 3 |
+| 251 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
 | 252 | `frontend/src/components/returns/Returns.jsx` | 13 |
 | 253 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 5 |
 | 254 | `frontend/src/components/sales/ExportModal.jsx` | 9 |
@@ -288,7 +288,7 @@ Code files scanned: **466**
 | 276 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 |
 | 277 | `frontend/src/components/shared/SectionSwitcher.tsx` | 3 |
 | 278 | `frontend/src/components/shared/WriteConflictModal.tsx` | 10 |
-| 279 | `frontend/src/components/users/PermissionEditor.jsx` | 5 |
+| 279 | `frontend/src/components/users/PermissionEditor.tsx` | 3 |
 | 280 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
 | 281 | `frontend/src/components/users/UserProfileModal.jsx` | 21 |
 | 282 | `frontend/src/components/users/Users.jsx` | 18 |
@@ -3316,13 +3316,12 @@ Code files scanned: **466**
 | 10 | `toggleSelect` | const arrow | 498 |
 | 11 | `toggleSelectAll` | const arrow | 507 |
 
-### 3.154 `frontend/src/components/branches/BranchForm.jsx`
+### 3.154 `frontend/src/components/branches/BranchForm.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `BranchForm` | export default function | 11 |
-| 2 | `set` | const arrow | 33 |
-| 3 | `handleSave` | const arrow | 45 |
+| 1 | `BranchForm` | export default function | 37 |
+| 2 | `handleSave` | const arrow | 57 |
 
 ### 3.155 `frontend/src/components/branches/TransferModal.jsx`
 
@@ -4618,13 +4617,14 @@ Code files scanned: **466**
 | 5 | `updateQty` | const arrow | 162 |
 | 6 | `submit` | const arrow | 168 |
 
-### 3.251 `frontend/src/components/returns/ReturnDetailModal.jsx`
+### 3.251 `frontend/src/components/returns/ReturnDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeScope` | function | 6 |
-| 2 | `ReturnDetailModal` | export default function | 10 |
-| 3 | `tr` | const arrow | 12 |
+| 1 | `normalizeScope` | function | 52 |
+| 2 | `coerceMoney` | function | 56 |
+| 3 | `isPositiveMoney` | function | 60 |
+| 4 | `ReturnDetailModal` | export default function | 64 |
 
 ### 3.252 `frontend/src/components/returns/Returns.jsx`
 
@@ -4913,15 +4913,13 @@ Code files scanned: **466**
 | 9 | `getConflictFieldRows` | function | 132 |
 | 10 | `WriteConflictModal` | export default function | 226 |
 
-### 3.279 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.279 `frontend/src/components/users/PermissionEditor.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `PermissionEditor` | export default function | 49 |
-| 2 | `translate` | const arrow | 50 |
-| 3 | `labelFor` | const arrow | 56 |
-| 4 | `sensitivityLabel` | const arrow | 57 |
-| 5 | `toggle` | const arrow | 64 |
+| 1 | `parsePermissionState` | function | 75 |
+| 2 | `PermissionEditor` | export default function | 89 |
+| 3 | `toggle` | const arrow | 104 |
 
 ### 3.280 `frontend/src/components/users/UserDetailSheet.tsx`
 
