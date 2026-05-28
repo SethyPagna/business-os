@@ -7,7 +7,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
-import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 
 const FILE_PICKER_LOAD_TIMEOUT_MS = 8000
 const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000

@@ -13,7 +13,7 @@ import { getClientDeviceInfo } from './utils/deviceInfo.js'
 import { parsePermissionMap } from './utils/permissions.js'
 import { normalizePriceValue } from './utils/pricing.js'
 import { withLoaderTimeout } from './utils/loaders.ts'
-import { refreshAppData } from './utils/appRefresh.js'
+import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
 
 /**

@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ImageOff } from 'lucide-react'
-import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.js'
+import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
 
 const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000
 const brokenProductImageUrls = new Map()

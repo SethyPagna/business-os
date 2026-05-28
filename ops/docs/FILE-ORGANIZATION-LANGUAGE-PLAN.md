@@ -1082,7 +1082,7 @@ Decision rule:
     existing `frontend/tests/mediaUploadHelpers.test.ts` to the frontend utility
     suite and fixed cache-busting so explicit upload versions replace an
     existing `v` query parameter instead of appending a duplicate. Added
-    `frontend/src/utils/publicAssetUrls.d.ts` for the JS public-asset boundary.
+    `frontend/src/utils/publicAssetUrls.ts` directly after retiring the JS public-asset boundary declaration file.
 118. Convert pricing helper to TypeScript. Done:
     The shared pricing and product-discount helper moved to
     `frontend/src/utils/pricing.ts`, while `frontend/src/utils/pricing.js`
@@ -1213,9 +1213,9 @@ Decision rule:
     `khmer-text` class merging, non-Khmer passthrough, and `lang="km"` props.
 135. Convert settings refresh routing helper to TypeScript. Done:
     The settings refresh channel mapper moved to
-    `frontend/src/utils/settingsRefresh.ts`, while `settingsRefresh.js`
+    `frontend/src/utils/settingsRefresh.ts`, while the retired `settingsRefresh.js`
     remains as the compatibility wrapper for API methods and tests. Added
-    `frontend/src/utils/appRefresh.d.ts` to document the app refresh utility
+    `frontend/src/utils/appRefresh.ts` as the app refresh utility
     boundary used by this typed module, and focused tests protect setting-rule
     routing plus app refresh channel normalization.
 136. Convert product page config constants to TypeScript. Done:
@@ -3729,6 +3729,13 @@ Decision rule:
     This finishes the backend test-directory conversion while preserving the
     direct Node/CommonJS execution contract used by the current lightweight
     test harness.
+466. Retire frontend utility TypeScript compatibility wrappers. Done:
+    `frontend/src/utils/appRefresh.ts`, `settingsRefresh.ts`,
+    `publicAssetUrls.ts`, and `favicon.ts` are imported directly by React,
+    API, media upload, product-gallery, and settings callers. The one-line
+    `.js` wrappers and the obsolete declaration-only shims for app refresh and
+    public asset URLs were deleted after reference scans showed each caller
+    could move to the TypeScript source path.
 
 ## Safety Gates
 

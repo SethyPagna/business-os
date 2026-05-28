@@ -1,4 +1,4 @@
-import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.js'
+import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
 
 interface ProductGalleryRecord {
   image_gallery?: unknown

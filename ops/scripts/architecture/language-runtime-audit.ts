@@ -379,7 +379,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   {
     implementation: 'frontend/src/utils/mediaUpload.ts',
     compatibilityWrapper: 'frontend/src/utils/mediaUpload.js',
-    declarationSupport: 'frontend/src/utils/publicAssetUrls.d.ts',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\mediaUploadHelpers.test.ts',
@@ -456,7 +456,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     implementation: 'frontend/src/components/products/helpers/productGalleryHelpers.ts',
     compatibilityWrapper: '',
     wrapperStatus: 'retired after Products and focused tests moved to TypeScript source',
-    declarationSupport: 'frontend/src/utils/publicAssetUrls.d.ts',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productGalleryHelpers.test.ts',
@@ -763,8 +763,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/settingsRefresh.ts',
-    compatibilityWrapper: 'frontend/src/utils/settingsRefresh.js',
-    declarationSupport: 'frontend/src/utils/appRefresh.d.ts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after API methods and settings callers moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\settingsRefresh.test.ts',

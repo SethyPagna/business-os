@@ -1,4 +1,4 @@
-import { normalizeRefreshChannels } from './appRefresh.js'
+import { normalizeRefreshChannels } from './appRefresh.ts'
 
 export const CATEGORY_REFRESH_CHANNELS = normalizeRefreshChannels(['categories', 'products', 'inventory'])
 export const UNIT_REFRESH_CHANNELS = normalizeRefreshChannels(['units', 'products', 'inventory'])

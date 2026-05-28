@@ -3,7 +3,7 @@ import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
 import { useApp } from '../../AppContext'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 

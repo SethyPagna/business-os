@@ -17,7 +17,7 @@ import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
-import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,

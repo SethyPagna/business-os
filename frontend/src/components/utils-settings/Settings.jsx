@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, Chevro
 import FontFamilyPicker from './FontFamilyPicker'
 import OtpModal from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
-import { createCircularFaviconDataUrl } from '../../utils/favicon'
+import { createCircularFaviconDataUrl } from '../../utils/favicon.ts'
 import PageHeader from '../shared/PageHeader'
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'

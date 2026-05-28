@@ -2198,8 +2198,8 @@ Cleanup checkpoint:
   merging, non-Khmer passthrough, and `lang="km"` props.
 - The settings refresh routing helper slice is now complete:
   `frontend/src/utils/settingsRefresh.ts` owns settings-to-refresh-channel
-  mapping, while `settingsRefresh.js` remains as the compatibility wrapper for
-  API methods and tests. `appRefresh.d.ts` documents the app refresh utility
+  mapping, and the retired `settingsRefresh.js` wrapper is no longer needed by
+  API methods or tests. `appRefresh.ts` owns the app refresh utility
   boundary used by this typed module, and focused coverage protects
   setting-rule routing plus app refresh channel normalization.
 - The product page config constants slice is now complete:
@@ -5256,3 +5256,11 @@ Move 475 status:
   `backend/test`, and the backend `test:utils` command plus language/runtime
   proof references now call the TypeScript path. This closes the backend test
   directory conversion without changing backend production runtime packaging.
+
+Move 476 status:
+- Move 476 retires four tiny frontend utility compatibility wrappers after
+  callers moved to TypeScript source imports. `appRefresh.ts`,
+  `settingsRefresh.ts`, `publicAssetUrls.ts`, and `favicon.ts` now serve
+  React, API, media, product-gallery, and settings callers directly, while
+  `appRefresh.js`, `settingsRefresh.js`, `publicAssetUrls.js`, and
+  `favicon.js` plus obsolete declaration shims are removed.

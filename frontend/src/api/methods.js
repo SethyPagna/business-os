@@ -32,12 +32,12 @@ import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.js'
 import { STORAGE_KEYS, SYNC } from '../constants'
 import { decodeTextBuffer } from '../utils/csvImport.js'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
-import { refreshAppData } from '../utils/appRefresh.js'
+import { refreshAppData } from '../utils/appRefresh.ts'
 import {
   CATEGORY_REFRESH_CHANNELS,
   getSettingsRefreshChannels,
   UNIT_REFRESH_CHANNELS,
-} from '../utils/settingsRefresh.js'
+} from '../utils/settingsRefresh.ts'
 import {
   LIVE_SERVER_SENSITIVE_MIRROR_TABLES,
   NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,

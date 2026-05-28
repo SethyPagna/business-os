@@ -1,4 +1,4 @@
-import { resolvePublicAssetUrl } from './publicAssetUrls.js'
+import { resolvePublicAssetUrl } from './publicAssetUrls.ts'
 
 type UploadStatus = 'idle' | 'uploading' | 'uploaded' | 'error' | 'cancelled'
 type ProcessingStatus = 'idle' | 'uploading' | 'ready' | 'error' | 'cancelled' | string
