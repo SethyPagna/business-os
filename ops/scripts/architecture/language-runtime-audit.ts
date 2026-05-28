@@ -1101,7 +1101,7 @@ const REJECTED_WEB_WORKER_CANDIDATES = [
     evidence: 'Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle.',
   },
   {
-    file: 'frontend/src/components/shared/ImageGalleryLightbox.jsx',
+    file: 'frontend/src/components/shared/ImageGalleryLightbox.tsx',
     decision: 'keep as React presentation component',
     reason: 'The lightbox filters a small image list, clamps an index, handles keyboard navigation, and renders images/thumbnails. It has no decoding, resizing, or heavy image processing loop to transfer.',
     evidence: 'Move 169 inspection found React state/control rendering and event handlers only; image loading remains normal browser rendering.',

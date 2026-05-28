@@ -1,8 +1,33 @@
 import { useState } from 'react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppFromContext } from '../../AppContext.jsx'
 import { getFieldItems } from './constants'
 
-function Toggle({ label, desc, value, onChange }) {
+type ReceiptTemplate = Record<string, unknown>
+
+type ReceiptFieldItem = {
+  key: string
+  label: string
+  desc: string
+  section: string
+}
+
+type ToggleProps = {
+  label: string
+  desc?: string
+  value: boolean
+  onChange: (value: boolean) => void
+}
+
+type AllFieldsPanelProps = {
+  tpl: ReceiptTemplate
+  setT: (key: string, value: boolean) => void
+}
+
+type AppTranslationContext = {
+  t?: (key: string) => string
+}
+
+function Toggle({ label, desc, value, onChange }: ToggleProps) {
   return (
     <label className="flex cursor-pointer items-start gap-3 py-1.5">
       <div className="relative mt-0.5 flex-shrink-0">
@@ -18,12 +43,13 @@ function Toggle({ label, desc, value, onChange }) {
   )
 }
 
-export default function AllFieldsPanel({ tpl, setT }) {
+export default function AllFieldsPanel({ tpl, setT }: AllFieldsPanelProps) {
+  const useApp = useAppFromContext as () => AppTranslationContext
   const { t } = useApp()
-  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+  const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key) : fallback)
   const [search, setSearch] = useState('')
-  const [expandedSections, setExpandedSections] = useState({})
-  const allFieldItems = getFieldItems(t)
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
+  const allFieldItems = getFieldItems(t ?? null) as ReceiptFieldItem[]
 
   const filtered = search.trim()
     ? allFieldItems.filter((field) => (
@@ -33,13 +59,13 @@ export default function AllFieldsPanel({ tpl, setT }) {
     ))
     : allFieldItems
 
-  const bySection = filtered.reduce((accumulator, field) => {
+  const bySection = filtered.reduce<Record<string, ReceiptFieldItem[]>>((accumulator, field) => {
     if (!accumulator[field.section]) accumulator[field.section] = []
     accumulator[field.section].push(field)
     return accumulator
   }, {})
 
-  const toggleSection = (section) => setExpandedSections((current) => ({ ...current, [section]: !current[section] }))
+  const toggleSection = (section: string) => setExpandedSections((current) => ({ ...current, [section]: !current[section] }))
 
   return (
     <div>

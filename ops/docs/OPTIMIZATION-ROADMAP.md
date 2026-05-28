@@ -2429,7 +2429,7 @@ Cleanup checkpoint:
   camera permission, video, native detector, zxing browser-control, and React
   lifecycle APIs.
 - Move 169 clears the remaining false-positive Web Worker candidates:
-  `ImageGalleryLightbox.jsx` remains a React presentation/keyboard navigation
+  `ImageGalleryLightbox.tsx` remains a React presentation/keyboard navigation
   component, and `importJobRefresh.js` remains a tiny main-thread event
   dispatcher for import completion refreshes. The language/runtime audit now
   filters those files so future worker slices focus on transferable CPU,

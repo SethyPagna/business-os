@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 485 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 486 in this file.
 
 ## Goal
 
@@ -1488,7 +1488,7 @@ Decision rule:
     because their work is tied to `Image`, `BarcodeDetector`, `getUserMedia`,
     video refs, zxing browser controls, and React permission UI.
 169. Clear remaining false-positive Web Worker candidates. Done:
-    `frontend/src/components/shared/ImageGalleryLightbox.jsx` is recorded as a
+    `frontend/src/components/shared/ImageGalleryLightbox.tsx` is recorded as a
     React presentation component, not an image-processing worker target.
     `frontend/src/utils/importJobRefresh.js` is recorded as a small main-thread
     event dispatcher because it maps import completion statuses to
@@ -3815,6 +3815,16 @@ Decision rule:
     not add production runtime TypeScript loaders. This repository remains a
     Vite React frontend plus Node backend, so no Next-specific folder layout is
     introduced.
+486. Convert receipt preview, receipt field panel, filter menu, and gallery
+    lightbox to TSX. Done: `ReceiptPreview.tsx`, `AllFieldsPanel.tsx`,
+    `FilterMenu.tsx`, and `ImageGalleryLightbox.tsx` now carry typed receipt
+    settings/template boundaries, typed app translation access, typed filter
+    section/option contracts, and typed lightbox labels/index callbacks. Tests
+    that inspect receipt preview wiring now read the TSX source. The language
+    runtime audit keeps `ImageGalleryLightbox.tsx` classified as React
+    presentation/event code, not a Rust/worker candidate, because the browser
+    still owns image loading and the component only coordinates state,
+    keyboard navigation, and rendering.
 
 ## Safety Gates
 

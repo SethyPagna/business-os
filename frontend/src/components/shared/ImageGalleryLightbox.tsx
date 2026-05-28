@@ -1,10 +1,31 @@
 import { useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 /**
  * Reusable gallery lightbox with arrows, dot navigation, and thumbnail rail.
  * Keep callers in control of state so the component stays simple and testable.
  */
+type LightboxLabels = {
+  prev?: string
+  next?: string
+  imageCount?: string
+  dotsLabel?: string
+}
+
+type ImageGalleryLightboxProps = {
+  open?: boolean
+  title?: string
+  images?: Array<string | null | undefined | false>
+  index?: number
+  onClose?: () => void
+  onIndexChange?: (index: number) => void
+  labels?: LightboxLabels
+  renderImage?: (src: string, alt: string, className: string) => ReactNode
+}
+
+type LabelValues = Record<string, string | number>
+
 export default function ImageGalleryLightbox({
   open = false,
   title = '',
@@ -14,8 +35,8 @@ export default function ImageGalleryLightbox({
   onIndexChange,
   labels = {},
   renderImage,
-}) {
-  const safeImages = Array.isArray(images) ? images.filter(Boolean) : []
+}: ImageGalleryLightboxProps) {
+  const safeImages = Array.isArray(images) ? images.filter(Boolean) as string[] : []
   const total = safeImages.length
   const safeIndex = total ? Math.max(0, Math.min(index, total - 1)) : 0
   const currentImage = total ? safeImages[safeIndex] : ''
@@ -27,24 +48,24 @@ export default function ImageGalleryLightbox({
     dotsLabel: labels.dotsLabel || 'Image {current} of {total}',
   }
 
-  function formatLabel(template, values) {
-    return String(template || '').replace(/\{(\w+)\}/g, (_match, key) => values?.[key] ?? '')
+  function formatLabel(template: string, values: LabelValues) {
+    return String(template || '').replace(/\{(\w+)\}/g, (_match, key) => String(values?.[key] ?? ''))
   }
 
-  function setIndex(nextIndex) {
+  function setIndex(nextIndex: number) {
     if (!total || typeof onIndexChange !== 'function') return
     const wrapped = (nextIndex + total) % total
     onIndexChange(wrapped)
   }
 
-  function renderGalleryImage(src, alt, className) {
+  function renderGalleryImage(src: string, alt: string, className: string) {
     if (typeof renderImage === 'function') return renderImage(src, alt, className)
     return <img src={src} alt={alt} className={className} />
   }
 
   useEffect(() => {
     if (!open || !total) return undefined
-    function onKeyDown(event) {
+    function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') onClose?.()
       if (event.key === 'ArrowLeft') setIndex(safeIndex - 1)
       if (event.key === 'ArrowRight') setIndex(safeIndex + 1)

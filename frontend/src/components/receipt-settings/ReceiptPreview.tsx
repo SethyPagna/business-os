@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ComponentType } from 'react'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -9,9 +10,34 @@ import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
 const RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS = 12000
 
-export default function ReceiptPreview({ tpl, settings }) {
-  const [ReceiptComp, setReceiptComp] = useState(null)
-  const [loadError, setLoadError] = useState(null)
+type ReceiptTemplate = Record<string, unknown> & {
+  receipt_language?: string
+}
+
+type ReceiptSettings = Record<string, unknown> & {
+  exchange_rate?: string | number
+}
+
+type ReceiptPreviewProps = {
+  tpl: ReceiptTemplate
+  settings: ReceiptSettings
+}
+
+type ReceiptComponentProps = {
+  sale: Record<string, unknown>
+  settings: Record<string, unknown>
+  onClose: () => void
+  _previewMode?: boolean
+}
+
+function formatLoadError(error: unknown): string {
+  if (error instanceof Error) return error.stack || error.message
+  return String(error)
+}
+
+export default function ReceiptPreview({ tpl, settings }: ReceiptPreviewProps) {
+  const [ReceiptComp, setReceiptComp] = useState<ComponentType<ReceiptComponentProps> | null>(null)
+  const [loadError, setLoadError] = useState<unknown>(null)
   const previewRequestRef = useRef(0)
   const aliveRef = useRef(true)
 
@@ -23,12 +49,12 @@ export default function ReceiptPreview({ tpl, settings }) {
     async function loadPreview() {
       try {
         const mod = await withLoaderTimeout(
-          () => import('../receipt/Receipt'),
+          () => import('../receipt/Receipt.jsx'),
           'Receipt preview',
           RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(previewRequestRef, requestId)) return
-        setReceiptComp(() => mod.default)
+        setReceiptComp(() => mod.default as ComponentType<ReceiptComponentProps>)
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(previewRequestRef, requestId)) return
         console.error('[ReceiptPreview] import Receipt failed', error)
@@ -42,7 +68,7 @@ export default function ReceiptPreview({ tpl, settings }) {
     }
   }, [])
 
-  const exchangeRate = parseFloat(settings.exchange_rate || '4100')
+  const exchangeRate = parseFloat(String(settings.exchange_rate || '4100'))
   const fakeSale = {
     receipt_number: 'RCP-PREVIEW-0001',
     cashier_name: 'Demo Cashier',
@@ -84,7 +110,7 @@ export default function ReceiptPreview({ tpl, settings }) {
     return (
       <div style={{ fontSize: 12, color: '#c00' }}>
         <div style={{ padding: 8, fontWeight: 700 }}>Preview failed to load</div>
-        <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{String(loadError?.stack || loadError?.message || loadError)}</pre>
+        <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{formatLoadError(loadError)}</pre>
       </div>
     )
   }

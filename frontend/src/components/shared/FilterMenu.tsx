@@ -1,7 +1,47 @@
 import { Filter, X } from 'lucide-react'
-import PortalMenu from './PortalMenu'
+import type { ReactNode } from 'react'
+import PortalMenuComponent from './PortalMenu.jsx'
 
-function sectionButtonClass(active) {
+type CloseMenu = () => void
+
+type FilterOption = {
+  id: string | number
+  label: ReactNode
+  title?: string
+  active?: boolean
+  disabled?: boolean
+  onClick?: () => void
+}
+
+type FilterSection = {
+  id: string | number
+  label: ReactNode
+  description?: ReactNode
+  options?: Array<FilterOption | null | undefined | false>
+  render?: (helpers: { closeMenu: CloseMenu }) => ReactNode
+}
+
+type PortalMenuProps = {
+  align?: 'left' | 'right'
+  menuClassName?: string
+  onOpenChange?: ((open: boolean) => void) | null
+  trigger: ReactNode
+  content: (helpers: { closeMenu: CloseMenu }) => ReactNode
+}
+
+type FilterMenuProps = {
+  label?: string
+  activeCount?: number
+  sections?: Array<FilterSection | null | undefined | false>
+  onClear?: (() => void) | null
+  compact?: boolean
+  mobileIconOnly?: boolean
+  onOpenChange?: ((open: boolean) => void) | null
+}
+
+const PortalMenu = PortalMenuComponent as (props: PortalMenuProps) => ReactNode
+
+function sectionButtonClass(active: boolean): string {
   return active
     ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
     : 'bg-slate-50 text-slate-700 border-slate-300 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:text-blue-300 dark:hover:bg-slate-700/80'
@@ -15,7 +55,7 @@ export default function FilterMenu({
   compact = false,
   mobileIconOnly = false,
   onOpenChange = null,
-}) {
+}: FilterMenuProps) {
   const hasActions = typeof onClear === 'function'
   const triggerLabel = activeCount > 0 ? `${label} (${activeCount})` : label
 
@@ -74,7 +114,7 @@ export default function FilterMenu({
           </div>
 
           <div className="space-y-3">
-            {sections.filter(Boolean).map((section) => (
+            {(sections.filter(Boolean) as FilterSection[]).map((section) => (
               <div key={section.id} className="space-y-1.5">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                   {section.label}
@@ -88,14 +128,14 @@ export default function FilterMenu({
                   section.render({ closeMenu })
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
-                    {(section.options || []).filter(Boolean).map((option) => (
+                    {((section.options || []).filter(Boolean) as FilterOption[]).map((option) => (
                       <button
                         key={option.id}
                         type="button"
                         disabled={option.disabled}
                         onClick={() => option.onClick?.()}
                         className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
-                        title={option.title || option.label}
+                        title={option.title || (typeof option.label === 'string' ? option.label : undefined)}
                       >
                         {option.label}
                       </button>
