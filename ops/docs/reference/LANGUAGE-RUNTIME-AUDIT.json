@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:09:56.701Z",
+  "generatedAt": "2026-05-28T03:14:20.019Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,11 +21,11 @@
   "languageCounts": [
     [
       "TypeScript",
-      190
+      205
     ],
     [
       "JavaScript",
-      158
+      143
     ],
     [
       "React JSX",
@@ -59,11 +59,11 @@
   "extensionCounts": [
     [
       ".ts",
-      190
+      205
     ],
     [
       ".js",
-      158
+      143
     ],
     [
       ".jsx",
@@ -1514,9 +1514,9 @@
       ],
       "tests": [
         "backend/test/importDecisionIntegrity.test.js",
-        "backend/test/importScaleSmoke.test.js",
-        "backend/test/importCsv.test.js",
-        "backend/test/productImportPolicies.test.js"
+        "backend/test/importScaleSmoke.test.ts",
+        "backend/test/importCsv.test.ts",
+        "backend/test/productImportPolicies.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
@@ -1525,15 +1525,15 @@
           "exists": true
         },
         {
-          "path": "backend/test/importScaleSmoke.test.js",
+          "path": "backend/test/importScaleSmoke.test.ts",
           "exists": true
         },
         {
-          "path": "backend/test/importCsv.test.js",
+          "path": "backend/test/importCsv.test.ts",
           "exists": true
         },
         {
-          "path": "backend/test/productImportPolicies.test.js",
+          "path": "backend/test/productImportPolicies.test.ts",
           "exists": true
         }
       ],
@@ -1587,7 +1587,7 @@
       "tests": [
         "backend/test/importDecisionIntegrity.test.js",
         "backend/test/routeContracts.test.js",
-        "backend/test/importScaleSmoke.test.js"
+        "backend/test/importScaleSmoke.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
@@ -1600,7 +1600,7 @@
           "exists": true
         },
         {
-          "path": "backend/test/importScaleSmoke.test.js",
+          "path": "backend/test/importScaleSmoke.test.ts",
           "exists": true
         }
       ],
@@ -1643,18 +1643,18 @@
       "rollback": "Inline the RFID apply db.prepare calls inside the product loop again; RFID confirmed quantity, movement, audit, and session status behavior remain unchanged.",
       "proof": [
         "npm.cmd --prefix backend run test:utils",
-        "node backend\\test\\rfidRoutes.test.js",
+        "node backend\\test\\rfidRoutes.test.ts",
         "node ops\\scripts\\backend\\schema-audit.ts"
       ],
       "tests": [
-        "backend/test/rfidRoutes.test.js",
+        "backend/test/rfidRoutes.test.ts",
         "backend/test/routeContracts.test.js",
         "backend/test/productBatchHierarchy.test.js"
       ],
       "targetExists": true,
       "testCoverage": [
         {
-          "path": "backend/test/rfidRoutes.test.js",
+          "path": "backend/test/rfidRoutes.test.ts",
           "exists": true
         },
         {

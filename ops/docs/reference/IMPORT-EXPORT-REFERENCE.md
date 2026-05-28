@@ -96,54 +96,54 @@ Code files documented: **506**
 | 84 | `backend/src/workers/mediaWorker.js` | 2 | 1 | 2 | 1 |
 | 85 | `backend/test/accessControl.test.js` | 2 | 0 | 1 | 0 |
 | 86 | `backend/test/analyticsRuntime.test.ts` | 2 | 0 | 1 | 0 |
-| 87 | `backend/test/authOtpGuards.test.js` | 2 | 0 | 1 | 0 |
+| 87 | `backend/test/authOtpGuards.test.ts` | 2 | 0 | 1 | 0 |
 | 88 | `backend/test/authSecurityFlow.test.js` | 8 | 0 | 1 | 0 |
 | 89 | `backend/test/backupDefaultDestination.test.ts` | 3 | 0 | 0 | 0 |
 | 90 | `backend/test/backupPerformanceHardening.test.js` | 3 | 0 | 0 | 0 |
 | 91 | `backend/test/backupRetention.test.js` | 5 | 0 | 1 | 0 |
 | 92 | `backend/test/backupSchema.test.js` | 4 | 0 | 1 | 0 |
 | 93 | `backend/test/branchStockSearch.test.js` | 6 | 0 | 0 | 0 |
-| 94 | `backend/test/contactOptions.test.js` | 2 | 0 | 1 | 0 |
-| 95 | `backend/test/dataPath.test.js` | 5 | 0 | 1 | 0 |
+| 94 | `backend/test/contactOptions.test.ts` | 2 | 0 | 1 | 0 |
+| 95 | `backend/test/dataPath.test.ts` | 5 | 0 | 1 | 0 |
 | 96 | `backend/test/defaultRoles.test.js` | 6 | 0 | 0 | 0 |
-| 97 | `backend/test/fileAssetStorageReconcile.test.js` | 2 | 0 | 1 | 0 |
+| 97 | `backend/test/fileAssetStorageReconcile.test.ts` | 2 | 0 | 1 | 0 |
 | 98 | `backend/test/fileAssetUsageCache.test.js` | 3 | 0 | 2 | 0 |
 | 99 | `backend/test/fileRouteSecurityFlow.test.js` | 6 | 0 | 0 | 0 |
 | 100 | `backend/test/fullAutomation.test.js` | 3 | 0 | 0 | 0 |
 | 101 | `backend/test/googleDriveSyncVersioning.test.js` | 4 | 0 | 1 | 0 |
 | 102 | `backend/test/idempotency.test.ts` | 2 | 0 | 1 | 0 |
-| 103 | `backend/test/importCsv.test.js` | 6 | 0 | 2 | 0 |
+| 103 | `backend/test/importCsv.test.ts` | 6 | 0 | 2 | 0 |
 | 104 | `backend/test/importDecisionIntegrity.test.js` | 3 | 0 | 0 | 0 |
 | 105 | `backend/test/importJobPerformanceHardening.test.ts` | 3 | 0 | 0 | 0 |
 | 106 | `backend/test/importJobStateMachine.test.js` | 8 | 0 | 4 | 0 |
-| 107 | `backend/test/importScaleSmoke.test.js` | 6 | 0 | 2 | 0 |
+| 107 | `backend/test/importScaleSmoke.test.ts` | 6 | 0 | 2 | 0 |
 | 108 | `backend/test/initials.test.ts` | 2 | 0 | 1 | 0 |
 | 109 | `backend/test/integrationDoctor.test.ts` | 2 | 0 | 1 | 0 |
-| 110 | `backend/test/inventorySettingsMediaContracts.test.js` | 3 | 0 | 0 | 0 |
+| 110 | `backend/test/inventorySettingsMediaContracts.test.ts` | 3 | 0 | 0 | 0 |
 | 111 | `backend/test/mediaOptimization.test.js` | 3 | 0 | 1 | 0 |
 | 112 | `backend/test/netSecurity.test.ts` | 2 | 0 | 1 | 0 |
 | 113 | `backend/test/notificationSummaryCache.test.js` | 2 | 0 | 1 | 0 |
-| 114 | `backend/test/offlineSecurity.test.js` | 3 | 0 | 0 | 0 |
+| 114 | `backend/test/offlineSecurity.test.ts` | 3 | 0 | 0 | 0 |
 | 115 | `backend/test/ownedGoogleAuth.test.js` | 4 | 0 | 1 | 0 |
 | 116 | `backend/test/permissionPolicy.test.ts` | 2 | 0 | 1 | 0 |
 | 117 | `backend/test/portalInventoryRegression.test.js` | 3 | 0 | 0 | 0 |
 | 118 | `backend/test/portalUtils.test.ts` | 2 | 0 | 1 | 0 |
-| 119 | `backend/test/postgresCutoverReadiness.test.js` | 3 | 0 | 1 | 0 |
+| 119 | `backend/test/postgresCutoverReadiness.test.ts` | 3 | 0 | 1 | 0 |
 | 120 | `backend/test/postgresDatabase.test.js` | 4 | 0 | 1 | 0 |
 | 121 | `backend/test/postgresQueryCompat.test.js` | 2 | 0 | 1 | 0 |
 | 122 | `backend/test/productBatchHierarchy.test.js` | 3 | 0 | 0 | 0 |
-| 123 | `backend/test/productExpiry.test.js` | 3 | 0 | 0 | 0 |
-| 124 | `backend/test/productImportPolicies.test.js` | 2 | 0 | 1 | 0 |
+| 123 | `backend/test/productExpiry.test.ts` | 3 | 0 | 0 | 0 |
+| 124 | `backend/test/productImportPolicies.test.ts` | 2 | 0 | 1 | 0 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 3 | 0 | 0 | 0 |
-| 126 | `backend/test/rfidRoutes.test.js` | 3 | 0 | 0 | 0 |
+| 126 | `backend/test/rfidRoutes.test.ts` | 3 | 0 | 0 | 0 |
 | 127 | `backend/test/routeContracts.test.js` | 10 | 0 | 5 | 0 |
-| 128 | `backend/test/runtimeCache.test.js` | 5 | 0 | 1 | 0 |
-| 129 | `backend/test/runtimeVersion.test.js` | 5 | 0 | 1 | 0 |
+| 128 | `backend/test/runtimeCache.test.ts` | 5 | 0 | 1 | 0 |
+| 129 | `backend/test/runtimeVersion.test.ts` | 5 | 0 | 1 | 0 |
 | 130 | `backend/test/schemaMetadata.test.js` | 2 | 0 | 1 | 0 |
 | 131 | `backend/test/serverUtils.test.js` | 3 | 0 | 2 | 0 |
 | 132 | `backend/test/settingsSnapshotObjectStorage.test.js` | 3 | 0 | 2 | 0 |
 | 133 | `backend/test/systemJobs.test.js` | 2 | 0 | 1 | 0 |
-| 134 | `backend/test/uploadSecurity.test.js` | 3 | 0 | 2 | 0 |
+| 134 | `backend/test/uploadSecurity.test.ts` | 3 | 0 | 2 | 0 |
 | 135 | `frontend/public/runtime-noise-guard.js` | 0 | 0 | 0 | 0 |
 | 136 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 | 0 | 0 | 0 |
 | 137 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js` | 0 | 0 | 0 | 0 |
@@ -652,7 +652,7 @@ Code files documented: **506**
   - `backend/src/middleware.js`
 - Referenced by (2)
   - `backend/src/routes/auth.js`
-  - `backend/test/authOtpGuards.test.js`
+  - `backend/test/authOtpGuards.test.ts`
 
 ### 3.5 `backend/src/backupSchema.js`
 
@@ -764,7 +764,7 @@ Code files documented: **506**
 - Referenced by (3)
   - `backend/src/routes/contacts.js`
   - `backend/src/services/importJobs.js`
-  - `backend/test/contactOptions.test.js`
+  - `backend/test/contactOptions.test.ts`
 
 ### 3.11 `backend/src/database.js`
 
@@ -828,7 +828,7 @@ Code files documented: **506**
   - `backend/src/routes/system/index.js`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/systemFsWorker.js`
-  - `backend/test/dataPath.test.js`
+  - `backend/test/dataPath.test.ts`
 
 ### 3.13 `backend/src/db/cutoverReadiness.js`
 
@@ -840,7 +840,7 @@ Code files documented: **506**
   - none
 - Referenced by (2)
   - `backend/src/routes/system/index.js`
-  - `backend/test/postgresCutoverReadiness.test.js`
+  - `backend/test/postgresCutoverReadiness.test.ts`
 
 ### 3.14 `backend/src/db/postgresQueryCompat.js`
 
@@ -889,10 +889,10 @@ Code files documented: **506**
   - `backend/src/routes/users.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.js`
-  - `backend/test/fileAssetStorageReconcile.test.js`
+  - `backend/test/fileAssetStorageReconcile.test.ts`
   - `backend/test/fileAssetUsageCache.test.js`
   - `backend/test/mediaOptimization.test.js`
-  - `backend/test/uploadSecurity.test.js`
+  - `backend/test/uploadSecurity.test.ts`
 
 ### 3.16 `backend/src/helpers.js`
 
@@ -955,8 +955,8 @@ Code files documented: **506**
   - none
 - Referenced by (3)
   - `backend/src/services/importJobs.js`
-  - `backend/test/importCsv.test.js`
-  - `backend/test/importScaleSmoke.test.js`
+  - `backend/test/importCsv.test.ts`
+  - `backend/test/importScaleSmoke.test.ts`
 
 ### 3.19 `backend/src/importParsing.js`
 
@@ -967,8 +967,8 @@ Code files documented: **506**
   - `backend/src/money.js`
 - Referenced by (3)
   - `backend/src/productImportPolicies.js`
-  - `backend/test/importCsv.test.js`
-  - `backend/test/importScaleSmoke.test.js`
+  - `backend/test/importCsv.test.ts`
+  - `backend/test/importScaleSmoke.test.ts`
 
 ### 3.20 `backend/src/initials.js`
 
@@ -1207,7 +1207,7 @@ Code files documented: **506**
 - Referenced by (3)
   - `backend/src/routes/products.js`
   - `backend/src/services/importJobs.js`
-  - `backend/test/productImportPolicies.test.js`
+  - `backend/test/productImportPolicies.test.ts`
 
 ### 3.34 `backend/src/requestContext.js`
 
@@ -1798,7 +1798,7 @@ Code files documented: **506**
   - `backend/src/helpers.js`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/runtime.js`
-  - `backend/test/runtimeCache.test.js`
+  - `backend/test/runtimeCache.test.ts`
 
 ### 3.59 `backend/src/runtimeState/index.js`
 
@@ -1829,7 +1829,7 @@ Code files documented: **506**
   - `backend/server.js`
   - `backend/src/routes/runtime.js`
   - `backend/src/services/googleDriveSync/index.js`
-  - `backend/test/runtimeVersion.test.js`
+  - `backend/test/runtimeVersion.test.ts`
 
 ### 3.61 `backend/src/schemaMetadata.js`
 
@@ -2192,7 +2192,7 @@ Code files documented: **506**
   - `backend/src/fileAssets.js`
   - `backend/src/middleware.js`
   - `backend/src/services/importJobs.js`
-  - `backend/test/uploadSecurity.test.js`
+  - `backend/test/uploadSecurity.test.ts`
 
 ### 3.82 `backend/src/websocket.js`
 
@@ -2256,7 +2256,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.87 `backend/test/authOtpGuards.test.js`
+### 3.87 `backend/test/authOtpGuards.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2350,7 +2350,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.94 `backend/test/contactOptions.test.js`
+### 3.94 `backend/test/contactOptions.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2361,7 +2361,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.95 `backend/test/dataPath.test.js`
+### 3.95 `backend/test/dataPath.test.ts`
 
 - Declared exports: none detected
 - Imports (5)
@@ -2390,7 +2390,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.97 `backend/test/fileAssetStorageReconcile.test.js`
+### 3.97 `backend/test/fileAssetStorageReconcile.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2465,7 +2465,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.103 `backend/test/importCsv.test.js`
+### 3.103 `backend/test/importCsv.test.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -2525,7 +2525,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.107 `backend/test/importScaleSmoke.test.js`
+### 3.107 `backend/test/importScaleSmoke.test.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -2563,7 +2563,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.110 `backend/test/inventorySettingsMediaContracts.test.js`
+### 3.110 `backend/test/inventorySettingsMediaContracts.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2609,7 +2609,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.114 `backend/test/offlineSecurity.test.js`
+### 3.114 `backend/test/offlineSecurity.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2668,7 +2668,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.119 `backend/test/postgresCutoverReadiness.test.js`
+### 3.119 `backend/test/postgresCutoverReadiness.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2716,7 +2716,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.123 `backend/test/productExpiry.test.js`
+### 3.123 `backend/test/productExpiry.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2728,7 +2728,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.124 `backend/test/productImportPolicies.test.js`
+### 3.124 `backend/test/productImportPolicies.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2751,7 +2751,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.126 `backend/test/rfidRoutes.test.js`
+### 3.126 `backend/test/rfidRoutes.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2786,7 +2786,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.128 `backend/test/runtimeCache.test.js`
+### 3.128 `backend/test/runtimeCache.test.ts`
 
 - Declared exports: none detected
 - Imports (5)
@@ -2800,7 +2800,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.129 `backend/test/runtimeVersion.test.js`
+### 3.129 `backend/test/runtimeVersion.test.ts`
 
 - Declared exports: none detected
 - Imports (5)
@@ -2862,7 +2862,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.134 `backend/test/uploadSecurity.test.js`
+### 3.134 `backend/test/uploadSecurity.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
