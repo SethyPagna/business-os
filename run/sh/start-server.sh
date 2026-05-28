@@ -9,7 +9,7 @@ LOG_DIR="$RUNTIME_DIR/logs"
 DATA_DIR="$ROOT/business-os-data"
 ENV_FILE="$BACKEND_DIR/.env"
 ECOSYSTEM="$ROOT/ops/config/ecosystem.config.js"
-PUBLIC_CHECK_SCRIPT="$ROOT/ops/scripts/runtime/smoke/check-public-url.mjs"
+PUBLIC_CHECK_SCRIPT="$ROOT/ops/scripts/runtime/smoke/check-public-url.ts"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }

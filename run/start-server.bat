@@ -474,7 +474,7 @@ set "PUBLIC_URL_OK="
 if not "!PUBLIC_URL_FOUND!"=="" (
     echo [INFO] Verifying public URL with Node HTTPS...
     set "BUSINESS_OS_STRICT_PUBLIC_INGRESS=1"
-    node "%ROOT%\ops\scripts\runtime\smoke\check-public-url.mjs" "!PUBLIC_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check.txt" 2>&1
+    node "%ROOT%\ops\scripts\runtime\smoke\check-public-url.ts" "!PUBLIC_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check.txt" 2>&1
     if not errorlevel 1 (
         if /I "!PUBLIC_URL_KIND!"=="cloudflare" (
             set "PUBLIC_URL_OK=1"
@@ -498,7 +498,7 @@ if not "!PUBLIC_URL_FOUND!"=="" (
                 powershell -NoProfile -Command "& '!TAILSCALE_CMD!' serve reset" >nul 2>&1
                 powershell -NoProfile -Command "& '!TAILSCALE_CMD!' funnel --bg --yes 'http://127.0.0.1:%PORT%'" >nul 2>&1
                 set "BUSINESS_OS_STRICT_PUBLIC_INGRESS=1"
-                node "%ROOT%\ops\scripts\runtime\smoke\check-public-url.mjs" "!PUBLIC_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check_retry.txt" 2>&1
+                node "%ROOT%\ops\scripts\runtime\smoke\check-public-url.ts" "!PUBLIC_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check_retry.txt" 2>&1
                 if not errorlevel 1 (
                     if defined TAILSCALE_NET_OK (
                         set "PUBLIC_URL_OK=1"

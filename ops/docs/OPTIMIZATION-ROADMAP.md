@@ -2884,7 +2884,7 @@ Cleanup checkpoint:
   `finally` cleanup wiring. Phase 29 repeat compares this coverage object so
   future smoke/live-test changes must preserve cleanup behavior.
 - Move 237 makes live smoke tests self-cleaning by prefix:
-  `ops/scripts/runtime/smoke/live-smoke.mjs` now runs
+  `ops/scripts/runtime/smoke/live-smoke.ts` now runs
   `cleanup-test-data.ts --prefix "<QA Smoke seed>" --apply` in `finally` and
   writes `ops/runtime/reports/live-smoke-cleanup-latest.json`. The cleanup
   script now includes prefix-based import job file matching and generated
@@ -5049,3 +5049,11 @@ Move 453 status:
   pruning, and local/R2 backup retention behavior while ops package scripts,
   full automation, smoke/audit cleanup callers, Docker release guardrails, and
   backend automation tests move to the TypeScript paths.
+
+Move 454 status:
+- Move 454 converts runtime smoke entrypoints to TypeScript.
+  `check-public-url.ts` keeps the same local/public URL and optional public
+  ingress probes, while `live-smoke.ts` keeps the same authenticated
+  product/inventory/sale/return flow and finally-scoped cleanup. Start-server
+  wrappers, backend `verify:live-smoke`, Docker release guardrails, and backend
+  automation tests now point at the TypeScript smoke paths.

@@ -1,15 +1,14 @@
 /* eslint-disable no-console */
-import fs from 'node:fs/promises'
-import os from 'node:os'
-import path from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import { performance } from 'node:perf_hooks'
+const fs = require('node:fs/promises')
+const os = require('node:os')
+const path = require('node:path')
+const { spawnSync } = require('node:child_process')
+const { performance } = require('node:perf_hooks')
 
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
 const USERNAME = process.env.BOS_USERNAME || 'admin'
 const PASSWORD = process.env.BOS_PASSWORD || 'Admin123456!'
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../../..')
 const CLEANUP_TEST_DATA = String(process.env.BOS_SMOKE_CLEANUP || '1').trim() !== '0'
 let smokeSeed = ''
 

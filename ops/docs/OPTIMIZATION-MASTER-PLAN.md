@@ -33,7 +33,7 @@ Every implementation session should follow this loop:
    - `import-worker`
    - `media-worker`
 5. Run live verification:
-   - `ops/scripts/runtime/live-smoke.mjs`
+   - `ops/scripts/runtime/smoke/live-smoke.ts`
    - route-scoped deep audit on the affected route
    - route-scoped browser action smoke when the route has clicks, tabs, filters,
      or write-entry actions

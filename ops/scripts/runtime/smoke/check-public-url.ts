@@ -1,5 +1,5 @@
-import https from 'node:https'
-import net from 'node:net'
+const https = require('node:https')
+const net = require('node:net')
 
 const DEFAULT_TIMEOUT_MS = 15000
 const PUBLIC_DNS_TIMEOUT_MS = 4000
@@ -161,7 +161,7 @@ async function main() {
   const [, , rawBaseUrl, ...rawPaths] = process.argv
   const baseUrl = normalizeBaseUrl(rawBaseUrl)
   if (!baseUrl) {
-    console.error('Usage: node ops/scripts/runtime/smoke/check-public-url.mjs <baseUrl> [path...]')
+    console.error('Usage: node ops/scripts/runtime/smoke/check-public-url.ts <baseUrl> [path...]')
     process.exit(1)
   }
 

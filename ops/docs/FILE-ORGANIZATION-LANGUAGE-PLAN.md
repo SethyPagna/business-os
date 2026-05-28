@@ -1976,7 +1976,7 @@ Decision rule:
     cleanup in `finally`. Phase 29 repeat now compares this object across cycles
     so future audit/test rewires cannot silently reintroduce test data buildup.
 237. Make live smoke tests self-cleaning by prefix. Done:
-    `ops/scripts/runtime/smoke/live-smoke.mjs` now calls the guarded
+    `ops/scripts/runtime/smoke/live-smoke.ts` now calls the guarded
     `cleanup-test-data.ts` path in `finally` with the exact `QA Smoke ...`
     prefix it created, writing
     `ops/runtime/reports/live-smoke-cleanup-latest.json`. The cleanup script now
@@ -2085,7 +2085,7 @@ Decision rule:
     repeat catches either a missing `prune-storage:preview` package command or a
     future regression that lets preview-named reports mutate runtime storage.
 250. Make live-smoke lookup residue prefix-scoped. Done:
-    `ops/scripts/runtime/smoke/live-smoke.mjs` now writes the unique `QA Smoke`
+    `ops/scripts/runtime/smoke/live-smoke.ts` now writes the unique `QA Smoke`
     seed into product category and brand fields, including imported smoke CSV
     rows, instead of using generic `Smoke` metadata. `cleanup-test-data.ts`
     now counts and removes empty QA-prefixed category/unit lookup rows in both
@@ -3557,6 +3557,12 @@ Decision rule:
     hygiene orchestration now point at the TypeScript paths while preserving
     guarded dry-run defaults, prefix-scoped QA cleanup, report retention, and
     backup prune behavior.
+444. Convert runtime smoke entrypoints to TypeScript. Done:
+    `check-public-url.ts` and `live-smoke.ts` replace the smoke `.mjs`
+    entrypoints. The Windows and shell start-server public URL checks, backend
+    `verify:live-smoke` script, Docker release guardrail, and backend
+    automation tests now use the TypeScript paths while keeping public ingress
+    probing, live sale/return/stock workflows, and smoke-test cleanup behavior.
 
 ## Safety Gates
 
