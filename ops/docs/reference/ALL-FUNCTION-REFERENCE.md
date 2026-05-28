@@ -94,28 +94,28 @@ Code files scanned: **506**
 | 82 | `backend/src/websocket.js` | 1 |
 | 83 | `backend/src/workers/importWorker.js` | 2 |
 | 84 | `backend/src/workers/mediaWorker.js` | 2 |
-| 85 | `backend/test/accessControl.test.js` | 2 |
+| 85 | `backend/test/accessControl.test.ts` | 2 |
 | 86 | `backend/test/analyticsRuntime.test.ts` | 1 |
 | 87 | `backend/test/authOtpGuards.test.ts` | 1 |
-| 88 | `backend/test/authSecurityFlow.test.js` | 14 |
+| 88 | `backend/test/authSecurityFlow.test.ts` | 14 |
 | 89 | `backend/test/backupDefaultDestination.test.ts` | 0 |
-| 90 | `backend/test/backupPerformanceHardening.test.js` | 1 |
+| 90 | `backend/test/backupPerformanceHardening.test.ts` | 1 |
 | 91 | `backend/test/backupRetention.test.ts` | 1 |
 | 92 | `backend/test/backupSchema.test.ts` | 1 |
-| 93 | `backend/test/branchStockSearch.test.js` | 10 |
+| 93 | `backend/test/branchStockSearch.test.ts` | 10 |
 | 94 | `backend/test/contactOptions.test.ts` | 1 |
 | 95 | `backend/test/dataPath.test.ts` | 2 |
-| 96 | `backend/test/defaultRoles.test.js` | 8 |
+| 96 | `backend/test/defaultRoles.test.ts` | 8 |
 | 97 | `backend/test/fileAssetStorageReconcile.test.ts` | 1 |
-| 98 | `backend/test/fileAssetUsageCache.test.js` | 1 |
-| 99 | `backend/test/fileRouteSecurityFlow.test.js` | 9 |
+| 98 | `backend/test/fileAssetUsageCache.test.ts` | 1 |
+| 99 | `backend/test/fileRouteSecurityFlow.test.ts` | 9 |
 | 100 | `backend/test/fullAutomation.test.js` | 2 |
 | 101 | `backend/test/googleDriveSyncVersioning.test.ts` | 1 |
 | 102 | `backend/test/idempotency.test.ts` | 1 |
 | 103 | `backend/test/importCsv.test.ts` | 2 |
-| 104 | `backend/test/importDecisionIntegrity.test.js` | 0 |
+| 104 | `backend/test/importDecisionIntegrity.test.ts` | 0 |
 | 105 | `backend/test/importJobPerformanceHardening.test.ts` | 1 |
-| 106 | `backend/test/importJobStateMachine.test.js` | 4 |
+| 106 | `backend/test/importJobStateMachine.test.ts` | 4 |
 | 107 | `backend/test/importScaleSmoke.test.ts` | 3 |
 | 108 | `backend/test/initials.test.ts` | 0 |
 | 109 | `backend/test/integrationDoctor.test.ts` | 1 |
@@ -136,12 +136,12 @@ Code files scanned: **506**
 | 124 | `backend/test/productImportPolicies.test.ts` | 1 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 0 |
 | 126 | `backend/test/rfidRoutes.test.ts` | 1 |
-| 127 | `backend/test/routeContracts.test.js` | 2 |
+| 127 | `backend/test/routeContracts.test.ts` | 2 |
 | 128 | `backend/test/runtimeCache.test.ts` | 2 |
 | 129 | `backend/test/runtimeVersion.test.ts` | 1 |
 | 130 | `backend/test/schemaMetadata.test.ts` | 3 |
-| 131 | `backend/test/serverUtils.test.js` | 2 |
-| 132 | `backend/test/settingsSnapshotObjectStorage.test.js` | 4 |
+| 131 | `backend/test/serverUtils.test.ts` | 2 |
+| 132 | `backend/test/settingsSnapshotObjectStorage.test.ts` | 4 |
 | 133 | `backend/test/systemJobs.test.ts` | 3 |
 | 134 | `backend/test/uploadSecurity.test.ts` | 1 |
 | 135 | `frontend/public/runtime-noise-guard.js` | 6 |
@@ -2405,7 +2405,7 @@ Code files scanned: **506**
 | 1 | `start` | function | 10 |
 | 2 | `shutdown` | function | 15 |
 
-### 3.85 `backend/test/accessControl.test.js`
+### 3.85 `backend/test/accessControl.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2424,7 +2424,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 
-### 3.88 `backend/test/authSecurityFlow.test.js`
+### 3.88 `backend/test/authSecurityFlow.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2447,7 +2447,7 @@ Code files scanned: **506**
 
 - No top-level named symbols detected.
 
-### 3.90 `backend/test/backupPerformanceHardening.test.js`
+### 3.90 `backend/test/backupPerformanceHardening.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2465,7 +2465,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 17 |
 
-### 3.93 `backend/test/branchStockSearch.test.js`
+### 3.93 `backend/test/branchStockSearch.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2493,7 +2493,7 @@ Code files scanned: **506**
 | 1 | `runTest` | function | 16 |
 | 2 | `makeTempRoot` | function | 27 |
 
-### 3.96 `backend/test/defaultRoles.test.js`
+### 3.96 `backend/test/defaultRoles.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2512,13 +2512,13 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.98 `backend/test/fileAssetUsageCache.test.js`
+### 3.98 `backend/test/fileAssetUsageCache.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.99 `backend/test/fileRouteSecurityFlow.test.js`
+### 3.99 `backend/test/fileRouteSecurityFlow.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2558,7 +2558,7 @@ Code files scanned: **506**
 | 1 | `runTest` | function | 13 |
 | 2 | `collectBatches` | function | 26 |
 
-### 3.104 `backend/test/importDecisionIntegrity.test.js`
+### 3.104 `backend/test/importDecisionIntegrity.test.ts`
 
 - No top-level named symbols detected.
 
@@ -2568,7 +2568,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.106 `backend/test/importJobStateMachine.test.js`
+### 3.106 `backend/test/importJobStateMachine.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2702,7 +2702,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.127 `backend/test/routeContracts.test.js`
+### 3.127 `backend/test/routeContracts.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2730,14 +2730,14 @@ Code files scanned: **506**
 | 2 | `loadSchemaMetadataWithColumns` | function | 18 |
 | 3 | `cleanup` | const arrow | 46 |
 
-### 3.131 `backend/test/serverUtils.test.js`
+### 3.131 `backend/test/serverUtils.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 22 |
 | 2 | `collectHeaders` | const arrow | 230 |
 
-### 3.132 `backend/test/settingsSnapshotObjectStorage.test.js`
+### 3.132 `backend/test/settingsSnapshotObjectStorage.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

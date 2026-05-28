@@ -94,28 +94,28 @@ Code files documented: **506**
 | 82 | `backend/src/websocket.js` | 5 | 1 | 3 | 1 |
 | 83 | `backend/src/workers/importWorker.js` | 2 | 1 | 2 | 1 |
 | 84 | `backend/src/workers/mediaWorker.js` | 2 | 1 | 2 | 1 |
-| 85 | `backend/test/accessControl.test.js` | 2 | 0 | 1 | 0 |
+| 85 | `backend/test/accessControl.test.ts` | 2 | 0 | 1 | 0 |
 | 86 | `backend/test/analyticsRuntime.test.ts` | 2 | 0 | 1 | 0 |
 | 87 | `backend/test/authOtpGuards.test.ts` | 2 | 0 | 1 | 0 |
-| 88 | `backend/test/authSecurityFlow.test.js` | 8 | 0 | 1 | 0 |
+| 88 | `backend/test/authSecurityFlow.test.ts` | 8 | 0 | 1 | 0 |
 | 89 | `backend/test/backupDefaultDestination.test.ts` | 3 | 0 | 0 | 0 |
-| 90 | `backend/test/backupPerformanceHardening.test.js` | 3 | 0 | 0 | 0 |
+| 90 | `backend/test/backupPerformanceHardening.test.ts` | 3 | 0 | 0 | 0 |
 | 91 | `backend/test/backupRetention.test.ts` | 5 | 0 | 1 | 0 |
 | 92 | `backend/test/backupSchema.test.ts` | 4 | 0 | 1 | 0 |
-| 93 | `backend/test/branchStockSearch.test.js` | 6 | 0 | 0 | 0 |
+| 93 | `backend/test/branchStockSearch.test.ts` | 6 | 0 | 0 | 0 |
 | 94 | `backend/test/contactOptions.test.ts` | 2 | 0 | 1 | 0 |
 | 95 | `backend/test/dataPath.test.ts` | 5 | 0 | 1 | 0 |
-| 96 | `backend/test/defaultRoles.test.js` | 6 | 0 | 0 | 0 |
+| 96 | `backend/test/defaultRoles.test.ts` | 6 | 0 | 0 | 0 |
 | 97 | `backend/test/fileAssetStorageReconcile.test.ts` | 2 | 0 | 1 | 0 |
-| 98 | `backend/test/fileAssetUsageCache.test.js` | 3 | 0 | 2 | 0 |
-| 99 | `backend/test/fileRouteSecurityFlow.test.js` | 6 | 0 | 0 | 0 |
+| 98 | `backend/test/fileAssetUsageCache.test.ts` | 3 | 0 | 2 | 0 |
+| 99 | `backend/test/fileRouteSecurityFlow.test.ts` | 6 | 0 | 0 | 0 |
 | 100 | `backend/test/fullAutomation.test.js` | 3 | 0 | 0 | 0 |
 | 101 | `backend/test/googleDriveSyncVersioning.test.ts` | 4 | 0 | 1 | 0 |
 | 102 | `backend/test/idempotency.test.ts` | 2 | 0 | 1 | 0 |
 | 103 | `backend/test/importCsv.test.ts` | 6 | 0 | 2 | 0 |
-| 104 | `backend/test/importDecisionIntegrity.test.js` | 3 | 0 | 0 | 0 |
+| 104 | `backend/test/importDecisionIntegrity.test.ts` | 3 | 0 | 0 | 0 |
 | 105 | `backend/test/importJobPerformanceHardening.test.ts` | 3 | 0 | 0 | 0 |
-| 106 | `backend/test/importJobStateMachine.test.js` | 8 | 0 | 4 | 0 |
+| 106 | `backend/test/importJobStateMachine.test.ts` | 8 | 0 | 4 | 0 |
 | 107 | `backend/test/importScaleSmoke.test.ts` | 6 | 0 | 2 | 0 |
 | 108 | `backend/test/initials.test.ts` | 2 | 0 | 1 | 0 |
 | 109 | `backend/test/integrationDoctor.test.ts` | 2 | 0 | 1 | 0 |
@@ -136,12 +136,12 @@ Code files documented: **506**
 | 124 | `backend/test/productImportPolicies.test.ts` | 2 | 0 | 1 | 0 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 3 | 0 | 0 | 0 |
 | 126 | `backend/test/rfidRoutes.test.ts` | 3 | 0 | 0 | 0 |
-| 127 | `backend/test/routeContracts.test.js` | 10 | 0 | 5 | 0 |
+| 127 | `backend/test/routeContracts.test.ts` | 10 | 0 | 5 | 0 |
 | 128 | `backend/test/runtimeCache.test.ts` | 5 | 0 | 1 | 0 |
 | 129 | `backend/test/runtimeVersion.test.ts` | 5 | 0 | 1 | 0 |
 | 130 | `backend/test/schemaMetadata.test.ts` | 2 | 0 | 1 | 0 |
-| 131 | `backend/test/serverUtils.test.js` | 3 | 0 | 2 | 0 |
-| 132 | `backend/test/settingsSnapshotObjectStorage.test.js` | 3 | 0 | 2 | 0 |
+| 131 | `backend/test/serverUtils.test.ts` | 3 | 0 | 2 | 0 |
+| 132 | `backend/test/settingsSnapshotObjectStorage.test.ts` | 3 | 0 | 2 | 0 |
 | 133 | `backend/test/systemJobs.test.ts` | 2 | 0 | 1 | 0 |
 | 134 | `backend/test/uploadSecurity.test.ts` | 3 | 0 | 2 | 0 |
 | 135 | `frontend/public/runtime-noise-guard.js` | 0 | 0 | 0 | 0 |
@@ -627,7 +627,7 @@ Code files documented: **506**
   - `backend/src/middleware.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/system/index.js`
-  - `backend/test/accessControl.test.js`
+  - `backend/test/accessControl.test.ts`
 
 ### 3.3 `backend/src/analytics/duckdbRuntime.js`
 
@@ -730,8 +730,8 @@ Code files documented: **506**
   - `backend/src/services/integrationDoctor.js`
   - `backend/src/services/mediaQueue.js`
   - `backend/src/settingsSnapshot.js`
-  - `backend/test/importJobStateMachine.test.js`
-  - `backend/test/serverUtils.test.js`
+  - `backend/test/importJobStateMachine.test.ts`
+  - `backend/test/serverUtils.test.ts`
 
 ### 3.9 `backend/src/conflictControl.js`
 
@@ -811,9 +811,9 @@ Code files documented: **506**
   - `backend/src/systemJobs.js`
   - `backend/src/workers/importWorker.js`
   - `backend/src/workers/mediaWorker.js`
-  - `backend/test/authSecurityFlow.test.js`
-  - `backend/test/fileAssetUsageCache.test.js`
-  - `backend/test/importJobStateMachine.test.js`
+  - `backend/test/authSecurityFlow.test.ts`
+  - `backend/test/fileAssetUsageCache.test.ts`
+  - `backend/test/importJobStateMachine.test.ts`
 
 ### 3.12 `backend/src/dataPath/index.js`
 
@@ -890,7 +890,7 @@ Code files documented: **506**
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.js`
   - `backend/test/fileAssetStorageReconcile.test.ts`
-  - `backend/test/fileAssetUsageCache.test.js`
+  - `backend/test/fileAssetUsageCache.test.ts`
   - `backend/test/mediaOptimization.test.ts`
   - `backend/test/uploadSecurity.test.ts`
 
@@ -1294,7 +1294,7 @@ Code files documented: **506**
   - `backend/src/settingsSnapshot.js`
 - Referenced by (2)
   - `backend/server.js`
-  - `backend/test/routeContracts.test.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.38 `backend/src/routes/branches.js`
 
@@ -1461,7 +1461,7 @@ Code files documented: **506**
   - `backend/src/schemaMetadata.js`
 - Referenced by (2)
   - `backend/server.js`
-  - `backend/test/routeContracts.test.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.46 `backend/src/routes/notifications.js`
 
@@ -1526,7 +1526,7 @@ Code files documented: **506**
   - `backend/src/settingsSnapshot.js`
 - Referenced by (2)
   - `backend/server.js`
-  - `backend/test/routeContracts.test.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.49 `backend/src/routes/products.js`
 
@@ -1572,7 +1572,7 @@ Code files documented: **506**
   - `backend/src/settingsSnapshot.js`
 - Referenced by (2)
   - `backend/server.js`
-  - `backend/test/routeContracts.test.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.50 `backend/src/routes/returns.js`
 
@@ -1737,7 +1737,7 @@ Code files documented: **506**
   - `backend/src/systemJobs.js`
 - Referenced by (2)
   - `backend/server.js`
-  - `backend/test/routeContracts.test.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.56 `backend/src/routes/units.js`
 
@@ -1873,7 +1873,7 @@ Code files documented: **506**
   - `backend/server.js`
   - `backend/src/routes/sync.js`
   - `backend/src/websocket.js`
-  - `backend/test/serverUtils.test.js`
+  - `backend/test/serverUtils.test.ts`
 
 ### 3.64 `backend/src/services/aiGateway.js`
 
@@ -2025,7 +2025,7 @@ Code files documented: **506**
   - `backend/src/routes/system/index.js`
   - `backend/src/services/integrationDoctor.js`
   - `backend/src/workers/importWorker.js`
-  - `backend/test/importJobStateMachine.test.js`
+  - `backend/test/importJobStateMachine.test.ts`
 
 ### 3.71 `backend/src/services/integrationDoctor.js`
 
@@ -2072,7 +2072,7 @@ Code files documented: **506**
   - `backend/src/routes/runtime.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/workers/mediaWorker.js`
-  - `backend/test/importJobStateMachine.test.js`
+  - `backend/test/importJobStateMachine.test.ts`
 
 ### 3.73 `backend/src/services/portalAi.js`
 
@@ -2131,7 +2131,7 @@ Code files documented: **506**
   - `backend/src/routes/products.js`
   - `backend/src/routes/settings.js`
   - `backend/src/uploadReferenceCleanup.js`
-  - `backend/test/settingsSnapshotObjectStorage.test.js`
+  - `backend/test/settingsSnapshotObjectStorage.test.ts`
 
 ### 3.77 `backend/src/storage/organizationFolders.js`
 
@@ -2178,7 +2178,7 @@ Code files documented: **506**
   - `backend/src/settingsSnapshot.js`
 - Referenced by (2)
   - `backend/src/fileAssets.js`
-  - `backend/test/settingsSnapshotObjectStorage.test.js`
+  - `backend/test/settingsSnapshotObjectStorage.test.ts`
 
 ### 3.81 `backend/src/uploadSecurity.js`
 
@@ -2234,7 +2234,7 @@ Code files documented: **506**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.85 `backend/test/accessControl.test.js`
+### 3.85 `backend/test/accessControl.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2267,7 +2267,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.88 `backend/test/authSecurityFlow.test.js`
+### 3.88 `backend/test/authSecurityFlow.test.ts`
 
 - Declared exports: none detected
 - Imports (8)
@@ -2296,7 +2296,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.90 `backend/test/backupPerformanceHardening.test.js`
+### 3.90 `backend/test/backupPerformanceHardening.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2335,7 +2335,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.93 `backend/test/branchStockSearch.test.js`
+### 3.93 `backend/test/branchStockSearch.test.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -2375,7 +2375,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.96 `backend/test/defaultRoles.test.js`
+### 3.96 `backend/test/defaultRoles.test.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -2401,7 +2401,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.98 `backend/test/fileAssetUsageCache.test.js`
+### 3.98 `backend/test/fileAssetUsageCache.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2414,7 +2414,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.99 `backend/test/fileRouteSecurityFlow.test.js`
+### 3.99 `backend/test/fileRouteSecurityFlow.test.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -2481,7 +2481,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.104 `backend/test/importDecisionIntegrity.test.js`
+### 3.104 `backend/test/importDecisionIntegrity.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2505,7 +2505,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.106 `backend/test/importJobStateMachine.test.js`
+### 3.106 `backend/test/importJobStateMachine.test.ts`
 
 - Declared exports: none detected
 - Imports (8)
@@ -2763,7 +2763,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.127 `backend/test/routeContracts.test.js`
+### 3.127 `backend/test/routeContracts.test.ts`
 
 - Declared exports: none detected
 - Imports (10)
@@ -2825,7 +2825,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.131 `backend/test/serverUtils.test.js`
+### 3.131 `backend/test/serverUtils.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2838,7 +2838,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.132 `backend/test/settingsSnapshotObjectStorage.test.js`
+### 3.132 `backend/test/settingsSnapshotObjectStorage.test.ts`
 
 - Declared exports: none detected
 - Imports (3)

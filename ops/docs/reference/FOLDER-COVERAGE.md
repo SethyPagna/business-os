@@ -424,28 +424,28 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `accessControl.test.js` | Project source/support file |
+| 1 | `accessControl.test.ts` | Project source/support file |
 | 2 | `analyticsRuntime.test.ts` | Project source/support file |
 | 3 | `authOtpGuards.test.ts` | Project source/support file |
-| 4 | `authSecurityFlow.test.js` | Project source/support file |
+| 4 | `authSecurityFlow.test.ts` | Project source/support file |
 | 5 | `backupDefaultDestination.test.ts` | Project source/support file |
-| 6 | `backupPerformanceHardening.test.js` | Project source/support file |
+| 6 | `backupPerformanceHardening.test.ts` | Project source/support file |
 | 7 | `backupRetention.test.ts` | Project source/support file |
 | 8 | `backupSchema.test.ts` | Project source/support file |
-| 9 | `branchStockSearch.test.js` | Project source/support file |
+| 9 | `branchStockSearch.test.ts` | Project source/support file |
 | 10 | `contactOptions.test.ts` | Project source/support file |
 | 11 | `dataPath.test.ts` | Project source/support file |
-| 12 | `defaultRoles.test.js` | Project source/support file |
+| 12 | `defaultRoles.test.ts` | Project source/support file |
 | 13 | `fileAssetStorageReconcile.test.ts` | Project source/support file |
-| 14 | `fileAssetUsageCache.test.js` | Project source/support file |
-| 15 | `fileRouteSecurityFlow.test.js` | Project source/support file |
+| 14 | `fileAssetUsageCache.test.ts` | Project source/support file |
+| 15 | `fileRouteSecurityFlow.test.ts` | Project source/support file |
 | 16 | `fullAutomation.test.js` | Project source/support file |
 | 17 | `googleDriveSyncVersioning.test.ts` | Project source/support file |
 | 18 | `idempotency.test.ts` | Project source/support file |
 | 19 | `importCsv.test.ts` | Project source/support file |
-| 20 | `importDecisionIntegrity.test.js` | Project source/support file |
+| 20 | `importDecisionIntegrity.test.ts` | Project source/support file |
 | 21 | `importJobPerformanceHardening.test.ts` | Project source/support file |
-| 22 | `importJobStateMachine.test.js` | Project source/support file |
+| 22 | `importJobStateMachine.test.ts` | Project source/support file |
 | 23 | `importScaleSmoke.test.ts` | Project source/support file |
 | 24 | `initials.test.ts` | Project source/support file |
 | 25 | `integrationDoctor.test.ts` | Project source/support file |
@@ -466,12 +466,12 @@ Total folders documented: **81**
 | 40 | `productImportPolicies.test.ts` | Project source/support file |
 | 41 | `productSearchPagination.test.ts` | Project source/support file |
 | 42 | `rfidRoutes.test.ts` | Project source/support file |
-| 43 | `routeContracts.test.js` | Project source/support file |
+| 43 | `routeContracts.test.ts` | Project source/support file |
 | 44 | `runtimeCache.test.ts` | Project source/support file |
 | 45 | `runtimeVersion.test.ts` | Project source/support file |
 | 46 | `schemaMetadata.test.ts` | Project source/support file |
-| 47 | `serverUtils.test.js` | Project source/support file |
-| 48 | `settingsSnapshotObjectStorage.test.js` | Project source/support file |
+| 47 | `serverUtils.test.ts` | Project source/support file |
+| 48 | `settingsSnapshotObjectStorage.test.ts` | Project source/support file |
 | 49 | `systemJobs.test.ts` | Project source/support file |
 | 50 | `uploadSecurity.test.ts` | Project source/support file |
 
