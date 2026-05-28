@@ -1,10 +1,41 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 
-import fs from 'node:fs'
-import path from 'node:path'
+const fs = require('node:fs')
+const path = require('node:path')
 
-function parseArgs(argv) {
+type DiagnosticsOptions = {
+  baseUrl: string
+  publicUrl: string
+  adminUrl: string
+  output: string
+  skipIfUnavailable: boolean
+}
+
+type ResponseProbe = {
+  ok: boolean
+  status: number
+  ms: number
+  contentType: string
+  json: unknown
+  textSample?: string
+  error?: string
+}
+
+type DiagnosticsReport = {
+  generatedAt: string
+  baseUrl: string
+  publicUrl: string | null
+  adminUrl: string | null
+  status: 'passed' | 'failed' | 'skipped'
+  reason?: string
+  failures: string[]
+  local: Record<string, ResponseProbe>
+  remote: Record<string, ResponseProbe>
+  checklist: Record<string, boolean>
+}
+
+function parseArgs(argv: string[]): DiagnosticsOptions {
   const options = {
     baseUrl: String(argv[2] || 'http://127.0.0.1:4000').replace(/\/$/, ''),
     publicUrl: '',
@@ -30,7 +61,7 @@ function parseArgs(argv) {
   return options
 }
 
-async function readResponse(url, timeoutMs = 10_000) {
+async function readResponse(url: string, timeoutMs = 10_000): Promise<ResponseProbe> {
   const startedAt = Date.now()
   try {
     const response = await fetch(url, {
@@ -41,7 +72,7 @@ async function readResponse(url, timeoutMs = 10_000) {
     const text = await response.text().catch(() => '')
     let json = null
     if (/json/i.test(contentType)) {
-      try { json = JSON.parse(text) } catch (_) {}
+      try { json = JSON.parse(text) } catch {}
     }
     return {
       ok: response.ok,
@@ -63,27 +94,31 @@ async function readResponse(url, timeoutMs = 10_000) {
   }
 }
 
-function hasBuildInfo(value) {
+function hasBuildInfo(value: unknown): boolean {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : null
   return Boolean(
-    value &&
-    typeof value === 'object' &&
-    String(value.hash || '').trim() &&
-    String(value.revision || '').trim(),
+    record &&
+    String(record.hash || '').trim() &&
+    String(record.revision || '').trim(),
   )
 }
 
-function mkdirForFile(filePath) {
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function mkdirForFile(filePath: string): void {
   if (!filePath) return
   fs.mkdirSync(path.dirname(path.resolve(filePath)), { recursive: true })
 }
 
-function writeReport(options, report) {
+function writeReport(options: DiagnosticsOptions, report: DiagnosticsReport): void {
   if (!options.output) return
   mkdirForFile(options.output)
   fs.writeFileSync(options.output, `${JSON.stringify(report, null, 2)}\n`)
 }
 
-async function main() {
+async function main(): Promise<void> {
   const options = parseArgs(process.argv)
   const local = {
     health: await readResponse(`${options.baseUrl}/health`),
@@ -120,8 +155,11 @@ async function main() {
   if (options.publicUrl) remote.publicHealth = await readResponse(`${options.publicUrl}/health`, 15_000)
   if (options.adminUrl) remote.adminHealth = await readResponse(`${options.adminUrl}/health`, 15_000)
 
-  const healthRuntime = local.health.json?.runtime || local.health.json?.data?.runtime || null
-  const runtimeData = local.runtimeVersion.json?.data || local.runtimeVersion.json || null
+  const healthJson = asRecord(local.health.json)
+  const healthData = asRecord(healthJson.data)
+  const healthRuntime = healthJson.runtime || healthData.runtime || null
+  const runtimeVersionJson = asRecord(local.runtimeVersion.json)
+  const runtimeData = runtimeVersionJson.data || local.runtimeVersion.json || null
   const buildManifest = local.buildManifest.json || null
   const failures = []
 

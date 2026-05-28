@@ -27,11 +27,11 @@ $DockerAppLog = Join-Path $LogDir 'docker-compose-app.log'
 $DockerWorkerLog = Join-Path $LogDir 'docker-compose-workers.log'
 $CloudflaredLog = Join-Path $LogDir 'cloudflared.log'
 $RouteContractLog = Join-Path $LogDir 'route-contract.log'
-$PostStartDiagnosticsScript = Join-Path $Root 'ops\scripts\runtime\smoke\post-start-diagnostics.mjs'
+$PostStartDiagnosticsScript = Join-Path $Root 'ops\scripts\runtime\smoke\post-start-diagnostics.ts'
 $PostStartDiagnosticsReport = Join-Path $LogDir 'post-start-diagnostics.json'
 $PostStartDiagnosticsLog = Join-Path $LogDir 'post-start-diagnostics.log'
 $Bootstrap = Join-Path $Root 'ops\scripts\powershell\runtime-bootstrap.ps1'
-$RouteContractScript = Join-Path $Root 'ops\scripts\runtime\smoke\check-route-contract.mjs'
+$RouteContractScript = Join-Path $Root 'ops\scripts\runtime\smoke\check-route-contract.ts'
 
 New-Item -ItemType Directory -Force -Path $LogDir, $DockerConfig | Out-Null
 Add-Content -LiteralPath $RunLog -Value "[$(Get-Date -Format s)] Runtime start requested"

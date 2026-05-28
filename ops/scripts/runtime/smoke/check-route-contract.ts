@@ -5,7 +5,15 @@ const baseUrl = String(process.argv[2] || 'http://127.0.0.1:4000').replace(/\/$/
 const args = new Set(process.argv.slice(3))
 const skipIfUnavailable = args.has('--skip-if-unavailable')
 
-const routes = [
+type RouteContract = {
+  name: string
+  path: string
+  method?: string
+  allowed: Set<number>
+  public?: boolean
+}
+
+const routes: RouteContract[] = [
   { name: 'health', path: '/health', allowed: new Set([200]), public: true },
   { name: 'products search', path: '/api/products/search?page=1&pageSize=1', allowed: new Set([200, 401, 403]) },
   { name: 'products filters', path: '/api/products/filters', allowed: new Set([200, 401, 403]) },
@@ -24,12 +32,12 @@ const routes = [
   { name: 'integration doctor diagnostics', path: '/api/system/integration-doctor', allowed: new Set([200, 401, 403]) },
 ]
 
-function fail(message) {
+function fail(message: string): void {
   console.error(`[route-contract] ${message}`)
   process.exitCode = 1
 }
 
-async function checkRoute(route) {
+async function checkRoute(route: RouteContract): Promise<void> {
   const url = `${baseUrl}${route.path}`
   let response
   try {
@@ -56,7 +64,7 @@ async function checkRoute(route) {
   console.log(`[route-contract] OK ${route.name}: ${response.status}`)
 }
 
-async function main() {
+async function main(): Promise<void> {
   try {
     await checkRoute(routes[0])
   } catch (error) {

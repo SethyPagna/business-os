@@ -952,7 +952,7 @@ Mini phases:
   `frontend/dist/business-os-build.json` already exists, the verifier also
   checks that it has concrete `revision`, `hash`, and `builtAt` values.
 - 24.4 Add post-start diagnostics checklist. Done:
-  `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` now checks the local
+  `ops/scripts/runtime/smoke/post-start-diagnostics.ts` now checks the local
   `/health`, `/api/runtime/version`, `/business-os-build.json`, and `/sw.js`
   startup surface, records optional public/admin health, and writes a JSON
   checklist artifact. `start-runtime.ps1` and Docker release health checks run
@@ -2712,7 +2712,7 @@ Cleanup checkpoint:
   manifests are validated for concrete `revision`, `hash`, and `builtAt`
   fields without forcing a pre-build dist folder to exist.
 - Move 216 implements the Phase 24.4 post-start diagnostics checklist:
-  `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` now writes a
+  `ops/scripts/runtime/smoke/post-start-diagnostics.ts` now writes a
   structured startup report covering local health, runtime version metadata,
   frontend build manifest metadata, service-worker availability, and optional
   public/admin health. `ops/scripts/powershell/start-runtime.ps1` writes the
@@ -2723,7 +2723,7 @@ Cleanup checkpoint:
   wiring as required release files.
 - Move 217 extends the post-start diagnostics checklist into local verification:
   `run/verify-local.bat` now calls
-  `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` after the optional
+  `ops/scripts/runtime/smoke/post-start-diagnostics.ts` after the optional
   route-contract smoke and writes
   `ops/runtime/reports/verify-local-post-start-diagnostics.json` when a local
   app is running. The smoke script now supports `--skip-if-unavailable`, so
@@ -5007,3 +5007,11 @@ Move 448 status:
   command names while adding typed argument, business-count, backup-package,
   and Docker option shapes. `post-live-hygiene.mjs` now calls the TypeScript
   dataset readiness script.
+
+Move 449 status:
+- Move 449 converts the local smoke check entrypoints for route contracts and
+  post-start diagnostics to TypeScript. `check-route-contract.ts` and
+  `post-start-diagnostics.ts` keep the same CLI behavior and JSON diagnostics
+  output while updating `run/verify-local.bat`, runtime/release PowerShell
+  launchers, dependency/release guardrails, and backend full-automation tests
+  to the new paths.

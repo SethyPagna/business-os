@@ -54,13 +54,13 @@ echo [OK] Business OS Docker release diagnostics passed
 echo.
 
 echo [preflight 5/6] Checking running app API route contract when available...
-node ops\scripts\runtime\smoke\check-route-contract.mjs http://127.0.0.1:4000 --skip-if-unavailable
+node ops\scripts\runtime\smoke\check-route-contract.ts http://127.0.0.1:4000 --skip-if-unavailable
 if errorlevel 1 exit /b 1
 echo [OK] Running app API route contract check passed or was skipped
 echo.
 
 echo [preflight 6/6] Writing running app diagnostics when available...
-node ops\scripts\runtime\smoke\post-start-diagnostics.mjs http://127.0.0.1:4000 --skip-if-unavailable --output ops\runtime\reports\verify-local-post-start-diagnostics.json
+node ops\scripts\runtime\smoke\post-start-diagnostics.ts http://127.0.0.1:4000 --skip-if-unavailable --output ops\runtime\reports\verify-local-post-start-diagnostics.json
 if errorlevel 1 exit /b 1
 echo [OK] Running app diagnostics passed, wrote report, or was skipped
 echo.

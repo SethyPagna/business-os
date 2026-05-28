@@ -261,7 +261,7 @@ runTest('docker release verification protects generated cleanup boundaries', () 
     'startRuntimeCheck',
     'localVerifyCheck',
     'localSkipIfUnavailable',
-    'post-start-diagnostics.mjs',
+    'post-start-diagnostics.ts',
     'post-start-diagnostics.json',
     'Post-start diagnostics',
     '/api/runtime/version',

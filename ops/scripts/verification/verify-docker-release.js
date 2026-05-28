@@ -15,8 +15,8 @@ const pruneStoragePath = path.join(root, 'ops', 'scripts', 'runtime', 'storage',
 const cleanupTestDataPath = path.join(root, 'ops', 'scripts', 'runtime', 'storage', 'cleanup-test-data.mjs')
 const actionHistoryCheckPath = path.join(root, 'ops', 'scripts', 'runtime', 'audits', 'action-history-undo-redo-check.mjs')
 const liveSmokePath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'live-smoke.mjs')
-const routeContractPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'check-route-contract.mjs')
-const postStartDiagnosticsPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'post-start-diagnostics.mjs')
+const routeContractPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'check-route-contract.ts')
+const postStartDiagnosticsPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'post-start-diagnostics.ts')
 const fullAppAuditPath = path.join(root, 'ops', 'scripts', 'runtime', 'audits', 'full-app-audit.mjs')
 const fullAutomationPath = path.join(root, 'ops', 'scripts', 'powershell', 'full-automation.ps1')
 const startRuntimePath = path.join(root, 'ops', 'scripts', 'powershell', 'start-runtime.ps1')
@@ -426,7 +426,7 @@ function main() {
     if (!automation.includes(token)) failures.push(`Docker release automation is missing local image bundle support: ${token}`)
   })
   ;[
-    'post-start-diagnostics.mjs',
+    'post-start-diagnostics.ts',
     'post-start-diagnostics.json',
     'PostStartDiagnosticsReport',
     'business-os-docker',
@@ -458,7 +458,7 @@ function main() {
   const startRuntime = read(startRuntimePath)
   const verifyLocal = read(path.join(root, 'run', 'verify-local.bat'))
   ;[
-    'post-start-diagnostics.mjs',
+    'post-start-diagnostics.ts',
     'post-start-diagnostics.json',
     'PostStartDiagnosticsReport',
     'Post-start diagnostics',
@@ -469,7 +469,7 @@ function main() {
     if (!startRuntime.includes(token)) failures.push(`Runtime starter is missing post-start diagnostics support: ${token}`)
   })
   ;[
-    'post-start-diagnostics.mjs',
+    'post-start-diagnostics.ts',
     'verify-local-post-start-diagnostics.json',
     '--skip-if-unavailable',
   ].forEach((token) => {
@@ -489,17 +489,17 @@ function main() {
 
   const postStartDiagnosticsCoverage = {
     scriptPresent: fs.existsSync(postStartDiagnosticsPath),
-    releaseHealthCheck: automation.includes('post-start-diagnostics.mjs') &&
+    releaseHealthCheck: automation.includes('post-start-diagnostics.ts') &&
       automation.includes('PostStartDiagnosticsReport') &&
       automation.includes('--public-url') &&
       automation.includes('--admin-url') &&
       automation.includes('--output'),
-    startRuntimeCheck: startRuntime.includes('post-start-diagnostics.mjs') &&
+    startRuntimeCheck: startRuntime.includes('post-start-diagnostics.ts') &&
       startRuntime.includes('PostStartDiagnosticsReport') &&
       startRuntime.includes('--public-url') &&
       startRuntime.includes('--admin-url') &&
       startRuntime.includes('--output'),
-    localVerifyCheck: verifyLocal.includes('post-start-diagnostics.mjs') &&
+    localVerifyCheck: verifyLocal.includes('post-start-diagnostics.ts') &&
       verifyLocal.includes('verify-local-post-start-diagnostics.json') &&
       verifyLocal.includes('--skip-if-unavailable'),
     localSkipIfUnavailable: postStartDiagnostics.includes('--skip-if-unavailable') &&

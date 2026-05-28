@@ -203,8 +203,8 @@ function buildLocalVerificationCoverage() {
     dockerReleaseGuard: verifyLocal.includes('verify-docker-release.js'),
     secretHygieneGuard: verifyLocal.includes('verify-secret-hygiene.js'),
     dockerDoctor: verifyLocal.includes('docker-release.ps1') && verifyLocal.includes('-Action Doctor'),
-    routeContractSmoke: verifyLocal.includes('check-route-contract.mjs') && verifyLocal.includes('--skip-if-unavailable'),
-    postStartDiagnostics: verifyLocal.includes('post-start-diagnostics.mjs') &&
+    routeContractSmoke: verifyLocal.includes('check-route-contract.ts') && verifyLocal.includes('--skip-if-unavailable'),
+    postStartDiagnostics: verifyLocal.includes('post-start-diagnostics.ts') &&
       verifyLocal.includes('verify-local-post-start-diagnostics.json') &&
       verifyLocal.includes('--skip-if-unavailable'),
     frontendDependencyInstall: verifyLocal.includes('FRONTEND_INSTALL_MODE') &&

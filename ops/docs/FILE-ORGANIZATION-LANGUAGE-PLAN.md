@@ -1794,7 +1794,7 @@ Decision rule:
     fields while still allowing the verifier to run before a fresh frontend
     build.
 216. Add post-start diagnostics checklist artifacts. Done:
-    `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` now checks local
+    `ops/scripts/runtime/smoke/post-start-diagnostics.ts` now checks local
     `/health`, `/api/runtime/version`, `/business-os-build.json`, and `/sw.js`
     after startup and records optional public/admin health in a JSON checklist.
     `ops/scripts/powershell/start-runtime.ps1` writes the report under
@@ -1805,7 +1805,7 @@ Decision rule:
     quietly drop out of the run/release path.
 217. Add post-start diagnostics to local verification. Done:
     `run/verify-local.bat` now runs
-    `ops/scripts/runtime/smoke/post-start-diagnostics.mjs` after the optional
+    `ops/scripts/runtime/smoke/post-start-diagnostics.ts` after the optional
     route-contract smoke and writes
     `ops/runtime/reports/verify-local-post-start-diagnostics.json` when a local
     app is available. The diagnostics script now has `--skip-if-unavailable`,
@@ -3520,6 +3520,13 @@ Decision rule:
     remain directly executable by Node 24 without changing the ops package
     module type. `post-live-hygiene.mjs` and full-automation tests now call the
     TypeScript storage readiness path.
+439. Convert route contract and post-start diagnostics smoke checks to
+    TypeScript. Done: `check-route-contract.ts` and
+    `post-start-diagnostics.ts` replace the `.mjs` smoke entrypoints while
+    keeping `run/verify-local.bat`, `start-runtime.ps1`, `docker-release.ps1`,
+    runtime dependency guards, Docker release guards, and full-automation
+    tests aligned. The diagnostics script keeps typed response/report shapes
+    and still writes the same JSON report contract.
 
 ## Safety Gates
 
