@@ -800,7 +800,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Dashboard.jsx` | UI component/page |
-| 2 | `MiniStat.jsx` | UI component/page |
+| 2 | `MiniStat.tsx` | UI component/page |
 
 
 ### 3.33 Folder: `frontend/src/components/dashboard/charts`
@@ -898,7 +898,7 @@ Total folders documented: **81**
 | 3 | `POS.jsx` | UI component/page |
 | 4 | `posCore.ts` | UI component/page |
 | 5 | `ProductImage.tsx` | UI component/page |
-| 6 | `QuickAddModal.jsx` | UI component/page |
+| 6 | `QuickAddModal.tsx` | UI component/page |
 
 
 ### 3.39 Folder: `frontend/src/components/products`
@@ -1133,7 +1133,7 @@ Total folders documented: **81**
 | 4 | `SalesImportModal.jsx` | UI component/page |
 | 5 | `salesImportWorker.ts` | UI component/page |
 | 6 | `SalesListSurface.jsx` | UI component/page |
-| 7 | `StatusBadge.jsx` | UI component/page |
+| 7 | `StatusBadge.tsx` | UI component/page |
 
 
 ### 3.53 Folder: `frontend/src/components/server`
@@ -1161,12 +1161,12 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `ActionHistoryBar.jsx` | UI component/page |
 | 2 | `BackgroundImportTracker.jsx` | UI component/page |
-| 3 | `ExportMenu.jsx` | UI component/page |
+| 3 | `ExportMenu.tsx` | UI component/page |
 | 4 | `FilterMenu.jsx` | UI component/page |
 | 5 | `globalScroll.ts` | UI component/page |
 | 6 | `ImageGalleryLightbox.jsx` | UI component/page |
 | 7 | `LoadingWatchdog.jsx` | UI component/page |
-| 8 | `Modal.jsx` | UI component/page |
+| 8 | `Modal.tsx` | UI component/page |
 | 9 | `navigationConfig.ts` | UI component/page |
 | 10 | `NotificationCenter.jsx` | UI component/page |
 | 11 | `pageActivity.ts` | UI component/page |

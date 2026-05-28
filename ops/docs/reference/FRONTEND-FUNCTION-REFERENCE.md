@@ -52,7 +52,7 @@ Total files documented: **193**
 | 40 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 7 |
 | 41 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
 | 42 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
-| 43 | `frontend/src/components/dashboard/MiniStat.jsx` | 1 |
+| 43 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
 | 44 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
 | 45 | `frontend/src/components/files/FilesPage.jsx` | 25 |
 | 46 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
@@ -73,7 +73,7 @@ Total files documented: **193**
 | 61 | `frontend/src/components/pos/POS.jsx` | 22 |
 | 62 | `frontend/src/components/pos/posCore.ts` | 1 |
 | 63 | `frontend/src/components/pos/ProductImage.tsx` | 1 |
-| 64 | `frontend/src/components/pos/QuickAddModal.jsx` | 2 |
+| 64 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
 | 65 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
 | 66 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 4 |
 | 67 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 2 |
@@ -126,16 +126,16 @@ Total files documented: **193**
 | 114 | `frontend/src/components/sales/SalesImportModal.jsx` | 10 |
 | 115 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
 | 116 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
-| 117 | `frontend/src/components/sales/StatusBadge.jsx` | 1 |
+| 117 | `frontend/src/components/sales/StatusBadge.tsx` | 2 |
 | 118 | `frontend/src/components/server/ServerPage.jsx` | 16 |
 | 119 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 4 |
 | 120 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
-| 121 | `frontend/src/components/shared/ExportMenu.jsx` | 1 |
+| 121 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
 | 122 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
 | 123 | `frontend/src/components/shared/globalScroll.ts` | 3 |
 | 124 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
 | 125 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 |
-| 126 | `frontend/src/components/shared/Modal.jsx` | 1 |
+| 126 | `frontend/src/components/shared/Modal.tsx` | 1 |
 | 127 | `frontend/src/components/shared/navigationConfig.ts` | 0 |
 | 128 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
 | 129 | `frontend/src/components/shared/pageActivity.ts` | 0 |
@@ -1036,11 +1036,11 @@ Total files documented: **193**
 | 15 | `rangeLabel` | const arrow | 480 |
 | 16 | `periodShort` | const arrow | 486 |
 
-### 3.43 `frontend/src/components/dashboard/MiniStat.jsx`
+### 3.43 `frontend/src/components/dashboard/MiniStat.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `MiniStat` | component/function | 2 |
+| 1 | `MiniStat` | component/function | 13 |
 
 ### 3.44 `frontend/src/components/files/FilePickerModal.jsx`
 
@@ -1280,12 +1280,12 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `ProductImage` | component/function | 12 |
 
-### 3.64 `frontend/src/components/pos/QuickAddModal.jsx`
+### 3.64 `frontend/src/components/pos/QuickAddModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `QuickAddModal` | component/function | 4 |
-| 2 | `T` | const arrow | 5 |
+| 1 | `QuickAddModal` | component/function | 12 |
+| 2 | `T` | const arrow | 13 |
 
 ### 3.65 `frontend/src/components/products/config/productPageConfig.ts`
 
@@ -1868,11 +1868,12 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `SalesListSurface` | component/function | 5 |
 
-### 3.117 `frontend/src/components/sales/StatusBadge.jsx`
+### 3.117 `frontend/src/components/sales/StatusBadge.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `StatusBadge` | component/function | 39 |
+| 1 | `isSaleStatus` | function | 24 |
+| 2 | `StatusBadge` | component/function | 50 |
 
 ### 3.118 `frontend/src/components/server/ServerPage.jsx`
 
@@ -1928,11 +1929,11 @@ Total files documented: **193**
 | 18 | `handleRemove` | const arrow | 398 |
 | 19 | `handleDismiss` | const arrow | 434 |
 
-### 3.121 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.121 `frontend/src/components/shared/ExportMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ExportMenu` | component/function | 4 |
+| 1 | `ExportMenu` | component/function | 24 |
 
 ### 3.122 `frontend/src/components/shared/FilterMenu.jsx`
 
@@ -1965,11 +1966,11 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `LoadingWatchdog` | component/function | 3 |
 
-### 3.126 `frontend/src/components/shared/Modal.jsx`
+### 3.126 `frontend/src/components/shared/Modal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `Modal` | component/function | 10 |
+| 1 | `Modal` | component/function | 13 |
 
 ### 3.127 `frontend/src/components/shared/navigationConfig.ts`
 

@@ -195,7 +195,7 @@ Code files scanned: **466**
 | 183 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 7 |
 | 184 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
 | 185 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
-| 186 | `frontend/src/components/dashboard/MiniStat.jsx` | 1 |
+| 186 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
 | 187 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
 | 188 | `frontend/src/components/files/FilesPage.jsx` | 25 |
 | 189 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
@@ -216,7 +216,7 @@ Code files scanned: **466**
 | 204 | `frontend/src/components/pos/POS.jsx` | 22 |
 | 205 | `frontend/src/components/pos/posCore.ts` | 10 |
 | 206 | `frontend/src/components/pos/ProductImage.tsx` | 1 |
-| 207 | `frontend/src/components/pos/QuickAddModal.jsx` | 2 |
+| 207 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
 | 208 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
 | 209 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 4 |
 | 210 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | 2 |
@@ -269,16 +269,16 @@ Code files scanned: **466**
 | 257 | `frontend/src/components/sales/SalesImportModal.jsx` | 10 |
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
 | 259 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
-| 260 | `frontend/src/components/sales/StatusBadge.jsx` | 2 |
+| 260 | `frontend/src/components/sales/StatusBadge.tsx` | 3 |
 | 261 | `frontend/src/components/server/ServerPage.jsx` | 16 |
 | 262 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 4 |
 | 263 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
-| 264 | `frontend/src/components/shared/ExportMenu.jsx` | 1 |
+| 264 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
 | 265 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
 | 266 | `frontend/src/components/shared/globalScroll.ts` | 5 |
 | 267 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
 | 268 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 |
-| 269 | `frontend/src/components/shared/Modal.jsx` | 1 |
+| 269 | `frontend/src/components/shared/Modal.tsx` | 1 |
 | 270 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
 | 271 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 1 |
@@ -3821,11 +3821,11 @@ Code files scanned: **466**
 | 15 | `rangeLabel` | const arrow | 480 |
 | 16 | `periodShort` | const arrow | 486 |
 
-### 3.186 `frontend/src/components/dashboard/MiniStat.jsx`
+### 3.186 `frontend/src/components/dashboard/MiniStat.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `MiniStat` | export default function | 2 |
+| 1 | `MiniStat` | export default function | 13 |
 
 ### 3.187 `frontend/src/components/files/FilePickerModal.jsx`
 
@@ -4078,12 +4078,12 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `ProductImage` | export default function | 12 |
 
-### 3.207 `frontend/src/components/pos/QuickAddModal.jsx`
+### 3.207 `frontend/src/components/pos/QuickAddModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `QuickAddModal` | export default function | 4 |
-| 2 | `T` | const arrow | 5 |
+| 1 | `QuickAddModal` | export default function | 12 |
+| 2 | `T` | const arrow | 13 |
 
 ### 3.208 `frontend/src/components/products/config/productPageConfig.ts`
 
@@ -4743,12 +4743,13 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `SalesListSurface` | export default function | 5 |
 
-### 3.260 `frontend/src/components/sales/StatusBadge.jsx`
+### 3.260 `frontend/src/components/sales/StatusBadge.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getStatusLabel` | export function | 23 |
-| 2 | `StatusBadge` | export default function | 39 |
+| 1 | `isSaleStatus` | function | 24 |
+| 2 | `getStatusLabel` | export function | 28 |
+| 3 | `StatusBadge` | export default function | 50 |
 
 ### 3.261 `frontend/src/components/server/ServerPage.jsx`
 
@@ -4804,11 +4805,11 @@ Code files scanned: **466**
 | 18 | `handleRemove` | const arrow | 398 |
 | 19 | `handleDismiss` | const arrow | 434 |
 
-### 3.264 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.264 `frontend/src/components/shared/ExportMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ExportMenu` | export default function | 4 |
+| 1 | `ExportMenu` | export default function | 24 |
 
 ### 3.265 `frontend/src/components/shared/FilterMenu.jsx`
 
@@ -4843,11 +4844,11 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `LoadingWatchdog` | export default function | 3 |
 
-### 3.269 `frontend/src/components/shared/Modal.jsx`
+### 3.269 `frontend/src/components/shared/Modal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `Modal` | export default function | 10 |
+| 1 | `Modal` | export default function | 13 |
 
 ### 3.270 `frontend/src/components/shared/navigationConfig.ts`
 

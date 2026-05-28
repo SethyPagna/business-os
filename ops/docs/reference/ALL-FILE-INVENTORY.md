@@ -218,7 +218,7 @@ Total files documented: **529**
 | 206 | `frontend/src/components/dashboard/charts/LineChart.jsx` | frontend-ui | 197 | 9.1 | UI component/page |
 | 207 | `frontend/src/components/dashboard/charts/NoData.tsx` | frontend-ui | 15 | 0.4 | UI component/page |
 | 208 | `frontend/src/components/dashboard/Dashboard.jsx` | frontend-ui | 2063 | 107.5 | UI component/page |
-| 209 | `frontend/src/components/dashboard/MiniStat.jsx` | frontend-ui | 36 | 1.7 | UI component/page |
+| 209 | `frontend/src/components/dashboard/MiniStat.tsx` | frontend-ui | 53 | 2.0 | UI component/page |
 | 210 | `frontend/src/components/files/FilePickerModal.jsx` | frontend-ui | 270 | 11.5 | UI component/page |
 | 211 | `frontend/src/components/files/FilesPage.jsx` | frontend-ui | 990 | 47.4 | UI component/page |
 | 212 | `frontend/src/components/files/FilesProvidersTab.jsx` | frontend-ui | 222 | 16.6 | UI component/page |
@@ -239,7 +239,7 @@ Total files documented: **529**
 | 227 | `frontend/src/components/pos/POS.jsx` | frontend-ui | 1919 | 107.6 | UI component/page |
 | 228 | `frontend/src/components/pos/posCore.ts` | frontend-ui | 167 | 6.4 | UI component/page |
 | 229 | `frontend/src/components/pos/ProductImage.tsx` | frontend-ui | 15 | 0.4 | UI component/page |
-| 230 | `frontend/src/components/pos/QuickAddModal.jsx` | frontend-ui | 38 | 1.6 | UI component/page |
+| 230 | `frontend/src/components/pos/QuickAddModal.tsx` | frontend-ui | 49 | 1.8 | UI component/page |
 | 231 | `frontend/src/components/products/config/productPageConfig.ts` | frontend-ui | 24 | 0.7 | UI component/page |
 | 232 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | frontend-ui | 119 | 5.0 | UI component/page |
 | 233 | `frontend/src/components/products/forms/BulkAddStockModal.jsx` | frontend-ui | 91 | 4.3 | UI component/page |
@@ -293,16 +293,16 @@ Total files documented: **529**
 | 281 | `frontend/src/components/sales/SalesImportModal.jsx` | frontend-ui | 228 | 10.4 | UI component/page |
 | 282 | `frontend/src/components/sales/salesImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 283 | `frontend/src/components/sales/SalesListSurface.jsx` | frontend-ui | 318 | 19.2 | UI component/page |
-| 284 | `frontend/src/components/sales/StatusBadge.jsx` | frontend-ui | 47 | 1.6 | UI component/page |
+| 284 | `frontend/src/components/sales/StatusBadge.tsx` | frontend-ui | 58 | 2.1 | UI component/page |
 | 285 | `frontend/src/components/server/ServerPage.jsx` | frontend-ui | 781 | 38.6 | UI component/page |
 | 286 | `frontend/src/components/shared/ActionHistoryBar.jsx` | frontend-ui | 151 | 8.1 | UI component/page |
 | 287 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | frontend-ui | 546 | 24.4 | UI component/page |
-| 288 | `frontend/src/components/shared/ExportMenu.jsx` | frontend-ui | 36 | 1.5 | UI component/page |
+| 288 | `frontend/src/components/shared/ExportMenu.tsx` | frontend-ui | 56 | 1.9 | UI component/page |
 | 289 | `frontend/src/components/shared/FilterMenu.jsx` | frontend-ui | 113 | 4.8 | UI component/page |
 | 290 | `frontend/src/components/shared/globalScroll.ts` | frontend-ui | 72 | 2.7 | UI component/page |
 | 291 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | frontend-ui | 119 | 4.9 | UI component/page |
 | 292 | `frontend/src/components/shared/LoadingWatchdog.jsx` | frontend-ui | 63 | 2.0 | UI component/page |
-| 293 | `frontend/src/components/shared/Modal.jsx` | frontend-ui | 34 | 1.8 | UI component/page |
+| 293 | `frontend/src/components/shared/Modal.tsx` | frontend-ui | 38 | 1.3 | UI component/page |
 | 294 | `frontend/src/components/shared/navigationConfig.ts` | frontend-ui | 66 | 2.3 | UI component/page |
 | 295 | `frontend/src/components/shared/NotificationCenter.jsx` | frontend-ui | 594 | 30.3 | UI component/page |
 | 296 | `frontend/src/components/shared/pageActivity.ts` | frontend-ui | 9 | 0.3 | UI component/page |
