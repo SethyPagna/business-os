@@ -26,7 +26,7 @@ Total files documented: **193**
 | 14 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 15 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
 | 16 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
-| 17 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 2 |
+| 17 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
 | 18 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 |
 | 19 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
 | 20 | `frontend/src/components/catalog/catalogUi.tsx` | 1 |
@@ -747,12 +747,12 @@ Total files documented: **193**
 
 - No top-level named function/class symbols detected.
 
-### 3.17 `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+### 3.17 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `CatalogPreviewSurface` | component/function | 9 |
-| 2 | `handlePortalTabClick` | const arrow | 47 |
+| 1 | `CatalogPreviewSurface` | component/function | 109 |
+| 2 | `handlePortalTabClick` | const arrow | 147 |
 
 ### 3.18 `frontend/src/components/catalog/CatalogProductsSection.jsx`
 

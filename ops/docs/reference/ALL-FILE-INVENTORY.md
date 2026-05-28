@@ -192,7 +192,7 @@ Total files documented: **529**
 | 180 | `frontend/src/components/catalog/CatalogImageField.tsx` | frontend-ui | 115 | 4.6 | UI component/page |
 | 181 | `frontend/src/components/catalog/CatalogPage.jsx` | frontend-ui | 3218 | 139.2 | UI component/page |
 | 182 | `frontend/src/components/catalog/CatalogPageContext.tsx` | frontend-ui | 25 | 0.6 | UI component/page |
-| 183 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | frontend-ui | 354 | 19.0 | UI component/page |
+| 183 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | frontend-ui | 454 | 21.5 | UI component/page |
 | 184 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | frontend-ui | 511 | 26.8 | UI component/page |
 | 185 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | frontend-ui | 837 | 50.4 | UI component/page |
 | 186 | `frontend/src/components/catalog/catalogUi.tsx` | frontend-ui | 82 | 3.0 | UI component/page |

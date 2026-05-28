@@ -169,7 +169,7 @@ Code files documented: **466**
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 2 | 1 | 1 | 1 |
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 12 | 1 | 11 | 1 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 | 2 | 0 | 2 |
-| 160 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 6 | 1 | 4 | 1 |
+| 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 6 | 1 | 4 | 1 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 8 | 1 | 6 | 1 |
 | 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 2 | 1 | 1 | 1 |
 | 163 | `frontend/src/components/catalog/catalogUi.tsx` | 1 | 3 | 0 | 4 |
@@ -3292,7 +3292,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
-  - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+  - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
   - `frontend/src/components/catalog/catalogUi.tsx`
@@ -3314,11 +3314,11 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.160 `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+### 3.160 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
 
 - Declared exports: `function`
 - Imports (6)
-  - `../files/FilePickerModal`
+  - `../files/FilePickerModal.jsx`
   - `../products/shared/primitives`
   - `../shared/ImageGalleryLightbox`
   - `../shared/PortalMenu`
@@ -3809,7 +3809,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/publicAssetUrls.ts`
 - Referenced by (5)
-  - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+  - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/import/BulkImportModal.tsx`
@@ -4587,7 +4587,7 @@ Code files documented: **466**
 - Referenced by (9)
   - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
-  - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+  - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/pos/ProductImage.tsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
@@ -5153,7 +5153,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (3)
-  - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+  - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
 
@@ -5297,7 +5297,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (7)
-  - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+  - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/contacts/shared.jsx`
   - `frontend/src/components/products/surfaces/HeaderActions.tsx`
   - `frontend/src/components/products/surfaces/ProductRowParts.tsx`

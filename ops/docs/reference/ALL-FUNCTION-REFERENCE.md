@@ -169,7 +169,7 @@ Code files scanned: **466**
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 2 |
-| 160 | `frontend/src/components/catalog/CatalogPreviewSurface.jsx` | 2 |
+| 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 |
 | 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
 | 163 | `frontend/src/components/catalog/catalogUi.tsx` | 4 |
@@ -3472,12 +3472,12 @@ Code files scanned: **466**
 | 1 | `CatalogPageProvider` | export function | 10 |
 | 2 | `useCatalogPageContext` | export function | 18 |
 
-### 3.160 `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
+### 3.160 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `CatalogPreviewSurface` | export default function | 9 |
-| 2 | `handlePortalTabClick` | const arrow | 47 |
+| 1 | `CatalogPreviewSurface` | export default function | 109 |
+| 2 | `handlePortalTabClick` | const arrow | 147 |
 
 ### 3.161 `frontend/src/components/catalog/CatalogProductsSection.jsx`
 
