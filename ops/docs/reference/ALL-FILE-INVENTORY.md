@@ -549,12 +549,12 @@ Total files documented: **569**
 | 537 | `ops/scripts/runtime/storage/prune-storage.ts` | project-scripts | 464 | 15.7 | Project source/support file |
 | 538 | `ops/scripts/runtime/storage/restore-candidates.ts` | project-scripts | 213 | 7.5 | Project source/support file |
 | 539 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | project-scripts | 219 | 7.9 | Project source/support file |
-| 540 | `ops/scripts/verification/verify-backup-reliability.js` | project-scripts | 140 | 5.0 | Project source/support file |
-| 541 | `ops/scripts/verification/verify-docker-release.js` | project-scripts | 651 | 30.7 | Project source/support file |
-| 542 | `ops/scripts/verification/verify-hardening-policy.js` | project-scripts | 140 | 5.5 | Project source/support file |
-| 543 | `ops/scripts/verification/verify-runtime-deps.js` | project-scripts | 352 | 14.9 | Project source/support file |
-| 544 | `ops/scripts/verification/verify-scale-services.js` | project-scripts | 175 | 6.5 | Project source/support file |
-| 545 | `ops/scripts/verification/verify-secret-hygiene.js` | project-scripts | 56 | 2.0 | Project source/support file |
+| 540 | `ops/scripts/verification/verify-backup-reliability.ts` | project-scripts | 140 | 5.0 | Project source/support file |
+| 541 | `ops/scripts/verification/verify-docker-release.ts` | project-scripts | 651 | 30.7 | Project source/support file |
+| 542 | `ops/scripts/verification/verify-hardening-policy.ts` | project-scripts | 140 | 5.5 | Project source/support file |
+| 543 | `ops/scripts/verification/verify-runtime-deps.ts` | project-scripts | 352 | 14.9 | Project source/support file |
+| 544 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
+| 545 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
 | 546 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
 | 547 | `README.md` | project-root | 159 | 11.5 | Project documentation entrypoint |
 | 548 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |

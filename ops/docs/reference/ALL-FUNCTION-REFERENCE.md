@@ -510,12 +510,12 @@ Code files scanned: **506**
 | 498 | `ops/scripts/runtime/storage/prune-storage.ts` | 17 |
 | 499 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
 | 500 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
-| 501 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
-| 502 | `ops/scripts/verification/verify-docker-release.js` | 11 |
-| 503 | `ops/scripts/verification/verify-hardening-policy.js` | 9 |
-| 504 | `ops/scripts/verification/verify-runtime-deps.js` | 13 |
-| 505 | `ops/scripts/verification/verify-scale-services.js` | 8 |
-| 506 | `ops/scripts/verification/verify-secret-hygiene.js` | 0 |
+| 501 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
+| 502 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
+| 503 | `ops/scripts/verification/verify-hardening-policy.ts` | 9 |
+| 504 | `ops/scripts/verification/verify-runtime-deps.ts` | 13 |
+| 505 | `ops/scripts/verification/verify-scale-services.ts` | 8 |
+| 506 | `ops/scripts/verification/verify-secret-hygiene.ts` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -7005,7 +7005,7 @@ Code files scanned: **506**
 | 13 | `countRestoredTables` | function | 152 |
 | 14 | `compareCounts` | function | 159 |
 
-### 3.501 `ops/scripts/verification/verify-backup-reliability.js`
+### 3.501 `ops/scripts/verification/verify-backup-reliability.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7016,7 +7016,7 @@ Code files scanned: **506**
 | 5 | `checkNeedles` | function | 29 |
 | 6 | `main` | function | 36 |
 
-### 3.502 `ops/scripts/verification/verify-docker-release.js`
+### 3.502 `ops/scripts/verification/verify-docker-release.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7032,7 +7032,7 @@ Code files scanned: **506**
 | 10 | `walk` | function | 314 |
 | 11 | `main` | function | 325 |
 
-### 3.503 `ops/scripts/verification/verify-hardening-policy.js`
+### 3.503 `ops/scripts/verification/verify-hardening-policy.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7046,7 +7046,7 @@ Code files scanned: **506**
 | 8 | `assertFullAutomationIncludesPolicy` | function | 77 |
 | 9 | `main` | function | 93 |
 
-### 3.504 `ops/scripts/verification/verify-runtime-deps.js`
+### 3.504 `ops/scripts/verification/verify-runtime-deps.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7064,7 +7064,7 @@ Code files scanned: **506**
 | 12 | `assertCoverageComplete` | function | 234 |
 | 13 | `main` | function | 247 |
 
-### 3.505 `ops/scripts/verification/verify-scale-services.js`
+### 3.505 `ops/scripts/verification/verify-scale-services.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7077,7 +7077,7 @@ Code files scanned: **506**
 | 7 | `trackedLicenses` | const arrow | 69 |
 | 8 | `main` | function | 95 |
 
-### 3.506 `ops/scripts/verification/verify-secret-hygiene.js`
+### 3.506 `ops/scripts/verification/verify-secret-hygiene.ts`
 
 - No top-level named symbols detected.
 

@@ -510,12 +510,12 @@ Code files documented: **506**
 | 498 | `ops/scripts/runtime/storage/prune-storage.ts` | 4 | 0 | 0 | 0 |
 | 499 | `ops/scripts/runtime/storage/restore-candidates.ts` | 2 | 0 | 0 | 0 |
 | 500 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 3 | 0 | 0 | 0 |
-| 501 | `ops/scripts/verification/verify-backup-reliability.js` | 3 | 0 | 1 | 0 |
-| 502 | `ops/scripts/verification/verify-docker-release.js` | 3 | 0 | 1 | 0 |
-| 503 | `ops/scripts/verification/verify-hardening-policy.js` | 4 | 0 | 1 | 0 |
-| 504 | `ops/scripts/verification/verify-runtime-deps.js` | 3 | 0 | 1 | 0 |
-| 505 | `ops/scripts/verification/verify-scale-services.js` | 4 | 0 | 1 | 0 |
-| 506 | `ops/scripts/verification/verify-secret-hygiene.js` | 4 | 0 | 1 | 0 |
+| 501 | `ops/scripts/verification/verify-backup-reliability.ts` | 3 | 0 | 1 | 0 |
+| 502 | `ops/scripts/verification/verify-docker-release.ts` | 3 | 0 | 1 | 0 |
+| 503 | `ops/scripts/verification/verify-hardening-policy.ts` | 4 | 0 | 1 | 0 |
+| 504 | `ops/scripts/verification/verify-runtime-deps.ts` | 3 | 0 | 1 | 0 |
+| 505 | `ops/scripts/verification/verify-scale-services.ts` | 4 | 0 | 1 | 0 |
+| 506 | `ops/scripts/verification/verify-secret-hygiene.ts` | 4 | 0 | 1 | 0 |
 
 ## 3. Detailed File Dependency Commentary
 
@@ -7638,12 +7638,12 @@ Code files documented: **506**
   - `ops/scripts/frontend/verify-i18n.js`
   - `ops/scripts/frontend/verify-ui.js`
   - `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
-  - `ops/scripts/verification/verify-backup-reliability.js`
-  - `ops/scripts/verification/verify-docker-release.js`
-  - `ops/scripts/verification/verify-hardening-policy.js`
-  - `ops/scripts/verification/verify-runtime-deps.js`
-  - `ops/scripts/verification/verify-scale-services.js`
-  - `ops/scripts/verification/verify-secret-hygiene.js`
+  - `ops/scripts/verification/verify-backup-reliability.ts`
+  - `ops/scripts/verification/verify-docker-release.ts`
+  - `ops/scripts/verification/verify-hardening-policy.ts`
+  - `ops/scripts/verification/verify-runtime-deps.ts`
+  - `ops/scripts/verification/verify-scale-services.ts`
+  - `ops/scripts/verification/verify-secret-hygiene.ts`
 
 ### 3.461 `ops/scripts/lib/report-utils.js`
 
@@ -8239,7 +8239,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.501 `ops/scripts/verification/verify-backup-reliability.js`
+### 3.501 `ops/scripts/verification/verify-backup-reliability.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8251,7 +8251,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.502 `ops/scripts/verification/verify-docker-release.js`
+### 3.502 `ops/scripts/verification/verify-docker-release.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8263,7 +8263,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.503 `ops/scripts/verification/verify-hardening-policy.js`
+### 3.503 `ops/scripts/verification/verify-hardening-policy.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8276,7 +8276,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.504 `ops/scripts/verification/verify-runtime-deps.js`
+### 3.504 `ops/scripts/verification/verify-runtime-deps.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8288,7 +8288,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.505 `ops/scripts/verification/verify-scale-services.js`
+### 3.505 `ops/scripts/verification/verify-scale-services.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8301,7 +8301,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.506 `ops/scripts/verification/verify-secret-hygiene.js`
+### 3.506 `ops/scripts/verification/verify-secret-hygiene.ts`
 
 - Declared exports: none detected
 - Imports (4)

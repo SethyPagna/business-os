@@ -1713,12 +1713,12 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `verify-backup-reliability.js` | Project source/support file |
-| 2 | `verify-docker-release.js` | Project source/support file |
-| 3 | `verify-hardening-policy.js` | Project source/support file |
-| 4 | `verify-runtime-deps.js` | Project source/support file |
-| 5 | `verify-scale-services.js` | Project source/support file |
-| 6 | `verify-secret-hygiene.js` | Project source/support file |
+| 1 | `verify-backup-reliability.ts` | Project source/support file |
+| 2 | `verify-docker-release.ts` | Project source/support file |
+| 3 | `verify-hardening-policy.ts` | Project source/support file |
+| 4 | `verify-runtime-deps.ts` | Project source/support file |
+| 5 | `verify-scale-services.ts` | Project source/support file |
+| 6 | `verify-secret-hygiene.ts` | Project source/support file |
 
 
 ### 3.79 Folder: `run`

@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-28T02:40:22.855Z
+Generated: 2026-05-28T02:45:08.195Z
 
 ## Summary
 
@@ -14,8 +14,8 @@ Generated: 2026-05-28T02:40:22.855Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 205 |
-| .js | 185 |
+| .ts | 211 |
+| .js | 179 |
 | .jsx | 107 |
 | .md | 44 |
 | .bat | 16 |
@@ -66,7 +66,7 @@ Generated: 2026-05-28T02:40:22.855Z
 | --- | --- | --- |
 | ops/docs/reference/PHASE29-AUDIT.json | 12097 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8317 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7085 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7084 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-ROADMAP.md | 5158 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |

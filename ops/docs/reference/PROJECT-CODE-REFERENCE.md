@@ -4,7 +4,7 @@ Auto-generated symbol inventory for root-level code files and project scripts.
 
 ## 1. Coverage Summary
 
-Total files documented: **24**
+Total files documented: **18**
 
 ## 2. Symbol Count by File
 
@@ -28,12 +28,6 @@ Total files documented: **24**
 | 16 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
 | 17 | `ops/scripts/powershell/start-runtime.ps1` | 1 |
 | 18 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | 0 |
-| 19 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
-| 20 | `ops/scripts/verification/verify-docker-release.js` | 11 |
-| 21 | `ops/scripts/verification/verify-hardening-policy.js` | 9 |
-| 22 | `ops/scripts/verification/verify-runtime-deps.js` | 13 |
-| 23 | `ops/scripts/verification/verify-scale-services.js` | 8 |
-| 24 | `ops/scripts/verification/verify-secret-hygiene.js` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -260,82 +254,6 @@ Total files documented: **24**
 | 1 | `Fail` | function | 11 |
 
 ### 3.18 `ops/scripts/powershell/tailscale-health-monitor.ps1`
-
-- No top-level named function/class symbols detected.
-
-### 3.19 `ops/scripts/verification/verify-backup-reliability.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `read` | function | 11 |
-| 2 | `lineFor` | function | 15 |
-| 3 | `requireText` | function | 21 |
-| 4 | `forbidText` | function | 25 |
-| 5 | `checkNeedles` | function | 29 |
-| 6 | `main` | function | 36 |
-
-### 3.20 `ops/scripts/verification/verify-docker-release.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `read` | function | 60 |
-| 2 | `rel` | function | 64 |
-| 3 | `requireFile` | function | 68 |
-| 4 | `requireToken` | function | 72 |
-| 5 | `buildCloudflareRuntimeCoverage` | function | 76 |
-| 6 | `assertCloudflareRuntimeCoverage` | function | 196 |
-| 7 | `walk` | function | 198 |
-| 8 | `buildTestDataCleanupCoverage` | function | 211 |
-| 9 | `assertBooleanCoverage` | function | 312 |
-| 10 | `walk` | function | 314 |
-| 11 | `main` | function | 325 |
-
-### 3.21 `ops/scripts/verification/verify-hardening-policy.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `normalizeRelativePath` | function | 13 |
-| 2 | `readWithLocalImports` | function | 17 |
-| 3 | `listTrackedOrPendingFiles` | function | 31 |
-| 4 | `lineFor` | function | 38 |
-| 5 | `assertContains` | function | 44 |
-| 6 | `assertNotContains` | function | 50 |
-| 7 | `assertNoApiCachingRegression` | function | 56 |
-| 8 | `assertFullAutomationIncludesPolicy` | function | 77 |
-| 9 | `main` | function | 93 |
-
-### 3.22 `ops/scripts/verification/verify-runtime-deps.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `assertTrackedFile` | function | 38 |
-| 2 | `rel` | function | 44 |
-| 3 | `requireToken` | function | 48 |
-| 4 | `hasLockDependency` | function | 54 |
-| 5 | `readIncludes` | function | 60 |
-| 6 | `packageLockVersion` | function | 64 |
-| 7 | `buildVersionConsistency` | function | 68 |
-| 8 | `assertVersionConsistency` | function | 94 |
-| 9 | `assertRuntimeVersionGuardWiring` | function | 100 |
-| 10 | `assertBuildManifestShapeWhenPresent` | function | 169 |
-| 11 | `buildLocalVerificationCoverage` | function | 186 |
-| 12 | `assertCoverageComplete` | function | 234 |
-| 13 | `main` | function | 247 |
-
-### 3.23 `ops/scripts/verification/verify-scale-services.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `ensureDir` | function | 19 |
-| 2 | `run` | function | 23 |
-| 3 | `firstExisting` | function | 41 |
-| 4 | `whereDocker` | function | 45 |
-| 5 | `resolveDocker` | function | 58 |
-| 6 | `checkSecretIgnoreRules` | function | 68 |
-| 7 | `trackedLicenses` | const arrow | 69 |
-| 8 | `main` | function | 95 |
-
-### 3.24 `ops/scripts/verification/verify-secret-hygiene.js`
 
 - No top-level named function/class symbols detected.
 
