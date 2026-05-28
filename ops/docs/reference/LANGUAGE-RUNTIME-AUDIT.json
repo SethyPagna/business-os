@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:40:03.382Z",
+  "generatedAt": "2026-05-28T03:49:31.732Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 474,
+  "sourceFiles": 468,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -24,12 +24,12 @@
       228
     ],
     [
-      "JavaScript",
+      "React JSX",
       107
     ],
     [
-      "React JSX",
-      107
+      "JavaScript",
+      101
     ],
     [
       "Windows batch",
@@ -62,12 +62,12 @@
       228
     ],
     [
-      ".js",
+      ".jsx",
       107
     ],
     [
-      ".jsx",
-      107
+      ".js",
+      101
     ],
     [
       ".bat",
@@ -1007,7 +1007,8 @@
     },
     {
       "implementation": "frontend/src/components/receipt-settings/constants.ts",
-      "compatibilityWrapper": "frontend/src/components/receipt-settings/constants.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after receipt settings callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1016,8 +1017,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1058,7 +1058,8 @@
     },
     {
       "implementation": "frontend/src/components/receipt-settings/template.ts",
-      "compatibilityWrapper": "frontend/src/components/receipt-settings/template.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after receipt settings callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1067,15 +1068,15 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
     },
     {
       "implementation": "frontend/src/components/shared/navigationConfig.ts",
-      "compatibilityWrapper": "frontend/src/components/shared/navigationConfig.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after navigation callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1084,8 +1085,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true

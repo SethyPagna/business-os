@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-28T03:40:03.803Z
+Generated: 2026-05-28T03:49:32.140Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 572
+- Files scanned: 565
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -15,8 +15,8 @@ Generated: 2026-05-28T03:40:03.803Z
 | Extension | Files |
 | --- | --- |
 | .ts | 269 |
-| .js | 108 |
 | .jsx | 107 |
+| .js | 101 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -33,19 +33,19 @@ Generated: 2026-05-28T03:40:03.803Z
 | frontend/components/products | 31 |
 | ops/docs/reference | 30 |
 | backend/routes | 24 |
-| frontend/components/shared | 20 |
+| frontend/components/shared | 17 |
 | ops/scripts/runtime/live-checks | 17 |
 | ops/docs | 14 |
 | frontend/components/catalog | 13 |
 | backend/services | 12 |
 | frontend/components/contacts | 12 |
 | frontend/components/inventory | 10 |
-| frontend/components/receipt-settings | 10 |
 | frontend/components/utils-settings | 10 |
 | run | 9 |
 | run/docker | 9 |
 | frontend/api | 8 |
 | frontend/components/dashboard | 8 |
+| frontend/components/receipt-settings | 8 |
 | ops/scripts/powershell | 8 |
 | frontend/components/sales | 7 |
 | ops/scripts/runtime/storage | 7 |
@@ -65,15 +65,15 @@ Generated: 2026-05-28T03:40:03.803Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/PHASE29-AUDIT.json | 12097 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8181 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7014 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5274 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8105 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6979 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5285 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3762 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3773 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2758 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2723 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
@@ -87,11 +87,11 @@ Generated: 2026-05-28T03:40:03.803Z
 | frontend/src/components/products/import/BulkImportModal.jsx | 1907 | frontend/components/products |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1814 | ops/docs/reference |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1775 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1768 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1603 | frontend/src/AppContext.jsx |
-| ops/scripts/architecture/language-runtime-audit.ts | 1582 | ops/scripts/architecture |
+| ops/scripts/architecture/language-runtime-audit.ts | 1585 | ops/scripts/architecture |
 | backend/src/routes/sales.js | 1573 | backend/routes |
 | backend/src/services/googleDriveSync/index.js | 1564 | backend/services |
 

@@ -4,7 +4,7 @@ Auto-generated import/export and dependency-link coverage for frontend/backend c
 
 ## 1. Coverage Summary
 
-Code files documented: **493**
+Code files documented: **486**
 
 ## 2. Dependency Matrix
 
@@ -256,253 +256,246 @@ Code files documented: **493**
 | 244 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 3 | 4 | 3 | 0 |
 | 245 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 2 | 1 | 0 | 1 |
 | 246 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
-| 247 | `frontend/src/components/receipt-settings/constants.js` | 0 | 0 | 0 | 3 |
-| 248 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 2 |
-| 249 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
-| 250 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
-| 251 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
-| 252 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 3 | 1 | 2 | 1 |
-| 253 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
-| 254 | `frontend/src/components/receipt-settings/template.js` | 0 | 0 | 0 | 2 |
-| 255 | `frontend/src/components/receipt-settings/template.ts` | 2 | 2 | 2 | 1 |
-| 256 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
-| 257 | `frontend/src/components/returns/EditReturnModal.jsx` | 4 | 1 | 3 | 1 |
-| 258 | `frontend/src/components/returns/NewReturnModal.jsx` | 4 | 1 | 3 | 1 |
-| 259 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 3 | 1 | 2 | 1 |
-| 260 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
-| 261 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
-| 262 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 2 | 1 | 0 | 1 |
-| 263 | `frontend/src/components/sales/ExportModal.jsx` | 5 | 1 | 3 | 1 |
-| 264 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
-| 265 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
-| 266 | `frontend/src/components/sales/SalesImportModal.jsx` | 5 | 1 | 4 | 1 |
-| 267 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 0 |
-| 268 | `frontend/src/components/sales/SalesListSurface.jsx` | 3 | 1 | 1 | 1 |
-| 269 | `frontend/src/components/sales/StatusBadge.jsx` | 0 | 5 | 0 | 6 |
-| 270 | `frontend/src/components/server/ServerPage.jsx` | 5 | 1 | 4 | 1 |
-| 271 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 3 | 1 | 1 | 17 |
-| 272 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 7 | 1 | 5 | 1 |
-| 273 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 7 |
-| 274 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
-| 275 | `frontend/src/components/shared/globalScroll.js` | 0 | 0 | 0 | 1 |
-| 276 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 1 |
-| 277 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
-| 278 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 | 1 | 0 | 6 |
-| 279 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 22 |
-| 280 | `frontend/src/components/shared/navigationConfig.js` | 0 | 0 | 0 | 2 |
-| 281 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 1 |
-| 282 | `frontend/src/components/shared/NotificationCenter.jsx` | 4 | 1 | 1 | 2 |
-| 283 | `frontend/src/components/shared/pageActivity.js` | 0 | 0 | 0 | 15 |
-| 284 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 0 |
-| 285 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
-| 286 | `frontend/src/components/shared/PaginationControls.jsx` | 2 | 4 | 0 | 8 |
-| 287 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 7 |
-| 288 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
-| 289 | `frontend/src/components/shared/SectionSwitcher.jsx` | 1 | 1 | 0 | 4 |
-| 290 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
-| 291 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 3 | 0 | 2 |
-| 292 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
-| 293 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
-| 294 | `frontend/src/components/users/Users.jsx` | 14 | 1 | 12 | 1 |
-| 295 | `frontend/src/components/utils-settings/AuditLog.jsx` | 10 | 1 | 8 | 1 |
-| 296 | `frontend/src/components/utils-settings/Backup.jsx` | 10 | 1 | 8 | 1 |
-| 297 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
-| 298 | `frontend/src/components/utils-settings/index.js` | 0 | 0 | 0 | 0 |
-| 299 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
-| 300 | `frontend/src/components/utils-settings/OtpModal.jsx` | 3 | 1 | 2 | 2 |
-| 301 | `frontend/src/components/utils-settings/ResetData.jsx` | 6 | 0 | 4 | 1 |
-| 302 | `frontend/src/components/utils-settings/Settings.jsx` | 13 | 1 | 11 | 1 |
-| 303 | `frontend/src/components/utils-settings/settingsConflict.js` | 0 | 0 | 0 | 1 |
-| 304 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 1 |
-| 305 | `frontend/src/constants.js` | 0 | 0 | 0 | 8 |
-| 306 | `frontend/src/constants.ts` | 0 | 12 | 0 | 0 |
-| 307 | `frontend/src/index.jsx` | 9 | 0 | 4 | 0 |
-| 308 | `frontend/src/platform/runtime/clientRuntime.js` | 0 | 0 | 0 | 3 |
-| 309 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 0 |
-| 310 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
-| 311 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
-| 312 | `frontend/src/types/jsx-modules.d.ts` | 0 | 3 | 0 | 0 |
-| 313 | `frontend/src/types/react.d.ts` | 0 | 5 | 0 | 0 |
-| 314 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 2 |
-| 315 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
-| 316 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
-| 317 | `frontend/src/utils/actionHistory.ts` | 2 | 1 | 1 | 16 |
-| 318 | `frontend/src/utils/appRefresh.ts` | 0 | 3 | 0 | 5 |
-| 319 | `frontend/src/utils/bulkOps.ts` | 0 | 1 | 0 | 8 |
-| 320 | `frontend/src/utils/color.ts` | 0 | 1 | 0 | 2 |
-| 321 | `frontend/src/utils/csv.d.ts` | 0 | 7 | 0 | 0 |
-| 322 | `frontend/src/utils/csv.js` | 0 | 0 | 0 | 13 |
-| 323 | `frontend/src/utils/csv.ts` | 0 | 8 | 0 | 1 |
-| 324 | `frontend/src/utils/csvExportWorker.ts` | 1 | 0 | 1 | 0 |
-| 325 | `frontend/src/utils/csvImport.js` | 0 | 0 | 0 | 2 |
-| 326 | `frontend/src/utils/csvImport.ts` | 1 | 11 | 1 | 1 |
-| 327 | `frontend/src/utils/csvRowCounter.ts` | 0 | 1 | 0 | 9 |
-| 328 | `frontend/src/utils/dateHelpers.ts` | 0 | 2 | 0 | 2 |
-| 329 | `frontend/src/utils/deviceInfo.ts` | 0 | 2 | 0 | 7 |
-| 330 | `frontend/src/utils/exportPackage.js` | 0 | 0 | 0 | 2 |
-| 331 | `frontend/src/utils/exportPackage.ts` | 1 | 2 | 1 | 1 |
-| 332 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
-| 333 | `frontend/src/utils/favicon.ts` | 0 | 1 | 0 | 3 |
-| 334 | `frontend/src/utils/formatters.ts` | 0 | 4 | 0 | 17 |
-| 335 | `frontend/src/utils/groupedRecords.ts` | 1 | 8 | 1 | 10 |
-| 336 | `frontend/src/utils/historyHelpers.ts` | 0 | 3 | 0 | 11 |
-| 337 | `frontend/src/utils/importJobRefresh.js` | 0 | 0 | 0 | 1 |
-| 338 | `frontend/src/utils/importJobRefresh.ts` | 0 | 3 | 0 | 0 |
-| 339 | `frontend/src/utils/index.js` | 0 | 0 | 0 | 0 |
-| 340 | `frontend/src/utils/index.ts` | 0 | 0 | 0 | 0 |
-| 341 | `frontend/src/utils/initials.ts` | 0 | 7 | 0 | 7 |
-| 342 | `frontend/src/utils/loaders.ts` | 0 | 9 | 0 | 20 |
-| 343 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 3 |
-| 344 | `frontend/src/utils/permissions.ts` | 0 | 1 | 0 | 2 |
-| 345 | `frontend/src/utils/pricing.d.ts` | 0 | 8 | 0 | 0 |
-| 346 | `frontend/src/utils/pricing.js` | 0 | 0 | 0 | 16 |
-| 347 | `frontend/src/utils/pricing.ts` | 0 | 8 | 0 | 1 |
-| 348 | `frontend/src/utils/printReceipt.js` | 0 | 0 | 0 | 2 |
-| 349 | `frontend/src/utils/printReceipt.ts` | 1 | 12 | 1 | 0 |
-| 350 | `frontend/src/utils/productBatches.ts` | 0 | 2 | 0 | 5 |
-| 351 | `frontend/src/utils/productGrouping.ts` | 1 | 4 | 1 | 4 |
-| 352 | `frontend/src/utils/publicAssetUrls.ts` | 1 | 2 | 1 | 7 |
-| 353 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 | 9 | 1 | 3 |
-| 354 | `frontend/src/utils/scriptTypography.ts` | 0 | 3 | 0 | 6 |
-| 355 | `frontend/src/utils/settingsRefresh.ts` | 1 | 3 | 1 | 0 |
-| 356 | `frontend/src/utils/settingsWriteOptions.ts` | 1 | 1 | 1 | 1 |
-| 357 | `frontend/src/web-api.js` | 0 | 0 | 0 | 1 |
-| 358 | `frontend/src/web-api.ts` | 6 | 0 | 6 | 0 |
-| 359 | `frontend/tailwind.config.ts` | 1 | 0 | 0 | 0 |
-| 360 | `frontend/tests/actionGuards.test.ts` | 1 | 0 | 0 | 0 |
-| 361 | `frontend/tests/actionStability.test.ts` | 4 | 0 | 0 | 0 |
-| 362 | `frontend/tests/adminShellMediaGuards.test.ts` | 2 | 0 | 0 | 0 |
-| 363 | `frontend/tests/apiHttp.test.ts` | 2 | 0 | 0 | 0 |
-| 364 | `frontend/tests/appRefresh.test.ts` | 2 | 0 | 1 | 0 |
-| 365 | `frontend/tests/appShellUtils.test.ts` | 3 | 0 | 1 | 0 |
-| 366 | `frontend/tests/assetCompression.test.ts` | 4 | 0 | 0 | 0 |
-| 367 | `frontend/tests/backupJobs.test.ts` | 2 | 0 | 0 | 0 |
-| 368 | `frontend/tests/barcodeImageScanner.test.ts` | 2 | 0 | 1 | 0 |
-| 369 | `frontend/tests/barcodeScannerState.test.ts` | 2 | 0 | 1 | 0 |
-| 370 | `frontend/tests/bulkOps.test.ts` | 2 | 0 | 1 | 0 |
-| 371 | `frontend/tests/contactImportWorker.test.ts` | 3 | 0 | 1 | 0 |
-| 372 | `frontend/tests/csvImport.test.ts` | 3 | 0 | 1 | 0 |
-| 373 | `frontend/tests/dashboardDataReliability.test.ts` | 2 | 0 | 0 | 0 |
-| 374 | `frontend/tests/dateHelpers.test.ts` | 2 | 0 | 1 | 0 |
-| 375 | `frontend/tests/deviceInfo.test.ts` | 2 | 0 | 1 | 0 |
-| 376 | `frontend/tests/exportPackages.test.ts` | 4 | 0 | 2 | 0 |
-| 377 | `frontend/tests/formatters.test.ts` | 2 | 0 | 1 | 0 |
-| 378 | `frontend/tests/globalScroll.test.ts` | 2 | 0 | 0 | 0 |
-| 379 | `frontend/tests/globalScrollControls.test.ts` | 2 | 0 | 1 | 0 |
-| 380 | `frontend/tests/groupedRecords.test.ts` | 2 | 0 | 1 | 0 |
-| 381 | `frontend/tests/historyHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 382 | `frontend/tests/importJobRefresh.test.ts` | 1 | 0 | 0 | 0 |
-| 383 | `frontend/tests/initials.test.ts` | 1 | 0 | 0 | 0 |
-| 384 | `frontend/tests/inventoryImportWorker.test.ts` | 3 | 0 | 1 | 0 |
-| 385 | `frontend/tests/inventoryMobileCardLayout.test.ts` | 2 | 0 | 0 | 0 |
-| 386 | `frontend/tests/inventoryMovementGroups.test.ts` | 2 | 0 | 1 | 0 |
-| 387 | `frontend/tests/inventoryRfidSection.test.ts` | 2 | 0 | 0 | 0 |
-| 388 | `frontend/tests/jsxSyntaxCheck.ts` | 5 | 0 | 0 | 0 |
-| 389 | `frontend/tests/loaders.test.ts` | 1 | 0 | 0 | 0 |
-| 390 | `frontend/tests/mediaUploadHelpers.test.ts` | 2 | 0 | 1 | 0 |
-| 391 | `frontend/tests/navigationConfig.test.ts` | 2 | 0 | 1 | 0 |
-| 392 | `frontend/tests/notificationBadge.test.ts` | 2 | 0 | 0 | 0 |
-| 393 | `frontend/tests/offlineSalesQueue.test.ts` | 2 | 0 | 0 | 0 |
-| 394 | `frontend/tests/offlineSecurityHardening.test.ts` | 2 | 0 | 0 | 0 |
-| 395 | `frontend/tests/offlineSyncArchitecture.test.ts` | 2 | 0 | 0 | 0 |
-| 396 | `frontend/tests/ownedGoogleAuth.test.ts` | 2 | 0 | 0 | 0 |
-| 397 | `frontend/tests/performanceLoadingUx.test.ts` | 2 | 0 | 0 | 0 |
-| 398 | `frontend/tests/permissionEditor.test.ts` | 2 | 0 | 0 | 0 |
-| 399 | `frontend/tests/permissions.test.ts` | 2 | 0 | 1 | 0 |
-| 400 | `frontend/tests/portalCatalogDisplay.test.ts` | 2 | 0 | 0 | 0 |
-| 401 | `frontend/tests/portalContentI18n.test.ts` | 1 | 0 | 0 | 0 |
-| 402 | `frontend/tests/portalEditorUtils.test.ts` | 1 | 0 | 0 | 0 |
-| 403 | `frontend/tests/portalFaqVocabulary.test.ts` | 1 | 0 | 0 | 0 |
-| 404 | `frontend/tests/portalLanguagePacks.test.ts` | 1 | 0 | 0 | 0 |
-| 405 | `frontend/tests/portalTranslateController.test.ts` | 1 | 0 | 0 | 0 |
-| 406 | `frontend/tests/posCore.test.ts` | 1 | 0 | 0 | 0 |
-| 407 | `frontend/tests/pricingContacts.test.ts` | 3 | 0 | 1 | 0 |
-| 408 | `frontend/tests/productBatches.test.ts` | 2 | 0 | 1 | 0 |
-| 409 | `frontend/tests/productDiscountUx.test.ts` | 2 | 0 | 0 | 0 |
-| 410 | `frontend/tests/productDisplayHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 411 | `frontend/tests/productFilterHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 412 | `frontend/tests/productGalleryHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 413 | `frontend/tests/productGrouping.test.ts` | 2 | 0 | 1 | 0 |
-| 414 | `frontend/tests/productGroupViewHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 415 | `frontend/tests/productHistoryHelpers.test.ts` | 2 | 0 | 1 | 0 |
-| 416 | `frontend/tests/productImportPlanner.test.ts` | 3 | 0 | 1 | 0 |
-| 417 | `frontend/tests/productImportWorkerFallback.test.ts` | 3 | 0 | 1 | 0 |
-| 418 | `frontend/tests/productMenuHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 419 | `frontend/tests/productPageHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 420 | `frontend/tests/productSearchPagination.test.ts` | 2 | 0 | 0 | 0 |
-| 421 | `frontend/tests/productSelectionHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 422 | `frontend/tests/productWriteHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 423 | `frontend/tests/publicErrorRecovery.test.ts` | 1 | 0 | 0 | 0 |
-| 424 | `frontend/tests/receiptSettingsSync.test.ts` | 2 | 0 | 0 | 0 |
-| 425 | `frontend/tests/receiptTemplate.test.ts` | 4 | 0 | 2 | 0 |
-| 426 | `frontend/tests/returnsLayout.test.ts` | 2 | 0 | 0 | 0 |
-| 427 | `frontend/tests/runtimeErrorClassifier.test.ts` | 1 | 0 | 0 | 0 |
-| 428 | `frontend/tests/salesImportWorker.test.ts` | 3 | 0 | 1 | 0 |
-| 429 | `frontend/tests/scanbotScanner.test.ts` | 2 | 0 | 1 | 0 |
-| 430 | `frontend/tests/scriptTypography.test.ts` | 2 | 0 | 1 | 0 |
-| 431 | `frontend/tests/sectionNavigation.test.ts` | 2 | 0 | 0 | 0 |
-| 432 | `frontend/tests/settingsConflictHelpers.test.ts` | 2 | 0 | 1 | 0 |
-| 433 | `frontend/tests/settingsRefresh.test.ts` | 1 | 0 | 0 | 0 |
-| 434 | `frontend/tests/storagePolicy.test.ts` | 1 | 0 | 0 | 0 |
-| 435 | `frontend/tests/utilsSettingsBarrel.test.ts` | 2 | 0 | 0 | 0 |
-| 436 | `frontend/vite.config.ts` | 8 | 1 | 0 | 0 |
-| 437 | `ops/scripts/architecture/generated-bulk-audit.ts` | 4 | 0 | 2 | 0 |
-| 438 | `ops/scripts/architecture/language-runtime-audit.ts` | 4 | 0 | 2 | 0 |
-| 439 | `ops/scripts/architecture/organization-audit.ts` | 4 | 0 | 2 | 0 |
-| 440 | `ops/scripts/architecture/phase29-audit.ts` | 5 | 0 | 2 | 0 |
-| 441 | `ops/scripts/backend/schema-audit.ts` | 2 | 0 | 0 | 0 |
-| 442 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
-| 443 | `ops/scripts/backend/verify-data-integrity.ts` | 3 | 0 | 0 | 0 |
-| 444 | `ops/scripts/frontend/verify-i18n.ts` | 2 | 0 | 1 | 0 |
-| 445 | `ops/scripts/frontend/verify-performance.ts` | 3 | 0 | 0 | 0 |
-| 446 | `ops/scripts/frontend/verify-ui.ts` | 3 | 0 | 1 | 0 |
-| 447 | `ops/scripts/lib/fs-utils.ts` | 2 | 1 | 0 | 13 |
-| 448 | `ops/scripts/lib/report-utils.ts` | 1 | 1 | 0 | 5 |
-| 449 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 4 | 0 | 1 | 0 |
-| 450 | `ops/scripts/runtime/audits/audit-auth.ts` | 0 | 4 | 0 | 18 |
-| 451 | `ops/scripts/runtime/audits/audit-manifest.ts` | 0 | 7 | 0 | 3 |
-| 452 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
-| 453 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 9 | 0 | 3 | 0 |
-| 454 | `ops/scripts/runtime/audits/full-app-audit.ts` | 9 | 0 | 3 | 0 |
-| 455 | `ops/scripts/runtime/browser-action-smoke.ts` | 8 | 0 | 3 | 0 |
-| 456 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
-| 457 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 3 | 0 | 0 | 0 |
-| 458 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 4 | 0 | 1 | 0 |
-| 459 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 4 | 0 | 0 | 0 |
-| 460 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 0 | 7 | 0 | 14 |
-| 461 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 462 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 6 | 0 | 2 | 0 |
-| 463 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 464 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 465 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 4 | 0 | 0 | 0 |
-| 466 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 467 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 468 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 469 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 470 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 471 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 472 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 473 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 4 | 0 | 0 | 0 |
-| 474 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 475 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 6 | 0 | 2 | 0 |
-| 476 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 477 | `ops/scripts/runtime/smoke/check-public-url.ts` | 2 | 0 | 0 | 0 |
-| 478 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
-| 479 | `ops/scripts/runtime/smoke/live-smoke.ts` | 5 | 0 | 0 | 0 |
-| 480 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 2 | 0 | 0 | 0 |
-| 481 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 3 | 0 | 0 | 0 |
-| 482 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 3 | 0 | 0 | 0 |
-| 483 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 3 | 0 | 0 | 0 |
-| 484 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 3 | 0 | 0 | 0 |
-| 485 | `ops/scripts/runtime/storage/prune-storage.ts` | 4 | 0 | 0 | 0 |
-| 486 | `ops/scripts/runtime/storage/restore-candidates.ts` | 2 | 0 | 0 | 0 |
-| 487 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 3 | 0 | 0 | 0 |
-| 488 | `ops/scripts/verification/verify-backup-reliability.ts` | 3 | 0 | 1 | 0 |
-| 489 | `ops/scripts/verification/verify-docker-release.ts` | 3 | 0 | 1 | 0 |
-| 490 | `ops/scripts/verification/verify-hardening-policy.ts` | 4 | 0 | 1 | 0 |
-| 491 | `ops/scripts/verification/verify-runtime-deps.ts` | 3 | 0 | 1 | 0 |
-| 492 | `ops/scripts/verification/verify-scale-services.ts` | 4 | 0 | 1 | 0 |
-| 493 | `ops/scripts/verification/verify-secret-hygiene.ts` | 4 | 0 | 1 | 0 |
+| 247 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 4 |
+| 248 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
+| 249 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
+| 250 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
+| 251 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 3 | 1 | 2 | 1 |
+| 252 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
+| 253 | `frontend/src/components/receipt-settings/template.ts` | 1 | 2 | 1 | 3 |
+| 254 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
+| 255 | `frontend/src/components/returns/EditReturnModal.jsx` | 4 | 1 | 3 | 1 |
+| 256 | `frontend/src/components/returns/NewReturnModal.jsx` | 4 | 1 | 3 | 1 |
+| 257 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 3 | 1 | 2 | 1 |
+| 258 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
+| 259 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
+| 260 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 2 | 1 | 0 | 1 |
+| 261 | `frontend/src/components/sales/ExportModal.jsx` | 5 | 1 | 3 | 1 |
+| 262 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
+| 263 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
+| 264 | `frontend/src/components/sales/SalesImportModal.jsx` | 5 | 1 | 4 | 1 |
+| 265 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 0 |
+| 266 | `frontend/src/components/sales/SalesListSurface.jsx` | 3 | 1 | 1 | 1 |
+| 267 | `frontend/src/components/sales/StatusBadge.jsx` | 0 | 5 | 0 | 6 |
+| 268 | `frontend/src/components/server/ServerPage.jsx` | 5 | 1 | 4 | 1 |
+| 269 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 3 | 1 | 1 | 17 |
+| 270 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 7 | 1 | 5 | 1 |
+| 271 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 7 |
+| 272 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
+| 273 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 2 |
+| 274 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
+| 275 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 | 1 | 0 | 6 |
+| 276 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 22 |
+| 277 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
+| 278 | `frontend/src/components/shared/NotificationCenter.jsx` | 4 | 1 | 1 | 2 |
+| 279 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
+| 280 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
+| 281 | `frontend/src/components/shared/PaginationControls.jsx` | 2 | 4 | 0 | 8 |
+| 282 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 7 |
+| 283 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
+| 284 | `frontend/src/components/shared/SectionSwitcher.jsx` | 1 | 1 | 0 | 4 |
+| 285 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
+| 286 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 3 | 0 | 2 |
+| 287 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
+| 288 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
+| 289 | `frontend/src/components/users/Users.jsx` | 14 | 1 | 12 | 1 |
+| 290 | `frontend/src/components/utils-settings/AuditLog.jsx` | 10 | 1 | 8 | 1 |
+| 291 | `frontend/src/components/utils-settings/Backup.jsx` | 10 | 1 | 8 | 1 |
+| 292 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
+| 293 | `frontend/src/components/utils-settings/index.js` | 0 | 0 | 0 | 0 |
+| 294 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
+| 295 | `frontend/src/components/utils-settings/OtpModal.jsx` | 3 | 1 | 2 | 2 |
+| 296 | `frontend/src/components/utils-settings/ResetData.jsx` | 6 | 0 | 4 | 1 |
+| 297 | `frontend/src/components/utils-settings/Settings.jsx` | 13 | 1 | 11 | 1 |
+| 298 | `frontend/src/components/utils-settings/settingsConflict.js` | 0 | 0 | 0 | 1 |
+| 299 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 1 |
+| 300 | `frontend/src/constants.ts` | 0 | 12 | 0 | 8 |
+| 301 | `frontend/src/index.jsx` | 9 | 0 | 4 | 0 |
+| 302 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 3 |
+| 303 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
+| 304 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
+| 305 | `frontend/src/types/jsx-modules.d.ts` | 0 | 3 | 0 | 0 |
+| 306 | `frontend/src/types/react.d.ts` | 0 | 5 | 0 | 0 |
+| 307 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 2 |
+| 308 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
+| 309 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
+| 310 | `frontend/src/utils/actionHistory.ts` | 2 | 1 | 1 | 16 |
+| 311 | `frontend/src/utils/appRefresh.ts` | 0 | 3 | 0 | 5 |
+| 312 | `frontend/src/utils/bulkOps.ts` | 0 | 1 | 0 | 8 |
+| 313 | `frontend/src/utils/color.ts` | 0 | 1 | 0 | 2 |
+| 314 | `frontend/src/utils/csv.d.ts` | 0 | 7 | 0 | 0 |
+| 315 | `frontend/src/utils/csv.js` | 0 | 0 | 0 | 13 |
+| 316 | `frontend/src/utils/csv.ts` | 0 | 8 | 0 | 1 |
+| 317 | `frontend/src/utils/csvExportWorker.ts` | 1 | 0 | 1 | 0 |
+| 318 | `frontend/src/utils/csvImport.js` | 0 | 0 | 0 | 2 |
+| 319 | `frontend/src/utils/csvImport.ts` | 1 | 11 | 1 | 1 |
+| 320 | `frontend/src/utils/csvRowCounter.ts` | 0 | 1 | 0 | 9 |
+| 321 | `frontend/src/utils/dateHelpers.ts` | 0 | 2 | 0 | 2 |
+| 322 | `frontend/src/utils/deviceInfo.ts` | 0 | 2 | 0 | 7 |
+| 323 | `frontend/src/utils/exportPackage.js` | 0 | 0 | 0 | 2 |
+| 324 | `frontend/src/utils/exportPackage.ts` | 1 | 2 | 1 | 1 |
+| 325 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
+| 326 | `frontend/src/utils/favicon.ts` | 0 | 1 | 0 | 3 |
+| 327 | `frontend/src/utils/formatters.ts` | 0 | 4 | 0 | 17 |
+| 328 | `frontend/src/utils/groupedRecords.ts` | 1 | 8 | 1 | 10 |
+| 329 | `frontend/src/utils/historyHelpers.ts` | 0 | 3 | 0 | 11 |
+| 330 | `frontend/src/utils/importJobRefresh.js` | 0 | 0 | 0 | 1 |
+| 331 | `frontend/src/utils/importJobRefresh.ts` | 0 | 3 | 0 | 0 |
+| 332 | `frontend/src/utils/index.js` | 0 | 0 | 0 | 0 |
+| 333 | `frontend/src/utils/index.ts` | 0 | 0 | 0 | 0 |
+| 334 | `frontend/src/utils/initials.ts` | 0 | 7 | 0 | 7 |
+| 335 | `frontend/src/utils/loaders.ts` | 0 | 9 | 0 | 20 |
+| 336 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 3 |
+| 337 | `frontend/src/utils/permissions.ts` | 0 | 1 | 0 | 2 |
+| 338 | `frontend/src/utils/pricing.d.ts` | 0 | 8 | 0 | 0 |
+| 339 | `frontend/src/utils/pricing.js` | 0 | 0 | 0 | 16 |
+| 340 | `frontend/src/utils/pricing.ts` | 0 | 8 | 0 | 1 |
+| 341 | `frontend/src/utils/printReceipt.js` | 0 | 0 | 0 | 2 |
+| 342 | `frontend/src/utils/printReceipt.ts` | 1 | 12 | 1 | 0 |
+| 343 | `frontend/src/utils/productBatches.ts` | 0 | 2 | 0 | 5 |
+| 344 | `frontend/src/utils/productGrouping.ts` | 1 | 4 | 1 | 4 |
+| 345 | `frontend/src/utils/publicAssetUrls.ts` | 1 | 2 | 1 | 7 |
+| 346 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 | 9 | 1 | 3 |
+| 347 | `frontend/src/utils/scriptTypography.ts` | 0 | 3 | 0 | 6 |
+| 348 | `frontend/src/utils/settingsRefresh.ts` | 1 | 3 | 1 | 0 |
+| 349 | `frontend/src/utils/settingsWriteOptions.ts` | 1 | 1 | 1 | 1 |
+| 350 | `frontend/src/web-api.js` | 0 | 0 | 0 | 1 |
+| 351 | `frontend/src/web-api.ts` | 6 | 0 | 6 | 0 |
+| 352 | `frontend/tailwind.config.ts` | 1 | 0 | 0 | 0 |
+| 353 | `frontend/tests/actionGuards.test.ts` | 1 | 0 | 0 | 0 |
+| 354 | `frontend/tests/actionStability.test.ts` | 4 | 0 | 0 | 0 |
+| 355 | `frontend/tests/adminShellMediaGuards.test.ts` | 2 | 0 | 0 | 0 |
+| 356 | `frontend/tests/apiHttp.test.ts` | 2 | 0 | 0 | 0 |
+| 357 | `frontend/tests/appRefresh.test.ts` | 2 | 0 | 1 | 0 |
+| 358 | `frontend/tests/appShellUtils.test.ts` | 3 | 0 | 1 | 0 |
+| 359 | `frontend/tests/assetCompression.test.ts` | 4 | 0 | 0 | 0 |
+| 360 | `frontend/tests/backupJobs.test.ts` | 2 | 0 | 0 | 0 |
+| 361 | `frontend/tests/barcodeImageScanner.test.ts` | 2 | 0 | 1 | 0 |
+| 362 | `frontend/tests/barcodeScannerState.test.ts` | 2 | 0 | 1 | 0 |
+| 363 | `frontend/tests/bulkOps.test.ts` | 2 | 0 | 1 | 0 |
+| 364 | `frontend/tests/contactImportWorker.test.ts` | 3 | 0 | 1 | 0 |
+| 365 | `frontend/tests/csvImport.test.ts` | 3 | 0 | 1 | 0 |
+| 366 | `frontend/tests/dashboardDataReliability.test.ts` | 2 | 0 | 0 | 0 |
+| 367 | `frontend/tests/dateHelpers.test.ts` | 2 | 0 | 1 | 0 |
+| 368 | `frontend/tests/deviceInfo.test.ts` | 2 | 0 | 1 | 0 |
+| 369 | `frontend/tests/exportPackages.test.ts` | 4 | 0 | 2 | 0 |
+| 370 | `frontend/tests/formatters.test.ts` | 2 | 0 | 1 | 0 |
+| 371 | `frontend/tests/globalScroll.test.ts` | 2 | 0 | 0 | 0 |
+| 372 | `frontend/tests/globalScrollControls.test.ts` | 2 | 0 | 1 | 0 |
+| 373 | `frontend/tests/groupedRecords.test.ts` | 2 | 0 | 1 | 0 |
+| 374 | `frontend/tests/historyHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 375 | `frontend/tests/importJobRefresh.test.ts` | 1 | 0 | 0 | 0 |
+| 376 | `frontend/tests/initials.test.ts` | 1 | 0 | 0 | 0 |
+| 377 | `frontend/tests/inventoryImportWorker.test.ts` | 3 | 0 | 1 | 0 |
+| 378 | `frontend/tests/inventoryMobileCardLayout.test.ts` | 2 | 0 | 0 | 0 |
+| 379 | `frontend/tests/inventoryMovementGroups.test.ts` | 2 | 0 | 1 | 0 |
+| 380 | `frontend/tests/inventoryRfidSection.test.ts` | 2 | 0 | 0 | 0 |
+| 381 | `frontend/tests/jsxSyntaxCheck.ts` | 5 | 0 | 0 | 0 |
+| 382 | `frontend/tests/loaders.test.ts` | 1 | 0 | 0 | 0 |
+| 383 | `frontend/tests/mediaUploadHelpers.test.ts` | 2 | 0 | 1 | 0 |
+| 384 | `frontend/tests/navigationConfig.test.ts` | 2 | 0 | 1 | 0 |
+| 385 | `frontend/tests/notificationBadge.test.ts` | 2 | 0 | 0 | 0 |
+| 386 | `frontend/tests/offlineSalesQueue.test.ts` | 2 | 0 | 0 | 0 |
+| 387 | `frontend/tests/offlineSecurityHardening.test.ts` | 2 | 0 | 0 | 0 |
+| 388 | `frontend/tests/offlineSyncArchitecture.test.ts` | 2 | 0 | 0 | 0 |
+| 389 | `frontend/tests/ownedGoogleAuth.test.ts` | 2 | 0 | 0 | 0 |
+| 390 | `frontend/tests/performanceLoadingUx.test.ts` | 2 | 0 | 0 | 0 |
+| 391 | `frontend/tests/permissionEditor.test.ts` | 2 | 0 | 0 | 0 |
+| 392 | `frontend/tests/permissions.test.ts` | 2 | 0 | 1 | 0 |
+| 393 | `frontend/tests/portalCatalogDisplay.test.ts` | 2 | 0 | 0 | 0 |
+| 394 | `frontend/tests/portalContentI18n.test.ts` | 1 | 0 | 0 | 0 |
+| 395 | `frontend/tests/portalEditorUtils.test.ts` | 1 | 0 | 0 | 0 |
+| 396 | `frontend/tests/portalFaqVocabulary.test.ts` | 1 | 0 | 0 | 0 |
+| 397 | `frontend/tests/portalLanguagePacks.test.ts` | 1 | 0 | 0 | 0 |
+| 398 | `frontend/tests/portalTranslateController.test.ts` | 1 | 0 | 0 | 0 |
+| 399 | `frontend/tests/posCore.test.ts` | 1 | 0 | 0 | 0 |
+| 400 | `frontend/tests/pricingContacts.test.ts` | 3 | 0 | 1 | 0 |
+| 401 | `frontend/tests/productBatches.test.ts` | 2 | 0 | 1 | 0 |
+| 402 | `frontend/tests/productDiscountUx.test.ts` | 2 | 0 | 0 | 0 |
+| 403 | `frontend/tests/productDisplayHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 404 | `frontend/tests/productFilterHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 405 | `frontend/tests/productGalleryHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 406 | `frontend/tests/productGrouping.test.ts` | 2 | 0 | 1 | 0 |
+| 407 | `frontend/tests/productGroupViewHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 408 | `frontend/tests/productHistoryHelpers.test.ts` | 2 | 0 | 1 | 0 |
+| 409 | `frontend/tests/productImportPlanner.test.ts` | 3 | 0 | 1 | 0 |
+| 410 | `frontend/tests/productImportWorkerFallback.test.ts` | 3 | 0 | 1 | 0 |
+| 411 | `frontend/tests/productMenuHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 412 | `frontend/tests/productPageHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 413 | `frontend/tests/productSearchPagination.test.ts` | 2 | 0 | 0 | 0 |
+| 414 | `frontend/tests/productSelectionHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 415 | `frontend/tests/productWriteHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 416 | `frontend/tests/publicErrorRecovery.test.ts` | 1 | 0 | 0 | 0 |
+| 417 | `frontend/tests/receiptSettingsSync.test.ts` | 2 | 0 | 0 | 0 |
+| 418 | `frontend/tests/receiptTemplate.test.ts` | 4 | 0 | 2 | 0 |
+| 419 | `frontend/tests/returnsLayout.test.ts` | 2 | 0 | 0 | 0 |
+| 420 | `frontend/tests/runtimeErrorClassifier.test.ts` | 1 | 0 | 0 | 0 |
+| 421 | `frontend/tests/salesImportWorker.test.ts` | 3 | 0 | 1 | 0 |
+| 422 | `frontend/tests/scanbotScanner.test.ts` | 2 | 0 | 1 | 0 |
+| 423 | `frontend/tests/scriptTypography.test.ts` | 2 | 0 | 1 | 0 |
+| 424 | `frontend/tests/sectionNavigation.test.ts` | 2 | 0 | 0 | 0 |
+| 425 | `frontend/tests/settingsConflictHelpers.test.ts` | 2 | 0 | 1 | 0 |
+| 426 | `frontend/tests/settingsRefresh.test.ts` | 1 | 0 | 0 | 0 |
+| 427 | `frontend/tests/storagePolicy.test.ts` | 1 | 0 | 0 | 0 |
+| 428 | `frontend/tests/utilsSettingsBarrel.test.ts` | 2 | 0 | 0 | 0 |
+| 429 | `frontend/vite.config.ts` | 8 | 1 | 0 | 0 |
+| 430 | `ops/scripts/architecture/generated-bulk-audit.ts` | 4 | 0 | 2 | 0 |
+| 431 | `ops/scripts/architecture/language-runtime-audit.ts` | 4 | 0 | 2 | 0 |
+| 432 | `ops/scripts/architecture/organization-audit.ts` | 4 | 0 | 2 | 0 |
+| 433 | `ops/scripts/architecture/phase29-audit.ts` | 5 | 0 | 2 | 0 |
+| 434 | `ops/scripts/backend/schema-audit.ts` | 2 | 0 | 0 | 0 |
+| 435 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
+| 436 | `ops/scripts/backend/verify-data-integrity.ts` | 3 | 0 | 0 | 0 |
+| 437 | `ops/scripts/frontend/verify-i18n.ts` | 2 | 0 | 1 | 0 |
+| 438 | `ops/scripts/frontend/verify-performance.ts` | 3 | 0 | 0 | 0 |
+| 439 | `ops/scripts/frontend/verify-ui.ts` | 3 | 0 | 1 | 0 |
+| 440 | `ops/scripts/lib/fs-utils.ts` | 2 | 1 | 0 | 13 |
+| 441 | `ops/scripts/lib/report-utils.ts` | 1 | 1 | 0 | 5 |
+| 442 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 4 | 0 | 1 | 0 |
+| 443 | `ops/scripts/runtime/audits/audit-auth.ts` | 0 | 4 | 0 | 18 |
+| 444 | `ops/scripts/runtime/audits/audit-manifest.ts` | 0 | 7 | 0 | 3 |
+| 445 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
+| 446 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 9 | 0 | 3 | 0 |
+| 447 | `ops/scripts/runtime/audits/full-app-audit.ts` | 9 | 0 | 3 | 0 |
+| 448 | `ops/scripts/runtime/browser-action-smoke.ts` | 8 | 0 | 3 | 0 |
+| 449 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
+| 450 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 3 | 0 | 0 | 0 |
+| 451 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 4 | 0 | 1 | 0 |
+| 452 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 4 | 0 | 0 | 0 |
+| 453 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 0 | 7 | 0 | 14 |
+| 454 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 455 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 6 | 0 | 2 | 0 |
+| 456 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 457 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 458 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 4 | 0 | 0 | 0 |
+| 459 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 460 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 461 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 462 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 463 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 464 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 465 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 466 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 4 | 0 | 0 | 0 |
+| 467 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 468 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 6 | 0 | 2 | 0 |
+| 469 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 470 | `ops/scripts/runtime/smoke/check-public-url.ts` | 2 | 0 | 0 | 0 |
+| 471 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
+| 472 | `ops/scripts/runtime/smoke/live-smoke.ts` | 5 | 0 | 0 | 0 |
+| 473 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 2 | 0 | 0 | 0 |
+| 474 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 3 | 0 | 0 | 0 |
+| 475 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 3 | 0 | 0 | 0 |
+| 476 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 3 | 0 | 0 | 0 |
+| 477 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 3 | 0 | 0 | 0 |
+| 478 | `ops/scripts/runtime/storage/prune-storage.ts` | 4 | 0 | 0 | 0 |
+| 479 | `ops/scripts/runtime/storage/restore-candidates.ts` | 2 | 0 | 0 | 0 |
+| 480 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 3 | 0 | 0 | 0 |
+| 481 | `ops/scripts/verification/verify-backup-reliability.ts` | 3 | 0 | 1 | 0 |
+| 482 | `ops/scripts/verification/verify-docker-release.ts` | 3 | 0 | 1 | 0 |
+| 483 | `ops/scripts/verification/verify-hardening-policy.ts` | 4 | 0 | 1 | 0 |
+| 484 | `ops/scripts/verification/verify-runtime-deps.ts` | 3 | 0 | 1 | 0 |
+| 485 | `ops/scripts/verification/verify-scale-services.ts` | 4 | 0 | 1 | 0 |
+| 486 | `ops/scripts/verification/verify-secret-hygiene.ts` | 4 | 0 | 1 | 0 |
 
 ## 3. Detailed File Dependency Commentary
 
@@ -2973,10 +2966,10 @@ Code files documented: **493**
 
 - Declared exports: `FRONTEND_BUILD_INFO`, `__resetApiWriteDedupeForTests`, `apiFetch`, `buildApiRequestDedupeKey`, `cacheClearAll`, `cacheGet`, `cacheGetStale`, `cacheInvalidate`, `cacheSet`, `clearCallLog`, `createApiVersionMismatchError`, `getApiVersionMismatchCooldown`, `getCallLog`, `getSyncServerUrl`, `getSyncToken`, `isApiVersionMismatchError`, `isCloudflareAccessRedirectResponse`, `isInvalidSessionError`, `isNetErr`, `isReachableServerResponseStatus`, `isRequiredRuntimeApiPath`, `isServerOnline`, `isTransientGatewayError`, `isWriteBlockedError`, `isWriteConflictError`, `markApiVersionMismatch`, `requireLiveServerWrite`, `route`, `setSyncServerUrl`, `setSyncToken`, `shouldCompareRuntimeVersions`, `startHealthCheck`
 - Imports (2)
-  - `../constants.js`
+  - `../constants.ts`
   - `../utils/deviceInfo.ts`
 - Internal dependencies (2)
-  - `frontend/src/constants.js`
+  - `frontend/src/constants.ts`
   - `frontend/src/utils/deviceInfo.ts`
 - Referenced by (0)
   - none
@@ -3011,15 +3004,15 @@ Code files documented: **493**
 - Declared exports: `adjustStock`, `applyRfidSession`, `approveImportJob`, `askPortalAi`, `attachSaleCustomer`, `browseDir`, `bulkImportCustomers`, `bulkImportDeliveryContacts`, `bulkImportProducts`, `bulkImportSuppliers`, `cancelImportJob`, `cancelSystemJob`, `changeUserPassword`, `completeGoogleOauth`, `completePasswordReset`, `createActionHistory`, `createAiProvider`, `createBranch`, `createCategory`, `createCustomTable`, `createCustomer`, `createDeliveryContact`, `createImportJob`, `createPortalSubmission`, `createProduct`, `createProductVariant`, `createReturn`, `createRfidSession`, `createRfidTag`, `createRole`, `createSale`, `createSupplier`, `createSupplierReturn`, `createUnit`, `createUser`, `deleteAiProvider`, `deleteAuditLogsRetention`, `deleteBranch`, `deleteCategory`, `deleteCustomRow`, `deleteCustomer`, `deleteDeliveryContact`, `deleteFileAsset`, `deleteImportJob`, `deleteProduct`, `deleteRole`, `deleteSupplier`, `deleteUnit`, `discardPendingSyncQueue`, `disconnectGoogleDriveSync`, `disconnectUserAuthProvider`, `downloadCustomerTemplate`, `downloadImportJobErrors`, `downloadImportTemplate`, `downloadSupplierTemplate`, `exportBackupFolder`, `factoryReset`, `forgetGoogleDriveSyncCredentials`, `getActionHistory`, `getAiProviders`, `getAiResponses`, `getAnalytics`, `getAppBootstrap`, `getAuditLogs`, `getBranchStock`, `getBranchStockIntegrity`, `getBranchSummary`, `getBranches`, `getCatalogMeta`, `getCatalogProducts`, `getCategories`, `getCurrentOrganization`, `getCustomTableData`, `getCustomTables`, `getCustomerPointSummaries`, `getCustomers`, `getDashboard`, `getDataPath`, `getDeliveryContacts`, `getFiles`, `getGoogleDriveSyncStatus`, `getImageDataUrl`, `getImportJob`, `getImportJobReview`, `getImportQueueStatus`, `getIntegrationDoctor`, `getInventoryMovements`, `getInventoryReasons`, `getInventoryStats`, `getInventorySummary`, `getNotificationSummary`, `getOrganizationBootstrap`, `getPendingSyncState`, `getPortalAiStatus`, `getPortalBootstrap`, `getPortalCatalogMeta`, `getPortalCatalogProducts`, `getPortalConfig`, `getPortalSubmissionsForReview`, `getProductFilters`, `getProductLookupUsage`, `getProducts`, `getProductsByIds`, `getReturn`, `getReturns`, `getRfidSessionReview`, `getRfidStatus`, `getRoles`, `getSales`, `getSalesExport`, `getScaleMigrationStatus`, `getSettings`, `getSuppliers`, `getSystemConfig`, `getSystemDebugLog`, `getSystemJob`, `getTransfers`, `getUnits`, `getUserAuthMethods`, `getUserProfile`, `getUsers`, `getVerificationCapabilities`, `importBackupFolder`, `insertCustomRow`, `listImportJobs`, `login`, `logout`, `lookupPortalMembership`, `moveStockRow`, `openCSVDialog`, `openFolderDialog`, `openImageDialog`, `openPath`, `otpConfirm`, `otpDisable`, `otpSetup`, `otpStatus`, `otpVerify`, `pollSystemJob`, `preflightImportJob`, `prepareScaleMigration`, `queueBackupFolderExport`, `queueBackupFolderRestore`, `queueGoogleDriveSyncNow`, `recordRfidSessionEvents`, `redoActionHistory`, `refreshOfflineDeviceSnapshot`, `repairBranchStockIntegrity`, `replaceProductLookupValues`, `requestPasswordResetEmail`, `resetData`, `resetDataPath`, `resetPassword`, `resetPasswordWithOtp`, `retryImportJob`, `retryPendingSyncNow`, `reviewPortalSubmission`, `runScaleMigration`, `saveGoogleDriveSyncPreferences`, `saveInventoryReasons`, `saveSettings`, `searchInventoryProducts`, `searchOrganizations`, `searchPortalCatalogProducts`, `searchProducts`, `searchRfidTags`, `setDataPath`, `startGoogleDriveSyncOauth`, `startGoogleOauth`, `startImportJob`, `syncGoogleDriveNow`, `testAiProvider`, `testSyncServer`, `transferInventoryStock`, `transferStock`, `undoActionHistory`, `unlinkGoogleOauth`, `updateActionHistory`, `updateAiProvider`, `updateBranch`, `updateCategory`, `updateCustomRow`, `updateCustomer`, `updateDeliveryContact`, `updateImportJobDecisions`, `updateProduct`, `updateReturn`, `updateRole`, `updateSaleStatus`, `updateSessionDuration`, `updateSupplier`, `updateUnit`, `updateUser`, `updateUserProfile`, `uploadFileAsset`, `uploadImportJobCsv`, `uploadImportJobImages`, `uploadImportJobZip`, `uploadProductImage`, `uploadUserAvatar`
 - Imports (6)
   - `../constants`
-  - `../platform/runtime/clientRuntime.js`
+  - `../platform/runtime/clientRuntime.ts`
   - `../utils/appRefresh.ts`
   - `../utils/csvImport.js`
   - `../utils/deviceInfo.ts`
   - `./localDb.js`
 - Internal dependencies (6)
   - `frontend/src/api/localDb.js`
-  - `frontend/src/constants.js`
-  - `frontend/src/platform/runtime/clientRuntime.js`
+  - `frontend/src/constants.ts`
+  - `frontend/src/platform/runtime/clientRuntime.ts`
   - `frontend/src/utils/appRefresh.ts`
   - `frontend/src/utils/csvImport.js`
   - `frontend/src/utils/deviceInfo.ts`
@@ -3041,11 +3034,11 @@ Code files documented: **493**
 
 - Declared exports: `connectWS`, `disconnectWS`, `isWSConnected`, `reconnectWS`
 - Imports (2)
-  - `../constants.js`
+  - `../constants.ts`
   - `./http.js`
 - Internal dependencies (2)
   - `frontend/src/api/http.js`
-  - `frontend/src/constants.js`
+  - `frontend/src/constants.ts`
 - Referenced by (0)
   - none
 
@@ -3075,7 +3068,7 @@ Code files documented: **493**
   - `./components/shared/NotificationCenter`
   - `./components/shared/QuickPreferenceToggles`
   - `./components/shared/WriteConflictModal`
-  - `./components/shared/globalScroll.js`
+  - `./components/shared/globalScroll.ts`
   - `./components/users/Users`
   - `./components/utils-settings/AuditLog`
   - `./components/utils-settings/Backup`
@@ -3108,7 +3101,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/NotificationCenter.jsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.jsx`
   - `frontend/src/components/shared/WriteConflictModal.jsx`
-  - `frontend/src/components/shared/globalScroll.js`
+  - `frontend/src/components/shared/globalScroll.ts`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
@@ -3152,7 +3145,7 @@ Code files documented: **493**
   - `./constants`
   - `./lang/en.json`
   - `./lang/km.json`
-  - `./platform/runtime/clientRuntime.js`
+  - `./platform/runtime/clientRuntime.ts`
   - `./utils/appRefresh.ts`
   - `./utils/deviceInfo.ts`
   - `./utils/loaders.ts`
@@ -3165,10 +3158,10 @@ Code files documented: **493**
   - `frontend/src/api/http.js`
   - `frontend/src/api/websocket.js`
   - `frontend/src/app/appShellUtils.ts`
-  - `frontend/src/constants.js`
+  - `frontend/src/constants.ts`
   - `frontend/src/lang/en.json`
   - `frontend/src/lang/km.json`
-  - `frontend/src/platform/runtime/clientRuntime.js`
+  - `frontend/src/platform/runtime/clientRuntime.ts`
   - `frontend/src/utils/appRefresh.ts`
   - `frontend/src/utils/deviceInfo.ts`
   - `frontend/src/utils/loaders.ts`
@@ -3242,7 +3235,7 @@ Code files documented: **493**
 - Internal dependencies (4)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.jsx`
-  - `frontend/src/constants.js`
+  - `frontend/src/constants.ts`
   - `frontend/src/utils/deviceInfo.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
@@ -3271,7 +3264,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/bulkOps.ts`
@@ -3356,7 +3349,7 @@ Code files documented: **493**
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
   - `frontend/src/components/catalog/catalogUi.jsx`
   - `frontend/src/components/products/shared/primitives.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/favicon.ts`
 - Referenced by (1)
@@ -3567,7 +3560,7 @@ Code files documented: **493**
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
@@ -3864,7 +3857,7 @@ Code files documented: **493**
   - `frontend/src/components/dashboard/charts/index.js`
   - `frontend/src/components/shared/ExportMenu.jsx`
   - `frontend/src/components/shared/LoadingWatchdog.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/dateHelpers.ts`
   - `frontend/src/utils/exportPackage.js`
@@ -3925,7 +3918,7 @@ Code files documented: **493**
   - `frontend/src/components/files/FilesResponsesTab.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/historyHelpers.ts`
@@ -4012,7 +4005,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/LoadingWatchdog.jsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/SectionSwitcher.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/bulkOps.ts`
@@ -4141,7 +4134,7 @@ Code files documented: **493**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/shared/LoadingWatchdog.jsx`
   - `frontend/src/components/shared/SectionSwitcher.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
@@ -4162,7 +4155,7 @@ Code files documented: **493**
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/components/shared/NotificationCenter.jsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.jsx`
-  - `frontend/src/components/shared/navigationConfig.js`
+  - `frontend/src/components/shared/navigationConfig.ts`
   - `frontend/src/components/users/UserProfileModal.jsx`
 - Referenced by (1)
   - `frontend/src/App.jsx`
@@ -4222,7 +4215,7 @@ Code files documented: **493**
   - `frontend/src/components/sales/StatusBadge.jsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.jsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/deviceInfo.ts`
   - `frontend/src/utils/initials.ts`
   - `frontend/src/utils/pricing.js`
@@ -4606,7 +4599,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/ImageGalleryLightbox.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/bulkOps.ts`
@@ -4756,34 +4749,24 @@ Code files documented: **493**
   - `react`
 - Internal dependencies (2)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/receipt-settings/constants.js`
+  - `frontend/src/components/receipt-settings/constants.ts`
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.247 `frontend/src/components/receipt-settings/constants.js`
-
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (3)
-  - `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
-  - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
-  - `frontend/src/components/receipt-settings/template.ts`
-
-### 3.248 `frontend/src/components/receipt-settings/constants.ts`
+### 3.247 `frontend/src/components/receipt-settings/constants.ts`
 
 - Declared exports: `ALL_FIELD_ITEMS`, `DEFAULT_TEMPLATE`, `getFieldItems`
 - Imports (0)
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (4)
+  - `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+  - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt-settings/template.ts`
   - `frontend/tests/receiptTemplate.test.ts`
 
-### 3.249 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
+### 3.248 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
 
 - Declared exports: `class`
 - Imports (1)
@@ -4793,7 +4776,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.250 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
+### 3.249 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -4804,7 +4787,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.251 `frontend/src/components/receipt-settings/PrintSettings.jsx`
+### 3.250 `frontend/src/components/receipt-settings/PrintSettings.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4816,7 +4799,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.252 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+### 3.251 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4829,7 +4812,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.253 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
+### 3.252 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
 - Declared exports: `function`
 - Imports (12)
@@ -4852,37 +4835,26 @@ Code files documented: **493**
   - `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
   - `frontend/src/components/receipt-settings/PrintSettings.jsx`
   - `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
-  - `frontend/src/components/receipt-settings/constants.js`
-  - `frontend/src/components/receipt-settings/template.js`
+  - `frontend/src/components/receipt-settings/constants.ts`
+  - `frontend/src/components/receipt-settings/template.ts`
   - `frontend/src/utils/loaders.ts`
   - `frontend/src/utils/receiptAppliedConfig.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.254 `frontend/src/components/receipt-settings/template.js`
-
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (2)
-  - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
-  - `frontend/src/components/receipt/Receipt.jsx`
-
-### 3.255 `frontend/src/components/receipt-settings/template.ts`
+### 3.253 `frontend/src/components/receipt-settings/template.ts`
 
 - Declared exports: `parseReceiptTemplate`, `serializeReceiptTemplate`
-- Imports (2)
-  - `./constants.js`
+- Imports (1)
   - `./constants.ts`
-- Internal dependencies (2)
-  - `frontend/src/components/receipt-settings/constants.js`
+- Internal dependencies (1)
   - `frontend/src/components/receipt-settings/constants.ts`
-- Referenced by (1)
+- Referenced by (3)
+  - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
+  - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/tests/receiptTemplate.test.ts`
 
-### 3.256 `frontend/src/components/receipt/Receipt.jsx`
+### 3.254 `frontend/src/components/receipt/Receipt.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -4895,7 +4867,7 @@ Code files documented: **493**
   - `react`
 - Internal dependencies (5)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/receipt-settings/template.js`
+  - `frontend/src/components/receipt-settings/template.ts`
   - `frontend/src/components/sales/StatusBadge.jsx`
   - `frontend/src/utils/printReceipt.js`
   - `frontend/src/utils/receiptAppliedConfig.ts`
@@ -4904,7 +4876,7 @@ Code files documented: **493**
   - `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.257 `frontend/src/components/returns/EditReturnModal.jsx`
+### 3.255 `frontend/src/components/returns/EditReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -4919,7 +4891,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.258 `frontend/src/components/returns/NewReturnModal.jsx`
+### 3.256 `frontend/src/components/returns/NewReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -4934,7 +4906,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.259 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+### 3.257 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4947,7 +4919,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.260 `frontend/src/components/returns/ReturnDetailModal.jsx`
+### 3.258 `frontend/src/components/returns/ReturnDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -4959,7 +4931,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.261 `frontend/src/components/returns/Returns.jsx`
+### 3.259 `frontend/src/components/returns/Returns.jsx`
 
 - Declared exports: `function`
 - Imports (19)
@@ -4993,7 +4965,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/ExportMenu.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/csv.js`
@@ -5003,7 +4975,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.262 `frontend/src/components/returns/ReturnsListSurface.jsx`
+### 3.260 `frontend/src/components/returns/ReturnsListSurface.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5014,7 +4986,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.263 `frontend/src/components/sales/ExportModal.jsx`
+### 3.261 `frontend/src/components/sales/ExportModal.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5030,7 +5002,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.264 `frontend/src/components/sales/SaleDetailModal.jsx`
+### 3.262 `frontend/src/components/sales/SaleDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5043,7 +5015,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.265 `frontend/src/components/sales/Sales.jsx`
+### 3.263 `frontend/src/components/sales/Sales.jsx`
 
 - Declared exports: `function`
 - Imports (21)
@@ -5080,7 +5052,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/ExportMenu.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/bulkOps.ts`
@@ -5091,7 +5063,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.266 `frontend/src/components/sales/SalesImportModal.jsx`
+### 3.264 `frontend/src/components/sales/SalesImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5108,7 +5080,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.267 `frontend/src/components/sales/salesImportWorker.ts`
+### 3.265 `frontend/src/components/sales/salesImportWorker.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -5118,7 +5090,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.268 `frontend/src/components/sales/SalesListSurface.jsx`
+### 3.266 `frontend/src/components/sales/SalesListSurface.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5130,7 +5102,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.269 `frontend/src/components/sales/StatusBadge.jsx`
+### 3.267 `frontend/src/components/sales/StatusBadge.jsx`
 
 - Declared exports: `ALL_STATUSES`, `STATUS_COLORS`, `STATUS_LABELS`, `function`, `getStatusLabel`
 - Imports (0)
@@ -5145,7 +5117,7 @@ Code files documented: **493**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/sales/SalesListSurface.jsx`
 
-### 3.270 `frontend/src/components/server/ServerPage.jsx`
+### 3.268 `frontend/src/components/server/ServerPage.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5157,12 +5129,12 @@ Code files documented: **493**
 - Internal dependencies (4)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.271 `frontend/src/components/shared/ActionHistoryBar.jsx`
+### 3.269 `frontend/src/components/shared/ActionHistoryBar.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5190,7 +5162,7 @@ Code files documented: **493**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.272 `frontend/src/components/shared/BackgroundImportTracker.jsx`
+### 3.270 `frontend/src/components/shared/BackgroundImportTracker.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -5210,7 +5182,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.273 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.271 `frontend/src/components/shared/ExportMenu.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5227,7 +5199,7 @@ Code files documented: **493**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.274 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.272 `frontend/src/components/shared/FilterMenu.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5245,27 +5217,18 @@ Code files documented: **493**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.275 `frontend/src/components/shared/globalScroll.js`
-
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (1)
-  - `frontend/src/App.jsx`
-
-### 3.276 `frontend/src/components/shared/globalScroll.ts`
+### 3.273 `frontend/src/components/shared/globalScroll.ts`
 
 - Declared exports: `getScrollTarget`, `getScrollToPosition`
 - Imports (0)
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (1)
+- Referenced by (2)
+  - `frontend/src/App.jsx`
   - `frontend/tests/globalScrollControls.test.ts`
 
-### 3.277 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.274 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5278,7 +5241,7 @@ Code files documented: **493**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
 
-### 3.278 `frontend/src/components/shared/LoadingWatchdog.jsx`
+### 3.275 `frontend/src/components/shared/LoadingWatchdog.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5293,7 +5256,7 @@ Code files documented: **493**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.279 `frontend/src/components/shared/Modal.jsx`
+### 3.276 `frontend/src/components/shared/Modal.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -5324,28 +5287,19 @@ Code files documented: **493**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.280 `frontend/src/components/shared/navigationConfig.js`
-
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (2)
-  - `frontend/src/components/navigation/Sidebar.jsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
-
-### 3.281 `frontend/src/components/shared/navigationConfig.ts`
+### 3.277 `frontend/src/components/shared/navigationConfig.ts`
 
 - Declared exports: `DEFAULT_MOBILE_PINNED`, `NAV_ITEMS`, `orderNavItems`, `parseNavSetting`
 - Imports (0)
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (1)
+- Referenced by (3)
+  - `frontend/src/components/navigation/Sidebar.jsx`
+  - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/tests/navigationConfig.test.ts`
 
-### 3.282 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.278 `frontend/src/components/shared/NotificationCenter.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -5359,13 +5313,14 @@ Code files documented: **493**
   - `frontend/src/App.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.283 `frontend/src/components/shared/pageActivity.js`
+### 3.279 `frontend/src/components/shared/pageActivity.ts`
 
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
+- Declared exports: `useIsPageActive`
+- Imports (2)
+  - `../../AppContext`
+  - `react`
+- Internal dependencies (1)
+  - `frontend/src/AppContext.jsx`
 - Referenced by (15)
   - `frontend/src/components/branches/Branches.jsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
@@ -5383,18 +5338,7 @@ Code files documented: **493**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.284 `frontend/src/components/shared/pageActivity.ts`
-
-- Declared exports: `useIsPageActive`
-- Imports (2)
-  - `../../AppContext`
-  - `react`
-- Internal dependencies (1)
-  - `frontend/src/AppContext.jsx`
-- Referenced by (0)
-  - none
-
-### 3.285 `frontend/src/components/shared/PageHeader.jsx`
+### 3.280 `frontend/src/components/shared/PageHeader.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -5409,7 +5353,7 @@ Code files documented: **493**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.286 `frontend/src/components/shared/PaginationControls.jsx`
+### 3.281 `frontend/src/components/shared/PaginationControls.jsx`
 
 - Declared exports: `PAGE_SIZE_OPTIONS`, `clampPage`, `function`, `paginateItems`
 - Imports (2)
@@ -5427,7 +5371,7 @@ Code files documented: **493**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.287 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.282 `frontend/src/components/shared/PortalMenu.jsx`
 
 - Declared exports: `ThreeDotPortal`, `function`
 - Imports (3)
@@ -5445,7 +5389,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.288 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.283 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5458,7 +5402,7 @@ Code files documented: **493**
   - `frontend/src/components/auth/Login.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.289 `frontend/src/components/shared/SectionSwitcher.jsx`
+### 3.284 `frontend/src/components/shared/SectionSwitcher.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5471,7 +5415,7 @@ Code files documented: **493**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.290 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.285 `frontend/src/components/shared/WriteConflictModal.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5481,7 +5425,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.291 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.286 `frontend/src/components/users/PermissionEditor.jsx`
 
 - Declared exports: `PERMISSION_DEFS`, `PERMISSION_SECTIONS`, `function`
 - Imports (0)
@@ -5492,7 +5436,7 @@ Code files documented: **493**
   - `frontend/src/components/users/UserDetailSheet.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.292 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.287 `frontend/src/components/users/UserDetailSheet.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5504,7 +5448,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/users/Users.jsx`
 
-### 3.293 `frontend/src/components/users/UserProfileModal.jsx`
+### 3.288 `frontend/src/components/users/UserProfileModal.jsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -5524,14 +5468,14 @@ Code files documented: **493**
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/utils-settings/OtpModal.jsx`
-  - `frontend/src/constants.js`
+  - `frontend/src/constants.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (2)
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.294 `frontend/src/components/users/Users.jsx`
+### 3.289 `frontend/src/components/users/Users.jsx`
 
 - Declared exports: `function`
 - Imports (14)
@@ -5554,7 +5498,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/shared/PortalMenu.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/components/users/PermissionEditor.jsx`
   - `frontend/src/components/users/UserDetailSheet.jsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
@@ -5565,7 +5509,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.295 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.290 `frontend/src/components/utils-settings/AuditLog.jsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -5584,14 +5528,14 @@ Code files documented: **493**
   - `frontend/src/components/shared/ExportMenu.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/groupedRecords.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.296 `frontend/src/components/utils-settings/Backup.jsx`
+### 3.291 `frontend/src/components/utils-settings/Backup.jsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -5611,13 +5555,13 @@ Code files documented: **493**
   - `frontend/src/components/shared/LoadingWatchdog.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
   - `frontend/src/components/shared/SectionSwitcher.jsx`
-  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/components/utils-settings/ResetData.jsx`
   - `frontend/src/utils/actionHistory.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.297 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.292 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5627,7 +5571,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.298 `frontend/src/components/utils-settings/index.js`
+### 3.293 `frontend/src/components/utils-settings/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5637,7 +5581,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.299 `frontend/src/components/utils-settings/index.ts`
+### 3.294 `frontend/src/components/utils-settings/index.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5647,7 +5591,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.300 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.295 `frontend/src/components/utils-settings/OtpModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5661,7 +5605,7 @@ Code files documented: **493**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.301 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.296 `frontend/src/components/utils-settings/ResetData.jsx`
 
 - Declared exports: none detected
 - Imports (6)
@@ -5679,7 +5623,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.302 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.297 `frontend/src/components/utils-settings/Settings.jsx`
 
 - Declared exports: `function`
 - Imports (13)
@@ -5701,7 +5645,7 @@ Code files documented: **493**
   - `frontend/src/components/shared/LoadingWatchdog.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
   - `frontend/src/components/shared/SectionSwitcher.jsx`
-  - `frontend/src/components/shared/navigationConfig.js`
+  - `frontend/src/components/shared/navigationConfig.ts`
   - `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
   - `frontend/src/components/utils-settings/OtpModal.jsx`
   - `frontend/src/components/utils-settings/settingsConflict.js`
@@ -5711,7 +5655,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.303 `frontend/src/components/utils-settings/settingsConflict.js`
+### 3.298 `frontend/src/components/utils-settings/settingsConflict.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5721,7 +5665,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.304 `frontend/src/components/utils-settings/settingsConflict.ts`
+### 3.299 `frontend/src/components/utils-settings/settingsConflict.ts`
 
 - Declared exports: `buildSettingsConflictState`, `diffSettingsConflictFields`
 - Imports (0)
@@ -5731,9 +5675,9 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/tests/settingsConflictHelpers.test.ts`
 
-### 3.305 `frontend/src/constants.js`
+### 3.300 `frontend/src/constants.ts`
 
-- Declared exports: none detected
+- Declared exports: `CURRENCY`, `DELIVERY_FEE_PAYER`, `EMPTY_CUSTOMER`, `LAYOUT`, `PAYMENT_METHODS`, `STOCK`, `STORAGE_KEYS`, `SYNC`, `WRITE_CHANNELS`, `createEmptyOrder`, `formatDate`, `isNetworkError`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -5748,17 +5692,7 @@ Code files documented: **493**
   - `frontend/src/platform/runtime/clientRuntime.ts`
   - `frontend/src/web-api.ts`
 
-### 3.306 `frontend/src/constants.ts`
-
-- Declared exports: `CURRENCY`, `DELIVERY_FEE_PAYER`, `EMPTY_CUSTOMER`, `LAYOUT`, `PAYMENT_METHODS`, `STOCK`, `STORAGE_KEYS`, `SYNC`, `WRITE_CHANNELS`, `createEmptyOrder`, `formatDate`, `isNetworkError`
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (0)
-  - none
-
-### 3.307 `frontend/src/index.jsx`
+### 3.301 `frontend/src/index.jsx`
 
 - Declared exports: none detected
 - Imports (9)
@@ -5779,31 +5713,21 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.308 `frontend/src/platform/runtime/clientRuntime.js`
+### 3.302 `frontend/src/platform/runtime/clientRuntime.ts`
 
-- Declared exports: none detected
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
+- Declared exports: `buildQueuedOperationScope`, `doesQueuedScopeMatchCurrent`, `normalizeRuntimeDescriptor`, `readStoredRuntimeDescriptor`, `resetClientRuntimeState`, `sanitizeSyncServerUrl`, `shouldResetForRuntimeChange`, `writeStoredRuntimeDescriptor`
+- Imports (2)
+  - `../../api/localDb.js`
+  - `../../constants.ts`
+- Internal dependencies (2)
+  - `frontend/src/api/localDb.js`
+  - `frontend/src/constants.ts`
 - Referenced by (3)
   - `frontend/src/api/methods.js`
   - `frontend/src/AppContext.jsx`
   - `frontend/src/web-api.ts`
 
-### 3.309 `frontend/src/platform/runtime/clientRuntime.ts`
-
-- Declared exports: `buildQueuedOperationScope`, `doesQueuedScopeMatchCurrent`, `normalizeRuntimeDescriptor`, `readStoredRuntimeDescriptor`, `resetClientRuntimeState`, `sanitizeSyncServerUrl`, `shouldResetForRuntimeChange`, `writeStoredRuntimeDescriptor`
-- Imports (2)
-  - `../../api/localDb.js`
-  - `../../constants.js`
-- Internal dependencies (2)
-  - `frontend/src/api/localDb.js`
-  - `frontend/src/constants.js`
-- Referenced by (0)
-  - none
-
-### 3.310 `frontend/src/platform/storage/storagePolicy.ts`
+### 3.303 `frontend/src/platform/storage/storagePolicy.ts`
 
 - Declared exports: `DRIVE_SYNC_STATUS_COOLDOWN_KEY`, `DRIVE_SYNC_STATUS_COOLDOWN_MS`, `LIVE_SERVER_SENSITIVE_MIRROR_TABLES`, `NOTIFICATION_SUMMARY_MISSING_TTL_MS`, `NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY`, `isCooldownActive`, `maxStoredNumber`, `shouldPersistLocalMirror`
 - Imports (0)
@@ -5813,7 +5737,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.311 `frontend/src/runtime/runtimeErrorClassifier.ts`
+### 3.304 `frontend/src/runtime/runtimeErrorClassifier.ts`
 
 - Declared exports: `isFirstPartyBuiltAssetSource`, `isGuardableStyleSheetError`, `isKnownBridgeMessage`, `isKnownEvalCspNoise`, `isKnownStyleInjectionNoise`, `isLikelyInjectedRuntimeSource`, `shouldSuppressRuntimeError`, `shouldSuppressSecurityPolicyViolation`
 - Imports (0)
@@ -5823,7 +5747,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.312 `frontend/src/types/jsx-modules.d.ts`
+### 3.305 `frontend/src/types/jsx-modules.d.ts`
 
 - Declared exports: `FactoryReset`, `ResetData`, `component`
 - Imports (0)
@@ -5833,7 +5757,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.313 `frontend/src/types/react.d.ts`
+### 3.306 `frontend/src/types/react.d.ts`
 
 - Declared exports: `useCallback`, `useEffect`, `useMemo`, `useRef`, `useState`
 - Imports (0)
@@ -5843,7 +5767,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.314 `frontend/src/types/receiptContracts.ts`
+### 3.307 `frontend/src/types/receiptContracts.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5854,7 +5778,7 @@ Code files documented: **493**
   - `frontend/src/utils/printReceipt.ts`
   - `frontend/src/utils/receiptAppliedConfig.ts`
 
-### 3.315 `frontend/src/types/settingsContracts.ts`
+### 3.308 `frontend/src/types/settingsContracts.ts`
 
 - Declared exports: `SETTINGS_REFRESH_CHANNELS`
 - Imports (0)
@@ -5864,7 +5788,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/utils/settingsWriteOptions.ts`
 
-### 3.316 `frontend/src/utils/actionGuards.ts`
+### 3.309 `frontend/src/utils/actionGuards.ts`
 
 - Declared exports: `beginKeyedAction`, `beginNamedAction`, `beginSingleAction`, `finishKeyedAction`, `finishNamedAction`, `finishSingleAction`
 - Imports (0)
@@ -5906,7 +5830,7 @@ Code files documented: **493**
   - `frontend/src/components/utils-settings/ResetData.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.317 `frontend/src/utils/actionHistory.ts`
+### 3.310 `frontend/src/utils/actionHistory.ts`
 
 - Declared exports: `useActionHistory`
 - Imports (2)
@@ -5932,7 +5856,7 @@ Code files documented: **493**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.318 `frontend/src/utils/appRefresh.ts`
+### 3.311 `frontend/src/utils/appRefresh.ts`
 
 - Declared exports: `DEFAULT_REFRESH_CHANNELS`, `normalizeRefreshChannels`, `refreshAppData`
 - Imports (0)
@@ -5946,7 +5870,7 @@ Code files documented: **493**
   - `frontend/src/utils/settingsRefresh.ts`
   - `frontend/tests/appRefresh.test.ts`
 
-### 3.319 `frontend/src/utils/bulkOps.ts`
+### 3.312 `frontend/src/utils/bulkOps.ts`
 
 - Declared exports: `runConcurrentTasks`
 - Imports (0)
@@ -5963,7 +5887,7 @@ Code files documented: **493**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/tests/bulkOps.test.ts`
 
-### 3.320 `frontend/src/utils/color.ts`
+### 3.313 `frontend/src/utils/color.ts`
 
 - Declared exports: `getContrastingTextColor`
 - Imports (0)
@@ -5974,7 +5898,7 @@ Code files documented: **493**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
 
-### 3.321 `frontend/src/utils/csv.d.ts`
+### 3.314 `frontend/src/utils/csv.d.ts`
 
 - Declared exports: `buildCSV`, `buildZip`, `buildZipInWorker`, `downloadBlob`, `downloadCSV`, `downloadZipFiles`, `downloadZipFilesAsync`
 - Imports (0)
@@ -5984,7 +5908,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.322 `frontend/src/utils/csv.js`
+### 3.315 `frontend/src/utils/csv.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6006,7 +5930,7 @@ Code files documented: **493**
   - `frontend/src/utils/csvExportWorker.ts`
   - `frontend/src/utils/exportPackage.ts`
 
-### 3.323 `frontend/src/utils/csv.ts`
+### 3.316 `frontend/src/utils/csv.ts`
 
 - Declared exports: `UTF8_BOM`, `buildCSV`, `buildZip`, `buildZipInWorker`, `downloadBlob`, `downloadCSV`, `downloadZipFiles`, `downloadZipFilesAsync`
 - Imports (0)
@@ -6016,7 +5940,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/tests/exportPackages.test.ts`
 
-### 3.324 `frontend/src/utils/csvExportWorker.ts`
+### 3.317 `frontend/src/utils/csvExportWorker.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6026,7 +5950,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.325 `frontend/src/utils/csvImport.js`
+### 3.318 `frontend/src/utils/csvImport.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6037,7 +5961,7 @@ Code files documented: **493**
   - `frontend/src/api/localDb.ts`
   - `frontend/src/api/methods.js`
 
-### 3.326 `frontend/src/utils/csvImport.ts`
+### 3.319 `frontend/src/utils/csvImport.ts`
 
 - Declared exports: `decodeTextBuffer`, `detectCsvDelimiter`, `normalizeCsvKey`, `normalizeCsvMoney`, `normalizeCsvPercent`, `normalizeNumericText`, `parseCsvNumber`, `parseCsvRows`, `parseDelimitedRows`, `parseRequiredCsvNumber`, `splitCsvLine`
 - Imports (1)
@@ -6047,7 +5971,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/tests/csvImport.test.ts`
 
-### 3.327 `frontend/src/utils/csvRowCounter.ts`
+### 3.320 `frontend/src/utils/csvRowCounter.ts`
 
 - Declared exports: `countCsvDataRows`
 - Imports (0)
@@ -6065,7 +5989,7 @@ Code files documented: **493**
   - `frontend/tests/inventoryImportWorker.test.ts`
   - `frontend/tests/salesImportWorker.test.ts`
 
-### 3.328 `frontend/src/utils/dateHelpers.ts`
+### 3.321 `frontend/src/utils/dateHelpers.ts`
 
 - Declared exports: `offsetDate`, `todayStr`
 - Imports (0)
@@ -6076,7 +6000,7 @@ Code files documented: **493**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/tests/dateHelpers.test.ts`
 
-### 3.329 `frontend/src/utils/deviceInfo.ts`
+### 3.322 `frontend/src/utils/deviceInfo.ts`
 
 - Declared exports: `getClientDeviceInfo`, `getClientMetaHeaders`
 - Imports (0)
@@ -6092,7 +6016,7 @@ Code files documented: **493**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/tests/deviceInfo.test.ts`
 
-### 3.330 `frontend/src/utils/exportPackage.js`
+### 3.323 `frontend/src/utils/exportPackage.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6103,7 +6027,7 @@ Code files documented: **493**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.331 `frontend/src/utils/exportPackage.ts`
+### 3.324 `frontend/src/utils/exportPackage.ts`
 
 - Declared exports: `buildReportManifestRows`, `buildReportPackageFiles`
 - Imports (1)
@@ -6113,7 +6037,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/tests/exportPackages.test.ts`
 
-### 3.332 `frontend/src/utils/exportReports.jsx`
+### 3.325 `frontend/src/utils/exportReports.jsx`
 
 - Declared exports: `buildStandaloneReportHtml`
 - Imports (3)
@@ -6127,7 +6051,7 @@ Code files documented: **493**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.333 `frontend/src/utils/favicon.ts`
+### 3.326 `frontend/src/utils/favicon.ts`
 
 - Declared exports: `createCircularFaviconDataUrl`
 - Imports (0)
@@ -6139,7 +6063,7 @@ Code files documented: **493**
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.334 `frontend/src/utils/formatters.ts`
+### 3.327 `frontend/src/utils/formatters.ts`
 
 - Declared exports: `fmtCount`, `fmtDate`, `fmtShort`, `fmtTime`
 - Imports (0)
@@ -6165,7 +6089,7 @@ Code files documented: **493**
   - `frontend/src/utils/exportReports.jsx`
   - `frontend/tests/formatters.test.ts`
 
-### 3.335 `frontend/src/utils/groupedRecords.ts`
+### 3.328 `frontend/src/utils/groupedRecords.ts`
 
 - Declared exports: `buildAlphabetActionSections`, `buildTimeActionSections`, `getAlphabetInitialSection`, `getAvailableYears`, `getTimeGroupingMode`, `getTimeParts`, `matchesYearMonthFilters`, `toggleIdSet`
 - Imports (1)
@@ -6184,7 +6108,7 @@ Code files documented: **493**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/tests/groupedRecords.test.ts`
 
-### 3.336 `frontend/src/utils/historyHelpers.ts`
+### 3.329 `frontend/src/utils/historyHelpers.ts`
 
 - Declared exports: `cloneHistorySnapshot`, `extractHistoryResultId`, `resolveCreatedHistorySnapshot`
 - Imports (0)
@@ -6204,7 +6128,7 @@ Code files documented: **493**
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.337 `frontend/src/utils/importJobRefresh.js`
+### 3.330 `frontend/src/utils/importJobRefresh.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6214,7 +6138,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/components/shared/BackgroundImportTracker.jsx`
 
-### 3.338 `frontend/src/utils/importJobRefresh.ts`
+### 3.331 `frontend/src/utils/importJobRefresh.ts`
 
 - Declared exports: `dispatchImportCompletionRefresh`, `getImportCompletionRefreshChannels`, `shouldDispatchImportCompletionRefresh`
 - Imports (0)
@@ -6224,7 +6148,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.339 `frontend/src/utils/index.js`
+### 3.332 `frontend/src/utils/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6234,7 +6158,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.340 `frontend/src/utils/index.ts`
+### 3.333 `frontend/src/utils/index.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6244,7 +6168,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.341 `frontend/src/utils/initials.ts`
+### 3.334 `frontend/src/utils/initials.ts`
 
 - Declared exports: `KHMER_INITIALS`, `aggregateInitialOptions`, `buildInitialOptionsFromProducts`, `compareInitialKeys`, `getInitialKey`, `getInitialType`, `normalizeInitialText`
 - Imports (0)
@@ -6260,7 +6184,7 @@ Code files documented: **493**
   - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/productGrouping.ts`
 
-### 3.342 `frontend/src/utils/loaders.ts`
+### 3.335 `frontend/src/utils/loaders.ts`
 
 - Declared exports: `DEFAULT_LOADER_TIMEOUT_MS`, `beginTrackedRequest`, `createLoaderTimeoutError`, `getFirstLoaderError`, `getLoaderErrorMessage`, `invalidateTrackedRequest`, `isTrackedRequestCurrent`, `settleLoaderMap`, `withLoaderTimeout`
 - Imports (0)
@@ -6289,7 +6213,7 @@ Code files documented: **493**
   - `frontend/src/components/utils-settings/ResetData.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.343 `frontend/src/utils/mediaUpload.ts`
+### 3.336 `frontend/src/utils/mediaUpload.ts`
 
 - Declared exports: `buildCacheBustedMediaPath`, `createInitialUploadState`, `isTemporaryPreviewUrl`, `reduceUploadState`, `sanitizePersistedMediaPath`
 - Imports (1)
@@ -6301,7 +6225,7 @@ Code files documented: **493**
   - `frontend/src/components/products/forms/ProductForm.jsx`
   - `frontend/tests/mediaUploadHelpers.test.ts`
 
-### 3.344 `frontend/src/utils/permissions.ts`
+### 3.337 `frontend/src/utils/permissions.ts`
 
 - Declared exports: `parsePermissionMap`
 - Imports (0)
@@ -6312,7 +6236,7 @@ Code files documented: **493**
   - `frontend/src/AppContext.jsx`
   - `frontend/tests/permissions.test.ts`
 
-### 3.345 `frontend/src/utils/pricing.d.ts`
+### 3.338 `frontend/src/utils/pricing.d.ts`
 
 - Declared exports: `calculateProductDiscount`, `formatPriceNumber`, `isProductDiscountActive`, `normalizeDiscountPercent`, `normalizeDiscountType`, `normalizePriceValue`, `roundUpToDecimals`, `toFiniteNumber`
 - Imports (0)
@@ -6322,7 +6246,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.346 `frontend/src/utils/pricing.js`
+### 3.339 `frontend/src/utils/pricing.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6347,7 +6271,7 @@ Code files documented: **493**
   - `frontend/src/components/products/surfaces/ProductRowParts.jsx`
   - `frontend/src/utils/csvImport.ts`
 
-### 3.347 `frontend/src/utils/pricing.ts`
+### 3.340 `frontend/src/utils/pricing.ts`
 
 - Declared exports: `calculateProductDiscount`, `formatPriceNumber`, `isProductDiscountActive`, `normalizeDiscountPercent`, `normalizeDiscountType`, `normalizePriceValue`, `roundUpToDecimals`, `toFiniteNumber`
 - Imports (0)
@@ -6357,7 +6281,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/tests/pricingContacts.test.ts`
 
-### 3.348 `frontend/src/utils/printReceipt.js`
+### 3.341 `frontend/src/utils/printReceipt.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6368,7 +6292,7 @@ Code files documented: **493**
   - `frontend/src/components/receipt-settings/PrintSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
 
-### 3.349 `frontend/src/utils/printReceipt.ts`
+### 3.342 `frontend/src/utils/printReceipt.ts`
 
 - Declared exports: `PRINT_DEFAULTS`, `createReceiptImageBlob`, `createReceiptPdfBlob`, `downloadReceiptImage`, `downloadReceiptPdf`, `getPaperWidthMm`, `getPrintSettings`, `normalizeReceiptContentWidth`, `openPrintableReceiptPreview`, `openReceiptPdf`, `printReceipt`, `savePrintSettings`
 - Imports (1)
@@ -6378,7 +6302,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.350 `frontend/src/utils/productBatches.ts`
+### 3.343 `frontend/src/utils/productBatches.ts`
 
 - Declared exports: `buildBatchPreview`, `getVisibleProductBatches`
 - Imports (0)
@@ -6392,7 +6316,7 @@ Code files documented: **493**
   - `frontend/src/components/products/surfaces/ProductRowParts.jsx`
   - `frontend/tests/productBatches.test.ts`
 
-### 3.351 `frontend/src/utils/productGrouping.ts`
+### 3.344 `frontend/src/utils/productGrouping.ts`
 
 - Declared exports: `buildProductGroupSections`, `buildProductGroups`, `getNameInitialSection`, `normalizeProductGroupName`
 - Imports (1)
@@ -6405,7 +6329,7 @@ Code files documented: **493**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/productGrouping.test.ts`
 
-### 3.352 `frontend/src/utils/publicAssetUrls.ts`
+### 3.345 `frontend/src/utils/publicAssetUrls.ts`
 
 - Declared exports: `getStoredPublicAssetBaseUrl`, `resolvePublicAssetUrl`
 - Imports (1)
@@ -6421,7 +6345,7 @@ Code files documented: **493**
   - `frontend/src/components/products/shared/primitives.jsx`
   - `frontend/src/utils/mediaUpload.ts`
 
-### 3.353 `frontend/src/utils/receiptAppliedConfig.ts`
+### 3.346 `frontend/src/utils/receiptAppliedConfig.ts`
 
 - Declared exports: `DEFAULT_RECEIPT_PRINT_SETTINGS`, `DEFAULT_RECEIPT_TEMPLATE`, `RECEIPT_PRINT_SETTINGS_STORAGE_KEY`, `buildAppliedReceiptConfig`, `normalizeReceiptPrintSettings`, `normalizeReceiptTemplate`, `readReceiptPrintSettingsFromSettings`, `serializeReceiptPrintSettings`, `serializeReceiptTemplateValue`
 - Imports (1)
@@ -6433,7 +6357,7 @@ Code files documented: **493**
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
 
-### 3.354 `frontend/src/utils/scriptTypography.ts`
+### 3.347 `frontend/src/utils/scriptTypography.ts`
 
 - Declared exports: `containsKhmerScript`, `getKhmerTextProps`, `withKhmerTextClass`
 - Imports (0)
@@ -6448,7 +6372,7 @@ Code files documented: **493**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/scriptTypography.test.ts`
 
-### 3.355 `frontend/src/utils/settingsRefresh.ts`
+### 3.348 `frontend/src/utils/settingsRefresh.ts`
 
 - Declared exports: `CATEGORY_REFRESH_CHANNELS`, `UNIT_REFRESH_CHANNELS`, `getSettingsRefreshChannels`
 - Imports (1)
@@ -6458,7 +6382,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.356 `frontend/src/utils/settingsWriteOptions.ts`
+### 3.349 `frontend/src/utils/settingsWriteOptions.ts`
 
 - Declared exports: `normalizeSettingsWriteOptions`
 - Imports (1)
@@ -6468,7 +6392,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/AppContext.jsx`
 
-### 3.357 `frontend/src/web-api.js`
+### 3.350 `frontend/src/web-api.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -6478,7 +6402,7 @@ Code files documented: **493**
 - Referenced by (1)
   - `frontend/src/AppContext.jsx`
 
-### 3.358 `frontend/src/web-api.ts`
+### 3.351 `frontend/src/web-api.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -6486,19 +6410,19 @@ Code files documented: **493**
   - `./api/localDb.js`
   - `./api/methods.js`
   - `./api/websocket.js`
-  - `./constants.js`
-  - `./platform/runtime/clientRuntime.js`
+  - `./constants.ts`
+  - `./platform/runtime/clientRuntime.ts`
 - Internal dependencies (6)
   - `frontend/src/api/http.js`
   - `frontend/src/api/localDb.js`
   - `frontend/src/api/methods.js`
   - `frontend/src/api/websocket.js`
-  - `frontend/src/constants.js`
-  - `frontend/src/platform/runtime/clientRuntime.js`
+  - `frontend/src/constants.ts`
+  - `frontend/src/platform/runtime/clientRuntime.ts`
 - Referenced by (0)
   - none
 
-### 3.359 `frontend/tailwind.config.ts`
+### 3.352 `frontend/tailwind.config.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6508,7 +6432,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.360 `frontend/tests/actionGuards.test.ts`
+### 3.353 `frontend/tests/actionGuards.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6518,7 +6442,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.361 `frontend/tests/actionStability.test.ts`
+### 3.354 `frontend/tests/actionStability.test.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -6531,7 +6455,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.362 `frontend/tests/adminShellMediaGuards.test.ts`
+### 3.355 `frontend/tests/adminShellMediaGuards.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6542,7 +6466,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.363 `frontend/tests/apiHttp.test.ts`
+### 3.356 `frontend/tests/apiHttp.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6553,7 +6477,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.364 `frontend/tests/appRefresh.test.ts`
+### 3.357 `frontend/tests/appRefresh.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6564,7 +6488,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.365 `frontend/tests/appShellUtils.test.ts`
+### 3.358 `frontend/tests/appShellUtils.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -6576,7 +6500,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.366 `frontend/tests/assetCompression.test.ts`
+### 3.359 `frontend/tests/assetCompression.test.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -6589,7 +6513,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.367 `frontend/tests/backupJobs.test.ts`
+### 3.360 `frontend/tests/backupJobs.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6600,7 +6524,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.368 `frontend/tests/barcodeImageScanner.test.ts`
+### 3.361 `frontend/tests/barcodeImageScanner.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6611,7 +6535,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.369 `frontend/tests/barcodeScannerState.test.ts`
+### 3.362 `frontend/tests/barcodeScannerState.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6622,7 +6546,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.370 `frontend/tests/bulkOps.test.ts`
+### 3.363 `frontend/tests/bulkOps.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6633,7 +6557,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.371 `frontend/tests/contactImportWorker.test.ts`
+### 3.364 `frontend/tests/contactImportWorker.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -6645,7 +6569,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.372 `frontend/tests/csvImport.test.ts`
+### 3.365 `frontend/tests/csvImport.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -6657,7 +6581,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.373 `frontend/tests/dashboardDataReliability.test.ts`
+### 3.366 `frontend/tests/dashboardDataReliability.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6668,7 +6592,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.374 `frontend/tests/dateHelpers.test.ts`
+### 3.367 `frontend/tests/dateHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6679,7 +6603,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.375 `frontend/tests/deviceInfo.test.ts`
+### 3.368 `frontend/tests/deviceInfo.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6690,7 +6614,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.376 `frontend/tests/exportPackages.test.ts`
+### 3.369 `frontend/tests/exportPackages.test.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -6704,7 +6628,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.377 `frontend/tests/formatters.test.ts`
+### 3.370 `frontend/tests/formatters.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6715,7 +6639,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.378 `frontend/tests/globalScroll.test.ts`
+### 3.371 `frontend/tests/globalScroll.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6726,7 +6650,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.379 `frontend/tests/globalScrollControls.test.ts`
+### 3.372 `frontend/tests/globalScrollControls.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6737,7 +6661,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.380 `frontend/tests/groupedRecords.test.ts`
+### 3.373 `frontend/tests/groupedRecords.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6748,7 +6672,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.381 `frontend/tests/historyHelpers.test.ts`
+### 3.374 `frontend/tests/historyHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6758,7 +6682,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.382 `frontend/tests/importJobRefresh.test.ts`
+### 3.375 `frontend/tests/importJobRefresh.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6768,7 +6692,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.383 `frontend/tests/initials.test.ts`
+### 3.376 `frontend/tests/initials.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6778,7 +6702,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.384 `frontend/tests/inventoryImportWorker.test.ts`
+### 3.377 `frontend/tests/inventoryImportWorker.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -6790,7 +6714,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.385 `frontend/tests/inventoryMobileCardLayout.test.ts`
+### 3.378 `frontend/tests/inventoryMobileCardLayout.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6801,7 +6725,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.386 `frontend/tests/inventoryMovementGroups.test.ts`
+### 3.379 `frontend/tests/inventoryMovementGroups.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6812,7 +6736,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.387 `frontend/tests/inventoryRfidSection.test.ts`
+### 3.380 `frontend/tests/inventoryRfidSection.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6823,7 +6747,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.388 `frontend/tests/jsxSyntaxCheck.ts`
+### 3.381 `frontend/tests/jsxSyntaxCheck.ts`
 
 - Declared exports: none detected
 - Imports (5)
@@ -6837,7 +6761,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.389 `frontend/tests/loaders.test.ts`
+### 3.382 `frontend/tests/loaders.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6847,7 +6771,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.390 `frontend/tests/mediaUploadHelpers.test.ts`
+### 3.383 `frontend/tests/mediaUploadHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6858,7 +6782,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.391 `frontend/tests/navigationConfig.test.ts`
+### 3.384 `frontend/tests/navigationConfig.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6869,7 +6793,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.392 `frontend/tests/notificationBadge.test.ts`
+### 3.385 `frontend/tests/notificationBadge.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6880,7 +6804,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.393 `frontend/tests/offlineSalesQueue.test.ts`
+### 3.386 `frontend/tests/offlineSalesQueue.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6891,7 +6815,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.394 `frontend/tests/offlineSecurityHardening.test.ts`
+### 3.387 `frontend/tests/offlineSecurityHardening.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6902,7 +6826,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.395 `frontend/tests/offlineSyncArchitecture.test.ts`
+### 3.388 `frontend/tests/offlineSyncArchitecture.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6913,7 +6837,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.396 `frontend/tests/ownedGoogleAuth.test.ts`
+### 3.389 `frontend/tests/ownedGoogleAuth.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6924,7 +6848,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.397 `frontend/tests/performanceLoadingUx.test.ts`
+### 3.390 `frontend/tests/performanceLoadingUx.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6935,7 +6859,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.398 `frontend/tests/permissionEditor.test.ts`
+### 3.391 `frontend/tests/permissionEditor.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6946,7 +6870,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.399 `frontend/tests/permissions.test.ts`
+### 3.392 `frontend/tests/permissions.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6957,7 +6881,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.400 `frontend/tests/portalCatalogDisplay.test.ts`
+### 3.393 `frontend/tests/portalCatalogDisplay.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6968,7 +6892,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.401 `frontend/tests/portalContentI18n.test.ts`
+### 3.394 `frontend/tests/portalContentI18n.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6978,7 +6902,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.402 `frontend/tests/portalEditorUtils.test.ts`
+### 3.395 `frontend/tests/portalEditorUtils.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6988,7 +6912,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.403 `frontend/tests/portalFaqVocabulary.test.ts`
+### 3.396 `frontend/tests/portalFaqVocabulary.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6998,7 +6922,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.404 `frontend/tests/portalLanguagePacks.test.ts`
+### 3.397 `frontend/tests/portalLanguagePacks.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7008,7 +6932,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.405 `frontend/tests/portalTranslateController.test.ts`
+### 3.398 `frontend/tests/portalTranslateController.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7018,7 +6942,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.406 `frontend/tests/posCore.test.ts`
+### 3.399 `frontend/tests/posCore.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7028,7 +6952,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.407 `frontend/tests/pricingContacts.test.ts`
+### 3.400 `frontend/tests/pricingContacts.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7040,7 +6964,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.408 `frontend/tests/productBatches.test.ts`
+### 3.401 `frontend/tests/productBatches.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7051,7 +6975,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.409 `frontend/tests/productDiscountUx.test.ts`
+### 3.402 `frontend/tests/productDiscountUx.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7062,7 +6986,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.410 `frontend/tests/productDisplayHelpers.test.ts`
+### 3.403 `frontend/tests/productDisplayHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7072,7 +6996,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.411 `frontend/tests/productFilterHelpers.test.ts`
+### 3.404 `frontend/tests/productFilterHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7082,7 +7006,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.412 `frontend/tests/productGalleryHelpers.test.ts`
+### 3.405 `frontend/tests/productGalleryHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7092,7 +7016,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.413 `frontend/tests/productGrouping.test.ts`
+### 3.406 `frontend/tests/productGrouping.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7103,7 +7027,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.414 `frontend/tests/productGroupViewHelpers.test.ts`
+### 3.407 `frontend/tests/productGroupViewHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7113,7 +7037,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.415 `frontend/tests/productHistoryHelpers.test.ts`
+### 3.408 `frontend/tests/productHistoryHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7124,7 +7048,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.416 `frontend/tests/productImportPlanner.test.ts`
+### 3.409 `frontend/tests/productImportPlanner.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7136,7 +7060,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.417 `frontend/tests/productImportWorkerFallback.test.ts`
+### 3.410 `frontend/tests/productImportWorkerFallback.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7148,7 +7072,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.418 `frontend/tests/productMenuHelpers.test.ts`
+### 3.411 `frontend/tests/productMenuHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7158,7 +7082,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.419 `frontend/tests/productPageHelpers.test.ts`
+### 3.412 `frontend/tests/productPageHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7168,7 +7092,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.420 `frontend/tests/productSearchPagination.test.ts`
+### 3.413 `frontend/tests/productSearchPagination.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7179,7 +7103,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.421 `frontend/tests/productSelectionHelpers.test.ts`
+### 3.414 `frontend/tests/productSelectionHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7189,7 +7113,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.422 `frontend/tests/productWriteHelpers.test.ts`
+### 3.415 `frontend/tests/productWriteHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7199,7 +7123,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.423 `frontend/tests/publicErrorRecovery.test.ts`
+### 3.416 `frontend/tests/publicErrorRecovery.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7209,7 +7133,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.424 `frontend/tests/receiptSettingsSync.test.ts`
+### 3.417 `frontend/tests/receiptSettingsSync.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7220,7 +7144,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.425 `frontend/tests/receiptTemplate.test.ts`
+### 3.418 `frontend/tests/receiptTemplate.test.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7234,7 +7158,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.426 `frontend/tests/returnsLayout.test.ts`
+### 3.419 `frontend/tests/returnsLayout.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7245,7 +7169,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.427 `frontend/tests/runtimeErrorClassifier.test.ts`
+### 3.420 `frontend/tests/runtimeErrorClassifier.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7255,7 +7179,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.428 `frontend/tests/salesImportWorker.test.ts`
+### 3.421 `frontend/tests/salesImportWorker.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7267,7 +7191,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.429 `frontend/tests/scanbotScanner.test.ts`
+### 3.422 `frontend/tests/scanbotScanner.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7278,7 +7202,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.430 `frontend/tests/scriptTypography.test.ts`
+### 3.423 `frontend/tests/scriptTypography.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7289,7 +7213,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.431 `frontend/tests/sectionNavigation.test.ts`
+### 3.424 `frontend/tests/sectionNavigation.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7300,7 +7224,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.432 `frontend/tests/settingsConflictHelpers.test.ts`
+### 3.425 `frontend/tests/settingsConflictHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7311,7 +7235,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.433 `frontend/tests/settingsRefresh.test.ts`
+### 3.426 `frontend/tests/settingsRefresh.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7321,7 +7245,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.434 `frontend/tests/storagePolicy.test.ts`
+### 3.427 `frontend/tests/storagePolicy.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7331,7 +7255,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.435 `frontend/tests/utilsSettingsBarrel.test.ts`
+### 3.428 `frontend/tests/utilsSettingsBarrel.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7342,7 +7266,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.436 `frontend/vite.config.ts`
+### 3.429 `frontend/vite.config.ts`
 
 - Declared exports: `defineConfig`
 - Imports (8)
@@ -7359,7 +7283,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.437 `ops/scripts/architecture/generated-bulk-audit.ts`
+### 3.430 `ops/scripts/architecture/generated-bulk-audit.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7373,7 +7297,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.438 `ops/scripts/architecture/language-runtime-audit.ts`
+### 3.431 `ops/scripts/architecture/language-runtime-audit.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7387,7 +7311,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.439 `ops/scripts/architecture/organization-audit.ts`
+### 3.432 `ops/scripts/architecture/organization-audit.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7401,7 +7325,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.440 `ops/scripts/architecture/phase29-audit.ts`
+### 3.433 `ops/scripts/architecture/phase29-audit.ts`
 
 - Declared exports: none detected
 - Imports (5)
@@ -7416,7 +7340,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.441 `ops/scripts/backend/schema-audit.ts`
+### 3.434 `ops/scripts/backend/schema-audit.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7427,7 +7351,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.442 `ops/scripts/backend/schema-primary-key-preflight.ts`
+### 3.435 `ops/scripts/backend/schema-primary-key-preflight.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7439,7 +7363,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.443 `ops/scripts/backend/verify-data-integrity.ts`
+### 3.436 `ops/scripts/backend/verify-data-integrity.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7451,7 +7375,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.444 `ops/scripts/frontend/verify-i18n.ts`
+### 3.437 `ops/scripts/frontend/verify-i18n.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7462,7 +7386,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.445 `ops/scripts/frontend/verify-performance.ts`
+### 3.438 `ops/scripts/frontend/verify-performance.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7474,7 +7398,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.446 `ops/scripts/frontend/verify-ui.ts`
+### 3.439 `ops/scripts/frontend/verify-ui.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7486,7 +7410,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.447 `ops/scripts/lib/fs-utils.ts`
+### 3.440 `ops/scripts/lib/fs-utils.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -7509,7 +7433,7 @@ Code files documented: **493**
   - `ops/scripts/verification/verify-scale-services.ts`
   - `ops/scripts/verification/verify-secret-hygiene.ts`
 
-### 3.448 `ops/scripts/lib/report-utils.ts`
+### 3.441 `ops/scripts/lib/report-utils.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -7523,7 +7447,7 @@ Code files documented: **493**
   - `ops/scripts/architecture/phase29-audit.ts`
   - `ops/scripts/runtime/audits/audit-report-html.ts`
 
-### 3.449 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
+### 3.442 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7536,7 +7460,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.450 `ops/scripts/runtime/audits/audit-auth.ts`
+### 3.443 `ops/scripts/runtime/audits/audit-auth.ts`
 
 - Declared exports: `applySessionToPlaywrightContext`, `buildBrowserStorageState`, `hydratePlaywrightPage`, `loginWithFetch`
 - Imports (0)
@@ -7563,7 +7487,7 @@ Code files documented: **493**
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
-### 3.451 `ops/scripts/runtime/audits/audit-manifest.ts`
+### 3.444 `ops/scripts/runtime/audits/audit-manifest.ts`
 
 - Declared exports: `ADMIN_ROUTES`, `FULL_AUDIT_ROUTES`, `PUBLIC_ROUTES`, `ROUTE_MANIFEST`, `getAuditProfiles`, `getRouteManifest`, `resolveAuditRoutes`
 - Imports (0)
@@ -7575,7 +7499,7 @@ Code files documented: **493**
   - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
 
-### 3.452 `ops/scripts/runtime/audits/audit-report-html.ts`
+### 3.445 `ops/scripts/runtime/audits/audit-report-html.ts`
 
 - Declared exports: `writeBrowserActionHtmlReport`, `writeDeepAuditHtmlReport`, `writeFullAuditHtmlReport`
 - Imports (4)
@@ -7590,7 +7514,7 @@ Code files documented: **493**
   - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
 
-### 3.453 `ops/scripts/runtime/audits/deep-live-audit.ts`
+### 3.446 `ops/scripts/runtime/audits/deep-live-audit.ts`
 
 - Declared exports: none detected
 - Imports (9)
@@ -7610,7 +7534,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.454 `ops/scripts/runtime/audits/full-app-audit.ts`
+### 3.447 `ops/scripts/runtime/audits/full-app-audit.ts`
 
 - Declared exports: none detected
 - Imports (9)
@@ -7630,7 +7554,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.455 `ops/scripts/runtime/browser-action-smoke.ts`
+### 3.448 `ops/scripts/runtime/browser-action-smoke.ts`
 
 - Declared exports: none detected
 - Imports (8)
@@ -7649,7 +7573,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.456 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
+### 3.449 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7662,7 +7586,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.457 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts`
+### 3.450 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7674,7 +7598,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.458 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
+### 3.451 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7687,7 +7611,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.459 `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts`
+### 3.452 `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7700,7 +7624,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.460 `ops/scripts/runtime/live-checks/live-check-utils.ts`
+### 3.453 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
 - Declared exports: `attachConsoleCollector`, `closeTopModal`, `isIgnoredConsole`, `latestObservedStatus`, `readJson`, `readJsonStatus`, `waitForRead`
 - Imports (0)
@@ -7723,7 +7647,7 @@ Code files documented: **493**
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
-### 3.461 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
+### 3.454 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7739,7 +7663,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.462 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
+### 3.455 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7755,7 +7679,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.463 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
+### 3.456 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7771,7 +7695,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.464 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
+### 3.457 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7787,7 +7711,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.465 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
+### 3.458 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7800,7 +7724,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.466 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
+### 3.459 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7816,7 +7740,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.467 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
+### 3.460 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7832,7 +7756,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.468 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
+### 3.461 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7848,7 +7772,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.469 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
+### 3.462 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7864,7 +7788,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.470 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
+### 3.463 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7880,7 +7804,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.471 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
+### 3.464 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7896,7 +7820,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.472 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
+### 3.465 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7912,7 +7836,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.473 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
+### 3.466 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7925,7 +7849,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.474 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
+### 3.467 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7941,7 +7865,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.475 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
+### 3.468 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7957,7 +7881,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.476 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
+### 3.469 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7973,7 +7897,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.477 `ops/scripts/runtime/smoke/check-public-url.ts`
+### 3.470 `ops/scripts/runtime/smoke/check-public-url.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7984,7 +7908,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.478 `ops/scripts/runtime/smoke/check-route-contract.ts`
+### 3.471 `ops/scripts/runtime/smoke/check-route-contract.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -7994,7 +7918,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.479 `ops/scripts/runtime/smoke/live-smoke.ts`
+### 3.472 `ops/scripts/runtime/smoke/live-smoke.ts`
 
 - Declared exports: none detected
 - Imports (5)
@@ -8008,7 +7932,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.480 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
+### 3.473 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -8019,7 +7943,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.481 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
+### 3.474 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8031,7 +7955,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.482 `ops/scripts/runtime/storage/cleanup-test-data.ts`
+### 3.475 `ops/scripts/runtime/storage/cleanup-test-data.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8043,7 +7967,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.483 `ops/scripts/runtime/storage/dataset-readiness.ts`
+### 3.476 `ops/scripts/runtime/storage/dataset-readiness.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8055,7 +7979,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.484 `ops/scripts/runtime/storage/post-live-hygiene.ts`
+### 3.477 `ops/scripts/runtime/storage/post-live-hygiene.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8067,7 +7991,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.485 `ops/scripts/runtime/storage/prune-storage.ts`
+### 3.478 `ops/scripts/runtime/storage/prune-storage.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8080,7 +8004,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.486 `ops/scripts/runtime/storage/restore-candidates.ts`
+### 3.479 `ops/scripts/runtime/storage/restore-candidates.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -8091,7 +8015,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.487 `ops/scripts/runtime/storage/restore-rehearsal.ts`
+### 3.480 `ops/scripts/runtime/storage/restore-rehearsal.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8103,7 +8027,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.488 `ops/scripts/verification/verify-backup-reliability.ts`
+### 3.481 `ops/scripts/verification/verify-backup-reliability.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8115,7 +8039,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.489 `ops/scripts/verification/verify-docker-release.ts`
+### 3.482 `ops/scripts/verification/verify-docker-release.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8127,7 +8051,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.490 `ops/scripts/verification/verify-hardening-policy.ts`
+### 3.483 `ops/scripts/verification/verify-hardening-policy.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8140,7 +8064,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.491 `ops/scripts/verification/verify-runtime-deps.ts`
+### 3.484 `ops/scripts/verification/verify-runtime-deps.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -8152,7 +8076,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.492 `ops/scripts/verification/verify-scale-services.ts`
+### 3.485 `ops/scripts/verification/verify-scale-services.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -8165,7 +8089,7 @@ Code files documented: **493**
 - Referenced by (0)
   - none
 
-### 3.493 `ops/scripts/verification/verify-secret-hygiene.ts`
+### 3.486 `ops/scripts/verification/verify-secret-hygiene.ts`
 
 - Declared exports: none detected
 - Imports (4)

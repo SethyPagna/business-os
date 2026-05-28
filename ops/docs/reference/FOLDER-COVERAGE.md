@@ -32,7 +32,7 @@ Total folders documented: **81**
 | 20 | `frontend/public/scanbot-web-sdk/bundle` | Project folder | 2 | 1 |
 | 21 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
 | 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
-| 23 | `frontend/src` | Project folder | 8 | 9 |
+| 23 | `frontend/src` | Project folder | 7 | 9 |
 | 24 | `frontend/src/api` | Frontend API and sync transport | 8 | 0 |
 | 25 | `frontend/src/app` | Project folder | 2 | 0 |
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
@@ -59,16 +59,16 @@ Total folders documented: **81**
 | 47 | `frontend/src/components/products/shared` | UI pages/components domain | 1 | 0 |
 | 48 | `frontend/src/components/products/surfaces` | UI pages/components domain | 4 | 0 |
 | 49 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
-| 50 | `frontend/src/components/receipt-settings` | UI pages/components domain | 10 | 0 |
+| 50 | `frontend/src/components/receipt-settings` | UI pages/components domain | 8 | 0 |
 | 51 | `frontend/src/components/returns` | UI pages/components domain | 6 | 0 |
 | 52 | `frontend/src/components/sales` | UI pages/components domain | 7 | 0 |
 | 53 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
-| 54 | `frontend/src/components/shared` | UI pages/components domain | 20 | 0 |
+| 54 | `frontend/src/components/shared` | UI pages/components domain | 17 | 0 |
 | 55 | `frontend/src/components/users` | UI pages/components domain | 4 | 0 |
 | 56 | `frontend/src/components/utils-settings` | UI pages/components domain | 10 | 0 |
 | 57 | `frontend/src/lang` | Localization resources | 2 | 0 |
 | 58 | `frontend/src/platform` | Project folder | 0 | 2 |
-| 59 | `frontend/src/platform/runtime` | Project folder | 2 | 0 |
+| 59 | `frontend/src/platform/runtime` | Project folder | 1 | 0 |
 | 60 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
 | 61 | `frontend/src/runtime` | Project folder | 1 | 0 |
 | 62 | `frontend/src/styles` | Project folder | 1 | 0 |
@@ -597,7 +597,7 @@ Total folders documented: **81**
 ### 3.23 Folder: `frontend/src`
 
 - Purpose: Project folder
-- Direct files: **8**
+- Direct files: **7**
 - Direct subfolders: **9**
 
 #### 3.23.1 Subfolders
@@ -620,12 +620,11 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `App.jsx` | Main app shell and page mounting |
 | 2 | `AppContext.jsx` | Global app state/context provider |
-| 3 | `constants.js` | Project source/support file |
-| 4 | `constants.ts` | Project source/support file |
-| 5 | `index.jsx` | Project source/support file |
-| 6 | `README.md` | Documentation |
-| 7 | `web-api.js` | Project source/support file |
-| 8 | `web-api.ts` | Project source/support file |
+| 3 | `constants.ts` | Project source/support file |
+| 4 | `index.jsx` | Project source/support file |
+| 5 | `README.md` | Documentation |
+| 6 | `web-api.js` | Project source/support file |
+| 7 | `web-api.ts` | Project source/support file |
 
 
 ### 3.24 Folder: `frontend/src/api`
@@ -1091,7 +1090,7 @@ Total folders documented: **81**
 ### 3.50 Folder: `frontend/src/components/receipt-settings`
 
 - Purpose: UI pages/components domain
-- Direct files: **10**
+- Direct files: **8**
 - Direct subfolders: **0**
 
 #### 3.50.2 Files
@@ -1099,15 +1098,13 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `AllFieldsPanel.jsx` | UI component/page |
-| 2 | `constants.js` | UI component/page |
-| 3 | `constants.ts` | UI component/page |
-| 4 | `ErrorBoundary.jsx` | UI component/page |
-| 5 | `FieldOrderManager.jsx` | UI component/page |
-| 6 | `PrintSettings.jsx` | UI component/page |
-| 7 | `ReceiptPreview.jsx` | UI component/page |
-| 8 | `ReceiptSettings.jsx` | UI component/page |
-| 9 | `template.js` | UI component/page |
-| 10 | `template.ts` | UI component/page |
+| 2 | `constants.ts` | UI component/page |
+| 3 | `ErrorBoundary.jsx` | UI component/page |
+| 4 | `FieldOrderManager.jsx` | UI component/page |
+| 5 | `PrintSettings.jsx` | UI component/page |
+| 6 | `ReceiptPreview.jsx` | UI component/page |
+| 7 | `ReceiptSettings.jsx` | UI component/page |
+| 8 | `template.ts` | UI component/page |
 
 
 ### 3.51 Folder: `frontend/src/components/returns`
@@ -1163,7 +1160,7 @@ Total folders documented: **81**
 ### 3.54 Folder: `frontend/src/components/shared`
 
 - Purpose: UI pages/components domain
-- Direct files: **20**
+- Direct files: **17**
 - Direct subfolders: **0**
 
 #### 3.54.2 Files
@@ -1174,22 +1171,19 @@ Total folders documented: **81**
 | 2 | `BackgroundImportTracker.jsx` | UI component/page |
 | 3 | `ExportMenu.jsx` | UI component/page |
 | 4 | `FilterMenu.jsx` | UI component/page |
-| 5 | `globalScroll.js` | UI component/page |
-| 6 | `globalScroll.ts` | UI component/page |
-| 7 | `ImageGalleryLightbox.jsx` | UI component/page |
-| 8 | `LoadingWatchdog.jsx` | UI component/page |
-| 9 | `Modal.jsx` | UI component/page |
-| 10 | `navigationConfig.js` | UI component/page |
-| 11 | `navigationConfig.ts` | UI component/page |
-| 12 | `NotificationCenter.jsx` | UI component/page |
-| 13 | `pageActivity.js` | UI component/page |
-| 14 | `pageActivity.ts` | UI component/page |
-| 15 | `PageHeader.jsx` | UI component/page |
-| 16 | `PaginationControls.jsx` | UI component/page |
-| 17 | `PortalMenu.jsx` | UI component/page |
-| 18 | `QuickPreferenceToggles.jsx` | UI component/page |
-| 19 | `SectionSwitcher.jsx` | UI component/page |
-| 20 | `WriteConflictModal.jsx` | UI component/page |
+| 5 | `globalScroll.ts` | UI component/page |
+| 6 | `ImageGalleryLightbox.jsx` | UI component/page |
+| 7 | `LoadingWatchdog.jsx` | UI component/page |
+| 8 | `Modal.jsx` | UI component/page |
+| 9 | `navigationConfig.ts` | UI component/page |
+| 10 | `NotificationCenter.jsx` | UI component/page |
+| 11 | `pageActivity.ts` | UI component/page |
+| 12 | `PageHeader.jsx` | UI component/page |
+| 13 | `PaginationControls.jsx` | UI component/page |
+| 14 | `PortalMenu.jsx` | UI component/page |
+| 15 | `QuickPreferenceToggles.jsx` | UI component/page |
+| 16 | `SectionSwitcher.jsx` | UI component/page |
+| 17 | `WriteConflictModal.jsx` | UI component/page |
 
 
 ### 3.55 Folder: `frontend/src/components/users`
@@ -1261,15 +1255,14 @@ Total folders documented: **81**
 ### 3.59 Folder: `frontend/src/platform/runtime`
 
 - Purpose: Project folder
-- Direct files: **2**
+- Direct files: **1**
 - Direct subfolders: **0**
 
 #### 3.59.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `clientRuntime.js` | Project source/support file |
-| 2 | `clientRuntime.ts` | Project source/support file |
+| 1 | `clientRuntime.ts` | Project source/support file |
 
 
 ### 3.60 Folder: `frontend/src/platform/storage`
