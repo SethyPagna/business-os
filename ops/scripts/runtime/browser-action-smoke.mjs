@@ -4,9 +4,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { chromium } from 'playwright'
-import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles, resolveAuditRoutes } from './audit-manifest.mjs'
-import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from './audit-auth.mjs'
-import { writeBrowserActionHtmlReport } from './audit-report-html.mjs'
+import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles, resolveAuditRoutes } from './audits/audit-manifest.ts'
+import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from './audits/audit-auth.ts'
+import { writeBrowserActionHtmlReport } from './audits/audit-report-html.ts'
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'

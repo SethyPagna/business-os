@@ -769,8 +769,8 @@ Decision rule:
     storage pruning passed on frontend hash `201f436a6618c27e`.
 73. Rewire live-check auth helper imports and delete the auth wrapper. Done:
     Phase 8.4 live-check scripts now import the grouped auth helper from
-    `ops/scripts/runtime/audits/audit-auth.mjs` directly. The old
-    `ops/scripts/runtime/audit-auth.mjs` compatibility wrapper became
+    `ops/scripts/runtime/audits/audit-auth.ts` directly. The old
+    `ops/scripts/runtime/audit-auth.ts` compatibility wrapper became
     generated-reference-only and was deleted after the organization audit
     reported zero active references.
 74. Delete the storage cleanup compatibility wrapper. Done:
@@ -1690,7 +1690,7 @@ Decision rule:
     grouped Cloudflare verifier paths under `ops/scripts/runtime/cloudflare/`
     and accepts non-ignored pending source files during move verification.
 199. Share runtime report byte formatting. Done:
-    `ops/scripts/runtime/audits/audit-report-html.mjs` now reuses
+    `ops/scripts/runtime/audits/audit-report-html.ts` now reuses
     `formatBytes()` from `ops/scripts/lib/report-utils.js` instead of carrying
     a local byte formatter. This keeps runtime audit report output aligned with
     the Phase 29 report utility layer.
@@ -3563,6 +3563,14 @@ Decision rule:
     `verify:live-smoke` script, Docker release guardrail, and backend
     automation tests now use the TypeScript paths while keeping public ingress
     probing, live sale/return/stock workflows, and smoke-test cleanup behavior.
+445. Convert shared live-audit helper modules to TypeScript. Done:
+    `audit-auth.ts`, `audit-manifest.ts`, and `audit-report-html.ts` replace
+    the shared `.mjs` audit helpers. The conversion adds typed login/session
+    contracts, route manifest/profile shapes, report summary rows, and HTML
+    report inputs while preserving the existing Phase 8.4 audit import graph.
+    Deep audit, full-app audit, browser-action smoke, focused Phase 8.4 live
+    checks, action-history dynamic login, and backend automation source checks
+    now point at the TypeScript helper modules.
 
 ## Safety Gates
 

@@ -1,4 +1,48 @@
-export const ROUTE_MANIFEST = [
+type AuditScope = 'admin' | 'public'
+
+type AuditPrimaryButton = {
+  label: string
+  expect: 'menu'
+}
+
+type RouteInteractions = {
+  search?: boolean
+  primaryButtons?: AuditPrimaryButton[]
+  tabs?: string[]
+  pinnedNavLabels?: string[]
+}
+
+export type AuditRoute = {
+  name: string
+  scope: AuditScope
+  path: string
+  navLabel?: string
+  ready: string[]
+  criticalApis: string[]
+  interactions: RouteInteractions
+  postInteractionWaitUntil?: 'networkidle'
+  browserAudit?: boolean
+  authRequired?: boolean
+}
+
+export type FullAuditRoute = {
+  name: string
+  path: string
+  api: string[]
+  scope: AuditScope
+  authRequired: boolean
+}
+
+type AuditProfile = {
+  name: 'desktop' | 'mobile'
+  viewport: {
+    width: number
+    height: number
+  }
+  isMobile: boolean
+}
+
+export const ROUTE_MANIFEST: AuditRoute[] = [
   {
     name: 'dashboard',
     scope: 'admin',
@@ -201,14 +245,18 @@ export const ROUTE_MANIFEST = [
   },
 ]
 
-export function getRouteManifest(name) {
+export function getRouteManifest(name: string): AuditRoute | null {
   return ROUTE_MANIFEST.find((route) => route.name === name) || null
 }
 
-export const ADMIN_ROUTES = ROUTE_MANIFEST.filter((route) => route.scope === 'admin' && route.browserAudit !== false)
-export const PUBLIC_ROUTES = ROUTE_MANIFEST.filter((route) => route.scope === 'public' && route.browserAudit !== false)
+export const ADMIN_ROUTES: AuditRoute[] = ROUTE_MANIFEST.filter((route) => route.scope === 'admin' && route.browserAudit !== false)
+export const PUBLIC_ROUTES: AuditRoute[] = ROUTE_MANIFEST.filter((route) => route.scope === 'public' && route.browserAudit !== false)
 
-export function resolveAuditRoutes(routeNames = []) {
+export function resolveAuditRoutes(routeNames: string[] | string = []): {
+  adminRoutes: AuditRoute[]
+  publicRoutes: AuditRoute[]
+  unknownRoutes: string[]
+} {
   const normalized = [...new Set(
     (Array.isArray(routeNames) ? routeNames : [])
       .flatMap((value) => String(value || '').split(','))
@@ -234,7 +282,7 @@ export function resolveAuditRoutes(routeNames = []) {
   }
 }
 
-export const FULL_AUDIT_ROUTES = ROUTE_MANIFEST.map((route) => ({
+export const FULL_AUDIT_ROUTES: FullAuditRoute[] = ROUTE_MANIFEST.map((route) => ({
   name: route.name,
   path: route.path,
   api: route.criticalApis || [],
@@ -242,10 +290,10 @@ export const FULL_AUDIT_ROUTES = ROUTE_MANIFEST.map((route) => ({
   authRequired: route.authRequired !== false,
 }))
 
-const DESKTOP_PROFILE = { name: 'desktop', viewport: { width: 1365, height: 900 }, isMobile: false }
-const MOBILE_PROFILE = { name: 'mobile', viewport: { width: 390, height: 844 }, isMobile: true }
+const DESKTOP_PROFILE: AuditProfile = { name: 'desktop', viewport: { width: 1365, height: 900 }, isMobile: false }
+const MOBILE_PROFILE: AuditProfile = { name: 'mobile', viewport: { width: 390, height: 844 }, isMobile: true }
 
-export function getAuditProfiles(profileName = 'exhaustive') {
+export function getAuditProfiles(profileName = 'exhaustive'): AuditProfile[] {
   return profileName === 'fast'
     ? [DESKTOP_PROFILE]
     : [DESKTOP_PROFILE, MOBILE_PROFILE]

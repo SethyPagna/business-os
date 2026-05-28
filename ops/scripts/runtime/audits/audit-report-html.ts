@@ -5,7 +5,97 @@ import path from 'node:path'
 const require = createRequire(import.meta.url)
 const { formatBytes } = require('../../lib/report-utils.js')
 
-function escapeHtml(value) {
+type AuditFinding = {
+  priority?: number | string
+  area?: string
+  message?: string
+  [key: string]: unknown
+}
+
+type AuditSummary = {
+  audit?: {
+    startedAt?: string
+    finishedAt?: string
+    durationMs?: number
+  }
+  health?: {
+    before?: { frontendHash?: string }
+    after?: { frontendHash?: string }
+  }
+  findings?: AuditFinding[]
+  routes?: Array<Record<string, unknown> & { notes?: string[] }>
+  api?: Record<string, unknown>[]
+}
+
+type MetricsSnapshot = {
+  lcp?: number
+  layoutShift?: number
+  inp?: number
+  longTasks?: unknown[]
+  lcpSelector?: string
+  shiftSourceSelector?: string
+}
+
+type PerformanceEntry = {
+  profile?: string
+  route?: string
+  path?: string
+  readyMs?: number
+  ms?: number
+  domContentLoadedMs?: number
+  fullAuditRouteMs?: number
+  documentRequestMs?: number
+  documentCacheStatus?: string
+  performance?: {
+    metrics?: MetricsSnapshot
+    resourceBytes?: { scripts?: number }
+  }
+  postInteractionPerformance?: {
+    metrics?: MetricsSnapshot
+  }
+  interactions?: Array<{ ms?: number }>
+  screenshot?: string
+}
+
+type NetworkEntry = {
+  profile?: string
+  route?: string
+  url?: string
+  durationMs?: number
+}
+
+type ConsoleEntry = {
+  profile?: string
+  route?: string
+  appOwned?: boolean
+}
+
+type RouteSummary = {
+  readyMs?: number
+  ms?: number
+  maxApiMs?: number
+  lcpMs?: number
+  longTaskCount?: number
+  maxInteractionMs?: number
+  scriptBytes?: number
+  directHtmlMs?: number
+  documentRequestMs?: number
+  cls?: number
+}
+
+type ReportOptions = {
+  reportDir: string
+  summary: AuditSummary
+  outputFile?: string
+}
+
+type DeepAuditReportOptions = ReportOptions & {
+  performanceReport?: PerformanceEntry[]
+  networkReport?: NetworkEntry[]
+  consoleReport?: ConsoleEntry[]
+}
+
+function escapeHtml(value: unknown): string {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -14,30 +104,30 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;')
 }
 
-function formatMs(value) {
+function formatMs(value: unknown): string {
   const number = Number(value)
   if (!Number.isFinite(number)) return ''
   return `${Math.round(number)} ms`
 }
 
-function formatCls(value) {
+function formatCls(value: unknown): string {
   const number = Number(value)
   if (!Number.isFinite(number)) return ''
   return number.toFixed(3)
 }
 
-function formatCount(value) {
+function formatCount(value: unknown): string {
   const number = Number(value)
   return Number.isFinite(number) ? String(number) : ''
 }
 
-function toRelativeLink(reportDir, candidatePath) {
+function toRelativeLink(reportDir: string, candidatePath: unknown): string {
   if (!candidatePath) return ''
-  const resolved = path.resolve(candidatePath)
+  const resolved = path.resolve(String(candidatePath))
   return path.relative(reportDir, resolved).replaceAll('\\', '/')
 }
 
-function inferHotPath(routeEntry) {
+function inferHotPath(routeEntry: RouteSummary): string {
   const readyMs = Number(routeEntry.readyMs || routeEntry.ms || 0)
   const apiMaxMs = Number(routeEntry.maxApiMs || 0)
   const lcpMs = Number(routeEntry.lcpMs || 0)
@@ -57,7 +147,7 @@ function inferHotPath(routeEntry) {
   return 'mixed / minor'
 }
 
-function renderFindings(findings) {
+function renderFindings(findings: AuditFinding[] | undefined): string {
   if (!Array.isArray(findings) || !findings.length) {
     return '<p>No findings recorded.</p>'
   }
@@ -81,7 +171,7 @@ function renderFindings(findings) {
   `
 }
 
-function renderSummaryCards(summary) {
+function renderSummaryCards(summary: AuditSummary): string {
   const cards = [
     ['Started', summary?.audit?.startedAt || ''],
     ['Finished', summary?.audit?.finishedAt || ''],
@@ -103,7 +193,7 @@ export async function writeDeepAuditHtmlReport({
   networkReport = [],
   consoleReport = [],
   outputFile = 'summary.html',
-}) {
+}: DeepAuditReportOptions): Promise<void> {
   const routeRows = performanceReport.map((entry) => {
     const metrics = entry?.performance?.metrics || {}
     const postMetrics = entry?.postInteractionPerformance?.metrics || {}
@@ -218,7 +308,7 @@ export async function writeFullAuditHtmlReport({
   reportDir,
   summary,
   outputFile = 'summary.html',
-}) {
+}: ReportOptions): Promise<void> {
   const routeRows = (summary?.routes || []).map((route) => `
     <tr>
       <td>${escapeHtml(route.name)}</td>
@@ -279,7 +369,7 @@ export async function writeBrowserActionHtmlReport({
   reportDir,
   summary,
   outputFile = 'summary.html',
-}) {
+}: ReportOptions): Promise<void> {
   const routeRows = (summary?.routes || []).map((route) => `
     <tr>
       <td>${escapeHtml(route.profile)}</td>

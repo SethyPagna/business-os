@@ -576,7 +576,7 @@ runTest('architecture audits share bounded worker helper', () => {
   const runtimeDepsVerify = read('ops/scripts/verification/verify-runtime-deps.js')
   const backupReliabilityVerify = read('ops/scripts/verification/verify-backup-reliability.js')
   const frontendVerifyUi = read('ops/scripts/frontend/verify-ui.js')
-  const auditReportHtml = read('ops/scripts/runtime/audits/audit-report-html.mjs')
+  const auditReportHtml = read('ops/scripts/runtime/audits/audit-report-html.ts')
   const reportUtils = read('ops/scripts/lib/report-utils.js')
 
   ;[

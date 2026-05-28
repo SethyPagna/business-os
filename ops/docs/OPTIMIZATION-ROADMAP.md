@@ -1917,8 +1917,8 @@ Cleanup checkpoint:
   broad Phase 8.4 Playwright, public Cloudflare portal Playwright, stale-path
   scan, and storage pruning.
 - Phase 8.4 live-check scripts now import the grouped auth helper directly from
-  `ops/scripts/runtime/audits/audit-auth.mjs`; the old
-  `ops/scripts/runtime/audit-auth.mjs` wrapper was deleted after the
+  `ops/scripts/runtime/audits/audit-auth.ts`; the old
+  `ops/scripts/runtime/audit-auth.ts` wrapper was deleted after the
   organization audit reported it had zero active references.
 - Phase 29 cleanup continued with generated-artifact and Docker hygiene:
   `ops/.playwright-cli` and `run/cv-render-check-word` were deleted after
@@ -2595,7 +2595,7 @@ Cleanup checkpoint:
   gate also accepts tracked or non-ignored pending source paths so grouped
   script moves can be verified before staging.
 - Move 199 shares runtime report byte formatting:
-  `ops/scripts/runtime/audits/audit-report-html.mjs` now imports
+  `ops/scripts/runtime/audits/audit-report-html.ts` now imports
   `formatBytes()` from `ops/scripts/lib/report-utils.js` instead of carrying a
   local formatter. Runtime audit HTML and Phase 29 generated-bulk reports now
   use the same byte-size display helper.
@@ -5057,3 +5057,13 @@ Move 454 status:
   product/inventory/sale/return flow and finally-scoped cleanup. Start-server
   wrappers, backend `verify:live-smoke`, Docker release guardrails, and backend
   automation tests now point at the TypeScript smoke paths.
+
+Move 455 status:
+- Move 455 converts the shared live-audit helper modules to TypeScript.
+  `audit-auth.ts`, `audit-manifest.ts`, and `audit-report-html.ts` now carry
+  typed session, storage-state, manifest route, profile, report-summary, and
+  audit-row contracts. The Phase 8.4 focused live checks, deep live audit,
+  full-app audit, browser-action smoke, action-history undo/redo check, and
+  backend full-automation source assertions now import the TypeScript helpers
+  directly, reducing the remaining `.mjs` surface without changing live audit
+  behavior.

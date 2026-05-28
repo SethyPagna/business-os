@@ -150,7 +150,7 @@ async function main(): Promise<void> {
     cleanup: null,
   }
   try {
-    const { loginWithFetch } = await import('./audit-auth.mjs')
+    const { loginWithFetch } = await import('./audit-auth.ts')
     const session = await loginWithFetch({ baseUrl: BASE_URL, username: USERNAME, password: PASSWORD })
     const created = await request(session, 'POST', '/api/action-history', {
       scope: 'global',
