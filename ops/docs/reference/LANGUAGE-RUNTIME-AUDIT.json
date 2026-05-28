@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:14:20.019Z",
+  "generatedAt": "2026-05-28T03:18:14.130Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,11 +21,11 @@
   "languageCounts": [
     [
       "TypeScript",
-      205
+      217
     ],
     [
       "JavaScript",
-      143
+      131
     ],
     [
       "React JSX",
@@ -59,11 +59,11 @@
   "extensionCounts": [
     [
       ".ts",
-      205
+      217
     ],
     [
       ".js",
-      143
+      131
     ],
     [
       ".jsx",
@@ -483,8 +483,8 @@
       "candidate": "backend/src/services/backupPackages.js",
       "tests": [
         "backend/test/backupPerformanceHardening.test.js",
-        "backend/test/backupRetention.test.js",
-        "backend/test/backupSchema.test.js"
+        "backend/test/backupRetention.test.ts",
+        "backend/test/backupSchema.test.ts"
       ],
       "command": "npm.cmd --prefix backend run test:utils",
       "reason": "Backup package streaming, retention, and schema summaries protect data-path rewrites.",
@@ -495,11 +495,11 @@
           "exists": true
         },
         {
-          "path": "backend/test/backupRetention.test.js",
+          "path": "backend/test/backupRetention.test.ts",
           "exists": true
         },
         {
-          "path": "backend/test/backupSchema.test.js",
+          "path": "backend/test/backupSchema.test.ts",
           "exists": true
         }
       ],
@@ -1483,8 +1483,8 @@
       ],
       "tests": [
         "backend/test/backupPerformanceHardening.test.js",
-        "backend/test/backupRetention.test.js",
-        "backend/test/backupSchema.test.js"
+        "backend/test/backupRetention.test.ts",
+        "backend/test/backupSchema.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
@@ -1493,11 +1493,11 @@
           "exists": true
         },
         {
-          "path": "backend/test/backupRetention.test.js",
+          "path": "backend/test/backupRetention.test.ts",
           "exists": true
         },
         {
-          "path": "backend/test/backupSchema.test.js",
+          "path": "backend/test/backupSchema.test.ts",
           "exists": true
         }
       ],
@@ -1618,7 +1618,7 @@
       "tests": [
         "backend/test/fullAutomation.test.js",
         "backend/test/backupPerformanceHardening.test.js",
-        "backend/test/backupRetention.test.js"
+        "backend/test/backupRetention.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
@@ -1631,7 +1631,7 @@
           "exists": true
         },
         {
-          "path": "backend/test/backupRetention.test.js",
+          "path": "backend/test/backupRetention.test.ts",
           "exists": true
         }
       ],
@@ -1649,7 +1649,7 @@
       "tests": [
         "backend/test/rfidRoutes.test.ts",
         "backend/test/routeContracts.test.js",
-        "backend/test/productBatchHierarchy.test.js"
+        "backend/test/productBatchHierarchy.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
@@ -1662,7 +1662,7 @@
           "exists": true
         },
         {
-          "path": "backend/test/productBatchHierarchy.test.js",
+          "path": "backend/test/productBatchHierarchy.test.ts",
           "exists": true
         }
       ],
@@ -1674,18 +1674,18 @@
       "rollback": "Inline the image-map, branch-stock-map, gallery, and badge decoration blocks separately in getPortalProducts and getPortalCatalogProductPage again; public catalog response fields remain unchanged.",
       "proof": [
         "npm.cmd --prefix backend run test:utils",
-        "node backend\\test\\portalInventoryRegression.test.js",
+        "node backend\\test\\portalInventoryRegression.test.ts",
         "node ops\\scripts\\backend\\schema-audit.ts"
       ],
       "tests": [
-        "backend/test/portalInventoryRegression.test.js",
+        "backend/test/portalInventoryRegression.test.ts",
         "backend/test/portalUtils.test.ts",
         "backend/test/routeContracts.test.js"
       ],
       "targetExists": true,
       "testCoverage": [
         {
-          "path": "backend/test/portalInventoryRegression.test.js",
+          "path": "backend/test/portalInventoryRegression.test.ts",
           "exists": true
         },
         {
@@ -1736,18 +1736,18 @@
       "rollback": "Move insertSaleMovement and updateSaleMovementCreatedAt back into the per-item allocation block; sale item, batch allocation, movement, and imported timestamp behavior remain unchanged.",
       "proof": [
         "npm.cmd --prefix backend run test:utils",
-        "node backend\\test\\productBatchHierarchy.test.js",
+        "node backend\\test\\productBatchHierarchy.test.ts",
         "node ops\\scripts\\backend\\schema-audit.ts"
       ],
       "tests": [
-        "backend/test/productBatchHierarchy.test.js",
+        "backend/test/productBatchHierarchy.test.ts",
         "backend/test/routeContracts.test.js",
-        "backend/test/portalInventoryRegression.test.js"
+        "backend/test/portalInventoryRegression.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
         {
-          "path": "backend/test/productBatchHierarchy.test.js",
+          "path": "backend/test/productBatchHierarchy.test.ts",
           "exists": true
         },
         {
@@ -1755,7 +1755,7 @@
           "exists": true
         },
         {
-          "path": "backend/test/portalInventoryRegression.test.js",
+          "path": "backend/test/portalInventoryRegression.test.ts",
           "exists": true
         }
       ],
@@ -1772,7 +1772,7 @@
       ],
       "tests": [
         "backend/test/routeContracts.test.js",
-        "backend/test/systemJobs.test.js",
+        "backend/test/systemJobs.test.ts",
         "backend/test/fullAutomation.test.js"
       ],
       "targetExists": true,
@@ -1782,7 +1782,7 @@
           "exists": true
         },
         {
-          "path": "backend/test/systemJobs.test.js",
+          "path": "backend/test/systemJobs.test.ts",
           "exists": true
         },
         {

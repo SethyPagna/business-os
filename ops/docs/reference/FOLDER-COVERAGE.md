@@ -430,8 +430,8 @@ Total folders documented: **81**
 | 4 | `authSecurityFlow.test.js` | Project source/support file |
 | 5 | `backupDefaultDestination.test.ts` | Project source/support file |
 | 6 | `backupPerformanceHardening.test.js` | Project source/support file |
-| 7 | `backupRetention.test.js` | Project source/support file |
-| 8 | `backupSchema.test.js` | Project source/support file |
+| 7 | `backupRetention.test.ts` | Project source/support file |
+| 8 | `backupSchema.test.ts` | Project source/support file |
 | 9 | `branchStockSearch.test.js` | Project source/support file |
 | 10 | `contactOptions.test.ts` | Project source/support file |
 | 11 | `dataPath.test.ts` | Project source/support file |
@@ -440,7 +440,7 @@ Total folders documented: **81**
 | 14 | `fileAssetUsageCache.test.js` | Project source/support file |
 | 15 | `fileRouteSecurityFlow.test.js` | Project source/support file |
 | 16 | `fullAutomation.test.js` | Project source/support file |
-| 17 | `googleDriveSyncVersioning.test.js` | Project source/support file |
+| 17 | `googleDriveSyncVersioning.test.ts` | Project source/support file |
 | 18 | `idempotency.test.ts` | Project source/support file |
 | 19 | `importCsv.test.ts` | Project source/support file |
 | 20 | `importDecisionIntegrity.test.js` | Project source/support file |
@@ -450,18 +450,18 @@ Total folders documented: **81**
 | 24 | `initials.test.ts` | Project source/support file |
 | 25 | `integrationDoctor.test.ts` | Project source/support file |
 | 26 | `inventorySettingsMediaContracts.test.ts` | Project source/support file |
-| 27 | `mediaOptimization.test.js` | Project source/support file |
+| 27 | `mediaOptimization.test.ts` | Project source/support file |
 | 28 | `netSecurity.test.ts` | Project source/support file |
-| 29 | `notificationSummaryCache.test.js` | Project source/support file |
+| 29 | `notificationSummaryCache.test.ts` | Project source/support file |
 | 30 | `offlineSecurity.test.ts` | Project source/support file |
-| 31 | `ownedGoogleAuth.test.js` | Project source/support file |
+| 31 | `ownedGoogleAuth.test.ts` | Project source/support file |
 | 32 | `permissionPolicy.test.ts` | Project source/support file |
-| 33 | `portalInventoryRegression.test.js` | Project source/support file |
+| 33 | `portalInventoryRegression.test.ts` | Project source/support file |
 | 34 | `portalUtils.test.ts` | Project source/support file |
 | 35 | `postgresCutoverReadiness.test.ts` | Project source/support file |
-| 36 | `postgresDatabase.test.js` | Project source/support file |
-| 37 | `postgresQueryCompat.test.js` | Project source/support file |
-| 38 | `productBatchHierarchy.test.js` | Project source/support file |
+| 36 | `postgresDatabase.test.ts` | Project source/support file |
+| 37 | `postgresQueryCompat.test.ts` | Project source/support file |
+| 38 | `productBatchHierarchy.test.ts` | Project source/support file |
 | 39 | `productExpiry.test.ts` | Project source/support file |
 | 40 | `productImportPolicies.test.ts` | Project source/support file |
 | 41 | `productSearchPagination.test.ts` | Project source/support file |
@@ -469,10 +469,10 @@ Total folders documented: **81**
 | 43 | `routeContracts.test.js` | Project source/support file |
 | 44 | `runtimeCache.test.ts` | Project source/support file |
 | 45 | `runtimeVersion.test.ts` | Project source/support file |
-| 46 | `schemaMetadata.test.js` | Project source/support file |
+| 46 | `schemaMetadata.test.ts` | Project source/support file |
 | 47 | `serverUtils.test.js` | Project source/support file |
 | 48 | `settingsSnapshotObjectStorage.test.js` | Project source/support file |
-| 49 | `systemJobs.test.js` | Project source/support file |
+| 49 | `systemJobs.test.ts` | Project source/support file |
 | 50 | `uploadSecurity.test.ts` | Project source/support file |
 
 

@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T03:14:20.019Z
+Generated: 2026-05-28T03:18:14.130Z
 
 ## Summary
 
@@ -22,8 +22,8 @@ Generated: 2026-05-28T03:14:20.019Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 205 |
-| JavaScript | 143 |
+| TypeScript | 217 |
+| JavaScript | 131 |
 | React JSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
@@ -80,7 +80,7 @@ Generated: 2026-05-28T03:14:20.019Z
 | Web Worker extraction | `frontend/src/components/contacts/ContactImportModal.jsx` | yes | yes `frontend/tests/contactImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
 | Completed Web Worker extraction | `frontend/src/components/inventory/InventoryImportModal.jsx` | yes | yes `frontend/tests/inventoryImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
 | Completed Web Worker extraction | `frontend/src/components/sales/SalesImportModal.jsx` | yes | yes `frontend/tests/salesImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
-| SQL/DuckDB/data-path optimization | `backend/src/services/backupPackages.js` | yes | yes `backend/test/backupPerformanceHardening.test.js`<br>yes `backend/test/backupRetention.test.js`<br>yes `backend/test/backupSchema.test.js` | yes | npm.cmd --prefix backend run test:utils |
+| SQL/DuckDB/data-path optimization | `backend/src/services/backupPackages.js` | yes | yes `backend/test/backupPerformanceHardening.test.js`<br>yes `backend/test/backupRetention.test.ts`<br>yes `backend/test/backupSchema.test.ts` | yes | npm.cmd --prefix backend run test:utils |
 
 ## Converted TypeScript Slices
 
@@ -159,9 +159,9 @@ Generated: 2026-05-28T03:14:20.019Z
 | `backend/src/routes/importJobs.js` | yes | Import-job listing now derives permitted import types from the current user and passes them into listImportJobs so the service can filter by type in SQL before decoration. | Remove getPermittedImportTypes, call listImportJobs with only the limit, and restore the route-level JavaScript permission filter. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\importDecisionIntegrity.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
 | `ops/scripts/verification/verify-backup-reliability.ts` | yes | Backup reliability verification now uses a source manifest and grouped required/forbidden text checks, replacing repeated one-off assertions across the same backup, Drive, UI, offline, and automation files. | Inline the individual requireText/forbidText calls again; the checked guard strings and failure messages remain equivalent. | `node ops\scripts\verification\verify-backup-reliability.ts`<br>`npm.cmd --prefix backend run test:utils`<br>`npm.cmd --prefix ops run phase29:audit:repeat` |
 | `backend/src/routes/inventory.js` | yes | RFID session apply now prepares branch, product, branch-stock, movement, product-summary, and session-finalization statements once per request instead of preparing lookups inside each confirmed product row. | Inline the RFID apply db.prepare calls inside the product loop again; RFID confirmed quantity, movement, audit, and session status behavior remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\rfidRoutes.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
-| `backend/src/routes/portal.js` | yes | Portal catalog products now share one image and branch-stock materialization helper plus one payload decorator across full catalog and paged search responses. | Inline the image-map, branch-stock-map, gallery, and badge decoration blocks separately in getPortalProducts and getPortalCatalogProductPage again; public catalog response fields remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\portalInventoryRegression.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
+| `backend/src/routes/portal.js` | yes | Portal catalog products now share one image and branch-stock materialization helper plus one payload decorator across full catalog and paged search responses. | Inline the image-map, branch-stock-map, gallery, and badge decoration blocks separately in getPortalProducts and getPortalCatalogProductPage again; public catalog response fields remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\portalInventoryRegression.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
 | `backend/src/routes/products.js` | yes | Image-only bulk import now builds one normalized product-name map before processing uploaded image filenames, replacing a full active-product scan for every image. | Remove productsByImageBaseName and return to allProducts.find inside the image loop; image matching behavior remains name-based. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\productSearchPagination.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
-| `backend/src/routes/sales.js` | yes | Sale creation now prepares the inventory movement insert and optional movement timestamp update once per transaction instead of rebuilding those statements for every sold item. | Move insertSaleMovement and updateSaleMovementCreatedAt back into the per-item allocation block; sale item, batch allocation, movement, and imported timestamp behavior remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\productBatchHierarchy.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
+| `backend/src/routes/sales.js` | yes | Sale creation now prepares the inventory movement insert and optional movement timestamp update once per transaction instead of rebuilding those statements for every sold item. | Move insertSaleMovement and updateSaleMovementCreatedAt back into the per-item allocation block; sale item, batch allocation, movement, and imported timestamp behavior remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\productBatchHierarchy.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
 | `backend/src/routes/system/index.js` | yes | System settings writes now prepare the delete statement once beside the upsert statement, avoiding repeated statement creation when null-valued settings are removed inside the transaction. | Remove deleteSetting and inline db.prepare("DELETE FROM settings WHERE key = ?") in the null-value branch; settings write behavior remains unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\routeContracts.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
 
 ## Runtime Policy

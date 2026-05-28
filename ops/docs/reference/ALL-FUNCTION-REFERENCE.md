@@ -100,8 +100,8 @@ Code files scanned: **506**
 | 88 | `backend/test/authSecurityFlow.test.js` | 14 |
 | 89 | `backend/test/backupDefaultDestination.test.ts` | 0 |
 | 90 | `backend/test/backupPerformanceHardening.test.js` | 1 |
-| 91 | `backend/test/backupRetention.test.js` | 1 |
-| 92 | `backend/test/backupSchema.test.js` | 1 |
+| 91 | `backend/test/backupRetention.test.ts` | 1 |
+| 92 | `backend/test/backupSchema.test.ts` | 1 |
 | 93 | `backend/test/branchStockSearch.test.js` | 10 |
 | 94 | `backend/test/contactOptions.test.ts` | 1 |
 | 95 | `backend/test/dataPath.test.ts` | 2 |
@@ -110,7 +110,7 @@ Code files scanned: **506**
 | 98 | `backend/test/fileAssetUsageCache.test.js` | 1 |
 | 99 | `backend/test/fileRouteSecurityFlow.test.js` | 9 |
 | 100 | `backend/test/fullAutomation.test.js` | 2 |
-| 101 | `backend/test/googleDriveSyncVersioning.test.js` | 1 |
+| 101 | `backend/test/googleDriveSyncVersioning.test.ts` | 1 |
 | 102 | `backend/test/idempotency.test.ts` | 1 |
 | 103 | `backend/test/importCsv.test.ts` | 2 |
 | 104 | `backend/test/importDecisionIntegrity.test.js` | 0 |
@@ -120,18 +120,18 @@ Code files scanned: **506**
 | 108 | `backend/test/initials.test.ts` | 0 |
 | 109 | `backend/test/integrationDoctor.test.ts` | 1 |
 | 110 | `backend/test/inventorySettingsMediaContracts.test.ts` | 2 |
-| 111 | `backend/test/mediaOptimization.test.js` | 3 |
+| 111 | `backend/test/mediaOptimization.test.ts` | 3 |
 | 112 | `backend/test/netSecurity.test.ts` | 1 |
-| 113 | `backend/test/notificationSummaryCache.test.js` | 1 |
+| 113 | `backend/test/notificationSummaryCache.test.ts` | 1 |
 | 114 | `backend/test/offlineSecurity.test.ts` | 2 |
-| 115 | `backend/test/ownedGoogleAuth.test.js` | 2 |
+| 115 | `backend/test/ownedGoogleAuth.test.ts` | 2 |
 | 116 | `backend/test/permissionPolicy.test.ts` | 0 |
-| 117 | `backend/test/portalInventoryRegression.test.js` | 2 |
+| 117 | `backend/test/portalInventoryRegression.test.ts` | 2 |
 | 118 | `backend/test/portalUtils.test.ts` | 1 |
 | 119 | `backend/test/postgresCutoverReadiness.test.ts` | 1 |
-| 120 | `backend/test/postgresDatabase.test.js` | 3 |
-| 121 | `backend/test/postgresQueryCompat.test.js` | 1 |
-| 122 | `backend/test/productBatchHierarchy.test.js` | 2 |
+| 120 | `backend/test/postgresDatabase.test.ts` | 3 |
+| 121 | `backend/test/postgresQueryCompat.test.ts` | 1 |
+| 122 | `backend/test/productBatchHierarchy.test.ts` | 2 |
 | 123 | `backend/test/productExpiry.test.ts` | 1 |
 | 124 | `backend/test/productImportPolicies.test.ts` | 1 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 0 |
@@ -139,10 +139,10 @@ Code files scanned: **506**
 | 127 | `backend/test/routeContracts.test.js` | 2 |
 | 128 | `backend/test/runtimeCache.test.ts` | 2 |
 | 129 | `backend/test/runtimeVersion.test.ts` | 1 |
-| 130 | `backend/test/schemaMetadata.test.js` | 3 |
+| 130 | `backend/test/schemaMetadata.test.ts` | 3 |
 | 131 | `backend/test/serverUtils.test.js` | 2 |
 | 132 | `backend/test/settingsSnapshotObjectStorage.test.js` | 4 |
-| 133 | `backend/test/systemJobs.test.js` | 3 |
+| 133 | `backend/test/systemJobs.test.ts` | 3 |
 | 134 | `backend/test/uploadSecurity.test.ts` | 1 |
 | 135 | `frontend/public/runtime-noise-guard.js` | 6 |
 | 136 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 |
@@ -2453,13 +2453,13 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.91 `backend/test/backupRetention.test.js`
+### 3.91 `backend/test/backupRetention.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.92 `backend/test/backupSchema.test.js`
+### 3.92 `backend/test/backupSchema.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2539,7 +2539,7 @@ Code files scanned: **506**
 | 1 | `read` | function | 9 |
 | 2 | `runTest` | function | 13 |
 
-### 3.101 `backend/test/googleDriveSyncVersioning.test.js`
+### 3.101 `backend/test/googleDriveSyncVersioning.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2602,7 +2602,7 @@ Code files scanned: **506**
 | 1 | `runTest` | function | 9 |
 | 2 | `readSource` | function | 20 |
 
-### 3.111 `backend/test/mediaOptimization.test.js`
+### 3.111 `backend/test/mediaOptimization.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2616,7 +2616,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.113 `backend/test/notificationSummaryCache.test.js`
+### 3.113 `backend/test/notificationSummaryCache.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2629,7 +2629,7 @@ Code files scanned: **506**
 | 1 | `read` | function | 5 |
 | 2 | `runTest` | function | 9 |
 
-### 3.115 `backend/test/ownedGoogleAuth.test.js`
+### 3.115 `backend/test/ownedGoogleAuth.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2640,7 +2640,7 @@ Code files scanned: **506**
 
 - No top-level named symbols detected.
 
-### 3.117 `backend/test/portalInventoryRegression.test.js`
+### 3.117 `backend/test/portalInventoryRegression.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2659,7 +2659,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 10 |
 
-### 3.120 `backend/test/postgresDatabase.test.js`
+### 3.120 `backend/test/postgresDatabase.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2667,13 +2667,13 @@ Code files scanned: **506**
 | 2 | `FakeClient` | class | 21 |
 | 3 | `createFakeDb` | function | 37 |
 
-### 3.121 `backend/test/postgresQueryCompat.test.js`
+### 3.121 `backend/test/postgresQueryCompat.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.122 `backend/test/productBatchHierarchy.test.js`
+### 3.122 `backend/test/productBatchHierarchy.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2722,7 +2722,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 
-### 3.130 `backend/test/schemaMetadata.test.js`
+### 3.130 `backend/test/schemaMetadata.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2746,7 +2746,7 @@ Code files scanned: **506**
 | 3 | `restore` | const arrow | 38 |
 | 4 | `createFakeCleanupDb` | function | 51 |
 
-### 3.133 `backend/test/systemJobs.test.js`
+### 3.133 `backend/test/systemJobs.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
