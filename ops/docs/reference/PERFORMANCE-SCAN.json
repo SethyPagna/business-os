@@ -1,10 +1,10 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 390,
+  "sourceFiles": 391,
   "distAssets": 87,
-  "totalSourceBytes": 6074977,
-  "totalSourceLines": 134655,
+  "totalSourceBytes": 6131565,
+  "totalSourceLines": 136118,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 250756,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -161,9 +161,9 @@
       "lines": 1198
     },
     {
-      "file": "frontend/src/App.jsx",
-      "size": 54426,
-      "lines": 1387
+      "file": "ops/scripts/runtime/audits/deep-live-audit.ts",
+      "size": 56588,
+      "lines": 1463
     }
   ],
   "topSourceByLines": [
@@ -263,6 +263,11 @@
       "lines": 1490
     },
     {
+      "file": "ops/scripts/runtime/audits/deep-live-audit.ts",
+      "size": 56588,
+      "lines": 1463
+    },
+    {
       "file": "backend/src/routes/portal.js",
       "size": 52672,
       "lines": 1407
@@ -286,11 +291,6 @@
       "file": "backend/src/fileAssets.js",
       "size": 44917,
       "lines": 1261
-    },
-    {
-      "file": "frontend/src/components/utils-settings/AuditLog.jsx",
-      "size": 57543,
-      "lines": 1198
     }
   ],
   "topBuiltChunks": [

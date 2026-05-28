@@ -1619,7 +1619,7 @@ Total folders documented: **81**
 | 2 | `audit-auth.ts` | Project source/support file |
 | 3 | `audit-manifest.ts` | Project source/support file |
 | 4 | `audit-report-html.ts` | Project source/support file |
-| 5 | `deep-live-audit.mjs` | Project source/support file |
+| 5 | `deep-live-audit.ts` | Project source/support file |
 | 6 | `full-app-audit.ts` | Project source/support file |
 
 

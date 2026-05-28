@@ -220,7 +220,7 @@
     "ops/docs/whole-app-hardening.md",
     "ops/scripts/architecture/language-runtime-audit.ts",
     "ops/scripts/powershell/docker-release.ps1",
-    "ops/scripts/runtime/audits/deep-live-audit.mjs",
+    "ops/scripts/runtime/audits/deep-live-audit.ts",
     "ops/scripts/runtime/browser-action-smoke.ts",
     "ops/scripts/runtime/live-checks/phase84-ui-live-check.ts"
   ],

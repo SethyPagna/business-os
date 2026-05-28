@@ -475,7 +475,7 @@ Code files documented: **506**
 | 463 | `ops/scripts/runtime/audits/audit-auth.ts` | 0 | 4 | 0 | 18 |
 | 464 | `ops/scripts/runtime/audits/audit-manifest.ts` | 0 | 7 | 0 | 3 |
 | 465 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
-| 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 9 | 0 | 3 | 0 |
+| 466 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 9 | 0 | 3 | 0 |
 | 467 | `ops/scripts/runtime/audits/full-app-audit.ts` | 9 | 0 | 3 | 0 |
 | 468 | `ops/scripts/runtime/browser-action-smoke.ts` | 8 | 0 | 3 | 0 |
 | 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
@@ -7681,7 +7681,7 @@ Code files documented: **506**
   - none
 - Referenced by (18)
   - `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
-  - `ops/scripts/runtime/audits/deep-live-audit.mjs`
+  - `ops/scripts/runtime/audits/deep-live-audit.ts`
   - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
   - `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
@@ -7707,7 +7707,7 @@ Code files documented: **506**
 - Internal dependencies (0)
   - none
 - Referenced by (3)
-  - `ops/scripts/runtime/audits/deep-live-audit.mjs`
+  - `ops/scripts/runtime/audits/deep-live-audit.ts`
   - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
 
@@ -7722,11 +7722,11 @@ Code files documented: **506**
 - Internal dependencies (1)
   - `ops/scripts/lib/report-utils.js`
 - Referenced by (3)
-  - `ops/scripts/runtime/audits/deep-live-audit.mjs`
+  - `ops/scripts/runtime/audits/deep-live-audit.ts`
   - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
 
-### 3.466 `ops/scripts/runtime/audits/deep-live-audit.mjs`
+### 3.466 `ops/scripts/runtime/audits/deep-live-audit.ts`
 
 - Declared exports: none detected
 - Imports (9)

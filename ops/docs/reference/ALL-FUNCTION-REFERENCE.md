@@ -475,7 +475,7 @@ Code files scanned: **506**
 | 463 | `ops/scripts/runtime/audits/audit-auth.ts` | 6 |
 | 464 | `ops/scripts/runtime/audits/audit-manifest.ts` | 3 |
 | 465 | `ops/scripts/runtime/audits/audit-report-html.ts` | 11 |
-| 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 43 |
+| 466 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 42 |
 | 467 | `ops/scripts/runtime/audits/full-app-audit.ts` | 22 |
 | 468 | `ops/scripts/runtime/browser-action-smoke.ts` | 32 |
 | 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 16 |
@@ -6521,53 +6521,52 @@ Code files scanned: **506**
 | 10 | `writeFullAuditHtmlReport` | export function | 307 |
 | 11 | `writeBrowserActionHtmlReport` | export function | 368 |
 
-### 3.466 `ops/scripts/runtime/audits/deep-live-audit.mjs`
+### 3.466 `ops/scripts/runtime/audits/deep-live-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 71 |
-| 2 | `readArgs` | function | 78 |
-| 3 | `safeName` | function | 94 |
-| 4 | `escapeRegExp` | function | 98 |
-| 5 | `addFinding` | function | 102 |
-| 6 | `assetFileName` | function | 111 |
-| 7 | `getScriptBudgetBytes` | function | 119 |
-| 8 | `isFailingFinding` | function | 140 |
-| 9 | `appOwnedUrl` | function | 144 |
-| 10 | `externalNoise` | function | 154 |
-| 11 | `isAppConsoleIssue` | function | 158 |
-| 12 | `isNavigationAbort` | function | 165 |
-| 13 | `writeJson` | function | 172 |
-| 14 | `requestJson` | function | 176 |
-| 15 | `runCommand` | function | 197 |
-| 16 | `captureHealth` | function | 234 |
-| 17 | `runFullApiAudit` | function | 250 |
-| 18 | `primeDirectRouteProbeMap` | function | 320 |
-| 19 | `loginForAudit` | function | 359 |
-| 20 | `isLoginScreen` | function | 373 |
-| 21 | `ensureAuditLogin` | function | 379 |
-| 22 | `installPerfObservers` | function | 413 |
-| 23 | `bosSelectorFor` | const arrow | 415 |
-| 24 | `createBrowserHarness` | function | 517 |
-| 25 | `createContext` | const arrow | 521 |
-| 26 | `attachCollectors` | function | 532 |
-| 27 | `resetBrowserState` | function | 620 |
-| 28 | `waitForRouteReady` | function | 636 |
-| 29 | `collectPerfSnapshot` | function | 663 |
-| 30 | `saveScreenshot` | function | 723 |
-| 31 | `performSearchInteraction` | function | 730 |
-| 32 | `dismissTransientUi` | function | 765 |
-| 33 | `clickNamedButton` | function | 783 |
-| 34 | `clickTestIdButton` | function | 818 |
-| 35 | `runRouteInteractions` | function | 858 |
-| 36 | `analyzeRoute` | function | 874 |
-| 37 | `auditRoute` | function | 973 |
-| 38 | `auditBrowserProfile` | function | 1169 |
-| 39 | `runIsolatedRoute` | const arrow | 1200 |
-| 40 | `auditRemoteReadOnly` | function | 1233 |
-| 41 | `captureDockerStateAndLogs` | function | 1271 |
-| 42 | `compareWithPreviousBaseline` | function | 1319 |
-| 43 | `main` | function | 1367 |
+| 1 | `readArg` | function | 88 |
+| 2 | `readArgs` | function | 95 |
+| 3 | `safeName` | function | 111 |
+| 4 | `escapeRegExp` | function | 115 |
+| 5 | `addFinding` | function | 119 |
+| 6 | `assetFileName` | function | 128 |
+| 7 | `getScriptBudgetBytes` | function | 136 |
+| 8 | `isFailingFinding` | function | 157 |
+| 9 | `appOwnedUrl` | function | 161 |
+| 10 | `externalNoise` | function | 171 |
+| 11 | `isAppConsoleIssue` | function | 175 |
+| 12 | `isNavigationAbort` | function | 182 |
+| 13 | `writeJson` | function | 189 |
+| 14 | `requestJson` | function | 193 |
+| 15 | `runCommand` | function | 214 |
+| 16 | `captureHealth` | function | 251 |
+| 17 | `runFullApiAudit` | function | 267 |
+| 18 | `primeDirectRouteProbeMap` | function | 337 |
+| 19 | `loginForAudit` | function | 376 |
+| 20 | `isLoginScreen` | function | 390 |
+| 21 | `ensureAuditLogin` | function | 396 |
+| 22 | `installPerfObservers` | function | 430 |
+| 23 | `bosSelectorFor` | const arrow | 432 |
+| 24 | `createBrowserHarness` | function | 534 |
+| 25 | `createContext` | const arrow | 538 |
+| 26 | `attachCollectors` | function | 549 |
+| 27 | `resetBrowserState` | function | 637 |
+| 28 | `waitForRouteReady` | function | 653 |
+| 29 | `collectPerfSnapshot` | function | 680 |
+| 30 | `saveScreenshot` | function | 740 |
+| 31 | `performSearchInteraction` | function | 747 |
+| 32 | `dismissTransientUi` | function | 782 |
+| 33 | `clickNamedButton` | function | 800 |
+| 34 | `clickTestIdButton` | function | 835 |
+| 35 | `runRouteInteractions` | function | 880 |
+| 36 | `analyzeRoute` | function | 896 |
+| 37 | `auditRoute` | function | 1004 |
+| 38 | `auditBrowserProfile` | function | 1207 |
+| 39 | `auditRemoteReadOnly` | function | 1271 |
+| 40 | `captureDockerStateAndLogs` | function | 1309 |
+| 41 | `compareWithPreviousBaseline` | function | 1357 |
+| 42 | `main` | function | 1405 |
 
 ### 3.467 `ops/scripts/runtime/audits/full-app-audit.ts`
 
