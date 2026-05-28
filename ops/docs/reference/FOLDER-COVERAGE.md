@@ -1165,16 +1165,16 @@ Total folders documented: **81**
 | 4 | `FilterMenu.jsx` | UI component/page |
 | 5 | `globalScroll.ts` | UI component/page |
 | 6 | `ImageGalleryLightbox.jsx` | UI component/page |
-| 7 | `LoadingWatchdog.jsx` | UI component/page |
+| 7 | `LoadingWatchdog.tsx` | UI component/page |
 | 8 | `Modal.tsx` | UI component/page |
 | 9 | `navigationConfig.ts` | UI component/page |
 | 10 | `NotificationCenter.jsx` | UI component/page |
 | 11 | `pageActivity.ts` | UI component/page |
-| 12 | `PageHeader.jsx` | UI component/page |
+| 12 | `PageHeader.tsx` | UI component/page |
 | 13 | `PaginationControls.jsx` | UI component/page |
 | 14 | `PortalMenu.jsx` | UI component/page |
-| 15 | `QuickPreferenceToggles.jsx` | UI component/page |
-| 16 | `SectionSwitcher.jsx` | UI component/page |
+| 15 | `QuickPreferenceToggles.tsx` | UI component/page |
+| 16 | `SectionSwitcher.tsx` | UI component/page |
 | 17 | `WriteConflictModal.jsx` | UI component/page |
 
 

@@ -277,16 +277,16 @@ Code files scanned: **466**
 | 265 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
 | 266 | `frontend/src/components/shared/globalScroll.ts` | 5 |
 | 267 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
-| 268 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 |
+| 268 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
 | 269 | `frontend/src/components/shared/Modal.tsx` | 1 |
 | 270 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
 | 271 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 1 |
-| 273 | `frontend/src/components/shared/PageHeader.jsx` | 1 |
+| 273 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
 | 274 | `frontend/src/components/shared/PaginationControls.jsx` | 5 |
 | 275 | `frontend/src/components/shared/PortalMenu.jsx` | 6 |
-| 276 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 3 |
-| 277 | `frontend/src/components/shared/SectionSwitcher.jsx` | 3 |
+| 276 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 |
+| 277 | `frontend/src/components/shared/SectionSwitcher.tsx` | 3 |
 | 278 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
 | 279 | `frontend/src/components/users/PermissionEditor.jsx` | 5 |
 | 280 | `frontend/src/components/users/UserDetailSheet.jsx` | 3 |
@@ -4838,11 +4838,11 @@ Code files scanned: **466**
 | 4 | `renderGalleryImage` | function | 40 |
 | 5 | `onKeyDown` | function | 47 |
 
-### 3.268 `frontend/src/components/shared/LoadingWatchdog.jsx`
+### 3.268 `frontend/src/components/shared/LoadingWatchdog.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `LoadingWatchdog` | export default function | 3 |
+| 1 | `LoadingWatchdog` | export default function | 14 |
 
 ### 3.269 `frontend/src/components/shared/Modal.tsx`
 
@@ -4874,11 +4874,11 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `useIsPageActive` | export function | 5 |
 
-### 3.273 `frontend/src/components/shared/PageHeader.jsx`
+### 3.273 `frontend/src/components/shared/PageHeader.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `PageHeader` | export default function | 9 |
+| 1 | `PageHeader` | export default function | 26 |
 
 ### 3.274 `frontend/src/components/shared/PaginationControls.jsx`
 
@@ -4901,21 +4901,21 @@ Code files scanned: **466**
 | 5 | `closeIfEscape` | const arrow | 84 |
 | 6 | `ThreeDotPortal` | export function | 193 |
 
-### 3.276 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.276 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ToggleButton` | function | 4 |
-| 2 | `QuickPreferenceToggles` | export default function | 23 |
-| 3 | `tr` | const arrow | 25 |
+| 1 | `ToggleButton` | function | 24 |
+| 2 | `QuickPreferenceToggles` | export default function | 43 |
+| 3 | `tr` | const arrow | 46 |
 
-### 3.277 `frontend/src/components/shared/SectionSwitcher.jsx`
+### 3.277 `frontend/src/components/shared/SectionSwitcher.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readStoredSection` | function | 3 |
-| 2 | `SectionSwitcher` | export default function | 12 |
-| 3 | `selectValue` | const arrow | 39 |
+| 1 | `readStoredSection` | function | 19 |
+| 2 | `SectionSwitcher` | export default function | 28 |
+| 3 | `selectValue` | const arrow | 55 |
 
 ### 3.278 `frontend/src/components/shared/WriteConflictModal.jsx`
 

@@ -277,16 +277,16 @@ Code files documented: **466**
 | 265 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
 | 266 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 2 |
 | 267 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
-| 268 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 | 1 | 0 | 6 |
+| 268 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 6 |
 | 269 | `frontend/src/components/shared/Modal.tsx` | 1 | 1 | 0 | 22 |
 | 270 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
 | 271 | `frontend/src/components/shared/NotificationCenter.jsx` | 4 | 1 | 1 | 2 |
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
-| 273 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
+| 273 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
 | 274 | `frontend/src/components/shared/PaginationControls.jsx` | 2 | 4 | 0 | 8 |
 | 275 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 7 |
-| 276 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
-| 277 | `frontend/src/components/shared/SectionSwitcher.jsx` | 1 | 1 | 0 | 4 |
+| 276 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 | 1 | 1 | 3 |
+| 277 | `frontend/src/components/shared/SectionSwitcher.tsx` | 1 | 1 | 0 | 4 |
 | 278 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
 | 279 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 3 | 0 | 2 |
 | 280 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
@@ -3049,7 +3049,7 @@ Code files documented: **466**
   - `frontend/src/components/server/ServerPage.jsx`
   - `frontend/src/components/shared/BackgroundImportTracker.jsx`
   - `frontend/src/components/shared/NotificationCenter.jsx`
-  - `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+  - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/components/shared/WriteConflictModal.jsx`
   - `frontend/src/components/shared/globalScroll.ts`
   - `frontend/src/components/users/Users.jsx`
@@ -3160,7 +3160,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/BackgroundImportTracker.jsx`
   - `frontend/src/components/shared/NotificationCenter.jsx`
   - `frontend/src/components/shared/pageActivity.ts`
-  - `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+  - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
@@ -3182,7 +3182,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (4)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+  - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/constants.ts`
   - `frontend/src/utils/deviceInfo.ts`
 - Referenced by (1)
@@ -3211,7 +3211,7 @@ Code files documented: **466**
   - `frontend/src/components/branches/TransferModal.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/Modal.tsx`
-  - `frontend/src/components/shared/PageHeader.jsx`
+  - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -3497,7 +3497,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/shared/Modal.tsx`
-  - `frontend/src/components/shared/PageHeader.jsx`
+  - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/csv.ts`
   - `frontend/src/utils/loaders.ts`
@@ -3612,7 +3612,7 @@ Code files documented: **466**
 - Declared exports: `ContactTable`, `DetailModal`, `ThreeDotMenu`, `buildSelectedSnapshots`, `countActiveFlags`, `useContactSelection`
 - Imports (7)
   - `../../AppContext`
-  - `../shared/LoadingWatchdog.jsx`
+  - `../shared/LoadingWatchdog`
   - `../shared/Modal`
   - `../shared/PaginationControls.jsx`
   - `../shared/PortalMenu`
@@ -3620,7 +3620,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (5)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/LoadingWatchdog.jsx`
+  - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/PortalMenu.jsx`
@@ -3774,7 +3774,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/MiniStat.tsx`
   - `frontend/src/components/dashboard/charts/index.ts`
   - `frontend/src/components/shared/ExportMenu.tsx`
-  - `frontend/src/components/shared/LoadingWatchdog.jsx`
+  - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/csv.ts`
   - `frontend/src/utils/dateHelpers.ts`
@@ -3835,7 +3835,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesProvidersTab.jsx`
   - `frontend/src/components/files/FilesResponsesTab.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
-  - `frontend/src/components/shared/PageHeader.jsx`
+  - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -3896,9 +3896,9 @@ Code files documented: **466**
   - `../shared/ActionHistoryBar.jsx`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
-  - `../shared/LoadingWatchdog.jsx`
+  - `../shared/LoadingWatchdog`
   - `../shared/PaginationControls.jsx`
-  - `../shared/SectionSwitcher.jsx`
+  - `../shared/SectionSwitcher`
   - `../shared/pageActivity`
   - `./InventoryImportModal`
   - `./InventoryMovementsSurface`
@@ -3920,9 +3920,9 @@ Code files documented: **466**
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
-  - `frontend/src/components/shared/LoadingWatchdog.jsx`
+  - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
-  - `frontend/src/components/shared/SectionSwitcher.jsx`
+  - `frontend/src/components/shared/SectionSwitcher.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -4034,15 +4034,15 @@ Code files documented: **466**
 - Imports (7)
   - `../../AppContext`
   - `../../utils/actionGuards.ts`
-  - `../shared/LoadingWatchdog.jsx`
-  - `../shared/SectionSwitcher.jsx`
+  - `../shared/LoadingWatchdog`
+  - `../shared/SectionSwitcher`
   - `../shared/pageActivity`
   - `lucide-react`
   - `react`
 - Internal dependencies (5)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/LoadingWatchdog.jsx`
-  - `frontend/src/components/shared/SectionSwitcher.jsx`
+  - `frontend/src/components/shared/LoadingWatchdog.tsx`
+  - `frontend/src/components/shared/SectionSwitcher.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
@@ -4063,7 +4063,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/components/shared/NotificationCenter.jsx`
-  - `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+  - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/components/shared/navigationConfig.ts`
   - `frontend/src/components/users/UserProfileModal.jsx`
 - Referenced by (1)
@@ -5038,7 +5038,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (4)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/PageHeader.jsx`
+  - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
@@ -5152,7 +5152,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
 
-### 3.268 `frontend/src/components/shared/LoadingWatchdog.jsx`
+### 3.268 `frontend/src/components/shared/LoadingWatchdog.tsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5249,11 +5249,11 @@ Code files documented: **466**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.273 `frontend/src/components/shared/PageHeader.jsx`
+### 3.273 `frontend/src/components/shared/PageHeader.tsx`
 
 - Declared exports: `function`
-- Imports (0)
-  - none
+- Imports (1)
+  - `react`
 - Internal dependencies (0)
   - none
 - Referenced by (6)
@@ -5300,12 +5300,13 @@ Code files documented: **466**
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.276 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.276 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
 
 - Declared exports: `function`
-- Imports (2)
-  - `../../AppContext`
+- Imports (3)
+  - `../../AppContext.jsx`
   - `lucide-react`
+  - `react`
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
 - Referenced by (3)
@@ -5313,7 +5314,7 @@ Code files documented: **466**
   - `frontend/src/components/auth/Login.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.277 `frontend/src/components/shared/SectionSwitcher.jsx`
+### 3.277 `frontend/src/components/shared/SectionSwitcher.tsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5453,9 +5454,9 @@ Code files documented: **466**
   - `../../AppContext`
   - `../../utils/actionHistory.ts`
   - `../shared/ActionHistoryBar`
-  - `../shared/LoadingWatchdog.jsx`
+  - `../shared/LoadingWatchdog`
   - `../shared/PageHeader`
-  - `../shared/SectionSwitcher.jsx`
+  - `../shared/SectionSwitcher`
   - `../shared/pageActivity`
   - `./ResetData`
   - `lucide-react`
@@ -5463,9 +5464,9 @@ Code files documented: **466**
 - Internal dependencies (8)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.jsx`
-  - `frontend/src/components/shared/LoadingWatchdog.jsx`
-  - `frontend/src/components/shared/PageHeader.jsx`
-  - `frontend/src/components/shared/SectionSwitcher.jsx`
+  - `frontend/src/components/shared/LoadingWatchdog.tsx`
+  - `frontend/src/components/shared/PageHeader.tsx`
+  - `frontend/src/components/shared/SectionSwitcher.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/components/utils-settings/ResetData.jsx`
   - `frontend/src/utils/actionHistory.ts`
@@ -5532,9 +5533,9 @@ Code files documented: **466**
   - `../../utils/actionGuards.ts`
   - `../../utils/favicon.ts`
   - `../../utils/loaders.ts`
-  - `../shared/LoadingWatchdog.jsx`
+  - `../shared/LoadingWatchdog`
   - `../shared/PageHeader`
-  - `../shared/SectionSwitcher.jsx`
+  - `../shared/SectionSwitcher`
   - `../shared/navigationConfig`
   - `./FontFamilyPicker`
   - `./OtpModal`
@@ -5543,9 +5544,9 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (11)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/LoadingWatchdog.jsx`
-  - `frontend/src/components/shared/PageHeader.jsx`
-  - `frontend/src/components/shared/SectionSwitcher.jsx`
+  - `frontend/src/components/shared/LoadingWatchdog.tsx`
+  - `frontend/src/components/shared/PageHeader.tsx`
+  - `frontend/src/components/shared/SectionSwitcher.tsx`
   - `frontend/src/components/shared/navigationConfig.ts`
   - `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
   - `frontend/src/components/utils-settings/OtpModal.jsx`

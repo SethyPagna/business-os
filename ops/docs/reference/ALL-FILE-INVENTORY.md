@@ -301,23 +301,23 @@ Total files documented: **529**
 | 289 | `frontend/src/components/shared/FilterMenu.jsx` | frontend-ui | 113 | 4.8 | UI component/page |
 | 290 | `frontend/src/components/shared/globalScroll.ts` | frontend-ui | 72 | 2.7 | UI component/page |
 | 291 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | frontend-ui | 119 | 4.9 | UI component/page |
-| 292 | `frontend/src/components/shared/LoadingWatchdog.jsx` | frontend-ui | 63 | 2.0 | UI component/page |
+| 292 | `frontend/src/components/shared/LoadingWatchdog.tsx` | frontend-ui | 74 | 2.2 | UI component/page |
 | 293 | `frontend/src/components/shared/Modal.tsx` | frontend-ui | 38 | 1.3 | UI component/page |
 | 294 | `frontend/src/components/shared/navigationConfig.ts` | frontend-ui | 66 | 2.3 | UI component/page |
 | 295 | `frontend/src/components/shared/NotificationCenter.jsx` | frontend-ui | 594 | 30.3 | UI component/page |
 | 296 | `frontend/src/components/shared/pageActivity.ts` | frontend-ui | 9 | 0.3 | UI component/page |
-| 297 | `frontend/src/components/shared/PageHeader.jsx` | frontend-ui | 55 | 2.2 | UI component/page |
+| 297 | `frontend/src/components/shared/PageHeader.tsx` | frontend-ui | 72 | 2.5 | UI component/page |
 | 298 | `frontend/src/components/shared/PaginationControls.jsx` | frontend-ui | 202 | 9.6 | UI component/page |
 | 299 | `frontend/src/components/shared/PortalMenu.jsx` | frontend-ui | 221 | 7.3 | UI component/page |
-| 300 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | frontend-ui | 56 | 2.0 | UI component/page |
-| 301 | `frontend/src/components/shared/SectionSwitcher.jsx` | frontend-ui | 72 | 2.8 | UI component/page |
+| 300 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | frontend-ui | 77 | 2.5 | UI component/page |
+| 301 | `frontend/src/components/shared/SectionSwitcher.tsx` | frontend-ui | 88 | 3.2 | UI component/page |
 | 302 | `frontend/src/components/shared/WriteConflictModal.jsx` | frontend-ui | 266 | 11.0 | UI component/page |
 | 303 | `frontend/src/components/users/PermissionEditor.jsx` | frontend-ui | 152 | 7.3 | UI component/page |
 | 304 | `frontend/src/components/users/UserDetailSheet.jsx` | frontend-ui | 103 | 5.0 | UI component/page |
 | 305 | `frontend/src/components/users/UserProfileModal.jsx` | frontend-ui | 1158 | 62.4 | UI component/page |
 | 306 | `frontend/src/components/users/Users.jsx` | frontend-ui | 1036 | 50.4 | UI component/page |
 | 307 | `frontend/src/components/utils-settings/AuditLog.jsx` | frontend-ui | 1198 | 56.2 | UI component/page |
-| 308 | `frontend/src/components/utils-settings/Backup.jsx` | frontend-ui | 1490 | 70.6 | UI component/page |
+| 308 | `frontend/src/components/utils-settings/Backup.jsx` | frontend-ui | 1490 | 70.5 | UI component/page |
 | 309 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | frontend-ui | 58 | 3.0 | UI component/page |
 | 310 | `frontend/src/components/utils-settings/index.ts` | frontend-ui | 7 | 0.3 | UI component/page |
 | 311 | `frontend/src/components/utils-settings/OtpModal.jsx` | frontend-ui | 258 | 10.2 | UI component/page |
@@ -516,7 +516,7 @@ Total files documented: **529**
 | 504 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
 | 505 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
 | 506 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
-| 507 | `README.md` | project-root | 159 | 11.5 | Project documentation entrypoint |
+| 507 | `README.md` | project-root | 159 | 11.6 | Project documentation entrypoint |
 | 508 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
 | 509 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
 | 510 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |

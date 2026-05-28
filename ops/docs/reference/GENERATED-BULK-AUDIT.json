@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T06:15:12.891Z",
+  "generatedAt": "2026-05-28T06:32:00.612Z",
   "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
   "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
   "measurementMode": "bounded-parallel-targets",
@@ -9,9 +9,9 @@
   "fileStatConcurrency": 32,
   "targets": 15,
   "existingTargets": 8,
-  "totalBytes": 694354840,
-  "protectedBytes": 370227010,
-  "cleanupCandidateBytes": 324127830,
+  "totalBytes": 545066288,
+  "protectedBytes": 220938419,
+  "cleanupCandidateBytes": 324127869,
   "nestedTargetOverlaps": [
     {
       "parent": "business-os-data",
@@ -31,18 +31,10 @@
     }
   ],
   "nestedOverlapBytes": 15496556,
-  "adjustedTotalBytes": 678858284,
-  "adjustedProtectedBytes": 354730454,
-  "adjustedCleanupCandidateBytes": 324127830,
+  "adjustedTotalBytes": 529569732,
+  "adjustedProtectedBytes": 205441863,
+  "adjustedCleanupCandidateBytes": 324127869,
   "largestProtectedTargets": [
-    {
-      "path": "ops/runtime",
-      "bytes": 191423084,
-      "files": 540,
-      "folders": 76,
-      "category": "runtime state",
-      "disposition": "retention"
-    },
     {
       "path": "business-os-data",
       "bytes": 163307370,
@@ -50,6 +42,14 @@
       "folders": 35,
       "category": "business data",
       "disposition": "preserve"
+    },
+    {
+      "path": "ops/runtime",
+      "bytes": 42134493,
+      "files": 420,
+      "folders": 59,
+      "category": "runtime state",
+      "disposition": "retention"
     },
     {
       "path": "business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads",
@@ -87,7 +87,7 @@
     },
     {
       "path": "frontend/dist",
-      "bytes": 31627838,
+      "bytes": 31627877,
       "files": 123,
       "folders": 6,
       "category": "build output",
@@ -105,7 +105,7 @@
   "slowestTargetMeasurements": [
     {
       "path": "backend/node_modules",
-      "measureMs": 823,
+      "measureMs": 1045,
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
@@ -114,7 +114,7 @@
     },
     {
       "path": "frontend/node_modules",
-      "measureMs": 504,
+      "measureMs": 645,
       "bytes": 158132222,
       "files": 11264,
       "folders": 986,
@@ -123,7 +123,7 @@
     },
     {
       "path": "ops/node_modules",
-      "measureMs": 55,
+      "measureMs": 50,
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
@@ -132,16 +132,16 @@
     },
     {
       "path": "ops/runtime",
-      "measureMs": 43,
-      "bytes": 191423084,
-      "files": 540,
-      "folders": 76,
+      "measureMs": 32,
+      "bytes": 42134493,
+      "files": 420,
+      "folders": 59,
       "category": "runtime state",
       "protected": true
     },
     {
       "path": "business-os-data",
-      "measureMs": 12,
+      "measureMs": 11,
       "bytes": 163307370,
       "files": 52,
       "folders": 35,
@@ -150,8 +150,8 @@
     },
     {
       "path": "frontend/dist",
-      "measureMs": 4,
-      "bytes": 31627838,
+      "measureMs": 3,
+      "bytes": 31627877,
       "files": 123,
       "folders": 6,
       "category": "build output",
@@ -184,9 +184,9 @@
       "targets": 3
     },
     "retention": {
-      "bytes": 191423084,
-      "files": 540,
-      "folders": 76,
+      "bytes": 42134493,
+      "files": 420,
+      "folders": 59,
       "targets": 1
     },
     "reinstallable": {
@@ -202,7 +202,7 @@
       "targets": 1
     },
     "regenerable": {
-      "bytes": 31627838,
+      "bytes": 31627877,
       "files": 123,
       "folders": 6,
       "targets": 1
@@ -245,26 +245,12 @@
   },
   "records": [
     {
-      "path": "ops/runtime",
-      "exists": true,
-      "bytes": 191423084,
-      "files": 540,
-      "folders": 76,
-      "measureMs": 43,
-      "category": "runtime state",
-      "disposition": "retention",
-      "protected": true,
-      "ignoreCovered": true,
-      "cleanGeneratedCovered": true,
-      "parseAsSource": false
-    },
-    {
       "path": "business-os-data",
       "exists": true,
       "bytes": 163307370,
       "files": 52,
       "folders": 35,
-      "measureMs": 12,
+      "measureMs": 11,
       "category": "business data",
       "disposition": "preserve",
       "protected": true,
@@ -278,7 +264,7 @@
       "bytes": 158132222,
       "files": 11264,
       "folders": 986,
-      "measureMs": 504,
+      "measureMs": 645,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -292,7 +278,7 @@
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
-      "measureMs": 823,
+      "measureMs": 1045,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -301,12 +287,26 @@
       "parseAsSource": false
     },
     {
+      "path": "ops/runtime",
+      "exists": true,
+      "bytes": 42134493,
+      "files": 420,
+      "folders": 59,
+      "measureMs": 32,
+      "category": "runtime state",
+      "disposition": "retention",
+      "protected": true,
+      "ignoreCovered": true,
+      "cleanGeneratedCovered": true,
+      "parseAsSource": false
+    },
+    {
       "path": "frontend/dist",
       "exists": true,
-      "bytes": 31627838,
+      "bytes": 31627877,
       "files": 123,
       "folders": 6,
-      "measureMs": 4,
+      "measureMs": 3,
       "category": "build output",
       "disposition": "regenerable",
       "protected": false,
@@ -334,7 +334,7 @@
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
-      "measureMs": 55,
+      "measureMs": 50,
       "category": "dependencies",
       "disposition": "safe cleanup",
       "protected": false,
@@ -376,7 +376,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 0,
+      "measureMs": 1,
       "category": "build output",
       "disposition": "regenerable",
       "protected": false,
@@ -432,7 +432,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 1,
+      "measureMs": 0,
       "category": "release kit",
       "disposition": "regenerable",
       "protected": false,
@@ -446,7 +446,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 0,
+      "measureMs": 1,
       "category": "local render artifact",
       "disposition": "safe cleanup",
       "protected": false,
