@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T10:12:00.313Z",
+  "generatedAt": "2026-05-28T10:26:28.226Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -29,11 +29,11 @@
     ],
     [
       "React JSX",
-      63
+      62
     ],
     [
       "React TSX",
-      44
+      45
     ],
     [
       "Windows batch",
@@ -71,11 +71,11 @@
     ],
     [
       ".jsx",
-      63
+      62
     ],
     [
       ".tsx",
-      44
+      45
     ],
     [
       ".bat",
@@ -195,7 +195,7 @@
       "evidence": "Move 168 inspection found DOM image loading and browser detector/zxing boundaries rather than a pure CPU loop that can move safely to a Worker."
     },
     {
-      "file": "frontend/src/components/products/scanning/BarcodeScannerModal.jsx",
+      "file": "frontend/src/components/products/scanning/BarcodeScannerModal.tsx",
       "decision": "keep on React/browser camera path",
       "reason": "The modal owns camera permission state, media streams, video refs, requestAnimationFrame scanning, and manual-entry UI. These are DOM and user-permission workflows, not transferable Worker computation.",
       "evidence": "Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle."

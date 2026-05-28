@@ -240,7 +240,7 @@ Code files scanned: **466**
 | 228 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
 | 229 | `frontend/src/components/products/Products.jsx` | 15 |
 | 230 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
-| 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 5 |
+| 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 7 |
 | 232 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
 | 233 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 9 |
 | 234 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
@@ -4423,15 +4423,17 @@ Code files scanned: **466**
 | 4 | `detectWithNativeBarcodeDetector` | function | 75 |
 | 5 | `scanBarcodeFromImageFile` | export function | 101 |
 
-### 3.231 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+### 3.231 `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `stopStream` | function | 24 |
-| 2 | `readCameraPermissionState` | function | 30 |
-| 3 | `watchCameraPermission` | function | 40 |
-| 4 | `handleChange` | const arrow | 44 |
-| 5 | `BarcodeScannerModal` | export default function | 53 |
+| 1 | `getNativeBarcodeDetector` | function | 94 |
+| 2 | `getScanErrorText` | function | 101 |
+| 3 | `stopStream` | function | 106 |
+| 4 | `readCameraPermissionState` | function | 112 |
+| 5 | `watchCameraPermission` | function | 123 |
+| 6 | `handleChange` | const arrow | 127 |
+| 7 | `BarcodeScannerModal` | export default function | 139 |
 
 ### 3.232 `frontend/src/components/products/scanning/barcodeScannerState.ts`
 

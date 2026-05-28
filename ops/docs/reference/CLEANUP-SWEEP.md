@@ -398,16 +398,13 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   the old `.mjs` wrapper. Cleanup must keep `productHistoryHelpers.mjs` until
   Products and focused history tests intentionally move to a new public
   boundary or the wrapper audit proves it is unused.
-- Move 141 converts the barcode image scanner helper to TypeScript while
-  preserving the old `.mjs` wrapper. Cleanup must keep
-  `barcodeImageScanner.mjs` until the scanner modal and focused scanner tests
-  intentionally move to a new public boundary or the wrapper audit proves it is
-  unused.
-- Move 142 converts the barcode scanner presentation-state helper to TypeScript
-  while preserving the old `.mjs` wrapper. Cleanup must keep
-  `barcodeScannerState.mjs` until the scanner modal and focused scanner-state
-  tests intentionally move to a new public boundary or the wrapper audit proves
-  it is unused.
+- Move 141 converts the barcode image scanner helper to TypeScript and no
+  `.mjs` scanner compatibility wrapper remains. Cleanup should keep the typed
+  scanner helper and focused scanner tests as the current public boundary.
+- Move 142 converts the barcode scanner presentation-state helper to
+  TypeScript and no `.mjs` scanner compatibility wrapper remains. Cleanup
+  should keep the typed scanner-state helper and focused scanner-state tests as
+  the current public boundary.
 - Move 143 converts the concurrent bulk task helper to TypeScript while
   preserving the old `.mjs` wrapper. Cleanup must keep `bulkOps.mjs` until all
   bulk-action surfaces and focused tests intentionally move to a new public
@@ -519,9 +516,9 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   also keep `backupPackages.js` in Node.js for now; the verified optimization is
   keyset pagination inside the existing runtime, not a language/runtime move.
 - Move 168 marks `frontend/src/components/products/scanning/barcodeImageScanner.ts`
-  and `BarcodeScannerModal.jsx` as intentionally main-browser scanner code, not
+  and `BarcodeScannerModal.tsx` as intentionally main-browser scanner code, not
   cleanup or Worker-move targets. They depend on browser image/camera APIs and
-  React permission UI. Cleanup should keep the `.mjs` scanner wrapper and
+  React permission UI. Cleanup should keep the typed scanner helpers and
   scanner tests until a future scanner replacement proves equal browser support.
 - Move 169 marks `ImageGalleryLightbox.tsx` and `importJobRefresh.js` as
   intentionally live main-thread UI/event code. Cleanup should keep the

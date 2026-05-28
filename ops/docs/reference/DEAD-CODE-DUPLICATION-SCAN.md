@@ -411,14 +411,14 @@ Move 140 converts the product history helper to TypeScript while preserving
 Deleted-product restore ordering and request-id generation now live in one
 typed helper used by Products and focused history tests.
 
-Move 141 converts the barcode image scanner helper to TypeScript while
-preserving `barcodeImageScanner.mjs` as an intentional compatibility wrapper.
+Move 141 converts the barcode image scanner helper to TypeScript and no
+`.mjs` scanner compatibility wrapper remains.
 Native barcode detection, zxing fallback loading, image loading, and scanner
 test doubles now share one typed helper boundary.
 
 Move 142 converts the barcode scanner presentation-state helper to TypeScript
-while preserving `barcodeScannerState.mjs` as an intentional compatibility
-wrapper. Camera permission/status branching and scanner state-kind outputs now
+and no `.mjs` scanner compatibility wrapper remains. Camera permission/status
+branching and scanner state-kind outputs now
 share one typed helper boundary.
 
 Move 143 converts the concurrent bulk task helper to TypeScript while

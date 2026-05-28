@@ -521,8 +521,8 @@ Continue with Phase 8.4:
   `productImportWorker.mjs`; the broad Phase 8.4 UI live check passed against
   frontend hash `0028bc915078664f`.
   The sixth physical move created `frontend/src/components/products/scanning`
-  for `BarcodeScannerModal.jsx`, `barcodeImageScanner.mjs`,
-  `barcodeScannerState.mjs`, and `scanbotScanner.mjs`; the Product scanner live
+  for `BarcodeScannerModal.tsx`, `barcodeImageScanner.ts`,
+  `barcodeScannerState.ts`, and `scanbotScanner.ts`; the Product scanner live
   check passed against frontend hash `4fdf242042c73694`.
   The seventh physical move created `frontend/src/components/products/history`
   for `productHistoryHelpers.mjs`; product history helper tests and the Product

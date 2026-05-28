@@ -423,15 +423,13 @@ path.
 
 Move 141 completes the barcode image scanner helper TypeScript conversion.
 `barcodeImageScanner.ts` now owns image data URL loading, browser image loading,
-native `BarcodeDetector` detection, and zxing fallback decoding, while
-`barcodeImageScanner.mjs` remains as the compatibility wrapper for the scanner
-modal and focused scanner tests.
+native `BarcodeDetector` detection, and zxing fallback decoding. No `.mjs`
+scanner compatibility wrapper remains.
 
 Move 142 completes the barcode scanner presentation-state helper TypeScript
 conversion. `barcodeScannerState.ts` now owns camera permission/status mapping,
-labels, retry visibility, empty-state messaging, and scanner state kinds, while
-`barcodeScannerState.mjs` remains as the compatibility wrapper for the scanner
-modal and focused scanner-state tests.
+labels, retry visibility, empty-state messaging, and scanner state kinds. No
+`.mjs` scanner compatibility wrapper remains.
 
 Move 143 completes the concurrent bulk task helper TypeScript conversion.
 `bulkOps.ts` now owns concurrency bounds, ordered result placement, success and

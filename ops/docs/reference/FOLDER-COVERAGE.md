@@ -1032,7 +1032,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `barcodeImageScanner.ts` | UI component/page |
-| 2 | `BarcodeScannerModal.jsx` | UI component/page |
+| 2 | `BarcodeScannerModal.tsx` | UI component/page |
 | 3 | `barcodeScannerState.ts` | UI component/page |
 | 4 | `scanbotScanner.ts` | UI component/page |
 

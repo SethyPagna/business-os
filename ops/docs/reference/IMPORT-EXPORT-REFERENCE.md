@@ -240,7 +240,7 @@ Code files documented: **466**
 | 228 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 1 | 3 | 1 | 0 |
 | 229 | `frontend/src/components/products/Products.jsx` | 32 | 1 | 30 | 1 |
 | 230 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 1 | 1 | 0 | 2 |
-| 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 7 | 1 | 4 | 1 |
+| 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 7 | 1 | 4 | 1 |
 | 232 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 | 1 | 0 | 2 |
 | 233 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 0 | 3 | 0 | 2 |
 | 234 | `frontend/src/components/products/shared/primitives.tsx` | 3 | 0 | 1 | 9 |
@@ -4220,7 +4220,7 @@ Code files documented: **466**
 - Internal dependencies (7)
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
-  - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+  - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/mediaUpload.ts`
@@ -4531,10 +4531,10 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+  - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/tests/barcodeImageScanner.test.ts`
 
-### 3.231 `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+### 3.231 `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -4561,7 +4561,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+  - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/tests/barcodeScannerState.test.ts`
 
 ### 3.233 `frontend/src/components/products/scanning/scanbotScanner.ts`
@@ -4572,7 +4572,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+  - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/tests/scanbotScanner.test.ts`
 
 ### 3.234 `frontend/src/components/products/shared/primitives.tsx`
@@ -5196,7 +5196,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
+  - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/src/components/sales/ExportModal.jsx`
   - `frontend/src/components/sales/SalesImportModal.jsx`
   - `frontend/src/components/shared/WriteConflictModal.tsx`

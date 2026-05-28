@@ -263,7 +263,7 @@ Total files documented: **529**
 | 251 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
 | 252 | `frontend/src/components/products/Products.jsx` | frontend-ui | 2006 | 96.3 | UI component/page |
 | 253 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | frontend-ui | 125 | 4.1 | UI component/page |
-| 254 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | frontend-ui | 581 | 28.0 | UI component/page |
+| 254 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | frontend-ui | 669 | 31.0 | UI component/page |
 | 255 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | frontend-ui | 82 | 2.5 | UI component/page |
 | 256 | `frontend/src/components/products/scanning/scanbotScanner.ts` | frontend-ui | 180 | 6.0 | UI component/page |
 | 257 | `frontend/src/components/products/shared/primitives.tsx` | frontend-ui | 250 | 8.1 | UI component/page |
