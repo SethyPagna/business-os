@@ -1,25 +1,16 @@
 import { Download } from 'lucide-react'
-import type { ComponentType, ReactNode } from 'react'
-import PortalMenuComponent from './PortalMenu.jsx'
-
-type PortalMenuProps = {
-  align?: 'left' | 'right'
-  items: unknown[]
-  menuClassName?: string
-  triggerWrapperClassName?: string
-  trigger: ReactNode
-}
+import type { ReactNode } from 'react'
+import PortalMenu from './PortalMenu'
+import type { PortalMenuItem } from './PortalMenu'
 
 type ExportMenuProps = {
   label?: string
-  items?: unknown[]
+  items?: Array<PortalMenuItem | null | undefined | false>
   compact?: boolean
   primary?: boolean
   triggerClassName?: string
   triggerWrapperClassName?: string
 }
-
-const PortalMenu = PortalMenuComponent as ComponentType<PortalMenuProps>
 
 export default function ExportMenu({
   label = 'Export',

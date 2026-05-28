@@ -1,6 +1,54 @@
 import { cloneElement, isValidElement, useState, useEffect, useRef, useCallback } from 'react'
+import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal } from 'lucide-react'
+
+type MenuColor = 'red' | 'blue' | 'purple' | 'green' | 'orange' | 'gray'
+
+export type PortalMenuItem = 'divider' | {
+  label: ReactNode
+  onClick?: () => void
+  color?: MenuColor | string
+  disabled?: boolean
+}
+
+type PortalContentHelpers = {
+  closeMenu: () => void
+  open: boolean
+}
+
+export type PortalMenuProps = {
+  trigger: ReactNode
+  items?: Array<PortalMenuItem | null | undefined | false>
+  align?: 'left' | 'right'
+  content?: ReactNode | ((helpers: PortalContentHelpers) => ReactNode) | null
+  menuClassName?: string
+  closeOnContentClick?: boolean
+  triggerWrapperClassName?: string
+  onOpenChange?: ((open: boolean) => void) | null
+}
+
+type ThreeDotPortalLabels = {
+  details?: string
+  viewDetails?: string
+  edit?: string
+  addVariant?: string
+  delete?: string
+  ariaLabel?: string
+}
+
+type ThreeDotPortalProps = {
+  onDetails?: () => void
+  onEdit?: () => void
+  onDelete?: () => void
+  onAddVariant?: () => void
+  extraItems?: Array<PortalMenuItem | null | undefined | false>
+  labels?: ThreeDotPortalLabels
+}
+
+function isPortalMenuItem(item: PortalMenuItem | null | undefined | false): item is PortalMenuItem {
+  return Boolean(item)
+}
 
 /**
  * 1. PortalMenu
@@ -17,11 +65,11 @@ export default function PortalMenu({
   closeOnContentClick = false,
   triggerWrapperClassName = '',
   onOpenChange = null,
-}) {
+}: PortalMenuProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
-  const triggerRef = useRef(null)
-  const menuRef = useRef(null)
+  const triggerRef = useRef<HTMLDivElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef(0)
 
   const reposition = useCallback(() => {
@@ -51,7 +99,7 @@ export default function PortalMenu({
     setPosition({ top, left })
   }, [align])
 
-  const toggleOpen = useCallback((event) => {
+  const toggleOpen = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.stopPropagation()
     setOpen((isOpen) => {
       if (!isOpen) setTimeout(reposition, 0)
@@ -66,8 +114,9 @@ export default function PortalMenu({
   useEffect(() => {
     if (!open) return undefined
 
-    const closeIfClickedOutside = (event) => {
+    const closeIfClickedOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target
+      if (!(target instanceof Node)) return
       const insideMenu = menuRef.current?.contains(target)
       const insideTrigger = triggerRef.current?.contains(target)
       if (!insideMenu && !insideTrigger) setOpen(false)
@@ -81,10 +130,10 @@ export default function PortalMenu({
         reposition()
       })
     }
-    const closeIfEscape = (event) => {
+    const closeIfEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false)
     }
-    let resizeObserver = null
+    let resizeObserver: ResizeObserver | null = null
 
     document.addEventListener('mousedown', closeIfClickedOutside)
     document.addEventListener('touchstart', closeIfClickedOutside)
@@ -111,7 +160,7 @@ export default function PortalMenu({
     }
   }, [open, reposition])
 
-  const colorClassByType = {
+  const colorClassByType: Record<string, string> = {
     red: 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
     blue: 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
     purple: 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20',
@@ -127,9 +176,10 @@ export default function PortalMenu({
         ? content({ closeMenu, open })
         : content)
     : null
+  const menuItems = (items || []).filter(isPortalMenuItem)
 
   const triggerNode = isValidElement(trigger)
-    ? cloneElement(trigger, {
+    ? cloneElement(trigger as ReactElement<Record<string, unknown>>, {
         'aria-expanded': open,
         'aria-haspopup': true,
       })
@@ -158,7 +208,7 @@ export default function PortalMenu({
         >
           {resolvedContent
             ? resolvedContent
-            : items.filter(Boolean).map((item, index) => (
+            : menuItems.map((item, index) => (
               item === 'divider'
                 ? <div key={`divider-${index}`} className="border-t border-gray-100 dark:border-gray-700 my-1" />
                 : (
@@ -171,7 +221,7 @@ export default function PortalMenu({
                     }}
                     disabled={item.disabled}
                     className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                      colorClassByType[item.color] || colorClassByType.gray
+                      colorClassByType[item.color || 'gray'] || colorClassByType.gray
                     }`}
                   >
                     {item.label}
@@ -197,13 +247,13 @@ export function ThreeDotPortal({
   onAddVariant,
   extraItems = [],
   labels = {},
-}) {
-  const items = [
+}: ThreeDotPortalProps) {
+  const items: Array<PortalMenuItem | null | undefined | false> = [
     onDetails && { label: labels.details || labels.viewDetails || 'View Details', onClick: onDetails },
     onEdit && { label: labels.edit || 'Edit', onClick: onEdit, color: 'blue' },
     onAddVariant && { label: labels.addVariant || 'Add Variant', onClick: onAddVariant, color: 'purple' },
     ...(extraItems || []),
-    onDelete && 'divider',
+    onDelete && ('divider' as const),
     onDelete && { label: labels.delete || 'Delete', onClick: onDelete, color: 'red' },
   ].filter(Boolean)
 

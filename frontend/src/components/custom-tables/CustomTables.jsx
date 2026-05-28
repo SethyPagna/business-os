@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, useSync } from '../../AppContext'
-import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import {

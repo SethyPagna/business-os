@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../../shared/Modal'
-import ActionHistoryBar from '../../shared/ActionHistoryBar.jsx'
+import ActionHistoryBar from '../../shared/ActionHistoryBar'
 import { useApp, useSync } from '../../../AppContext'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'

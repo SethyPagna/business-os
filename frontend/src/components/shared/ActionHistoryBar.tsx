@@ -1,12 +1,55 @@
 import { useState } from 'react'
 import { CornerDownLeft, CornerDownRight, History } from 'lucide-react'
-import { useApp } from '../../AppContext.jsx'
+import { useApp as useAppFromContext } from '../../AppContext.jsx'
 
-function formatHistoryList(items = []) {
+type Translate = (key: string, fallback: string) => string
+
+type HistoryItem = {
+  id?: string | number
+  label?: string
+  status?: string
+}
+
+type UserOption = {
+  id: string | number
+  name?: string
+  username?: string
+}
+
+type ActionHistory = {
+  undoItems?: HistoryItem[]
+  redoItems?: HistoryItem[]
+  serverItems?: HistoryItem[]
+  isAdmin?: boolean
+  userFilter?: string
+  setUserFilter?: (userId: string) => void
+  userOptions?: UserOption[]
+  canUndo?: boolean
+  canRedo?: boolean
+  busy?: boolean
+  lastUndoLabel?: string
+  lastRedoLabel?: string
+  undo: (id?: string | number) => void
+  redo: (id?: string | number) => void
+}
+
+type AppTranslationContext = {
+  t?: (key: string) => string
+}
+
+type ActionHistoryBarProps = {
+  history?: ActionHistory | null
+  align?: 'left' | 'right'
+  className?: string
+  t?: (key: string) => string
+  summaryMode?: 'full' | 'compact'
+}
+
+function formatHistoryList(items: HistoryItem[] = []) {
   return items.map((item) => item?.label).filter(Boolean).slice(-10).reverse()
 }
 
-function formatServerStatus(item, T) {
+function formatServerStatus(item: HistoryItem, T: Translate) {
   if (item?.status === 'undoable') return T('undo_available', 'Undo available')
   if (item?.status === 'redoable') return T('redo_available', 'Redo available')
   if (item?.status === 'failed') return T('failed', 'Failed')
@@ -19,12 +62,13 @@ export default function ActionHistoryBar({
   className = '',
   t,
   summaryMode = 'full',
-}) {
+}: ActionHistoryBarProps) {
+  const useApp = useAppFromContext as () => AppTranslationContext
   const app = useApp()
   const [open, setOpen] = useState(false)
   if (!history) return null
 
-  const T = (key, fallback) => {
+  const T: Translate = (key, fallback) => {
     if (typeof t === 'function') return t(key) || fallback
     if (typeof app?.t === 'function') return app.t(key) || fallback
     return fallback
@@ -112,7 +156,7 @@ export default function ActionHistoryBar({
           ) : null}
           {(history.undoItems || []).slice(-10).reverse().map((item) => (
             <button
-              key={`undo-${item.id}`}
+              key={`undo-${item.id || item.label}`}
               type="button"
               className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
               disabled={!!history.busy}
@@ -124,7 +168,7 @@ export default function ActionHistoryBar({
           ))}
           {(history.redoItems || []).slice(-10).reverse().map((item) => (
             <button
-              key={`redo-${item.id}`}
+              key={`redo-${item.id || item.label}`}
               type="button"
               className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
               disabled={!!history.busy}
@@ -136,7 +180,7 @@ export default function ActionHistoryBar({
           ))}
           {recordedItems.map((item) => (
             <div
-              key={`recorded-${item.id}`}
+              key={`recorded-${item.id || item.label}`}
               className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left"
             >
               <span className="min-w-0 truncate text-slate-700 dark:text-slate-200">{item.label}</span>

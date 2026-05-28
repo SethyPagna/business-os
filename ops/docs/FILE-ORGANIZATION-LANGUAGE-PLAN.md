@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 486 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 487 in this file.
 
 ## Goal
 
@@ -3825,6 +3825,14 @@ Decision rule:
     presentation/event code, not a Rust/worker candidate, because the browser
     still owns image loading and the component only coordinates state,
     keyboard navigation, and rendering.
+487. Convert portal menu, action history bar, and user detail sheet to TSX.
+    Done: `PortalMenu.tsx` now owns the typed body-portal trigger, item,
+    divider, custom-content, and three-dot action contracts; `ActionHistoryBar`
+    now carries typed undo/redo/server-history and admin user-filter shapes;
+    `UserDetailSheet.tsx` now has typed role/user/permission boundaries while
+    keeping `PermissionEditor.jsx` as the current permission-definition source.
+    Callers no longer import the old ActionHistoryBar JSX path, and TSX menu wrappers now
+    import the typed `PortalMenu` directly instead of casting the JSX module.
 
 ## Safety Gates
 

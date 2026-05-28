@@ -1,12 +1,51 @@
 import { fmtDate } from '../../utils/formatters'
-import { PERMISSION_DEFS } from './PermissionEditor'
+import { PERMISSION_DEFS as PERMISSION_DEFS_SOURCE } from './PermissionEditor.jsx'
 
-function translateLabel(t, key, fallback) {
+type TranslateFunction = (key: string) => string
+
+type UserRole = {
+  id: string | number
+  name?: string
+  permissions?: string | Record<string, unknown> | null
+}
+
+type UserDetail = {
+  role_id?: string | number | null
+  role_name?: string
+  phone?: string
+  email?: string
+  is_active?: boolean
+  otp_enabled?: boolean
+  created_at?: string | number | Date | null
+  avatar_path?: string
+  name?: string
+  username?: string
+}
+
+type PermissionDefinition = {
+  key: string
+  tKey?: string
+  label?: string
+}
+
+type UserDetailSheetProps = {
+  user: UserDetail
+  roles?: UserRole[]
+  canManage?: boolean
+  onEdit?: () => void
+  onResetPw?: () => void
+  onClose?: () => void
+  t?: TranslateFunction
+}
+
+const PERMISSION_DEFS = PERMISSION_DEFS_SOURCE as PermissionDefinition[]
+
+function translateLabel(t: TranslateFunction | undefined, key: string, fallback: string): string {
   const value = typeof t === 'function' ? t(key) : null
   return value && value !== key ? value : fallback
 }
 
-function buildRowData(user, role, t) {
+function buildRowData(user: UserDetail, role: UserRole | undefined, t: TranslateFunction | undefined): Array<[string, string]> {
   return [
     [translateLabel(t, 'role', 'Role'), user.role_name || role?.name || translateLabel(t, 'no_role', 'No role')],
     [translateLabel(t, 'phone', 'Phone'), user.phone || '-'],
@@ -18,17 +57,20 @@ function buildRowData(user, role, t) {
   ]
 }
 
-export default function UserDetailSheet({ user, roles, canManage, onEdit, onResetPw, onClose, t }) {
-  const role = roles?.find((item) => Number(item.id) === Number(user.role_id))
-  let permissions = {}
-
+function parsePermissions(role: UserRole | undefined): Record<string, unknown> {
   try {
-    permissions = role
-      ? (typeof role.permissions === 'string' ? JSON.parse(role.permissions || '{}') : (role.permissions || {}))
-      : {}
-  } catch (_) {
-    permissions = {}
+    if (!role) return {}
+    return typeof role.permissions === 'string'
+      ? JSON.parse(role.permissions || '{}')
+      : (role.permissions || {})
+  } catch {
+    return {}
   }
+}
+
+export default function UserDetailSheet({ user, roles, canManage, onEdit, onResetPw, onClose, t }: UserDetailSheetProps) {
+  const role = roles?.find((item) => Number(item.id) === Number(user.role_id))
+  const permissions = parsePermissions(role)
 
   const permissionKeys = Object.keys(permissions).filter((key) => permissions[key])
   const rowData = buildRowData(user, role, t)

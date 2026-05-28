@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
-import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'

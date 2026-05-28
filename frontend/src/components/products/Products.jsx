@@ -17,7 +17,7 @@ import {
   ProductDiscountBadge,
   ProductRowActions,
 } from './surfaces/ProductRowParts'
-import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildProductGroupSections } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'

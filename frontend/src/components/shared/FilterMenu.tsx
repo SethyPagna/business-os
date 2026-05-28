@@ -1,6 +1,6 @@
 import { Filter, X } from 'lucide-react'
 import type { ReactNode } from 'react'
-import PortalMenuComponent from './PortalMenu.jsx'
+import PortalMenu from './PortalMenu'
 
 type CloseMenu = () => void
 
@@ -21,14 +21,6 @@ type FilterSection = {
   render?: (helpers: { closeMenu: CloseMenu }) => ReactNode
 }
 
-type PortalMenuProps = {
-  align?: 'left' | 'right'
-  menuClassName?: string
-  onOpenChange?: ((open: boolean) => void) | null
-  trigger: ReactNode
-  content: (helpers: { closeMenu: CloseMenu }) => ReactNode
-}
-
 type FilterMenuProps = {
   label?: string
   activeCount?: number
@@ -38,8 +30,6 @@ type FilterMenuProps = {
   mobileIconOnly?: boolean
   onOpenChange?: ((open: boolean) => void) | null
 }
-
-const PortalMenu = PortalMenuComponent as (props: PortalMenuProps) => ReactNode
 
 function sectionButtonClass(active: boolean): string {
   return active

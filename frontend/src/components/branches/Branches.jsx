@@ -3,7 +3,7 @@ import { ArrowRightLeft, Building2, Pencil, Plus, Trash2, Warehouse } from 'luci
 import { useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
-import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
