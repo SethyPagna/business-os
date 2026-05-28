@@ -39,7 +39,7 @@ const productPageConfig = fs.readFileSync(new URL('../src/components/products/co
 const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.jsx', import.meta.url), 'utf8')
 const productForm = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.jsx', import.meta.url), 'utf8')
 const bulkImportModal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
-const manageCategoriesModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageCategoriesModal.jsx', import.meta.url), 'utf8')
+const manageCategoriesModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageCategoriesModal.tsx', import.meta.url), 'utf8')
 const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageUnitsModal.tsx', import.meta.url), 'utf8')
 const manageBrandsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageBrandsModal.jsx', import.meta.url), 'utf8')
 const productLookupSnapshots = fs.readFileSync(new URL('../src/components/products/lookups/productLookupSnapshots.ts', import.meta.url), 'utf8')
@@ -1881,7 +1881,7 @@ assert.match(
 )
 assert.match(
   manageCategoriesModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getCategories\(\),\s*'Category lookup options',\s*PRODUCT_CATEGORY_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCategoryApi\(\)\.getCategories\(\),\s*'Category lookup options',\s*PRODUCT_CATEGORY_LOOKUP_TIMEOUT_MS,\s*\)/,
   'category lookup manager undo lookups should timeout slow category reads',
 )
 assert.match(
@@ -1901,7 +1901,7 @@ assert.doesNotMatch(
 )
 assert.match(
   manageCategoriesModal,
-  /withLoaderTimeout\(\(\) => Promise\.all\(\[[\s\S]{0,140}window\.api\.getCategories\(\),[\s\S]{0,140}window\.api\.getProductLookupUsage\(\),[\s\S]{0,80}\]\), 'Categories', PRODUCT_CATEGORY_LOOKUP_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => Promise\.all\(\[[\s\S]{0,140}getCategoryApi\(\)\.getCategories\(\),[\s\S]{0,140}getCategoryApi\(\)\.getProductLookupUsage\(\),[\s\S]{0,80}\]\), 'Categories', PRODUCT_CATEGORY_LOOKUP_TIMEOUT_MS\)/,
   'category lookup manager should timeout category and usage reads',
 )
 assert.doesNotMatch(

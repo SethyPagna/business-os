@@ -3387,7 +3387,7 @@ Cleanup checkpoint:
   settings writes still invalidate the same prefixes, but the cache layer now
   avoids self-inflicted Redis contention during write bursts.
 - Move 305 indexes lookup-manager bulk delete snapshots:
-  `ManageCategoriesModal.jsx` and `ManageUnitsModal.tsx` now build
+  `ManageCategoriesModal.tsx` and `ManageUnitsModal.tsx` now build
   `categoriesById` / `unitsById` maps with `useMemo()` and use those indexes
   for single and bulk delete snapshots. Bulk delete no longer repeatedly scans
   the visible lookup rows with `ids.map(...find(...))`, preserving undo/redo
@@ -5423,3 +5423,11 @@ Move 495 status:
   results. The conversion keeps bulk delete and undo/redo loops explicit,
   routes unit API calls through a typed accessor, and updates source-reading
   tests to the TSX path.
+
+Move 496 status:
+- Move 496 converts product category lookup manager
+  `ManageCategoriesModal.tsx`. The typed boundary now covers category rows,
+  lookup usage rows, virtual cleanup rows, selected ids, app sync context,
+  lookup snapshot APIs, and category mutation results. The conversion keeps
+  bulk delete and undo/redo loops explicit, routes category API calls through a
+  typed accessor, and updates source-reading tests to the TSX path.

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
-import { useApp, useSync } from '../../../AppContext'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../../AppContext.jsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import {
@@ -21,9 +22,113 @@ const PRODUCT_CATEGORY_LOOKUP_TIMEOUT_MS = 10000
 const PRODUCT_CATEGORY_PRODUCTS_TIMEOUT_MS = 12000
 const PRODUCT_CATEGORY_MUTATION_TIMEOUT_MS = 12000
 
-function mergeCategoryUsage(categories = [], usageEntries = []) {
+type EntityId = string | number
+
+interface CategoryRow {
+  id: EntityId
+  name: string
+  color?: string | null
+  usage_count?: number
+  unresolved_count?: number
+  sample_products?: ProductSample[]
+  updated_at?: unknown
+  virtual?: boolean
+}
+
+interface CategoryUsageEntry {
+  name?: string
+  usage_count?: unknown
+  unresolved_count?: unknown
+  sample_products?: ProductSample[]
+}
+
+type ProductRow = Record<string, unknown> & {
+  id?: unknown
+  name?: unknown
+}
+
+type ProductPayload = ProductRow[] | {
+  items?: ProductRow[]
+  total?: unknown
+  pageSize?: unknown
+  totalPages?: unknown
+}
+
+interface ProductSample {
+  name?: string
+}
+
+interface CategoryMutationResult {
+  success?: boolean
+  error?: string
+  merged?: boolean
+}
+
+interface CategoryApi {
+  getCategories: () => Promise<CategoryRow[] | unknown>
+  getProductLookupUsage: () => Promise<{ categories?: CategoryUsageEntry[] } | unknown>
+  createCategory: (payload: CategoryPayload) => Promise<CategoryMutationResult | undefined>
+  updateCategory: (id: EntityId, payload: CategoryPayload) => Promise<CategoryMutationResult | undefined>
+  deleteCategory: (id: EntityId, payload?: { expectedUpdatedAt?: unknown }) => Promise<CategoryMutationResult | undefined>
+  searchProducts?: (params: Record<string, unknown>) => Promise<ProductPayload> | ProductPayload
+  getProductsByIds?: (ids: number[], options: { include: string }) => Promise<ProductPayload> | ProductPayload
+  updateProduct?: (id: number, payload: Record<string, unknown>) => Promise<unknown> | unknown
+}
+
+interface CategoryPayload {
+  name: string
+  color: string
+  expectedUpdatedAt?: unknown
+}
+
+interface ReviewSelection {
+  type: 'category'
+  value: string
+}
+
+interface ManageCategoriesModalProps {
+  onClose: () => void
+  onReviewSelection?: (selection: ReviewSelection) => void
+  t: (key: string) => string
+}
+
+interface AppContextValue {
+  notify: (message: string, type?: string) => void
+}
+
+interface SyncContextValue {
+  syncChannel?: { channel?: string } | null
+}
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+
+function getCategoryApi(): CategoryApi {
+  return (window as unknown as { api: CategoryApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function normalizeCategoryRows(rows: unknown): CategoryRow[] {
+  if (!Array.isArray(rows)) return []
+  return rows
+    .map((row) => {
+      const source = row as Partial<CategoryRow> | null | undefined
+      return {
+        ...source,
+        id: source?.id ?? 0,
+        name: String(source?.name || ''),
+        color: source?.color || DEFAULT_CATEGORY_COLOR,
+      } as CategoryRow
+    })
+    .filter((category) => category.name.trim())
+}
+
+function mergeCategoryUsage(categories: CategoryRow[] = [], usageEntries: CategoryUsageEntry[] = []): CategoryRow[] {
   const usageMap = new Map((usageEntries || []).map((entry) => [normalizeLookup(entry?.name), entry]))
-  const merged = new Map()
+  const merged = new Map<string, CategoryRow>()
   ;(categories || []).forEach((category) => {
     const key = normalizeLookup(category?.name)
     const usage = usageMap.get(key)
@@ -39,7 +144,7 @@ function mergeCategoryUsage(categories = [], usageEntries = []) {
     if (!key || merged.has(key)) return
     merged.set(key, {
       id: `virtual:${key}`,
-      name: entry.name,
+      name: String(entry.name || ''),
       color: DEFAULT_CATEGORY_COLOR,
       usage_count: Number(entry?.usage_count || 0),
       unresolved_count: Number(entry?.unresolved_count || 0),
@@ -50,16 +155,16 @@ function mergeCategoryUsage(categories = [], usageEntries = []) {
   return Array.from(merged.values()).sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || '')))
 }
 
-export default function ManageCategoriesModal({ onClose, onReviewSelection, t }) {
-  const [cats, setCats] = useState([])
+export default function ManageCategoriesModal({ onClose, onReviewSelection, t }: ManageCategoriesModalProps) {
+  const [categories, setCategories] = useState<CategoryRow[]>([])
   const [newName, setNewName] = useState('')
   const [newColor, setNewColor] = useState(DEFAULT_CATEGORY_COLOR)
-  const [editing, setEditing] = useState(null)
+  const [editing, setEditing] = useState<CategoryRow | null>(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [deletingId, setDeletingId] = useState(null)
-  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [deletingId, setDeletingId] = useState<EntityId | 'selected' | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const { notify } = useApp()
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
     ? t('review_products')
@@ -70,39 +175,40 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-categories' })
+  const actionHistoryForBar = actionHistory as unknown as ComponentProps<typeof ActionHistoryBar>['history']
   const categoriesById = useMemo(() => {
-    const index = new Map()
-    for (const category of cats) {
+    const index = new Map<number, CategoryRow>()
+    for (const category of categories) {
       const id = Number(category?.id || 0)
       if (id) index.set(id, category)
     }
     return index
-  }, [cats])
+  }, [categories])
 
-  const fetchCategories = useCallback(async () => {
+  const fetchCategories = useCallback(async (): Promise<CategoryRow[]> => {
     const rows = await withLoaderTimeout(
-      () => window.api.getCategories(),
+      () => getCategoryApi().getCategories(),
       'Category lookup options',
       PRODUCT_CATEGORY_LOOKUP_TIMEOUT_MS,
     )
-    return Array.isArray(rows) ? rows : []
+    return normalizeCategoryRows(rows)
   }, [])
 
-  const findCategoryById = useCallback(async (id) => {
+  const findCategoryById = useCallback(async (id: EntityId): Promise<CategoryRow | null> => {
     const rows = await fetchCategories()
     return rows.find((entry) => Number(entry?.id || 0) === Number(id)) || null
   }, [fetchCategories])
 
-  const findCategoryByName = useCallback(async (name) => {
+  const findCategoryByName = useCallback(async (name: string): Promise<CategoryRow | null> => {
     const key = normalizeLookup(name)
     if (!key) return null
     const rows = await fetchCategories()
     return rows.find((entry) => normalizeLookup(entry?.name) === key) || null
   }, [fetchCategories])
 
-  const fetchCategoryProductSnapshots = useCallback(async (names = []) => {
+  const fetchCategoryProductSnapshots = useCallback(async (names: string[] = []) => {
     return fetchLookupProductSnapshots({
-      api: window.api,
+      api: getCategoryApi(),
       field: 'category',
       names,
       label: 'Category product snapshots',
@@ -110,53 +216,56 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
     })
   }, [])
 
-  const restoreCategoryProductSnapshots = useCallback(async (snapshots = []) => {
+  const restoreCategoryProductSnapshots = useCallback(async (snapshots: Record<string, unknown>[] = []) => {
     await restoreLookupProductSnapshots({
-      api: window.api,
+      api: getCategoryApi(),
       field: 'category',
       snapshots,
       label: 'Category product restore',
       timeoutMs: PRODUCT_CATEGORY_PRODUCTS_TIMEOUT_MS,
     })
   }, [])
-  const runCategoryMutation = useCallback((loader, label) => (
+  const runCategoryMutation = useCallback((loader: () => Promise<CategoryMutationResult | undefined>, label: string) => (
     withLoaderTimeout(loader, label, PRODUCT_CATEGORY_MUTATION_TIMEOUT_MS)
   ), [])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
     const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     try {
       const [data, usage] = await withLoaderTimeout(() => Promise.all([
-        window.api.getCategories(),
-        window.api.getProductLookupUsage(),
+        getCategoryApi().getCategories(),
+        getCategoryApi().getProductLookupUsage(),
       ]), 'Categories', PRODUCT_CATEGORY_LOOKUP_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setCats(mergeCategoryUsage(Array.isArray(data) ? data : [], usage?.categories || []))
+      const usageRows = (usage as { categories?: CategoryUsageEntry[] } | null | undefined)?.categories || []
+      setCategories(mergeCategoryUsage(normalizeCategoryRows(data), usageRows))
       setSelectedIds(new Set())
       setErr('')
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setErr(error?.message || 'Failed to load categories')
+      setErr(getErrorMessage(error, 'Failed to load categories'))
     } finally {
       if (isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
     }
   }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { void load() }, [load])
   useEffect(() => {
-    if (syncChannel?.channel === 'categories') load()
-  }, [load, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+    if (syncChannel?.channel === 'categories') void load()
+  }, [load, syncChannel])
+  useEffect(() => () => {
+    invalidateTrackedRequest(loadRequestRef)
+  }, [])
 
-  const handleAdd = async () => {
+  const handleAdd = async (): Promise<void> => {
     if (!newName.trim() || saving) return
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
     setErr('')
     setSaving(true)
     try {
       const payload = { name: newName.trim(), color: newColor }
-      const res = await runCategoryMutation(() => window.api.createCategory(payload), 'Create category')
+      const res = await runCategoryMutation(() => getCategoryApi().createCategory(payload), 'Create category')
       if (res?.success === false) {
         setErr(res.error || 'Failed')
         return
@@ -169,37 +278,31 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
         undo: async () => {
           const latest = await findCategoryByName(payload.name)
           if (!latest) throw new Error('Category no longer exists.')
-          await runCategoryMutation(() => window.api.deleteCategory(latest.id, { expectedUpdatedAt: latest.updated_at || undefined }), 'Undo category creation')
+          await runCategoryMutation(() => getCategoryApi().deleteCategory(latest.id, { expectedUpdatedAt: latest.updated_at || undefined }), 'Undo category creation')
           await load()
         },
         redo: async () => {
-          await runCategoryMutation(() => window.api.createCategory(payload), 'Redo category creation')
+          await runCategoryMutation(() => getCategoryApi().createCategory(payload), 'Redo category creation')
           await load()
         },
       })
     } catch (error) {
-      setErr(error?.message || 'Failed')
+      setErr(getErrorMessage(error, 'Failed'))
     } finally {
       finishSingleAction(saveInFlightRef)
       setSaving(false)
     }
   }
 
-  const handleUpdate = async (cat) => {
+  const handleUpdate = async (category: CategoryRow): Promise<void> => {
     if (saving) return
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
     setErr('')
     setSaving(true)
     try {
-      const previousSnapshot = cats.find((entry) => Number(entry?.id || 0) === Number(cat?.id || 0))
-      const payload = {
-        name: cat.name,
-        color: cat.color,
-        expectedUpdatedAt: cat.updated_at || undefined,
-      }
-      const res = await runCategoryMutation(() => window.api.updateCategory(cat.id, {
-        ...payload,
-      }), 'Update category')
+      const previousSnapshot = categories.find((entry) => Number(entry?.id || 0) === Number(category?.id || 0))
+      const payload = { name: category.name, color: category.color || DEFAULT_CATEGORY_COLOR, expectedUpdatedAt: category.updated_at || undefined }
+      const res = await runCategoryMutation(() => getCategoryApi().updateCategory(category.id, payload), 'Update category')
       if (res?.success === false) {
         setErr(res.error || 'Failed')
         return
@@ -213,7 +316,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
           undo: async () => {
             const latest = await findCategoryById(previousSnapshot.id)
             if (!latest) throw new Error('Category no longer exists.')
-            await runCategoryMutation(() => window.api.updateCategory(previousSnapshot.id, {
+            await runCategoryMutation(() => getCategoryApi().updateCategory(previousSnapshot.id, {
               name: previousSnapshot.name,
               color: previousSnapshot.color || DEFAULT_CATEGORY_COLOR,
               expectedUpdatedAt: latest.updated_at || undefined,
@@ -223,7 +326,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
           redo: async () => {
             const latest = await findCategoryById(previousSnapshot.id)
             if (!latest) throw new Error('Category no longer exists.')
-            await runCategoryMutation(() => window.api.updateCategory(previousSnapshot.id, {
+            await runCategoryMutation(() => getCategoryApi().updateCategory(previousSnapshot.id, {
               name: payload.name,
               color: payload.color || DEFAULT_CATEGORY_COLOR,
               expectedUpdatedAt: latest.updated_at || undefined,
@@ -233,14 +336,14 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
         })
       }
     } catch (error) {
-      setErr(error?.message || 'Failed')
+      setErr(getErrorMessage(error, 'Failed'))
     } finally {
       finishSingleAction(saveInFlightRef)
       setSaving(false)
     }
   }
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: EntityId): Promise<void> => {
     if (saving || deletingId) return
     if (!beginSingleAction(deleteInFlightRef, { blocked: deletingId != null })) return
     if (!confirm(t('confirm_delete'))) {
@@ -252,7 +355,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
       const category = categoriesById.get(Number(id))
       const deletedEntries = category ? [{ id: Number(category.id), name: category.name, color: category.color || DEFAULT_CATEGORY_COLOR }] : []
       const productSnapshots = await fetchCategoryProductSnapshots(deletedEntries.map((entry) => entry.name))
-      await runCategoryMutation(() => window.api.deleteCategory(id, { expectedUpdatedAt: category?.updated_at || undefined }), 'Delete category')
+      await runCategoryMutation(() => getCategoryApi().deleteCategory(id, { expectedUpdatedAt: category?.updated_at || undefined }), 'Delete category')
       setSelectedIds((current) => {
         const next = new Set(current)
         next.delete(Number(id))
@@ -265,7 +368,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
           undo: async () => {
             for (const entry of deletedEntries) {
               const existing = await findCategoryByName(entry.name)
-              if (!existing) await runCategoryMutation(() => window.api.createCategory({ name: entry.name, color: entry.color || DEFAULT_CATEGORY_COLOR }), 'Undo category deletion')
+              if (!existing) await runCategoryMutation(() => getCategoryApi().createCategory({ name: entry.name, color: entry.color || DEFAULT_CATEGORY_COLOR }), 'Undo category deletion')
             }
             await restoreCategoryProductSnapshots(productSnapshots)
             await load()
@@ -274,21 +377,21 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
             for (const entry of deletedEntries) {
               const existing = await findCategoryByName(entry.name)
               if (!existing) continue
-              await runCategoryMutation(() => window.api.deleteCategory(existing.id, { expectedUpdatedAt: existing.updated_at || undefined }), 'Redo category deletion')
+              await runCategoryMutation(() => getCategoryApi().deleteCategory(existing.id, { expectedUpdatedAt: existing.updated_at || undefined }), 'Redo category deletion')
             }
             await load()
           },
         })
       }
     } catch (error) {
-      notify(error?.message || 'Failed', 'error')
+      notify(getErrorMessage(error, 'Failed'), 'error')
     } finally {
       finishSingleAction(deleteInFlightRef)
       setDeletingId(null)
     }
   }
 
-  const toggleSelected = (id) => {
+  const toggleSelected = (id: EntityId): void => {
     const numericId = Number(id)
     setSelectedIds((current) => {
       const next = new Set(current)
@@ -298,9 +401,9 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
     })
   }
 
-  const toggleAllVisible = () => {
+  const toggleAllVisible = (): void => {
     setSelectedIds((current) => {
-      const visibleIds = cats.map((category) => Number(category.id))
+      const visibleIds = categories.map((category) => Number(category.id))
       const allSelected = visibleIds.length > 0 && visibleIds.every((id) => current.has(id))
       const next = new Set(current)
       for (const id of visibleIds) {
@@ -311,7 +414,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
     })
   }
 
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = async (): Promise<void> => {
     if (saving || deletingId || selectedIds.size === 0) return
     if (!beginSingleAction(bulkDeleteInFlightRef, { blocked: deletingId != null })) return
     if (!confirm(`Delete ${selectedIds.size} selected categor${selectedIds.size === 1 ? 'y' : 'ies'}?`)) {
@@ -323,7 +426,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
     try {
       const deletedEntries = ids
         .map((id) => categoriesById.get(Number(id)))
-        .filter(Boolean)
+        .filter((category): category is CategoryRow => Boolean(category))
         .map((category) => ({
           id: Number(category.id),
           name: category.name,
@@ -332,7 +435,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
         }))
       const productSnapshots = await fetchCategoryProductSnapshots(deletedEntries.map((entry) => entry.name))
       for (const category of deletedEntries) {
-        await runCategoryMutation(() => window.api.deleteCategory(category.id, { expectedUpdatedAt: category.updated_at || undefined }), 'Bulk delete categories')
+        await runCategoryMutation(() => getCategoryApi().deleteCategory(category.id, { expectedUpdatedAt: category.updated_at || undefined }), 'Bulk delete categories')
       }
       notify(`Deleted ${ids.length} categor${ids.length === 1 ? 'y' : 'ies'}`, 'success')
       setSelectedIds(new Set())
@@ -343,7 +446,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
           undo: async () => {
             for (const entry of deletedEntries) {
               const existing = await findCategoryByName(entry.name)
-              if (!existing) await runCategoryMutation(() => window.api.createCategory({ name: entry.name, color: entry.color || DEFAULT_CATEGORY_COLOR }), 'Undo category bulk deletion')
+              if (!existing) await runCategoryMutation(() => getCategoryApi().createCategory({ name: entry.name, color: entry.color || DEFAULT_CATEGORY_COLOR }), 'Undo category bulk deletion')
             }
             await restoreCategoryProductSnapshots(productSnapshots)
             await load()
@@ -352,14 +455,14 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
             for (const entry of deletedEntries) {
               const existing = await findCategoryByName(entry.name)
               if (!existing) continue
-              await runCategoryMutation(() => window.api.deleteCategory(existing.id, { expectedUpdatedAt: existing.updated_at || undefined }), 'Redo category bulk deletion')
+              await runCategoryMutation(() => getCategoryApi().deleteCategory(existing.id, { expectedUpdatedAt: existing.updated_at || undefined }), 'Redo category bulk deletion')
             }
             await load()
           },
         })
       }
     } catch (error) {
-      notify(error?.message || 'Failed to delete selected categories', 'error')
+      notify(getErrorMessage(error, 'Failed to delete selected categories'), 'error')
     } finally {
       finishSingleAction(bulkDeleteInFlightRef)
       setDeletingId(null)
@@ -370,7 +473,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
     <Modal title={t('manage_categories') || 'Manage Categories'} onClose={onClose}>
       <div className="space-y-4">
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
-        <ActionHistoryBar history={actionHistory} />
+        <ActionHistoryBar history={actionHistoryForBar} />
 
         <div className="flex items-end gap-2">
           <div className="flex-1">
@@ -382,7 +485,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
               placeholder={t('category') || 'Category'}
-              onKeyDown={(event) => { if (event.key === 'Enter') handleAdd() }}
+              onKeyDown={(event) => { if (event.key === 'Enter') void handleAdd() }}
             />
           </div>
           <div>
@@ -396,19 +499,17 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
               className="h-10 w-10 cursor-pointer rounded-lg border border-gray-300"
             />
           </div>
-          <button className="btn-primary" onClick={handleAdd} disabled={saving}>
-            {saving ? (t('saving') || 'Saving...') : (t('add') || 'Add')}
-          </button>
+          <button className="btn-primary" onClick={() => void handleAdd()} disabled={saving}>{saving ? (t('saving') || 'Saving...') : (t('add') || 'Add')}</button>
         </div>
 
         <div className="max-h-80 space-y-2 overflow-auto">
           {loading ? <div className="rounded-lg border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">{t('loading') || 'Loading...'}</div> : null}
-          {!loading && cats.length > 0 ? (
+          {!loading && categories.length > 0 ? (
             <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white/95 px-3 py-2 text-xs shadow-sm backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
               <label className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
                 <input
                   type="checkbox"
-                  checked={cats.length > 0 && cats.every((category) => selectedIds.has(Number(category.id)))}
+                  checked={categories.length > 0 && categories.every((category) => selectedIds.has(Number(category.id)))}
                   onChange={toggleAllVisible}
                 />
                 <span>{selectedIds.size ? `${selectedIds.size} selected` : 'Select visible'}</span>
@@ -416,14 +517,14 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
               <button
                 type="button"
                 className="text-xs font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400"
-                onClick={handleDeleteSelected}
+                onClick={() => void handleDeleteSelected()}
                 disabled={!selectedIds.size || saving || deletingId != null}
               >
                 {deletingId === 'selected' ? (t('deleting') || 'Deleting...') : 'Delete selected'}
               </button>
             </div>
           ) : null}
-          {cats.map((category) => (
+          {categories.map((category) => (
             <div key={category.id} className="flex items-center gap-3 rounded-lg border border-gray-100 p-2 dark:border-gray-700">
               {editing?.id === category.id ? (
                 <>
@@ -432,7 +533,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
                     name={`category_color_${category.id}`}
                     type="color"
                     value={editing.color || DEFAULT_CATEGORY_COLOR}
-                    onChange={(event) => setEditing((current) => ({ ...current, color: event.target.value }))}
+                    onChange={(event) => setEditing((current) => current ? { ...current, color: event.target.value } : current)}
                     className="h-8 w-8 cursor-pointer rounded border border-gray-300"
                   />
                   <input
@@ -440,9 +541,9 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
                     name={`category_name_${category.id}`}
                     className="input flex-1 py-1"
                     value={editing.name}
-                    onChange={(event) => setEditing((current) => ({ ...current, name: event.target.value }))}
+                    onChange={(event) => setEditing((current) => current ? { ...current, name: event.target.value } : current)}
                   />
-                  <button className="btn-primary px-3 py-1 text-xs" onClick={() => handleUpdate(editing)} disabled={saving}>
+                  <button className="btn-primary px-3 py-1 text-xs" onClick={() => void handleUpdate(editing)} disabled={saving}>
                     {saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
                   </button>
                   <button className="btn-secondary px-2 py-1 text-xs" onClick={() => setEditing(null)} disabled={saving}>
@@ -487,7 +588,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
                       {reviewProductsLabel}
                     </button>
                   ) : null}
-                  <button onClick={() => handleDelete(category.id)} className="text-xs text-red-500 hover:underline" disabled={!!deletingId || category.virtual}>
+                  <button onClick={() => void handleDelete(category.id)} className="text-xs text-red-500 hover:underline" disabled={saving || !!deletingId || category.virtual}>
                     {deletingId === category.id ? (t('deleting') || 'Deleting...') : (t('delete') || 'Delete')}
                   </button>
                 </>

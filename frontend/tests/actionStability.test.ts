@@ -510,17 +510,17 @@ await runTest('inventory adjust, move, transfer, and batch actions use shared gu
 })
 
 await runTest('product category manager actions use shared guards and bounded mutations', () => {
-  const source = readFrontend('src/components/products/lookups/ManageCategoriesModal.jsx')
+  const source = readFrontend('src/components/products/lookups/ManageCategoriesModal.tsx')
   const mutationLines = source
     .split('\n')
-    .filter((line) => /window\.api\.(createCategory|updateCategory|deleteCategory)\(/.test(line))
+    .filter((line) => /getCategoryApi\(\)\.(createCategory|updateCategory|deleteCategory)\(/.test(line))
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const PRODUCT_CATEGORY_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
   assert.match(source, /const deleteInFlightRef = useRef\(false\)/)
   assert.match(source, /const bulkDeleteInFlightRef = useRef\(false\)/)
-  assert.match(source, /const runCategoryMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_CATEGORY_MUTATION_TIMEOUT_MS\)/)
+  assert.match(source, /const runCategoryMutation = useCallback\(\(loader: \(\) => Promise<CategoryMutationResult \| undefined>, label: string\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_CATEGORY_MUTATION_TIMEOUT_MS\)/)
   assert.match(source, /if \(!beginSingleAction\(saveInFlightRef, \{ blocked: saving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(deleteInFlightRef, \{ blocked: deletingId != null \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(bulkDeleteInFlightRef, \{ blocked: deletingId != null \}\)\) return/)
