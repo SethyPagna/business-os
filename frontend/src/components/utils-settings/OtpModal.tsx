@@ -1,7 +1,5 @@
-// OtpModal
-// Two-factor authentication setup / disable modal.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppFromContext } from '../../AppContext.jsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -10,16 +8,54 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
+type OtpMode = 'setup' | 'disable'
+type OtpStep = 'loading' | 'confirm_disable' | 'scan' | 'error'
+type Translate = (key: string, fallback?: string) => string | undefined
+
+type OtpModalProps = {
+  mode: OtpMode
+  userId?: string | number | null
+  onClose: () => void
+  onDone: (enabled: boolean) => void
+  t?: Translate
+}
+
+type AppContextValue = {
+  t?: Translate
+}
+
+type OtpApiResult = {
+  success?: boolean
+  qrDataUrl?: string | null
+  secret?: string | null
+  error?: string
+}
+
+type OtpApi = {
+  otpSetup?: (payload: { userId?: string | number | null }) => Promise<OtpApiResult>
+  otpConfirm?: (payload: { userId?: string | number | null; token: string }) => Promise<OtpApiResult>
+  otpDisable?: (payload: { userId?: string | number | null; password: string }) => Promise<OtpApiResult>
+}
+
+const useApp = useAppFromContext as () => AppContextValue
 const OTP_SETUP_TIMEOUT_MS = 12000
 const OTP_CONFIRM_TIMEOUT_MS = 12000
 const OTP_DISABLE_TIMEOUT_MS = 12000
 
-export default function OtpModal({ mode, userId, onClose, onDone, t }) {
+function getOtpApi(): OtpApi {
+  return typeof window === 'undefined' ? {} : (window as Window & { api?: OtpApi }).api || {}
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : String(error || fallback)
+}
+
+export default function OtpModal({ mode, userId, onClose, onDone, t }: OtpModalProps) {
   const app = useApp()
-  const tr = t || app.t
-  const [step, setStep] = useState(mode === 'setup' ? 'loading' : 'confirm_disable')
-  const [qrDataUrl, setQrDataUrl] = useState(null)
-  const [secret, setSecret] = useState(null)
+  const tr = t || app.t || ((key: string) => key)
+  const [step, setStep] = useState<OtpStep>(mode === 'setup' ? 'loading' : 'confirm_disable')
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [secret, setSecret] = useState<string | null>(null)
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -52,7 +88,7 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
     async function loadSetup() {
       try {
         const result = await withLoaderTimeout(
-          () => window.api.otpSetup({ userId }),
+          () => getOtpApi().otpSetup?.({ userId }) || Promise.resolve({ success: false, error: 'OTP setup is unavailable' }),
           'OTP setup',
           OTP_SETUP_TIMEOUT_MS,
         )
@@ -65,9 +101,9 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
         }
         setError(result?.error || 'Setup failed')
         setStep('error')
-      } catch (setupError) {
+      } catch (setupError: unknown) {
         if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
-        setError(setupError?.message || 'Setup failed')
+        setError(getErrorMessage(setupError, 'Setup failed'))
         setStep('error')
       }
     }
@@ -91,7 +127,7 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
     setError('')
     try {
       const result = await withLoaderTimeout(
-        () => window.api.otpConfirm({ userId, token: code }),
+        () => getOtpApi().otpConfirm?.({ userId, token: code }) || Promise.resolve({ success: false, error: 'OTP confirmation is unavailable' }),
         'OTP confirmation',
         OTP_CONFIRM_TIMEOUT_MS,
       )
@@ -101,9 +137,9 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
         return
       }
       setError(result?.error || 'Invalid code - check your app is synced')
-    } catch (confirmError) {
+    } catch (confirmError: unknown) {
       if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
-      setError(confirmError?.message || 'Failed to confirm code')
+      setError(getErrorMessage(confirmError, 'Failed to confirm code'))
     } finally {
       if (aliveRef.current && isTrackedRequestCurrent(actionRequestRef, requestId)) {
         finishSingleAction(actionInFlightRef)
@@ -120,7 +156,7 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
     setError('')
     try {
       const result = await withLoaderTimeout(
-        () => window.api.otpDisable({ userId, password }),
+        () => getOtpApi().otpDisable?.({ userId, password }) || Promise.resolve({ success: false, error: 'OTP disable is unavailable' }),
         'OTP disable',
         OTP_DISABLE_TIMEOUT_MS,
       )
@@ -130,9 +166,9 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
         return
       }
       setError(result?.error || 'Failed to disable')
-    } catch (disableError) {
+    } catch (disableError: unknown) {
       if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
-      setError(disableError?.message || 'Failed to disable')
+      setError(getErrorMessage(disableError, 'Failed to disable'))
     } finally {
       if (aliveRef.current && isTrackedRequestCurrent(actionRequestRef, requestId)) {
         finishSingleAction(actionInFlightRef)

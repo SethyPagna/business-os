@@ -273,7 +273,7 @@ await runTest('settings save and app favicon upload keep synchronous guards', ()
 })
 
 await runTest('reset data and factory reset use guarded bounded actions', () => {
-  const source = readFrontend('src/components/utils-settings/ResetData.jsx')
+  const source = readFrontend('src/components/utils-settings/ResetData.tsx')
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/utils\/loaders\.ts'/)
@@ -283,8 +283,8 @@ await runTest('reset data and factory reset use guarded bounded actions', () => 
   assert.match(source, /const factoryResetInFlightRef = useRef\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(resetInFlightRef, \{ blocked: working \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(factoryResetInFlightRef, \{ blocked: working \}\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.resetData\(mode\),\s*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.factoryReset\(\),\s*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => [\s\S]*resetData\?\.\(mode\)[\s\S]*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(resetInFlightRef\)[\s\S]*setWorking\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(factoryResetInFlightRef\)[\s\S]*setWorking\(false\)/)
 })
@@ -338,7 +338,7 @@ await runTest('secondary import modals use the shared single-action guard', () =
 })
 
 await runTest('OTP confirm and disable use the shared single-action guard', () => {
-  const source = readFrontend('src/components/utils-settings/OtpModal.jsx')
+  const source = readFrontend('src/components/utils-settings/OtpModal.tsx')
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const actionInFlightRef = useRef\(false\)/)

@@ -1,10 +1,71 @@
 import { useRef, useState } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { AlertTriangle, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppFromContext } from '../../AppContext.jsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 
+type ResetMode = 'sales' | 'all'
+type ResetColor = 'red' | 'danger'
+type Translate = (key: string, fallback?: string) => string | undefined
+type Notify = (message: string, type?: string) => void
+
+type AppContextValue = {
+  t?: Translate
+  notify: Notify
+  hasPermission: (permission: string) => boolean
+}
+
+type ResetApiResult = {
+  success?: boolean
+  message?: string
+  error?: string
+}
+
+type ResetApi = {
+  resetData?: (mode: ResetMode) => Promise<ResetApiResult>
+  factoryReset?: () => Promise<ResetApiResult>
+}
+
+type ActionHistory = {
+  pushAction?: (action: {
+    scope: string
+    entity: string
+    label: string
+    undo_payload?: Record<string, unknown>
+  }) => void
+}
+
+type ConfirmResetProps = {
+  title: string
+  description: string
+  whatDeleted: string
+  whatKept?: string
+  confirmWord: string
+  onConfirm: () => void
+  working: boolean
+  buttonLabel: string
+  color?: ResetColor
+  icon?: LucideIcon
+  t?: Translate
+}
+
+type ResetPanelProps = {
+  actionHistory?: ActionHistory | null
+}
+
+type ResetOption = {
+  id: ResetMode
+  label: string
+  desc: string
+  deleted: string
+  kept: string
+  word: string
+  icon: LucideIcon
+}
+
+const useApp = useAppFromContext as () => AppContextValue
 const RESET_DATA_TIMEOUT_MS = 60000
 const FACTORY_RESET_TIMEOUT_MS = 90000
 
@@ -20,8 +81,8 @@ function ConfirmReset({
   color = 'red',
   icon: Icon = AlertTriangle,
   t,
-}) {
-  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+}: ConfirmResetProps) {
+  const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [step, setStep] = useState(0)
   const [typed, setTyped] = useState('')
   const borderCls = color === 'red' ? 'border-red-200 dark:border-red-900/50' : 'border-red-500 dark:border-red-700 bg-red-50/30 dark:bg-red-950/20'
@@ -89,14 +150,22 @@ function ConfirmReset({
   )
 }
 
-function ResetData({ actionHistory = null }) {
+function getResetApi(): ResetApi {
+  return typeof window === 'undefined' ? {} : (window as Window & { api?: ResetApi }).api || {}
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || 'unknown error')
+}
+
+function ResetData({ actionHistory = null }: ResetPanelProps) {
   const { t, notify, hasPermission } = useApp()
-  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
-  const [mode, setMode] = useState('sales')
+  const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
+  const [mode, setMode] = useState<ResetMode>('sales')
   const [working, setWorking] = useState(false)
   const resetInFlightRef = useRef(false)
 
-  const MODES = [
+  const MODES: ResetOption[] = [
     {
       id: 'sales',
       label: T('reset_sales_label', 'Sales Only Reset'),
@@ -117,7 +186,7 @@ function ResetData({ actionHistory = null }) {
     },
   ]
 
-  const selected = MODES.find((entry) => entry.id === mode)
+  const selected = MODES.find((entry) => entry.id === mode) || MODES[0]
 
   const doReset = async () => {
     if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
@@ -125,7 +194,7 @@ function ResetData({ actionHistory = null }) {
     setWorking(true)
     try {
       const result = await withLoaderTimeout(
-        () => window.api.resetData(mode),
+        () => getResetApi().resetData?.(mode) || Promise.resolve({ success: false, error: 'Reset API is unavailable' }),
         'Reset business data',
         RESET_DATA_TIMEOUT_MS,
       )
@@ -141,8 +210,8 @@ function ResetData({ actionHistory = null }) {
       } else {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
       }
-    } catch (error) {
-      notify(`${T('error', 'Error')}: ${error.message}`, 'error')
+    } catch (error: unknown) {
+      notify(`${T('error', 'Error')}: ${getErrorMessage(error)}`, 'error')
     } finally {
       finishSingleAction(resetInFlightRef)
       setWorking(false)
@@ -189,9 +258,9 @@ function ResetData({ actionHistory = null }) {
   )
 }
 
-function FactoryReset({ actionHistory = null }) {
+function FactoryReset({ actionHistory = null }: ResetPanelProps) {
   const { t, notify, hasPermission } = useApp()
-  const T = (key, fallback) => (t && t(key)) || fallback
+  const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [step, setStep] = useState(0)
   const [typed, setTyped] = useState('')
   const [working, setWorking] = useState(false)
@@ -204,7 +273,7 @@ function FactoryReset({ actionHistory = null }) {
     setWorking(true)
     try {
       const result = await withLoaderTimeout(
-        () => window.api.factoryReset(),
+        () => getResetApi().factoryReset?.() || Promise.resolve({ success: false, error: 'Factory reset API is unavailable' }),
         'Factory reset',
         FACTORY_RESET_TIMEOUT_MS,
       )
@@ -221,8 +290,8 @@ function FactoryReset({ actionHistory = null }) {
         setStep(0)
         setTyped('')
       }
-    } catch (error) {
-      notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${error.message}`, 'error')
+    } catch (error: unknown) {
+      notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${getErrorMessage(error)}`, 'error')
       setStep(0)
       setTyped('')
     } finally {

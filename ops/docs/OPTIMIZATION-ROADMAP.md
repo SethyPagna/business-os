@@ -5373,3 +5373,12 @@ Move 489 status:
   print-setting persistence, preview refs, product image loading, placeholders,
   margin display, dual-price input, and numeric parsing helpers. Source-reading
   tests now target the TSX paths.
+
+Move 490 status:
+- Move 490 converts utility settings `ResetData.tsx`, `OtpModal.tsx`, and
+  `FontFamilyPicker.tsx`. The typed contracts cover destructive reset modes,
+  factory-reset API fallbacks, action-history payloads, OTP setup/disable
+  request state, OTP API payloads, font option records, and settings callbacks.
+  The utils-settings barrel now exports the converted TSX modules directly,
+  source-reading tests target the TSX paths, and obsolete named `.jsx`
+  declaration shims for reset exports were removed.

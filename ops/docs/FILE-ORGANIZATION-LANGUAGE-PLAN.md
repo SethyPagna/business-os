@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 489 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 490 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 76 `.jsx`
+  - 73 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 31 `.tsx`
+  - 34 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -597,7 +597,7 @@ Decision rule:
     performance loading UX tests, JSX check, typecheck, and production build
     passed on frontend hash `c760b6afc8011408`.
 53. Harden destructive reset actions. Done:
-    `frontend/src/components/utils-settings/ResetData.jsx` now wraps typed-confirm
+    `frontend/src/components/utils-settings/ResetData.tsx` now wraps typed-confirm
     business-data reset and factory-reset calls in shared same-tick guards plus
     explicit long-running timeout contracts. This keeps reset/factory-reset
     requests from stacking under repeated clicks and prevents an indefinite
@@ -3853,6 +3853,14 @@ Decision rule:
     auto-save settings payloads; and `products/shared/primitives.tsx` now
     exposes typed product image, placeholder, margin, dual-price, and numeric
     parsing primitives. Source-reading tests now target the TSX files.
+490. Convert utility settings reset, OTP, and font controls to TSX. Done:
+    `ResetData.tsx` now types destructive reset modes, action-history payloads,
+    confirmation props, API fallbacks, and error boundaries; `OtpModal.tsx`
+    now types setup/disable modes, request steps, OTP API payloads, and
+    guarded action callbacks; and `FontFamilyPicker.tsx` now types font option
+    contracts while replacing stale mojibake triangle glyphs with lucide
+    chevrons. The utils-settings barrel now exports these typed modules
+    directly and the obsolete named `.jsx` declaration shims were removed.
 
 ## Safety Gates
 

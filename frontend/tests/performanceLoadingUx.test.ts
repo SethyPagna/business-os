@@ -9,8 +9,8 @@ const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.jsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.jsx', import.meta.url), 'utf8')
 const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
-const otpModal = fs.readFileSync(new URL('../src/components/utils-settings/OtpModal.jsx', import.meta.url), 'utf8')
-const resetData = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.jsx', import.meta.url), 'utf8')
+const otpModal = fs.readFileSync(new URL('../src/components/utils-settings/OtpModal.tsx', import.meta.url), 'utf8')
+const resetData = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
 const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.jsx', import.meta.url), 'utf8')
 const receiptSettingsPage = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.jsx', import.meta.url), 'utf8')
 const receiptPreview = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
@@ -1380,7 +1380,7 @@ assert.match(
 )
 assert.match(
   otpModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.otpSetup\(\{ userId \}\),\s*'OTP setup',\s*OTP_SETUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*otpSetup\?\.\(\{ userId \}\)[\s\S]*'OTP setup',\s*OTP_SETUP_TIMEOUT_MS,\s*\)/,
   'OTP setup should timeout slow setup reads',
 )
 assert.match(
@@ -1405,12 +1405,12 @@ assert.match(
 )
 assert.match(
   resetData,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.resetData\(mode\),\s*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*resetData\?\.\(mode\)[\s\S]*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/,
   'reset data should timeout slow destructive reset actions',
 )
 assert.match(
   resetData,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.factoryReset\(\),\s*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,
   'factory reset should timeout slow destructive reset actions',
 )
 assert.match(
