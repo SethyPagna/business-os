@@ -1615,7 +1615,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `action-history-undo-redo-check.mjs` | Project source/support file |
+| 1 | `action-history-undo-redo-check.ts` | Project source/support file |
 | 2 | `audit-auth.mjs` | Project source/support file |
 | 3 | `audit-manifest.mjs` | Project source/support file |
 | 4 | `audit-report-html.mjs` | Project source/support file |

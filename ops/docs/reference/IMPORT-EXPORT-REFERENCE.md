@@ -471,7 +471,7 @@ Code files documented: **506**
 | 459 | `ops/scripts/frontend/verify-ui.js` | 3 | 0 | 1 | 0 |
 | 460 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 13 |
 | 461 | `ops/scripts/lib/report-utils.js` | 1 | 1 | 0 | 5 |
-| 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | 5 | 0 | 1 | 0 |
+| 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 4 | 0 | 1 | 0 |
 | 463 | `ops/scripts/runtime/audits/audit-auth.mjs` | 0 | 4 | 0 | 17 |
 | 464 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 0 | 7 | 0 | 2 |
 | 465 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 4 | 3 | 1 | 2 |
@@ -7667,15 +7667,14 @@ Code files documented: **506**
   - `ops/scripts/architecture/phase29-audit.mjs`
   - `ops/scripts/runtime/audits/audit-report-html.mjs`
 
-### 3.462 `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs`
+### 3.462 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
 
 - Declared exports: none detected
-- Imports (5)
+- Imports (4)
   - `./audit-auth.mjs`
   - `node:child_process`
   - `node:fs`
   - `node:path`
-  - `node:url`
 - Internal dependencies (1)
   - `ops/scripts/runtime/audits/audit-auth.mjs`
 - Referenced by (0)
@@ -7689,7 +7688,7 @@ Code files documented: **506**
 - Internal dependencies (0)
   - none
 - Referenced by (17)
-  - `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs`
+  - `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
   - `ops/scripts/runtime/audits/full-app-audit.mjs`
   - `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`

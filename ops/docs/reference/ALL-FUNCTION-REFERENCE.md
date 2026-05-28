@@ -471,7 +471,7 @@ Code files scanned: **506**
 | 459 | `ops/scripts/frontend/verify-ui.js` | 11 |
 | 460 | `ops/scripts/lib/fs-utils.js` | 16 |
 | 461 | `ops/scripts/lib/report-utils.js` | 5 |
-| 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | 5 |
+| 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 5 |
 | 463 | `ops/scripts/runtime/audits/audit-auth.mjs` | 6 |
 | 464 | `ops/scripts/runtime/audits/audit-manifest.mjs` | 3 |
 | 465 | `ops/scripts/runtime/audits/audit-report-html.mjs` | 11 |
@@ -6476,15 +6476,15 @@ Code files scanned: **506**
 | 4 | `outputTail` | function | 31 |
 | 5 | `formatBytes` | function | 38 |
 
-### 3.462 `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs`
+### 3.462 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 24 |
-| 2 | `request` | function | 28 |
-| 3 | `runCleanupCommand` | function | 48 |
-| 4 | `cleanupActionHistoryData` | function | 65 |
-| 5 | `main` | function | 98 |
+| 1 | `assert` | function | 62 |
+| 2 | `request` | function | 66 |
+| 3 | `runCleanupCommand` | function | 91 |
+| 4 | `cleanupActionHistoryData` | function | 108 |
+| 5 | `main` | function | 141 |
 
 ### 3.463 `ops/scripts/runtime/audits/audit-auth.mjs`
 

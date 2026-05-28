@@ -510,7 +510,7 @@ Total files documented: **569**
 | 498 | `ops/scripts/powershell/runtime-bootstrap.ps1` | project-scripts | 592 | 21.6 | Project source/support file |
 | 499 | `ops/scripts/powershell/start-runtime.ps1` | project-scripts | 377 | 16.3 | Project source/support file |
 | 500 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | project-scripts | 240 | 7.8 | Project source/support file |
-| 501 | `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` | project-scripts | 162 | 6.2 | Project source/support file |
+| 501 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | project-scripts | 206 | 7.1 | Project source/support file |
 | 502 | `ops/scripts/runtime/audits/audit-auth.mjs` | project-scripts | 127 | 4.5 | Project source/support file |
 | 503 | `ops/scripts/runtime/audits/audit-manifest.mjs` | project-scripts | 253 | 7.6 | Project source/support file |
 | 504 | `ops/scripts/runtime/audits/audit-report-html.mjs` | project-scripts | 356 | 14.0 | Project source/support file |
