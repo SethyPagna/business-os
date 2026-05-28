@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-28T00:03:21.381Z
+Generated: 2026-05-28T00:18:20.243Z
 
 ## Summary
 
@@ -15,9 +15,9 @@ Generated: 2026-05-28T00:03:21.381Z
 | Extension | Files |
 | --- | --- |
 | .js | 185 |
-| .ts | 151 |
+| .ts | 162 |
 | .jsx | 107 |
-| .mjs | 87 |
+| .mjs | 76 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -81,7 +81,7 @@ Generated: 2026-05-28T00:03:21.381Z
 | backend/src/routes/products.js | 2218 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
-| frontend/tests/performanceLoadingUx.test.mjs | 2077 | frontend/tests/performanceLoadingUx.test.mjs |
+| frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/dashboard/Dashboard.jsx | 2063 | frontend/components/dashboard |
 | frontend/src/components/products/Products.jsx | 2006 | frontend/components/products |
 | frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |

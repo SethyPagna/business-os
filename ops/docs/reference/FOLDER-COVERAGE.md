@@ -1439,13 +1439,13 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `actionGuards.test.ts` | Project source/support file |
-| 2 | `actionStability.test.mjs` | Project source/support file |
-| 3 | `adminShellMediaGuards.test.mjs` | Project source/support file |
-| 4 | `apiHttp.test.mjs` | Project source/support file |
+| 2 | `actionStability.test.ts` | Project source/support file |
+| 3 | `adminShellMediaGuards.test.ts` | Project source/support file |
+| 4 | `apiHttp.test.ts` | Project source/support file |
 | 5 | `appRefresh.test.ts` | Project source/support file |
 | 6 | `appShellUtils.test.ts` | Project source/support file |
 | 7 | `assetCompression.test.ts` | Project source/support file |
-| 8 | `backupJobs.test.mjs` | Project source/support file |
+| 8 | `backupJobs.test.ts` | Project source/support file |
 | 9 | `barcodeImageScanner.test.ts` | Project source/support file |
 | 10 | `barcodeScannerState.test.ts` | Project source/support file |
 | 11 | `bulkOps.test.ts` | Project source/support file |
@@ -1465,17 +1465,17 @@ Total folders documented: **81**
 | 25 | `inventoryImportWorker.test.ts` | Project source/support file |
 | 26 | `inventoryMobileCardLayout.test.ts` | Project source/support file |
 | 27 | `inventoryMovementGroups.test.ts` | Project source/support file |
-| 28 | `inventoryRfidSection.test.mjs` | Project source/support file |
-| 29 | `jsxSyntaxCheck.mjs` | Project source/support file |
+| 28 | `inventoryRfidSection.test.ts` | Project source/support file |
+| 29 | `jsxSyntaxCheck.ts` | Project source/support file |
 | 30 | `loaders.test.ts` | Project source/support file |
 | 31 | `mediaUploadHelpers.test.ts` | Project source/support file |
 | 32 | `navigationConfig.test.ts` | Project source/support file |
 | 33 | `notificationBadge.test.ts` | Project source/support file |
-| 34 | `offlineSalesQueue.test.mjs` | Project source/support file |
-| 35 | `offlineSecurityHardening.test.mjs` | Project source/support file |
-| 36 | `offlineSyncArchitecture.test.mjs` | Project source/support file |
-| 37 | `ownedGoogleAuth.test.mjs` | Project source/support file |
-| 38 | `performanceLoadingUx.test.mjs` | Project source/support file |
+| 34 | `offlineSalesQueue.test.ts` | Project source/support file |
+| 35 | `offlineSecurityHardening.test.ts` | Project source/support file |
+| 36 | `offlineSyncArchitecture.test.ts` | Project source/support file |
+| 37 | `ownedGoogleAuth.test.ts` | Project source/support file |
+| 38 | `performanceLoadingUx.test.ts` | Project source/support file |
 | 39 | `permissionEditor.test.ts` | Project source/support file |
 | 40 | `permissions.test.ts` | Project source/support file |
 | 41 | `portalCatalogDisplay.test.ts` | Project source/support file |

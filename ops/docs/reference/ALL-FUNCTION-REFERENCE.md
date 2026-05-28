@@ -417,13 +417,13 @@ Code files scanned: **540**
 | 405 | `frontend/src/web-api.ts` | 33 |
 | 406 | `frontend/tailwind.config.mjs` | 0 |
 | 407 | `frontend/tests/actionGuards.test.ts` | 1 |
-| 408 | `frontend/tests/actionStability.test.mjs` | 3 |
-| 409 | `frontend/tests/adminShellMediaGuards.test.mjs` | 0 |
-| 410 | `frontend/tests/apiHttp.test.mjs` | 3 |
+| 408 | `frontend/tests/actionStability.test.ts` | 3 |
+| 409 | `frontend/tests/adminShellMediaGuards.test.ts` | 0 |
+| 410 | `frontend/tests/apiHttp.test.ts` | 3 |
 | 411 | `frontend/tests/appRefresh.test.ts` | 2 |
 | 412 | `frontend/tests/appShellUtils.test.ts` | 1 |
 | 413 | `frontend/tests/assetCompression.test.ts` | 1 |
-| 414 | `frontend/tests/backupJobs.test.mjs` | 0 |
+| 414 | `frontend/tests/backupJobs.test.ts` | 0 |
 | 415 | `frontend/tests/barcodeImageScanner.test.ts` | 2 |
 | 416 | `frontend/tests/barcodeScannerState.test.ts` | 1 |
 | 417 | `frontend/tests/bulkOps.test.ts` | 1 |
@@ -443,17 +443,17 @@ Code files scanned: **540**
 | 431 | `frontend/tests/inventoryImportWorker.test.ts` | 1 |
 | 432 | `frontend/tests/inventoryMobileCardLayout.test.ts` | 0 |
 | 433 | `frontend/tests/inventoryMovementGroups.test.ts` | 1 |
-| 434 | `frontend/tests/inventoryRfidSection.test.mjs` | 0 |
-| 435 | `frontend/tests/jsxSyntaxCheck.mjs` | 1 |
+| 434 | `frontend/tests/inventoryRfidSection.test.ts` | 0 |
+| 435 | `frontend/tests/jsxSyntaxCheck.ts` | 1 |
 | 436 | `frontend/tests/loaders.test.ts` | 1 |
 | 437 | `frontend/tests/mediaUploadHelpers.test.ts` | 1 |
 | 438 | `frontend/tests/navigationConfig.test.ts` | 1 |
 | 439 | `frontend/tests/notificationBadge.test.ts` | 0 |
-| 440 | `frontend/tests/offlineSalesQueue.test.mjs` | 1 |
-| 441 | `frontend/tests/offlineSecurityHardening.test.mjs` | 1 |
-| 442 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 1 |
-| 443 | `frontend/tests/ownedGoogleAuth.test.mjs` | 1 |
-| 444 | `frontend/tests/performanceLoadingUx.test.mjs` | 0 |
+| 440 | `frontend/tests/offlineSalesQueue.test.ts` | 1 |
+| 441 | `frontend/tests/offlineSecurityHardening.test.ts` | 1 |
+| 442 | `frontend/tests/offlineSyncArchitecture.test.ts` | 1 |
+| 443 | `frontend/tests/ownedGoogleAuth.test.ts` | 1 |
+| 444 | `frontend/tests/performanceLoadingUx.test.ts` | 0 |
 | 445 | `frontend/tests/permissionEditor.test.ts` | 0 |
 | 446 | `frontend/tests/permissions.test.ts` | 0 |
 | 447 | `frontend/tests/portalCatalogDisplay.test.ts` | 1 |
@@ -5998,25 +5998,25 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.408 `frontend/tests/actionStability.test.mjs`
+### 3.408 `frontend/tests/actionStability.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readFrontend` | function | 10 |
-| 2 | `readRepo` | function | 14 |
-| 3 | `runTest` | function | 20 |
+| 1 | `readFrontend` | function | 12 |
+| 2 | `readRepo` | function | 16 |
+| 3 | `runTest` | function | 22 |
 
-### 3.409 `frontend/tests/adminShellMediaGuards.test.mjs`
+### 3.409 `frontend/tests/adminShellMediaGuards.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.410 `frontend/tests/apiHttp.test.mjs`
+### 3.410 `frontend/tests/apiHttp.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 21 |
-| 2 | `createDeferredResponse` | function | 32 |
-| 3 | `resetApiState` | function | 43 |
+| 1 | `runTest` | function | 24 |
+| 2 | `createDeferredResponse` | function | 35 |
+| 3 | `resetApiState` | function | 46 |
 
 ### 3.411 `frontend/tests/appRefresh.test.ts`
 
@@ -6037,7 +6037,7 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `collectMediaFiles` | function | 12 |
 
-### 3.414 `frontend/tests/backupJobs.test.mjs`
+### 3.414 `frontend/tests/backupJobs.test.ts`
 
 - No top-level named symbols detected.
 
@@ -6155,11 +6155,11 @@ Code files scanned: **540**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.434 `frontend/tests/inventoryRfidSection.test.mjs`
+### 3.434 `frontend/tests/inventoryRfidSection.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.435 `frontend/tests/jsxSyntaxCheck.mjs`
+### 3.435 `frontend/tests/jsxSyntaxCheck.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6187,31 +6187,31 @@ Code files scanned: **540**
 
 - No top-level named symbols detected.
 
-### 3.440 `frontend/tests/offlineSalesQueue.test.mjs`
+### 3.440 `frontend/tests/offlineSalesQueue.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
-### 3.441 `frontend/tests/offlineSecurityHardening.test.mjs`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
-
-### 3.442 `frontend/tests/offlineSyncArchitecture.test.mjs`
+### 3.441 `frontend/tests/offlineSecurityHardening.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
-### 3.443 `frontend/tests/ownedGoogleAuth.test.mjs`
+### 3.442 `frontend/tests/offlineSyncArchitecture.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 6 |
+| 1 | `runTest` | function | 8 |
 
-### 3.444 `frontend/tests/performanceLoadingUx.test.mjs`
+### 3.443 `frontend/tests/ownedGoogleAuth.test.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `runTest` | function | 8 |
+
+### 3.444 `frontend/tests/performanceLoadingUx.test.ts`
 
 - No top-level named symbols detected.
 

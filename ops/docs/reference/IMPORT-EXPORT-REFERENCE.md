@@ -417,13 +417,13 @@ Code files documented: **540**
 | 405 | `frontend/src/web-api.ts` | 6 | 0 | 6 | 0 |
 | 406 | `frontend/tailwind.config.mjs` | 0 | 0 | 0 | 0 |
 | 407 | `frontend/tests/actionGuards.test.ts` | 1 | 0 | 0 | 0 |
-| 408 | `frontend/tests/actionStability.test.mjs` | 4 | 0 | 0 | 0 |
-| 409 | `frontend/tests/adminShellMediaGuards.test.mjs` | 2 | 0 | 0 | 0 |
-| 410 | `frontend/tests/apiHttp.test.mjs` | 2 | 0 | 0 | 0 |
+| 408 | `frontend/tests/actionStability.test.ts` | 4 | 0 | 0 | 0 |
+| 409 | `frontend/tests/adminShellMediaGuards.test.ts` | 2 | 0 | 0 | 0 |
+| 410 | `frontend/tests/apiHttp.test.ts` | 2 | 0 | 0 | 0 |
 | 411 | `frontend/tests/appRefresh.test.ts` | 2 | 0 | 1 | 0 |
 | 412 | `frontend/tests/appShellUtils.test.ts` | 3 | 0 | 1 | 0 |
 | 413 | `frontend/tests/assetCompression.test.ts` | 4 | 0 | 0 | 0 |
-| 414 | `frontend/tests/backupJobs.test.mjs` | 2 | 0 | 0 | 0 |
+| 414 | `frontend/tests/backupJobs.test.ts` | 2 | 0 | 0 | 0 |
 | 415 | `frontend/tests/barcodeImageScanner.test.ts` | 2 | 0 | 1 | 0 |
 | 416 | `frontend/tests/barcodeScannerState.test.ts` | 2 | 0 | 1 | 0 |
 | 417 | `frontend/tests/bulkOps.test.ts` | 2 | 0 | 1 | 0 |
@@ -443,17 +443,17 @@ Code files documented: **540**
 | 431 | `frontend/tests/inventoryImportWorker.test.ts` | 3 | 0 | 1 | 0 |
 | 432 | `frontend/tests/inventoryMobileCardLayout.test.ts` | 2 | 0 | 0 | 0 |
 | 433 | `frontend/tests/inventoryMovementGroups.test.ts` | 2 | 0 | 1 | 0 |
-| 434 | `frontend/tests/inventoryRfidSection.test.mjs` | 2 | 0 | 0 | 0 |
-| 435 | `frontend/tests/jsxSyntaxCheck.mjs` | 5 | 0 | 0 | 0 |
+| 434 | `frontend/tests/inventoryRfidSection.test.ts` | 2 | 0 | 0 | 0 |
+| 435 | `frontend/tests/jsxSyntaxCheck.ts` | 5 | 0 | 0 | 0 |
 | 436 | `frontend/tests/loaders.test.ts` | 1 | 0 | 0 | 0 |
 | 437 | `frontend/tests/mediaUploadHelpers.test.ts` | 2 | 0 | 1 | 0 |
 | 438 | `frontend/tests/navigationConfig.test.ts` | 2 | 0 | 1 | 0 |
 | 439 | `frontend/tests/notificationBadge.test.ts` | 2 | 0 | 0 | 0 |
-| 440 | `frontend/tests/offlineSalesQueue.test.mjs` | 2 | 0 | 0 | 0 |
-| 441 | `frontend/tests/offlineSecurityHardening.test.mjs` | 2 | 0 | 0 | 0 |
-| 442 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 2 | 0 | 0 | 0 |
-| 443 | `frontend/tests/ownedGoogleAuth.test.mjs` | 2 | 0 | 0 | 0 |
-| 444 | `frontend/tests/performanceLoadingUx.test.mjs` | 2 | 0 | 0 | 0 |
+| 440 | `frontend/tests/offlineSalesQueue.test.ts` | 2 | 0 | 0 | 0 |
+| 441 | `frontend/tests/offlineSecurityHardening.test.ts` | 2 | 0 | 0 | 0 |
+| 442 | `frontend/tests/offlineSyncArchitecture.test.ts` | 2 | 0 | 0 | 0 |
+| 443 | `frontend/tests/ownedGoogleAuth.test.ts` | 2 | 0 | 0 | 0 |
+| 444 | `frontend/tests/performanceLoadingUx.test.ts` | 2 | 0 | 0 | 0 |
 | 445 | `frontend/tests/permissionEditor.test.ts` | 2 | 0 | 0 | 0 |
 | 446 | `frontend/tests/permissions.test.ts` | 2 | 0 | 1 | 0 |
 | 447 | `frontend/tests/portalCatalogDisplay.test.ts` | 2 | 0 | 0 | 0 |
@@ -7021,7 +7021,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.408 `frontend/tests/actionStability.test.mjs`
+### 3.408 `frontend/tests/actionStability.test.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7034,7 +7034,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.409 `frontend/tests/adminShellMediaGuards.test.mjs`
+### 3.409 `frontend/tests/adminShellMediaGuards.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7045,7 +7045,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.410 `frontend/tests/apiHttp.test.mjs`
+### 3.410 `frontend/tests/apiHttp.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7092,7 +7092,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.414 `frontend/tests/backupJobs.test.mjs`
+### 3.414 `frontend/tests/backupJobs.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7315,7 +7315,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.434 `frontend/tests/inventoryRfidSection.test.mjs`
+### 3.434 `frontend/tests/inventoryRfidSection.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7326,7 +7326,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.435 `frontend/tests/jsxSyntaxCheck.mjs`
+### 3.435 `frontend/tests/jsxSyntaxCheck.ts`
 
 - Declared exports: none detected
 - Imports (5)
@@ -7383,7 +7383,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.440 `frontend/tests/offlineSalesQueue.test.mjs`
+### 3.440 `frontend/tests/offlineSalesQueue.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7394,7 +7394,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.441 `frontend/tests/offlineSecurityHardening.test.mjs`
+### 3.441 `frontend/tests/offlineSecurityHardening.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7405,7 +7405,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.442 `frontend/tests/offlineSyncArchitecture.test.mjs`
+### 3.442 `frontend/tests/offlineSyncArchitecture.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7416,7 +7416,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.443 `frontend/tests/ownedGoogleAuth.test.mjs`
+### 3.443 `frontend/tests/ownedGoogleAuth.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7427,7 +7427,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.444 `frontend/tests/performanceLoadingUx.test.mjs`
+### 3.444 `frontend/tests/performanceLoadingUx.test.ts`
 
 - Declared exports: none detected
 - Imports (2)

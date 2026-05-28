@@ -257,16 +257,16 @@ Backend:
 
 Continue with Phase 8.4:
 - Product import synchronous guard is implemented.
-- `frontend/tests/actionStability.test.mjs` is included in `npm run test:utils`.
+- `frontend/tests/actionStability.test.ts` is included in `npm run test:utils`.
 - Returns, file picker/library, and product form image/save guard checks are
   implemented.
 - Catalog media, profile/avatar, and settings save/upload guards are
   implemented and covered by source regression.
 - Latest verification passed:
-  - `node tests/performanceLoadingUx.test.mjs`
-  - `node tests/apiHttp.test.mjs`
+  - `node tests/performanceLoadingUx.test.ts`
+  - `node tests/apiHttp.test.ts`
   - `node tests/actionGuards.test.ts`
-  - `node tests/actionStability.test.mjs`
+  - `node tests/actionStability.test.ts`
   - `npm.cmd run typecheck`
   - `npm.cmd run test:utils`
   - `npm.cmd run build`
@@ -1001,7 +1001,7 @@ Started:
   modal through its real UI path without queuing a job.
 
 Verified:
-- `frontend/tests/performanceLoadingUx.test.mjs` checks tracker timeout usage,
+- `frontend/tests/performanceLoadingUx.test.ts` checks tracker timeout usage,
   tracker no-clear behavior, branch stock timeout usage, and transfer modal
   timeout/no-clear behavior. It now also checks Sales and Inventory user-filter
   option timeout/no-clear behavior, Product form supplier option timeout/no-clear
@@ -1015,10 +1015,10 @@ Verified:
   It now also checks AppContext settings/bootstrap timeout coverage and the
   settings no-clear fallback. It now also checks Inventory primary branch,
   stats, product summary, movement, and RFID timeout constants.
-- `frontend/tests/actionStability.test.mjs` checks the Background Import Tracker
+- `frontend/tests/actionStability.test.ts` checks the Background Import Tracker
   same-tick action guard wiring for cancel, retry, approve, error-download, and
   remove, including direct calls through `beginTrackerAction(...)`.
-- `frontend/tests/apiHttp.test.mjs` keeps the import tracker in the read-only
+- `frontend/tests/apiHttp.test.ts` keeps the import tracker in the read-only
   530/fallback/backoff coverage.
 - Focused Playwright UI check clicked the Branch stock button against the live
   local runtime and observed HTTP 200 for both `background-import-tracker` and
