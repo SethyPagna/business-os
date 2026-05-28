@@ -3612,6 +3612,15 @@ Decision rule:
     The checks keep the same Branch, Contacts, and Users modal/tab/action
     browser workflows while adding typed health, console-entry, observed
     request, and user-record boundaries.
+452. Convert product action focused live checks to TypeScript. Done:
+    `phase84-product-page-actions-live-check.ts`,
+    `phase84-product-scanning-actions-live-check.ts`,
+    `phase84-product-stock-actions-live-check.ts`, and
+    `phase84-product-variant-actions-live-check.ts` replace their `.mjs`
+    entrypoints. The checks keep the same add-product, row action,
+    non-mutating delete-confirmation, manual barcode scanner, bulk stock,
+    branch stock, and add-variant browser workflows while adding typed health,
+    console-entry, observed-request, dialog, and Playwright page boundaries.
 
 ## Safety Gates
 

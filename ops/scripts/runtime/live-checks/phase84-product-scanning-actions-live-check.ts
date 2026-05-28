@@ -11,37 +11,31 @@ const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
 const USERNAME = process.env.BOS_USERNAME || 'admin'
 const PASSWORD = process.env.BOS_PASSWORD || 'Admin123456!'
 const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, '-')
-const REPORT_DIR = path.join(ROOT_DIR, 'ops/runtime/reports', `phase84-product-variant-actions-live-check-${TIMESTAMP}`)
+const REPORT_DIR = path.join(ROOT_DIR, 'ops/runtime/reports', `phase84-product-scanning-actions-live-check-${TIMESTAMP}`)
 const REPORT_PATH = path.join(REPORT_DIR, 'report.json')
-const SCREENSHOT_PATH = path.join(REPORT_DIR, 'product-variant-actions.png')
+const SCREENSHOT_PATH = path.join(REPORT_DIR, 'product-scanning-actions.png')
+const MANUAL_BARCODE_VALUE = '8991234567890'
 
-function assert(condition, message) {
+type ConsoleEntry = { type: string; text: string }
+type ObservedRequest = { method: string; status: number; url: string }
+type RuntimeHealth = {
+  status?: string
+  runtime?: {
+    frontend?: { hash?: string }
+    sourceHash?: string
+  }
+}
+
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
 
 
 
-async function openFirstVariantModal(page) {
-  const actionButtons = page.getByRole('button', { name: /Open actions menu|Actions/i })
-  const count = await actionButtons.count()
-  assert(count > 0, 'No product row action buttons rendered')
-
-  for (let index = 0; index < Math.min(count, 20); index += 1) {
-    await actionButtons.nth(index).click()
-    const addVariant = page.getByRole('button', { name: /Add Variant/i })
-    if (await addVariant.count()) {
-      await addVariant.first().click()
-      return index
-    }
-    await page.keyboard.press('Escape').catch(() => {})
-  }
-  throw new Error('No visible product action menu exposed Add Variant')
-}
-
-async function main() {
+async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
-  const health = await readJson(`${BASE_URL}/health`)
+  const health = await readJson(`${BASE_URL}/health`) as RuntimeHealth
   const build = await readJson(`${BASE_URL}/business-os-build.json`)
   assert(health.status === 'ok', 'Runtime health is not ok')
 
@@ -51,13 +45,13 @@ async function main() {
     const context = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1366, height: 900 } })
     const storageState = await applySessionToPlaywrightContext(context, session, BASE_URL)
     const page = await context.newPage()
-    const consoleMessages = []
-    const observedRequests = []
+    const consoleMessages: ConsoleEntry[] = []
+    const observedRequests: ObservedRequest[] = []
     attachConsoleCollector(page, consoleMessages)
     page.on('response', (response) => {
       const url = response.url()
       if (/\/api\/(products|categories|units|branches|action-history)/i.test(url)) {
-        observedRequests.push({ status: response.status(), url })
+        observedRequests.push({ method: response.request().method(), status: response.status(), url })
       }
     })
 
@@ -68,18 +62,26 @@ async function main() {
     await page.getByText('Products', { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     const productsStatus = await productsRead
 
-    const openedActionIndex = await openFirstVariantModal(page)
-    const modal = page.locator('.fixed.inset-0').last()
-    await modal.getByRole('heading', { name: /Add Variant/i }).waitFor({ state: 'visible', timeout: 20_000 })
+    await page.getByRole('button', { name: /^Product$/i }).last().click()
+    const addModal = page.locator('.fixed.inset-0').last()
+    await addModal.getByRole('heading', { name: /Add Product/i }).waitFor({ state: 'visible', timeout: 20_000 })
+    await addModal.locator('#product-barcode').waitFor({ state: 'visible', timeout: 10_000 })
 
-    const variantNameVisible = await modal.locator('#variant-form-name').isVisible()
-    const skuVisible = await modal.locator('#variant-form-sku').isVisible()
-    const barcodeVisible = await modal.locator('#variant-form-barcode').isVisible()
-    const unitVisible = await modal.locator('#variant-form-unit').isVisible()
-    const branchVisible = await modal.locator('#variant-form-branch').isVisible()
-    const addVariantButtonVisible = await modal.getByRole('button', { name: /^Add Variant$/i }).isVisible()
-    assert(variantNameVisible, 'Variant name input did not render')
-    assert(addVariantButtonVisible, 'Add Variant submit button did not render')
+    await addModal.getByRole('button', { name: /Scan barcode/i }).click()
+    const scannerModal = page.locator('.fixed.inset-0').filter({ hasText: /Scan barcode|Manual entry/i }).last()
+    await scannerModal.locator('#scanner-manual-value').waitFor({ state: 'visible', timeout: 20_000 })
+    const manualEntryVisible = await scannerModal.getByText(/Manual entry/i).first().isVisible()
+    await scannerModal.locator('#scanner-manual-value').fill(MANUAL_BARCODE_VALUE)
+    await scannerModal.getByRole('button', { name: /Use value/i }).click()
+    await scannerModal.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {})
+
+    const barcodeValue = await addModal.locator('#product-barcode').inputValue()
+    assert(barcodeValue === MANUAL_BARCODE_VALUE, `Manual barcode value was not applied, got "${barcodeValue}"`)
+
+    const mutatingProductRequests = observedRequests.filter((entry) => (
+      /\/api\/products(\/\d+)?$/i.test(entry.url) && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(entry.method)
+    ))
+    assert(mutatingProductRequests.length === 0, `Non-destructive check unexpectedly sent mutations: ${JSON.stringify(mutatingProductRequests, null, 2)}`)
 
     const frameworkOverlayVisible = await page.locator('#vite-error-overlay, [data-nextjs-dialog-overlay]').count()
     assert(frameworkOverlayVisible === 0, 'A framework error overlay is visible')
@@ -98,20 +100,17 @@ async function main() {
       checks: {
         productsPageVisible: true,
         productsStatus,
-        openedActionIndex,
-        variantModalOpened: true,
-        variantNameVisible,
-        skuVisible,
-        barcodeVisible,
-        unitVisible,
-        branchVisible,
-        addVariantButtonVisible,
+        addProductModalOpened: true,
+        scannerModalOpened: true,
+        manualEntryVisible,
+        manualBarcodeApplied: true,
+        mutatingProductRequests: mutatingProductRequests.length,
         frameworkOverlayVisible: false,
         relevantConsoleMessages: relevantConsole.length,
       },
       observedRequests,
       screenshots: {
-        productVariant: SCREENSHOT_PATH,
+        productScanning: SCREENSHOT_PATH,
       },
     }
     await fs.writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
@@ -121,7 +120,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch((error: any) => {
   console.error(error?.stack || error?.message || String(error))
   process.exitCode = 1
 })

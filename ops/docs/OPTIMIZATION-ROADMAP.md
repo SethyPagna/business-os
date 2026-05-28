@@ -5116,3 +5116,13 @@ Move 461 status:
   customer/supplier/delivery/import, and user/role/password modal workflows
   while adding typed health, console-entry, observed-request, and user-record
   shapes.
+
+Move 462 status:
+- Move 462 converts the focused product action live checks to TypeScript.
+  `phase84-product-page-actions-live-check.ts`,
+  `phase84-product-scanning-actions-live-check.ts`,
+  `phase84-product-stock-actions-live-check.ts`, and
+  `phase84-product-variant-actions-live-check.ts` preserve add-product,
+  action menu, delete-confirm dismissal, manual barcode, bulk stock, branch
+  stock, and variant modal workflows while adding typed health, console-entry,
+  observed-request, dialog, and Playwright page shapes.
