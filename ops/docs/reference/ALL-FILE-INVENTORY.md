@@ -296,7 +296,7 @@ Total files documented: **529**
 | 284 | `frontend/src/components/sales/StatusBadge.tsx` | frontend-ui | 58 | 2.1 | UI component/page |
 | 285 | `frontend/src/components/server/ServerPage.jsx` | frontend-ui | 781 | 38.6 | UI component/page |
 | 286 | `frontend/src/components/shared/ActionHistoryBar.tsx` | frontend-ui | 195 | 9.2 | UI component/page |
-| 287 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | frontend-ui | 546 | 24.4 | UI component/page |
+| 287 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | frontend-ui | 652 | 27.6 | UI component/page |
 | 288 | `frontend/src/components/shared/ExportMenu.tsx` | frontend-ui | 47 | 1.7 | UI component/page |
 | 289 | `frontend/src/components/shared/FilterMenu.tsx` | frontend-ui | 143 | 5.6 | UI component/page |
 | 290 | `frontend/src/components/shared/globalScroll.ts` | frontend-ui | 72 | 2.7 | UI component/page |
@@ -304,7 +304,7 @@ Total files documented: **529**
 | 292 | `frontend/src/components/shared/LoadingWatchdog.tsx` | frontend-ui | 74 | 2.2 | UI component/page |
 | 293 | `frontend/src/components/shared/Modal.tsx` | frontend-ui | 38 | 1.3 | UI component/page |
 | 294 | `frontend/src/components/shared/navigationConfig.ts` | frontend-ui | 66 | 2.3 | UI component/page |
-| 295 | `frontend/src/components/shared/NotificationCenter.jsx` | frontend-ui | 594 | 30.3 | UI component/page |
+| 295 | `frontend/src/components/shared/NotificationCenter.tsx` | frontend-ui | 695 | 33.4 | UI component/page |
 | 296 | `frontend/src/components/shared/pageActivity.ts` | frontend-ui | 9 | 0.3 | UI component/page |
 | 297 | `frontend/src/components/shared/PageHeader.tsx` | frontend-ui | 72 | 2.5 | UI component/page |
 | 298 | `frontend/src/components/shared/PaginationControls.tsx` | frontend-ui | 222 | 10.3 | UI component/page |
@@ -372,13 +372,13 @@ Total files documented: **529**
 | 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 733 | 59.2 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 733 | 59.3 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
 | 367 | `frontend/tests/appShellUtils.test.ts` | frontend-root | 116 | 5.1 | Project source/support file |
 | 368 | `frontend/tests/assetCompression.test.ts` | frontend-root | 36 | 1.5 | Project source/support file |
-| 369 | `frontend/tests/backupJobs.test.ts` | frontend-root | 136 | 9.0 | Project source/support file |
+| 369 | `frontend/tests/backupJobs.test.ts` | frontend-root | 137 | 9.1 | Project source/support file |
 | 370 | `frontend/tests/barcodeImageScanner.test.ts` | frontend-root | 119 | 3.2 | Project source/support file |
 | 371 | `frontend/tests/barcodeScannerState.test.ts` | frontend-root | 64 | 2.6 | Project source/support file |
 | 372 | `frontend/tests/bulkOps.test.ts` | frontend-root | 62 | 2.1 | Project source/support file |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 92.8 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 92.7 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |

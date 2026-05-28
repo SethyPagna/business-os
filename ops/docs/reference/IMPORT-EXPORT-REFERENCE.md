@@ -272,7 +272,7 @@ Code files documented: **466**
 | 260 | `frontend/src/components/sales/StatusBadge.tsx` | 0 | 5 | 0 | 6 |
 | 261 | `frontend/src/components/server/ServerPage.jsx` | 5 | 1 | 4 | 1 |
 | 262 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 | 1 | 1 | 17 |
-| 263 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 7 | 1 | 5 | 1 |
+| 263 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 7 | 1 | 5 | 1 |
 | 264 | `frontend/src/components/shared/ExportMenu.tsx` | 3 | 1 | 1 | 7 |
 | 265 | `frontend/src/components/shared/FilterMenu.tsx` | 3 | 1 | 1 | 8 |
 | 266 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 2 |
@@ -280,7 +280,7 @@ Code files documented: **466**
 | 268 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 6 |
 | 269 | `frontend/src/components/shared/Modal.tsx` | 1 | 1 | 0 | 22 |
 | 270 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
-| 271 | `frontend/src/components/shared/NotificationCenter.jsx` | 4 | 1 | 1 | 2 |
+| 271 | `frontend/src/components/shared/NotificationCenter.tsx` | 4 | 1 | 1 | 2 |
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
 | 273 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
 | 274 | `frontend/src/components/shared/PaginationControls.tsx` | 2 | 4 | 0 | 8 |
@@ -2940,7 +2940,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/src/components/shared/BackgroundImportTracker.jsx`
+  - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/utils/publicAssetUrls.ts`
   - `frontend/src/web-api.ts`
 
@@ -3047,8 +3047,8 @@ Code files documented: **466**
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/server/ServerPage.jsx`
-  - `frontend/src/components/shared/BackgroundImportTracker.jsx`
-  - `frontend/src/components/shared/NotificationCenter.jsx`
+  - `frontend/src/components/shared/BackgroundImportTracker.tsx`
+  - `frontend/src/components/shared/NotificationCenter.tsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/components/shared/WriteConflictModal.tsx`
   - `frontend/src/components/shared/globalScroll.ts`
@@ -3157,8 +3157,8 @@ Code files documented: **466**
   - `frontend/src/components/sales/SalesImportModal.jsx`
   - `frontend/src/components/server/ServerPage.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
-  - `frontend/src/components/shared/BackgroundImportTracker.jsx`
-  - `frontend/src/components/shared/NotificationCenter.jsx`
+  - `frontend/src/components/shared/BackgroundImportTracker.tsx`
+  - `frontend/src/components/shared/NotificationCenter.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
@@ -4062,7 +4062,7 @@ Code files documented: **466**
 - Internal dependencies (6)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/app/appShellUtils.ts`
-  - `frontend/src/components/shared/NotificationCenter.jsx`
+  - `frontend/src/components/shared/NotificationCenter.tsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/components/shared/navigationConfig.ts`
   - `frontend/src/components/users/UserProfileModal.jsx`
@@ -5076,11 +5076,11 @@ Code files documented: **466**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.263 `frontend/src/components/shared/BackgroundImportTracker.jsx`
+### 3.263 `frontend/src/components/shared/BackgroundImportTracker.tsx`
 
 - Declared exports: `function`
 - Imports (7)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../api/http.ts`
   - `../../utils/actionGuards.ts`
   - `../../utils/importJobRefresh.ts`
@@ -5215,11 +5215,11 @@ Code files documented: **466**
   - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/tests/navigationConfig.test.ts`
 
-### 3.271 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.271 `frontend/src/components/shared/NotificationCenter.tsx`
 
 - Declared exports: `function`
 - Imports (4)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `lucide-react`
   - `react`
   - `react-dom`
@@ -5712,7 +5712,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/sales/SalesImportModal.jsx`
   - `frontend/src/components/server/ServerPage.jsx`
-  - `frontend/src/components/shared/BackgroundImportTracker.jsx`
+  - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/components/utils-settings/OtpModal.tsx`
@@ -5989,7 +5989,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/components/shared/BackgroundImportTracker.jsx`
+  - `frontend/src/components/shared/BackgroundImportTracker.tsx`
 
 ### 3.317 `frontend/src/utils/index.ts`
 
@@ -6041,7 +6041,7 @@ Code files documented: **466**
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/returns/EditReturnModal.jsx`
   - `frontend/src/components/sales/ExportModal.jsx`
-  - `frontend/src/components/shared/BackgroundImportTracker.jsx`
+  - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/components/utils-settings/Settings.jsx`

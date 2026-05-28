@@ -566,7 +566,7 @@ Move 164 completes the sales import Web Worker row-count slice.
 preview counts consistent with inventory/contact quoted multiline CSV handling
 without changing the server-side import job pathway.
 
-Move 165 rejects `frontend/src/components/shared/BackgroundImportTracker.jsx`
+Move 165 rejects `frontend/src/components/shared/BackgroundImportTracker.tsx`
 as a Web Worker extraction target. The file is bounded import-job polling and
 UI action orchestration, not browser CPU/file/media work, so the language audit
 now records it in `rejectedWebWorkerCandidates` and removes it from ranked

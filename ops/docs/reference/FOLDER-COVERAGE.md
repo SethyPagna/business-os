@@ -1160,7 +1160,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `ActionHistoryBar.tsx` | UI component/page |
-| 2 | `BackgroundImportTracker.jsx` | UI component/page |
+| 2 | `BackgroundImportTracker.tsx` | UI component/page |
 | 3 | `ExportMenu.tsx` | UI component/page |
 | 4 | `FilterMenu.tsx` | UI component/page |
 | 5 | `globalScroll.ts` | UI component/page |
@@ -1168,7 +1168,7 @@ Total folders documented: **81**
 | 7 | `LoadingWatchdog.tsx` | UI component/page |
 | 8 | `Modal.tsx` | UI component/page |
 | 9 | `navigationConfig.ts` | UI component/page |
-| 10 | `NotificationCenter.jsx` | UI component/page |
+| 10 | `NotificationCenter.tsx` | UI component/page |
 | 11 | `pageActivity.ts` | UI component/page |
 | 12 | `PageHeader.tsx` | UI component/page |
 | 13 | `PaginationControls.tsx` | UI component/page |

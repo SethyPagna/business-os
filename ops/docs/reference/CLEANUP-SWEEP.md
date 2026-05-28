@@ -499,7 +499,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   stable Vite worker wrapper for `salesImportWorker.ts`. Cleanup must keep this
   worker wrapper until bundler imports intentionally move to a different typed
   worker-entry strategy.
-- Move 165 marks `frontend/src/components/shared/BackgroundImportTracker.jsx`
+- Move 165 marks `frontend/src/components/shared/BackgroundImportTracker.tsx`
   as an intentional non-worker UI orchestration file. Cleanup and language
   conversion sweeps should keep it in the React path unless future evidence
   shows real browser CPU work beyond bounded polling and tiny list transforms.

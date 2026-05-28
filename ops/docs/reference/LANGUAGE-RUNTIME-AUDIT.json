@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T13:10:45.173Z",
+  "generatedAt": "2026-05-28T13:42:30.387Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -29,11 +29,11 @@
     ],
     [
       "React TSX",
-      59
+      61
     ],
     [
       "React JSX",
-      48
+      46
     ],
     [
       "Windows batch",
@@ -71,11 +71,11 @@
     ],
     [
       ".tsx",
-      59
+      61
     ],
     [
       ".jsx",
-      48
+      46
     ],
     [
       ".bat",
@@ -213,10 +213,10 @@
       "evidence": "Move 169 inspection found small status/type normalization, Set dedupe, and CustomEvent dispatch only; Move 385 converted the helper to TypeScript but kept the same main-thread event boundary."
     },
     {
-      "file": "frontend/src/components/shared/BackgroundImportTracker.jsx",
+      "file": "frontend/src/components/shared/BackgroundImportTracker.tsx",
       "decision": "keep on React main thread",
       "reason": "Polls import-job state, dedupes a bounded eight-row list, dispatches completion refreshes, and coordinates UI actions; it has no file parsing, media decoding, or CPU-heavy browser loop worth moving to a Worker.",
-      "evidence": "Move 165 inspection of BackgroundImportTracker.jsx found API orchestration and tiny list transforms only."
+      "evidence": "Move 165 inspection of BackgroundImportTracker.tsx found API orchestration and tiny list transforms only."
     }
   ],
   "verificationMatrix": [

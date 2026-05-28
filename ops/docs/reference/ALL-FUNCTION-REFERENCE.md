@@ -272,7 +272,7 @@ Code files scanned: **466**
 | 260 | `frontend/src/components/sales/StatusBadge.tsx` | 3 |
 | 261 | `frontend/src/components/server/ServerPage.jsx` | 16 |
 | 262 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
-| 263 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
+| 263 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 21 |
 | 264 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
 | 265 | `frontend/src/components/shared/FilterMenu.tsx` | 2 |
 | 266 | `frontend/src/components/shared/globalScroll.ts` | 5 |
@@ -280,7 +280,7 @@ Code files scanned: **466**
 | 268 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
 | 269 | `frontend/src/components/shared/Modal.tsx` | 1 |
 | 270 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
-| 271 | `frontend/src/components/shared/NotificationCenter.jsx` | 7 |
+| 271 | `frontend/src/components/shared/NotificationCenter.tsx` | 9 |
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 1 |
 | 273 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
 | 274 | `frontend/src/components/shared/PaginationControls.tsx` | 4 |
@@ -4766,29 +4766,31 @@ Code files scanned: **466**
 | 2 | `formatServerStatus` | function | 52 |
 | 3 | `ActionHistoryBar` | export default function | 59 |
 
-### 3.263 `frontend/src/components/shared/BackgroundImportTracker.jsx`
+### 3.263 `frontend/src/components/shared/BackgroundImportTracker.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `nextImportTrackerBackoff` | function | 26 |
-| 2 | `normalizeJobStatus` | function | 33 |
-| 3 | `dedupeJobsById` | function | 37 |
-| 4 | `isRecent` | function | 49 |
-| 5 | `getJobProgressDetails` | function | 55 |
-| 6 | `getJobLabel` | function | 123 |
-| 7 | `getJobResultSummary` | function | 129 |
-| 8 | `add` | const arrow | 132 |
-| 9 | `getRowsDisplay` | function | 145 |
-| 10 | `buildJobsSignature` | function | 161 |
-| 11 | `BackgroundImportTracker` | export default function | 176 |
-| 12 | `beginTrackerAction` | const arrow | 303 |
-| 13 | `finishTrackerAction` | const arrow | 312 |
-| 14 | `handleCancel` | const arrow | 317 |
-| 15 | `handleRetry` | const arrow | 335 |
-| 16 | `handleApprove` | const arrow | 353 |
-| 17 | `handleDownloadErrors` | const arrow | 382 |
-| 18 | `handleRemove` | const arrow | 398 |
-| 19 | `handleDismiss` | const arrow | 434 |
+| 1 | `getImportTrackerApi` | function | 99 |
+| 2 | `getErrorMessage` | function | 104 |
+| 3 | `nextImportTrackerBackoff` | function | 108 |
+| 4 | `normalizeJobStatus` | function | 115 |
+| 5 | `dedupeJobsById` | function | 119 |
+| 6 | `isRecent` | function | 131 |
+| 7 | `normalizeImportJobListResult` | function | 137 |
+| 8 | `getJobProgressDetails` | function | 152 |
+| 9 | `getJobLabel` | function | 220 |
+| 10 | `getJobResultSummary` | function | 226 |
+| 11 | `add` | const arrow | 229 |
+| 12 | `getRowsDisplay` | function | 242 |
+| 13 | `buildJobsSignature` | function | 258 |
+| 14 | `BackgroundImportTracker` | export default function | 273 |
+| 15 | `finishTrackerAction` | const arrow | 412 |
+| 16 | `handleCancel` | const arrow | 417 |
+| 17 | `handleRetry` | const arrow | 436 |
+| 18 | `handleApprove` | const arrow | 455 |
+| 19 | `handleDownloadErrors` | const arrow | 485 |
+| 20 | `handleRemove` | const arrow | 502 |
+| 21 | `handleDismiss` | const arrow | 540 |
 
 ### 3.264 `frontend/src/components/shared/ExportMenu.tsx`
 
@@ -4841,17 +4843,19 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `parseNavSetting` | export function | 42 |
 
-### 3.271 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.271 `frontend/src/components/shared/NotificationCenter.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `preferenceValue` | function | 135 |
-| 2 | `matchesVisibilityMode` | function | 142 |
-| 3 | `NotificationSeverityIcon` | function | 149 |
-| 4 | `NotificationCenter` | export default function | 164 |
-| 5 | `syncVisibility` | const arrow | 198 |
-| 6 | `onVisible` | const arrow | 271 |
-| 7 | `handleClickOutside` | const arrow | 294 |
+| 1 | `getNotificationApi` | function | 101 |
+| 2 | `getErrorMessage` | function | 106 |
+| 3 | `preferenceValue` | function | 233 |
+| 4 | `matchesVisibilityMode` | function | 241 |
+| 5 | `NotificationSeverityIcon` | function | 248 |
+| 6 | `NotificationCenter` | export default function | 263 |
+| 7 | `syncVisibility` | const arrow | 297 |
+| 8 | `onVisible` | const arrow | 371 |
+| 9 | `handleClickOutside` | const arrow | 394 |
 
 ### 3.272 `frontend/src/components/shared/pageActivity.ts`
 

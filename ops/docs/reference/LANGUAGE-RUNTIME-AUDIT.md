@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T13:10:45.173Z
+Generated: 2026-05-28T13:42:30.387Z
 
 ## Summary
 
@@ -24,8 +24,8 @@ Generated: 2026-05-28T13:10:45.173Z
 | --- | --- |
 | TypeScript | 225 |
 | JavaScript | 84 |
-| React TSX | 59 |
-| React JSX | 48 |
+| React TSX | 61 |
+| React JSX | 46 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |
@@ -201,7 +201,7 @@ Generated: 2026-05-28T13:10:45.173Z
 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | keep on React/browser camera path | The modal owns camera permission state, media streams, video refs, requestAnimationFrame scanning, and manual-entry UI. These are DOM and user-permission workflows, not transferable Worker computation. | Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle. |
 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | keep as React presentation component | The lightbox filters a small image list, clamps an index, handles keyboard navigation, and renders images/thumbnails. It has no decoding, resizing, or heavy image processing loop to transfer. | Move 169 inspection found React state/control rendering and event handlers only; image loading remains normal browser rendering. |
 | `frontend/src/utils/importJobRefresh.ts` | keep as main-thread event dispatcher | The helper maps completed import-job types to refresh channels and dispatches sync:update browser events. Moving it to a Worker would add message overhead and lose direct window event dispatch. | Move 169 inspection found small status/type normalization, Set dedupe, and CustomEvent dispatch only; Move 385 converted the helper to TypeScript but kept the same main-thread event boundary. |
-| `frontend/src/components/shared/BackgroundImportTracker.jsx` | keep on React main thread | Polls import-job state, dedupes a bounded eight-row list, dispatches completion refreshes, and coordinates UI actions; it has no file parsing, media decoding, or CPU-heavy browser loop worth moving to a Worker. | Move 165 inspection of BackgroundImportTracker.jsx found API orchestration and tiny list transforms only. |
+| `frontend/src/components/shared/BackgroundImportTracker.tsx` | keep on React main thread | Polls import-job state, dedupes a bounded eight-row list, dispatches completion refreshes, and coordinates UI actions; it has no file parsing, media decoding, or CPU-heavy browser loop worth moving to a Worker. | Move 165 inspection of BackgroundImportTracker.tsx found API orchestration and tiny list transforms only. |
 
 ## Boundary
 

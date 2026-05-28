@@ -91,7 +91,7 @@ intentionally alive as the Vite module-worker wrapper. The executable sales
 row-count worker lives in `salesImportWorker.ts`, while the shared fallback
 parser remains `csvRowCounter.ts`.
 
-Move 165 keeps `frontend/src/components/shared/BackgroundImportTracker.jsx` in
+Move 165 keeps `frontend/src/components/shared/BackgroundImportTracker.tsx` in
 the React UI path and records it as a rejected Web Worker candidate. The file
 is not dead code and is not duplicate parsing logic; it owns bounded import-job
 polling, completion refresh dispatch, and tracker action state.
