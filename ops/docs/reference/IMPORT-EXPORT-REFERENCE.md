@@ -234,7 +234,7 @@ Code files documented: **466**
 | 222 | `frontend/src/components/products/import/BulkImportModal.jsx` | 6 | 1 | 4 | 1 |
 | 223 | `frontend/src/components/products/import/productImportPlanner.ts` | 0 | 11 | 0 | 3 |
 | 224 | `frontend/src/components/products/import/productImportWorker.ts` | 1 | 0 | 1 | 0 |
-| 225 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 6 | 1 | 5 | 1 |
+| 225 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | 6 | 1 | 5 | 1 |
 | 226 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 6 | 1 | 5 | 1 |
 | 227 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 6 | 1 | 5 | 1 |
 | 228 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 1 | 3 | 1 | 0 |
@@ -3141,7 +3141,7 @@ Code files documented: **466**
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
-  - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
@@ -4386,11 +4386,11 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.225 `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+### 3.225 `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
 
 - Declared exports: `function`
 - Imports (6)
-  - `../../../AppContext`
+  - `../../../AppContext.jsx`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/actionHistory.ts`
   - `../../shared/ActionHistoryBar`
@@ -4497,7 +4497,7 @@ Code files documented: **466**
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/history/productHistoryHelpers.ts`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
-  - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
@@ -5066,7 +5066,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
-  - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
@@ -5192,7 +5192,7 @@ Code files documented: **466**
   - `frontend/src/components/products/forms/ProductForm.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
-  - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
@@ -5701,7 +5701,7 @@ Code files documented: **466**
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
-  - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
@@ -5735,7 +5735,7 @@ Code files documented: **466**
   - `frontend/src/components/custom-tables/CustomTables.jsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+  - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`

@@ -91,7 +91,7 @@ Total files documented: **193**
 | 79 | `frontend/src/components/products/import/BulkImportModal.jsx` | 63 |
 | 80 | `frontend/src/components/products/import/productImportPlanner.ts` | 11 |
 | 81 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
-| 82 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | 16 |
+| 82 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | 9 |
 | 83 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
 | 84 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
 | 85 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 7 |
@@ -1485,26 +1485,19 @@ Total files documented: **193**
 | 2 | `waitForNextTask` | function | 43 |
 | 3 | `getErrorMessage` | function | 49 |
 
-### 3.82 `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
+### 3.82 `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `parseBrandOptions` | function | 40 |
-| 2 | `parseBrandColorMap` | function | 53 |
-| 3 | `toTitleCase` | function | 63 |
-| 4 | `getBrandReviewRule` | function | 71 |
-| 5 | `getBrandSortScore` | function | 75 |
-| 6 | `buildSavedLibrary` | function | 81 |
-| 7 | `ManageBrandsModal` | component/function | 99 |
-| 8 | `saveLibrary` | const arrow | 207 |
-| 9 | `restoreProductFieldSnapshots` | const arrow | 216 |
-| 10 | `addLibraryBrand` | const arrow | 230 |
-| 11 | `renameBrand` | const arrow | 282 |
-| 12 | `removeBrands` | const arrow | 362 |
-| 13 | `removeBrand` | const arrow | 442 |
-| 14 | `applySuggestedNormalization` | const arrow | 444 |
-| 15 | `toggleSelectedBrand` | const arrow | 450 |
-| 16 | `toggleAllVisibleBrands` | const arrow | 459 |
+| 1 | `getBrandApi` | function | 116 |
+| 2 | `getErrorMessage` | function | 120 |
+| 3 | `parseBrandOptions` | function | 124 |
+| 4 | `parseBrandColorMap` | function | 137 |
+| 5 | `toTitleCase` | function | 152 |
+| 6 | `getBrandReviewRule` | function | 160 |
+| 7 | `getBrandSortScore` | function | 164 |
+| 8 | `buildSavedLibrary` | function | 170 |
+| 9 | `ManageBrandsModal` | component/function | 192 |
 
 ### 3.83 `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
 

@@ -257,7 +257,7 @@ Total files documented: **529**
 | 245 | `frontend/src/components/products/import/BulkImportModal.jsx` | frontend-ui | 1907 | 91.8 | UI component/page |
 | 246 | `frontend/src/components/products/import/productImportPlanner.ts` | frontend-ui | 634 | 25.3 | UI component/page |
 | 247 | `frontend/src/components/products/import/productImportWorker.ts` | frontend-ui | 68 | 1.9 | UI component/page |
-| 248 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | frontend-ui | 680 | 28.4 | UI component/page |
+| 248 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | frontend-ui | 777 | 31.6 | UI component/page |
 | 249 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | frontend-ui | 603 | 25.0 | UI component/page |
 | 250 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | frontend-ui | 603 | 24.0 | UI component/page |
 | 251 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
@@ -372,7 +372,7 @@ Total files documented: **529**
 | 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 731 | 58.9 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 731 | 59.0 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
