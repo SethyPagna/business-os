@@ -621,7 +621,7 @@ Total folders documented: **81**
 | 1 | `App.jsx` | Main app shell and page mounting |
 | 2 | `AppContext.jsx` | Global app state/context provider |
 | 3 | `constants.ts` | Project source/support file |
-| 4 | `index.jsx` | Project source/support file |
+| 4 | `index.tsx` | Project source/support file |
 | 5 | `README.md` | Documentation |
 | 6 | `web-api.ts` | Project source/support file |
 
@@ -833,7 +833,7 @@ Total folders documented: **81**
 | 1 | `FilePickerModal.jsx` | UI component/page |
 | 2 | `FilesPage.jsx` | UI component/page |
 | 3 | `FilesProvidersTab.jsx` | UI component/page |
-| 4 | `FilesResponsesTab.jsx` | UI component/page |
+| 4 | `FilesResponsesTab.tsx` | UI component/page |
 
 
 ### 3.35 Folder: `frontend/src/components/inventory`
@@ -852,7 +852,7 @@ Total folders documented: **81**
 | 4 | `inventoryImportWorker.ts` | UI component/page |
 | 5 | `InventoryMovementsSurface.jsx` | UI component/page |
 | 6 | `InventoryProductsSurface.jsx` | UI component/page |
-| 7 | `InventoryRfidSurface.jsx` | UI component/page |
+| 7 | `InventoryRfidSurface.tsx` | UI component/page |
 | 8 | `movementGroups.ts` | UI component/page |
 | 9 | `ProductDetailModal.jsx` | UI component/page |
 

@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-28T12:18:02.081Z
+Generated: 2026-05-28T12:33:36.409Z
 
 ## Summary
 
@@ -16,8 +16,8 @@ Generated: 2026-05-28T12:18:02.081Z
 | --- | --- |
 | .ts | 266 |
 | .js | 84 |
-| .jsx | 54 |
-| .tsx | 53 |
+| .tsx | 56 |
+| .jsx | 51 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -68,9 +68,9 @@ Generated: 2026-05-28T12:18:02.081Z
 | ops/docs/reference/PHASE29-AUDIT.json | 12103 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7898 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6852 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5501 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5511 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3981 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 3990 | ops/docs |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |

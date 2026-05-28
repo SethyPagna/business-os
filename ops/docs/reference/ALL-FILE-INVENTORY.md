@@ -222,14 +222,14 @@ Total files documented: **529**
 | 210 | `frontend/src/components/files/FilePickerModal.jsx` | frontend-ui | 270 | 11.5 | UI component/page |
 | 211 | `frontend/src/components/files/FilesPage.jsx` | frontend-ui | 990 | 47.4 | UI component/page |
 | 212 | `frontend/src/components/files/FilesProvidersTab.jsx` | frontend-ui | 222 | 16.6 | UI component/page |
-| 213 | `frontend/src/components/files/FilesResponsesTab.jsx` | frontend-ui | 142 | 9.5 | UI component/page |
+| 213 | `frontend/src/components/files/FilesResponsesTab.tsx` | frontend-ui | 197 | 11.0 | UI component/page |
 | 214 | `frontend/src/components/inventory/DualMoney.tsx` | frontend-ui | 16 | 0.4 | UI component/page |
 | 215 | `frontend/src/components/inventory/Inventory.jsx` | frontend-ui | 4123 | 208.9 | UI component/page |
 | 216 | `frontend/src/components/inventory/InventoryImportModal.jsx` | frontend-ui | 228 | 10.5 | UI component/page |
 | 217 | `frontend/src/components/inventory/inventoryImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 218 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | frontend-ui | 540 | 34.3 | UI component/page |
 | 219 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | frontend-ui | 467 | 31.6 | UI component/page |
-| 220 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | frontend-ui | 126 | 8.4 | UI component/page |
+| 220 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | frontend-ui | 180 | 9.6 | UI component/page |
 | 221 | `frontend/src/components/inventory/movementGroups.ts` | frontend-ui | 287 | 12.9 | UI component/page |
 | 222 | `frontend/src/components/inventory/ProductDetailModal.jsx` | frontend-ui | 202 | 13.4 | UI component/page |
 | 223 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | frontend-ui | 625 | 35.7 | UI component/page |
@@ -325,7 +325,7 @@ Total files documented: **529**
 | 313 | `frontend/src/components/utils-settings/Settings.jsx` | frontend-ui | 1730 | 80.6 | UI component/page |
 | 314 | `frontend/src/components/utils-settings/settingsConflict.ts` | frontend-ui | 64 | 1.8 | UI component/page |
 | 315 | `frontend/src/constants.ts` | frontend-core | 185 | 4.6 | Project source/support file |
-| 316 | `frontend/src/index.jsx` | frontend-core | 194 | 6.4 | Project source/support file |
+| 316 | `frontend/src/index.tsx` | frontend-core | 206 | 7.2 | Project source/support file |
 | 317 | `frontend/src/lang/en.json` | frontend-i18n | 2721 | 134.5 | Localization dictionary |
 | 318 | `frontend/src/lang/km.json` | frontend-i18n | 2730 | 246.7 | Localization dictionary |
 | 319 | `frontend/src/platform/runtime/clientRuntime.ts` | frontend-core | 249 | 9.1 | Project source/support file |
@@ -333,7 +333,7 @@ Total files documented: **529**
 | 321 | `frontend/src/README.md` | frontend-core | 37 | 1.5 | Documentation |
 | 322 | `frontend/src/runtime/runtimeErrorClassifier.ts` | frontend-core | 154 | 5.4 | Project source/support file |
 | 323 | `frontend/src/styles/main.css` | frontend-style | 741 | 29.9 | Project source/support file |
-| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 10 | 0.3 | Project source/support file |
+| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 11 | 0.3 | Project source/support file |
 | 325 | `frontend/src/types/receiptContracts.ts` | frontend-core | 67 | 1.6 | Project source/support file |
 | 326 | `frontend/src/types/settingsContracts.ts` | frontend-core | 27 | 0.5 | Project source/support file |
 | 327 | `frontend/src/utils/actionGuards.ts` | frontend-utils | 76 | 2.2 | Utility helper |

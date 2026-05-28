@@ -199,14 +199,14 @@ Code files documented: **466**
 | 187 | `frontend/src/components/files/FilePickerModal.jsx` | 4 | 1 | 3 | 5 |
 | 188 | `frontend/src/components/files/FilesPage.jsx` | 11 | 1 | 10 | 1 |
 | 189 | `frontend/src/components/files/FilesProvidersTab.jsx` | 0 | 1 | 0 | 1 |
-| 190 | `frontend/src/components/files/FilesResponsesTab.jsx` | 0 | 1 | 0 | 1 |
+| 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 0 | 1 | 0 | 1 |
 | 191 | `frontend/src/components/inventory/DualMoney.tsx` | 0 | 1 | 0 | 1 |
 | 192 | `frontend/src/components/inventory/Inventory.jsx` | 30 | 1 | 28 | 1 |
 | 193 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 5 | 1 | 4 | 1 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 | 0 | 1 | 0 |
 | 195 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 4 | 1 | 2 | 1 |
 | 196 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 4 | 1 | 2 | 1 |
-| 197 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 0 | 1 | 0 | 1 |
+| 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 | 1 | 0 | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 2 |
 | 199 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 | 1 | 2 | 1 |
 | 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 7 | 1 | 5 | 1 |
@@ -301,11 +301,11 @@ Code files documented: **466**
 | 289 | `frontend/src/components/utils-settings/Settings.jsx` | 13 | 1 | 11 | 1 |
 | 290 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 2 |
 | 291 | `frontend/src/constants.ts` | 0 | 12 | 0 | 8 |
-| 292 | `frontend/src/index.jsx` | 9 | 0 | 4 | 0 |
+| 292 | `frontend/src/index.tsx` | 9 | 0 | 4 | 0 |
 | 293 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 2 |
 | 294 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
 | 295 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
-| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 6 | 0 | 0 |
+| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 7 | 0 | 0 |
 | 297 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 3 |
 | 298 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
 | 299 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
@@ -3059,7 +3059,7 @@ Code files documented: **466**
   - `frontend/src/utils/favicon.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
-  - `frontend/src/index.jsx`
+  - `frontend/src/index.tsx`
 
 ### 3.149 `frontend/src/app/appShellUtils.ts`
 
@@ -3072,7 +3072,7 @@ Code files documented: **466**
   - `frontend/src/App.jsx`
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
-  - `frontend/src/index.jsx`
+  - `frontend/src/index.tsx`
   - `frontend/tests/appShellUtils.test.ts`
 
 ### 3.150 `frontend/src/app/publicErrorRecovery.ts`
@@ -3168,7 +3168,7 @@ Code files documented: **466**
   - `frontend/src/components/utils-settings/OtpModal.tsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
-  - `frontend/src/index.jsx`
+  - `frontend/src/index.tsx`
   - `frontend/src/utils/actionHistory.ts`
 
 ### 3.152 `frontend/src/components/auth/Login.jsx`
@@ -3828,12 +3828,12 @@ Code files documented: **466**
   - `../shared/PageHeader`
   - `../shared/pageActivity`
   - `./FilesProvidersTab.jsx`
-  - `./FilesResponsesTab.jsx`
+  - `./FilesResponsesTab`
   - `react`
 - Internal dependencies (10)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/files/FilesProvidersTab.jsx`
-  - `frontend/src/components/files/FilesResponsesTab.jsx`
+  - `frontend/src/components/files/FilesResponsesTab.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
@@ -3854,7 +3854,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/files/FilesPage.jsx`
 
-### 3.190 `frontend/src/components/files/FilesResponsesTab.jsx`
+### 3.190 `frontend/src/components/files/FilesResponsesTab.tsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -3914,7 +3914,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
   - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
-  - `frontend/src/components/inventory/InventoryRfidSurface.jsx`
+  - `frontend/src/components/inventory/InventoryRfidSurface.tsx`
   - `frontend/src/components/inventory/ProductDetailModal.jsx`
   - `frontend/src/components/inventory/movementGroups.ts`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
@@ -3995,11 +3995,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.197 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
+### 3.197 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
 
 - Declared exports: `function`
-- Imports (0)
-  - none
+- Imports (1)
+  - `react`
 - Internal dependencies (0)
   - none
 - Referenced by (1)
@@ -5591,12 +5591,12 @@ Code files documented: **466**
   - `frontend/src/platform/runtime/clientRuntime.ts`
   - `frontend/src/web-api.ts`
 
-### 3.292 `frontend/src/index.jsx`
+### 3.292 `frontend/src/index.tsx`
 
 - Declared exports: none detected
 - Imports (9)
-  - `./App`
-  - `./AppContext`
+  - `./App.jsx`
+  - `./AppContext.jsx`
   - `./app/appShellUtils.ts`
   - `./styles/main.css`
   - `@fontsource/noto-sans-khmer/400.css`
@@ -5647,7 +5647,7 @@ Code files documented: **466**
 
 ### 3.296 `frontend/src/types/jsx-modules.d.ts`
 
-- Declared exports: `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `component`, `useApp`, `useSync`
+- Declared exports: `AppProvider`, `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `component`, `useApp`, `useSync`
 - Imports (0)
   - none
 - Internal dependencies (0)

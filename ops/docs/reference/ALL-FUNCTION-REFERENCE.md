@@ -199,14 +199,14 @@ Code files scanned: **466**
 | 187 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
 | 188 | `frontend/src/components/files/FilesPage.jsx` | 25 |
 | 189 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
-| 190 | `frontend/src/components/files/FilesResponsesTab.jsx` | 1 |
+| 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
 | 191 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
 | 192 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
 | 193 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 10 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
 | 195 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
 | 196 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
-| 197 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 1 |
+| 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
 | 199 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
 | 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
@@ -301,7 +301,7 @@ Code files scanned: **466**
 | 289 | `frontend/src/components/utils-settings/Settings.jsx` | 21 |
 | 290 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
 | 291 | `frontend/src/constants.ts` | 3 |
-| 292 | `frontend/src/index.jsx` | 10 |
+| 292 | `frontend/src/index.tsx` | 10 |
 | 293 | `frontend/src/platform/runtime/clientRuntime.ts` | 17 |
 | 294 | `frontend/src/platform/storage/storagePolicy.ts` | 3 |
 | 295 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 13 |
@@ -3874,11 +3874,11 @@ Code files scanned: **466**
 | 1 | `ProviderStatus` | function | 10 |
 | 2 | `FilesProvidersTab` | export default function | 21 |
 
-### 3.190 `frontend/src/components/files/FilesResponsesTab.jsx`
+### 3.190 `frontend/src/components/files/FilesResponsesTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `FilesResponsesTab` | export default function | 11 |
+| 1 | `FilesResponsesTab` | export default function | 66 |
 
 ### 3.191 `frontend/src/components/inventory/DualMoney.tsx`
 
@@ -3953,11 +3953,11 @@ Code files scanned: **466**
 | 2 | `renderDesktopTableHead` | const arrow | 45 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 67 |
 
-### 3.197 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
+### 3.197 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `InventoryRfidSurface` | export default function | 1 |
+| 1 | `InventoryRfidSurface` | export default function | 55 |
 
 ### 3.198 `frontend/src/components/inventory/movementGroups.ts`
 
@@ -5111,20 +5111,20 @@ Code files scanned: **466**
 | 2 | `formatDate` | export function | 152 |
 | 3 | `isNetworkError` | export function | 181 |
 
-### 3.292 `frontend/src/index.jsx`
+### 3.292 `frontend/src/index.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `registerOfflineAppShell` | function | 16 |
-| 2 | `register` | const arrow | 19 |
-| 3 | `installFormFieldAccessibility` | function | 35 |
-| 4 | `escapeSelectorValue` | const arrow | 40 |
-| 5 | `wireField` | const arrow | 45 |
-| 6 | `scan` | const arrow | 67 |
-| 7 | `safeInsertRule` | const function | 105 |
-| 8 | `safeCssRulesGetter` | const function | 122 |
-| 9 | `stopKnownStartupNoise` | const arrow | 138 |
-| 10 | `scheduleFormFieldAccessibility` | function | 171 |
+| 1 | `registerOfflineAppShell` | function | 22 |
+| 2 | `register` | const arrow | 25 |
+| 3 | `installFormFieldAccessibility` | function | 41 |
+| 4 | `escapeSelectorValue` | const arrow | 46 |
+| 5 | `wireField` | const arrow | 51 |
+| 6 | `scan` | const arrow | 73 |
+| 7 | `safeInsertRule` | const function | 111 |
+| 8 | `safeCssRulesGetter` | const function | 129 |
+| 9 | `stopKnownStartupNoise` | const arrow | 145 |
+| 10 | `scheduleFormFieldAccessibility` | function | 180 |
 
 ### 3.293 `frontend/src/platform/runtime/clientRuntime.ts`
 

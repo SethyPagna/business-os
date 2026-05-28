@@ -56,14 +56,14 @@ Total files documented: **193**
 | 44 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
 | 45 | `frontend/src/components/files/FilesPage.jsx` | 25 |
 | 46 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
-| 47 | `frontend/src/components/files/FilesResponsesTab.jsx` | 1 |
+| 47 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
 | 48 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
 | 49 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
 | 50 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 10 |
 | 51 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
 | 52 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
 | 53 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
-| 54 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 1 |
+| 54 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 55 | `frontend/src/components/inventory/movementGroups.ts` | 11 |
 | 56 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
 | 57 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
@@ -158,7 +158,7 @@ Total files documented: **193**
 | 146 | `frontend/src/components/utils-settings/Settings.jsx` | 21 |
 | 147 | `frontend/src/components/utils-settings/settingsConflict.ts` | 1 |
 | 148 | `frontend/src/constants.ts` | 0 |
-| 149 | `frontend/src/index.jsx` | 10 |
+| 149 | `frontend/src/index.tsx` | 10 |
 | 150 | `frontend/src/platform/runtime/clientRuntime.ts` | 9 |
 | 151 | `frontend/src/platform/storage/storagePolicy.ts` | 0 |
 | 152 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 5 |
@@ -1089,11 +1089,11 @@ Total files documented: **193**
 | 1 | `ProviderStatus` | function | 10 |
 | 2 | `FilesProvidersTab` | component/function | 21 |
 
-### 3.47 `frontend/src/components/files/FilesResponsesTab.jsx`
+### 3.47 `frontend/src/components/files/FilesResponsesTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `FilesResponsesTab` | component/function | 11 |
+| 1 | `FilesResponsesTab` | component/function | 66 |
 
 ### 3.48 `frontend/src/components/inventory/DualMoney.tsx`
 
@@ -1168,11 +1168,11 @@ Total files documented: **193**
 | 2 | `renderDesktopTableHead` | const arrow | 45 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 67 |
 
-### 3.54 `frontend/src/components/inventory/InventoryRfidSurface.jsx`
+### 3.54 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `InventoryRfidSurface` | component/function | 1 |
+| 1 | `InventoryRfidSurface` | component/function | 55 |
 
 ### 3.55 `frontend/src/components/inventory/movementGroups.ts`
 
@@ -2221,20 +2221,20 @@ Total files documented: **193**
 
 - No top-level named function/class symbols detected.
 
-### 3.149 `frontend/src/index.jsx`
+### 3.149 `frontend/src/index.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `registerOfflineAppShell` | function | 16 |
-| 2 | `register` | const arrow | 19 |
-| 3 | `installFormFieldAccessibility` | function | 35 |
-| 4 | `escapeSelectorValue` | const arrow | 40 |
-| 5 | `wireField` | const arrow | 45 |
-| 6 | `scan` | const arrow | 67 |
-| 7 | `safeInsertRule` | const function | 105 |
-| 8 | `safeCssRulesGetter` | const function | 122 |
-| 9 | `stopKnownStartupNoise` | const arrow | 138 |
-| 10 | `scheduleFormFieldAccessibility` | function | 171 |
+| 1 | `registerOfflineAppShell` | function | 22 |
+| 2 | `register` | const arrow | 25 |
+| 3 | `installFormFieldAccessibility` | function | 41 |
+| 4 | `escapeSelectorValue` | const arrow | 46 |
+| 5 | `wireField` | const arrow | 51 |
+| 6 | `scan` | const arrow | 73 |
+| 7 | `safeInsertRule` | const function | 111 |
+| 8 | `safeCssRulesGetter` | const function | 129 |
+| 9 | `stopKnownStartupNoise` | const arrow | 145 |
+| 10 | `scheduleFormFieldAccessibility` | function | 180 |
 
 ### 3.150 `frontend/src/platform/runtime/clientRuntime.ts`
 
