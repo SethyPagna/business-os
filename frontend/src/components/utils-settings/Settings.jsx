@@ -11,7 +11,7 @@ import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.js'
+import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
 import {
   buildCacheBustedMediaPath,
   createInitialUploadState,

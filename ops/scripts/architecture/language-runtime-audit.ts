@@ -294,7 +294,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/contacts/contactOptionUtils.ts',
-    compatibilityWrapper: 'frontend/src/components/contacts/contactOptionUtils.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after contact callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -304,7 +305,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/inventory/movementGroups.ts',
-    compatibilityWrapper: 'frontend/src/components/inventory/movementGroups.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after inventory callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -568,7 +570,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/contacts/customerMembershipNumber.ts',
-    compatibilityWrapper: 'frontend/src/components/contacts/customerMembershipNumber.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after contact callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -579,7 +582,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/dashboard/charts/index.ts',
-    compatibilityWrapper: 'frontend/src/components/dashboard/charts/index.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after dashboard chart callers moved to TypeScript source',
     declarationSupport: 'frontend/src/types/jsx-modules.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -614,7 +618,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/utils-settings/index.ts',
-    compatibilityWrapper: 'frontend/src/components/utils-settings/index.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after utility settings callers moved to TypeScript source',
     declarationSupport: 'frontend/src/types/jsx-modules.d.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -626,7 +631,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/utils-settings/settingsConflict.ts',
-    compatibilityWrapper: 'frontend/src/components/utils-settings/settingsConflict.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after Settings page callers moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',

@@ -1311,15 +1311,17 @@ Decision rule:
 149. Convert contact option helper to TypeScript. Done:
     The customer, supplier, and delivery contact-option normalization helper
     moved to `frontend/src/components/contacts/contactOptionUtils.ts`, while
-    `contactOptionUtils.js` remains as the compatibility wrapper for contact
-    forms and focused pricing/contact tests. The typed helper now normalizes
-    unknown import-row and stored JSON values at the boundary.
+    `contactOptionUtils.js` initially remained as the compatibility wrapper for
+    contact forms and focused pricing/contact tests, then was retired in Move
+    479 after callers moved to the TypeScript source. The typed helper now
+    normalizes unknown import-row and stored JSON values at the boundary.
 150. Convert inventory movement group helper to TypeScript. Done:
     The inventory movement timestamp, grouping, totals, pagination, and
     search-haystack helper moved to
     `frontend/src/components/inventory/movementGroups.ts`, while
-    `movementGroups.js` remains as the compatibility wrapper for
-    `Inventory.jsx` and focused movement-group tests. The existing
+    `movementGroups.js` initially remained as the compatibility wrapper for
+    `Inventory.jsx` and focused movement-group tests, then was retired in Move
+    479 after callers moved to the TypeScript source. The existing
     `inventoryMovementGroups.test.ts` is now part of `test:utils` so movement
     grouping stays inside the regular Phase 29 frontend gate.
 151. Convert POS core helper to TypeScript. Done:
@@ -1353,17 +1355,19 @@ Decision rule:
 154. Convert customer membership number helper to TypeScript. Done:
     The customer membership generator moved to
     `frontend/src/components/contacts/customerMembershipNumber.ts`, while
-    `customerMembershipNumber.js` remains as the compatibility wrapper for
-    contacts surfaces and tests. The typed boundary now names the `LCMN`
-    prefix and generated entropy length explicitly, keeping the existing
+    `customerMembershipNumber.js` initially remained as the compatibility
+    wrapper for contacts surfaces and tests, then was retired in Move 479 after
+    callers moved to the TypeScript source. The typed boundary now names the
+    `LCMN` prefix and generated entropy length explicitly, keeping the existing
     membership-number format stable.
 155. Convert dashboard chart barrel to TypeScript. Done:
     The chart export barrel moved to
     `frontend/src/components/dashboard/charts/index.ts`, while `index.js`
-    remains as the compatibility wrapper for dashboard and report-rendering
-    imports. `frontend/src/types/jsx-modules.d.ts` documents the checked
-    boundary for existing JSX chart components until those visual components
-    are converted in their own measured slices.
+    initially remained as the compatibility wrapper for dashboard and
+    report-rendering imports, then was retired in Move 479 after callers moved
+    to the TypeScript source. `frontend/src/types/jsx-modules.d.ts` documents
+    the checked boundary for existing JSX chart components until those visual
+    components are converted in their own measured slices.
 156. Convert receipt template helper to TypeScript. Done:
     The receipt template parser and serializer moved to
     `frontend/src/components/receipt-settings/template.ts`, while
@@ -1384,17 +1388,20 @@ Decision rule:
 158. Convert utils-settings barrel to TypeScript. Done:
     The admin utility component barrel moved to
     `frontend/src/components/utils-settings/index.ts`, while `index.js`
-    remains as the stable compatibility wrapper for any importers that use the
-    folder public boundary. `frontend/src/types/jsx-modules.d.ts` now documents
-    the checked JSX component boundary needed by the barrel until those large
-    admin surfaces are converted in separate measured slices.
+    initially remained as the stable compatibility wrapper for any importers
+    that use the folder public boundary, then was retired in Move 479 after
+    callers moved to the TypeScript source. `frontend/src/types/jsx-modules.d.ts`
+    now documents the checked JSX component boundary needed by the barrel until
+    those large admin surfaces are converted in separate measured slices.
 159. Convert settings conflict helper to TypeScript. Done:
     The settings stale-write conflict mapper moved to
     `frontend/src/components/utils-settings/settingsConflict.ts`, while
-    `settingsConflict.js` remains as the stable compatibility wrapper for
-    Settings page imports and focused conflict tests. The typed boundary now
-    accepts `unknown` settings payloads, normalizes object inputs once per diff,
-    and keeps the existing JSON comparison behavior for nested values.
+    `settingsConflict.js` initially remained as the stable compatibility
+    wrapper for Settings page imports and focused conflict tests, then was
+    retired in Move 479 after callers moved to the TypeScript source. The typed
+    boundary now accepts `unknown` settings payloads, normalizes object inputs
+    once per diff, and keeps the existing JSON comparison behavior for nested
+    values.
 160. Convert storage policy helper to TypeScript. Done:
     The local mirror and cooldown policy moved to
     `frontend/src/platform/storage/storagePolicy.ts`, while
@@ -3754,6 +3761,14 @@ Decision rule:
     previous one-line `.js` wrappers were deleted after exact caller rewrites
     and reference scans, keeping app shell scroll controls, navigation order,
     runtime reset metadata, and receipt template parsing on typed source paths.
+479. Retire frontend helper/barrel compatibility wrappers. Done:
+    `contactOptionUtils.ts`, `customerMembershipNumber.ts`,
+    `movementGroups.ts`, dashboard `charts/index.ts`,
+    `utils-settings/index.ts`, and `utils-settings/settingsConflict.ts` now
+    serve direct TypeScript imports. The previous one-line `.js` wrappers were
+    removed after the Settings conflict import and barrel test moved to typed
+    paths, reducing the remaining frontend JavaScript wrapper surface without
+    changing component ownership.
 
 ## Safety Gates
 

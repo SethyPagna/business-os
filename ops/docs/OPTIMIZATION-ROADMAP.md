@@ -2280,14 +2280,16 @@ Cleanup checkpoint:
   `frontend/src/components/contacts/contactOptionUtils.ts` owns contact-option
   creation, stored JSON parsing, import-row parsing, summaries, and primary
   option selection for customers, suppliers, and delivery contacts, while
-  `contactOptionUtils.js` remains as the compatibility wrapper. The typed
-  boundary now normalizes unknown CSV/JSON values before they reach contact
-  forms.
+  `contactOptionUtils.js` initially remained as the compatibility wrapper, then
+  was retired in Move 479 after callers moved to the TypeScript source. The
+  typed boundary now normalizes unknown CSV/JSON values before they reach
+  contact forms.
 - The inventory movement group helper slice is now complete:
   `frontend/src/components/inventory/movementGroups.ts` owns movement timestamp
   normalization, transfer/purchase/adjustment grouping, signed and displayed
   totals, expanded-group pagination, and search haystacks, while
-  `movementGroups.js` remains as the compatibility wrapper. The focused
+  `movementGroups.js` initially remained as the compatibility wrapper, then was
+  retired in Move 479 after callers moved to the TypeScript source. The focused
   movement-group test now runs inside `test:utils`.
 - The POS core helper slice is now complete:
   `frontend/src/components/pos/posCore.ts` owns product lookup maps, variant
@@ -2310,16 +2312,19 @@ Cleanup checkpoint:
   item rows explicit.
 - The customer membership number helper slice is now complete:
   `frontend/src/components/contacts/customerMembershipNumber.ts` owns the
-  `LCMN` membership generator, while `customerMembershipNumber.js` remains as
-  the compatibility wrapper for contacts imports and tests. The typed boundary
-  names the prefix and entropy length constants, so the customer identifier
-  format stays stable while the helper joins the checked TypeScript surface.
+  `LCMN` membership generator, while `customerMembershipNumber.js` initially
+  remained as the compatibility wrapper for contacts imports and tests, then
+  was retired in Move 479 after callers moved to the TypeScript source. The
+  typed boundary names the prefix and entropy length constants, so the customer
+  identifier format stays stable while the helper joins the checked TypeScript
+  surface.
 - The dashboard chart barrel slice is now complete:
   `frontend/src/components/dashboard/charts/index.ts` owns the chart exports,
-  while `index.js` remains as the compatibility wrapper for dashboard and
-  report-rendering imports. `frontend/src/types/jsx-modules.d.ts` keeps the
-  existing JSX chart module boundary explicit until chart components are
-  converted as separate visual slices.
+  while `index.js` initially remained as the compatibility wrapper for
+  dashboard and report-rendering imports, then was retired in Move 479 after
+  callers moved to the TypeScript source. `frontend/src/types/jsx-modules.d.ts`
+  keeps the existing JSX chart module boundary explicit until chart components
+  are converted as separate visual slices.
 - The receipt template helper slice is now complete:
   `frontend/src/components/receipt-settings/template.ts` owns parsing and
   serialization of persisted receipt templates, while `template.js` initially
@@ -2337,17 +2342,20 @@ Cleanup checkpoint:
   fallback path.
 - The utils-settings barrel slice is now complete:
   `frontend/src/components/utils-settings/index.ts` owns the admin utility
-  component re-export boundary, while `index.js` remains as the compatibility
-  wrapper for any folder-level imports. `frontend/src/types/jsx-modules.d.ts`
-  records the checked JSX boundary until the large settings, backup, audit,
-  reset-data, OTP, and font-picker components move in separate slices.
+  component re-export boundary, while `index.js` initially remained as the
+  compatibility wrapper for any folder-level imports, then was retired in Move
+  479 after callers moved to the TypeScript source.
+  `frontend/src/types/jsx-modules.d.ts` records the checked JSX boundary until
+  the large settings, backup, audit, reset-data, OTP, and font-picker
+  components move in separate slices.
 - The settings conflict helper slice is now complete:
   `frontend/src/components/utils-settings/settingsConflict.ts` owns the
   stale-write conflict state and field-diff helpers, while
-  `settingsConflict.js` remains as the compatibility wrapper for Settings page
-  imports and focused conflict tests. The typed boundary accepts `unknown`
-  settings payloads and avoids repeated object normalization inside each field
-  diff row.
+  `settingsConflict.js` initially remained as the compatibility wrapper for
+  Settings page imports and focused conflict tests, then was retired in Move
+  479 after callers moved to the TypeScript source. The typed boundary accepts
+  `unknown` settings payloads and avoids repeated object normalization inside
+  each field diff row.
 - The storage policy helper slice is now complete:
   `frontend/src/platform/storage/storagePolicy.ts` owns the live-server local
   mirror allow/deny policy plus notification and Drive cooldown helpers, while
@@ -5282,3 +5290,11 @@ Move 478 status:
   root `constants.ts`, `clientRuntime.ts`, and receipt settings
   `constants.ts`/`template.ts` now serve direct TypeScript imports, while the
   matching one-line `.js` wrappers are removed.
+
+Move 479 status:
+- Move 479 retires six frontend helper/barrel wrappers after exact caller and
+  test rewrites. `contactOptionUtils.ts`, `customerMembershipNumber.ts`,
+  `movementGroups.ts`, dashboard `charts/index.ts`,
+  `utils-settings/index.ts`, and `utils-settings/settingsConflict.ts` now serve
+  direct TypeScript imports, while the matching one-line `.js` wrappers are
+  removed.
