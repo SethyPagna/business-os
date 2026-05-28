@@ -2,7 +2,7 @@
 
 Auto-generated high-level coverage summary for first-party frontend/backend files and folders.
 
-- Total files: **530**
+- Total files: **529**
 - Total folders: **81**
 
 | Category | File Count |
@@ -12,7 +12,7 @@ Auto-generated high-level coverage summary for first-party frontend/backend file
 | backend-routes | 24 |
 | backend-services | 12 |
 | frontend-api | 5 |
-| frontend-core | 15 |
+| frontend-core | 14 |
 | frontend-i18n | 2 |
 | frontend-root | 100 |
 | frontend-style | 1 |

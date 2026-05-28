@@ -72,7 +72,7 @@ Total folders documented: **81**
 | 60 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
 | 61 | `frontend/src/runtime` | Project folder | 1 | 0 |
 | 62 | `frontend/src/styles` | Project folder | 1 | 0 |
-| 63 | `frontend/src/types` | Project folder | 4 | 0 |
+| 63 | `frontend/src/types` | Project folder | 3 | 0 |
 | 64 | `frontend/src/utils` | Project folder | 33 | 0 |
 | 65 | `frontend/tests` | Project folder | 76 | 0 |
 | 66 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
@@ -736,7 +736,7 @@ Total folders documented: **81**
 | 1 | `CatalogEditorSurface.jsx` | UI component/page |
 | 2 | `CatalogImageField.jsx` | UI component/page |
 | 3 | `CatalogPage.jsx` | UI component/page |
-| 4 | `CatalogPageContext.jsx` | UI component/page |
+| 4 | `CatalogPageContext.tsx` | UI component/page |
 | 5 | `CatalogPreviewSurface.jsx` | UI component/page |
 | 6 | `CatalogProductsSection.jsx` | UI component/page |
 | 7 | `CatalogSecondaryTabs.jsx` | UI component/page |
@@ -817,7 +817,7 @@ Total folders documented: **81**
 | 2 | `DonutChart.jsx` | UI component/page |
 | 3 | `index.ts` | UI component/page |
 | 4 | `LineChart.jsx` | UI component/page |
-| 5 | `NoData.jsx` | UI component/page |
+| 5 | `NoData.tsx` | UI component/page |
 
 
 ### 3.34 Folder: `frontend/src/components/files`
@@ -846,7 +846,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `DualMoney.jsx` | UI component/page |
+| 1 | `DualMoney.tsx` | UI component/page |
 | 2 | `Inventory.jsx` | UI component/page |
 | 3 | `InventoryImportModal.jsx` | UI component/page |
 | 4 | `inventoryImportWorker.ts` | UI component/page |
@@ -897,7 +897,7 @@ Total folders documented: **81**
 | 2 | `FilterPanel.jsx` | UI component/page |
 | 3 | `POS.jsx` | UI component/page |
 | 4 | `posCore.ts` | UI component/page |
-| 5 | `ProductImage.jsx` | UI component/page |
+| 5 | `ProductImage.tsx` | UI component/page |
 | 6 | `QuickAddModal.jsx` | UI component/page |
 
 
@@ -1091,7 +1091,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `AllFieldsPanel.jsx` | UI component/page |
 | 2 | `constants.ts` | UI component/page |
-| 3 | `ErrorBoundary.jsx` | UI component/page |
+| 3 | `ErrorBoundary.tsx` | UI component/page |
 | 4 | `FieldOrderManager.jsx` | UI component/page |
 | 5 | `PrintSettings.jsx` | UI component/page |
 | 6 | `ReceiptPreview.jsx` | UI component/page |
@@ -1297,7 +1297,7 @@ Total folders documented: **81**
 ### 3.63 Folder: `frontend/src/types`
 
 - Purpose: Project folder
-- Direct files: **4**
+- Direct files: **3**
 - Direct subfolders: **0**
 
 #### 3.63.2 Files
@@ -1305,9 +1305,8 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `jsx-modules.d.ts` | Project source/support file |
-| 2 | `react.d.ts` | Project source/support file |
-| 3 | `receiptContracts.ts` | Project source/support file |
-| 4 | `settingsContracts.ts` | Project source/support file |
+| 2 | `receiptContracts.ts` | Project source/support file |
+| 3 | `settingsContracts.ts` | Project source/support file |
 
 
 ### 3.64 Folder: `frontend/src/utils`

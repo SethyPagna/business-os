@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 546,
+  "filesScanned": 545,
   "largeFiles": 71,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -135,10 +135,6 @@
       4
     ],
     [
-      "frontend/src/types",
-      4
-    ],
-    [
       "ops/scripts/architecture",
       4
     ],
@@ -148,6 +144,10 @@
     ],
     [
       "ops/scripts/runtime/cloudflare",
+      4
+    ],
+    [
+      "ops/scripts/runtime/smoke",
       4
     ]
   ],
