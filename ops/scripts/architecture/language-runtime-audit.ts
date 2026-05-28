@@ -218,8 +218,8 @@ const FOCUSED_TEST_COVERAGE = [
     candidate: 'backend/src/services/backupPackages.js',
     tests: [
       'backend/test/backupPerformanceHardening.test.js',
-      'backend/test/backupRetention.test.js',
-      'backend/test/backupSchema.test.js',
+      'backend/test/backupRetention.test.ts',
+      'backend/test/backupSchema.test.ts',
     ],
     command: 'npm.cmd --prefix backend run test:utils',
     reason: 'Backup package streaming, retention, and schema summaries protect data-path rewrites.',
@@ -876,8 +876,8 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
     tests: [
       'backend/test/backupPerformanceHardening.test.js',
-      'backend/test/backupRetention.test.js',
-      'backend/test/backupSchema.test.js',
+      'backend/test/backupRetention.test.ts',
+      'backend/test/backupSchema.test.ts',
     ],
   },
   {
@@ -948,7 +948,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     tests: [
       'backend/test/fullAutomation.test.js',
       'backend/test/backupPerformanceHardening.test.js',
-      'backend/test/backupRetention.test.js',
+      'backend/test/backupRetention.test.ts',
     ],
   },
   {
@@ -963,7 +963,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     tests: [
       'backend/test/rfidRoutes.test.ts',
       'backend/test/routeContracts.test.js',
-      'backend/test/productBatchHierarchy.test.js',
+      'backend/test/productBatchHierarchy.test.ts',
     ],
   },
   {
@@ -972,11 +972,11 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Inline the image-map, branch-stock-map, gallery, and badge decoration blocks separately in getPortalProducts and getPortalCatalogProductPage again; public catalog response fields remain unchanged.',
     proof: [
       'npm.cmd --prefix backend run test:utils',
-      'node backend\\test\\portalInventoryRegression.test.js',
+      'node backend\\test\\portalInventoryRegression.test.ts',
       'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
-      'backend/test/portalInventoryRegression.test.js',
+      'backend/test/portalInventoryRegression.test.ts',
       'backend/test/portalUtils.test.ts',
       'backend/test/routeContracts.test.js',
     ],
@@ -1002,13 +1002,13 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Move insertSaleMovement and updateSaleMovementCreatedAt back into the per-item allocation block; sale item, batch allocation, movement, and imported timestamp behavior remain unchanged.',
     proof: [
       'npm.cmd --prefix backend run test:utils',
-      'node backend\\test\\productBatchHierarchy.test.js',
+      'node backend\\test\\productBatchHierarchy.test.ts',
       'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
-      'backend/test/productBatchHierarchy.test.js',
+      'backend/test/productBatchHierarchy.test.ts',
       'backend/test/routeContracts.test.js',
-      'backend/test/portalInventoryRegression.test.js',
+      'backend/test/portalInventoryRegression.test.ts',
     ],
   },
   {
@@ -1022,7 +1022,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
     tests: [
       'backend/test/routeContracts.test.js',
-      'backend/test/systemJobs.test.js',
+      'backend/test/systemJobs.test.ts',
       'backend/test/fullAutomation.test.js',
     ],
   },

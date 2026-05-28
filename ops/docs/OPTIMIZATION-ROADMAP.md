@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 472.
+- Latest completed implementation move in this roadmap: Move 473.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2457,7 +2457,7 @@ Cleanup checkpoint:
   decoration across full catalog and paged search responses. The route stays in
   Node.js because it is request/response shaping, but the duplicate
   materialization blocks are gone and
-  `backend/test/portalInventoryRegression.test.js` guards the helper contract.
+  `backend/test/portalInventoryRegression.test.ts` guards the helper contract.
 - Move 176 optimizes image-only product bulk import matching:
   `backend/src/routes/products.js` now builds one normalized product-name map
   before walking uploaded image filenames. Matching each filename to a product
@@ -3265,7 +3265,7 @@ Cleanup checkpoint:
   stale remote objects. Docker-safe cleanup reclaimed 2.503 GB of builder cache
   while preserving images, volumes, uploads, secrets, and retained backups.
 - Move 292 adds behavioral tests for shared schema metadata caching:
-  `backend/test/schemaMetadata.test.js` now verifies positive and negative
+  `backend/test/schemaMetadata.test.ts` now verifies positive and negative
   cache hits, ordered candidate-column selection, custom-table
   `markColumnPresent` refresh behavior, and safe fallbacks when metadata probes
   fail, using a mocked database. The helper test is wired into
@@ -4399,7 +4399,7 @@ Move 391 status:
   callback chains, while preserving the shared asset query path, image gallery
   fallback, branch stock payloads, top-seller/new-arrival/recommended ranks,
   full portal product list behavior, and paged catalog search behavior.
-  `backend/test/portalInventoryRegression.test.js` now guards the shared
+  `backend/test/portalInventoryRegression.test.ts` now guards the shared
   direct-loop payload helper instead of the prior inline `map()` shape.
   Focused syntax, route contract tests, portal inventory regression tests, and
   portal membership hardening tests passed.
@@ -4446,7 +4446,7 @@ Move 395 status:
   sales/returns/submission query SQL, screenshot JSON parsing, review response
   fields, sales/return totals, membership discount totals, point summaries, and
   public membership response shape remain unchanged.
-  `backend/test/portalInventoryRegression.test.js` now guards the shared
+  `backend/test/portalInventoryRegression.test.ts` now guards the shared
   clause-wrapping helper. Focused syntax, route contract tests, portal
   inventory regression tests, and portal membership hardening tests passed.
 
@@ -5223,3 +5223,15 @@ Move 472 status:
   `test:utils` and the language/runtime proof matrix now reference the
   TypeScript paths; production backend runtime files and release packaging are
   intentionally unchanged in this test-only conversion batch.
+
+Move 473 status:
+- Move 473 converts the third backend utility test tranche to TypeScript.
+  `backupRetention.test.ts`, `notificationSummaryCache.test.ts`,
+  `systemJobs.test.ts`, `postgresQueryCompat.test.ts`,
+  `portalInventoryRegression.test.ts`, `ownedGoogleAuth.test.ts`,
+  `productBatchHierarchy.test.ts`, `backupSchema.test.ts`,
+  `schemaMetadata.test.ts`, `mediaOptimization.test.ts`,
+  `postgresDatabase.test.ts`, and `googleDriveSyncVersioning.test.ts` replace
+  their `.js` test entrypoints. The backend `test:utils` command and
+  language/runtime proof references now call the TypeScript paths, keeping the
+  production runtime and release packaging unchanged.

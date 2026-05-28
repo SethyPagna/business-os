@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 462 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 463 in this file.
 
 ## Goal
 
@@ -668,7 +668,7 @@ Decision rule:
     `backend/src/services/backupPackages.js` now recognizes timestamped
     Docker-release backup folders such as `20260509-065427` only under
     `ops/runtime/docker-release/backups`, while normal backup roots remain
-    limited to `datasync-*` packages. `backend/test/backupRetention.test.js`
+    limited to `datasync-*` packages. `backend/test/backupRetention.test.ts`
     now proves the retention planner keeps the newest Docker-release timestamp
     packages and leaves unrelated folders untouched. This folds the manual
     Phase 29 cleanup rule into the standard `prune-storage` path.
@@ -1523,7 +1523,7 @@ Decision rule:
     image selection, and highlight badge decoration now have one route-local
     implementation instead of two parallel blocks. This keeps the route in
     Node.js while reducing duplicate query/materialization pathways, with
-    `backend/test/portalInventoryRegression.test.js` guarding the shared
+    `backend/test/portalInventoryRegression.test.ts` guarding the shared
     helper contract.
 176. Optimize image-only product bulk import matching. Done:
     `backend/src/routes/products.js` now builds a `productsByImageBaseName` map
@@ -1538,7 +1538,7 @@ Decision rule:
     insert and optional imported timestamp update once per sale creation
     transaction instead of rebuilding those statements for each sold item. This
     keeps the existing Node.js batch allocation and audit flow while reducing
-    per-item SQL statement setup. `backend/test/productBatchHierarchy.test.js`
+    per-item SQL statement setup. `backend/test/productBatchHierarchy.test.ts`
     guards the request-scoped movement statements.
 178. Reuse system settings delete statement. Done:
     `backend/src/routes/system/index.js` now prepares the settings delete
@@ -2012,7 +2012,7 @@ Decision rule:
     `idx_action_history_scope_user_updated_pg`, matching the API's
     `scope = ? ORDER BY updated_at DESC, id DESC` and
     `scope = ? AND created_by_id = ? ORDER BY updated_at DESC, id DESC`
-    history-bar reads. `backend/test/postgresDatabase.test.js` guards the
+    history-bar reads. `backend/test/postgresDatabase.test.ts` guards the
     startup DDL, and `ops/docs/SCHEMA-RELATIONSHIPS.md` now records the
     completed read-path indexes in the schema map.
 241. Add unique session-token index. Done:
@@ -2486,7 +2486,7 @@ Decision rule:
     2.503 GB of builder cache while preserving images, volumes, uploads,
     secrets, and retained backup packages.
 292. Add behavioral tests for shared schema metadata caching. Done:
-    `backend/test/schemaMetadata.test.js` now exercises the shared
+    `backend/test/schemaMetadata.test.ts` now exercises the shared
     `schemaMetadata` helper with a mocked database, covering positive and
     negative cache hits, ordered candidate-column selection, custom-table
     `markColumnPresent` refresh behavior, and safe fallbacks when metadata
@@ -3702,6 +3702,15 @@ Decision rule:
     command and language/runtime proof strings now reference the TypeScript
     paths, keeping this conversion on the test surface while backend runtime
     packaging remains unchanged.
+463. Convert the third backend utility test tranche to TypeScript. Done:
+    Twelve medium backend tests now run as `.ts` entrypoints:
+    `backupRetention`, `notificationSummaryCache`, `systemJobs`,
+    `postgresQueryCompat`, `portalInventoryRegression`, `ownedGoogleAuth`,
+    `productBatchHierarchy`, `backupSchema`, `schemaMetadata`,
+    `mediaOptimization`, `postgresDatabase`, and `googleDriveSyncVersioning`.
+    The backend `test:utils` command and language/runtime proof references now
+    call the TypeScript paths. The batch keeps production runtime files stable
+    and continues shrinking backend `.js` from the verified test surface first.
 
 ## Safety Gates
 
