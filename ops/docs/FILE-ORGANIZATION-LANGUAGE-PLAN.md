@@ -694,7 +694,7 @@ Decision rule:
     `run/docker/rotate-cloudflare.bat`, hardening policy, and full automation
     now point at the grouped Cloudflare implementation path directly. Backend
     automation tests read the grouped implementation and assert the old
-    `verify-cloudflare-automation.mjs` wrapper still forwards to it.
+    `verify-cloudflare-automation.ts` wrapper still forwards to it.
 63. Group deep audit runtime scripts. Done:
     Full-app and deep-live audit implementations plus their shared auth,
     manifest, and HTML-report helpers moved to
@@ -1710,7 +1710,7 @@ Decision rule:
     reads instead of carrying a local async JSON helper. This keeps the Phase 29
     language/runtime sweep aligned with the shared filesystem utility layer.
 203. Share Cloudflare automation file reads. Done:
-    `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` now
+    `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` now
     reuses `readJson()` and `readUtf8()` from `ops/scripts/lib/fs-utils.js` for
     policy, token, and allowed-email file reads. Network request behavior stays
     owned by the Cloudflare verifier.
@@ -1748,7 +1748,7 @@ Decision rule:
     app runtime to MinIO while declaring `OBJECT_STORAGE_DRIVER=r2`.
     `ops/scripts/powershell/start-runtime.ps1` bridges those values from the
     ignored Docker release env into the scale Compose run so secrets are not
-    stored in `docker-scale.env`. `verify-r2-object-store.mjs` now verifies the
+    stored in `docker-scale.env`. `verify-r2-object-store.ts` now verifies the
     backend's Cloudflare API fallback when direct S3-compatible credentials are
     unauthorized.
 210. Reject report utility false-positive from language conversion queue. Done:
@@ -3540,6 +3540,15 @@ Decision rule:
     orchestrator now calls the TypeScript audit paths, and the conversion keeps
     CommonJS-style loading so direct Node execution avoids typeless ESM
     reparsing overhead during repeated audit loops.
+442. Convert Cloudflare runtime operations to TypeScript. Done:
+    `rotate-cloudflare-tunnel-token.ts`,
+    `update-cloudflare-tunnel-origin.ts`,
+    `verify-cloudflare-automation.ts`, and `verify-r2-object-store.ts` replace
+    the Cloudflare `.mjs` entrypoints. The public run wrappers,
+    full-automation launcher, hardening policy, Docker release guardrail, and
+    backend automation tests now point at the TypeScript paths while preserving
+    direct Node execution for tunnel origin updates, token rotation, Access/WAF
+    verification, and R2 object-store checks.
 
 ## Safety Gates
 

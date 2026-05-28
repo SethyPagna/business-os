@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import crypto from 'node:crypto'
-import { createRequire } from 'node:module'
-import { fileURLToPath } from 'node:url'
+const fs = require('node:fs')
+const path = require('node:path')
+const crypto = require('node:crypto')
+const { createRequire } = require('node:module')
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..', '..', '..', '..')
 const requireFromBackend = createRequire(path.join(root, 'backend', 'package.json'))
 const {

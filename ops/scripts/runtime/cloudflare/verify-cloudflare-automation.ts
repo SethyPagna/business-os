@@ -1,14 +1,11 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import https from 'node:https'
-import { createRequire } from 'node:module'
-
-const require = createRequire(import.meta.url)
+const fs = require('node:fs')
+const path = require('node:path')
+const https = require('node:https')
 const { readJson, readUtf8 } = require('../../lib/fs-utils.js')
 
-const ROOT = path.resolve(new URL('../../../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const DEFAULT_POLICY = path.join(ROOT, 'ops', 'automation', 'business-os-automation.json')
 
 function parseArgs(argv) {

@@ -15,8 +15,8 @@ function Resolve-Root {
 $Root = Resolve-Root
 $PolicyPath = Join-Path $Root 'ops\automation\business-os-automation.json'
 $DockerRelease = Join-Path $Root 'ops\scripts\powershell\docker-release.ps1'
-$CloudflareVerify = Join-Path $Root 'ops\scripts\runtime\cloudflare\verify-cloudflare-automation.mjs'
-$R2Verify = Join-Path $Root 'ops\scripts\runtime\cloudflare\verify-r2-object-store.mjs'
+$CloudflareVerify = Join-Path $Root 'ops\scripts\runtime\cloudflare\verify-cloudflare-automation.ts'
+$R2Verify = Join-Path $Root 'ops\scripts\runtime\cloudflare\verify-r2-object-store.ts'
 $StoragePrune = Join-Path $Root 'ops\scripts\runtime\storage\prune-storage.mjs'
 $StoragePruneReport = Join-Path $Root 'ops\runtime\reports\prune-storage-latest.json'
 $TestDataCleanup = Join-Path $Root 'ops\scripts\runtime\storage\cleanup-test-data.mjs'

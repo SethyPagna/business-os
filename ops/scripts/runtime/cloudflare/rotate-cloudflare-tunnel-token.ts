@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import crypto from 'node:crypto'
-import fs from 'node:fs'
-import https from 'node:https'
-import path from 'node:path'
+const crypto = require('node:crypto')
+const fs = require('node:fs')
+const https = require('node:https')
+const path = require('node:path')
 
-const ROOT = path.resolve(new URL('../../../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const ENV_FILES = [
   path.join(ROOT, 'backend', '.env'),
   path.join(ROOT, 'ops', 'runtime', 'docker-release', 'docker-release.env'),

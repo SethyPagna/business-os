@@ -2617,7 +2617,7 @@ Cleanup checkpoint:
   language/runtime audit on the same filesystem utility path as the generated
   bulk audit.
 - Move 203 shares Cloudflare automation file reads:
-  `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` now imports
+  `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` now imports
   `readJson()` and `readUtf8()` from `ops/scripts/lib/fs-utils.js` for policy,
   token, and allowed-email file reads instead of carrying local JSON/text read
   wrappers. The Cloudflare API request logic remains local to the verifier.
@@ -5032,3 +5032,11 @@ Move 451 status:
   Package scripts, full automation, backend guardrails, and the Phase 29 child
   process list now call the TypeScript entrypoints while retaining direct
   Node execution and bounded audit concurrency.
+
+Move 452 status:
+- Move 452 converts the Cloudflare runtime operations to TypeScript.
+  `rotate-cloudflare-tunnel-token.ts`, `update-cloudflare-tunnel-origin.ts`,
+  `verify-cloudflare-automation.ts`, and `verify-r2-object-store.ts` keep the
+  same Cloudflare API, tunnel origin, Access/WAF, token rotation, and R2
+  verification behavior while the run wrappers, full automation, hardening
+  policy, and Docker release guardrail move to the TypeScript paths.

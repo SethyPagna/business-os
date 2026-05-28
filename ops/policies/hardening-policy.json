@@ -13,12 +13,12 @@
           "mustNotContain": ["x-auth-session", "authorization", "searchParams.get('token')"]
         },
         {
-          "path": "frontend/src/api/http.js",
+          "path": "frontend/src/api/http.ts",
           "mustContain": ["credentials: 'include'", "cookie credentials"],
           "mustNotContain": ["x-auth-session", "getAuthSessionToken", "setAuthSessionToken", "AUTH_TOKEN"]
         },
         {
-          "path": "frontend/src/web-api.js",
+          "path": "frontend/src/web-api.ts",
           "mustNotContain": ["getAuthSessionToken", "setAuthSessionToken", "AUTH_TOKEN"]
         }
       ]
@@ -67,11 +67,11 @@
       "name": "Encrypted offline vault and versioned sync",
       "files": [
         {
-          "path": "frontend/src/api/localDb.js",
+          "path": "frontend/src/api/localDb.ts",
           "mustContain": ["sync_outbox", "offline_vault", "offline_file_chunks", "encrypted_payload"]
         },
         {
-          "path": "frontend/src/web-api.js",
+          "path": "frontend/src/web-api.ts",
           "mustContain": [
             "OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000",
             "PBKDF2",
@@ -146,18 +146,18 @@
       "name": "Cloudflare and R2 release automation",
       "files": [
         {
-          "path": "ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs",
+          "path": "ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts",
           "mustContain": ["upsertAccessApp", "http_request_firewall_custom", "http_ratelimit", "cf.colo.id", "Business OS Admin", "Business OS obvious injection block"],
           "mustNotContain": ["managed_challenge"]
         },
         {
-          "path": "ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs",
+          "path": "ops/scripts/runtime/cloudflare/verify-r2-object-store.ts",
           "mustContain": ["PutObjectCommand", "GetObjectCommand", "DeleteObjectCommand", "HeadObjectCommand", "R2 disappearance confirmed"],
           "mustNotContain": ["S3_SECRET_ACCESS_KEY="]
         },
         {
           "path": "ops/scripts/powershell/full-automation.ps1",
-          "mustContain": ["verify-cloudflare-automation.mjs", "verify-r2-object-store.mjs", "/sw.js secure offline sync check passed"]
+          "mustContain": ["verify-cloudflare-automation.ts", "verify-r2-object-store.ts", "/sw.js secure offline sync check passed"]
         }
       ]
     },

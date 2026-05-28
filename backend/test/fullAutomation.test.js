@@ -62,7 +62,7 @@ runTest('full automation launcher and policy are present', () => {
     'Phase 29 schema, organization, cleanup, language, and Docker guardrail audit',
     'verify-hardening-policy.js',
     'verify-backup-reliability.js',
-    'verify-r2-object-store.mjs',
+    'verify-r2-object-store.ts',
     'Action history undo/redo live verification',
     'action-history-undo-redo-check.ts',
     'prune-storage.mjs',
@@ -87,12 +87,11 @@ runTest('full automation launcher and policy are present', () => {
 })
 
 runTest('cloudflare automation is explicit about account-level permissions', () => {
-  const script = read('ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs')
-  const r2Verifier = read('ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs')
-  const oldWrapperPath = path.join(root, 'ops', 'scripts', 'runtime', 'verify-cloudflare-automation.mjs')
+  const script = read('ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts')
+  const r2Verifier = read('ops/scripts/runtime/cloudflare/verify-r2-object-store.ts')
+  const oldWrapperPath = path.join(root, 'ops', 'scripts', 'runtime', 'verify-cloudflare-automation.ts')
   const readme = read('ops/automation/README.md')
   assert.match(script, /cloudflare-api-token\.txt/)
-  assert.match(script, /createRequire/)
   assert.match(script, /require\('\.\.\/\.\.\/lib\/fs-utils\.js'\)/)
   assert.match(script, /readJson/)
   assert.match(script, /readUtf8/)
@@ -218,10 +217,10 @@ runTest('docker release verification protects generated cleanup boundaries', () 
     'liveSmokeCleanupReport',
     'fullAutomationPostcheck',
     'local-runtime-and-cloudflare-retention-guardrail',
-    'rotate-cloudflare-tunnel-token.mjs',
-    'update-cloudflare-tunnel-origin.mjs',
-    'verify-cloudflare-automation.mjs',
-    'verify-r2-object-store.mjs',
+    'rotate-cloudflare-tunnel-token.ts',
+    'update-cloudflare-tunnel-origin.ts',
+    'verify-cloudflare-automation.ts',
+    'verify-r2-object-store.ts',
     'wrapperPaths',
     'hostOriginWrapper: rel',
     'dockerRotateWrapper: rel',

@@ -2,7 +2,7 @@
 chcp 65001 >nul 2>&1
 setlocal
 for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
-node "%ROOT%\ops\scripts\runtime\cloudflare\rotate-cloudflare-tunnel-token.mjs" --mode docker %*
+node "%ROOT%\ops\scripts\runtime\cloudflare\rotate-cloudflare-tunnel-token.ts" --mode docker %*
 set "EXIT_CODE=%ERRORLEVEL%"
 echo.
 if "%EXIT_CODE%"=="0" (

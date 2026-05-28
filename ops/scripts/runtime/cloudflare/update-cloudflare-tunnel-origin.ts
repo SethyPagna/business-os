@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import fs from 'node:fs'
-import path from 'node:path'
-import https from 'node:https'
+const fs = require('node:fs')
+const path = require('node:path')
+const https = require('node:https')
 
-const ROOT = path.resolve(new URL('../../../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const ENV_FILE = path.join(ROOT, 'backend', '.env')
 const DEFAULT_TOKEN_FILE = path.join(ROOT, 'ops', 'runtime', 'secrets', 'cloudflare-api-token.txt')
 

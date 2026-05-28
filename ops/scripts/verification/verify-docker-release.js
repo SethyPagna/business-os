@@ -24,10 +24,10 @@ const automationPolicyPath = path.join(root, 'ops', 'automation', 'business-os-a
 const opsPackagePath = path.join(root, 'ops', 'package.json')
 const summaryPath = path.join(root, 'ops', 'docs', 'reference', 'DOCKER-RELEASE-GUARDRAIL.json')
 const cloudflareRuntimePaths = {
-  rotateToken: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'rotate-cloudflare-tunnel-token.mjs'),
-  updateOrigin: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'update-cloudflare-tunnel-origin.mjs'),
-  verifyAutomation: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'verify-cloudflare-automation.mjs'),
-  verifyR2ObjectStore: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'verify-r2-object-store.mjs'),
+  rotateToken: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'rotate-cloudflare-tunnel-token.ts'),
+  updateOrigin: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'update-cloudflare-tunnel-origin.ts'),
+  verifyAutomation: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'verify-cloudflare-automation.ts'),
+  verifyR2ObjectStore: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'verify-r2-object-store.ts'),
   hostOriginWrapper: path.join(root, 'run', 'cloudflare-origin.bat'),
   dockerRotateWrapper: path.join(root, 'run', 'docker', 'rotate-cloudflare.bat'),
   runtimeApiToken: path.join(root, 'ops', 'runtime', 'secrets', 'cloudflare-api-token.txt'),
@@ -96,10 +96,10 @@ function buildCloudflareRuntimeCoverage({ policy, policyParseError, pruneStorage
       dockerRotateWrapper: rel(cloudflareRuntimePaths.dockerRotateWrapper),
     },
     wrappers: {
-      hostOriginDelegatesToScript: hostOriginWrapper.includes('update-cloudflare-tunnel-origin.mjs'),
+      hostOriginDelegatesToScript: hostOriginWrapper.includes('update-cloudflare-tunnel-origin.ts'),
       hostOriginSupportsHostAndDocker: hostOriginWrapper.includes('host^|docker') &&
         hostOriginWrapper.includes('--mode "%MODE%"'),
-      dockerRotateDelegatesToScript: dockerRotateWrapper.includes('rotate-cloudflare-tunnel-token.mjs') &&
+      dockerRotateDelegatesToScript: dockerRotateWrapper.includes('rotate-cloudflare-tunnel-token.ts') &&
         dockerRotateWrapper.includes('--mode docker'),
     },
     tokenRotation: {
