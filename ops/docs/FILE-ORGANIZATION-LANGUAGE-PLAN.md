@@ -2165,7 +2165,7 @@ Decision rule:
     production use. The latest report shows transactional table counts at zero
     after Move 257 while preserving action-history and audit-log counts.
 259. Add standalone dataset-readiness gate. Done:
-    `ops/scripts/runtime/storage/dataset-readiness.mjs` now provides a fast
+    `ops/scripts/runtime/storage/dataset-readiness.ts` now provides a fast
     Docker/Postgres readiness check that writes
     `ops/runtime/reports/dataset-readiness-latest.json`. The default
     `dataset-readiness` command reports `empty` or `loaded` without failing,
@@ -2174,7 +2174,7 @@ Decision rule:
     `empty`, and the loaded gate correctly exits nonzero until verified
     business data is restored or re-imported.
 260. Add non-mutating restore-candidate scanner. Done:
-    `ops/scripts/runtime/storage/restore-candidates.mjs` scans local Docker and
+    `ops/scripts/runtime/storage/restore-candidates.ts` scans local Docker and
     data-sync backup roots, validates required backup files, parses
     `postgres.sql` COPY blocks, and writes
     `ops/runtime/reports/restore-candidates-latest.json`. It reports the newest
@@ -2185,7 +2185,7 @@ Decision rule:
     rows across products, batches, branch stock, sales, returns, inventory
     movements, and stock transfers.
 261. Add temporary-database restore rehearsal. Done:
-    `ops/scripts/runtime/storage/restore-rehearsal.mjs` restores the recommended
+    `ops/scripts/runtime/storage/restore-rehearsal.ts` restores the recommended
     backup into a temporary Postgres database named
     `business_os_restore_rehearsal_<timestamp>`, compares restored table counts
     against the source `postgres.sql` COPY counts, writes
@@ -3512,6 +3512,14 @@ Decision rule:
     table-result, and summary shapes while preserving the read-only Docker
     `psql` query and workspace-safe output guard. Backend full-automation tests
     and the language/runtime audit now reference the TypeScript path.
+438. Convert storage readiness and restore check entrypoints to TypeScript.
+    Done: `dataset-readiness.ts`, `restore-candidates.ts`, and
+    `restore-rehearsal.ts` replace their `.mjs` entrypoints while preserving
+    the existing npm command names. The scripts now carry typed argument,
+    count, package, and Docker option shapes, keep workspace path guards, and
+    remain directly executable by Node 24 without changing the ops package
+    module type. `post-live-hygiene.mjs` and full-automation tests now call the
+    TypeScript storage readiness path.
 
 ## Safety Gates
 

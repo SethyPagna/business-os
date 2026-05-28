@@ -4999,3 +4999,11 @@ Move 447 status:
   argument parsing, table-result payloads, and summary output. Backend
   automation tests and the language/runtime audit now point at the `.ts`
   entrypoint.
+
+Move 448 status:
+- Move 448 converts the storage readiness and restore verification entrypoints
+  to TypeScript. `ops/scripts/runtime/storage/dataset-readiness.ts`,
+  `restore-candidates.ts`, and `restore-rehearsal.ts` preserve their npm
+  command names while adding typed argument, business-count, backup-package,
+  and Docker option shapes. `post-live-hygiene.mjs` now calls the TypeScript
+  dataset readiness script.

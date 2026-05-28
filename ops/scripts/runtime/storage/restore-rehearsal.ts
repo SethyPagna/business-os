@@ -1,10 +1,9 @@
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+const fs = require('node:fs')
+const path = require('node:path')
+const { spawnSync } = require('node:child_process')
 
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../../..')
 const DEFAULT_RESTORE_CANDIDATES_REPORT = path.join(ROOT_DIR, 'ops', 'runtime', 'reports', 'restore-candidates-latest.json')
 const BUSINESS_TABLES = [
   'products',
@@ -18,7 +17,23 @@ const BUSINESS_TABLES = [
   'stock_transfers',
 ]
 
-function parseArgs(argv = process.argv.slice(2)) {
+type RestoreRehearsalArgs = {
+  backupPath: string
+  output: string
+  keepDb: boolean
+  container: string
+  user: string
+}
+
+type BusinessCounts = Record<string, number>
+
+type DockerRunOptions = {
+  input?: string
+  encoding?: BufferEncoding
+  maxBuffer?: number
+}
+
+function parseArgs(argv = process.argv.slice(2)): RestoreRehearsalArgs {
   const args = {
     backupPath: '',
     output: '',
@@ -42,13 +57,13 @@ function parseArgs(argv = process.argv.slice(2)) {
   return args
 }
 
-function assertInsideWorkspace(target) {
+function assertInsideWorkspace(target: string): string {
   const relative = path.relative(ROOT_DIR, target)
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Refusing path outside workspace: ${target}`)
   return target
 }
 
-function readJson(filePath) {
+function readJson(filePath: string): Record<string, unknown> {
   const buffer = fs.readFileSync(filePath)
   const text = buffer[0] === 0xff && buffer[1] === 0xfe
     ? buffer.toString('utf16le')
@@ -56,7 +71,7 @@ function readJson(filePath) {
   return JSON.parse(text.replace(/^\uFEFF/, ''))
 }
 
-function resolveRecommendedBackupPath() {
+function resolveRecommendedBackupPath(): string {
   if (!fs.existsSync(DEFAULT_RESTORE_CANDIDATES_REPORT)) {
     throw new Error('No restore-candidates report found. Run npm.cmd --prefix ops run restore-candidates first, or pass --backup-path.')
   }
@@ -66,7 +81,7 @@ function resolveRecommendedBackupPath() {
   return assertInsideWorkspace(path.resolve(ROOT_DIR, relativePath))
 }
 
-function countSqlCopyRows(sqlPath) {
+function countSqlCopyRows(sqlPath: string): BusinessCounts {
   const counts = Object.fromEntries(BUSINESS_TABLES.map((table) => [table, 0]))
   const tableSet = new Set(BUSINESS_TABLES)
   const text = fs.readFileSync(sqlPath, 'utf8')
@@ -86,7 +101,7 @@ function countSqlCopyRows(sqlPath) {
   return counts
 }
 
-function runDocker(args, dockerArgs, options = {}) {
+function runDocker(args: RestoreRehearsalArgs, dockerArgs: string[], options: DockerRunOptions = {}): string {
   const result = spawnSync('docker', dockerArgs, {
     input: options.input,
     encoding: options.encoding || 'utf8',
@@ -98,26 +113,26 @@ function runDocker(args, dockerArgs, options = {}) {
   return String(result.stdout || '').trim()
 }
 
-function runPsql(args, database, sql, options = {}) {
+function runPsql(args: RestoreRehearsalArgs, database: string, sql: string, options: DockerRunOptions = {}): string {
   return runDocker(args, [
     'exec', '-i', args.container, 'psql', '-U', args.user, '-d', database,
     '-v', 'ON_ERROR_STOP=1', '-t', '-A', '-c', sql,
   ], options)
 }
 
-function createTempDatabaseName() {
+function createTempDatabaseName(): string {
   return `business_os_restore_rehearsal_${Date.now()}`
 }
 
-function quoteIdentifier(value) {
+function quoteIdentifier(value: string): string {
   return `"${String(value).replace(/"/g, '""')}"`
 }
 
-function createDatabase(args, databaseName) {
+function createDatabase(args: RestoreRehearsalArgs, databaseName: string): void {
   runDocker(args, ['exec', args.container, 'createdb', '-U', args.user, databaseName])
 }
 
-function dropDatabase(args, databaseName) {
+function dropDatabase(args: RestoreRehearsalArgs, databaseName: string): void {
   runPsql(args, 'postgres', `
     SELECT pg_terminate_backend(pid)
     FROM pg_stat_activity
@@ -126,7 +141,7 @@ function dropDatabase(args, databaseName) {
   runDocker(args, ['exec', args.container, 'dropdb', '-U', args.user, '--if-exists', databaseName])
 }
 
-function restoreSql(args, databaseName, sqlPath) {
+function restoreSql(args: RestoreRehearsalArgs, databaseName: string, sqlPath: string): void {
   const sql = fs.readFileSync(sqlPath, 'utf8')
   runDocker(args, [
     'exec', '-i', args.container, 'psql', '-U', args.user, '-d', databaseName,
@@ -134,14 +149,14 @@ function restoreSql(args, databaseName, sqlPath) {
   ], { input: sql, maxBuffer: 1024 * 1024 * 80 })
 }
 
-function countRestoredTables(args, databaseName) {
+function countRestoredTables(args: RestoreRehearsalArgs, databaseName: string): BusinessCounts {
   const selectParts = BUSINESS_TABLES.map((table) => `'${table}', (SELECT COUNT(*)::integer FROM ${quoteIdentifier(table)})`)
   const output = runPsql(args, databaseName, `SELECT json_build_object(${selectParts.join(', ')})::text;`)
   const line = output.split(/\r?\n/).find((entry) => entry.trim().startsWith('{'))
-  return JSON.parse(line)
+  return JSON.parse(line) as BusinessCounts
 }
 
-function compareCounts(expected, actual) {
+function compareCounts(expected: BusinessCounts, actual: BusinessCounts) {
   return BUSINESS_TABLES.map((table) => ({
     table,
     expected: Number(expected[table] || 0),

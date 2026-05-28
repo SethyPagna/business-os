@@ -802,15 +802,15 @@ runTest('generated integrity backlog cleanup is guarded and dry-run first', () =
 })
 
 runTest('dataset readiness has a standalone ops check', () => {
-  const readiness = read('ops/scripts/runtime/storage/dataset-readiness.mjs')
+  const readiness = read('ops/scripts/runtime/storage/dataset-readiness.ts')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(
     opsPackage.scripts['dataset-readiness'],
-    'node scripts/runtime/storage/dataset-readiness.mjs --output ops/runtime/reports/dataset-readiness-latest.json',
+    'node scripts/runtime/storage/dataset-readiness.ts --output ops/runtime/reports/dataset-readiness-latest.json',
   )
   assert.equal(
     opsPackage.scripts['dataset-readiness:loaded'],
-    'node scripts/runtime/storage/dataset-readiness.mjs --fail-if-empty --output ops/runtime/reports/dataset-readiness-latest.json',
+    'node scripts/runtime/storage/dataset-readiness.ts --fail-if-empty --output ops/runtime/reports/dataset-readiness-latest.json',
   )
   ;[
     '--fail-if-empty',
@@ -840,7 +840,7 @@ runTest('post-live hygiene gate fails on residue or empty datasets', () => {
     'cleanup-integrity-backlog.mjs',
     'sumMatchedCounts',
     'Generated integrity cleanup preview still matches',
-    'dataset-readiness.mjs',
+    'dataset-readiness.ts',
     '--fail-if-empty',
     'Dataset readiness is',
     'verify-data-integrity.js',
@@ -912,15 +912,15 @@ runTest('schema primary-key preflight is read-only and blocker aware', () => {
 })
 
 runTest('restore candidate scan is non-mutating and file based', () => {
-  const restoreCandidates = read('ops/scripts/runtime/storage/restore-candidates.mjs')
+  const restoreCandidates = read('ops/scripts/runtime/storage/restore-candidates.ts')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(
     opsPackage.scripts['restore-candidates'],
-    'node scripts/runtime/storage/restore-candidates.mjs --output ops/runtime/reports/restore-candidates-latest.json',
+    'node scripts/runtime/storage/restore-candidates.ts --output ops/runtime/reports/restore-candidates-latest.json',
   )
   assert.equal(
     opsPackage.scripts['restore-candidates:loaded'],
-    'node scripts/runtime/storage/restore-candidates.mjs --fail-if-no-loaded --output ops/runtime/reports/restore-candidates-latest.json',
+    'node scripts/runtime/storage/restore-candidates.ts --fail-if-no-loaded --output ops/runtime/reports/restore-candidates-latest.json',
   )
   ;[
     'countSqlCopyRows',
@@ -940,11 +940,11 @@ runTest('restore candidate scan is non-mutating and file based', () => {
 })
 
 runTest('restore rehearsal uses a temporary database', () => {
-  const rehearsal = read('ops/scripts/runtime/storage/restore-rehearsal.mjs')
+  const rehearsal = read('ops/scripts/runtime/storage/restore-rehearsal.ts')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(
     opsPackage.scripts['restore-rehearsal'],
-    'node scripts/runtime/storage/restore-rehearsal.mjs --output ops/runtime/reports/restore-rehearsal-latest.json',
+    'node scripts/runtime/storage/restore-rehearsal.ts --output ops/runtime/reports/restore-rehearsal-latest.json',
   )
   ;[
     'business_os_restore_rehearsal_',

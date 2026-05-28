@@ -154,7 +154,7 @@ function buildCheckPlan(args) {
       },
     ),
     () => withReportCheck(
-      nodeCheck('dataset readiness', 'ops/scripts/runtime/storage/dataset-readiness.mjs', [
+      nodeCheck('dataset readiness', 'ops/scripts/runtime/storage/dataset-readiness.ts', [
         '--fail-if-empty',
         '--output',
         DATASET_READINESS_REPORT,

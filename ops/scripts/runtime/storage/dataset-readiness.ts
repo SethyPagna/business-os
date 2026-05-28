@@ -1,12 +1,21 @@
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+const fs = require('node:fs')
+const path = require('node:path')
+const { spawnSync } = require('node:child_process')
 
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../../..')
 
-function parseArgs(argv = process.argv.slice(2)) {
+type DatasetReadinessArgs = {
+  failIfEmpty: boolean
+  output: string
+  container: string
+  user: string
+  database: string
+}
+
+type TableCounts = Record<string, number>
+
+function parseArgs(argv = process.argv.slice(2)): DatasetReadinessArgs {
   const args = {
     failIfEmpty: false,
     output: '',
@@ -27,13 +36,13 @@ function parseArgs(argv = process.argv.slice(2)) {
   return args
 }
 
-function assertInsideWorkspace(target) {
+function assertInsideWorkspace(target: string): string {
   const relative = path.relative(ROOT_DIR, target)
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Refusing output outside workspace: ${target}`)
   return target
 }
 
-function runPsql(args, sql) {
+function runPsql(args: DatasetReadinessArgs, sql: string): TableCounts {
   const result = spawnSync('docker', [
     'exec', '-i', args.container, 'psql', '-U', args.user, '-d', args.database,
     '-v', 'ON_ERROR_STOP=1', '-t', '-A', '-c', sql,
@@ -41,10 +50,10 @@ function runPsql(args, sql) {
   if (result.status !== 0) throw new Error((result.stderr || result.stdout || `psql exited with ${result.status}`).trim())
   const line = String(result.stdout || '').split(/\r?\n/).map((entry) => entry.trim()).find((entry) => entry.startsWith('{'))
   if (!line) throw new Error(`Dataset readiness query did not return JSON. Output: ${result.stdout}`)
-  return JSON.parse(line)
+  return JSON.parse(line) as TableCounts
 }
 
-function buildCountsSql() {
+function buildCountsSql(): string {
   return `
 SELECT json_build_object(
   'products', (SELECT COUNT(*)::integer FROM products),
@@ -62,7 +71,7 @@ SELECT json_build_object(
 `
 }
 
-function summarizeDataset(counts) {
+function summarizeDataset(counts: TableCounts): { status: 'loaded' | 'empty', loadedTables: string[], counts: TableCounts, note: string } {
   const transactionalTables = [
     'products',
     'product_batches',

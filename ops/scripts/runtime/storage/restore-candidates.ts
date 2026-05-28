@@ -1,9 +1,8 @@
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+const fs = require('node:fs')
+const path = require('node:path')
 
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../../..')
 const DEFAULT_BACKUP_ROOTS = [
   path.join(ROOT_DIR, 'ops', 'runtime', 'docker-release', 'backups'),
   path.join(ROOT_DIR, 'business-os-data', 'backups'),
@@ -21,7 +20,32 @@ const BUSINESS_TABLES = [
   'stock_transfers',
 ]
 
-function parseArgs(argv = process.argv.slice(2)) {
+type RestoreCandidatesArgs = {
+  output: string
+  failIfNoLoaded: boolean
+  roots: string[]
+}
+
+type BusinessCounts = Record<string, number>
+
+type BackupPackage = {
+  name: string
+  path: string
+  relativePath: string
+  valid: boolean
+  missingFiles: string[]
+  format: string
+  createdAt: string
+  updatedAt: string
+  readiness: {
+    status: 'loaded' | 'empty'
+    loadedTables: string[]
+    businessRows: number
+    counts: BusinessCounts
+  }
+}
+
+function parseArgs(argv = process.argv.slice(2)): RestoreCandidatesArgs {
   const args = {
     output: '',
     failIfNoLoaded: false,
@@ -40,25 +64,25 @@ function parseArgs(argv = process.argv.slice(2)) {
   return args
 }
 
-function assertInsideWorkspace(target) {
+function assertInsideWorkspace(target: string): string {
   const relative = path.relative(ROOT_DIR, target)
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Refusing path outside workspace: ${target}`)
   return target
 }
 
-function readJson(filePath) {
+function readJson(filePath: string): Record<string, unknown> | null {
   try {
     const buffer = fs.readFileSync(filePath)
     const text = buffer[0] === 0xff && buffer[1] === 0xfe
       ? buffer.toString('utf16le')
       : buffer.toString('utf8')
     return JSON.parse(text.replace(/^\uFEFF/, ''))
-  } catch (_) {
+  } catch {
     return null
   }
 }
 
-function countSqlCopyRows(sqlPath, tables = BUSINESS_TABLES) {
+function countSqlCopyRows(sqlPath: string, tables = BUSINESS_TABLES): BusinessCounts {
   const counts = Object.fromEntries(tables.map((table) => [table, 0]))
   if (!fs.existsSync(sqlPath)) return counts
   const tableSet = new Set(tables)
@@ -79,7 +103,7 @@ function countSqlCopyRows(sqlPath, tables = BUSINESS_TABLES) {
   return counts
 }
 
-function summarizeCounts(counts) {
+function summarizeCounts(counts: BusinessCounts): BackupPackage['readiness'] {
   const loadedTables = BUSINESS_TABLES.filter((table) => Number(counts[table] || 0) > 0)
   return {
     status: loadedTables.length ? 'loaded' : 'empty',
@@ -89,7 +113,7 @@ function summarizeCounts(counts) {
   }
 }
 
-function inspectBackupPackage(backupPath) {
+function inspectBackupPackage(backupPath: string): BackupPackage {
   const manifestPath = path.join(backupPath, 'manifest.json')
   const manifest = readJson(manifestPath)
   const missingFiles = REQUIRED_FILES.filter((file) => !fs.existsSync(path.join(backupPath, file)))
@@ -109,8 +133,8 @@ function inspectBackupPackage(backupPath) {
   }
 }
 
-function findBackupPackages(roots) {
-  const packages = []
+function findBackupPackages(roots: string[]): BackupPackage[] {
+  const packages: BackupPackage[] = []
   for (const root of roots) {
     if (!fs.existsSync(root)) continue
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
@@ -123,7 +147,7 @@ function findBackupPackages(roots) {
   return packages.sort((a, b) => String(b.createdAt || b.name).localeCompare(String(a.createdAt || a.name)))
 }
 
-function chooseRecommendation(packages) {
+function chooseRecommendation(packages: BackupPackage[]) {
   const loaded = packages.filter((entry) => entry.valid && entry.readiness.status === 'loaded')
   const latestLoaded = loaded[0] || null
   const largestLoaded = [...loaded].sort((a, b) => {
