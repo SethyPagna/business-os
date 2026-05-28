@@ -39,12 +39,12 @@ Total folders documented: **81**
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
 | 28 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
 | 29 | `frontend/src/components/catalog` | UI pages/components domain | 13 | 0 |
-| 30 | `frontend/src/components/contacts` | UI pages/components domain | 12 | 0 |
+| 30 | `frontend/src/components/contacts` | UI pages/components domain | 10 | 0 |
 | 31 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
 | 32 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
-| 33 | `frontend/src/components/dashboard/charts` | UI pages/components domain | 6 | 0 |
+| 33 | `frontend/src/components/dashboard/charts` | UI pages/components domain | 5 | 0 |
 | 34 | `frontend/src/components/files` | UI pages/components domain | 4 | 0 |
-| 35 | `frontend/src/components/inventory` | UI pages/components domain | 10 | 0 |
+| 35 | `frontend/src/components/inventory` | UI pages/components domain | 9 | 0 |
 | 36 | `frontend/src/components/loyalty-points` | UI pages/components domain | 1 | 0 |
 | 37 | `frontend/src/components/navigation` | UI pages/components domain | 1 | 0 |
 | 38 | `frontend/src/components/pos` | UI pages/components domain | 6 | 0 |
@@ -65,7 +65,7 @@ Total folders documented: **81**
 | 53 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
 | 54 | `frontend/src/components/shared` | UI pages/components domain | 17 | 0 |
 | 55 | `frontend/src/components/users` | UI pages/components domain | 4 | 0 |
-| 56 | `frontend/src/components/utils-settings` | UI pages/components domain | 10 | 0 |
+| 56 | `frontend/src/components/utils-settings` | UI pages/components domain | 8 | 0 |
 | 57 | `frontend/src/lang` | Localization resources | 2 | 0 |
 | 58 | `frontend/src/platform` | Project folder | 0 | 2 |
 | 59 | `frontend/src/platform/runtime` | Project folder | 1 | 0 |
@@ -755,7 +755,7 @@ Total folders documented: **81**
 ### 3.30 Folder: `frontend/src/components/contacts`
 
 - Purpose: UI pages/components domain
-- Direct files: **12**
+- Direct files: **10**
 - Direct subfolders: **0**
 
 #### 3.30.2 Files
@@ -764,16 +764,14 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `ContactImportModal.jsx` | UI component/page |
 | 2 | `contactImportWorker.ts` | UI component/page |
-| 3 | `contactOptionUtils.js` | UI component/page |
-| 4 | `contactOptionUtils.ts` | UI component/page |
-| 5 | `Contacts.jsx` | UI component/page |
-| 6 | `CustomerFormModal.jsx` | UI component/page |
-| 7 | `customerMembershipNumber.js` | UI component/page |
-| 8 | `customerMembershipNumber.ts` | UI component/page |
-| 9 | `CustomersTab.jsx` | UI component/page |
-| 10 | `DeliveryTab.jsx` | UI component/page |
-| 11 | `shared.jsx` | UI component/page |
-| 12 | `SuppliersTab.jsx` | UI component/page |
+| 3 | `contactOptionUtils.ts` | UI component/page |
+| 4 | `Contacts.jsx` | UI component/page |
+| 5 | `CustomerFormModal.jsx` | UI component/page |
+| 6 | `customerMembershipNumber.ts` | UI component/page |
+| 7 | `CustomersTab.jsx` | UI component/page |
+| 8 | `DeliveryTab.jsx` | UI component/page |
+| 9 | `shared.jsx` | UI component/page |
+| 10 | `SuppliersTab.jsx` | UI component/page |
 
 
 ### 3.31 Folder: `frontend/src/components/custom-tables`
@@ -812,7 +810,7 @@ Total folders documented: **81**
 ### 3.33 Folder: `frontend/src/components/dashboard/charts`
 
 - Purpose: UI pages/components domain
-- Direct files: **6**
+- Direct files: **5**
 - Direct subfolders: **0**
 
 #### 3.33.2 Files
@@ -821,10 +819,9 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `BarChart.jsx` | UI component/page |
 | 2 | `DonutChart.jsx` | UI component/page |
-| 3 | `index.js` | UI component/page |
-| 4 | `index.ts` | UI component/page |
-| 5 | `LineChart.jsx` | UI component/page |
-| 6 | `NoData.jsx` | UI component/page |
+| 3 | `index.ts` | UI component/page |
+| 4 | `LineChart.jsx` | UI component/page |
+| 5 | `NoData.jsx` | UI component/page |
 
 
 ### 3.34 Folder: `frontend/src/components/files`
@@ -846,7 +843,7 @@ Total folders documented: **81**
 ### 3.35 Folder: `frontend/src/components/inventory`
 
 - Purpose: UI pages/components domain
-- Direct files: **10**
+- Direct files: **9**
 - Direct subfolders: **0**
 
 #### 3.35.2 Files
@@ -860,9 +857,8 @@ Total folders documented: **81**
 | 5 | `InventoryMovementsSurface.jsx` | UI component/page |
 | 6 | `InventoryProductsSurface.jsx` | UI component/page |
 | 7 | `InventoryRfidSurface.jsx` | UI component/page |
-| 8 | `movementGroups.js` | UI component/page |
-| 9 | `movementGroups.ts` | UI component/page |
-| 10 | `ProductDetailModal.jsx` | UI component/page |
+| 8 | `movementGroups.ts` | UI component/page |
+| 9 | `ProductDetailModal.jsx` | UI component/page |
 
 
 ### 3.36 Folder: `frontend/src/components/loyalty-points`
@@ -1205,7 +1201,7 @@ Total folders documented: **81**
 ### 3.56 Folder: `frontend/src/components/utils-settings`
 
 - Purpose: UI pages/components domain
-- Direct files: **10**
+- Direct files: **8**
 - Direct subfolders: **0**
 
 #### 3.56.2 Files
@@ -1215,13 +1211,11 @@ Total folders documented: **81**
 | 1 | `AuditLog.jsx` | UI component/page |
 | 2 | `Backup.jsx` | UI component/page |
 | 3 | `FontFamilyPicker.jsx` | UI component/page |
-| 4 | `index.js` | UI component/page |
-| 5 | `index.ts` | UI component/page |
-| 6 | `OtpModal.jsx` | UI component/page |
-| 7 | `ResetData.jsx` | UI component/page |
-| 8 | `Settings.jsx` | UI component/page |
-| 9 | `settingsConflict.js` | UI component/page |
-| 10 | `settingsConflict.ts` | UI component/page |
+| 4 | `index.ts` | UI component/page |
+| 5 | `OtpModal.jsx` | UI component/page |
+| 6 | `ResetData.jsx` | UI component/page |
+| 7 | `Settings.jsx` | UI component/page |
+| 8 | `settingsConflict.ts` | UI component/page |
 
 
 ### 3.57 Folder: `frontend/src/lang`

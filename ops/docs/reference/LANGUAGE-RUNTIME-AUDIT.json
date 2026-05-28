@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:49:31.732Z",
+  "generatedAt": "2026-05-28T03:55:26.159Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 468,
+  "sourceFiles": 462,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -29,7 +29,7 @@
     ],
     [
       "JavaScript",
-      101
+      95
     ],
     [
       "Windows batch",
@@ -67,7 +67,7 @@
     ],
     [
       ".js",
-      101
+      95
     ],
     [
       ".bat",
@@ -608,7 +608,8 @@
     },
     {
       "implementation": "frontend/src/components/contacts/contactOptionUtils.ts",
-      "compatibilityWrapper": "frontend/src/components/contacts/contactOptionUtils.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after contact callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -616,15 +617,15 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
     },
     {
       "implementation": "frontend/src/components/inventory/movementGroups.ts",
-      "compatibilityWrapper": "frontend/src/components/inventory/movementGroups.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after inventory callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -632,8 +633,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1024,7 +1024,8 @@
     },
     {
       "implementation": "frontend/src/components/contacts/customerMembershipNumber.ts",
-      "compatibilityWrapper": "frontend/src/components/contacts/customerMembershipNumber.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after contact callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1033,15 +1034,15 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
     },
     {
       "implementation": "frontend/src/components/dashboard/charts/index.ts",
-      "compatibilityWrapper": "frontend/src/components/dashboard/charts/index.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after dashboard chart callers moved to TypeScript source",
       "declarationSupport": "frontend/src/types/jsx-modules.d.ts",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1050,8 +1051,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1092,7 +1092,8 @@
     },
     {
       "implementation": "frontend/src/components/utils-settings/index.ts",
-      "compatibilityWrapper": "frontend/src/components/utils-settings/index.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after utility settings callers moved to TypeScript source",
       "declarationSupport": "frontend/src/types/jsx-modules.d.ts",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1102,15 +1103,15 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
     },
     {
       "implementation": "frontend/src/components/utils-settings/settingsConflict.ts",
-      "compatibilityWrapper": "frontend/src/components/utils-settings/settingsConflict.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after Settings page callers moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1119,8 +1120,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true

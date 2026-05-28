@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T03:49:31.732Z
+Generated: 2026-05-28T03:55:26.159Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 468
+- Files scanned: 462
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -24,7 +24,7 @@ Generated: 2026-05-28T03:49:31.732Z
 | --- | --- |
 | TypeScript | 228 |
 | React JSX | 107 |
-| JavaScript | 101 |
+| JavaScript | 95 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |
@@ -92,8 +92,8 @@ Generated: 2026-05-28T03:49:31.732Z
 | `frontend/src/components/catalog/portalContentI18n.ts` | yes | retired frontend/src/components/catalog/portalContentI18n.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalContentI18n.test.ts`<br>`node frontend\tests\portalFaqVocabulary.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalEditorUtils.ts` | yes | retired frontend/src/components/catalog/portalEditorUtils.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalEditorUtils.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | yes | retired after catalog surfaces and tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalLanguagePacks.test.ts`<br>`node frontend\tests\portalFaqVocabulary.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/contacts/contactOptionUtils.ts` | yes | `frontend/src/components/contacts/contactOptionUtils.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/inventory/movementGroups.ts` | yes | `frontend/src/components/inventory/movementGroups.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryMovementGroups.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/contacts/contactOptionUtils.ts` | yes | retired after contact callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/inventory/movementGroups.ts` | yes | retired after inventory callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryMovementGroups.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/pos/posCore.ts` | yes | `frontend/src/components/pos/posCore.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\posCore.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/csvImport.ts` | yes | `frontend/src/utils/csvImport.js` | yes | `frontend/src/utils/pricing.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\csvImport.test.ts`<br>`node frontend\tests\productImportPlanner.test.ts` |
 | `frontend/src/utils/csvRowCounter.ts` | yes | retired after import modals and workers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryImportWorker.test.ts`<br>`node frontend\tests\salesImportWorker.test.ts`<br>`npm.cmd --prefix frontend run build` |
@@ -117,12 +117,12 @@ Generated: 2026-05-28T03:49:31.732Z
 | `frontend/src/components/products/import/productImportPlanner.ts` | yes | retired frontend/src/components/products/import/productImportPlanner.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/import/productImportWorker.ts` | yes | retired frontend/src/components/products/import/productImportWorker.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/receipt-settings/constants.ts` | yes | retired after receipt settings callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\receiptTemplate.test.ts`<br>`node frontend\tests\receiptSettingsSync.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/contacts/customerMembershipNumber.ts` | yes | `frontend/src/components/contacts/customerMembershipNumber.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/dashboard/charts/index.ts` | yes | `frontend/src/components/dashboard/charts/index.js` | yes | `frontend/src/types/jsx-modules.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/contacts/customerMembershipNumber.ts` | yes | retired after contact callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/dashboard/charts/index.ts` | yes | retired after dashboard chart callers moved to TypeScript source | n/a | `frontend/src/types/jsx-modules.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/receipt-settings/template.ts` | yes | retired after receipt settings callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\receiptTemplate.test.ts`<br>`node frontend\tests\receiptSettingsSync.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/shared/navigationConfig.ts` | yes | retired after navigation callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\navigationConfig.test.ts`<br>`node frontend\tests\sectionNavigation.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/utils-settings/index.ts` | yes | `frontend/src/components/utils-settings/index.js` | yes | `frontend/src/types/jsx-modules.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\utilsSettingsBarrel.test.ts`<br>`node frontend\tests\sectionNavigation.test.ts`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/utils-settings/settingsConflict.ts` | yes | `frontend/src/components/utils-settings/settingsConflict.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\settingsConflictHelpers.test.ts`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/utils-settings/index.ts` | yes | retired after utility settings callers moved to TypeScript source | n/a | `frontend/src/types/jsx-modules.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\utilsSettingsBarrel.test.ts`<br>`node frontend\tests\sectionNavigation.test.ts`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/utils-settings/settingsConflict.ts` | yes | retired after Settings page callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\settingsConflictHelpers.test.ts`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/platform/storage/storagePolicy.ts` | yes | retired frontend/src/platform/storage/storagePolicy.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\storagePolicy.test.ts`<br>`node frontend\tests\apiHttp.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/actionGuards.ts` | yes | retired frontend/src/utils/actionGuards.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\actionGuards.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/color.ts` | yes | retired after frontend callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`node frontend\tests\productSearchPagination.test.ts`<br>`npm.cmd --prefix frontend run build` |

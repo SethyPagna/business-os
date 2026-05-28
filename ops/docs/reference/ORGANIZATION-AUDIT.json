@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 565,
+  "filesScanned": 559,
   "largeFiles": 71,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -68,15 +68,11 @@
     ],
     [
       "frontend/components/contacts",
-      12
+      10
     ],
     [
       "frontend/components/inventory",
-      10
-    ],
-    [
-      "frontend/components/utils-settings",
-      10
+      9
     ],
     [
       "run",
@@ -91,16 +87,20 @@
       8
     ],
     [
-      "frontend/components/dashboard",
+      "frontend/components/receipt-settings",
       8
     ],
     [
-      "frontend/components/receipt-settings",
+      "frontend/components/utils-settings",
       8
     ],
     [
       "ops/scripts/powershell",
       8
+    ],
+    [
+      "frontend/components/dashboard",
+      7
     ],
     [
       "frontend/components/sales",
