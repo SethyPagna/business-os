@@ -1029,7 +1029,7 @@ Current checkpoint:
   source checks, typecheck, production build, runtime health, and the focused
   Product page action live check passed on frontend hash `db2bde8c13de0d64`.
 - Eighth Phase 26 physical move complete: Product presentation surfaces
-  `HeaderActions.jsx`, `ProductsListSurface.jsx`, and `ProductDetailModal.jsx`
+  `HeaderActions.tsx`, `ProductsListSurface.jsx`, and `ProductDetailModal.jsx`
   now live under `frontend/src/components/products/surfaces`. Product discount
   and product pagination source tests, source checks, typecheck, production
   build, runtime health, and the focused Product page action live check passed
@@ -1073,7 +1073,7 @@ Current checkpoint:
   runtime health, focused Product page action live check, and focused Product
   scanner live check passed on frontend hash `ff7f953e9b217168`.
 - Fourteenth Phase 26 physical move complete: Product row presentation helpers
-  now live under `frontend/src/components/products/surfaces/ProductRowParts.jsx`.
+  now live under `frontend/src/components/products/surfaces/ProductRowParts.tsx`.
   The module owns the product discount badge, row action menu wrapper, batch
   preview chips, and desktop details cell. `Products.jsx` now imports those
   presentation pieces instead of defining them inline. Source checks, typecheck,
@@ -1631,7 +1631,7 @@ Checkpoint:
   owns Products page helper functions for debounced state, brand lookups, frame
   scheduling, gallery normalization, gallery fallback selection, and public
   image URL resolution. `products/surfaces` now also owns Product row
-  presentation parts through `ProductRowParts.jsx`. `products/helpers` also
+  presentation parts through `ProductRowParts.tsx`. `products/helpers` also
   owns Product filter/export data helpers through `productFilterHelpers.mjs`.
   `products/helpers` now also owns Product selection and pagination data helpers
   through `productSelectionHelpers.mjs`.
@@ -5382,3 +5382,12 @@ Move 490 status:
   The utils-settings barrel now exports the converted TSX modules directly,
   source-reading tests target the TSX paths, and obsolete named `.jsx`
   declaration shims for reset exports were removed.
+
+Move 491 status:
+- Move 491 converts product presentation `HeaderActions.tsx` and
+  `ProductRowParts.tsx`. The typed contracts cover product header actions,
+  export menu entries, translation fallback behavior, product promotions,
+  batch preview rows, row action menu callbacks, money formatting, and detail
+  pill rendering. The conversion also removes corrupted fallback strings from
+  the product header and replaces loose detail-pill filtering with an explicit
+  typed accumulator.

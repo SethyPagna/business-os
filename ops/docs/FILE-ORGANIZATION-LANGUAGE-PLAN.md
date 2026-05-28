@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 490 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 491 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 73 `.jsx`
+  - 71 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 34 `.tsx`
+  - 36 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -208,7 +208,7 @@ Decision rule:
     source checks, typecheck, production build, runtime health, and a focused
     Product page Playwright action check passed on frontend hash
     `db2bde8c13de0d64`.
-12. Move the product presentation surface cluster. Done: `HeaderActions.jsx`,
+12. Move the product presentation surface cluster. Done: `HeaderActions.tsx`,
     `ProductsListSurface.jsx`, and `ProductDetailModal.jsx` now live in
     `frontend/src/components/products/surfaces`. Product discount and product
     pagination source tests, source checks, typecheck, production build,
@@ -251,7 +251,7 @@ Decision rule:
     source checks, typecheck, production build, runtime health, focused Product
     page Playwright, and focused Product scanner Playwright passed on frontend
     hash `ff7f953e9b217168`.
-18. Move product row presentation parts. Done: `ProductRowParts.jsx` now lives
+18. Move product row presentation parts. Done: `ProductRowParts.tsx` now lives
     in `frontend/src/components/products/surfaces`, owning the product discount
     badge, row action menu wrapper, batch preview chips, and desktop details
     cell. `Products.jsx` no longer defines those presentation helpers inline.
@@ -3861,6 +3861,13 @@ Decision rule:
     contracts while replacing stale mojibake triangle glyphs with lucide
     chevrons. The utils-settings barrel now exports these typed modules
     directly and the obsolete named `.jsx` declaration shims were removed.
+491. Convert product header actions and row presentation parts to TSX. Done:
+    `HeaderActions.tsx` now types product action callbacks, export menu items,
+    and translation fallbacks while removing corrupted fallback strings;
+    `ProductRowParts.tsx` now types product/promotion/batch preview records,
+    row action menu callbacks, money formatting, and detail-pill rendering.
+    `ProductDetailsCell` now uses an explicit typed pill accumulator instead
+    of relying on loose `filter(Boolean)` inference.
 
 ## Safety Gates
 
