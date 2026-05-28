@@ -1654,7 +1654,7 @@ Total folders documented: **81**
 | 3 | `phase84-contacts-live-check.mjs` | Project source/support file |
 | 4 | `phase84-files-providers-actions-live-check.mjs` | Project source/support file |
 | 5 | `phase84-inventory-actions-live-check.mjs` | Project source/support file |
-| 6 | `phase84-live-suite.mjs` | Project source/support file |
+| 6 | `phase84-live-suite.ts` | Project source/support file |
 | 7 | `phase84-product-brands-actions-live-check.mjs` | Project source/support file |
 | 8 | `phase84-product-categories-actions-live-check.mjs` | Project source/support file |
 | 9 | `phase84-product-page-actions-live-check.mjs` | Project source/support file |

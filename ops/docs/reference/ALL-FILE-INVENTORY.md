@@ -526,7 +526,7 @@ Total files documented: **569**
 | 514 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | project-scripts | 126 | 5.7 | Project source/support file |
 | 515 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | project-scripts | 125 | 5.9 | Project source/support file |
 | 516 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | project-scripts | 154 | 7.8 | Project source/support file |
-| 517 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | project-scripts | 198 | 6.4 | Project source/support file |
+| 517 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | project-scripts | 247 | 7.6 | Project source/support file |
 | 518 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | project-scripts | 125 | 6.2 | Project source/support file |
 | 519 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | project-scripts | 119 | 5.8 | Project source/support file |
 | 520 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | project-scripts | 132 | 6.1 | Project source/support file |

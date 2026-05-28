@@ -487,7 +487,7 @@ Code files documented: **506**
 | 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 477 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | 4 | 0 | 0 | 0 |
+| 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 4 | 0 | 0 | 0 |
 | 479 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 480 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 481 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
@@ -7923,7 +7923,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.478 `ops/scripts/runtime/live-checks/phase84-live-suite.mjs`
+### 3.478 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
 
 - Declared exports: none detected
 - Imports (4)

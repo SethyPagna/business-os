@@ -487,7 +487,7 @@ Code files scanned: **506**
 | 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 2 |
 | 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
 | 477 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 3 |
-| 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` | 11 |
+| 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 11 |
 | 479 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 3 |
 | 480 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 2 |
 | 481 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 3 |
@@ -6741,21 +6741,21 @@ Code files scanned: **506**
 | 2 | `openFirstProductDetail` | function | 26 |
 | 3 | `main` | function | 35 |
 
-### 3.478 `ops/scripts/runtime/live-checks/phase84-live-suite.mjs`
+### 3.478 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 31 |
-| 2 | `assertInsideWorkspace` | function | 54 |
-| 3 | `tail` | function | 60 |
-| 4 | `readJsonIfExists` | function | 64 |
-| 5 | `latestReportPathForPrefix` | function | 69 |
-| 6 | `relativePath` | function | 87 |
-| 7 | `summarizeReport` | function | 92 |
-| 8 | `readStepReport` | function | 123 |
-| 9 | `runNodeStep` | function | 133 |
-| 10 | `skippedStep` | function | 153 |
-| 11 | `runSuite` | function | 163 |
+| 1 | `parseArgs` | function | 78 |
+| 2 | `assertInsideWorkspace` | function | 101 |
+| 3 | `tail` | function | 107 |
+| 4 | `readJsonIfExists` | function | 111 |
+| 5 | `latestReportPathForPrefix` | function | 116 |
+| 6 | `relativePath` | function | 134 |
+| 7 | `summarizeReport` | function | 139 |
+| 8 | `readStepReport` | function | 172 |
+| 9 | `runNodeStep` | function | 182 |
+| 10 | `skippedStep` | function | 202 |
+| 11 | `runSuite` | function | 212 |
 
 ### 3.479 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs`
 
