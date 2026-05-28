@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 460 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 461 in this file.
 
 ## Goal
 
@@ -1530,7 +1530,7 @@ Decision rule:
     once from active products before processing uploaded image filenames. The
     image-only import path now does one normalized-name lookup per image instead
     of scanning every active product for every uploaded file. The behavior stays
-    name-based and route-local, while `backend/test/productSearchPagination.test.js`
+    name-based and route-local, while `backend/test/productSearchPagination.test.ts`
     guards the map-backed path and absence of the repeated `allProducts.find`
     loop.
 177. Reuse sale creation movement statements. Done:
@@ -3683,6 +3683,15 @@ Decision rule:
     preserve the direct Node/CommonJS execution contract while removing two
     more `.js` source entrypoints from the schema and data-integrity guardrail
     loop.
+461. Convert the first backend utility test tranche to TypeScript. Done:
+    Ten short backend regression tests now run as `.ts` entrypoints:
+    `backupDefaultDestination`, `productSearchPagination`, `initials`,
+    `idempotency`, `permissionPolicy`, `portalUtils`,
+    `importJobPerformanceHardening`, `netSecurity`, `analyticsRuntime`, and
+    `integrationDoctor`. The backend `test:utils` script, language/runtime
+    proof references, and related plan notes now point at the TypeScript test
+    paths. This keeps production backend source untouched while shrinking the
+    remaining `.js` test surface in a verified slice.
 
 ## Safety Gates
 

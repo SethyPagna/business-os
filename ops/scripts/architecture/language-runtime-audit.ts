@@ -977,7 +977,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
     tests: [
       'backend/test/portalInventoryRegression.test.js',
-      'backend/test/portalUtils.test.js',
+      'backend/test/portalUtils.test.ts',
       'backend/test/routeContracts.test.js',
     ],
   },
@@ -987,11 +987,11 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Remove productsByImageBaseName and return to allProducts.find inside the image loop; image matching behavior remains name-based.',
     proof: [
       'npm.cmd --prefix backend run test:utils',
-      'node backend\\test\\productSearchPagination.test.js',
+      'node backend\\test\\productSearchPagination.test.ts',
       'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
-      'backend/test/productSearchPagination.test.js',
+      'backend/test/productSearchPagination.test.ts',
       'backend/test/importDecisionIntegrity.test.js',
       'backend/test/routeContracts.test.js',
     ],

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 470.
+- Latest completed implementation move in this roadmap: Move 471.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -5199,3 +5199,14 @@ Move 470 status:
   keeps the schema and data-integrity loop on the direct Node/CommonJS path
   while removing two more JavaScript source entrypoints from the recurring
   verification surface.
+
+Move 471 status:
+- Move 471 converts the first backend utility test tranche to TypeScript.
+  `backupDefaultDestination.test.ts`, `productSearchPagination.test.ts`,
+  `initials.test.ts`, `idempotency.test.ts`, `permissionPolicy.test.ts`,
+  `portalUtils.test.ts`, `importJobPerformanceHardening.test.ts`,
+  `netSecurity.test.ts`, `analyticsRuntime.test.ts`, and
+  `integrationDoctor.test.ts` replace their `.js` test entrypoints. The
+  backend `test:utils` command and language/runtime proof references now call
+  the TypeScript paths, keeping production backend runtime files stable while
+  reducing the remaining JavaScript test surface.
