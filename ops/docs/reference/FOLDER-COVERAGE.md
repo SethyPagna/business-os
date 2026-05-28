@@ -1694,11 +1694,11 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `cleanup-integrity-backlog.mjs` | Project source/support file |
-| 2 | `cleanup-test-data.mjs` | Project source/support file |
+| 1 | `cleanup-integrity-backlog.ts` | Project source/support file |
+| 2 | `cleanup-test-data.ts` | Project source/support file |
 | 3 | `dataset-readiness.ts` | Project source/support file |
-| 4 | `post-live-hygiene.mjs` | Project source/support file |
-| 5 | `prune-storage.mjs` | Project source/support file |
+| 4 | `post-live-hygiene.ts` | Project source/support file |
+| 5 | `prune-storage.ts` | Project source/support file |
 | 6 | `restore-candidates.ts` | Project source/support file |
 | 7 | `restore-rehearsal.ts` | Project source/support file |
 

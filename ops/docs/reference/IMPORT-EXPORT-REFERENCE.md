@@ -503,11 +503,11 @@ Code files documented: **506**
 | 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
 | 492 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 | 0 | 0 | 0 |
 | 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 2 | 0 | 0 | 0 |
-| 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 4 | 0 | 0 | 0 |
-| 495 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 4 | 0 | 0 | 0 |
+| 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 3 | 0 | 0 | 0 |
+| 495 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 3 | 0 | 0 | 0 |
 | 496 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 3 | 0 | 0 | 0 |
-| 497 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | 4 | 0 | 0 | 0 |
-| 498 | `ops/scripts/runtime/storage/prune-storage.mjs` | 5 | 0 | 0 | 0 |
+| 497 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 3 | 0 | 0 | 0 |
+| 498 | `ops/scripts/runtime/storage/prune-storage.ts` | 4 | 0 | 0 | 0 |
 | 499 | `ops/scripts/runtime/storage/restore-candidates.ts` | 2 | 0 | 0 | 0 |
 | 500 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 3 | 0 | 0 | 0 |
 | 501 | `ops/scripts/verification/verify-backup-reliability.js` | 3 | 0 | 1 | 0 |
@@ -8151,27 +8151,25 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.494 `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs`
+### 3.494 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
 
 - Declared exports: none detected
-- Imports (4)
+- Imports (3)
   - `node:child_process`
   - `node:fs`
   - `node:path`
-  - `node:url`
 - Internal dependencies (0)
   - none
 - Referenced by (0)
   - none
 
-### 3.495 `ops/scripts/runtime/storage/cleanup-test-data.mjs`
+### 3.495 `ops/scripts/runtime/storage/cleanup-test-data.ts`
 
 - Declared exports: none detected
-- Imports (4)
+- Imports (3)
   - `node:child_process`
   - `node:fs`
   - `node:path`
-  - `node:url`
 - Internal dependencies (0)
   - none
 - Referenced by (0)
@@ -8189,28 +8187,26 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.497 `ops/scripts/runtime/storage/post-live-hygiene.mjs`
+### 3.497 `ops/scripts/runtime/storage/post-live-hygiene.ts`
 
 - Declared exports: none detected
-- Imports (4)
+- Imports (3)
   - `node:child_process`
   - `node:fs`
   - `node:path`
-  - `node:url`
 - Internal dependencies (0)
   - none
 - Referenced by (0)
   - none
 
-### 3.498 `ops/scripts/runtime/storage/prune-storage.mjs`
+### 3.498 `ops/scripts/runtime/storage/prune-storage.ts`
 
 - Declared exports: none detected
-- Imports (5)
+- Imports (4)
   - `node:child_process`
   - `node:fs`
   - `node:module`
   - `node:path`
-  - `node:url`
 - Internal dependencies (0)
   - none
 - Referenced by (0)

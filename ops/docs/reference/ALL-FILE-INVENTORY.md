@@ -542,11 +542,11 @@ Total files documented: **569**
 | 530 | `ops/scripts/runtime/smoke/check-route-contract.ts` | project-scripts | 86 | 3.9 | Project source/support file |
 | 531 | `ops/scripts/runtime/smoke/live-smoke.mjs` | project-scripts | 319 | 13.5 | Project source/support file |
 | 532 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | project-scripts | 213 | 6.9 | Project source/support file |
-| 533 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | project-scripts | 231 | 9.7 | Project source/support file |
-| 534 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | project-scripts | 431 | 18.8 | Project source/support file |
+| 533 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | project-scripts | 230 | 9.6 | Project source/support file |
+| 534 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | project-scripts | 430 | 18.8 | Project source/support file |
 | 535 | `ops/scripts/runtime/storage/dataset-readiness.ts` | project-scripts | 117 | 4.5 | Project source/support file |
-| 536 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | project-scripts | 212 | 6.8 | Project source/support file |
-| 537 | `ops/scripts/runtime/storage/prune-storage.mjs` | project-scripts | 466 | 15.8 | Project source/support file |
+| 536 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | project-scripts | 211 | 6.7 | Project source/support file |
+| 537 | `ops/scripts/runtime/storage/prune-storage.ts` | project-scripts | 464 | 15.7 | Project source/support file |
 | 538 | `ops/scripts/runtime/storage/restore-candidates.ts` | project-scripts | 213 | 7.5 | Project source/support file |
 | 539 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | project-scripts | 219 | 7.9 | Project source/support file |
 | 540 | `ops/scripts/verification/verify-backup-reliability.js` | project-scripts | 140 | 5.0 | Project source/support file |

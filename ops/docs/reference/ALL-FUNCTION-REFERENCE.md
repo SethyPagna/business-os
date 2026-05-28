@@ -503,11 +503,11 @@ Code files scanned: **506**
 | 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
 | 492 | `ops/scripts/runtime/smoke/live-smoke.mjs` | 6 |
 | 493 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
-| 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` | 8 |
-| 495 | `ops/scripts/runtime/storage/cleanup-test-data.mjs` | 21 |
+| 494 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
+| 495 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
 | 496 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
-| 497 | `ops/scripts/runtime/storage/post-live-hygiene.mjs` | 11 |
-| 498 | `ops/scripts/runtime/storage/prune-storage.mjs` | 17 |
+| 497 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 11 |
+| 498 | `ops/scripts/runtime/storage/prune-storage.ts` | 17 |
 | 499 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
 | 500 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
 | 501 | `ops/scripts/verification/verify-backup-reliability.js` | 6 |
@@ -6887,44 +6887,44 @@ Code files scanned: **506**
 | 6 | `writeReport` | function | 115 |
 | 7 | `main` | function | 121 |
 
-### 3.494 `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs`
+### 3.494 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 9 |
-| 2 | `assertInsideWorkspace` | function | 31 |
-| 3 | `generatedTextMatch` | function | 37 |
-| 4 | `buildTempTablesSql` | function | 44 |
-| 5 | `buildCountsSql` | function | 145 |
-| 6 | `buildDeleteSql` | function | 163 |
-| 7 | `buildSql` | function | 192 |
-| 8 | `runPsql` | function | 201 |
+| 1 | `parseArgs` | function | 8 |
+| 2 | `assertInsideWorkspace` | function | 30 |
+| 3 | `generatedTextMatch` | function | 36 |
+| 4 | `buildTempTablesSql` | function | 43 |
+| 5 | `buildCountsSql` | function | 144 |
+| 6 | `buildDeleteSql` | function | 162 |
+| 7 | `buildSql` | function | 191 |
+| 8 | `runPsql` | function | 200 |
 
-### 3.495 `ops/scripts/runtime/storage/cleanup-test-data.mjs`
+### 3.495 `ops/scripts/runtime/storage/cleanup-test-data.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 9 |
-| 2 | `assertInsideWorkspace` | function | 39 |
-| 3 | `sqlString` | function | 45 |
-| 4 | `likeEscape` | function | 49 |
-| 5 | `productSeedWhere` | function | 53 |
-| 6 | `textQaWhere` | function | 73 |
-| 7 | `lookupNameWhere` | function | 85 |
-| 8 | `buildTempTablesSql` | function | 97 |
-| 9 | `textMatch` | const arrow | 98 |
-| 10 | `lookupNameMatch` | const arrow | 99 |
-| 11 | `buildCountsSelectSql` | function | 219 |
-| 12 | `buildDeleteSql` | function | 243 |
-| 13 | `buildSql` | function | 304 |
-| 14 | `runPsql` | function | 308 |
-| 15 | `pathIsInside` | function | 320 |
-| 16 | `measurePathBytes` | function | 325 |
-| 17 | `walkFiles` | function | 336 |
-| 18 | `fileMatchesGeneratedImport` | function | 345 |
-| 19 | `findGeneratedImportDirectories` | function | 351 |
-| 20 | `cleanupAuditImportFiles` | function | 377 |
-| 21 | `countMatchedRows` | function | 400 |
+| 1 | `parseArgs` | function | 8 |
+| 2 | `assertInsideWorkspace` | function | 38 |
+| 3 | `sqlString` | function | 44 |
+| 4 | `likeEscape` | function | 48 |
+| 5 | `productSeedWhere` | function | 52 |
+| 6 | `textQaWhere` | function | 72 |
+| 7 | `lookupNameWhere` | function | 84 |
+| 8 | `buildTempTablesSql` | function | 96 |
+| 9 | `textMatch` | const arrow | 97 |
+| 10 | `lookupNameMatch` | const arrow | 98 |
+| 11 | `buildCountsSelectSql` | function | 218 |
+| 12 | `buildDeleteSql` | function | 242 |
+| 13 | `buildSql` | function | 303 |
+| 14 | `runPsql` | function | 307 |
+| 15 | `pathIsInside` | function | 319 |
+| 16 | `measurePathBytes` | function | 324 |
+| 17 | `walkFiles` | function | 335 |
+| 18 | `fileMatchesGeneratedImport` | function | 344 |
+| 19 | `findGeneratedImportDirectories` | function | 350 |
+| 20 | `cleanupAuditImportFiles` | function | 376 |
+| 21 | `countMatchedRows` | function | 399 |
 
 ### 3.496 `ops/scripts/runtime/storage/dataset-readiness.ts`
 
@@ -6936,43 +6936,43 @@ Code files scanned: **506**
 | 4 | `buildCountsSql` | function | 56 |
 | 5 | `summarizeDataset` | function | 74 |
 
-### 3.497 `ops/scripts/runtime/storage/post-live-hygiene.mjs`
+### 3.497 `ops/scripts/runtime/storage/post-live-hygiene.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 12 |
-| 2 | `assertInsideWorkspace` | function | 27 |
-| 3 | `runCheck` | function | 33 |
-| 4 | `appendBounded` | const arrow | 43 |
-| 5 | `readJsonReport` | function | 77 |
-| 6 | `sumMatchedCounts` | function | 83 |
-| 7 | `withReportCheck` | function | 88 |
-| 8 | `nodeCheck` | function | 111 |
-| 9 | `buildCheckPlan` | function | 115 |
-| 10 | `runChecks` | function | 185 |
-| 11 | `main` | function | 193 |
+| 1 | `parseArgs` | function | 11 |
+| 2 | `assertInsideWorkspace` | function | 26 |
+| 3 | `runCheck` | function | 32 |
+| 4 | `appendBounded` | const arrow | 42 |
+| 5 | `readJsonReport` | function | 76 |
+| 6 | `sumMatchedCounts` | function | 82 |
+| 7 | `withReportCheck` | function | 87 |
+| 8 | `nodeCheck` | function | 110 |
+| 9 | `buildCheckPlan` | function | 114 |
+| 10 | `runChecks` | function | 184 |
+| 11 | `main` | function | 192 |
 
-### 3.498 `ops/scripts/runtime/storage/prune-storage.mjs`
+### 3.498 `ops/scripts/runtime/storage/prune-storage.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readJsonFile` | function | 14 |
-| 2 | `numberFromPolicy` | function | 22 |
-| 3 | `parseArgs` | function | 27 |
-| 4 | `runDockerCommand` | function | 103 |
-| 5 | `pruneDockerSafe` | function | 111 |
-| 6 | `loadEnvFile` | function | 158 |
-| 7 | `loadRuntimeEnv` | function | 176 |
-| 8 | `assertInsideWorkspace` | function | 185 |
-| 9 | `directoryBytes` | function | 194 |
-| 10 | `pathBytes` | function | 220 |
-| 11 | `pruneDirectoryChildren` | function | 229 |
-| 12 | `pruneDirectoryEntries` | function | 233 |
-| 13 | `collectLogFiles` | function | 270 |
-| 14 | `compactLogFile` | function | 298 |
-| 15 | `compactRuntimeLogs` | function | 326 |
-| 16 | `findBackupRoots` | function | 359 |
-| 17 | `main` | function | 373 |
+| 1 | `readJsonFile` | function | 12 |
+| 2 | `numberFromPolicy` | function | 20 |
+| 3 | `parseArgs` | function | 25 |
+| 4 | `runDockerCommand` | function | 101 |
+| 5 | `pruneDockerSafe` | function | 109 |
+| 6 | `loadEnvFile` | function | 156 |
+| 7 | `loadRuntimeEnv` | function | 174 |
+| 8 | `assertInsideWorkspace` | function | 183 |
+| 9 | `directoryBytes` | function | 192 |
+| 10 | `pathBytes` | function | 218 |
+| 11 | `pruneDirectoryChildren` | function | 227 |
+| 12 | `pruneDirectoryEntries` | function | 231 |
+| 13 | `collectLogFiles` | function | 268 |
+| 14 | `compactLogFile` | function | 296 |
+| 15 | `compactRuntimeLogs` | function | 324 |
+| 16 | `findBackupRoots` | function | 357 |
+| 17 | `main` | function | 371 |
 
 ### 3.499 `ops/scripts/runtime/storage/restore-candidates.ts`
 
