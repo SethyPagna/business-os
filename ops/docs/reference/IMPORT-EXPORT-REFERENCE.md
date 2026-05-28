@@ -478,10 +478,10 @@ Code files documented: **506**
 | 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 9 | 0 | 3 | 0 |
 | 467 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 9 | 0 | 3 | 0 |
 | 468 | `ops/scripts/runtime/browser-action-smoke.mjs` | 8 | 0 | 0 | 0 |
-| 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | 4 | 0 | 0 | 0 |
-| 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | 3 | 0 | 0 | 0 |
-| 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | 5 | 0 | 1 | 0 |
-| 472 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | 5 | 0 | 0 | 0 |
+| 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
+| 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 3 | 0 | 0 | 0 |
+| 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 4 | 0 | 1 | 0 |
+| 472 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 4 | 0 | 0 | 0 |
 | 473 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 0 | 7 | 0 | 14 |
 | 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 6 | 0 | 2 | 0 |
@@ -7637,7 +7637,7 @@ Code files documented: **506**
   - `ops/scripts/architecture/phase29-audit.ts`
   - `ops/scripts/frontend/verify-i18n.js`
   - `ops/scripts/frontend/verify-ui.js`
-  - `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
+  - `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
   - `ops/scripts/verification/verify-backup-reliability.js`
   - `ops/scripts/verification/verify-docker-release.js`
   - `ops/scripts/verification/verify-hardening-policy.js`
@@ -7780,7 +7780,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.469 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs`
+### 3.469 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7793,7 +7793,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.470 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs`
+### 3.470 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7805,29 +7805,27 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.471 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
+### 3.471 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
 
 - Declared exports: none detected
-- Imports (5)
+- Imports (4)
   - `../../lib/fs-utils.js`
   - `node:fs`
   - `node:https`
-  - `node:module`
   - `node:path`
 - Internal dependencies (1)
   - `ops/scripts/lib/fs-utils.js`
 - Referenced by (0)
   - none
 
-### 3.472 `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs`
+### 3.472 `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts`
 
 - Declared exports: none detected
-- Imports (5)
+- Imports (4)
   - `node:crypto`
   - `node:fs`
   - `node:module`
   - `node:path`
-  - `node:url`
 - Internal dependencies (0)
   - none
 - Referenced by (0)

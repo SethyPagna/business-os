@@ -1633,10 +1633,10 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `rotate-cloudflare-tunnel-token.mjs` | Project source/support file |
-| 2 | `update-cloudflare-tunnel-origin.mjs` | Project source/support file |
-| 3 | `verify-cloudflare-automation.mjs` | Project source/support file |
-| 4 | `verify-r2-object-store.mjs` | Project source/support file |
+| 1 | `rotate-cloudflare-tunnel-token.ts` | Project source/support file |
+| 2 | `update-cloudflare-tunnel-origin.ts` | Project source/support file |
+| 3 | `verify-cloudflare-automation.ts` | Project source/support file |
+| 4 | `verify-r2-object-store.ts` | Project source/support file |
 
 
 ### 3.75 Folder: `ops/scripts/runtime/live-checks`

@@ -478,10 +478,10 @@ Code files scanned: **506**
 | 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 43 |
 | 467 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 22 |
 | 468 | `ops/scripts/runtime/browser-action-smoke.mjs` | 32 |
-| 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | 16 |
-| 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | 6 |
-| 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | 16 |
-| 472 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | 8 |
+| 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 16 |
+| 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
+| 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
+| 472 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
 | 473 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 8 |
 | 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 2 |
 | 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 2 |
@@ -6633,7 +6633,7 @@ Code files scanned: **506**
 | 31 | `runProfile` | function | 678 |
 | 32 | `main` | function | 746 |
 
-### 3.469 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs`
+### 3.469 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6654,7 +6654,7 @@ Code files scanned: **506**
 | 15 | `main` | function | 150 |
 | 16 | `requestJson` | function | 205 |
 
-### 3.470 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs`
+### 3.470 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6665,39 +6665,39 @@ Code files scanned: **506**
 | 5 | `main` | function | 58 |
 | 6 | `requestJson` | function | 103 |
 
-### 3.471 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs`
+### 3.471 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 14 |
-| 2 | `readToken` | function | 24 |
-| 3 | `cleanToken` | const arrow | 25 |
-| 4 | `readAllowedEmails` | function | 31 |
-| 5 | `normalizeAdminAccessMode` | function | 39 |
-| 6 | `requestJson` | function | 45 |
-| 7 | `summarizeFailure` | function | 80 |
-| 8 | `cloudflareErrors` | function | 87 |
-| 9 | `assertSuccess` | function | 93 |
-| 10 | `buildAccessPolicies` | function | 100 |
-| 11 | `upsertAccessApp` | function | 121 |
-| 12 | `getEntrypointRuleset` | function | 146 |
-| 13 | `upsertEntrypointRuleset` | function | 152 |
-| 14 | `tryApplyRuleset` | function | 171 |
-| 15 | `applyCloudflareAutomation` | function | 182 |
-| 16 | `main` | function | 226 |
+| 1 | `parseArgs` | function | 11 |
+| 2 | `readToken` | function | 21 |
+| 3 | `cleanToken` | const arrow | 22 |
+| 4 | `readAllowedEmails` | function | 28 |
+| 5 | `normalizeAdminAccessMode` | function | 36 |
+| 6 | `requestJson` | function | 42 |
+| 7 | `summarizeFailure` | function | 77 |
+| 8 | `cloudflareErrors` | function | 84 |
+| 9 | `assertSuccess` | function | 90 |
+| 10 | `buildAccessPolicies` | function | 97 |
+| 11 | `upsertAccessApp` | function | 118 |
+| 12 | `getEntrypointRuleset` | function | 143 |
+| 13 | `upsertEntrypointRuleset` | function | 149 |
+| 14 | `tryApplyRuleset` | function | 168 |
+| 15 | `applyCloudflareAutomation` | function | 179 |
+| 16 | `main` | function | 223 |
 
-### 3.472 `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs`
+### 3.472 `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `loadEnvFile` | function | 20 |
-| 2 | `readConfig` | function | 38 |
-| 3 | `bodyToString` | function | 61 |
-| 4 | `isMissingObjectError` | function | 69 |
-| 5 | `isAuthLikeError` | function | 75 |
-| 6 | `canUseApiFallback` | function | 84 |
-| 7 | `verifyRuntimeObjectStoreFallback` | function | 88 |
-| 8 | `main` | function | 96 |
+| 1 | `loadEnvFile` | function | 18 |
+| 2 | `readConfig` | function | 36 |
+| 3 | `bodyToString` | function | 59 |
+| 4 | `isMissingObjectError` | function | 67 |
+| 5 | `isAuthLikeError` | function | 73 |
+| 6 | `canUseApiFallback` | function | 82 |
+| 7 | `verifyRuntimeObjectStoreFallback` | function | 86 |
+| 8 | `main` | function | 94 |
 
 ### 3.473 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
 

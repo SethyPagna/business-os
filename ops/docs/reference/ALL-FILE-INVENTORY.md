@@ -119,7 +119,7 @@ Total files documented: **569**
 | 107 | `backend/test/fileAssetStorageReconcile.test.js` | backend-root | 57 | 1.4 | Project source/support file |
 | 108 | `backend/test/fileAssetUsageCache.test.js` | backend-root | 120 | 3.6 | Project source/support file |
 | 109 | `backend/test/fileRouteSecurityFlow.test.js` | backend-root | 217 | 7.2 | Project source/support file |
-| 110 | `backend/test/fullAutomation.test.js` | backend-root | 971 | 38.1 | Project source/support file |
+| 110 | `backend/test/fullAutomation.test.js` | backend-root | 970 | 38.0 | Project source/support file |
 | 111 | `backend/test/googleDriveSyncVersioning.test.js` | backend-root | 121 | 5.1 | Project source/support file |
 | 112 | `backend/test/idempotency.test.js` | backend-root | 32 | 0.7 | Project source/support file |
 | 113 | `backend/test/importCsv.test.js` | backend-root | 83 | 3.0 | Project source/support file |
@@ -517,10 +517,10 @@ Total files documented: **569**
 | 505 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | project-scripts | 1425 | 53.8 | Project source/support file |
 | 506 | `ops/scripts/runtime/audits/full-app-audit.mjs` | project-scripts | 621 | 27.5 | Project source/support file |
 | 507 | `ops/scripts/runtime/browser-action-smoke.mjs` | project-scripts | 775 | 28.5 | Project source/support file |
-| 508 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.mjs` | project-scripts | 244 | 10.8 | Project source/support file |
-| 509 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.mjs` | project-scripts | 144 | 6.1 | Project source/support file |
-| 510 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.mjs` | project-scripts | 288 | 12.1 | Project source/support file |
-| 511 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.mjs` | project-scripts | 157 | 6.1 | Project source/support file |
+| 508 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | project-scripts | 244 | 10.8 | Project source/support file |
+| 509 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | project-scripts | 144 | 6.0 | Project source/support file |
+| 510 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | project-scripts | 285 | 12.0 | Project source/support file |
+| 511 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | project-scripts | 155 | 6.0 | Project source/support file |
 | 512 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | project-scripts | 67 | 2.4 | Project source/support file |
 | 513 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | project-scripts | 129 | 6.2 | Project source/support file |
 | 514 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | project-scripts | 126 | 5.7 | Project source/support file |
