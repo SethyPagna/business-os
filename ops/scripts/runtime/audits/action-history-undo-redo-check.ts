@@ -1,11 +1,49 @@
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import { loginWithFetch } from './audit-auth.mjs'
+const fs = require('node:fs')
+const path = require('node:path')
+const { spawnSync } = require('node:child_process')
 
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
+type FetchSession = {
+  cookieHeader: string
+}
+
+type ActionHistoryItem = {
+  id?: number | string
+  status?: string
+}
+
+type ActionHistoryResponse = {
+  id?: number | string
+  item?: ActionHistoryItem
+  items?: ActionHistoryItem[]
+  payload?: Record<string, unknown>
+  error?: string
+}
+
+type CleanupCommandResult = {
+  ok: boolean
+  status: number | string | null
+  stdoutTail: string
+  stderrTail: string
+}
+
+type CleanupResult = {
+  skipped: boolean
+  ok?: boolean
+  apply?: CleanupCommandResult & { outputPath: string }
+  postcheck?: CleanupCommandResult & { outputPath: string }
+}
+
+type ActionHistoryReport = {
+  generatedAt: string
+  baseUrl: string
+  prefix: string
+  actionId: number | null
+  checks: Record<string, boolean>
+  cleanup: CleanupResult | null
+}
+
+const ROOT_DIR = path.resolve(__dirname, '../../../..')
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
 const USERNAME = process.env.BOS_USERNAME || 'admin'
 const PASSWORD = process.env.BOS_PASSWORD || 'Admin123456!'
@@ -21,11 +59,16 @@ const CLEANUP_POSTCHECK_REPORT_PATH = process.env.BOS_ACTION_HISTORY_CLEANUP_POS
 const CLEANUP_TEST_DATA = String(process.env.BOS_ACTION_HISTORY_CLEANUP || '1').trim() !== '0'
 const PREFIX = process.env.BOS_ACTION_HISTORY_PREFIX || `QA Action History ${Date.now()}`
 
-function assert(condition, message) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
-async function request(session, method, pathname, body = null) {
+async function request(
+  session: FetchSession,
+  method: string,
+  pathname: string,
+  body: Record<string, unknown> | null = null,
+): Promise<ActionHistoryResponse> {
   const response = await fetch(`${BASE_URL}${pathname}`, {
     method,
     headers: {
@@ -42,10 +85,10 @@ async function request(session, method, pathname, body = null) {
   if (!response.ok) {
     throw new Error(`${method} ${pathname} failed (${response.status}): ${typeof payload === 'string' ? payload : payload?.error || 'unknown error'}`)
   }
-  return payload
+  return typeof payload === 'string' ? { error: payload } : payload
 }
 
-function runCleanupCommand(args) {
+function runCleanupCommand(args: string[]): CleanupCommandResult {
   const result = spawnSync(process.execPath, [
     path.join(ROOT_DIR, 'ops/scripts/runtime/storage/cleanup-test-data.mjs'),
     ...args,
@@ -62,7 +105,7 @@ function runCleanupCommand(args) {
   }
 }
 
-function cleanupActionHistoryData(prefix) {
+function cleanupActionHistoryData(prefix: string): CleanupResult {
   if (!CLEANUP_TEST_DATA || !prefix) return { skipped: true }
   const apply = runCleanupCommand([
     '--prefix',
@@ -95,10 +138,10 @@ function cleanupActionHistoryData(prefix) {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   let actionId = null
-  let cleanup = { skipped: true }
-  const report = {
+  let cleanup: CleanupResult = { skipped: true }
+  const report: ActionHistoryReport = {
     generatedAt: new Date().toISOString(),
     baseUrl: BASE_URL,
     prefix: PREFIX,
@@ -107,6 +150,7 @@ async function main() {
     cleanup: null,
   }
   try {
+    const { loginWithFetch } = await import('./audit-auth.mjs')
     const session = await loginWithFetch({ baseUrl: BASE_URL, username: USERNAME, password: PASSWORD })
     const created = await request(session, 'POST', '/api/action-history', {
       scope: 'global',

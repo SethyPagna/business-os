@@ -13,7 +13,7 @@ const dockerignorePath = path.join(root, '.dockerignore')
 const gitignorePath = path.join(root, '.gitignore')
 const pruneStoragePath = path.join(root, 'ops', 'scripts', 'runtime', 'storage', 'prune-storage.mjs')
 const cleanupTestDataPath = path.join(root, 'ops', 'scripts', 'runtime', 'storage', 'cleanup-test-data.mjs')
-const actionHistoryCheckPath = path.join(root, 'ops', 'scripts', 'runtime', 'audits', 'action-history-undo-redo-check.mjs')
+const actionHistoryCheckPath = path.join(root, 'ops', 'scripts', 'runtime', 'audits', 'action-history-undo-redo-check.ts')
 const liveSmokePath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'live-smoke.mjs')
 const routeContractPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'check-route-contract.ts')
 const postStartDiagnosticsPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'post-start-diagnostics.ts')
@@ -214,7 +214,7 @@ function buildTestDataCleanupCoverage({ cleanupTestData, actionHistoryCheck, ful
     scriptPresent: fs.existsSync(cleanupTestDataPath),
     actionHistoryCheckPresent: fs.existsSync(actionHistoryCheckPath),
     liveSmokeScriptPresent: fs.existsSync(liveSmokePath),
-    actionHistoryPackageScriptPresent: opsPackage?.scripts?.['action-history:check'] === 'node scripts/runtime/audits/action-history-undo-redo-check.mjs',
+    actionHistoryPackageScriptPresent: opsPackage?.scripts?.['action-history:check'] === 'node scripts/runtime/audits/action-history-undo-redo-check.ts',
     packageScriptPresent: opsPackage?.scripts?.['cleanup-test-data'] === 'node scripts/runtime/storage/cleanup-test-data.mjs',
     packagePostcheckScriptsPresent: opsPackage?.scripts?.['cleanup-test-data:check']?.includes('--fail-on-match') &&
       opsPackage?.scripts?.['cleanup-test-data:check-smoke']?.includes('--fail-on-match') &&
@@ -288,7 +288,7 @@ function buildTestDataCleanupCoverage({ cleanupTestData, actionHistoryCheck, ful
       actionHistoryCheck.includes('action-history-undo-redo-cleanup-postcheck-latest.json') &&
       actionHistoryCheck.includes('--fail-on-match'),
     fullAutomationActionHistoryCheck: fullAutomation.includes('Action history undo/redo live verification') &&
-      fullAutomation.includes('action-history-undo-redo-check.mjs'),
+      fullAutomation.includes('action-history-undo-redo-check.ts'),
     liveSmokeFinallyCleanup: liveSmoke.includes('cleanupLiveSmokeData') &&
       liveSmoke.includes('finally') &&
       liveSmoke.includes('BOS_SMOKE_CLEANUP') &&

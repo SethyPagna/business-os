@@ -1998,7 +1998,7 @@ Decision rule:
     release guardrails now verify the postcheck scripts, fail-on-match support,
     and full-automation wiring.
 239. Codify action-history undo/redo live verification. Done:
-    `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` now logs in,
+    `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` now logs in,
     creates one reversible `QA Action History ...` row, calls the server
     `/undo` and `/redo` transitions, verifies payload round-trip plus the final
     `undoable` state, then removes its own action-history and audit-log rows via
@@ -2092,7 +2092,7 @@ Decision rule:
     dry-run postchecks and apply mode, so future smoke/import verification does
     not leave hidden lookup residue after product rows are cleaned.
 251. Add action-history self-cleanup postcheck. Done:
-    `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` now runs a
+    `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` now runs a
     dry-run `--fail-on-match` postcheck immediately after its apply cleanup and
     writes `action-history-undo-redo-cleanup-postcheck-latest.json`. The
     standalone undo/redo verifier now proves both the API transition behavior
@@ -3527,6 +3527,12 @@ Decision rule:
     runtime dependency guards, Docker release guards, and full-automation
     tests aligned. The diagnostics script keeps typed response/report shapes
     and still writes the same JSON report contract.
+440. Convert the action-history undo/redo live audit to TypeScript. Done:
+    `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` replaces
+    the `.mjs` entrypoint while preserving the `action-history:check` npm
+    command and full-automation launcher behavior. The script now has typed
+    session, API response, cleanup command, and report shapes while keeping
+    its reversible action check and prefix-scoped cleanup/postcheck flow.
 
 ## Safety Gates
 

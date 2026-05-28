@@ -64,7 +64,7 @@ runTest('full automation launcher and policy are present', () => {
     'verify-backup-reliability.js',
     'verify-r2-object-store.mjs',
     'Action history undo/redo live verification',
-    'action-history-undo-redo-check.mjs',
+    'action-history-undo-redo-check.ts',
     'prune-storage.mjs',
     "'--policy', $PolicyPath",
     "'--output', $StoragePruneReport",
@@ -154,12 +154,12 @@ runTest('scaled runtime app and workers self-heal backend dependencies', () => {
 runTest('docker release verification protects generated cleanup boundaries', () => {
   const verifier = read('ops/scripts/verification/verify-docker-release.js')
   const cleanupTestData = read('ops/scripts/runtime/storage/cleanup-test-data.mjs')
-  const actionHistoryCheck = read('ops/scripts/runtime/audits/action-history-undo-redo-check.mjs')
+  const actionHistoryCheck = read('ops/scripts/runtime/audits/action-history-undo-redo-check.ts')
   const fullAppAudit = read('ops/scripts/runtime/audits/full-app-audit.mjs')
   const liveSmoke = read('ops/scripts/runtime/smoke/live-smoke.mjs')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(opsPackage.scripts['cleanup-test-data'], 'node scripts/runtime/storage/cleanup-test-data.mjs')
-  assert.equal(opsPackage.scripts['action-history:check'], 'node scripts/runtime/audits/action-history-undo-redo-check.mjs')
+  assert.equal(opsPackage.scripts['action-history:check'], 'node scripts/runtime/audits/action-history-undo-redo-check.ts')
   assert.equal(opsPackage.scripts['prune-storage:preview'], 'node scripts/runtime/storage/prune-storage.mjs --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json')
   assert.match(opsPackage.scripts['cleanup-test-data:check'], /--fail-on-match/)
   assert.match(opsPackage.scripts['cleanup-test-data:check-smoke'], /--fail-on-match/)

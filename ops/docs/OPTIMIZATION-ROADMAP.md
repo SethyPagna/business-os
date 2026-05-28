@@ -2904,7 +2904,7 @@ Cleanup checkpoint:
   runtime-only latest reports under `ops/runtime/reports`. The Docker release
   guardrail records the postcheck support and Phase 29 repeat compares it.
 - Move 239 codifies action-history undo/redo live verification:
-  `ops/scripts/runtime/audits/action-history-undo-redo-check.mjs` creates a
+  `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` creates a
   reversible `QA Action History ...` server row, exercises `/undo` and `/redo`,
   verifies status transitions and payload round-trip, then cleans its own
   action-history and audit-log rows in `finally`. `ops/package.json` exposes
@@ -5015,3 +5015,11 @@ Move 449 status:
   output while updating `run/verify-local.bat`, runtime/release PowerShell
   launchers, dependency/release guardrails, and backend full-automation tests
   to the new paths.
+
+Move 450 status:
+- Move 450 converts the action-history undo/redo live audit to TypeScript.
+  `action-history-undo-redo-check.ts` keeps the same login, create, undo,
+  redo, history visibility, and cleanup postcheck behavior while adding typed
+  session, response, cleanup, and report contracts. Full automation, Docker
+  release guardrails, and the `action-history:check` package script now point
+  at the TypeScript entrypoint.
