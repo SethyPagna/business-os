@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import { AlertCircle, Camera, CheckCircle2, Keyboard, ScanLine, ShieldAlert } from 'lucide-react'
 import Modal from '../../shared/Modal'
 import { deriveScannerPresentation } from './barcodeScannerState.ts'
@@ -21,27 +22,112 @@ const KNOWN_FORMATS = [
   'upc_e',
 ]
 
-function stopStream(stream) {
+type ScannerStatus = 'idle' | 'starting' | 'scanning' | 'blocked' | 'dismissed' | 'manual'
+type ScannerPermissionState = 'unknown' | 'prompt' | 'granted' | 'denied' | 'blocked' | 'unsupported'
+
+interface BarcodeScannerModalProps {
+  open: boolean
+  title: string
+  onClose: () => void
+  onDetected: (value: string) => void
+  t: (key: string) => string
+}
+
+interface BarcodeDetectionResult {
+  rawValue?: unknown
+}
+
+interface NativeBarcodeDetector {
+  detect: (source: HTMLVideoElement) => Promise<BarcodeDetectionResult[]>
+}
+
+interface NativeBarcodeDetectorConstructor {
+  new(options: { formats: string[] }): NativeBarcodeDetector
+  getSupportedFormats?: () => Promise<unknown[]>
+}
+
+interface ZxingControls {
+  stop?: () => void
+}
+
+interface ZxingReader {
+  reset?: () => void
+  decodeFromConstraints: (
+    constraints: MediaStreamConstraints,
+    element: HTMLVideoElement | null,
+    callback: (result: { getText?: () => unknown } | null) => void,
+  ) => Promise<ZxingControls>
+}
+
+interface ZxingModule {
+  BrowserMultiFormatReader: new () => ZxingReader
+}
+
+interface ScannerLabels {
+  scanReady: string
+  scanUnsupported: string
+  scanPermissionDenied: string
+  cameraPermissionNeeded: string
+  cameraPermissionBlocked: string
+  cameraPermissionResetHint: string
+  requestCameraAccess: string
+  tryCameraAgain: string
+  scanFromPhoto: string
+  scanFromPhotoBusy: string
+  requestingCamera: string
+  scanFailed: string
+  scanPhotoFailed: string
+  scanFallbackActive: string
+  manualEntry: string
+  detectedValue: string
+  useValue: string
+  scanning: string
+  cameraDocumentBlocked: string
+}
+
+interface ScannerStateBadge {
+  label: string
+  className: string
+  icon: ReactNode
+}
+
+function getNativeBarcodeDetector(): NativeBarcodeDetectorConstructor | null {
+  const detector = (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector
+  return typeof detector === 'function'
+    ? detector as NativeBarcodeDetectorConstructor
+    : null
+}
+
+function getScanErrorText(error: unknown): string {
+  const source = error as { message?: unknown; name?: unknown } | null | undefined
+  return `${String(source?.name || '')} ${String(source?.message || error || '')}`
+}
+
+function stopStream(stream: MediaStream | null | undefined): void {
   try {
     stream?.getTracks?.().forEach((track) => track.stop())
   } catch (_) {}
 }
 
-async function readCameraPermissionState() {
+async function readCameraPermissionState(): Promise<ScannerPermissionState> {
   try {
     if (!navigator?.permissions?.query) return 'unknown'
-    const result = await navigator.permissions.query({ name: 'camera' })
-    return String(result?.state || 'unknown')
+    const result = await navigator.permissions.query({ name: 'camera' as PermissionName })
+    const state = String(result?.state || 'unknown')
+    return ['prompt', 'granted', 'denied'].includes(state) ? state as ScannerPermissionState : 'unknown'
   } catch (_) {
     return 'unknown'
   }
 }
 
-async function watchCameraPermission(onChange) {
+async function watchCameraPermission(onChange: (state: ScannerPermissionState) => void): Promise<() => void> {
   try {
     if (!navigator?.permissions?.query) return () => {}
-    const result = await navigator.permissions.query({ name: 'camera' })
-    const handleChange = () => onChange?.(String(result?.state || 'unknown'))
+    const result = await navigator.permissions.query({ name: 'camera' as PermissionName })
+    const handleChange = () => {
+      const state = String(result?.state || 'unknown')
+      onChange(['prompt', 'granted', 'denied'].includes(state) ? state as ScannerPermissionState : 'unknown')
+    }
     handleChange()
     result.addEventListener?.('change', handleChange)
     return () => result.removeEventListener?.('change', handleChange)
@@ -56,30 +142,30 @@ export default function BarcodeScannerModal({
   onClose,
   onDetected,
   t,
-}) {
-  const videoRef = useRef(null)
-  const streamRef = useRef(null)
-  const frameRef = useRef(null)
-  const detectorRef = useRef(null)
-  const zxingReaderRef = useRef(null)
-  const zxingControlsRef = useRef(null)
-  const permissionCleanupRef = useRef(() => {})
-  const photoInputRef = useRef(null)
+}: BarcodeScannerModalProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const frameRef = useRef<number | null>(null)
+  const detectorRef = useRef<NativeBarcodeDetector | null>(null)
+  const zxingReaderRef = useRef<ZxingReader | null>(null)
+  const zxingControlsRef = useRef<ZxingControls | null>(null)
+  const permissionCleanupRef = useRef<() => void>(() => {})
+  const photoInputRef = useRef<HTMLInputElement | null>(null)
   const startTokenRef = useRef(0)
   const lastScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
-  const [status, setStatus] = useState('idle')
+  const [status, setStatus] = useState<ScannerStatus>('idle')
   const [error, setError] = useState('')
-  const [permissionState, setPermissionState] = useState('unknown')
+  const [permissionState, setPermissionState] = useState<ScannerPermissionState>('unknown')
   const [photoBusy, setPhotoBusy] = useState(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
 
-  const labels = useMemo(() => ({
+  const labels = useMemo<ScannerLabels>(() => ({
     scanReady: tr('scan_ready', 'Point the camera at a barcode or SKU label.', 'ដាក់កាមេរ៉ាទៅលើបាកូដ ឬស្លាក SKU។'),
     scanUnsupported: tr('scan_unsupported', 'Camera scanning is not supported in this browser. You can still paste or type the value below.', 'ការស្កេនកាមេរ៉ាមិនត្រូវបានគាំទ្រដោយកម្មវិធីរុករកនេះទេ។ អ្នកនៅតែអាចបិទភ្ជាប់ ឬវាយតម្លៃខាងក្រោមបាន។'),
     scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow it or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតវា ឬបញ្ចូលកូដដោយដៃ។'),
@@ -103,7 +189,7 @@ export default function BarcodeScannerModal({
 
   const promptDismissedMessage = tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
 
-  const cleanup = useCallback(() => {
+  const cleanup = useCallback((): void => {
     startTokenRef.current = 0
     if (frameRef.current) {
       cancelAnimationFrame(frameRef.current)
@@ -123,7 +209,7 @@ export default function BarcodeScannerModal({
     }
   }, [])
 
-  const scanFrame = useCallback(async () => {
+  const scanFrame = useCallback(async (): Promise<void> => {
     const detector = detectorRef.current
     const video = videoRef.current
     if (!detector || !video) return
@@ -146,7 +232,7 @@ export default function BarcodeScannerModal({
     frameRef.current = requestAnimationFrame(scanFrame)
   }, [cleanup, onDetected])
 
-  const startCamera = useCallback(async ({ preserveManualValue = false } = {}) => {
+  const startCamera = useCallback(async ({ preserveManualValue = false }: { preserveManualValue?: boolean } = {}): Promise<void> => {
     const startToken = Date.now()
     cleanup()
     startTokenRef.current = startToken
@@ -179,13 +265,16 @@ export default function BarcodeScannerModal({
       const video = videoRef.current
       if (video) video.setAttribute('playsinline', 'true')
 
-      if (typeof window.BarcodeDetector === 'function') {
-        const supported = typeof window.BarcodeDetector.getSupportedFormats === 'function'
-          ? await window.BarcodeDetector.getSupportedFormats()
+      const NativeBarcodeDetector = getNativeBarcodeDetector()
+      if (NativeBarcodeDetector) {
+        const supported = typeof NativeBarcodeDetector.getSupportedFormats === 'function'
+          ? await NativeBarcodeDetector.getSupportedFormats()
           : KNOWN_FORMATS
         if (startTokenRef.current !== startToken) return
-        const formats = (supported || []).filter((item) => KNOWN_FORMATS.includes(item))
-        detectorRef.current = new window.BarcodeDetector({ formats: formats.length ? formats : KNOWN_FORMATS })
+        const formats = (supported || [])
+          .map((item) => String(item || ''))
+          .filter((item) => KNOWN_FORMATS.includes(item))
+        detectorRef.current = new NativeBarcodeDetector({ formats: formats.length ? formats : KNOWN_FORMATS })
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -210,7 +299,7 @@ export default function BarcodeScannerModal({
         return
       }
 
-      const { BrowserMultiFormatReader } = await import('@zxing/browser')
+      const { BrowserMultiFormatReader } = await import('@zxing/browser') as unknown as ZxingModule
       if (startTokenRef.current !== startToken) return
       const reader = new BrowserMultiFormatReader()
       zxingReaderRef.current = reader
@@ -241,10 +330,9 @@ export default function BarcodeScannerModal({
       setStatus('scanning')
       setError(labels.scanFallbackActive)
     } catch (scanError) {
-      const message = String(scanError?.message || '')
-      const name = String(scanError?.name || '')
-      const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(`${name} ${message}`)
-      const denied = /denied|permission|notallowed/i.test(`${name} ${message}`)
+      const scanErrorText = getScanErrorText(scanError)
+      const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
+      const denied = /denied|permission|notallowed/i.test(scanErrorText)
       const blocked = documentBlocked || (denied && nextPermissionState === 'denied')
       const dismissed = denied && !blocked
       setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
@@ -270,7 +358,7 @@ export default function BarcodeScannerModal({
     tr,
   ])
 
-  const prepareScanner = useCallback(async () => {
+  const prepareScanner = useCallback(async (): Promise<void> => {
     cleanup()
     setError('')
     setStatus('idle')
@@ -298,14 +386,14 @@ export default function BarcodeScannerModal({
     startCamera({ preserveManualValue: true })
   }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported, startCamera])
 
-  const openPhotoPicker = useCallback(() => {
+  const openPhotoPicker = useCallback((): void => {
     if (photoBusy) return
     cleanup()
     setStatus('manual')
     photoInputRef.current?.click?.()
   }, [cleanup, photoBusy])
 
-  const handlePhotoSelection = useCallback(async (event) => {
+  const handlePhotoSelection = useCallback(async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event?.target?.files?.[0]
     if (!file) return
     setPhotoBusy(true)
@@ -318,7 +406,7 @@ export default function BarcodeScannerModal({
       onDetected(nextValue)
     } catch (scanError) {
       setStatus('manual')
-      setError(scanError?.message || labels.scanPhotoFailed)
+      setError(scanError instanceof Error ? scanError.message : labels.scanPhotoFailed)
     } finally {
       if (event?.target) event.target.value = ''
       setPhotoBusy(false)
@@ -357,7 +445,7 @@ export default function BarcodeScannerModal({
         setStatus('blocked')
         setError(labels.cameraPermissionBlocked)
       }
-    }).then((dispose) => {
+    }).then((dispose: (() => void) | undefined) => {
       if (cancelled) {
         dispose?.()
         return
@@ -385,7 +473,7 @@ export default function BarcodeScannerModal({
     labels: { ...labels, error },
     promptDismissedMessage,
   })
-  const stateBadge = stateKind === 'scanning'
+  const stateBadge: ScannerStateBadge = stateKind === 'scanning'
     ? {
         label: tr('scanner_state_live', 'Live camera', 'កាមេរ៉ាកំពុងដំណើរការ'),
         className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100',
@@ -481,10 +569,10 @@ export default function BarcodeScannerModal({
                     <button
                       type="button"
                       className="btn-secondary w-full border-white/20 bg-white/10 text-white hover:bg-white/15"
-                      disabled={status === 'starting'}
+                      disabled={false}
                       onClick={() => startCamera({ preserveManualValue: true })}
                     >
-                      {status === 'starting' ? labels.requestingCamera : requestCameraLabel}
+                      {requestCameraLabel}
                     </button>
                   ) : null}
                   <button

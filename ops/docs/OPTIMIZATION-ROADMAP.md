@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 497.
+- Latest completed implementation move in this roadmap: Move 498.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -1018,8 +1018,8 @@ Current checkpoint:
   opened the Product import modal from the real Products button on frontend hash
   `0028bc915078664f`.
 - Sixth Phase 26 physical move complete: Product scanning files
-  `BarcodeScannerModal.jsx`, `barcodeImageScanner.mjs`,
-  `barcodeScannerState.mjs`, and `scanbotScanner.mjs` now live under
+  `BarcodeScannerModal.tsx`, `barcodeImageScanner.ts`,
+  `barcodeScannerState.ts`, and `scanbotScanner.ts` now live under
   `frontend/src/components/products/scanning`. The focused Product scanner live
   check opened Add Product, opened Scan barcode, applied a manual barcode value,
   and sent zero product mutations on frontend hash `4fdf242042c73694`.
@@ -2238,13 +2238,11 @@ Cleanup checkpoint:
 - The barcode image scanner helper slice is now complete:
   `frontend/src/components/products/scanning/barcodeImageScanner.ts` owns image
   data URL loading, browser image loading, native `BarcodeDetector` detection,
-  and zxing fallback decoding, while `barcodeImageScanner.mjs` remains as the
-  compatibility wrapper for the scanner modal and focused tests.
+  and zxing fallback decoding. No `.mjs` scanner compatibility wrapper remains.
 - The barcode scanner presentation-state helper slice is now complete:
   `frontend/src/components/products/scanning/barcodeScannerState.ts` owns the
   camera permission/status-to-UI-state mapping, labels, retry visibility, and
-  empty-state messaging, while `barcodeScannerState.mjs` remains as the
-  compatibility wrapper for the scanner modal and focused tests.
+  empty-state messaging. No `.mjs` scanner compatibility wrapper remains.
 - The concurrent bulk task helper slice is now complete:
   `frontend/src/utils/bulkOps.ts` owns concurrency bounds, ordered results,
   success/failure buckets, and per-item error capture, while `bulkOps.mjs`
@@ -5439,3 +5437,11 @@ Move 497 status:
   settings/product-rewrite mutation surface. The conversion keeps the indexed
   delete-impact path, routes settings plus product brand rewrite calls through
   a typed accessor, and updates source-reading tests to the TSX path.
+
+Move 498 status:
+- Move 498 converts product barcode scanner modal `BarcodeScannerModal.tsx`.
+  The typed boundary now covers modal props, camera permission states, media
+  streams, native `BarcodeDetector`, ZXing reader/controls, file input events,
+  scanner labels, and state-badge rendering. The conversion keeps camera,
+  manual, and photo scan flows in the browser UI lifecycle and preserves the
+  existing scanner presentation helper.

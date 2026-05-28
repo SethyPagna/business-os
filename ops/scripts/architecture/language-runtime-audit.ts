@@ -1095,7 +1095,7 @@ const REJECTED_WEB_WORKER_CANDIDATES = [
     evidence: 'Move 168 inspection found DOM image loading and browser detector/zxing boundaries rather than a pure CPU loop that can move safely to a Worker.',
   },
   {
-    file: 'frontend/src/components/products/scanning/BarcodeScannerModal.jsx',
+    file: 'frontend/src/components/products/scanning/BarcodeScannerModal.tsx',
     decision: 'keep on React/browser camera path',
     reason: 'The modal owns camera permission state, media streams, video refs, requestAnimationFrame scanning, and manual-entry UI. These are DOM and user-permission workflows, not transferable Worker computation.',
     evidence: 'Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle.',

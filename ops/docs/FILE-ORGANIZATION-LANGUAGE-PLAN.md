@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 497 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 498 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 63 `.jsx`
+  - 62 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 44 `.tsx`
+  - 45 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -197,9 +197,9 @@ Decision rule:
    performance loading source checks, production build, runtime health, and the
    broad Phase 8.4 UI Playwright check passed on frontend hash
    `0028bc915078664f`.
-10. Move the product scanning cluster. Done: `BarcodeScannerModal.jsx`,
-    `barcodeImageScanner.mjs`, `barcodeScannerState.mjs`, and
-    `scanbotScanner.mjs` now live in
+10. Move the product scanning cluster. Done: `BarcodeScannerModal.tsx`,
+    `barcodeImageScanner.ts`, `barcodeScannerState.ts`, and
+    `scanbotScanner.ts` now live in
     `frontend/src/components/products/scanning`. Scanner unit tests, production
     build, runtime health, and a focused Product scanner Playwright check passed
     on frontend hash `4fdf242042c73694`.
@@ -1260,16 +1260,14 @@ Decision rule:
     restore contract explicit without changing the public import path.
 141. Convert barcode image scanner helper to TypeScript. Done:
     The photo barcode scanner helper moved to
-    `frontend/src/components/products/scanning/barcodeImageScanner.ts`, while
-    `barcodeImageScanner.mjs` remains as the compatibility wrapper for
-    `BarcodeScannerModal.jsx` and focused scanner tests. The typed helper keeps
+    `frontend/src/components/products/scanning/barcodeImageScanner.ts` and no
+    `.mjs` scanner compatibility wrapper remains. The typed helper keeps
     the native `BarcodeDetector` fast path, zxing fallback, image loader, and
     injected test seams explicit.
 142. Convert barcode scanner presentation state helper to TypeScript. Done:
     The scanner presentation-state helper moved to
-    `frontend/src/components/products/scanning/barcodeScannerState.ts`, while
-    `barcodeScannerState.mjs` remains as the compatibility wrapper for
-    `BarcodeScannerModal.jsx` and focused scanner-state tests. The typed helper
+    `frontend/src/components/products/scanning/barcodeScannerState.ts` and no
+    `.mjs` scanner compatibility wrapper remains. The typed helper
     keeps camera permission, scanner status, labels, and state-kind outputs
     explicit.
 143. Convert concurrent bulk task helper to TypeScript. Done:
@@ -3911,6 +3909,13 @@ Decision rule:
     the existing indexed delete-impact path, keeps brand undo/redo loops
     explicit, and routes settings plus product brand rewrite calls through a
     typed `getBrandApi` boundary.
+498. Convert product barcode scanner modal to TSX. Done:
+    `BarcodeScannerModal.tsx` now types modal props, camera permission states,
+    media streams, native `BarcodeDetector`, ZXing reader/controls, file input
+    events, scanner labels, and state-badge rendering. The conversion keeps the
+    camera/manual/photo scan paths in the main browser thread, preserves the
+    existing scanner presentation helper, and removes loose optional error
+    access from camera and photo failure handling.
 
 ## Safety Gates
 

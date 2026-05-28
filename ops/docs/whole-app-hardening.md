@@ -360,7 +360,7 @@ Last updated: 2026-05-18
     check opened the Product import modal and passed on frontend hash
     `0028bc915078664f`.
   - Sixth Phase 26 physical move complete: Product scanner files
-    `BarcodeScannerModal.jsx`, `barcodeImageScanner.ts`,
+    `BarcodeScannerModal.tsx`, `barcodeImageScanner.ts`,
     `barcodeScannerState.ts`, and `scanbotScanner.ts` now live in
     `frontend/src/components/products/scanning`; the focused Product scanner
     live check opened Scan barcode, applied a manual barcode value back to the
