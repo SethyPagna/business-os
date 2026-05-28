@@ -577,7 +577,7 @@ Decision rule:
     Phase 8.4 Playwright UI live check, and storage pruning passed on frontend
     hash `0c203e94c6184818`.
 51. Add Cloudflare public portal live verification. Done:
-    `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
+    `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
     now opens `https://leangcosmetics.dpdns.org/public` through Playwright,
     verifies customer-facing content renders, rejects visible
     `{"success":false}` / internal-server-error output, asserts portal config,
@@ -807,7 +807,7 @@ Decision rule:
     preserving their route-specific assertions, labels, screenshots, and report
     outputs.
 79. Harden the public Cloudflare portal live check against CSP false positives.
-    Done: `phase84-public-portal-cloudflare-check.mjs` now records the main
+    Done: `phase84-public-portal-cloudflare-check.ts` now records the main
     document CSP headers, asserts the enforced CSP includes first-party script
     and connect sources, asserts no report-only CSP header is present, and
     ignores browser report-only CSP console chatter only after the real page,
@@ -2685,7 +2685,7 @@ Decision rule:
     options, replacing render-time `summary.filter(...).map(...)` allocation;
     no folder move or language conversion was needed.
 322. Harden public Cloudflare portal CSP verification. Done:
-    `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
+    `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
     now distinguishes app-origin report-only CSP regressions from Cloudflare's
     intermittent Page Shield `cdn-cgi/script_monitor` diagnostic header.
     `backend/test/fullAutomation.test.js` guards the behavior; no folder move
@@ -3585,6 +3585,12 @@ Decision rule:
     and workspace-safe report output handling while continuing to run the UI
     live check, public Cloudflare portal check, and post-live hygiene gate in
     order.
+448. Convert the public Cloudflare portal live check to TypeScript. Done:
+    `phase84-public-portal-cloudflare-check.ts` replaces the `.mjs` live
+    check and is now called by `phase84-live-suite.ts`. The script preserves
+    the remote portal render/API/CSP assertions while adding typed console
+    entries, observed request records, portal checks, and report output
+    structure.
 
 ## Safety Gates
 

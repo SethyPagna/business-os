@@ -11,24 +11,67 @@ const REPORT_DIR = path.join(ROOT_DIR, 'ops/runtime/reports', `phase84-public-po
 const REPORT_PATH = path.join(REPORT_DIR, 'report.json')
 const SCREENSHOT_PATH = path.join(REPORT_DIR, 'public.png')
 
-function assert(condition, message) {
+type ConsoleEntry = {
+  type: string
+  text: string
+}
+
+type ObservedRequest = {
+  status: number
+  url: string
+}
+
+type PortalChecks = {
+  title: string
+  portalVisible: boolean
+  internalServerErrorVisible: boolean
+  renderedProductCount: number
+  configStatus: number | null
+  metaStatus: number | null
+  searchStatus: number | null
+  aiStatus: number | null
+  enforcedCspPresent: boolean
+  reportOnlyCspPresent: boolean
+  toleratedCloudflareScriptMonitorReportOnlyCsp: boolean
+  failedResponseCount: number
+  relevantConsoleMessages: number
+  pageErrors: number
+}
+
+type PortalReport = {
+  url: string
+  checks: PortalChecks
+  observedRequests: ObservedRequest[]
+  mainResponseHeaders: {
+    'content-security-policy': string
+    'content-security-policy-report-only': string
+  }
+  consoleMessages: ConsoleEntry[]
+  relevantConsole: ConsoleEntry[]
+  pageErrors: string[]
+  screenshots: {
+    public: string
+  }
+}
+
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
-function isRelevantConsole(message) {
+function isRelevantConsole(message: string): boolean {
   return !/favicon\.ico|ResizeObserver loop|Search endpoint requested|violates the following Content Security Policy directive:.*policy is report-only/i.test(message)
 }
 
-function isCloudflareScriptMonitorReportOnlyCsp(header) {
+function isCloudflareScriptMonitorReportOnlyCsp(header: string): boolean {
   return /csp-reporting\.cloudflare\.com\/cdn-cgi\/script_monitor\/report/i.test(header)
     || /report-to\s+cf-csp-endpoint/i.test(header)
 }
 
-function endpointStatus(observedRequests, pattern) {
+function endpointStatus(observedRequests: ObservedRequest[], pattern: RegExp): number | null {
   return [...observedRequests].reverse().find((request) => pattern.test(request.url))?.status ?? null
 }
 
-async function main() {
+async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
   const publicOrigin = new URL(REMOTE_PUBLIC_URL).origin
   const browser = await chromium.launch({ headless: true })
@@ -39,9 +82,9 @@ async function main() {
       ignoreHTTPSErrors: true,
     })
     const page = await context.newPage()
-    const consoleMessages = []
-    const pageErrors = []
-    const observedRequests = []
+    const consoleMessages: ConsoleEntry[] = []
+    const pageErrors: string[] = []
+    const observedRequests: ObservedRequest[] = []
 
     page.on('console', (message) => {
       consoleMessages.push({ type: message.type(), text: message.text() })
@@ -72,7 +115,7 @@ async function main() {
     const relevantConsole = consoleMessages.filter((message) => isRelevantConsole(message.text))
     const failedResponses = observedRequests.filter((request) => request.status >= 500)
 
-    const checks = {
+    const checks: PortalChecks = {
       title,
       portalVisible,
       internalServerErrorVisible,
@@ -90,7 +133,7 @@ async function main() {
     }
 
     await page.screenshot({ path: SCREENSHOT_PATH, fullPage: true })
-    const report = {
+    const report: PortalReport = {
       url: page.url(),
       checks,
       observedRequests,

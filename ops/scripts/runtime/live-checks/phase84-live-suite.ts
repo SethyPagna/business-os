@@ -63,7 +63,7 @@ const SUITE_STEPS: SuiteStep[] = [
   },
   {
     name: 'public Cloudflare portal check',
-    script: 'ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs',
+    script: 'ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts',
     flag: 'skipPublic',
     reportPrefix: 'phase84-public-portal-cloudflare-check-',
   },

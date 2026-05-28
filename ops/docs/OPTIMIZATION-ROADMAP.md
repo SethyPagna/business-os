@@ -3465,7 +3465,7 @@ Cleanup checkpoint:
   checks, toggles, and batch failure recovery. This removes the remaining
   filtered selected-ID allocation and one-off failed-item ID normalization path.
 - Current remote public-portal status:
-  `phase84-public-portal-cloudflare-check.mjs` passes against
+  `phase84-public-portal-cloudflare-check.ts` passes against
   `https://leangcosmetics.dpdns.org/public`: the portal rendered customer
   content, loaded 40 products, all portal API requests returned 200, the
   enforced CSP header was present, no report-only CSP header was present, and
@@ -3534,7 +3534,7 @@ Move 321 status:
 Move 322 status:
 - Move 322 hardens the public Cloudflare portal live check for intermittent
   Cloudflare Page Shield script-monitor report-only CSP injection:
-  `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs`
+  `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
   now still fails app-origin report-only CSP regressions, but recognizes
   Cloudflare's own non-blocking `cdn-cgi/script_monitor` diagnostics when the
   enforced app CSP, rendered products, API statuses, console checks, and page
@@ -5083,3 +5083,10 @@ Move 457 status:
   child report summaries, skipped-step handling, and workspace-safe report
   output. This leaves the large route-specific Playwright entrypoints as the
   remaining Phase 8.4 `.mjs` conversion surface.
+
+Move 458 status:
+- Move 458 converts the public Cloudflare portal live check to TypeScript.
+  `phase84-public-portal-cloudflare-check.ts` preserves the remote portal
+  render, API status, CSP, response, console, page-error, and screenshot
+  assertions while adding typed portal check/report shapes. The Phase 8.4
+  suite now calls the TypeScript public portal check directly.

@@ -852,7 +852,7 @@ runTest('post-live hygiene gate fails on residue or empty datasets', () => {
 
 runTest('phase 8.4 live suite runs UI, public portal, then hygiene', () => {
   const suite = read('ops/scripts/runtime/live-checks/phase84-live-suite.ts')
-  const publicPortal = read('ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.mjs')
+  const publicPortal = read('ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(
     opsPackage.scripts['phase84:live-suite'],
@@ -860,7 +860,7 @@ runTest('phase 8.4 live suite runs UI, public portal, then hygiene', () => {
   )
   ;[
     'phase84-ui-live-check.mjs',
-    'phase84-public-portal-cloudflare-check.mjs',
+    'phase84-public-portal-cloudflare-check.ts',
     'post-live-hygiene.ts',
     '--skip-ui',
     '--skip-public',
