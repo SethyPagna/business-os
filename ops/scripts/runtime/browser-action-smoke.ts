@@ -4,9 +4,98 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { chromium } from 'playwright'
-import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles, resolveAuditRoutes } from './audits/audit-manifest.ts'
+import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles, resolveAuditRoutes, type AuditProfile, type AuditRoute } from './audits/audit-manifest.ts'
 import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from './audits/audit-auth.ts'
 import { writeBrowserActionHtmlReport } from './audits/audit-report-html.ts'
+
+type ConsoleEntry = {
+  type: string
+  text: string
+  location?: unknown
+  ts: string
+}
+
+type Finding = {
+  priority: number
+  area: string
+  message: string
+  [key: string]: unknown
+}
+
+type HealthSnapshot = {
+  status: string
+  frontendHash: string | null
+  sourceHash: string | null
+  drivers: unknown
+}
+
+type ActionResult = {
+  name: string
+  kind: string
+  ok: boolean
+  ms: number
+  settleMs?: number
+  skipped?: boolean
+  proof?: string
+  reason?: string
+  error?: string
+}
+
+type RouteResult = {
+  profile: string
+  route: string
+  path: string
+  navMs: number
+  readyMs: number
+  navOk: boolean
+  passedInteractions: number
+  totalInteractions: number
+  consoleIssues: number
+  screenshot: string
+  notes: string[]
+}
+
+type BrowserActionSummary = {
+  audit: {
+    baseUrl: string
+    reportDir: string
+    startedAt: string
+    finishedAt?: string
+    profile: string
+  }
+  health: Record<string, HealthSnapshot>
+  routes: RouteResult[]
+  actions: Array<ActionResult & { profile: string; route: string }>
+  findings: Finding[]
+  artifacts: {
+    screenshots: string[]
+  }
+}
+
+type JsonProbe = {
+  status: number
+  ok: boolean
+  ms: number
+  body: Record<string, any>
+}
+
+type NavResult = {
+  ok: boolean
+  ms: number
+  readyMs: number
+  reason: string
+}
+
+type ButtonAction = string | {
+  label?: string
+  expect?: string
+  testId?: string
+}
+
+type LocatorLike = any
+type PageLike = any
+type BrowserLike = any
+type ContextLike = any
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
@@ -23,7 +112,7 @@ const ROUTE_READY_TIMEOUT_MS = 15_000
 const ACTION_TIMEOUT_MS = 2_500
 const SETTLE_WAIT_MS = 200
 
-const summary = {
+const summary: BrowserActionSummary = {
   audit: {
     baseUrl: BASE_URL,
     reportDir: REPORT_DIR,
@@ -39,15 +128,15 @@ const summary = {
   },
 }
 
-function readArg(name) {
+function readArg(name: string): string {
   const index = process.argv.indexOf(name)
   if (index >= 0) return process.argv[index + 1] || ''
   const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`))
   return prefixed ? prefixed.slice(name.length + 1) : ''
 }
 
-function readArgs(name) {
-  const values = []
+function readArgs(name: string): string[] {
+  const values: string[] = []
   for (let index = 0; index < process.argv.length; index += 1) {
     const arg = process.argv[index]
     if (arg === name) {
@@ -62,15 +151,15 @@ function readArgs(name) {
   return values
 }
 
-function safeName(value) {
+function safeName(value: unknown): string {
   return String(value || 'artifact').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'artifact'
 }
 
-function escapeRegExp(value = '') {
+function escapeRegExp(value = ''): string {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function addFinding(priority, area, message, extra = {}) {
+function addFinding(priority: number, area: string, message: string, extra: Record<string, unknown> = {}): void {
   summary.findings.push({
     priority,
     area,
@@ -79,17 +168,17 @@ function addFinding(priority, area, message, extra = {}) {
   })
 }
 
-function isExternalConsoleNoise(message) {
+function isExternalConsoleNoise(message: unknown): boolean {
   return /chrome-extension:|No Listener: tabs:outgoing|Statsig|ab\.chatgpt\.com|ERR_BLOCKED_BY_CLIENT/i.test(String(message || ''))
 }
 
-function isAppConsoleIssue(entry) {
+function isAppConsoleIssue(entry: ConsoleEntry): boolean {
   const type = String(entry.type || '').toLowerCase()
   if (!['error', 'warning', 'warn', 'pageerror'].includes(type)) return false
   return !isExternalConsoleNoise(entry.text)
 }
 
-async function requestJson(url) {
+async function requestJson(url: string): Promise<JsonProbe> {
   const started = performance.now()
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) })
   const body = await response.json().catch(() => ({}))
@@ -101,7 +190,7 @@ async function requestJson(url) {
   }
 }
 
-async function captureHealth(phase) {
+async function captureHealth(phase: string): Promise<void> {
   const health = await requestJson(`${BASE_URL}/health`)
   if (!health.ok || health.body?.status !== 'ok') {
     throw new Error(`Health check failed during ${phase}`)
@@ -114,7 +203,7 @@ async function captureHealth(phase) {
   }
 }
 
-function buildContextOptions(profile) {
+function buildContextOptions(profile: AuditProfile): Record<string, unknown> {
   return {
     viewport: profile.viewport,
     isMobile: profile.isMobile,
@@ -123,8 +212,8 @@ function buildContextOptions(profile) {
   }
 }
 
-async function attachConsoleCapture(page) {
-  const entries = []
+async function attachConsoleCapture(page: PageLike): Promise<ConsoleEntry[]> {
+  const entries: ConsoleEntry[] = []
   page.on('console', (msg) => {
     entries.push({
       type: msg.type(),
@@ -144,14 +233,14 @@ async function attachConsoleCapture(page) {
   return entries
 }
 
-async function saveScreenshot(page, name) {
+async function saveScreenshot(page: PageLike, name: string): Promise<string> {
   const file = path.join(SCREENSHOT_DIR, `${safeName(name)}.png`)
   await page.screenshot({ path: file, fullPage: false })
   summary.artifacts.screenshots.push(file)
   return file
 }
 
-async function waitForRouteReady(page, route) {
+async function waitForRouteReady(page: PageLike, route: Pick<AuditRoute, 'name' | 'ready'>): Promise<number> {
   const started = performance.now()
   await page.waitForFunction(({ readyTexts, routeName }) => {
     const text = document.body?.innerText || ''
@@ -172,11 +261,11 @@ async function waitForRouteReady(page, route) {
   return Math.round(performance.now() - started)
 }
 
-function getActiveRouteRoot(page) {
+function getActiveRouteRoot(page: PageLike): LocatorLike {
   return page.locator('[data-bos-active-page="true"]').first()
 }
 
-async function dismissTransientUi(page) {
+async function dismissTransientUi(page: PageLike): Promise<void> {
   await page.keyboard.press('Escape').catch(() => {})
   await page.waitForTimeout(120)
   const dismissButtons = [
@@ -194,17 +283,17 @@ async function dismissTransientUi(page) {
   }
 }
 
-async function clickWithFallback(locator, timeout = ACTION_TIMEOUT_MS) {
+async function clickWithFallback(locator: LocatorLike, timeout = ACTION_TIMEOUT_MS): Promise<void> {
   try {
     await locator.click({ timeout })
     return
-  } catch (error) {
+  } catch (error: any) {
     if (!/intercepts pointer events|Timeout/i.test(String(error?.message || ''))) throw error
     await locator.click({ timeout, force: true })
   }
 }
 
-async function countVisibleDialogs(page) {
+async function countVisibleDialogs(page: PageLike): Promise<number> {
   const modalSelectors = [
     '[role="dialog"]',
     '[aria-modal="true"]',
@@ -220,7 +309,7 @@ async function countVisibleDialogs(page) {
   return count
 }
 
-async function countVisibleNamedButtons(page, labels = []) {
+async function countVisibleNamedButtons(page: PageLike, labels: string[] = []): Promise<number> {
   let count = 0
   for (const label of labels) {
     const buttons = page.getByRole('button', { name: new RegExp(`^${escapeRegExp(label)}$`, 'i') })
@@ -232,7 +321,7 @@ async function countVisibleNamedButtons(page, labels = []) {
   return count
 }
 
-async function countVisiblePortalLayers(page) {
+async function countVisiblePortalLayers(page: PageLike): Promise<number> {
   return await page.evaluate(() => {
     return Array.from(document.body.querySelectorAll('div'))
       .filter((node) => {
@@ -245,7 +334,7 @@ async function countVisiblePortalLayers(page) {
   }).catch(() => 0)
 }
 
-async function clickVisibleButton(page, label) {
+async function clickVisibleButton(page: PageLike, label: string): Promise<LocatorLike> {
   const exact = new RegExp(`^${escapeRegExp(label)}$`, 'i')
   const exactButtons = page.getByRole('button', { name: exact })
   const exactCount = await exactButtons.count().catch(() => 0)
@@ -264,7 +353,7 @@ async function clickVisibleButton(page, label) {
   return page.getByRole('button', { name: exact }).first()
 }
 
-async function findButtonInLocator(locator, label) {
+async function findButtonInLocator(locator: LocatorLike, label: string): Promise<LocatorLike> {
   const exact = new RegExp(`^${escapeRegExp(label)}$`, 'i')
   const exactButtons = locator.getByRole('button', { name: exact })
   const exactCount = await exactButtons.count().catch(() => 0)
@@ -285,7 +374,7 @@ async function findButtonInLocator(locator, label) {
   return locator.getByRole('button', { name: exact }).first()
 }
 
-async function openMobileMoreDrawer(page) {
+async function openMobileMoreDrawer(page: PageLike): Promise<boolean> {
   const nav = page.locator('nav').filter({ has: page.getByRole('button', { name: /^More$/i }) }).first()
   const moreButton = await findButtonInLocator(nav, 'More')
   if (!(await moreButton.count().catch(() => 0))) return false
@@ -294,7 +383,7 @@ async function openMobileMoreDrawer(page) {
   return true
 }
 
-async function navigateViaUi(page, route, profileName) {
+async function navigateViaUi(page: PageLike, route: AuditRoute, profileName: string): Promise<NavResult> {
   const rootPath = `${BASE_URL}/?__bos_browser_action=${Date.now()}`
   if (route.name === 'dashboard') {
     const started = performance.now()
@@ -357,7 +446,7 @@ async function navigateViaUi(page, route, profileName) {
   let readyMs = 0
   try {
     readyMs = await waitForRouteReady(page, route)
-  } catch (error) {
+  } catch (error: any) {
     const fallback = await page.evaluate(() => {
       const active = document.querySelector('[data-bos-active-page="true"]')
       return {
@@ -409,7 +498,12 @@ async function navigateViaUi(page, route, profileName) {
   }
 }
 
-async function verifyExpectation(page, button, expect, baseline = {}) {
+async function verifyExpectation(
+  page: PageLike,
+  button: LocatorLike,
+  expect: string | undefined,
+  baseline: Record<string, unknown> = {},
+): Promise<{ ok: boolean; proof: string }> {
   if (!expect || expect === 'stable') {
     await page.waitForTimeout(SETTLE_WAIT_MS)
     return { ok: true, proof: 'route-stable' }
@@ -471,7 +565,7 @@ async function verifyExpectation(page, button, expect, baseline = {}) {
   return { ok: true, proof: 'clicked' }
 }
 
-async function clickNamedButton(page, route, action) {
+async function clickNamedButton(page: PageLike, route: AuditRoute, action: ButtonAction): Promise<ActionResult> {
   await dismissTransientUi(page)
   const label = typeof action === 'string' ? action : action?.label
   const expect = typeof action === 'object' ? action?.expect : ''
@@ -511,7 +605,7 @@ async function clickNamedButton(page, route, action) {
       proof: proof.proof,
       reason: proof.ok ? '' : proof.proof,
     }
-  } catch (error) {
+  } catch (error: any) {
     await dismissTransientUi(page)
     return {
       name,
@@ -523,7 +617,7 @@ async function clickNamedButton(page, route, action) {
   }
 }
 
-async function clickTestIdButton(page, route, action) {
+async function clickTestIdButton(page: PageLike, route: AuditRoute, action: { testId: string; expect?: string }): Promise<ActionResult> {
   await dismissTransientUi(page)
   const name = `${route.name}:testid:${action.testId}`
   const routeRoot = getActiveRouteRoot(page)
@@ -561,7 +655,7 @@ async function clickTestIdButton(page, route, action) {
       proof: proof.proof,
       reason: proof.ok ? '' : proof.proof,
     }
-  } catch (error) {
+  } catch (error: any) {
     await dismissTransientUi(page)
     return {
       name,
@@ -573,10 +667,10 @@ async function clickTestIdButton(page, route, action) {
   }
 }
 
-async function performSearchInteraction(page, route) {
+async function performSearchInteraction(page: PageLike, route: AuditRoute): Promise<ActionResult> {
   const started = performance.now()
   const routeRoot = getActiveRouteRoot(page)
-  async function findSearchInput() {
+  async function findSearchInput(): Promise<LocatorLike | null> {
     const candidates = [
       'input[type="search"]',
       'input[placeholder*="Search" i]',
@@ -644,8 +738,8 @@ async function performSearchInteraction(page, route) {
   }
 }
 
-async function runRouteInteractions(page, route) {
-  const actions = []
+async function runRouteInteractions(page: PageLike, route: AuditRoute): Promise<ActionResult[]> {
+  const actions: ActionResult[] = []
   if (route?.interactions?.search) {
     actions.push(await performSearchInteraction(page, route))
   }
@@ -658,7 +752,7 @@ async function runRouteInteractions(page, route) {
   return actions
 }
 
-async function bootstrapProfile(profile) {
+async function bootstrapProfile(profile: AuditProfile): Promise<{ browser: BrowserLike; context: ContextLike; page: PageLike }> {
   const browser = await chromium.launch({ headless: true })
   const context = await browser.newContext(buildContextOptions(profile))
   const session = await loginWithFetch({
@@ -675,7 +769,7 @@ async function bootstrapProfile(profile) {
   return { browser, context, page }
 }
 
-async function runProfile(profile) {
+async function runProfile(profile: AuditProfile): Promise<void> {
   const routeSelection = resolveAuditRoutes(readArgs('--route'))
   if (routeSelection.unknownRoutes.length) {
     throw new Error(`Unknown browser action route(s): ${routeSelection.unknownRoutes.join(', ')}`)
@@ -743,7 +837,7 @@ async function runProfile(profile) {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
   await fs.mkdir(SCREENSHOT_DIR, { recursive: true })
   await captureHealth('before')
@@ -768,7 +862,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch((error: any) => {
   console.error(error?.stack || error?.message || String(error))
   process.exitCode = 1
 })

@@ -3591,6 +3591,12 @@ Decision rule:
     the remote portal render/API/CSP assertions while adding typed console
     entries, observed request records, portal checks, and report output
     structure.
+449. Convert the browser action smoke audit to TypeScript. Done:
+    `browser-action-smoke.ts` replaces the `.mjs` browser action audit while
+    preserving the `browser-action-smoke` package command. The script now has
+    typed profile, route, summary, health, action, finding, navigation, and
+    console-entry shapes while continuing to exercise manifest-driven route
+    navigation, searches, menus, dialogs, and screenshot/report generation.
 
 ## Safety Gates
 

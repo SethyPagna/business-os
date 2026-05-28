@@ -8,6 +8,7 @@ type AuditPrimaryButton = {
 type RouteInteractions = {
   search?: boolean
   primaryButtons?: AuditPrimaryButton[]
+  testIdButtons?: Array<{ testId: string; expect?: string }>
   tabs?: string[]
   pinnedNavLabels?: string[]
 }
@@ -33,7 +34,7 @@ export type FullAuditRoute = {
   authRequired: boolean
 }
 
-type AuditProfile = {
+export type AuditProfile = {
   name: 'desktop' | 'mobile'
   viewport: {
     width: number

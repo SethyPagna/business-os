@@ -5090,3 +5090,11 @@ Move 458 status:
   render, API status, CSP, response, console, page-error, and screenshot
   assertions while adding typed portal check/report shapes. The Phase 8.4
   suite now calls the TypeScript public portal check directly.
+
+Move 459 status:
+- Move 459 converts the manifest-driven browser action smoke audit to
+  TypeScript. `browser-action-smoke.ts` keeps the same route navigation,
+  search, button, menu, dialog, screenshot, and HTML report behavior while
+  adding typed profile, route, summary, health, action, finding, navigation,
+  and console-entry records. The ops package command now calls the TypeScript
+  entrypoint directly.
