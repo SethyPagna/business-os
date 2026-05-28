@@ -354,8 +354,8 @@ Last updated: 2026-05-18
     `frontend/src/components/products/forms`, and the Product stock-helper live
     check passed on frontend hash `b79c04b453d1b469`.
   - Fifth Phase 26 physical move complete: Product import files
-    `BulkImportModal.jsx`, `productImportPlanner.mjs`, and
-    `productImportWorker.mjs` now live in
+    `BulkImportModal.tsx`, `productImportPlanner.ts`, and
+    `productImportWorker.ts` now live in
     `frontend/src/components/products/import`; the broad Phase 8.4 UI live
     check opened the Product import modal and passed on frontend hash
     `0028bc915078664f`.

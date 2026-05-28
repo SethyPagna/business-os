@@ -181,13 +181,13 @@ await runTest('large product import analysis keeps deterministic row counts', ()
 })
 
 await runTest('bulk import modal does not fetch the full product catalog before review', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /await\s+window\.api\.getProducts\(/)
   assert.match(source, /Existing-product conflicts\s+[\s\S]*server import job/)
 })
 
 await runTest('bulk import modal stops the async start sequence after cancel is requested', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
   assert.match(source, /useRef/)
   assert.match(source, /cancelRequestedRef/)
   assert.match(source, /throwIfImportCancelled/)
@@ -196,7 +196,7 @@ await runTest('bulk import modal stops the async start sequence after cancel is 
   assert.match(source, /isBlockingProductImportIssue/)
   assert.match(source, /blockingIssueCount/)
 
-  const startMatches = [...source.matchAll(/await\s+withLoaderTimeout\(\s*\(\) => window\.api\.startImportJob\(jobId,\s*\{\s*source:/g)]
+  const startMatches = [...source.matchAll(/await\s+withLoaderTimeout\(\s*\(\) => api\.startImportJob\(activeJobId,\s*\{\s*source:/g)]
   assert.ok(startMatches.length >= 2, 'expected timeout-wrapped image-only and CSV import start calls')
   for (const match of startMatches) {
     const previousGuard = source.lastIndexOf('throwIfImportCancelled()', match.index)
@@ -206,7 +206,7 @@ await runTest('bulk import modal stops the async start sequence after cancel is 
 })
 
 await runTest('bulk import modal surfaces grouped families, filter hints, inline edits, undo, and target clarity', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
 
   assert.match(source, /CONFLICT_FILTER_OPTIONS/)
   assert.doesNotMatch(source, /value:\s*'identifier',\s*label:\s*'SKU\/barcode'/)
@@ -230,7 +230,7 @@ await runTest('bulk import modal surfaces grouped families, filter hints, inline
 })
 
 await runTest('bulk import modal explains specific review errors before apply', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
 
   assert.match(source, /getProductImportRowIssueDetails/)
   assert.match(source, /reviewIssueSummary/)
@@ -247,7 +247,7 @@ await runTest('bulk import modal explains specific review errors before apply', 
 })
 
 await runTest('bulk import modal has collapsible inline details and cancelled job recovery', () => {
-  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
 
   assert.match(source, /collapsedDetailRows/)
   assert.match(source, /toggleInlineDetails/)
@@ -262,11 +262,11 @@ await runTest('bulk import modal has collapsible inline details and cancelled jo
   assert.match(source, /const IMPORT_JOB_PREFLIGHT_TIMEOUT_MS = 15000/)
   assert.match(
     source,
-    /withLoaderTimeout\(\s*\(\) => window\.api\.getImportJob\(jobId\),\s*'Product import job status',\s*IMPORT_JOB_STATUS_TIMEOUT_MS,\s*\)/,
+    /withLoaderTimeout\(\s*\(\) => api\.getImportJob\?\.\(jobId\),\s*'Product import job status',\s*IMPORT_JOB_STATUS_TIMEOUT_MS,\s*\)/,
   )
   assert.match(
     source,
-    /withLoaderTimeout\(\s*\(\) => window\.api\.preflightImportJob\(jobId\),\s*'Product import preflight',\s*IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,\s*\)/,
+    /withLoaderTimeout\(\s*\(\) => api\.preflightImportJob\(jobId\),\s*'Product import preflight',\s*IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,\s*\)/,
   )
   assert.doesNotMatch(source, /const payload = await window\.api\.getImportJob\(jobId\)/)
   assert.doesNotMatch(source, /const preflight = await window\.api\.preflightImportJob\(jobId\)/)

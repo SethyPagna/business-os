@@ -71,11 +71,11 @@ await runTest('background import modals notify parent pages when a job is queued
     '../src/components/inventory/InventoryImportModal.jsx',
     '../src/components/sales/SalesImportModal.jsx',
     '../src/components/contacts/ContactImportModal.jsx',
-    '../src/components/products/import/BulkImportModal.jsx',
+    '../src/components/products/import/BulkImportModal.tsx',
   ]
   for (const file of files) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
-    assert.match(source, /signalDone\s*=\s*async\s*\(payload\)/, `${file} should define a queued import callback helper`)
+    assert.match(source, /signalDone\s*=\s*async\s*\(payload(?::[^)]*)?\)/, `${file} should define a queued import callback helper`)
     assert.match(source, /await\s+signalDone\(.*queuedResult|await\s+signalDone\(response\)|await\s+signalDone\(nextResult\)/, `${file} should notify the parent after queueing an import job`)
   }
 })

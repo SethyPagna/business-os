@@ -38,7 +38,7 @@ const products = fs.readFileSync(new URL('../src/components/products/Products.js
 const productPageConfig = fs.readFileSync(new URL('../src/components/products/config/productPageConfig.ts', import.meta.url), 'utf8')
 const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.jsx', import.meta.url), 'utf8')
 const productForm = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
-const bulkImportModal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
+const bulkImportModal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
 const manageCategoriesModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageCategoriesModal.tsx', import.meta.url), 'utf8')
 const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageUnitsModal.tsx', import.meta.url), 'utf8')
 const manageBrandsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageBrandsModal.tsx', import.meta.url), 'utf8')
@@ -1520,52 +1520,52 @@ assert.match(
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getImportJob\(jobId\),\s*'Product import job status',\s*IMPORT_JOB_STATUS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.getImportJob\?\.\(jobId\),\s*'Product import job status',\s*IMPORT_JOB_STATUS_TIMEOUT_MS,\s*\)/,
   'bulk import cancelled-job recovery should timeout slow job status reads',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.preflightImportJob\(jobId\),\s*'Product import preflight',\s*IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.preflightImportJob\(jobId\),\s*'Product import preflight',\s*IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,\s*\)/,
   'bulk import final preflight should timeout slow server review checks',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.createImportJob\(\{[\s\S]*type: 'products'[\s\S]*\}\),\s*'Product import job',\s*PRODUCT_IMPORT_JOB_CREATE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.createImportJob\(\{[\s\S]*type: 'products'[\s\S]*\}\),\s*'Product import job',\s*PRODUCT_IMPORT_JOB_CREATE_TIMEOUT_MS,\s*\)/,
   'product CSV import should timeout slow job creation',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.createImportJob\(\{[\s\S]*mode: 'images_only'[\s\S]*\}\),\s*'Product image import job',\s*PRODUCT_IMPORT_JOB_CREATE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.createImportJob\(\{[\s\S]*mode: 'images_only'[\s\S]*\}\),\s*'Product image import job',\s*PRODUCT_IMPORT_JOB_CREATE_TIMEOUT_MS,\s*\)/,
   'product image-only import should timeout slow job creation',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadImportJobCsv\(\{[\s\S]*fileName: csvData\?\.name \|\| 'products-import\.csv'[\s\S]*\}\),\s*'Product import CSV upload',\s*PRODUCT_IMPORT_JOB_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobCsv\(\{[\s\S]*fileName: csvData\?\.name \|\| 'products-import\.csv'[\s\S]*\}\),\s*'Product import CSV upload',\s*PRODUCT_IMPORT_JOB_UPLOAD_TIMEOUT_MS,\s*\)/,
   'product CSV import should timeout slow CSV uploads',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadImportJobCsv\(\{[\s\S]*fileName: 'image-only-import\.csv'[\s\S]*\}\),\s*'Product image import CSV upload',\s*PRODUCT_IMPORT_JOB_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobCsv\(\{[\s\S]*fileName: 'image-only-import\.csv'[\s\S]*\}\),\s*'Product image import CSV upload',\s*PRODUCT_IMPORT_JOB_UPLOAD_TIMEOUT_MS,\s*\)/,
   'product image-only import should timeout slow CSV manifest uploads',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadImportJobZip\(\{ jobId, file: zipFile \}\),\s*'Product import ZIP upload',\s*PRODUCT_IMPORT_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobZip\(\{ jobId: activeJobId, file: zipFile \}\),\s*'Product import ZIP upload',\s*PRODUCT_IMPORT_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
   'product CSV import should timeout ZIP uploads with an explicit budget',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadImportJobImages\(\{[\s\S]*files: browserImages,[\s\S]*\}\),\s*'Product import image upload',\s*PRODUCT_IMPORT_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobImages\(\{[\s\S]*files: browserImages,[\s\S]*\}\),\s*'Product import image upload',\s*PRODUCT_IMPORT_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
   'product CSV import should timeout browser image uploads with an explicit budget',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.startImportJob\(jobId, \{ source: 'products_modal' \}\),\s*'Product import start',\s*PRODUCT_IMPORT_JOB_START_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.startImportJob\(activeJobId, \{ source: 'products_modal' \}\),\s*'Product import start',\s*PRODUCT_IMPORT_JOB_START_TIMEOUT_MS,\s*\)/,
   'product CSV import should timeout slow job start',
 )
 assert.match(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.startImportJob\(jobId, \{ source: 'products_modal' \}\),\s*'Product image import start',\s*PRODUCT_IMPORT_JOB_START_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.startImportJob\(activeJobId, \{ source: 'products_modal' \}\),\s*'Product image import start',\s*PRODUCT_IMPORT_JOB_START_TIMEOUT_MS,\s*\)/,
   'product image-only import should timeout slow job start',
 )
 assert.doesNotMatch(

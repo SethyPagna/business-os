@@ -1012,8 +1012,8 @@ Current checkpoint:
   `frontend/src/components/products/forms`. The Product stock-helper live check
   passed on frontend hash `b79c04b453d1b469`.
 - Fifth Phase 26 physical move complete: Product import files
-  `BulkImportModal.jsx`, `productImportPlanner.mjs`, and
-  `productImportWorker.mjs` now live under
+  `BulkImportModal.tsx`, `productImportPlanner.ts`, and
+  `productImportWorker.ts` now live under
   `frontend/src/components/products/import`. The broad Phase 8.4 UI live check
   opened the Product import modal from the real Products button on frontend hash
   `0028bc915078664f`.
@@ -2142,10 +2142,11 @@ Cleanup checkpoint:
 - The product import planner slice is now complete:
   `frontend/src/components/products/import/productImportPlanner.ts` owns CSV
   product import row normalization, identifier conflict analysis, same-name
-  family grouping, blocking barcode/encoding issue checks, and summary counts,
-  while `productImportPlanner.mjs` remains as the compatibility wrapper for
-  `BulkImportModal`, the import worker, and tests. Product import `.ts` modules
-  are now part of the frontend typecheck gate.
+  family grouping, blocking barcode/encoding issue checks, and summary counts.
+  The former product import planner compatibility wrapper has been retired;
+  `BulkImportModal`, the import worker, and tests read the TypeScript planner
+  directly. Product import `.ts` modules are now part of the frontend typecheck
+  gate.
 - The action guard utility slice is now complete:
   `frontend/src/utils/actionGuards.ts` owns same-tick single-action,
   named-action, and keyed-action guards, while `actionGuards.mjs` remains as
@@ -2300,10 +2301,10 @@ Cleanup checkpoint:
   branch-aware line matching explicit.
 - The product import worker slice is now complete:
   `frontend/src/components/products/import/productImportWorker.ts` owns the
-  browser worker message boundary and progress/result/error posts, while
-  `productImportWorker.mjs` remains as the stable Vite module-worker wrapper
-  used by the bulk import modal. This keeps main-thread import parsing relief
-  intact while adding typechecked worker payload shapes.
+  browser worker message boundary and progress/result/error posts. The retired
+  product import worker wrapper is no longer needed by the bulk import modal,
+  which resolves the TypeScript worker entry directly. This keeps main-thread
+  import parsing relief intact while adding typechecked worker payload shapes.
 - The receipt settings constants slice is now complete:
   `frontend/src/components/receipt-settings/constants.ts` owns the receipt
   default template and translated field metadata, while `constants.js`
@@ -2377,7 +2378,7 @@ Cleanup checkpoint:
   existing background import job contract and blocks submit while a row check is
   still in flight.
 - The product import Web Worker path is now hardened:
-  `BulkImportModal.jsx` still uses
+  `BulkImportModal.tsx` uses
   `frontend/src/components/products/import/productImportWorker.ts` for heavier
   product CSV analysis, but now falls back to
   `productImportPlanner.ts` when Worker support is missing, worker startup or
@@ -3452,7 +3453,7 @@ Cleanup checkpoint:
   rescanning `ctx.activeBranches` for every row, while preserving the existing
   Node import worker and SQL pathways.
 - Move 316 makes bulk product-import conflict summaries single-pass:
-  `frontend/src/components/products/import/BulkImportModal.jsx` now builds the
+  `frontend/src/components/products/import/BulkImportModal.tsx` now builds the
   review filter counts with one `conflictGroups` accumulator loop. The import
   review surface no longer filters the same conflict list separately for each
   badge count, and `productImportPlanner.test.ts` guards the single-pass shape.
@@ -5454,3 +5455,13 @@ Move 499 status:
   conversion keeps multipart File uploads, synchronous upload/save refs,
   scanner modal behavior, branch stock adjustment wiring, and product discount
   preview logic intact.
+
+Move 500 status:
+- Move 500 converts the bulk product import modal `BulkImportModal.tsx`. The
+  typed boundary now covers product-import rows, existing product candidates,
+  conflict groups/subgroups, import job payloads, progress updates, server
+  preflight responses, browser/ZIP image maps, file-picker assets, review
+  undo snapshots, and bulk decision maps. The conversion keeps the worker-first
+  CSV planner plus synchronous fallback, image upload paths, inline review
+  editing, and import-job lifecycle intact while moving product import API calls
+  behind a typed accessor.

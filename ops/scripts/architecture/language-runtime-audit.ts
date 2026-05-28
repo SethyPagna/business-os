@@ -538,7 +538,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/products/import/productImportPlanner.ts',
-    compatibilityWrapper: 'frontend/src/components/products/import/productImportPlanner.mjs',
+    compatibilityWrapper: '',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -549,7 +549,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/components/products/import/productImportWorker.ts',
-    compatibilityWrapper: 'frontend/src/components/products/import/productImportWorker.mjs',
+    compatibilityWrapper: '',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -809,9 +809,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
 
 const COMPLETED_WEB_WORKER_SLICES = [
   {
-    surface: 'frontend/src/components/products/import/BulkImportModal.jsx',
+    surface: 'frontend/src/components/products/import/BulkImportModal.tsx',
     worker: 'frontend/src/components/products/import/productImportWorker.ts',
-    compatibilityWrapper: 'frontend/src/components/products/import/productImportWorker.mjs',
+    compatibilityWrapper: '',
     fallback: 'frontend/src/components/products/import/productImportPlanner.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',

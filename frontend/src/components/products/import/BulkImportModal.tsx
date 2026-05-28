@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
+import type { ComponentType } from 'react'
 import { ChevronDown, ChevronRight, Info, Undo2 } from 'lucide-react'
 import Modal from '../../shared/Modal'
-import FilePickerModal from '../../files/FilePickerModal'
+import FilePickerModalBase from '../../files/FilePickerModal.jsx'
 import {
   analyzeProductImportText,
   getProductImportBarcodeIssue,
@@ -31,7 +32,7 @@ const IDENTIFIER_DECISION_OPTIONS = [
   { value: 'allow_duplicate', label: 'Keep same ID' },
 ]
 
-const CONFLICT_FILTER_OPTIONS = [
+const CONFLICT_FILTER_OPTIONS: ConflictFilterOption[] = [
   { value: 'all', label: 'All', countKey: 'total', hint: 'All rows that need review before the import can be applied.' },
   { value: 'same_name', label: 'Family', countKey: 'sameName', hint: 'Rows sharing the same product name. Expand the family to see parent and variant scenarios.' },
   { value: 'barcode', label: 'Barcode', countKey: 'barcode', hint: 'Rows with duplicate, unsafe, or review-worthy barcode values. Scientific notation blocks import until edited or cleared.' },
@@ -52,20 +53,228 @@ const PRODUCT_IMPORT_IMAGE_UPLOAD_TIMEOUT_MS = 120000
 const PRODUCT_IMPORT_JOB_START_TIMEOUT_MS = 12000
 const PRODUCT_IMPORT_ANALYSIS_TIMEOUT_MS = 60000
 
+type EntityId = string | number
+type ImportActionName = 'retry' | 'delete' | 'image-only' | 'pick-csv' | 'import'
+type ImportMode = 'products' | 'images'
+type FieldRulePreset = 'merge_blank_only' | 'keep_existing' | 'use_imported'
+type ImportDecision = string
+type RowIndex = number
+type ImportRecord = Record<string, any>
+type ProductImportRow = ImportRecord & {
+  _import_row_index?: number
+  _rowNumber?: number
+  _planned_action?: string
+  _target_product_id?: EntityId
+  _parent_id?: EntityId
+  name?: string
+  sku?: string
+  barcode?: string
+  image_conflict_mode?: string
+  _identifier_conflict_mode?: string
+}
+type ExistingProduct = ImportRecord & {
+  id?: EntityId
+  parent_id?: EntityId
+  name?: string
+  sku?: string
+  barcode?: string
+  image_gallery?: unknown
+  image_path?: string
+}
+type ProductImportConflict = ImportRecord & {
+  row?: ProductImportRow
+  index: number
+  existing?: ExistingProduct | null
+  plannedAction?: string
+  conflictType?: string
+  conflictFields?: string[]
+  importDuplicateRows?: Record<string, number[]>
+  sameBasic?: boolean
+  samePricing?: boolean
+  sameImages?: boolean
+  incomingImages?: string[]
+  existingImages?: string[]
+  issueTypes?: string[]
+  familyContextOnly?: boolean
+  group?: ProductImportGroup | null
+}
+type ProductImportSubgroup = ImportRecord & {
+  signature?: string
+  suggestedAction?: string
+  rowNumbers?: number[]
+}
+type ProductImportGroup = ImportRecord & {
+  key?: string
+  title?: string
+  rowIndexes?: number[]
+  rowNumbers?: number[]
+  subgroups?: ProductImportSubgroup[]
+}
+type ProductImportAnalysis = {
+  rows?: ProductImportRow[]
+  cleanRows?: ProductImportRow[]
+  conflicts?: ProductImportConflict[]
+  groups?: ProductImportGroup[]
+  decisions?: Record<RowIndex, ImportDecision>
+  summary?: ProductImportSummary | null
+}
+type ProductImportSummary = ImportRecord & {
+  variantCount?: number
+}
+type ImageFileMap = Record<string, File | string>
+type BrowserImageEntry = {
+  relativePath: string
+  file: File
+}
+type CsvData = {
+  name?: string
+  content: string
+}
+type ImportJob = ImportRecord & {
+  id?: EntityId
+  job_id?: EntityId
+  status?: string
+  processed_rows?: number
+  total_rows?: number
+  processed_images?: number
+  total_images?: number
+  failed_rows?: number
+  failed_images?: number
+  last_error?: string
+  error?: string
+}
+type ImportResult = {
+  imported: number
+  updated: number
+  queued?: number
+  images_matched?: number
+  jobId?: EntityId | null
+  job?: ImportJob | null
+  cancelled?: boolean
+  errors?: string[]
+  message?: string
+}
+type ImportProgress = {
+  progress: number
+  label: string
+}
+type PreflightIssue = {
+  rowNumber?: EntityId
+  message?: string
+}
+type ServerPreflight = {
+  jobId: EntityId
+  checkedRows: number
+  failures: PreflightIssue[]
+  warnings: PreflightIssue[]
+}
+type ReviewUndoSnapshot = {
+  label: string
+  decisions: Record<RowIndex, ImportDecision>
+  imageDecisions: Record<RowIndex, string>
+  identifierDecisions: Record<RowIndex, string>
+  identifierOverrides: Record<RowIndex, Partial<ProductImportRow>>
+  rowOverrides: Record<RowIndex, Partial<ProductImportRow>>
+  fieldRules: Record<string, string>
+}
+type FileAsset = {
+  original_name?: string
+  public_path?: string
+}
+type ProductImportApi = {
+  openFolderDialog?: () => Promise<string | null | undefined>
+  openCSVDialog: () => Promise<CsvData | null | undefined>
+  getImportJob?: (jobId: EntityId | null | undefined) => Promise<ImportRecord | ImportJob | undefined>
+  preflightImportJob: (jobId: EntityId) => Promise<ImportRecord | undefined>
+  cancelImportJob: (jobId: EntityId, options?: ImportRecord) => Promise<ImportRecord | ImportJob | undefined>
+  retryImportJob: (jobId: EntityId, options?: ImportRecord) => Promise<ImportRecord | ImportJob | undefined>
+  deleteImportJob: (jobId: EntityId, options?: ImportRecord) => Promise<unknown>
+  createImportJob: (payload: ImportRecord) => Promise<ImportRecord | ImportJob | undefined>
+  uploadImportJobCsv: (payload: ImportRecord) => Promise<unknown>
+  uploadImportJobZip: (payload: { jobId: EntityId; file: File }) => Promise<unknown>
+  uploadImportJobImages: (payload: { jobId: EntityId; files: BrowserImageEntry[]; onProgress: (progress: ImportProgress) => void }) => Promise<unknown>
+  startImportJob: (jobId: EntityId, options?: ImportRecord) => Promise<unknown>
+  downloadImportTemplate: (type: string) => void
+  downloadImportJobErrors?: (jobId: EntityId) => void
+}
+type FilePickerModalProps = {
+  open: boolean
+  onClose: () => void
+  mediaType: string
+  title: string
+  multiple?: boolean
+  onSelectMany?: (assets: FileAsset[]) => void
+}
+type BulkImportModalProps = {
+  onClose: () => void
+  onDone?: (payload: ImportResult) => unknown | Promise<unknown>
+  t?: (key: string) => string
+}
+type ProductImportError = Error & {
+  code?: string
+  preflight?: ServerPreflight
+}
+type ConflictFilterOption = {
+  value: string
+  label: string
+  countKey: keyof ConflictGroupCounts
+  hint: string
+}
+type ConflictGroupCounts = {
+  total: number
+  sameName: number
+  identifier: number
+  barcode: number
+  sku: number
+  pricing: number
+  existing: number
+  variant: number
+  merge: number
+  override: number
+  errors: number
+}
+type VisibleConflictSection = {
+  key: string
+  familyKey: string
+  group?: ProductImportGroup
+  title: string
+  rowNumbers: number[]
+  rows: ProductImportConflict[]
+}
+
+const FilePickerModal = FilePickerModalBase as ComponentType<FilePickerModalProps>
+
+function getProductImportApi(): ProductImportApi {
+  return (window as unknown as { api: ProductImportApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 const FIELD_RULE_PRESET_HINTS = {
   merge_blank_only: 'Only fill blank existing details; keep existing values when both sides have data.',
   keep_existing: 'Keep existing product details and only import stock/images according to row actions.',
   use_imported: 'Use imported CSV details for reviewed fields when the row updates or overrides a product.',
-}
+} satisfies Record<FieldRulePreset, string>
 
-function getBaseName(value) {
+function getBaseName(value: unknown): string {
   return String(value || '')
     .split(/[\\/]/)
     .pop()
-    .trim()
+    ?.trim()
+    || ''
 }
 
-function analyzeProductCsvInWorker({ text, existingProducts, onProgress }) {
+function analyzeProductCsvInWorker({
+  text,
+  existingProducts,
+  onProgress,
+}: {
+  text: string
+  existingProducts: ExistingProduct[]
+  onProgress?: (progress: ImportProgress) => void
+}): Promise<ProductImportAnalysis> {
   const runFallbackAnalysis = () => {
     onProgress?.({ progress: 15, label: 'Using browser analysis fallback' })
     return analyzeProductImportText(text, existingProducts)
@@ -73,10 +282,10 @@ function analyzeProductCsvInWorker({ text, existingProducts, onProgress }) {
   if (typeof Worker === 'undefined') {
     return Promise.resolve(runFallbackAnalysis())
   }
-  return new Promise((resolve, reject) => {
+  return new Promise<ProductImportAnalysis>((resolve, reject) => {
     const id = `product-import-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    let worker = null
-    let timeoutId = null
+    let worker: Worker | null = null
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
     let settled = false
     const cleanup = () => {
       if (timeoutId) {
@@ -86,13 +295,13 @@ function analyzeProductCsvInWorker({ text, existingProducts, onProgress }) {
       worker?.terminate()
       worker = null
     }
-    const complete = (callback) => {
+    const complete = (callback: () => void): void => {
       if (settled) return
       settled = true
       cleanup()
       callback()
     }
-    const runFallback = (error) => {
+    const runFallback = (error: unknown): void => {
       complete(() => {
         try {
           resolve(runFallbackAnalysis())
@@ -106,7 +315,7 @@ function analyzeProductCsvInWorker({ text, existingProducts, onProgress }) {
       timeoutId = setTimeout(() => {
         runFallback(new Error('Import analysis worker timed out'))
       }, PRODUCT_IMPORT_ANALYSIS_TIMEOUT_MS)
-      worker.onmessage = (event) => {
+      worker.onmessage = (event: MessageEvent<ImportRecord>) => {
         const message = event.data || {}
         if (message.id !== id) return
         if (message.type === 'progress') {
@@ -119,7 +328,7 @@ function analyzeProductCsvInWorker({ text, existingProducts, onProgress }) {
           runFallback(new Error(message.error || 'Import analysis failed'))
         }
       }
-      worker.onerror = (error) => {
+      worker.onerror = (error: ErrorEvent) => {
         runFallback(new Error(error?.message || 'Import analysis worker failed'))
       }
       worker.postMessage({ id, text, existingProducts })
@@ -135,14 +344,14 @@ function analyzeProductCsvInWorker({ text, existingProducts, onProgress }) {
  * 1.2 Convert paths/URLs to basename for human conflict display.
  * 1.3 Keep max 5 unique names in source order.
  */
-function getIncomingImageFilenames(row = {}) {
+function getIncomingImageFilenames(row: ProductImportRow = {}): string[] {
   const direct = [
     'image_filename',
     'image_filename_1', 'image_filename_2', 'image_filename_3', 'image_filename_4', 'image_filename_5',
     'image_1', 'image_2', 'image_3', 'image_4', 'image_5',
     'image_url_1', 'image_url_2', 'image_url_3', 'image_url_4', 'image_url_5',
   ]
-  const candidates = []
+  const candidates: string[] = []
   direct.forEach((key) => {
     const value = String(row?.[key] || '').trim()
     if (value) candidates.push(getBaseName(value))
@@ -156,8 +365,8 @@ function getIncomingImageFilenames(row = {}) {
       .filter(Boolean)
       .forEach((item) => candidates.push(item))
   })
-  const seen = new Set()
-  const unique = []
+  const seen = new Set<string>()
+  const unique: string[] = []
   for (const item of candidates) {
     const key = item.toLowerCase()
     if (seen.has(key)) continue
@@ -168,9 +377,9 @@ function getIncomingImageFilenames(row = {}) {
   return unique
 }
 
-function getExistingImageFilenames(product = {}) {
+function getExistingImageFilenames(product: ExistingProduct | null = {}): string[] {
   const safeProduct = product && typeof product === 'object' ? product : {}
-  let gallery = []
+  let gallery: unknown[] = []
   if (Array.isArray(safeProduct.image_gallery)) {
     gallery = safeProduct.image_gallery
   } else if (typeof safeProduct.image_gallery === 'string' && safeProduct.image_gallery.trim()) {
@@ -183,8 +392,8 @@ function getExistingImageFilenames(product = {}) {
   }
   const fallback = safeProduct.image_path ? [safeProduct.image_path] : []
   const source = gallery.length ? gallery : fallback
-  const seen = new Set()
-  const names = []
+  const seen = new Set<string>()
+  const names: string[] = []
   for (const entry of source) {
     const name = getBaseName(entry)
     if (!name) continue
@@ -197,7 +406,7 @@ function getExistingImageFilenames(product = {}) {
   return names
 }
 
-function csvEscape(value) {
+function csvEscape(value: unknown): string {
   const text = String(value ?? '')
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
@@ -227,21 +436,21 @@ const IMPORT_REVIEW_EDIT_FIELDS = [
 
 const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr']
 
-function compactImportValue(value) {
+function compactImportValue(value: unknown): string {
   const text = String(value ?? '').trim()
   return text || '-'
 }
 
-function isBlankImportValue(value) {
+function isBlankImportValue(value: unknown): boolean {
   return String(value ?? '').trim() === ''
 }
 
-function hasPriceReviewIssue(row = {}, existing = null, samePricing = true) {
+function hasPriceReviewIssue(row: ProductImportRow = {}, existing: ExistingProduct | null = null, samePricing = true): boolean {
   if (existing && samePricing === false) return true
   return IMPORT_PRICE_FIELDS.every((field) => isBlankImportValue(row?.[field]) || Number(row?.[field] || 0) === 0)
 }
 
-function getProductImportIssueLabel(issueType) {
+function getProductImportIssueLabel(issueType: unknown): string {
   if (issueType === 'barcode_scientific_notation') return 'Barcode exported as scientific notation'
   if (issueType === 'barcode_too_long') return 'Barcode too long'
   if (issueType === 'invalid_barcode') return 'Invalid barcode'
@@ -250,7 +459,7 @@ function getProductImportIssueLabel(issueType) {
   return String(issueType || '').replaceAll('_', ' ')
 }
 
-function getProductImportIssueHint(issueType) {
+function getProductImportIssueHint(issueType: unknown): string {
   if (issueType === 'barcode_scientific_notation') return 'Edit this barcode, clear it, or re-export the CSV with the barcode column formatted as text. Scientific notation cannot be applied safely.'
   if (issueType === 'barcode_too_long') return 'Shorten this barcode or clear it before importing.'
   if (issueType === 'invalid_barcode') return 'Remove invalid control characters or clear this barcode before importing.'
@@ -258,8 +467,8 @@ function getProductImportIssueHint(issueType) {
   return 'Review this row before importing.'
 }
 
-function getProductImportRowIssueDetails(entry = {}, editedRow = {}) {
-  const details = []
+function getProductImportRowIssueDetails(entry: ProductImportConflict = { index: 0 }, editedRow: ProductImportRow = {}) {
+  const details: Array<{ title: string; detail: string; blocking?: boolean }> = []
   const conflictFields = Array.isArray(entry.conflictFields) ? entry.conflictFields : []
   const duplicateRows = entry.importDuplicateRows || {}
   const barcodeIssue = getProductImportBarcodeIssue(editedRow.barcode)
@@ -313,61 +522,64 @@ function getProductImportRowIssueDetails(entry = {}, editedRow = {}) {
   return details
 }
 
-function valuesDiffer(left, right) {
+function valuesDiffer(left: unknown, right: unknown): boolean {
   return String(left ?? '').trim().normalize('NFC') !== String(right ?? '').trim().normalize('NFC')
 }
 
-function normalizeImageMatchKey(value) {
+function normalizeImageMatchKey(value: unknown): string {
   return String(value || '')
     .split(/[\\/]/)
     .pop()
-    .replace(/\.[^.]+$/, '')
+    ?.replace(/\.[^.]+$/, '')
     .replace(/[_-]+/g, ' ')
     .normalize('NFC')
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase()
+    || ''
 }
 
-function getImageReference(entryKey, entryValue) {
+function getImageReference(entryKey: unknown, entryValue: unknown): string {
   const textValue = typeof entryValue === 'string' ? entryValue.trim() : ''
   if (textValue && (/^data:image\//i.test(textValue) || /^https?:\/\//i.test(textValue) || textValue.startsWith('/uploads/') || textValue.startsWith('uploads/'))) {
     return textValue.startsWith('uploads/') ? `/${textValue}` : textValue
   }
-  return getBaseName(entryKey || textValue || entryValue?.name || '')
+  const fileName = typeof File !== 'undefined' && entryValue instanceof File ? entryValue.name : ''
+  return getBaseName(entryKey || textValue || fileName || '')
 }
 
-function findImageReferenceForRow(row = {}, imageFiles = {}) {
+function findImageReferenceForRow(row: ProductImportRow = {}, imageFiles: ImageFileMap = {}): string {
   const keys = [row.name, row.sku, row.barcode].map(normalizeImageMatchKey).filter(Boolean)
   if (!keys.length) return ''
   for (const [entryKey, entryValue] of Object.entries(imageFiles || {})) {
-    const imageKey = normalizeImageMatchKey(entryKey || entryValue?.name || '')
+    const fileName = typeof File !== 'undefined' && entryValue instanceof File ? entryValue.name : ''
+    const imageKey = normalizeImageMatchKey(entryKey || fileName || '')
     if (imageKey && keys.includes(imageKey)) return getImageReference(entryKey, entryValue)
   }
   return ''
 }
 
-function getDecisionLabel(value) {
+function getDecisionLabel(value: unknown): string {
   return IMPORT_DECISION_OPTIONS.find((item) => item.value === value)?.label || String(value || 'Action')
 }
 
-function getFamilyKeyForRow(row = {}) {
+function getFamilyKeyForRow(row: ProductImportRow = {}): string {
   return normalizeImportProductName(row?.name) || `row:${Number(row?._import_row_index ?? row?._rowNumber ?? 0)}`
 }
 
-function summarizeRowNumbers(rowNumbers = []) {
+function summarizeRowNumbers(rowNumbers: unknown[] = []): string {
   const unique = Array.from(new Set((Array.isArray(rowNumbers) ? rowNumbers : []).map((value) => Number(value)).filter(Boolean))).sort((left, right) => left - right)
   if (!unique.length) return '-'
   if (unique.length <= 4) return unique.join(', ')
   return `${unique.slice(0, 3).join(', ')} +${unique.length - 3}`
 }
 
-function summarizeSubgroup(subgroup = {}, index = 0) {
+function summarizeSubgroup(subgroup: ProductImportSubgroup = {}, index = 0): string {
   const label = getDecisionLabel(subgroup.suggestedAction || 'new')
   return `Case ${index + 1}: ${label} - rows ${summarizeRowNumbers(subgroup.rowNumbers)}`
 }
 
-function getImportActionTargetSummary(entry = {}, decisionValue = '', editedRow = {}) {
+function getImportActionTargetSummary(entry: ProductImportConflict = { index: 0 }, decisionValue = '', editedRow: ProductImportRow = {}): string {
   const existing = entry.existing || null
   const action = String(decisionValue || entry.plannedAction || editedRow?._planned_action || 'new')
   const row = { ...(entry.row || {}), ...(editedRow || {}) }
@@ -400,7 +612,7 @@ function getImportActionTargetSummary(entry = {}, decisionValue = '', editedRow 
   return `Create a new product row for ${familyName}`
 }
 
-function createFamilyContextEntry(row = {}, rowIndex = 0, group = null) {
+function createFamilyContextEntry(row: ProductImportRow = {}, rowIndex = 0, group: ProductImportGroup | null = null): ProductImportConflict {
   const safeRow = row && typeof row === 'object' ? row : {}
   const index = Number(rowIndex ?? safeRow._import_row_index ?? 0)
   return {
@@ -421,7 +633,11 @@ function createFamilyContextEntry(row = {}, rowIndex = 0, group = null) {
   }
 }
 
-function buildVisibleFamilyRows(group, conflictsByIndex, importRowsByIndex) {
+function buildVisibleFamilyRows(
+  group: ProductImportGroup | null | undefined,
+  conflictsByIndex: Map<number, ProductImportConflict>,
+  importRowsByIndex: Map<number, ProductImportRow>,
+): ProductImportConflict[] {
   const rowIndexes = Array.isArray(group?.rowIndexes) ? group.rowIndexes : []
   return rowIndexes
     .map((rowIndex) => {
@@ -432,11 +648,21 @@ function buildVisibleFamilyRows(group, conflictsByIndex, importRowsByIndex) {
       const row = importRowsByIndex.get(index)
       return row ? createFamilyContextEntry(row, index, group) : null
     })
-    .filter((entry) => entry?.row)
+    .filter((entry): entry is ProductImportConflict => !!entry?.row)
     .sort((left, right) => Number(left?.row?._rowNumber || left?.index || 0) - Number(right?.row?._rowNumber || right?.index || 0))
 }
 
-function InlineImportDetailGrid({ row = {}, compareTo = null, onBeginEdit, onChange }) {
+function InlineImportDetailGrid({
+  row = {},
+  compareTo = null,
+  onBeginEdit,
+  onChange,
+}: {
+  row?: ProductImportRow
+  compareTo?: ExistingProduct | null
+  onBeginEdit?: (field: string) => void
+  onChange?: (field: string, value: string) => void
+}) {
   return (
     <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {IMPORT_REVIEW_EDIT_FIELDS.map(([field, label]) => {
@@ -467,7 +693,7 @@ function InlineImportDetailGrid({ row = {}, compareTo = null, onBeginEdit, onCha
   )
 }
 
-function buildImageOnlyCsv(imageFiles = {}) {
+function buildImageOnlyCsv(imageFiles: ImageFileMap = {}): string {
   const rows = Object.entries(imageFiles || {})
     .filter(Boolean)
     .map(([name, value]) => [
@@ -485,90 +711,91 @@ function buildImageOnlyCsv(imageFiles = {}) {
   ].join('\n')
 }
 
-function getBrowserImageEntries(imageFiles = {}) {
+function getBrowserImageEntries(imageFiles: ImageFileMap = {}): BrowserImageEntry[] {
   return Object.entries(imageFiles || {})
-    .filter(([, value]) => typeof File !== 'undefined' && value instanceof File)
+    .filter((entry): entry is [string, File] => typeof File !== 'undefined' && entry[1] instanceof File)
     .map(([relativePath, file]) => ({
       relativePath: relativePath || file.webkitRelativePath || file.name,
       file,
     }))
 }
 
-export default function BulkImportModal({ onClose, onDone, t }) {
-  const [mode, setMode] = useState('products')
+export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalProps) {
+  const [mode, setMode] = useState<ImportMode>('products')
   const [step, setStep] = useState(1)
-  const [csvData, setCsvData] = useState(null)
-  const [imageDir, setImageDir] = useState(null)
-  const [imageFiles, setImageFiles] = useState({})
-  const [zipFile, setZipFile] = useState(null)
-  const [conflicts, setConflicts] = useState([])
-  const [cleanRows, setCleanRows] = useState([])
-  const [importRows, setImportRows] = useState([])
-  const [reviewGroups, setReviewGroups] = useState([])
-  const [analysisSummary, setAnalysisSummary] = useState(null)
-  const [analysisProgress, setAnalysisProgress] = useState(null)
-  const [decisions, setDecisions] = useState({})
-  const [imageDecisions, setImageDecisions] = useState({})
-  const [identifierDecisions, setIdentifierDecisions] = useState({})
-  const [identifierOverrides, setIdentifierOverrides] = useState({})
-  const [rowOverrides, setRowOverrides] = useState({})
+  const [csvData, setCsvData] = useState<CsvData | null>(null)
+  const [imageDir, setImageDir] = useState<string | null>(null)
+  const [imageFiles, setImageFiles] = useState<ImageFileMap>({})
+  const [zipFile, setZipFile] = useState<File | null>(null)
+  const [conflicts, setConflicts] = useState<ProductImportConflict[]>([])
+  const [cleanRows, setCleanRows] = useState<ProductImportRow[]>([])
+  const [importRows, setImportRows] = useState<ProductImportRow[]>([])
+  const [reviewGroups, setReviewGroups] = useState<ProductImportGroup[]>([])
+  const [analysisSummary, setAnalysisSummary] = useState<ProductImportSummary | null>(null)
+  const [analysisProgress, setAnalysisProgress] = useState<ImportProgress | null>(null)
+  const [decisions, setDecisions] = useState<Record<RowIndex, ImportDecision>>({})
+  const [imageDecisions, setImageDecisions] = useState<Record<RowIndex, string>>({})
+  const [identifierDecisions, setIdentifierDecisions] = useState<Record<RowIndex, string>>({})
+  const [identifierOverrides, setIdentifierOverrides] = useState<Record<RowIndex, Partial<ProductImportRow>>>({})
+  const [rowOverrides, setRowOverrides] = useState<Record<RowIndex, Partial<ProductImportRow>>>({})
   const [conflictFilter, setConflictFilter] = useState('all')
   const [conflictQuery, setConflictQuery] = useState('')
-  const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
-  const [collapsedFamilyKeys, setCollapsedFamilyKeys] = useState(() => new Set())
-  const [collapsedDetailRows, setCollapsedDetailRows] = useState(() => new Set())
-  const [reviewUndoStack, setReviewUndoStack] = useState([])
-  const [fieldRules, setFieldRules] = useState({})
-  const [result, setResult] = useState(null)
-  const [currentJob, setCurrentJob] = useState(null)
-  const [serverPreflight, setServerPreflight] = useState(null)
+  const [selectedConflictIds, setSelectedConflictIds] = useState<Set<RowIndex>>(() => new Set())
+  const [collapsedFamilyKeys, setCollapsedFamilyKeys] = useState<Set<string>>(() => new Set())
+  const [collapsedDetailRows, setCollapsedDetailRows] = useState<Set<RowIndex>>(() => new Set())
+  const [reviewUndoStack, setReviewUndoStack] = useState<ReviewUndoSnapshot[]>([])
+  const [fieldRules, setFieldRules] = useState<Record<string, string>>({})
+  const [result, setResult] = useState<ImportResult | null>(null)
+  const [currentJob, setCurrentJob] = useState<ImportJob | null>(null)
+  const [serverPreflight, setServerPreflight] = useState<ServerPreflight | null>(null)
   const [loading, setLoading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const cancelRequestedRef = useRef(false)
-  const editSessionRef = useRef(new Set())
+  const editSessionRef = useRef<Set<string>>(new Set())
   const actionInFlightRef = useRef('')
 
-  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
-  const signalDone = async (payload) => {
+  const T = (key: string, fallback: string): string => (typeof t === 'function' ? t(key) : fallback)
+  const signalDone = async (payload: ImportResult): Promise<void> => {
     if (typeof onDone === 'function') {
       await Promise.resolve(onDone(payload))
     }
   }
 
-  const throwIfImportCancelled = () => {
+  const throwIfImportCancelled = (): void => {
     if (!cancelRequestedRef.current) return
-    const error = new Error(T('import_cancelled', 'Import cancelled.'))
+    const error = new Error(T('import_cancelled', 'Import cancelled.')) as ProductImportError
     error.code = 'import_cancel_requested'
     throw error
   }
 
-  const isCancelledStartError = (error) => /import was cancelled|retry before starting/i.test(String(error?.message || error || ''))
+  const isCancelledStartError = (error: unknown): boolean => /import was cancelled|retry before starting/i.test(getErrorMessage(error, String(error || '')))
 
-  const beginImportAction = (action, options = {}) => {
+  const beginImportAction = (action: ImportActionName, options: { setLoading?: boolean } = {}): boolean => {
     if (!beginNamedAction(actionInFlightRef, action, { blocked: loading })) return false
     if (options.setLoading !== false) setLoading(true)
     return true
   }
 
-  const finishImportAction = (action) => {
+  const finishImportAction = (action: ImportActionName): void => {
     finishNamedAction(actionInFlightRef, action)
     setLoading(false)
   }
 
-  const setCancelledResult = async (jobId = currentJob?.id, error = null) => {
+  const setCancelledResult = async (jobId: EntityId | null | undefined = currentJob?.id, error: unknown = null): Promise<void> => {
     let job = currentJob
-    if (jobId && window.api.getImportJob) {
+    const api = getProductImportApi()
+    if (jobId && api.getImportJob) {
       try {
         const payload = await withLoaderTimeout(
-          () => window.api.getImportJob(jobId),
+          () => api.getImportJob?.(jobId),
           'Product import job status',
           IMPORT_JOB_STATUS_TIMEOUT_MS,
         )
-        job = payload?.job || payload || job
+        job = (payload?.job || payload || job) as ImportJob | null
         if (job) setCurrentJob(job)
       } catch (_) {}
     }
-    const message = error?.message || T('import_cancelled', 'Import cancelled.')
+    const message = getErrorMessage(error, T('import_cancelled', 'Import cancelled.'))
     setResult({
       imported: 0,
       updated: 0,
@@ -582,7 +809,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setStep(3)
   }
 
-  const createReviewSnapshot = (label) => ({
+  const createReviewSnapshot = (label: string): ReviewUndoSnapshot => ({
     label,
     decisions,
     imageDecisions,
@@ -592,11 +819,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     fieldRules,
   })
 
-  const pushReviewUndoSnapshot = (label) => {
+  const pushReviewUndoSnapshot = (label: string): void => {
     setReviewUndoStack((stack) => [...stack.slice(-19), createReviewSnapshot(label)])
   }
 
-  const undoLastReviewChange = () => {
+  const undoLastReviewChange = (): void => {
     setReviewUndoStack((stack) => {
       const snapshot = stack[stack.length - 1]
       if (!snapshot) return stack
@@ -611,7 +838,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const beginInlineEdit = (rowIndex, field, label = 'Edited row details') => {
+  const beginInlineEdit = (rowIndex: RowIndex, field: string, label = 'Edited row details'): void => {
     const key = `${rowIndex}:${field}`
     setCollapsedDetailRows((current) => {
       if (!current.has(rowIndex)) return current
@@ -653,7 +880,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   }
 
   const pickImageDirectory = async () => {
-    const folder = await window.api.openFolderDialog?.()
+    const folder = await getProductImportApi().openFolderDialog?.()
     if (folder) {
       setImageDir(folder)
       return
@@ -662,10 +889,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     input.type = 'file'
     input.webkitdirectory = true
     input.multiple = true
-    input.onchange = async (event) => {
-      const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'))
+    input.onchange = async (event: Event) => {
+      const target = event.target as HTMLInputElement | null
+      const files = Array.from(target?.files || []).filter((file) => file.type.startsWith('image/'))
       if (!files.length) return
-      const map = {}
+      const map: ImageFileMap = {}
       files.forEach((file) => {
         map[file.webkitRelativePath || file.name] = file
       })
@@ -680,8 +908,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = '.zip,application/zip,application/x-zip-compressed'
-    input.onchange = (event) => {
-      const file = event.target.files?.[0]
+    input.onchange = (event: Event) => {
+      const target = event.target as HTMLInputElement | null
+      const file = target?.files?.[0]
       if (!file) return
       setZipFile(file)
       setImageDir(`${file.name} (${Math.ceil(file.size / 1024 / 1024)} MB ZIP)`)
@@ -689,7 +918,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     input.click()
   }
 
-  const addLibraryImages = (assets = []) => {
+  const addLibraryImages = (assets: FileAsset[] = []) => {
     const safeAssets = Array.isArray(assets) ? assets : []
     if (!safeAssets.length) return
     setImageFiles((current) => {
@@ -705,7 +934,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const buildCsvForImportJob = () => {
+  const buildCsvForImportJob = (): string => {
     const rows = importRows.length ? importRows : analyzeProductImportText(csvData?.content || '', []).rows
     const instructions = rows.map((row, index) => {
       const rowIndex = Number(row?._import_row_index ?? index)
@@ -728,26 +957,27 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         _parent_id: row?._parent_id || '',
       }
     })
-    const headers = Array.from(instructions.reduce((set, row) => {
+    const headers = Array.from(instructions.reduce((set: Set<string>, row) => {
       Object.keys(row || {}).forEach((key) => set.add(key))
       return set
     }, new Set(['name', 'sku', 'barcode', '_action', '_target_product_id', '_parent_id', '_field_rules', '_identifier_conflict_mode', 'image_conflict_mode'])))
     return [
       headers.join(','),
-      ...instructions.map((row) => headers.map((header) => csvEscape(row?.[header])).join(',')),
+      ...instructions.map((row) => headers.map((header) => csvEscape((row as ImportRecord)?.[header])).join(',')),
     ].join('\n')
   }
 
-  const ensureServerPreflightReady = async (jobId) => {
+  const ensureServerPreflightReady = async (jobId: EntityId): Promise<ImportRecord | undefined> => {
+    const api = getProductImportApi()
     const preflight = await withLoaderTimeout(
-      () => window.api.preflightImportJob(jobId),
+      () => api.preflightImportJob(jobId),
       'Product import preflight',
       IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,
     )
     const failures = Array.isArray(preflight?.failures) ? preflight.failures : []
     const warnings = Array.isArray(preflight?.warnings) ? preflight.warnings : []
     if (failures.length) {
-      const preflightError = new Error(failures[0]?.message || 'Import review still has blocking issues.')
+      const preflightError = new Error(failures[0]?.message || 'Import review still has blocking issues.') as ProductImportError
       preflightError.preflight = {
         jobId,
         checkedRows: Number(preflight?.checkedRows || 0),
@@ -780,14 +1010,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     }
     cancelRequestedRef.current = true
     try {
-      const payload = await window.api.cancelImportJob(currentJob.id, { source: 'products_modal' })
-      setCurrentJob(payload?.job || payload || currentJob)
+      const payload = await getProductImportApi().cancelImportJob(currentJob.id, { source: 'products_modal' })
+      setCurrentJob((payload?.job || payload || currentJob) as ImportJob)
       setAnalysisProgress((current) => ({
         progress: current?.progress || 0,
         label: T('cancel_requested', 'Cancel requested...'),
       }))
     } catch (error) {
-      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Failed to cancel import job'] })
+      setResult({ imported: 0, updated: 0, errors: [getErrorMessage(error, 'Failed to cancel import job')] })
       setStep(3)
       setLoading(false)
     }
@@ -802,14 +1032,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     }
     setAnalysisProgress({ progress: 0, label: T('retry_import', 'Retry import') })
     try {
-      const payload = await window.api.retryImportJob(targetJob.id, { source: 'products_modal' })
-      const job = payload?.job || payload || targetJob
+      const payload = await getProductImportApi().retryImportJob(targetJob.id, { source: 'products_modal' })
+      const job = (payload?.job || payload || targetJob) as ImportJob
       setCurrentJob(job)
       setResult(null)
       cancelRequestedRef.current = false
       setStep(2)
     } catch (error) {
-      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Failed to retry import job'] })
+      setResult({ imported: 0, updated: 0, errors: [getErrorMessage(error, 'Failed to retry import job')] })
       setStep(3)
     } finally {
       finishImportAction('retry')
@@ -832,12 +1062,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       return
     }
     try {
-      await window.api.deleteImportJob(targetJob.id, { force: true, source: 'products_modal' })
+      await getProductImportApi().deleteImportJob(targetJob.id, { force: true, source: 'products_modal' })
       setCurrentJob(null)
       setResult(null)
       resetCsvState()
     } catch (error) {
-      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Failed to delete import job'] })
+      setResult({ imported: 0, updated: 0, errors: [getErrorMessage(error, 'Failed to delete import job')] })
       setStep(3)
     } finally {
       finishImportAction('delete')
@@ -850,25 +1080,27 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     cancelRequestedRef.current = false
     setServerPreflight(null)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
-    let jobId = null
+    let jobId: EntityId | null = null
+    const api = getProductImportApi()
     try {
       const created = await withLoaderTimeout(
-        () => window.api.createImportJob({
+        () => api.createImportJob({
           type: 'products',
           policy: { mode: 'images_only', image_conflict_mode: 'append_csv' },
         }),
         'Product image import job',
         PRODUCT_IMPORT_JOB_CREATE_TIMEOUT_MS,
       )
-      const job = created?.job || created
+      const job = (created?.job || created) as ImportJob | undefined
+      if (!job?.id) throw new Error('Import job was not created')
       setCurrentJob(job)
-      jobId = job?.id
-      if (!jobId) throw new Error('Import job was not created')
+      const activeJobId = job.id
+      jobId = activeJobId
       throwIfImportCancelled()
 
       await withLoaderTimeout(
-        () => window.api.uploadImportJobCsv({
-          jobId,
+        () => api.uploadImportJobCsv({
+          jobId: activeJobId,
           text: buildImageOnlyCsv(imageFiles),
           fileName: 'image-only-import.csv',
         }),
@@ -879,7 +1111,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       if (zipFile) {
         setAnalysisProgress({ progress: 10, label: 'Uploading ZIP image pack' })
         await withLoaderTimeout(
-          () => window.api.uploadImportJobZip({ jobId, file: zipFile }),
+          () => api.uploadImportJobZip({ jobId: activeJobId, file: zipFile }),
           'Product image import ZIP upload',
           PRODUCT_IMPORT_IMAGE_UPLOAD_TIMEOUT_MS,
         )
@@ -888,8 +1120,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       const browserImages = getBrowserImageEntries(imageFiles)
       if (browserImages.length) {
         await withLoaderTimeout(
-          () => window.api.uploadImportJobImages({
-            jobId,
+          () => api.uploadImportJobImages({
+            jobId: activeJobId,
             files: browserImages,
             onProgress: setAnalysisProgress,
           }),
@@ -899,10 +1131,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         throwIfImportCancelled()
       }
       setAnalysisProgress({ progress: 92, label: 'Checking conflicts and row decisions' })
-      await ensureServerPreflightReady(jobId)
+      await ensureServerPreflightReady(activeJobId)
       throwIfImportCancelled()
       await withLoaderTimeout(
-        () => window.api.startImportJob(jobId, { source: 'products_modal' }),
+        () => api.startImportJob(activeJobId, { source: 'products_modal' }),
         'Product image import start',
         PRODUCT_IMPORT_JOB_START_TIMEOUT_MS,
       )
@@ -921,13 +1153,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
       return
     } catch (error) {
-      if (error?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
+      const importError = error as ProductImportError
+      if (importError?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
         await setCancelledResult(jobId, error)
-      } else if (Array.isArray(error?.preflight?.failures) && error.preflight.failures.length) {
-        notify(error?.message || 'Server preflight found rows that still need review.', 'error')
+      } else if (Array.isArray(importError?.preflight?.failures) && importError.preflight.failures.length) {
+        alert(getErrorMessage(error, 'Server preflight found rows that still need review.'))
         setStep(2)
       } else {
-        setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
+        setResult({ imported: 0, updated: 0, errors: [getErrorMessage(error, 'Import failed')] })
         setStep(3)
       }
     } finally {
@@ -939,7 +1172,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const handlePickCSV = async () => {
     if (!beginImportAction('pick-csv', { setLoading: false })) return
     try {
-      const picked = await window.api.openCSVDialog()
+      const picked = await getProductImportApi().openCSVDialog()
       if (!picked) return
       setCsvData(picked)
       setLoading(true)
@@ -965,9 +1198,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           ),
         }
       })
-      const nextImageDecisions = {}
-      const nextIdentifierDecisions = {}
-      const nextIdentifierOverrides = {}
+      const nextImageDecisions: Record<RowIndex, string> = {}
+      const nextIdentifierDecisions: Record<RowIndex, string> = {}
+      const nextIdentifierOverrides: Record<RowIndex, Partial<ProductImportRow>> = {}
       ;[...(analysis.cleanRows || []), ...nextConflicts].forEach((entry) => {
         const index = Number(entry.index ?? entry.row?._import_row_index ?? 0)
         const incomingImages = getIncomingImageFilenames(entry.row)
@@ -993,7 +1226,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       editSessionRef.current = new Set()
       setStep(2)
     } catch (error) {
-      alert(`Failed to analyze CSV: ${error?.message || 'Unknown error'}`)
+      alert(`Failed to analyze CSV: ${getErrorMessage(error, 'Unknown error')}`)
     } finally {
       finishImportAction('pick-csv')
       setAnalysisProgress(null)
@@ -1006,10 +1239,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     cancelRequestedRef.current = false
     setServerPreflight(null)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
-    let jobId = null
+    let jobId: EntityId | null = null
+    const api = getProductImportApi()
     try {
       const created = await withLoaderTimeout(
-        () => window.api.createImportJob({
+        () => api.createImportJob({
           type: 'products',
           policy: {
             source: 'products_modal',
@@ -1019,15 +1253,16 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         'Product import job',
         PRODUCT_IMPORT_JOB_CREATE_TIMEOUT_MS,
       )
-      const job = created?.job || created
+      const job = (created?.job || created) as ImportJob | undefined
+      if (!job?.id) throw new Error('Import job was not created')
       setCurrentJob(job)
-      jobId = job?.id
-      if (!jobId) throw new Error('Import job was not created')
+      const activeJobId = job.id
+      jobId = activeJobId
       throwIfImportCancelled()
 
       await withLoaderTimeout(
-        () => window.api.uploadImportJobCsv({
-          jobId,
+        () => api.uploadImportJobCsv({
+          jobId: activeJobId,
           text: buildCsvForImportJob(),
           fileName: csvData?.name || 'products-import.csv',
         }),
@@ -1038,7 +1273,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       if (zipFile) {
         setAnalysisProgress({ progress: 10, label: 'Uploading ZIP image pack' })
         await withLoaderTimeout(
-          () => window.api.uploadImportJobZip({ jobId, file: zipFile }),
+          () => api.uploadImportJobZip({ jobId: activeJobId, file: zipFile }),
           'Product import ZIP upload',
           PRODUCT_IMPORT_IMAGE_UPLOAD_TIMEOUT_MS,
         )
@@ -1047,8 +1282,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       const browserImages = getBrowserImageEntries(imageFiles)
       if (browserImages.length) {
         await withLoaderTimeout(
-          () => window.api.uploadImportJobImages({
-            jobId,
+          () => api.uploadImportJobImages({
+            jobId: activeJobId,
             files: browserImages,
             onProgress: setAnalysisProgress,
           }),
@@ -1058,10 +1293,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         throwIfImportCancelled()
       }
       setAnalysisProgress({ progress: 92, label: 'Checking conflicts and row decisions' })
-      await ensureServerPreflightReady(jobId)
+      await ensureServerPreflightReady(activeJobId)
       throwIfImportCancelled()
       await withLoaderTimeout(
-        () => window.api.startImportJob(jobId, { source: 'products_modal' }),
+        () => api.startImportJob(activeJobId, { source: 'products_modal' }),
         'Product import start',
         PRODUCT_IMPORT_JOB_START_TIMEOUT_MS,
       )
@@ -1079,13 +1314,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
       return
     } catch (error) {
-      if (error?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
+      const importError = error as ProductImportError
+      if (importError?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
         await setCancelledResult(jobId, error)
-      } else if (Array.isArray(error?.preflight?.failures) && error.preflight.failures.length) {
-        notify(error?.message || 'Server preflight found rows that still need review.', 'error')
+      } else if (Array.isArray(importError?.preflight?.failures) && importError.preflight.failures.length) {
+        alert(getErrorMessage(error, 'Server preflight found rows that still need review.'))
         setStep(2)
       } else {
-        setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
+        setResult({ imported: 0, updated: 0, errors: [getErrorMessage(error, 'Import failed')] })
         setStep(3)
       }
     } finally {
@@ -1209,14 +1445,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   }, [conflictFilter, conflictQuery, conflicts, decisions, reviewIssueIndexSet, rowOverrides])
 
   const visibleConflictSections = useMemo(() => {
-    const groupByRowIndex = new Map()
+    const groupByRowIndex = new Map<RowIndex, ProductImportGroup>()
     reviewGroups.forEach((group) => {
       ;(group.rowIndexes || []).forEach((rowIndex) => {
         groupByRowIndex.set(Number(rowIndex), group)
       })
     })
-    const sections = []
-    const sectionByFamily = new Map()
+    const sections: VisibleConflictSection[] = []
+    const sectionByFamily = new Map<string, VisibleConflictSection>()
 
     visibleConflicts.forEach((entry) => {
       const rowIndex = Number(entry.index ?? entry.row?._import_row_index ?? 0)
@@ -1237,7 +1473,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         sectionByFamily.set(key, section)
         sections.push(section)
       }
-      if (!group) sectionByFamily.get(key).rows.push(entry)
+      const section = sectionByFamily.get(key)
+      if (!group && section) section.rows.push(entry)
     })
 
     return sections
@@ -1246,7 +1483,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const visibleReviewRows = useMemo(() => visibleConflictSections.flatMap((section) => section.rows || []), [visibleConflictSections])
   const visibleReviewRowCount = visibleReviewRows.length
 
-  const toggleFamilyCollapse = (familyKey) => {
+  const toggleFamilyCollapse = (familyKey: string) => {
     setCollapsedFamilyKeys((current) => {
       const next = new Set(current)
       if (next.has(familyKey)) next.delete(familyKey)
@@ -1255,7 +1492,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const toggleInlineDetails = (rowIndex) => {
+  const toggleInlineDetails = (rowIndex: RowIndex) => {
     setCollapsedDetailRows((current) => {
       const next = new Set(current)
       if (next.has(rowIndex)) next.delete(rowIndex)
@@ -1264,7 +1501,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const toggleConflictSelection = (index) => {
+  const toggleConflictSelection = (index: RowIndex) => {
     setSelectedConflictIds((current) => {
       const next = new Set(current)
       if (next.has(index)) next.delete(index)
@@ -1273,7 +1510,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const toggleSelectAllConflicts = (checked) => {
+  const toggleSelectAllConflicts = (checked: boolean) => {
     if (!checked) {
       setSelectedConflictIds(new Set())
       return
@@ -1281,7 +1518,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setSelectedConflictIds(new Set(visibleReviewRows.map((entry) => entry.index)))
   }
 
-  const applyDecisionToSelection = (value) => {
+  const applyDecisionToSelection = (value: string) => {
     if (!selectedConflictIds.size) return
     pushReviewUndoSnapshot('Changed selected import actions')
     setDecisions((current) => {
@@ -1291,7 +1528,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const applyImageDecisionToSelection = (value) => {
+  const applyImageDecisionToSelection = (value: string) => {
     if (!selectedConflictIds.size) return
     pushReviewUndoSnapshot('Changed selected image actions')
     setImageDecisions((current) => {
@@ -1308,7 +1545,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const applyIdentifierDecisionToSelection = (value) => {
+  const applyIdentifierDecisionToSelection = (value: string) => {
     if (!selectedConflictIds.size) return
     pushReviewUndoSnapshot('Changed selected identifier actions')
     setIdentifierDecisions((current) => {
@@ -1320,7 +1557,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const applyFieldRulePreset = (preset) => {
+  const applyFieldRulePreset = (preset: FieldRulePreset) => {
     pushReviewUndoSnapshot('Changed detail merge rule')
     const fields = [
       'category', 'brand', 'unit', 'supplier', 'description', 'low_stock_threshold',
@@ -1333,15 +1570,15 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setFieldRules({ __preset: preset, ...Object.fromEntries(fields.map((field) => [field, rule])) })
   }
 
-  const renderConflictRow = (entry) => {
-    const { row, index, existing, plannedAction, conflictType, conflictFields = [], importDuplicateRows = {}, sameBasic, samePricing, sameImages, incomingImages = [], existingImages = [] } = entry
+  const renderConflictRow = (entry: ProductImportConflict) => {
+    const { row = {}, index, existing, plannedAction, conflictType, conflictFields = [], importDuplicateRows = {}, sameBasic, samePricing, sameImages, incomingImages = [], existingImages = [] } = entry
     const editedRow = {
       ...(row || {}),
       ...(rowOverrides[index] || {}),
       sku: identifierOverrides[index]?.sku ?? rowOverrides[index]?.sku ?? row?.sku ?? '',
       barcode: identifierOverrides[index]?.barcode ?? rowOverrides[index]?.barcode ?? row?.barcode ?? '',
     }
-    const updateEditedRow = (field, value) => {
+    const updateEditedRow = (field: string, value: string) => {
       setRowOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), [field]: value } }))
       if (field === 'sku' || field === 'barcode') {
         setIdentifierOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), [field]: value } }))
@@ -1592,7 +1829,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
             </p>
           </div>
           <div className="flex gap-3">
-            <button type="button" className="btn-secondary flex-1 text-sm" onClick={() => window.api.downloadImportTemplate('products')}>
+            <button type="button" className="btn-secondary flex-1 text-sm" onClick={() => getProductImportApi().downloadImportTemplate('products')}>
               {T('csv_template_download', 'Download Template')}
             </button>
             <button type="button" className="btn-primary flex-1 text-sm" onClick={handlePickCSV} disabled={loading}>
@@ -1736,10 +1973,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     <span className="whitespace-nowrap text-gray-500 dark:text-gray-400">Details</span>
                     <select
                       className="input h-8 min-w-[11rem] py-1 text-xs"
-                      value={fieldRules.__preset || 'merge_blank_only'}
-                      title={FIELD_RULE_PRESET_HINTS[fieldRules.__preset || 'merge_blank_only']}
+                      value={(fieldRules.__preset as FieldRulePreset | undefined) || 'merge_blank_only'}
+                      title={FIELD_RULE_PRESET_HINTS[(fieldRules.__preset as FieldRulePreset | undefined) || 'merge_blank_only']}
                       onChange={(event) => {
-                        const value = event.target.value
+                        const value = event.target.value as FieldRulePreset
                         applyFieldRulePreset(value)
                       }}
                     >
@@ -1856,7 +2093,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
             {result.jobId ? <p className="mt-1 text-xs opacity-70">Job: {result.jobId}</p> : null}
             {result.imported > 0 ? <p className="text-sm">{T('n_products_created', '{n} new products created').replace('{n}', String(result.imported))}</p> : null}
             {result.updated > 0 ? <p className="text-sm">{T('n_products_updated', '{n} products updated').replace('{n}', String(result.updated))}</p> : null}
-            {result.images_matched > 0 ? <p className="text-sm">{T('n_images_matched', '{n} images matched').replace('{n}', String(result.images_matched))}</p> : null}
+            {(result.images_matched || 0) > 0 ? <p className="text-sm">{T('n_images_matched', '{n} images matched').replace('{n}', String(result.images_matched || 0))}</p> : null}
             {!result.queued && result.imported === 0 && result.updated === 0 && (result.images_matched || 0) === 0 ? <p className="text-sm">No changes applied.</p> : null}
           </div>
           {Array.isArray(result.errors) && result.errors.length ? (
@@ -1866,7 +2103,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                 {result.errors.map((message, index) => <div key={index}>{message}</div>)}
               </div>
               {result.job?.id ? (
-                <button type="button" className="btn-secondary mt-2 text-sm" onClick={() => window.api.downloadImportJobErrors?.(result.job.id)}>
+                <button type="button" className="btn-secondary mt-2 text-sm" onClick={() => { if (result.job?.id) getProductImportApi().downloadImportJobErrors?.(result.job.id) }}>
                   {T('download_failed_rows', 'Download failed rows')}
                 </button>
               ) : null}

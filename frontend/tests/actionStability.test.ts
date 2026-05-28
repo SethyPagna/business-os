@@ -67,22 +67,22 @@ await runTest('POS quick-add customer and delivery writes are bounded', () => {
 })
 
 await runTest('bulk product import actions use a synchronous in-flight guard', () => {
-  const source = readFrontend('src/components/products/import/BulkImportModal.jsx')
+  const source = readFrontend('src/components/products/import/BulkImportModal.tsx')
 
   assert.match(source, /import \{ beginNamedAction, finishNamedAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const actionInFlightRef = useRef\(''\)/)
-  assert.match(source, /const beginImportAction = \(action, options = \{\}\) => \{[\s\S]*if \(!beginNamedAction\(actionInFlightRef, action, \{ blocked: loading \}\)\) return false/)
-  assert.match(source, /const finishImportAction = \(action\) => \{[\s\S]*finishNamedAction\(actionInFlightRef, action\)[\s\S]*setLoading\(false\)/)
+  assert.match(source, /const beginImportAction = \(action: ImportActionName, options: \{ setLoading\?: boolean \} = \{\}\): boolean => \{[\s\S]*if \(!beginNamedAction\(actionInFlightRef, action, \{ blocked: loading \}\)\) return false/)
+  assert.match(source, /const finishImportAction = \(action: ImportActionName\): void => \{[\s\S]*finishNamedAction\(actionInFlightRef, action\)[\s\S]*setLoading\(false\)/)
   assert.match(source, /const handleRetryCurrentJob = async \(\) => \{[\s\S]*if \(!beginImportAction\('retry'\)\) return/)
   assert.match(source, /const handleDeleteCurrentJob = async \(\) => \{[\s\S]*if \(!beginImportAction\('delete'\)\) return/)
   assert.match(source, /const handleImageOnlyImport = async \(\) => \{[\s\S]*if \(!beginImportAction\('image-only'\)\) return/)
   assert.match(source, /const handlePickCSV = async \(\) => \{[\s\S]*if \(!beginImportAction\('pick-csv', \{ setLoading: false \}\)\) return/)
   assert.match(source, /const handleImport = async \(\) => \{[\s\S]*if \(!beginImportAction\('import'\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.createImportJob\(/, 'product import job creation should be bounded')
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.uploadImportJobCsv\(/, 'product import CSV upload should be bounded')
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.uploadImportJobZip\(/, 'product import ZIP upload should be bounded')
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.uploadImportJobImages\(/, 'product import image upload should be bounded')
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.startImportJob\(jobId, \{ source: 'products_modal' \}\)/, 'product import job start should be bounded')
+  assert.match(source, /const api = getProductImportApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.createImportJob\(/, 'product import job creation should be bounded')
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobCsv\(/, 'product import CSV upload should be bounded')
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobZip\(/, 'product import ZIP upload should be bounded')
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobImages\(/, 'product import image upload should be bounded')
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.startImportJob\(activeJobId, \{ source: 'products_modal' \}\)/, 'product import job start should be bounded')
 })
 
 await runTest('background import tracker actions use a synchronous action guard', () => {

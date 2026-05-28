@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 499 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 500 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 61 `.jsx`
+  - 60 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 46 `.tsx`
+  - 47 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -191,8 +191,8 @@ Decision rule:
    `frontend/src/components/products/forms`. Focused source checks,
    production build, runtime health, and Product stock-helper Playwright
    verification passed on frontend hash `b79c04b453d1b469`.
-9. Move the product import cluster. Done: `BulkImportModal.jsx`,
-   `productImportPlanner.mjs`, and `productImportWorker.mjs` now live in
+9. Move the product import cluster. Done: `BulkImportModal.tsx`,
+   `productImportPlanner.ts`, and `productImportWorker.ts` now live in
    `frontend/src/components/products/import`. Product import planner tests,
    performance loading source checks, production build, runtime health, and the
    broad Phase 8.4 UI Playwright check passed on frontend hash
@@ -1143,10 +1143,11 @@ Decision rule:
     The CSV product import normalization, identifier conflict analysis,
     same-name grouping, blocking barcode/encoding issue checks, and import
     summary planner moved to
-    `frontend/src/components/products/import/productImportPlanner.ts`, while
-    `productImportPlanner.mjs` remains as the compatibility wrapper for
-    `BulkImportModal`, the product import worker, and focused tests. The
-    frontend TypeScript project now includes product import `.ts` modules.
+    `frontend/src/components/products/import/productImportPlanner.ts`. The
+    former product import planner wrapper has been retired; `BulkImportModal`,
+    the product import worker, and focused tests now read the TypeScript planner
+    directly. The frontend TypeScript project now includes product import `.ts`
+    modules.
     Focused product import planner, CSV import, performance loading UX, action
     stability, and strict frontend typecheck tests passed.
 125. Convert action guard utility to TypeScript. Done:
@@ -1344,8 +1345,10 @@ Decision rule:
 152. Convert product import worker entrypoint to TypeScript. Done:
     The browser worker logic moved to
     `frontend/src/components/products/import/productImportWorker.ts`, while
-    `productImportWorker.mjs` remains as the stable Vite module-worker wrapper
-    used by `BulkImportModal.jsx`. The typed worker boundary now narrows
+    the former product import worker wrapper remained as the stable Vite module-worker wrapper
+    until the worker boundary moved fully to TypeScript; the current
+    `BulkImportModal.tsx` caller reads `productImportWorker.ts` through the
+    typed worker URL. The typed worker boundary now narrows
     incoming worker messages, posts explicit progress/result/error message
     shapes, and keeps the existing import-analysis fallback path unchanged.
 153. Convert receipt settings constants to TypeScript. Done:
@@ -1431,7 +1434,7 @@ Decision rule:
     row-check timeout, stale-result guard, and the existing server-side
     background import job contract.
 163. Harden the product import worker fallback path. Done:
-    `frontend/src/components/products/import/BulkImportModal.jsx` now treats
+    `frontend/src/components/products/import/BulkImportModal.tsx` now treats
     product CSV analysis as a bounded worker-first path with a synchronous
     parser fallback for missing Worker support, worker startup failure,
     postMessage failure, worker error messages, and 60 second timeouts.
@@ -2666,7 +2669,7 @@ Decision rule:
     branches. This is a hot-path import optimization only; no schema migration,
     folder move, or language conversion was justified.
 316. Make bulk product-import conflict summaries single-pass. Done:
-    `frontend/src/components/products/import/BulkImportModal.jsx` now computes
+    `frontend/src/components/products/import/BulkImportModal.tsx` now computes
     review badge counts in one `conflictGroups` accumulator loop instead of
     repeatedly filtering the conflict list. This is a local UI workflow
     optimization; no folder move or language conversion was needed.
@@ -3923,6 +3926,13 @@ Decision rule:
     synchronous image/save in-flight guards, scanner modal behavior, and branch
     stock adjustment wiring intact while replacing loose error-message access
     with a typed helper.
+500. Convert bulk product import modal to TSX. Done: `BulkImportModal.tsx`
+    now types product-import rows, conflict groups, import jobs, progress
+    payloads, server preflight results, image file maps, file-picker assets,
+    bulk decisions, and inline edit state. The conversion keeps the worker-first
+    planner path, synchronous fallback, image ZIP/browser upload flows,
+    review/undo loops, and import-job lifecycle intact while routing `window.api`
+    calls through a typed product-import boundary.
 
 ## Safety Gates
 
