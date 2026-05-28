@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 502 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 503 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 58 `.jsx`
+  - 57 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 49 `.tsx`
+  - 50 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -3944,6 +3944,13 @@ Decision rule:
     image boundary. The conversion keeps data/blob display masking, upload
     progress, optimization status, error display, and extensionless catalog
     editor imports intact.
+503. Convert catalog preview surface to TSX. Done:
+    `CatalogPreviewSurface.tsx` now types portal tab icons, display config,
+    refs, sticky-nav metrics, gallery state, file-picker state, translation
+    options, scroll commands, and lazy JSX modal boundaries. The conversion
+    keeps the preview shell render path, public sticky navigation, translation
+    menu, theme toggle, scroll controls, gallery modals, and Vite catalog
+    preview chunk placement intact.
 
 ## Safety Gates
 

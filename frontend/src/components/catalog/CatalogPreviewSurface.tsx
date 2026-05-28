@@ -1,10 +1,110 @@
 import { Suspense, lazy } from 'react'
+import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { ArrowDown, ArrowUp, Globe, Moon, Sun } from 'lucide-react'
 import { ProductImg } from '../products/shared/primitives'
 
 const PortalMenu = lazy(() => import('../shared/PortalMenu'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
-const FilePickerModal = lazy(() => import('../files/FilePickerModal'))
+
+type CopyFunction = (key: string, fallback: string) => string
+
+type DisplayConfig = {
+  businessName?: string
+  businessTagline?: string
+  logoPositionX?: number
+  logoPositionY?: number
+  logoZoom?: number
+  translateWidgetEnabled?: boolean
+}
+
+type PortalTab = {
+  key: string
+  label: string
+  icon: ComponentType<{ className?: string }>
+}
+
+type PortalNavMetrics = {
+  left?: number
+  width?: number
+  height?: number
+}
+
+type GalleryViewState = {
+  open: boolean
+  title: string
+  items: string[]
+  index: number
+}
+
+type PortalImageViewState = {
+  open: boolean
+  title: string
+  images: string[]
+  index: number
+}
+
+type FilePickerState = {
+  open: boolean
+  target?: unknown
+  mediaType: string
+  title: string
+}
+
+type FilePickerModalProps = FilePickerState & {
+  onClose: () => void
+  onSelect: (asset: unknown) => void
+}
+
+type TranslateOption = {
+  value: string
+  label: string
+  kind?: string
+}
+
+type TranslateApplyState = 'idle' | 'applied' | 'failed' | string
+
+type CatalogPreviewSurfaceProps = {
+  publicView: boolean
+  darkMode: boolean
+  portalBackground: string
+  copy: CopyFunction
+  canEdit: boolean
+  previewSectionRef: RefObject<HTMLDivElement>
+  onBackToEditor: () => void
+  displayConfig: DisplayConfig
+  versionedBusinessLogo?: string | null
+  showBrandLabel: boolean | string
+  previewTitle: string
+  portalTabs: PortalTab[]
+  activeTab: string
+  setActiveTab: (key: string) => void
+  publicPortalNavRef: RefObject<HTMLElement>
+  publicPortalNavPinned: boolean
+  publicPortalNavMetrics: PortalNavMetrics
+  catalogSection: ReactNode
+  secondaryTabSection: ReactNode
+  publicScrollButtonsVisible: boolean
+  scrollPublicPortal: (direction: 'top' | 'bottom') => void
+  productGalleryView: GalleryViewState
+  setProductGalleryView: Dispatch<SetStateAction<GalleryViewState>>
+  filePicker: FilePickerState
+  setFilePicker: Dispatch<SetStateAction<FilePickerState>>
+  handleFilePickerSelect: (asset: unknown) => void
+  portalImageView: PortalImageViewState
+  setPortalImageView: Dispatch<SetStateAction<PortalImageViewState>>
+  toggleTheme: () => void
+  translateTarget: string
+  translateApplyState: TranslateApplyState
+  translateApplyMessage?: string
+  externalTranslateTarget?: string | null
+  translateReady: boolean
+  changeTranslateTarget: (target: string) => void
+  allPublicTranslateOptions: TranslateOption[]
+}
+
+const FilePickerModal = lazy(async () => ({
+  default: (await import('../files/FilePickerModal.jsx')).default as ComponentType<FilePickerModalProps>,
+}))
 
 export default function CatalogPreviewSurface({
   publicView,
@@ -43,8 +143,8 @@ export default function CatalogPreviewSurface({
   translateReady,
   changeTranslateTarget,
   allPublicTranslateOptions,
-}) {
-  const handlePortalTabClick = (key) => {
+}: CatalogPreviewSurfaceProps) {
+  const handlePortalTabClick = (key: string) => {
     if (key === activeTab) return
     setActiveTab(key)
     if (!publicView || typeof window === 'undefined') return
@@ -65,7 +165,7 @@ export default function CatalogPreviewSurface({
     })
   }
 
-  const pinnedNavStyle = publicView && publicPortalNavPinned ? {
+  const pinnedNavStyle: CSSProperties | undefined = publicView && publicPortalNavPinned ? {
     position: 'fixed',
     top: typeof window !== 'undefined' && window.innerWidth >= 640 ? '8px' : '0px',
     left: `${typeof window !== 'undefined' ? Math.max(8, publicPortalNavMetrics.left || 0) : publicPortalNavMetrics.left}px`,
@@ -315,7 +415,7 @@ export default function CatalogPreviewSurface({
           images={productGalleryView.items}
           index={productGalleryView.index}
           onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
-          onIndexChange={(index) => setProductGalleryView((current) => ({ ...current, index }))}
+          onIndexChange={(index: number) => setProductGalleryView((current) => ({ ...current, index }))}
           labels={{
             prev: copy('prevImage', 'Prev'),
             next: copy('nextImage', 'Next'),
@@ -339,7 +439,7 @@ export default function CatalogPreviewSurface({
           images={portalImageView.images}
           index={portalImageView.index}
           onClose={() => setPortalImageView({ open: false, title: '', images: [], index: 0 })}
-          onIndexChange={(index) => setPortalImageView((current) => ({ ...current, index }))}
+          onIndexChange={(index: number) => setPortalImageView((current) => ({ ...current, index }))}
           labels={{
             prev: copy('prevImage', 'Prev'),
             next: copy('nextImage', 'Next'),

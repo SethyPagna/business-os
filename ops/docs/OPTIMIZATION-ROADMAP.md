@@ -5480,3 +5480,12 @@ Move 502 status:
   callbacks, upload progress state, processing state, cancellation hooks, and
   preview image rendering. The conversion keeps data/blob masking, upload
   status messages, error display, and catalog editor imports unchanged.
+
+Move 503 status:
+- Move 503 converts the catalog preview surface `CatalogPreviewSurface.tsx`.
+  The typed boundary now covers portal tabs, icon components, display config,
+  preview refs, sticky-nav metrics, gallery state, file-picker state,
+  translation options, scroll commands, and lazy JSX modal imports. The
+  conversion preserves the public preview shell, pinned navigation, translation
+  menu, theme toggle, scroll controls, gallery modals, and Vite catalog-preview
+  chunk placement.

@@ -131,7 +131,7 @@ function manualChunks(id: string): string | undefined {
       return 'catalog-editor'
     }
     if (
-      normalized.includes('/src/components/catalog/CatalogPreviewSurface.jsx')
+      normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')
       || normalized.includes('/src/components/catalog/CatalogSecondaryTabs.jsx')
       || normalized.includes('/src/components/catalog/CatalogProductsSection.jsx')
     ) {
