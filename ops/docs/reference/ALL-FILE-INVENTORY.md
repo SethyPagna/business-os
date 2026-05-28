@@ -268,9 +268,9 @@ Total files documented: **529**
 | 256 | `frontend/src/components/products/scanning/scanbotScanner.ts` | frontend-ui | 180 | 6.0 | UI component/page |
 | 257 | `frontend/src/components/products/shared/primitives.tsx` | frontend-ui | 250 | 8.1 | UI component/page |
 | 258 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | frontend-ui | 154 | 5.8 | UI component/page |
-| 259 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | frontend-ui | 241 | 12.2 | UI component/page |
+| 259 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | frontend-ui | 322 | 14.3 | UI component/page |
 | 260 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | frontend-ui | 196 | 6.4 | UI component/page |
-| 261 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | frontend-ui | 334 | 18.7 | UI component/page |
+| 261 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | frontend-ui | 391 | 20.5 | UI component/page |
 | 262 | `frontend/src/components/README.md` | frontend-ui | 37 | 1.9 | UI component/page |
 | 263 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | frontend-ui | 121 | 4.5 | UI component/page |
 | 264 | `frontend/src/components/receipt-settings/constants.ts` | frontend-ui | 156 | 7.9 | UI component/page |
@@ -516,7 +516,7 @@ Total files documented: **529**
 | 504 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
 | 505 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
 | 506 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
-| 507 | `README.md` | project-root | 159 | 11.7 | Project documentation entrypoint |
+| 507 | `README.md` | project-root | 159 | 11.8 | Project documentation entrypoint |
 | 508 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
 | 509 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
 | 510 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |

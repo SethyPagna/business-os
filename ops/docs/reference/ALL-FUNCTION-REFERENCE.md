@@ -245,9 +245,9 @@ Code files scanned: **466**
 | 233 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 9 |
 | 234 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
 | 235 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 2 |
-| 236 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
+| 236 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 3 |
 | 237 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 5 |
-| 238 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
+| 238 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 3 |
 | 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
 | 240 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
 | 241 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 |
@@ -4486,13 +4486,13 @@ Code files scanned: **466**
 | 1 | `ProductsHeaderActions` | export default function | 19 |
 | 2 | `tr` | const arrow | 29 |
 
-### 3.236 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+### 3.236 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductDetailModal` | export default function | 7 |
-| 2 | `T` | const arrow | 23 |
-| 3 | `Row` | const arrow | 43 |
+| 1 | `ProductDetailModal` | export default function | 79 |
+| 2 | `T` | const arrow | 95 |
+| 3 | `Row` | const arrow | 116 |
 
 ### 3.237 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
@@ -4504,13 +4504,13 @@ Code files scanned: **466**
 | 4 | `ProductBatchPreview` | export function | 127 |
 | 5 | `ProductDetailsCell` | export function | 161 |
 
-### 3.238 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
+### 3.238 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductsListSurface` | export default function | 4 |
-| 2 | `renderDesktopTableHead` | const arrow | 47 |
-| 3 | `renderDesktopLoadingShell` | const arrow | 76 |
+| 1 | `ProductsListSurface` | export default function | 61 |
+| 2 | `renderDesktopTableHead` | const arrow | 104 |
+| 3 | `renderDesktopLoadingShell` | const arrow | 133 |
 
 ### 3.239 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 

@@ -102,9 +102,9 @@ Total files documented: **193**
 | 90 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 6 |
 | 91 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
 | 92 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 2 |
-| 93 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
+| 93 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 3 |
 | 94 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 1 |
-| 95 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 3 |
+| 95 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 3 |
 | 96 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
 | 97 | `frontend/src/components/receipt-settings/constants.ts` | 1 |
 | 98 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 |
@@ -1618,13 +1618,13 @@ Total files documented: **193**
 | 1 | `ProductsHeaderActions` | component/function | 19 |
 | 2 | `tr` | const arrow | 29 |
 
-### 3.93 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+### 3.93 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ProductDetailModal` | component/function | 7 |
-| 2 | `T` | const arrow | 23 |
-| 3 | `Row` | const arrow | 43 |
+| 1 | `ProductDetailModal` | component/function | 79 |
+| 2 | `T` | const arrow | 95 |
+| 3 | `Row` | const arrow | 116 |
 
 ### 3.94 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
@@ -1632,13 +1632,13 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `label` | const arrow | 103 |
 
-### 3.95 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
+### 3.95 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ProductsListSurface` | component/function | 4 |
-| 2 | `renderDesktopTableHead` | const arrow | 47 |
-| 3 | `renderDesktopLoadingShell` | const arrow | 76 |
+| 1 | `ProductsListSurface` | component/function | 61 |
+| 2 | `renderDesktopTableHead` | const arrow | 104 |
+| 3 | `renderDesktopLoadingShell` | const arrow | 133 |
 
 ### 3.96 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 

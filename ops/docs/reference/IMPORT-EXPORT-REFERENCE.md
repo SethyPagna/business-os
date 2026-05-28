@@ -245,9 +245,9 @@ Code files documented: **466**
 | 233 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 0 | 3 | 0 | 2 |
 | 234 | `frontend/src/components/products/shared/primitives.tsx` | 3 | 0 | 1 | 9 |
 | 235 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 3 | 1 | 2 | 1 |
-| 236 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 5 | 1 | 4 | 1 |
+| 236 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 6 | 1 | 4 | 1 |
 | 237 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 4 | 4 | 3 | 0 |
-| 238 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 2 | 1 | 0 | 1 |
+| 238 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 2 | 1 | 0 | 1 |
 | 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 3 | 1 | 2 | 1 |
 | 240 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 4 |
 | 241 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 | 1 | 0 | 1 |
@@ -4502,8 +4502,8 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/products/surfaces/HeaderActions.tsx`
-  - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
-  - `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
+  - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
+  - `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
@@ -4593,7 +4593,7 @@ Code files documented: **466**
   - `frontend/src/components/products/forms/ProductForm.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.jsx`
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+  - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 ### 3.235 `frontend/src/components/products/surfaces/HeaderActions.tsx`
 
@@ -4608,15 +4608,16 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.236 `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+### 3.236 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 - Declared exports: `function`
-- Imports (5)
+- Imports (6)
   - `../../../utils/color.ts`
   - `../../../utils/pricing.ts`
   - `../../../utils/productBatches.ts`
   - `../shared/primitives`
   - `lucide-react`
+  - `react`
 - Internal dependencies (4)
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/utils/color.ts`
@@ -4640,7 +4641,7 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.238 `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
+### 3.238 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5784,7 +5785,7 @@ Code files documented: **466**
   - none
 - Referenced by (2)
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+  - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 ### 3.304 `frontend/src/utils/csv.ts`
 
@@ -6088,7 +6089,7 @@ Code files documented: **466**
   - `frontend/src/components/products/helpers/productDisplayHelpers.ts`
   - `frontend/src/components/products/helpers/productFilterHelpers.ts`
   - `frontend/src/components/products/helpers/productWriteHelpers.ts`
-  - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+  - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
   - `frontend/src/components/products/surfaces/ProductRowParts.tsx`
   - `frontend/src/utils/csvImport.ts`
   - `frontend/tests/pricingContacts.test.ts`
@@ -6114,7 +6115,7 @@ Code files documented: **466**
 - Referenced by (5)
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/ProductDetailModal.jsx`
-  - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
+  - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
   - `frontend/src/components/products/surfaces/ProductRowParts.tsx`
   - `frontend/tests/productBatches.test.ts`
 

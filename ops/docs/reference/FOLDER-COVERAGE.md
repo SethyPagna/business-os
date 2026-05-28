@@ -1061,9 +1061,9 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `HeaderActions.tsx` | UI component/page |
-| 2 | `ProductDetailModal.jsx` | UI component/page |
+| 2 | `ProductDetailModal.tsx` | UI component/page |
 | 3 | `ProductRowParts.tsx` | UI component/page |
-| 4 | `ProductsListSurface.jsx` | UI component/page |
+| 4 | `ProductsListSurface.tsx` | UI component/page |
 
 
 ### 3.49 Folder: `frontend/src/components/receipt`

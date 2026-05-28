@@ -530,8 +530,8 @@ Continue with Phase 8.4:
   Latest Product page report:
   `ops/runtime/reports/phase84-product-page-actions-live-check-2026-05-18T06-45-27-618Z/report.json`.
   The eighth physical move created `frontend/src/components/products/surfaces`
-  for `HeaderActions.jsx`, `ProductsListSurface.jsx`, and
-  `ProductDetailModal.jsx`; product discount and pagination source tests and
+  for `HeaderActions.tsx`, `ProductsListSurface.tsx`, and
+  `ProductDetailModal.tsx`; product discount and pagination source tests and
   the Product page action live check passed against frontend hash
   `e9b985386668bdf9`. Latest Product page report:
   `ops/runtime/reports/phase84-product-page-actions-live-check-2026-05-18T06-56-46-809Z/report.json`.
