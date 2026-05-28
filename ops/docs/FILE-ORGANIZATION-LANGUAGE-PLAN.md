@@ -3786,6 +3786,12 @@ Decision rule:
     asset URLs, background import tracking, and focused API tests. The previous
     one-line `.js` wrappers were removed after exact caller rewrites and the
     runtime dependency guardrail now checks the typed HTTP source directly.
+482. Open the TSX conversion lane with small presentational components. Done:
+    `ProductImage.tsx`, `CatalogPageContext.tsx`, `DualMoney.tsx`,
+    `NoData.tsx`, and receipt-settings `ErrorBoundary.tsx` now compile as
+    strict TSX. The old local React hook-only declaration shim was removed in
+    favor of real React type packages, and TSX compilation is enabled without
+    changing runtime routing or page ownership.
 
 ## Safety Gates
 

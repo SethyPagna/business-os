@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-// @ts-expect-error AppContext is still a JSX boundary in the TypeScript migration queue.
-import { useApp } from '../AppContext.jsx'
+import { useApp as useAppHook } from '../AppContext.jsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -18,6 +17,8 @@ type ActionHistoryUser = {
   role_code?: unknown
   permissions?: unknown
 }
+
+const useApp = useAppHook as () => { user?: ActionHistoryUser }
 
 type ActionHistoryInput = {
   id?: unknown
@@ -118,7 +119,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 export function useActionHistory({ limit = 10, notify, scope = 'global', enabled = true }: ActionHistoryOptions = {}) {
-  const { user } = useApp() as { user?: ActionHistoryUser }
+  const { user } = useApp()
   const [undoStack, setUndoStack] = useState<ActionHistoryEntry[]>([])
   const [redoStack, setRedoStack] = useState<ActionHistoryEntry[]>([])
   const [serverItems, setServerItems] = useState<ServerHistoryItem[]>([])
@@ -173,7 +174,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         setUserOptions(Array.isArray(rows) ? rows : [])
       })
       .catch(() => {})
-    return () => invalidateTrackedRequest(usersRequestRef)
+    return () => {
+      invalidateTrackedRequest(usersRequestRef)
+    }
   }, [enabled, isAdmin])
 
   useEffect(() => () => {

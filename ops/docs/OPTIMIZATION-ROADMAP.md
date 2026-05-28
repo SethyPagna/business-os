@@ -5315,3 +5315,11 @@ Move 481 status:
   `web-api.ts` now serve direct imports, while the matching one-line `.js`
   wrappers are removed and runtime dependency verification points at the typed
   HTTP source.
+
+Move 482 status:
+- Move 482 opens the strict TSX conversion lane by converting five small
+  presentational/context components: POS `ProductImage.tsx`, catalog
+  `CatalogPageContext.tsx`, inventory `DualMoney.tsx`, dashboard
+  `NoData.tsx`, and receipt-settings `ErrorBoundary.tsx`. The frontend now
+  carries real React type packages and the old local hook-only React shim is
+  removed, so future JSX-to-TSX moves use the actual React public API.

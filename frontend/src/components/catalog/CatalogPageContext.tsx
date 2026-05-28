@@ -1,8 +1,13 @@
-import { createContext, useContext } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 
-const CatalogPageContext = createContext(null)
+const CatalogPageContext = createContext<unknown>(null)
 
-export function CatalogPageProvider({ value, children }) {
+type CatalogPageProviderProps = {
+  value: unknown
+  children: ReactNode
+}
+
+export function CatalogPageProvider({ value, children }: CatalogPageProviderProps) {
   return (
     <CatalogPageContext.Provider value={value}>
       {children}
@@ -17,4 +22,3 @@ export function useCatalogPageContext() {
   }
   return context
 }
-
