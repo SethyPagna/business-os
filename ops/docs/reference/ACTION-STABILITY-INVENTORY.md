@@ -130,7 +130,7 @@ Backend:
 | POS checkout/payment | `frontend/src/components/pos/POS.jsx`, `frontend/src/api/methods.js`, `backend/src/routes/sales.js` | Duplicate sales, stock double-deduct | `checkoutInFlightRef`, `loading`, `client_request_id`, backend duplicate lookup | Add/keep source regression covering all three layers |
 | Customer returns | `frontend/src/components/returns/NewReturnModal.jsx`, `frontend/src/components/returns/EditReturnModal.jsx`, `backend/src/routes/returns.js` | Duplicate returns, wrong restored stock | `submitting`, synchronous submit ref, backend idempotency for creates | Add deeper edit conflict Playwright check |
 | Supplier returns | `frontend/src/components/returns/NewSupplierReturnModal.jsx`, `backend/src/routes/returns.js` | Duplicate supplier stock removal | `submitting`, synchronous submit ref, backend idempotency | Add live form-state Playwright check |
-| Product import/apply | `frontend/src/components/products/import/BulkImportModal.jsx`, `frontend/src/api/methods.js`, `backend/src/routes/importJobs.js` | Multiple import jobs, repeated uploads, conflicting apply | `loading`, synchronous in-flight ref, server job state, rate limits | Add deeper server idempotency review for approve/start |
+| Product import/apply | `frontend/src/components/products/import/BulkImportModal.tsx`, `frontend/src/api/methods.js`, `backend/src/routes/importJobs.js` | Multiple import jobs, repeated uploads, conflicting apply | `loading`, synchronous in-flight ref, server job state, rate limits | Add deeper server idempotency review for approve/start |
 | Product media upload | `frontend/src/components/products/forms/ProductForm.tsx`, `frontend/src/api/methods.js`, `backend/src/routes/products.js` | Duplicate media, broken primary image | `saving`, `imageUploading`, synchronous upload/save refs, live-server write requirement | Add failure recovery check |
 | Catalog/public media | `frontend/src/components/catalog/CatalogPage.jsx`, `frontend/src/components/catalog/CatalogEditorSurface.jsx`, `frontend/src/components/catalog/CatalogImageField.jsx` | Broken public media refs | per-block upload status, per-target synchronous upload guard | Add path ownership and retry checks |
 | File library upload/delete | `frontend/src/components/files/FilePickerModal.jsx`, `frontend/src/components/files/FilesPage.jsx`, `backend/src/routes/files.js` | Duplicate assets, wrong delete | `uploading`, delete id state, synchronous upload/delete refs | Add live file-picker Playwright check |
@@ -482,8 +482,8 @@ Continue with Phase 8.4:
   `ops/runtime/reports/phase84-product-stock-actions-live-check-2026-05-18T06-16-56-368Z/report.json`.
   Product import/apply paths still use same-tick named action guards, bounded
   import job create/upload/start/preflight reads, and worker-based CSV analysis
-  after `BulkImportModal.jsx`, `productImportPlanner.mjs`, and
-  `productImportWorker.mjs` moved under
+  after `BulkImportModal.tsx`, `productImportPlanner.ts`, and
+  `productImportWorker.ts` moved under
   `frontend/src/components/products/import`. Live verification opens the Product
   import modal from the real Products button without starting an import. Latest
   verified frontend hash: `0028bc915078664f`; latest report:
@@ -517,8 +517,8 @@ Continue with Phase 8.4:
   with `BulkAddStockModal.tsx` and `BranchStockAdjuster.tsx`; the Product
   stock-helper live check passed against frontend hash `b79c04b453d1b469`.
   The fifth physical move created `frontend/src/components/products/import`
-  for `BulkImportModal.jsx`, `productImportPlanner.mjs`, and
-  `productImportWorker.mjs`; the broad Phase 8.4 UI live check passed against
+  for `BulkImportModal.tsx`, `productImportPlanner.ts`, and
+  `productImportWorker.ts`; the broad Phase 8.4 UI live check passed against
   frontend hash `0028bc915078664f`.
   The sixth physical move created `frontend/src/components/products/scanning`
   for `BarcodeScannerModal.tsx`, `barcodeImageScanner.ts`,

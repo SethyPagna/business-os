@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T10:52:00.789Z
+Generated: 2026-05-28T11:21:04.168Z
 
 ## Summary
 
@@ -24,8 +24,8 @@ Generated: 2026-05-28T10:52:00.789Z
 | --- | --- |
 | TypeScript | 225 |
 | JavaScript | 84 |
-| React JSX | 61 |
-| React TSX | 46 |
+| React JSX | 60 |
+| React TSX | 47 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |
@@ -114,8 +114,8 @@ Generated: 2026-05-28T10:52:00.789Z
 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | yes | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\barcodeImageScanner.test.ts`<br>`node frontend\tests\scanbotScanner.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | yes | `frontend/src/components/products/scanning/barcodeScannerState.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\barcodeScannerState.test.ts`<br>`node frontend\tests\scanbotScanner.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/bulkOps.ts` | yes | retired frontend/src/utils/bulkOps.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\bulkOps.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/products/import/productImportPlanner.ts` | yes | retired frontend/src/components/products/import/productImportPlanner.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/products/import/productImportWorker.ts` | yes | retired frontend/src/components/products/import/productImportWorker.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/products/import/productImportPlanner.ts` | yes | none | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/products/import/productImportWorker.ts` | yes | none | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/receipt-settings/constants.ts` | yes | retired after receipt settings callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\receiptTemplate.test.ts`<br>`node frontend\tests\receiptSettingsSync.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/contacts/customerMembershipNumber.ts` | yes | retired after contact callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/dashboard/charts/index.ts` | yes | retired after dashboard chart callers moved to TypeScript source | n/a | `frontend/src/types/jsx-modules.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
@@ -142,7 +142,7 @@ Generated: 2026-05-28T10:52:00.789Z
 
 | Surface | Exists | Worker | Worker exists | Fallback | Fallback exists | Proof |
 | --- | --- | --- | --- | --- | --- | --- |
-| `frontend/src/components/products/import/BulkImportModal.jsx` | yes | `frontend/src/components/products/import/productImportWorker.ts` | yes | `frontend/src/components/products/import/productImportPlanner.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportWorkerFallback.test.ts`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright product import modal flow` |
+| `frontend/src/components/products/import/BulkImportModal.tsx` | yes | `frontend/src/components/products/import/productImportWorker.ts` | yes | `frontend/src/components/products/import/productImportPlanner.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportWorkerFallback.test.ts`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright product import modal flow` |
 | `frontend/src/components/contacts/ContactImportModal.jsx` | yes | `frontend/src/components/contacts/contactImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\contactImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright contact import modal flow` |
 | `frontend/src/components/inventory/InventoryImportModal.jsx` | yes | `frontend/src/components/inventory/inventoryImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright inventory import modal flow` |
 | `frontend/src/components/sales/SalesImportModal.jsx` | yes | `frontend/src/components/sales/salesImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\salesImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright sales import modal flow` |

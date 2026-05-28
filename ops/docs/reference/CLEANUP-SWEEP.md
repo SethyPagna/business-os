@@ -332,10 +332,9 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   `retired productGalleryHelpers declaration shim` until Products, write helper tests, action
   stability tests, and typed product helper imports intentionally move to a new
   public boundary.
-- Move 124 converts the product import planner to TypeScript while preserving
-  the old `.mjs` wrapper. Cleanup must keep `productImportPlanner.mjs` until
-  `BulkImportModal`, `productImportWorker.mjs`, and focused product import
-  planner tests intentionally move to a new public boundary.
+- Move 124 converts the product import planner to TypeScript and retires the old
+  wrapper after `BulkImportModal`, the product import worker, and focused product
+  import planner tests moved to the typed public boundary.
 - Move 125 converts the action guard utility to TypeScript while preserving
   the old `.mjs` wrapper. Cleanup must keep `actionGuards.mjs` until the many
   component imports and source-inspection action stability tests intentionally
@@ -445,10 +444,10 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   `.mjs` wrapper. Cleanup must keep `posCore.mjs` until `POS.jsx` and focused
   POS core tests intentionally move to a new public boundary or the wrapper
   audit proves it is unused.
-- Move 152 converts the product import worker body to TypeScript while
-  preserving `productImportWorker.mjs` as the Vite module-worker entrypoint.
-  Cleanup must keep that wrapper until `BulkImportModal.jsx` and production
-  build evidence prove a new worker URL is safe.
+- Move 152 converts the product import worker body to TypeScript. The retired
+  Vite module-worker wrapper is no longer required because `BulkImportModal.tsx`
+  resolves `productImportWorker.ts` directly and production build evidence proves
+  the typed worker URL is safe.
 - Move 153 converts receipt settings constants to TypeScript while preserving
   `constants.js` as the receipt settings compatibility wrapper. Cleanup must
   keep that wrapper until receipt settings imports, template helpers, and
@@ -491,12 +490,11 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   as the stable Vite worker wrapper for `inventoryImportWorker.ts`. The shared
   row-counter wrapper has been deleted after inventory, sales, contact, and
   focused tests moved to direct typed paths.
-- Move 163 records the product import worker cluster as an active completed
-  worker slice: `BulkImportModal.jsx` depends on `productImportWorker.mjs` for
-  the Vite module-worker entrypoint, while `productImportPlanner.ts` remains
-  the synchronous fallback/correctness oracle. Cleanup must keep both wrappers
-  and the planner until worker and modal imports are intentionally rewired with
-  a passing build and focused product import flow.
+- Move 163 records the product import worker cluster as a completed worker
+  slice: `BulkImportModal.tsx` resolves `productImportWorker.ts` directly, while
+  `productImportPlanner.ts` remains the synchronous fallback/correctness oracle.
+  Cleanup can keep both typed files and no longer needs the retired worker
+  wrapper after the passing build and focused product import tests.
 - Move 164 adds `frontend/src/components/sales/salesImportWorker.mjs` as the
   stable Vite worker wrapper for `salesImportWorker.ts`. Cleanup must keep this
   worker wrapper until bundler imports intentionally move to a different typed

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T10:52:00.789Z",
+  "generatedAt": "2026-05-28T11:21:04.168Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -29,11 +29,11 @@
     ],
     [
       "React JSX",
-      61
+      60
     ],
     [
       "React TSX",
-      46
+      47
     ],
     [
       "Windows batch",
@@ -71,11 +71,11 @@
     ],
     [
       ".jsx",
-      61
+      60
     ],
     [
       ".tsx",
-      46
+      47
     ],
     [
       ".bat",
@@ -981,7 +981,7 @@
     },
     {
       "implementation": "frontend/src/components/products/import/productImportPlanner.ts",
-      "compatibilityWrapper": "frontend/src/components/products/import/productImportPlanner.mjs",
+      "compatibilityWrapper": "",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -990,7 +990,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "retired frontend/src/components/products/import/productImportPlanner.mjs",
+      "wrapperStatus": "",
       "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -998,7 +998,7 @@
     },
     {
       "implementation": "frontend/src/components/products/import/productImportWorker.ts",
-      "compatibilityWrapper": "frontend/src/components/products/import/productImportWorker.mjs",
+      "compatibilityWrapper": "",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1007,7 +1007,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "retired frontend/src/components/products/import/productImportWorker.mjs",
+      "wrapperStatus": "",
       "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
@@ -1374,9 +1374,9 @@
   "convertedTypeScriptCoverageGaps": [],
   "completedWebWorkerSlices": [
     {
-      "surface": "frontend/src/components/products/import/BulkImportModal.jsx",
+      "surface": "frontend/src/components/products/import/BulkImportModal.tsx",
       "worker": "frontend/src/components/products/import/productImportWorker.ts",
-      "compatibilityWrapper": "frontend/src/components/products/import/productImportWorker.mjs",
+      "compatibilityWrapper": "",
       "fallback": "frontend/src/components/products/import/productImportPlanner.ts",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1388,7 +1388,7 @@
       ],
       "surfaceExists": true,
       "workerExists": true,
-      "wrapperStatus": "retired frontend/src/components/products/import/productImportWorker.mjs",
+      "wrapperStatus": "",
       "compatibilityWrapperRequired": false,
       "compatibilityWrapperExists": true,
       "fallbackExists": true,

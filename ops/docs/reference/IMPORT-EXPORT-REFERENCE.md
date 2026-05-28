@@ -231,7 +231,7 @@ Code files documented: **466**
 | 219 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 0 | 10 | 0 | 0 |
 | 220 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 2 | 15 | 2 | 0 |
 | 221 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 0 | 2 | 0 | 2 |
-| 222 | `frontend/src/components/products/import/BulkImportModal.jsx` | 6 | 1 | 4 | 1 |
+| 222 | `frontend/src/components/products/import/BulkImportModal.tsx` | 6 | 1 | 4 | 1 |
 | 223 | `frontend/src/components/products/import/productImportPlanner.ts` | 0 | 11 | 0 | 3 |
 | 224 | `frontend/src/components/products/import/productImportWorker.ts` | 1 | 0 | 1 | 0 |
 | 225 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | 6 | 1 | 5 | 1 |
@@ -3812,7 +3812,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
-  - `frontend/src/components/products/import/BulkImportModal.jsx`
+  - `frontend/src/components/products/import/BulkImportModal.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
 
 ### 3.188 `frontend/src/components/files/FilesPage.jsx`
@@ -4346,13 +4346,13 @@ Code files documented: **466**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/productHistoryHelpers.test.ts`
 
-### 3.222 `frontend/src/components/products/import/BulkImportModal.jsx`
+### 3.222 `frontend/src/components/products/import/BulkImportModal.tsx`
 
 - Declared exports: `function`
 - Imports (6)
   - `../../../utils/actionGuards.ts`
   - `../../../utils/loaders.ts`
-  - `../../files/FilePickerModal`
+  - `../../files/FilePickerModal.jsx`
   - `../../shared/Modal`
   - `lucide-react`
   - `react`
@@ -4496,7 +4496,7 @@ Code files documented: **466**
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/history/productHistoryHelpers.ts`
-  - `frontend/src/components/products/import/BulkImportModal.jsx`
+  - `frontend/src/components/products/import/BulkImportModal.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
@@ -5191,7 +5191,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
-  - `frontend/src/components/products/import/BulkImportModal.jsx`
+  - `frontend/src/components/products/import/BulkImportModal.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
@@ -5700,7 +5700,7 @@ Code files documented: **466**
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
-  - `frontend/src/components/products/import/BulkImportModal.jsx`
+  - `frontend/src/components/products/import/BulkImportModal.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
@@ -6035,7 +6035,7 @@ Code files documented: **466**
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
-  - `frontend/src/components/products/import/BulkImportModal.jsx`
+  - `frontend/src/components/products/import/BulkImportModal.tsx`
   - `frontend/src/components/products/lookups/productLookupSnapshots.ts`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/returns/EditReturnModal.jsx`

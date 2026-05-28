@@ -28,10 +28,10 @@ The public Cloudflare portal check was hardened at the same time: it now
 records/asserts the actual document CSP headers, so browser report-only CSP
 console chatter can be ignored without weakening the security signal.
 
-Move 152 keeps `productImportWorker.mjs` intentionally alive as a runtime
-entrypoint wrapper. It is not dead code: `BulkImportModal.jsx` constructs the
-Vite module worker through that path, while the executable worker body now
-lives in `productImportWorker.ts`.
+Move 152 has retired the old product import worker wrapper after the modal moved
+to the typed worker URL. `BulkImportModal.tsx` now constructs the Vite module
+worker from `productImportWorker.ts`, so the executable worker body and the
+runtime entrypoint are the same typed file.
 
 Move 153 keeps `frontend/src/components/receipt-settings/constants.js`
 intentionally alive as a compatibility wrapper for receipt settings imports
@@ -82,10 +82,9 @@ has been retired after inventory, sales, contact, and focused tests moved to
 `csvRowCounter.ts`.
 
 Move 163 confirms the product import worker cluster is not dead code:
-`BulkImportModal.jsx` constructs the Vite worker from `productImportWorker.mjs`,
-`productImportWorker.ts` owns the typed worker message loop, and
-`productImportPlanner.ts` remains the fallback parser used for Worker startup,
-postMessage, timeout, and worker-error recovery.
+`BulkImportModal.tsx` constructs the Vite worker from `productImportWorker.ts`,
+and `productImportPlanner.ts` remains the fallback parser used for Worker
+startup, postMessage, timeout, and worker-error recovery.
 
 Move 164 keeps `frontend/src/components/sales/salesImportWorker.mjs`
 intentionally alive as the Vite module-worker wrapper. The executable sales
@@ -323,11 +322,11 @@ implementation keeps product write, restore, branch adjustment, transfer, and
 bulk update payload logic in one checked module, making duplicated stock/write
 payload construction easier to catch before it reaches Products.
 
-Move 124 converts the product import planner to TypeScript while preserving
-`productImportPlanner.mjs` as an intentional compatibility wrapper. The typed
-implementation keeps CSV normalization, identifier conflict decisions,
-same-name grouping, and blocking import issue handling in one checked module,
-making duplicate import-analysis branches easier to catch before they drift.
+Move 124 converts the product import planner to TypeScript and retires the old
+compatibility wrapper. The typed implementation keeps CSV normalization,
+identifier conflict decisions, same-name grouping, and blocking import issue
+handling in one checked module, making duplicate import-analysis branches easier
+to catch before they drift.
 
 Move 125 converts the action guard utility to TypeScript while preserving
 `actionGuards.mjs` as an intentional compatibility wrapper. The typed

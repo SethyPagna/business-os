@@ -1000,7 +1000,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `BulkImportModal.jsx` | UI component/page |
+| 1 | `BulkImportModal.tsx` | UI component/page |
 | 2 | `productImportPlanner.ts` | UI component/page |
 | 3 | `productImportWorker.ts` | UI component/page |
 

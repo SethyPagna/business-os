@@ -318,9 +318,9 @@ gallery helper boundary.
 Move 124 completes the product import planner TypeScript conversion.
 `productImportPlanner.ts` now owns CSV product import row normalization,
 identifier conflict analysis, same-name family grouping, blocking
-barcode/encoding issue checks, and summary counts, while
-`productImportPlanner.mjs` remains as the compatibility wrapper for
-`BulkImportModal`, the product import worker, and focused tests.
+barcode/encoding issue checks, and summary counts. The former planner wrapper
+has been retired; `BulkImportModal`, the product import worker, and focused
+tests read the typed planner directly.
 
 Move 125 completes the action guard utility TypeScript conversion.
 `actionGuards.ts` now owns same-tick single-action, named-action, and
@@ -491,8 +491,8 @@ focused POS tests.
 
 Move 152 completes the product import worker TypeScript conversion.
 `productImportWorker.ts` now owns worker-side message narrowing and
-progress/result/error posts, while `productImportWorker.mjs` remains as the
-stable Vite module-worker wrapper used by the bulk import modal.
+progress/result/error posts and is now the stable Vite module-worker entrypoint
+used by the bulk import modal.
 
 Move 153 completes the receipt settings constants TypeScript conversion.
 `constants.ts` now owns the receipt default template and translated field
@@ -550,11 +550,11 @@ the shared `csvRowCounter.ts` parser, and keeps the background import job
 upload/start flow unchanged.
 
 Move 163 hardens the product import worker loop rather than adding a duplicate
-worker. `BulkImportModal.jsx` now routes Worker unsupported, worker startup
+worker. `BulkImportModal.tsx` now routes Worker unsupported, worker startup
 failure, postMessage failure, worker error, and 60 second timeout cases through
 the existing `productImportPlanner.ts` parser fallback. The Phase 29 language
-audit records `BulkImportModal.jsx`, `productImportWorker.ts`,
-`productImportWorker.mjs`, and `productImportPlanner.ts` as one completed Web
+audit records `BulkImportModal.tsx`, `productImportWorker.ts`, and
+`productImportPlanner.ts` as one completed Web
 Worker slice, so later worker candidates advance to the next import or media
 hot path.
 

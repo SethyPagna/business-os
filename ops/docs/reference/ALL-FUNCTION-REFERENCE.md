@@ -231,7 +231,7 @@ Code files scanned: **466**
 | 219 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 7 |
 | 220 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 18 |
 | 221 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 1 |
-| 222 | `frontend/src/components/products/import/BulkImportModal.jsx` | 63 |
+| 222 | `frontend/src/components/products/import/BulkImportModal.tsx` | 51 |
 | 223 | `frontend/src/components/products/import/productImportPlanner.ts` | 18 |
 | 224 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
 | 225 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | 9 |
@@ -4246,73 +4246,61 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `createProductHistoryRequestId` | export function | 43 |
 
-### 3.222 `frontend/src/components/products/import/BulkImportModal.jsx`
+### 3.222 `frontend/src/components/products/import/BulkImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getBaseName` | function | 61 |
-| 2 | `analyzeProductCsvInWorker` | function | 68 |
-| 3 | `runFallbackAnalysis` | const arrow | 69 |
-| 4 | `cleanup` | const arrow | 81 |
-| 5 | `complete` | const arrow | 89 |
-| 6 | `runFallback` | const arrow | 95 |
-| 7 | `getIncomingImageFilenames` | function | 138 |
-| 8 | `getExistingImageFilenames` | function | 171 |
-| 9 | `csvEscape` | function | 200 |
-| 10 | `compactImportValue` | function | 230 |
-| 11 | `isBlankImportValue` | function | 235 |
-| 12 | `hasPriceReviewIssue` | function | 239 |
-| 13 | `getProductImportIssueLabel` | function | 244 |
-| 14 | `getProductImportIssueHint` | function | 253 |
-| 15 | `getProductImportRowIssueDetails` | function | 261 |
-| 16 | `valuesDiffer` | function | 316 |
-| 17 | `normalizeImageMatchKey` | function | 320 |
-| 18 | `getImageReference` | function | 332 |
-| 19 | `findImageReferenceForRow` | function | 340 |
-| 20 | `getDecisionLabel` | function | 350 |
-| 21 | `getFamilyKeyForRow` | function | 354 |
-| 22 | `summarizeRowNumbers` | function | 358 |
-| 23 | `summarizeSubgroup` | function | 365 |
-| 24 | `getImportActionTargetSummary` | function | 370 |
-| 25 | `createFamilyContextEntry` | function | 403 |
-| 26 | `buildVisibleFamilyRows` | function | 424 |
-| 27 | `InlineImportDetailGrid` | function | 439 |
-| 28 | `buildImageOnlyCsv` | function | 470 |
-| 29 | `getBrowserImageEntries` | function | 488 |
-| 30 | `BulkImportModal` | export default function | 497 |
-| 31 | `T` | const arrow | 531 |
-| 32 | `signalDone` | const arrow | 532 |
-| 33 | `throwIfImportCancelled` | const arrow | 538 |
-| 34 | `isCancelledStartError` | const arrow | 545 |
-| 35 | `beginImportAction` | const arrow | 547 |
-| 36 | `finishImportAction` | const arrow | 553 |
-| 37 | `setCancelledResult` | const arrow | 558 |
-| 38 | `createReviewSnapshot` | const arrow | 585 |
-| 39 | `pushReviewUndoSnapshot` | const arrow | 595 |
-| 40 | `undoLastReviewChange` | const arrow | 599 |
-| 41 | `beginInlineEdit` | const arrow | 614 |
-| 42 | `resetCsvState` | const arrow | 627 |
-| 43 | `pickImageDirectory` | const arrow | 655 |
-| 44 | `pickImageZip` | const arrow | 679 |
-| 45 | `addLibraryImages` | const arrow | 692 |
-| 46 | `buildCsvForImportJob` | const arrow | 708 |
-| 47 | `ensureServerPreflightReady` | const arrow | 741 |
-| 48 | `handleCancelCurrentJob` | const arrow | 775 |
-| 49 | `handleRetryCurrentJob` | const arrow | 796 |
-| 50 | `handleDeleteCurrentJob` | const arrow | 820 |
-| 51 | `handleImageOnlyImport` | const arrow | 847 |
-| 52 | `handlePickCSV` | const arrow | 939 |
-| 53 | `handleImport` | const arrow | 1003 |
-| 54 | `toggleFamilyCollapse` | const arrow | 1249 |
-| 55 | `toggleInlineDetails` | const arrow | 1258 |
-| 56 | `toggleConflictSelection` | const arrow | 1267 |
-| 57 | `toggleSelectAllConflicts` | const arrow | 1276 |
-| 58 | `applyDecisionToSelection` | const arrow | 1284 |
-| 59 | `applyImageDecisionToSelection` | const arrow | 1294 |
-| 60 | `applyIdentifierDecisionToSelection` | const arrow | 1311 |
-| 61 | `applyFieldRulePreset` | const arrow | 1323 |
-| 62 | `renderConflictRow` | const arrow | 1336 |
-| 63 | `updateEditedRow` | const arrow | 1344 |
+| 1 | `getProductImportApi` | function | 247 |
+| 2 | `getErrorMessage` | function | 251 |
+| 3 | `getBaseName` | function | 261 |
+| 4 | `analyzeProductCsvInWorker` | function | 269 |
+| 5 | `runFallbackAnalysis` | const arrow | 278 |
+| 6 | `cleanup` | const arrow | 290 |
+| 7 | `complete` | const arrow | 298 |
+| 8 | `getIncomingImageFilenames` | function | 347 |
+| 9 | `getExistingImageFilenames` | function | 380 |
+| 10 | `csvEscape` | function | 409 |
+| 11 | `compactImportValue` | function | 439 |
+| 12 | `isBlankImportValue` | function | 444 |
+| 13 | `hasPriceReviewIssue` | function | 448 |
+| 14 | `getProductImportIssueLabel` | function | 453 |
+| 15 | `getProductImportIssueHint` | function | 462 |
+| 16 | `getProductImportRowIssueDetails` | function | 470 |
+| 17 | `valuesDiffer` | function | 525 |
+| 18 | `normalizeImageMatchKey` | function | 529 |
+| 19 | `getImageReference` | function | 542 |
+| 20 | `findImageReferenceForRow` | function | 551 |
+| 21 | `getDecisionLabel` | function | 562 |
+| 22 | `getFamilyKeyForRow` | function | 566 |
+| 23 | `summarizeRowNumbers` | function | 570 |
+| 24 | `summarizeSubgroup` | function | 577 |
+| 25 | `getImportActionTargetSummary` | function | 582 |
+| 26 | `createFamilyContextEntry` | function | 615 |
+| 27 | `buildVisibleFamilyRows` | function | 636 |
+| 28 | `InlineImportDetailGrid` | function | 655 |
+| 29 | `buildImageOnlyCsv` | function | 696 |
+| 30 | `getBrowserImageEntries` | function | 714 |
+| 31 | `BulkImportModal` | export default function | 723 |
+| 32 | `resetCsvState` | const arrow | 854 |
+| 33 | `pickImageDirectory` | const arrow | 882 |
+| 34 | `pickImageZip` | const arrow | 907 |
+| 35 | `addLibraryImages` | const arrow | 921 |
+| 36 | `handleCancelCurrentJob` | const arrow | 1005 |
+| 37 | `handleRetryCurrentJob` | const arrow | 1026 |
+| 38 | `handleDeleteCurrentJob` | const arrow | 1050 |
+| 39 | `handleImageOnlyImport` | const arrow | 1077 |
+| 40 | `handlePickCSV` | const arrow | 1172 |
+| 41 | `handleImport` | const arrow | 1236 |
+| 42 | `toggleFamilyCollapse` | const arrow | 1486 |
+| 43 | `toggleInlineDetails` | const arrow | 1495 |
+| 44 | `toggleConflictSelection` | const arrow | 1504 |
+| 45 | `toggleSelectAllConflicts` | const arrow | 1513 |
+| 46 | `applyDecisionToSelection` | const arrow | 1521 |
+| 47 | `applyImageDecisionToSelection` | const arrow | 1531 |
+| 48 | `applyIdentifierDecisionToSelection` | const arrow | 1548 |
+| 49 | `applyFieldRulePreset` | const arrow | 1560 |
+| 50 | `renderConflictRow` | const arrow | 1573 |
+| 51 | `updateEditedRow` | const arrow | 1581 |
 
 ### 3.223 `frontend/src/components/products/import/productImportPlanner.ts`
 
