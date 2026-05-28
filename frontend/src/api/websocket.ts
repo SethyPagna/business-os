@@ -1,5 +1,5 @@
 /**
- * api/websocket.js — WebSocket connection lifecycle.
+ * api/websocket.ts - WebSocket connection lifecycle.
  *
  * Maintains a single persistent WS connection to the sync server.
  * Dispatches CustomEvents that AppContext and components listen to:
@@ -8,7 +8,7 @@
  */
 
 import { SYNC } from '../constants.ts'
-import { getSyncServerUrl } from './http.js'
+import { getSyncServerUrl } from './http.ts'
 
 let ws: WebSocket | null = null
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null

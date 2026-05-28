@@ -67,7 +67,7 @@ assert.doesNotMatch(
 
 assert.match(
   webApiSource,
-  /import \{[^}]*getSyncServerUrl[^}]*\} from '\.\/api\/http\.js'/s,
+  /import \{[^}]*getSyncServerUrl[^}]*\} from '\.\/api\/http\.ts'/s,
   'window.api.getSyncServerUrl must use the synchronous http module export, not the lazy async methods proxy',
 )
 

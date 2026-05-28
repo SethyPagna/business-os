@@ -27,7 +27,7 @@ import { getAvailableYears, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { isApiVersionMismatchError } from '../../api/http.js'
+import { isApiVersionMismatchError } from '../../api/http.ts'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.ts'
 import {
   beginTrackedRequest,

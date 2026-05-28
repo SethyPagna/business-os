@@ -26,8 +26,8 @@ import {
   isTransientGatewayError,
   getApiVersionMismatchCooldown,
   markApiVersionMismatch,
-} from './http.js'
-import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.js'
+} from './http.ts'
+import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { STORAGE_KEYS, SYNC } from '../constants'
 import { decodeTextBuffer } from '../utils/csvImport.ts'

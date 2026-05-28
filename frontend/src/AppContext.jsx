@@ -1,11 +1,11 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, useContext as _useContext, startTransition } from 'react'
 import en from './lang/en.json'
 import { STORAGE_KEYS, SYNC } from './constants'
-// web-api.js installs window.api synchronously via static imports.
+// web-api.ts installs window.api synchronously via static imports.
 // Importing it here (rather than dynamic import) ensures window.api
 // is available before any React render cycle runs.
-import './web-api.js'
-import { cacheClearAll, FRONTEND_BUILD_INFO, isCloudflareAccessRedirectResponse, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.js'
+import './web-api.ts'
+import { cacheClearAll, FRONTEND_BUILD_INFO, isCloudflareAccessRedirectResponse, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
   readStoredRuntimeDescriptor,
@@ -14,7 +14,7 @@ import {
   shouldResetForRuntimeChange,
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
-import { isWSConnected, reconnectWS } from './api/websocket.js'
+import { isWSConnected, reconnectWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPathForPage } from './app/appShellUtils.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { parsePermissionMap } from './utils/permissions.ts'

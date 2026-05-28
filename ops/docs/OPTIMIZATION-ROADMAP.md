@@ -3349,7 +3349,7 @@ Cleanup checkpoint:
   runner now passes all 21 checks with zero failures while preserving concise
   duration and repeat-consistency reporting.
 - Move 300 bounds offline file-sync failure writes:
-  `frontend/src/web-api.js` now updates failed/pending offline file chunk rows
+  `frontend/src/web-api.ts` now updates failed/pending offline file chunk rows
   through `mapOfflineFileChunkStatusUpdates()` with
   `OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3` instead of issuing an
   unbounded `Promise.all(rows.map(...offline_file_chunks.update...))` burst
@@ -3685,7 +3685,7 @@ Move 331 status:
 
 Move 332 status:
 - Move 332 makes local mirror table cleanup direct-loop based:
-  `frontend/src/api/localDb.js` now normalizes and deduplicates requested Dexie
+  `frontend/src/api/localDb.ts` now normalizes and deduplicates requested Dexie
   table names with one direct loop and resolves table objects with another
   direct loop, replacing the prior spread `Set` over `map().filter()` plus a
   second `map().filter()` table-resolution pass. Focused coverage in
@@ -5308,3 +5308,10 @@ Move 480 status:
   `importJobRefresh.ts`, `pricing.ts`, `printReceipt.ts`, and `utils/index.ts`
   now serve direct TypeScript imports, while the matching one-line `.js`
   wrappers and obsolete `csv.d.ts`/`pricing.d.ts` shims are removed.
+
+Move 481 status:
+- Move 481 retires the frontend API/bootstrap wrappers after exact caller
+  rewrites. `api/http.ts`, `api/websocket.ts`, `api/localDb.ts`, and
+  `web-api.ts` now serve direct imports, while the matching one-line `.js`
+  wrappers are removed and runtime dependency verification points at the typed
+  HTTP source.

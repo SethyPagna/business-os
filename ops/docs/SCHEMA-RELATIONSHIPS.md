@@ -17,7 +17,7 @@ This document is the working relational schema map for Business OS. It was built
 - `backend/src/routes/**/*.js`
 - `backend/src/services/**/*.js`
 - `backend/src/backupSchema.js`
-- `frontend/src/api/localDb.js`
+- `frontend/src/api/localDb.ts`
 - `frontend/src/api/methods.js`
 - runtime configuration in `ops/docker/compose.scale.yml`
 

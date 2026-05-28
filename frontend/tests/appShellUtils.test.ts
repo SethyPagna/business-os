@@ -96,7 +96,7 @@ runTest('service worker serves cached app shell for offline navigations only', (
 })
 
 runTest('successful login reconnects websocket writes immediately', () => {
-  assert.match(appContextSource, /import \{ isWSConnected, reconnectWS \} from '\.\/api\/websocket\.js'/)
+  assert.match(appContextSource, /import \{ isWSConnected, reconnectWS \} from '\.\/api\/websocket\.ts'/)
   assert.match(appContextSource, /cacheClearAll\(\)\s+reconnectWS\(\)\s+startHealthCheck\(\)/)
 })
 

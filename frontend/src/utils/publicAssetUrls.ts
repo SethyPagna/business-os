@@ -1,4 +1,4 @@
-import { FRONTEND_BUILD_INFO } from '../api/http.js'
+import { FRONTEND_BUILD_INFO } from '../api/http.ts'
 
 type PublicAssetOptions = {
   publicAssetBaseUrl?: unknown

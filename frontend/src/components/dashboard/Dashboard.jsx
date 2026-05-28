@@ -16,7 +16,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
-import { isInvalidSessionError } from '../../api/http.js'
+import { isInvalidSessionError } from '../../api/http.ts'
 
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
 const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`

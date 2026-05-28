@@ -14,7 +14,7 @@ import {
   isRequiredRuntimeApiPath,
   setSyncServerUrl,
   setSyncToken,
-} from '../src/api/http.js'
+} from '../src/api/http.ts'
 
 type TestCallback = () => void | Promise<void>
 type FetchCall = Parameters<typeof fetch>

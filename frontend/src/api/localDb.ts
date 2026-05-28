@@ -1,5 +1,5 @@
 /**
- * api/localDb.js — Offline-first IndexedDB store (Dexie).
+ * api/localDb.ts - Offline-first IndexedDB store (Dexie).
  *
  * Exports a ready-to-use `dexieDb` instance and thin helper functions
  * that mirror the server API shapes, used as fallbacks inside route().

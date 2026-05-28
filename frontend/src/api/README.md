@@ -4,7 +4,7 @@ This folder is the browser-side transport layer for Business OS.
 
 ## Files
 
-- `http.ts` with `http.js` as a compatibility wrapper
+- `http.ts`
   - low-level HTTP request wrapper
   - auth token attachment, retry handling, offline/server-unreachable detection
   - runtime version mismatch, Cloudflare Access redirect, transient gateway, write-dedupe, and read-fallback classification
@@ -14,13 +14,13 @@ This folder is the browser-side transport layer for Business OS.
   - keeps request/response shapes centralized so UI pages do not hand-roll endpoints
   - next high-risk TypeScript target because it is still the large domain registry
 
-- `localDb.ts` with `localDb.js` as a compatibility wrapper
+- `localDb.ts`
   - Dexie-based browser storage for offline queues and local cache helpers
 
-- `websocket.ts` with `websocket.js` as a compatibility wrapper
+- `websocket.ts`
   - realtime sync channel client used by the shared app shell
 
-- `../web-api.ts` with `../web-api.js` as a compatibility wrapper
+- `../web-api.ts`
   - installs `window.api`, owns offline vault sync, background sync registration, service-worker event forwarding, and lazy domain-method loading
 
 ## Rules
@@ -28,4 +28,4 @@ This folder is the browser-side transport layer for Business OS.
 1. Add new API calls here before wiring them into pages.
 2. Keep auth/session handling centralized here so page components stay declarative.
 3. Prefer stable method names that describe the business action, not just the URL.
-4. TypeScript conversions should add real boundaries: typed payloads, typed timers, typed event details, and one explicit compatibility wrapper when existing JSX imports still use `.js`.
+4. TypeScript conversions should add real boundaries: typed payloads, typed timers, and typed event details; add compatibility wrappers only when existing JSX imports cannot safely move yet.

@@ -13,9 +13,9 @@
  *   api/methods.js   - all domain API methods
  */
 
-import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
-import { connectWS, disconnectWS, reconnectWS } from './api/websocket.js'
-import { dexieDb }                 from './api/localDb.js'
+import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.ts'
+import { connectWS, disconnectWS, reconnectWS } from './api/websocket.ts'
+import { dexieDb }                 from './api/localDb.ts'
 import { STORAGE_KEYS }            from './constants.ts'
 import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.ts'
 import {

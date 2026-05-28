@@ -1,11 +1,11 @@
 /**
- * api/http.js ??HTTP client for the sync server.
+ * api/http.ts - HTTP client for the sync server.
  *
  * Provides:
- *   apiFetch(method, path, body)  ??typed JSON fetch with cookie credentials and timeout
- *   isNetErr(err)                 ??classify network errors (vs server errors)
- *   readCache / writeCache        ??short-lived in-memory read cache (20 s TTL)
- *   route(channel, serverFn, localFn, isWrite) ??smart dispatcher used by every api/* module
+ *   apiFetch(method, path, body)  - typed JSON fetch with cookie credentials and timeout
+ *   isNetErr(err)                 - classify network errors (vs server errors)
+ *   readCache / writeCache        - short-lived in-memory read cache (20 s TTL)
+ *   route(channel, serverFn, localFn, isWrite) - smart dispatcher used by every api/* module
  *
  * Consumers import from this file; they never access syncServerUrl directly.
  * Call setSyncServerUrl() and setSyncToken() from AppContext or web-api bootstrap.

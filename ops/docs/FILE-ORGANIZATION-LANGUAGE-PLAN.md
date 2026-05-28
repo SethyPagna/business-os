@@ -2564,7 +2564,7 @@ Decision rule:
     runs last against a settled reference tree. Focused automation coverage and
     a three-cycle `phase29:audit:repeat` pass with 21 checks and zero failures.
 300. Bound offline file-sync failure status writes. Done:
-    `frontend/src/web-api.js` now routes failed/pending chunk status updates
+    `frontend/src/web-api.ts` now routes failed/pending chunk status updates
     through `mapOfflineFileChunkStatusUpdates()` with
     `OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3`, avoiding an unbounded
     IndexedDB write burst when a large offline file upload pauses or fails.
@@ -3780,6 +3780,12 @@ Decision rule:
     `csv.d.ts`/`pricing.d.ts` declaration shims were removed after exact import
     rewrites, keeping CSV parsing, export packaging, import-job refresh events,
     pricing, and receipt printing on typed source paths.
+481. Retire frontend API/bootstrap compatibility wrappers. Done:
+    `api/http.ts`, `api/websocket.ts`, `api/localDb.ts`, and `web-api.ts` now
+    serve direct imports for app context, API methods, runtime reset, public
+    asset URLs, background import tracking, and focused API tests. The previous
+    one-line `.js` wrappers were removed after exact caller rewrites and the
+    runtime dependency guardrail now checks the typed HTTP source directly.
 
 ## Safety Gates
 

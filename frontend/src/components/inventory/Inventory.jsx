@@ -26,7 +26,7 @@ import { buildProductGroupSections } from '../../utils/productGrouping.ts'
 import { buildBatchPreview } from '../../utils/productBatches.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { isApiVersionMismatchError } from '../../api/http.js'
+import { isApiVersionMismatchError } from '../../api/http.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,

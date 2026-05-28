@@ -1,5 +1,5 @@
 import { STORAGE_KEYS } from '../../constants.ts'
-import { resetLocalMirrorDb } from '../../api/localDb.js'
+import { resetLocalMirrorDb } from '../../api/localDb.ts'
 
 type RuntimeDescriptor = {
   serverStartTime: string
