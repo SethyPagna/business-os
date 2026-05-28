@@ -3605,6 +3605,13 @@ Decision rule:
     action-history, row action, console, screenshot, and report assertions
     while adding typed health, console-entry, observed-request, and direct
     request-context boundaries.
+451. Convert admin entity focused live checks to TypeScript. Done:
+    `phase84-branches-actions-live-check.ts`,
+    `phase84-contacts-live-check.ts`, and
+    `phase84-users-actions-live-check.ts` replace their `.mjs` entrypoints.
+    The checks keep the same Branch, Contacts, and Users modal/tab/action
+    browser workflows while adding typed health, console-entry, observed
+    request, and user-record boundaries.
 
 ## Safety Gates
 

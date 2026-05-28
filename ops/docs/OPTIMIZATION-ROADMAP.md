@@ -5107,3 +5107,12 @@ Move 460 status:
   modal, lookup usage, action-history, row controls, screenshot, and console
   assertions while adding typed health, console-entry, observed-request, and
   request-context shapes.
+
+Move 461 status:
+- Move 461 converts the Branch, Contacts, and Users focused live checks to
+  TypeScript. `phase84-branches-actions-live-check.ts`,
+  `phase84-contacts-live-check.ts`, and
+  `phase84-users-actions-live-check.ts` preserve add/edit/transfer,
+  customer/supplier/delivery/import, and user/role/password modal workflows
+  while adding typed health, console-entry, observed-request, and user-record
+  shapes.
