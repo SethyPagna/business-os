@@ -1650,8 +1650,8 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `live-check-utils.ts` | Project source/support file |
-| 2 | `phase84-branches-actions-live-check.mjs` | Project source/support file |
-| 3 | `phase84-contacts-live-check.mjs` | Project source/support file |
+| 2 | `phase84-branches-actions-live-check.ts` | Project source/support file |
+| 3 | `phase84-contacts-live-check.ts` | Project source/support file |
 | 4 | `phase84-files-providers-actions-live-check.mjs` | Project source/support file |
 | 5 | `phase84-inventory-actions-live-check.mjs` | Project source/support file |
 | 6 | `phase84-live-suite.ts` | Project source/support file |
@@ -1665,7 +1665,7 @@ Total folders documented: **81**
 | 14 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
 | 15 | `phase84-sales-actions-live-check.mjs` | Project source/support file |
 | 16 | `phase84-ui-live-check.mjs` | Project source/support file |
-| 17 | `phase84-users-actions-live-check.mjs` | Project source/support file |
+| 17 | `phase84-users-actions-live-check.ts` | Project source/support file |
 
 
 ### 3.76 Folder: `ops/scripts/runtime/smoke`

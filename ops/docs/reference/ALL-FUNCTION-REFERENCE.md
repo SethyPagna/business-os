@@ -483,8 +483,8 @@ Code files scanned: **506**
 | 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
 | 472 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
 | 473 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
-| 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 2 |
-| 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 2 |
+| 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 2 |
+| 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
 | 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
 | 477 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 3 |
 | 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 11 |
@@ -498,7 +498,7 @@ Code files scanned: **506**
 | 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
-| 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 2 |
+| 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
 | 490 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
 | 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
 | 492 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
@@ -6712,19 +6712,19 @@ Code files scanned: **506**
 | 7 | `waitForRead` | export function | 101 |
 | 8 | `closeTopModal` | export function | 118 |
 
-### 3.474 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
+### 3.474 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `main` | function | 26 |
+| 1 | `assert` | function | 28 |
+| 2 | `main` | function | 36 |
 
-### 3.475 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
+### 3.475 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `main` | function | 26 |
+| 1 | `assert` | function | 28 |
+| 2 | `main` | function | 36 |
 
 ### 3.476 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
 
@@ -6833,12 +6833,12 @@ Code files scanned: **506**
 | 1 | `assert` | function | 19 |
 | 2 | `main` | function | 26 |
 
-### 3.489 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
+### 3.489 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `main` | function | 26 |
+| 1 | `assert` | function | 32 |
+| 2 | `main` | function | 40 |
 
 ### 3.490 `ops/scripts/runtime/smoke/check-public-url.ts`
 

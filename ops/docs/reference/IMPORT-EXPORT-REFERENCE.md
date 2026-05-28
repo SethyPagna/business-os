@@ -483,8 +483,8 @@ Code files documented: **506**
 | 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 4 | 0 | 1 | 0 |
 | 472 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 4 | 0 | 0 | 0 |
 | 473 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 0 | 7 | 0 | 14 |
-| 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 6 | 0 | 2 | 0 |
 | 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 477 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 4 | 0 | 0 | 0 |
@@ -498,7 +498,7 @@ Code files documented: **506**
 | 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 4 | 0 | 0 | 0 |
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 6 | 0 | 2 | 0 |
-| 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
+| 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 6 | 0 | 2 | 0 |
 | 490 | `ops/scripts/runtime/smoke/check-public-url.ts` | 2 | 0 | 0 | 0 |
 | 491 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
 | 492 | `ops/scripts/runtime/smoke/live-smoke.ts` | 5 | 0 | 0 | 0 |
@@ -7684,8 +7684,8 @@ Code files documented: **506**
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
   - `ops/scripts/runtime/audits/full-app-audit.mjs`
   - `ops/scripts/runtime/browser-action-smoke.ts`
-  - `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
-  - `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
+  - `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
@@ -7697,7 +7697,7 @@ Code files documented: **506**
   - `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
-  - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 ### 3.464 `ops/scripts/runtime/audits/audit-manifest.ts`
 
@@ -7844,8 +7844,8 @@ Code files documented: **506**
 - Internal dependencies (0)
   - none
 - Referenced by (14)
-  - `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
-  - `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
+  - `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
@@ -7857,9 +7857,9 @@ Code files documented: **506**
   - `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
-  - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
+  - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
-### 3.474 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
+### 3.474 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7875,7 +7875,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.475 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
+### 3.475 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -8093,7 +8093,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.489 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.mjs`
+### 3.489 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
