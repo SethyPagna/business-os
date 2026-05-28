@@ -521,7 +521,7 @@ Decision rule:
     `184285cf77ae8c5e`.
 45. Harden Files library asset upload/delete actions. Done:
     `frontend/src/components/files/FilesPage.jsx` and
-    `frontend/src/components/files/FilePickerModal.jsx` now wrap file asset
+    `frontend/src/components/files/FilePickerModal.tsx` now wrap file asset
     uploads and deletes in explicit timeout contracts while preserving their
     same-tick upload/delete guards. The Files selected-assets toolbar also uses
     the imported `Download` icon instead of an undefined `Save` symbol. Focused
@@ -3968,6 +3968,14 @@ Decision rule:
     and requirements. `FilesResponsesTab.tsx` now types AI response rows,
     profile fields, candidate products, recommendations, citations, expansion
     state, and refresh/date callbacks.
+506. Convert file picker and branch transfer modals to TSX. Done:
+    `FilePickerModal.tsx` now types file asset rows, media-type filters,
+    upload/delete API boundaries, selected-path state, file-input events, and
+    modal callbacks while keeping the upload/delete in-flight guards intact.
+    `TransferModal.tsx` now types branch choices, branch-stock rows, transfer
+    mutation payloads, transfer API responses, product selection, quantity
+    validation, and tracked branch-stock refreshes. Catalog/product lazy
+    imports plus stability/loading tests now read the TSX modal paths.
 
 ## Safety Gates
 

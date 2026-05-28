@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
@@ -11,9 +11,76 @@ import {
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000
 
-function normalizeTransferStockRows(stock) {
-  if (Array.isArray(stock)) return stock
-  if (Array.isArray(stock?.items)) return stock.items
+type TranslateFunction = (key: string) => string
+type NotifyFunction = (message: string, type?: string) => void
+
+type BranchOption = {
+  id: string | number
+  name: string
+}
+
+type TransferProduct = {
+  id: string | number
+  name?: string
+  sku?: string
+  unit?: string
+  branch_quantity?: number | string
+}
+
+type TransferStockResponse = {
+  items?: TransferProduct[]
+}
+
+type TransferResult = {
+  success?: boolean
+  error?: string
+}
+
+type TransferModalProps = {
+  branches: BranchOption[]
+  onClose: () => void
+  onDone: () => void
+  user?: { id?: string | number; name?: string }
+  notify: NotifyFunction
+}
+
+type AppContextValue = {
+  t: TranslateFunction
+  settings?: { language?: string }
+}
+
+type TransferApi = {
+  getBranchStock: (
+    branchId: number,
+    options: { page: number; pageSize: number; stockState: string },
+  ) => Promise<unknown>
+  transferStock: (payload: {
+    fromBranchId: number
+    toBranchId: number
+    productId: string | number
+    productName: string
+    quantity: number
+    note: string
+    userId?: string | number
+    userName?: string
+  }) => Promise<TransferResult>
+}
+
+const useApp = useAppHook as () => AppContextValue
+
+function getTransferApi(): TransferApi {
+  if (!window.api) throw new Error('Branch transfer API is not available.')
+  return window.api as TransferApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function normalizeTransferStockRows(stock: unknown): TransferProduct[] {
+  if (Array.isArray(stock)) return stock.filter((product): product is TransferProduct => !!product && typeof product === 'object')
+  const response = stock as TransferStockResponse
+  if (Array.isArray(response?.items)) return response.items.filter((product): product is TransferProduct => !!product && typeof product === 'object')
   return []
 }
 
@@ -24,7 +91,7 @@ function normalizeTransferStockRows(stock) {
  * - Validate source/destination/quantity before write.
  * - Surface transfer results through notifications.
  */
-export default function TransferModal({ branches, onClose, onDone, user, notify }) {
+export default function TransferModal({ branches, onClose, onDone, user, notify }: TransferModalProps) {
   const { t, settings } = useApp()
 
   /**
@@ -34,8 +101,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [fromBranch, setFromBranch] = useState('')
   const [toBranch, setToBranch] = useState('')
   const [search, setSearch] = useState('')
-  const [products, setProducts] = useState([])
-  const [selectedProduct, setSelectedProduct] = useState(null)
+  const [products, setProducts] = useState<TransferProduct[]>([])
+  const [selectedProduct, setSelectedProduct] = useState<TransferProduct | null>(null)
   const [quantity, setQuantity] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
@@ -78,8 +145,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     setLoadingProducts(true)
     async function loadStock() {
       try {
-        const stock = await withLoaderTimeout(
-          () => window.api.getBranchStock(Number.parseInt(fromBranch, 10), { page: 1, pageSize: 50, stockState: 'positive' }),
+        const stock = await withLoaderTimeout<unknown>(
+          () => getTransferApi().getBranchStock(Number.parseInt(fromBranch, 10), { page: 1, pageSize: 50, stockState: 'positive' }),
           'Branch stock for transfer',
           TRANSFER_STOCK_LOAD_TIMEOUT_MS,
         )
@@ -92,7 +159,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
         setSelectedProduct(null)
         setQuantity('')
-        notify(error?.message || (t('failed_to_load_data') || 'Failed to load data'), 'error')
+        notify(getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data'), 'error')
       } finally {
         if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
         setLoadingProducts(false)
@@ -100,7 +167,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     }
     loadStock()
 
-    return () => invalidateTrackedRequest(stockRequestRef)
+    return () => {
+      invalidateTrackedRequest(stockRequestRef)
+    }
   }, [fromBranch])
 
   /**
@@ -145,11 +214,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     if (!beginSingleAction(transferInFlightRef, { blocked: saving })) return
     setSaving(true)
     try {
-      const res = await withLoaderTimeout(() => window.api.transferStock({
+      const res = await withLoaderTimeout<TransferResult>(() => getTransferApi().transferStock({
         fromBranchId: Number.parseInt(fromBranch, 10),
         toBranchId: Number.parseInt(toBranch, 10),
         productId: selectedProduct.id,
-        productName: selectedProduct.name,
+        productName: selectedProduct.name || '',
         quantity: qty,
         note,
         userId: user?.id,
@@ -168,7 +237,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
 
       notify(res?.error || (t('transfer_failed') || 'Transfer failed'), 'error')
     } catch (error) {
-      notify(error?.message || (t('transfer_failed') || 'Transfer failed'), 'error')
+      notify(getErrorMessage(error, t('transfer_failed') || 'Transfer failed'), 'error')
     } finally {
       finishSingleAction(transferInFlightRef)
       setSaving(false)

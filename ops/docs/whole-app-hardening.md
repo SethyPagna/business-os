@@ -706,7 +706,7 @@ Last updated: 2026-05-18
     contracts in `frontend/src/components/utils-settings/Backup.jsx`. Files
     library asset upload/delete pathways now have explicit timeout contracts in
     `frontend/src/components/files/FilesPage.jsx` and
-    `frontend/src/components/files/FilePickerModal.jsx`. Settings and Catalog
+    `frontend/src/components/files/FilePickerModal.tsx`. Settings and Catalog
     media upload pathways now have explicit timeout contracts in
     `frontend/src/components/utils-settings/Settings.jsx` and
     `frontend/src/components/catalog/CatalogPage.jsx`. Product form image

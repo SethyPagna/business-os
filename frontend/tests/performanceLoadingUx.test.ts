@@ -32,7 +32,7 @@ const newReturnModal = fs.readFileSync(new URL('../src/components/returns/NewRet
 const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.jsx', import.meta.url), 'utf8')
 const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.jsx', import.meta.url), 'utf8')
 const branches = fs.readFileSync(new URL('../src/components/branches/Branches.jsx', import.meta.url), 'utf8')
-const transferModal = fs.readFileSync(new URL('../src/components/branches/TransferModal.jsx', import.meta.url), 'utf8')
+const transferModal = fs.readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 const catalogPage = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
 const products = fs.readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
 const productPageConfig = fs.readFileSync(new URL('../src/components/products/config/productPageConfig.ts', import.meta.url), 'utf8')
@@ -44,7 +44,7 @@ const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/loo
 const manageBrandsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageBrandsModal.tsx', import.meta.url), 'utf8')
 const productLookupSnapshots = fs.readFileSync(new URL('../src/components/products/lookups/productLookupSnapshots.ts', import.meta.url), 'utf8')
 const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.jsx', import.meta.url), 'utf8')
-const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePickerModal.jsx', import.meta.url), 'utf8')
+const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePickerModal.tsx', import.meta.url), 'utf8')
 const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.jsx', import.meta.url), 'utf8')
 const usersPage = fs.readFileSync(new URL('../src/components/users/Users.jsx', import.meta.url), 'utf8')
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
@@ -420,7 +420,7 @@ assert.match(
 )
 assert.match(
   transferModal,
-  /window\.api\.getBranchStock\(Number\.parseInt\(fromBranch, 10\), \{ page: 1, pageSize: 50, stockState: 'positive' \}\)/,
+  /getTransferApi\(\)\.getBranchStock\(Number\.parseInt\(fromBranch, 10\), \{ page: 1, pageSize: 50, stockState: 'positive' \}\)/,
   'transfer stock modal should request a bounded positive-stock page',
 )
 assert.match(
@@ -1625,7 +1625,7 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout\(\(\) => window\.api\.getFiles\(\{ search, mediaType \}\), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => getFilePickerApi\(\)\.getFiles\(\{ search, mediaType \}\), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS\)/,
   'file picker library should timeout slow file reads',
 )
 assert.match(
@@ -1640,12 +1640,12 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout<FileAsset>\(\s*\(\) => getFilePickerApi\(\)\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/,
   'file picker uploads should timeout slow upload requests',
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getFilePickerApi\(\)\.deleteFileAsset\(assetId, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/,
   'file picker deletes should timeout slow delete requests',
 )
 assert.doesNotMatch(

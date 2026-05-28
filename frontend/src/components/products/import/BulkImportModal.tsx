@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { ChevronDown, ChevronRight, Info, Undo2 } from 'lucide-react'
 import Modal from '../../shared/Modal'
-import FilePickerModalBase from '../../files/FilePickerModal.jsx'
+import FilePickerModalBase from '../../files/FilePickerModal'
 import {
   analyzeProductImportText,
   getProductImportBarcodeIssue,

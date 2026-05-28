@@ -5508,3 +5508,12 @@ Move 505 status:
   contracts, AI response rows, recommendation citations, expansion state, and
   refresh/date callbacks. `index.html`, app-shell tests, and frontend source
   docs now point at the TSX entry path.
+
+Move 506 status:
+- Move 506 converts the file picker and branch transfer modals:
+  `FilePickerModal.tsx` and `TransferModal.tsx`. The typed boundaries now
+  cover file asset rows, media-type filters, upload/delete API calls, selected
+  file paths, file-input events, branch options, branch-stock rows, transfer
+  mutation payloads, transfer API responses, selected-product state, and
+  tracked branch-stock refreshes. Catalog/product modal imports plus stability
+  and loading tests now point at the TSX modal paths.

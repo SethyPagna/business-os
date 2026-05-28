@@ -103,7 +103,7 @@ type CatalogPreviewSurfaceProps = {
 }
 
 const FilePickerModal = lazy(async () => ({
-  default: (await import('../files/FilePickerModal.jsx')).default as ComponentType<FilePickerModalProps>,
+  default: (await import('../files/FilePickerModal')).default as ComponentType<FilePickerModalProps>,
 }))
 
 export default function CatalogPreviewSurface({

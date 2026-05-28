@@ -182,7 +182,7 @@ interface NumericInputOptions {
 }
 
 const FilePickerModal = lazy(async () => ({
-  default: (await import('../../files/FilePickerModal.jsx')).default as ComponentType<FilePickerModalProps>,
+  default: (await import('../../files/FilePickerModal')).default as ComponentType<FilePickerModalProps>,
 }))
 
 function getProductFormApi(): ProductFormApi | undefined {

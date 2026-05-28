@@ -158,7 +158,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
 })
 
 await runTest('file picker and library upload/delete flows keep synchronous action guards', () => {
-  const picker = readFrontend('src/components/files/FilePickerModal.jsx')
+  const picker = readFrontend('src/components/files/FilePickerModal.tsx')
   const filesPage = readFrontend('src/components/files/FilesPage.jsx')
   const methods = readFrontend('src/api/methods.js')
 
@@ -183,8 +183,9 @@ await runTest('file picker and library upload/delete flows keep synchronous acti
 
   assert.match(picker, /const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000/)
   assert.match(picker, /const FILE_PICKER_DELETE_TIMEOUT_MS = 12000/)
-  assert.match(picker, /withLoaderTimeout\(\s*\(\) => window\.api\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/)
-  assert.match(picker, /withLoaderTimeout\(\s*\(\) => window\.api\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/)
+  assert.match(picker, /function getFilePickerApi\(\): FilePickerApi/)
+  assert.match(picker, /withLoaderTimeout<FileAsset>\(\s*\(\) => getFilePickerApi\(\)\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(picker, /withLoaderTimeout\(\s*\(\) => getFilePickerApi\(\)\.deleteFileAsset\(assetId, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/)
 
   assert.match(methods, /export async function uploadFileAsset\(\{ file, userId, userName, signal, onProgress \} = \{\}\) \{[\s\S]*requireLiveServerWrite\('files:upload'/)
   assert.match(methods, /return route\('files:delete', \(\) => apiFetch\('DELETE', `\/api\/files\/\$\{id\}`/)
@@ -452,7 +453,7 @@ await runTest('sales status and membership actions use shared guards and bounded
 
 await runTest('branch CRUD and transfer actions use shared guards and bounded mutations', () => {
   const branches = readFrontend('src/components/branches/Branches.jsx')
-  const transfer = readFrontend('src/components/branches/TransferModal.jsx')
+  const transfer = readFrontend('src/components/branches/TransferModal.tsx')
 
   assert.match(branches, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(branches, /const BRANCH_MUTATION_TIMEOUT_MS = 12000/)
@@ -477,7 +478,8 @@ await runTest('branch CRUD and transfer actions use shared guards and bounded mu
   assert.match(transfer, /const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(transfer, /const transferInFlightRef = useRef\(false\)/)
   assert.match(transfer, /if \(!beginSingleAction\(transferInFlightRef, \{ blocked: saving \}\)\) return/)
-  assert.match(transfer, /withLoaderTimeout\(\(\) => window\.api\.transferStock\(\{[\s\S]*'Transfer branch stock', TRANSFER_STOCK_MUTATION_TIMEOUT_MS\)/)
+  assert.match(transfer, /function getTransferApi\(\): TransferApi/)
+  assert.match(transfer, /withLoaderTimeout<TransferResult>\(\(\) => getTransferApi\(\)\.transferStock\(\{[\s\S]*'Transfer branch stock', TRANSFER_STOCK_MUTATION_TIMEOUT_MS\)/)
   assert.match(transfer, /finally \{[\s\S]*finishSingleAction\(transferInFlightRef\)[\s\S]*setSaving\(false\)/)
 })
 

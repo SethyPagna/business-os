@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Modal from '../shared/Modal'
-import { useApp } from '../../AppContext'
+import type { ChangeEvent, ComponentType, ReactNode } from 'react'
+import ModalBase from '../shared/Modal'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -13,12 +14,68 @@ const FILE_PICKER_LOAD_TIMEOUT_MS = 8000
 const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000
 const FILE_PICKER_DELETE_TIMEOUT_MS = 12000
 
-function AssetPreview({ asset }) {
+type MediaTypeFilter = 'all' | 'image' | 'video' | 'document'
+type TranslateFunction = (key: string) => string
+type NotifyFunction = (message: string, type?: string) => void
+
+type FileAsset = {
+  id?: string | number
+  public_path?: string
+  browser_public_path?: string
+  original_name?: string
+  media_type?: string
+  mime_type?: string
+  byte_size?: number
+  usageCount?: number
+  canDelete?: boolean
+  updated_at?: string
+}
+
+type FilePickerModalProps = {
+  open: boolean
+  onClose: () => void
+  onSelect?: (publicPath: string, asset: FileAsset) => void
+  onSelectMany?: (assets: FileAsset[]) => void
+  mediaType?: MediaTypeFilter
+  title?: ReactNode
+  multiple?: boolean
+  initialSelected?: string[]
+}
+
+type AppContextValue = {
+  notify: NotifyFunction
+  user?: { id?: string | number; name?: string }
+  t?: TranslateFunction
+}
+
+type FilePickerApi = {
+  getFiles: (options: { search: string; mediaType: MediaTypeFilter }) => Promise<unknown>
+  uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string }) => Promise<FileAsset>
+  deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string }) => Promise<unknown>
+}
+
+const Modal = ModalBase as ComponentType<{ title: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode }>
+const useApp = useAppHook as () => AppContextValue
+
+function getFilePickerApi(): FilePickerApi {
+  if (!window.api) throw new Error('File library API is not available.')
+  return window.api as FilePickerApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function normalizeFileAssets(value: unknown): FileAsset[] {
+  return Array.isArray(value) ? value.filter((asset): asset is FileAsset => !!asset && typeof asset === 'object') : []
+}
+
+function AssetPreview({ asset }: { asset: FileAsset }) {
   const previewUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
   if (asset?.media_type === 'image') {
     return (
       <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100">
-        <img src={previewUrl} alt={asset.original_name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+        <img src={previewUrl} alt={asset.original_name || ''} className="h-full w-full object-cover" loading="lazy" decoding="async" />
       </div>
     )
   }
@@ -45,20 +102,20 @@ export default function FilePickerModal({
   title = 'Choose file',
   multiple = false,
   initialSelected = [],
-}) {
+}: FilePickerModalProps) {
   const { notify, user, t } = useApp()
-  const [files, setFiles] = useState([])
+  const [files, setFiles] = useState<FileAsset[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [deletingAssetId, setDeletingAssetId] = useState(null)
-  const [selectedPaths, setSelectedPaths] = useState([])
-  const inputRef = useRef(null)
+  const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([])
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const loadRequestRef = useRef(0)
   const uploadInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
 
-  const tr = (key, fallback) => {
+  const tr = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
   }
@@ -67,12 +124,12 @@ export default function FilePickerModal({
     const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS)
+      const result = await withLoaderTimeout(() => getFilePickerApi().getFiles({ search, mediaType }), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setFiles(Array.isArray(result) ? result : [])
+      setFiles(normalizeFileAssets(result))
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      notify(error?.message || 'Failed to load files', 'error')
+      notify(getErrorMessage(error, 'Failed to load files'), 'error')
     } finally {
       if (isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
     }
@@ -87,10 +144,14 @@ export default function FilePickerModal({
   useEffect(() => {
     if (!open) return undefined
     const timer = window.setTimeout(() => { loadFiles() }, 180)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [loadFiles, open])
 
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+  useEffect(() => () => {
+    invalidateTrackedRequest(loadRequestRef)
+  }, [])
 
   const accept = useMemo(() => {
     if (mediaType === 'image') return 'image/*'
@@ -99,7 +160,7 @@ export default function FilePickerModal({
     return 'image/*,video/*,.csv,text/csv,application/pdf,.pdf'
   }, [mediaType])
 
-  function toggleSelectedPath(asset) {
+  function toggleSelectedPath(asset: FileAsset): void {
     const publicPath = String(asset?.public_path || '').trim()
     if (!publicPath) return
     setSelectedPaths((current) => (
@@ -109,7 +170,7 @@ export default function FilePickerModal({
     ))
   }
 
-  async function handleUpload(event) {
+  async function handleUpload(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const selectedFiles = Array.from(event.target.files || [])
     event.target.value = ''
     if (!selectedFiles.length) return
@@ -117,10 +178,10 @@ export default function FilePickerModal({
     uploadInFlightRef.current = true
     setUploading(true)
     try {
-      const uploadedAssets = []
+      const uploadedAssets: FileAsset[] = []
       for (const file of selectedFiles) {
-        const asset = await withLoaderTimeout(
-          () => window.api.uploadFileAsset({ file, userId: user?.id, userName: user?.name }),
+        const asset = await withLoaderTimeout<FileAsset>(
+          () => getFilePickerApi().uploadFileAsset({ file, userId: user?.id, userName: user?.name }),
           'Upload picker file asset',
           FILE_PICKER_UPLOAD_TIMEOUT_MS,
         )
@@ -144,15 +205,16 @@ export default function FilePickerModal({
         })
       }
     } catch (error) {
-      notify(error?.message || 'Upload failed', 'error')
+      notify(getErrorMessage(error, 'Upload failed'), 'error')
     } finally {
       uploadInFlightRef.current = false
       setUploading(false)
     }
   }
 
-  async function handleDelete(asset) {
+  async function handleDelete(asset: FileAsset): Promise<void> {
     if (!asset?.id || deletingAssetId || deleteInFlightRef.current) return
+    const assetId = asset.id
     if (!asset.canDelete) {
       notify(tr('file_in_use', 'This file is still in use and cannot be deleted.'), 'error')
       return
@@ -162,10 +224,10 @@ export default function FilePickerModal({
       deleteInFlightRef.current = false
       return
     }
-    setDeletingAssetId(asset.id)
+    setDeletingAssetId(assetId)
     try {
       await withLoaderTimeout(
-        () => window.api.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined }),
+        () => getFilePickerApi().deleteFileAsset(assetId, { expectedUpdatedAt: asset.updated_at || undefined }),
         'Delete picker file asset',
         FILE_PICKER_DELETE_TIMEOUT_MS,
       )
@@ -173,7 +235,7 @@ export default function FilePickerModal({
       await loadFiles()
       setSelectedPaths((current) => current.filter((entry) => entry !== asset.public_path))
     } catch (error) {
-      notify(error?.message || 'Delete failed', 'error')
+      notify(getErrorMessage(error, 'Delete failed'), 'error')
     } finally {
       deleteInFlightRef.current = false
       setDeletingAssetId(null)
@@ -182,7 +244,7 @@ export default function FilePickerModal({
 
   if (!open) return null
 
-  const selectedAssets = files.filter((asset) => selectedPaths.includes(asset.public_path))
+  const selectedAssets = files.filter((asset) => selectedPaths.includes(asset.public_path || ''))
 
   return (
     <Modal title={title} onClose={onClose} wide>
@@ -201,7 +263,8 @@ export default function FilePickerModal({
         {files.length ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {files.map((asset) => {
-              const isSelected = selectedPaths.includes(asset.public_path)
+              const publicPath = asset.public_path || ''
+              const isSelected = selectedPaths.includes(publicPath)
               return (
                 <div key={asset.id} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
                   <AssetPreview asset={asset} />
@@ -216,11 +279,11 @@ export default function FilePickerModal({
                         {isSelected ? tr('selected', 'Selected') : tr('select', 'Select')}
                       </button>
                     ) : (
-                      <button type="button" className="btn-primary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => { onSelect?.(asset.public_path, asset); onClose() }}>
+                      <button type="button" className="btn-primary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => { if (publicPath) onSelect?.(publicPath, asset); onClose() }}>
                         {tr('select', 'Select')}
                       </button>
                     )}
-                    <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path).catch(() => {})} title={tr('copy', 'Copy')}>
+                    <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(resolvePublicAssetUrl(publicPath) || asset.browser_public_path || publicPath).catch(() => {})} title={tr('copy', 'Copy')}>
                       <span className="hidden sm:inline">{tr('copy', 'Copy')}</span>
                       <span className="sm:hidden">{tr('copy', 'Copy').slice(0, 4)}</span>
                     </button>
