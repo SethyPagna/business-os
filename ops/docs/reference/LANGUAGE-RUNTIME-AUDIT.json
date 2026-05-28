@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:55:26.159Z",
+  "generatedAt": "2026-05-28T04:03:26.305Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 462,
+  "sourceFiles": 453,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      228
+      226
     ],
     [
       "React JSX",
@@ -29,7 +29,7 @@
     ],
     [
       "JavaScript",
-      95
+      88
     ],
     [
       "Windows batch",
@@ -59,7 +59,7 @@
   "extensionCounts": [
     [
       ".ts",
-      228
+      226
     ],
     [
       ".jsx",
@@ -67,7 +67,7 @@
     ],
     [
       ".js",
-      95
+      88
     ],
     [
       ".bat",
@@ -262,9 +262,9 @@
     },
     {
       "track": "Web Worker extraction",
-      "firstCandidate": "frontend/src/utils/csv.ts",
-      "score": 6,
-      "lines": 234,
+      "firstCandidate": "frontend/src/components/products/scanning/scanbotScanner.ts",
+      "score": 5,
+      "lines": 180,
       "requiredProof": [
         "npm.cmd --prefix frontend run test:utils",
         "npm.cmd --prefix frontend run build",
@@ -656,16 +656,16 @@
     },
     {
       "implementation": "frontend/src/utils/csvImport.ts",
-      "compatibilityWrapper": "frontend/src/utils/csvImport.js",
-      "declarationSupport": "frontend/src/utils/pricing.d.ts",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after CSV import callers moved to TypeScript source",
+      "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\csvImport.test.ts",
         "node frontend\\tests\\productImportPlanner.test.ts"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -753,16 +753,16 @@
     },
     {
       "implementation": "frontend/src/utils/pricing.ts",
-      "compatibilityWrapper": "frontend/src/utils/pricing.js",
-      "declarationSupport": "frontend/src/utils/pricing.d.ts",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after pricing callers moved to TypeScript source",
+      "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\pricingContacts.test.ts",
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1212,8 +1212,9 @@
     },
     {
       "implementation": "frontend/src/utils/exportPackage.ts",
-      "compatibilityWrapper": "frontend/src/utils/exportPackage.js",
-      "declarationSupport": "frontend/src/utils/csv.d.ts",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after export package callers moved to TypeScript source",
+      "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\exportPackages.test.ts",
@@ -1221,8 +1222,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1246,7 +1246,8 @@
     },
     {
       "implementation": "frontend/src/utils/importJobRefresh.ts",
-      "compatibilityWrapper": "frontend/src/utils/importJobRefresh.js",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after background import tracker moved to TypeScript source",
       "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
@@ -1254,16 +1255,16 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
     },
     {
       "implementation": "frontend/src/utils/index.ts",
-      "compatibilityWrapper": "frontend/src/utils/index.js",
-      "declarationSupport": "frontend/src/utils/csv.d.ts",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after utility barrel callers moved to TypeScript source",
+      "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\formatters.test.ts",
@@ -1271,8 +1272,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
@@ -1450,10 +1450,10 @@
       "covered": true
     },
     {
-      "surface": "frontend/src/utils/csv.js",
+      "surface": "frontend/src/utils/csv.ts",
       "worker": "frontend/src/utils/csvExportWorker.ts",
       "compatibilityWrapper": "frontend/src/utils/csvExportWorker.mjs",
-      "fallback": "frontend/src/utils/csv.js",
+      "fallback": "frontend/src/utils/csv.ts",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\exportPackages.test.ts",
@@ -1795,13 +1795,6 @@
   ],
   "completedDataPathCoverageGaps": [],
   "conversionCandidates": [
-    {
-      "file": "frontend/src/utils/csv.ts",
-      "lines": 234,
-      "score": 6,
-      "track": "Web Worker extraction",
-      "rule": "Browser CPU/file parsing/media work candidate."
-    },
     {
       "file": "frontend/src/components/products/scanning/scanbotScanner.ts",
       "lines": 180,

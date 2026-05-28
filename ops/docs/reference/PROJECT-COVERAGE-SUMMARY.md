@@ -2,7 +2,7 @@
 
 Auto-generated high-level coverage summary for first-party frontend/backend files and folders.
 
-- Total files: **543**
+- Total files: **534**
 - Total folders: **81**
 
 | Category | File Count |
@@ -17,7 +17,7 @@ Auto-generated high-level coverage summary for first-party frontend/backend file
 | frontend-root | 100 |
 | frontend-style | 1 |
 | frontend-ui | 140 |
-| frontend-utils | 42 |
+| frontend-utils | 33 |
 | project-root | 4 |
 | project-scripts | 87 |
 

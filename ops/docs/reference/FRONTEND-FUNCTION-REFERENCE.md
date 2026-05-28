@@ -4,7 +4,7 @@ Auto-generated symbol inventory for frontend files. Regenerate with `node ops/sc
 
 ## 1. Coverage Summary
 
-Total files documented: **207**
+Total files documented: **198**
 
 ## 2. Symbol Count by File
 
@@ -174,49 +174,40 @@ Total files documented: **207**
 | 162 | `frontend/src/utils/appRefresh.ts` | 0 |
 | 163 | `frontend/src/utils/bulkOps.ts` | 1 |
 | 164 | `frontend/src/utils/color.ts` | 2 |
-| 165 | `frontend/src/utils/csv.d.ts` | 0 |
-| 166 | `frontend/src/utils/csv.js` | 0 |
-| 167 | `frontend/src/utils/csv.ts` | 8 |
-| 168 | `frontend/src/utils/csvExportWorker.ts` | 1 |
-| 169 | `frontend/src/utils/csvImport.js` | 0 |
-| 170 | `frontend/src/utils/csvImport.ts` | 8 |
-| 171 | `frontend/src/utils/csvRowCounter.ts` | 1 |
-| 172 | `frontend/src/utils/dateHelpers.ts` | 1 |
-| 173 | `frontend/src/utils/deviceInfo.ts` | 2 |
-| 174 | `frontend/src/utils/exportPackage.js` | 0 |
-| 175 | `frontend/src/utils/exportPackage.ts` | 0 |
-| 176 | `frontend/src/utils/exportReports.jsx` | 8 |
-| 177 | `frontend/src/utils/favicon.ts` | 3 |
-| 178 | `frontend/src/utils/formatters.ts` | 1 |
-| 179 | `frontend/src/utils/groupedRecords.ts` | 3 |
-| 180 | `frontend/src/utils/historyHelpers.ts` | 0 |
-| 181 | `frontend/src/utils/importJobRefresh.js` | 0 |
-| 182 | `frontend/src/utils/importJobRefresh.ts` | 4 |
-| 183 | `frontend/src/utils/index.js` | 0 |
-| 184 | `frontend/src/utils/index.ts` | 0 |
-| 185 | `frontend/src/utils/initials.ts` | 1 |
-| 186 | `frontend/src/utils/loaders.ts` | 0 |
-| 187 | `frontend/src/utils/mediaUpload.ts` | 0 |
-| 188 | `frontend/src/utils/permissions.ts` | 1 |
-| 189 | `frontend/src/utils/pricing.d.ts` | 0 |
-| 190 | `frontend/src/utils/pricing.js` | 0 |
-| 191 | `frontend/src/utils/pricing.ts` | 0 |
-| 192 | `frontend/src/utils/printReceipt.js` | 0 |
-| 193 | `frontend/src/utils/printReceipt.ts` | 30 |
-| 194 | `frontend/src/utils/productBatches.ts` | 1 |
-| 195 | `frontend/src/utils/productGrouping.ts` | 9 |
-| 196 | `frontend/src/utils/publicAssetUrls.ts` | 6 |
-| 197 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 |
-| 198 | `frontend/src/utils/scriptTypography.ts` | 0 |
-| 199 | `frontend/src/utils/settingsRefresh.ts` | 1 |
-| 200 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
-| 201 | `frontend/src/web-api.js` | 0 |
-| 202 | `frontend/src/web-api.ts` | 33 |
-| 203 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
-| 204 | `ops/scripts/frontend/verify-performance.ts` | 4 |
-| 205 | `ops/scripts/frontend/verify-ui.ts` | 11 |
-| 206 | `frontend/vite.config.ts` | 5 |
-| 207 | `frontend/tailwind.config.ts` | 0 |
+| 165 | `frontend/src/utils/csv.ts` | 8 |
+| 166 | `frontend/src/utils/csvExportWorker.ts` | 1 |
+| 167 | `frontend/src/utils/csvImport.ts` | 8 |
+| 168 | `frontend/src/utils/csvRowCounter.ts` | 1 |
+| 169 | `frontend/src/utils/dateHelpers.ts` | 1 |
+| 170 | `frontend/src/utils/deviceInfo.ts` | 2 |
+| 171 | `frontend/src/utils/exportPackage.ts` | 0 |
+| 172 | `frontend/src/utils/exportReports.jsx` | 8 |
+| 173 | `frontend/src/utils/favicon.ts` | 3 |
+| 174 | `frontend/src/utils/formatters.ts` | 1 |
+| 175 | `frontend/src/utils/groupedRecords.ts` | 3 |
+| 176 | `frontend/src/utils/historyHelpers.ts` | 0 |
+| 177 | `frontend/src/utils/importJobRefresh.ts` | 4 |
+| 178 | `frontend/src/utils/index.ts` | 0 |
+| 179 | `frontend/src/utils/initials.ts` | 1 |
+| 180 | `frontend/src/utils/loaders.ts` | 0 |
+| 181 | `frontend/src/utils/mediaUpload.ts` | 0 |
+| 182 | `frontend/src/utils/permissions.ts` | 1 |
+| 183 | `frontend/src/utils/pricing.ts` | 0 |
+| 184 | `frontend/src/utils/printReceipt.ts` | 30 |
+| 185 | `frontend/src/utils/productBatches.ts` | 1 |
+| 186 | `frontend/src/utils/productGrouping.ts` | 9 |
+| 187 | `frontend/src/utils/publicAssetUrls.ts` | 6 |
+| 188 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 |
+| 189 | `frontend/src/utils/scriptTypography.ts` | 0 |
+| 190 | `frontend/src/utils/settingsRefresh.ts` | 1 |
+| 191 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
+| 192 | `frontend/src/web-api.js` | 0 |
+| 193 | `frontend/src/web-api.ts` | 33 |
+| 194 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
+| 195 | `ops/scripts/frontend/verify-performance.ts` | 4 |
+| 196 | `ops/scripts/frontend/verify-ui.ts` | 11 |
+| 197 | `frontend/vite.config.ts` | 5 |
+| 198 | `frontend/tailwind.config.ts` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -2345,15 +2336,7 @@ Total files documented: **207**
 | 1 | `normalizeHex` | function | 1 |
 | 2 | `relativeLuminance` | function | 12 |
 
-### 3.165 `frontend/src/utils/csv.d.ts`
-
-- No top-level named function/class symbols detected.
-
-### 3.166 `frontend/src/utils/csv.js`
-
-- No top-level named function/class symbols detected.
-
-### 3.167 `frontend/src/utils/csv.ts`
+### 3.165 `frontend/src/utils/csv.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2366,17 +2349,13 @@ Total files documented: **207**
 | 7 | `toBlobPart` | function | 94 |
 | 8 | `encodeZipTimestamp` | function | 100 |
 
-### 3.168 `frontend/src/utils/csvExportWorker.ts`
+### 3.166 `frontend/src/utils/csvExportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getErrorMessage` | function | 20 |
 
-### 3.169 `frontend/src/utils/csvImport.js`
-
-- No top-level named function/class symbols detected.
-
-### 3.170 `frontend/src/utils/csvImport.ts`
+### 3.167 `frontend/src/utils/csvImport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2389,34 +2368,30 @@ Total files documented: **207**
 | 7 | `removeCurrencyNoise` | function | 237 |
 | 8 | `normalizeNumberSeparators` | function | 244 |
 
-### 3.171 `frontend/src/utils/csvRowCounter.ts`
+### 3.168 `frontend/src/utils/csvRowCounter.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `finishRecord` | const arrow | 7 |
 
-### 3.172 `frontend/src/utils/dateHelpers.ts`
+### 3.169 `frontend/src/utils/dateHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `toLocalDateString` | function | 4 |
 
-### 3.173 `frontend/src/utils/deviceInfo.ts`
+### 3.170 `frontend/src/utils/deviceInfo.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getBrowserName` | function | 13 |
 | 2 | `getOperatingSystemName` | function | 21 |
 
-### 3.174 `frontend/src/utils/exportPackage.js`
+### 3.171 `frontend/src/utils/exportPackage.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.175 `frontend/src/utils/exportPackage.ts`
-
-- No top-level named function/class symbols detected.
-
-### 3.176 `frontend/src/utils/exportReports.jsx`
+### 3.172 `frontend/src/utils/exportReports.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2429,7 +2404,7 @@ Total files documented: **207**
 | 7 | `renderTables` | function | 283 |
 | 8 | `renderNotes` | function | 317 |
 
-### 3.177 `frontend/src/utils/favicon.ts`
+### 3.173 `frontend/src/utils/favicon.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2437,13 +2412,13 @@ Total files documented: **207**
 | 2 | `shouldUseAnonymousCors` | function | 18 |
 | 3 | `loadImage` | function | 29 |
 
-### 3.178 `frontend/src/utils/formatters.ts`
+### 3.174 `frontend/src/utils/formatters.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeTimestampInput` | function | 6 |
 
-### 3.179 `frontend/src/utils/groupedRecords.ts`
+### 3.175 `frontend/src/utils/groupedRecords.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2451,15 +2426,11 @@ Total files documented: **207**
 | 2 | `normalizeName` | function | 56 |
 | 3 | `compareAlphabetLabels` | function | 64 |
 
-### 3.180 `frontend/src/utils/historyHelpers.ts`
+### 3.176 `frontend/src/utils/historyHelpers.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.181 `frontend/src/utils/importJobRefresh.js`
-
-- No top-level named function/class symbols detected.
-
-### 3.182 `frontend/src/utils/importJobRefresh.ts`
+### 3.177 `frontend/src/utils/importJobRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2468,51 +2439,35 @@ Total files documented: **207**
 | 3 | `uniqueChannels` | function | 32 |
 | 4 | `dispatchSyncUpdate` | function | 41 |
 
-### 3.183 `frontend/src/utils/index.js`
+### 3.178 `frontend/src/utils/index.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.184 `frontend/src/utils/index.ts`
-
-- No top-level named function/class symbols detected.
-
-### 3.185 `frontend/src/utils/initials.ts`
+### 3.179 `frontend/src/utils/initials.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getInitialRank` | function | 54 |
 
-### 3.186 `frontend/src/utils/loaders.ts`
+### 3.180 `frontend/src/utils/loaders.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.187 `frontend/src/utils/mediaUpload.ts`
+### 3.181 `frontend/src/utils/mediaUpload.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.188 `frontend/src/utils/permissions.ts`
+### 3.182 `frontend/src/utils/permissions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `isPermissionMap` | function | 3 |
 
-### 3.189 `frontend/src/utils/pricing.d.ts`
+### 3.183 `frontend/src/utils/pricing.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.190 `frontend/src/utils/pricing.js`
-
-- No top-level named function/class symbols detected.
-
-### 3.191 `frontend/src/utils/pricing.ts`
-
-- No top-level named function/class symbols detected.
-
-### 3.192 `frontend/src/utils/printReceipt.js`
-
-- No top-level named function/class symbols detected.
-
-### 3.193 `frontend/src/utils/printReceipt.ts`
+### 3.184 `frontend/src/utils/printReceipt.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2547,13 +2502,13 @@ Total files documented: **207**
 | 29 | `renderPdfBlob` | const arrow | 884 |
 | 30 | `extractReceiptLines` | function | 940 |
 
-### 3.194 `frontend/src/utils/productBatches.ts`
+### 3.185 `frontend/src/utils/productBatches.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeBranchId` | function | 26 |
 
-### 3.195 `frontend/src/utils/productGrouping.ts`
+### 3.186 `frontend/src/utils/productGrouping.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2567,7 +2522,7 @@ Total files documented: **207**
 | 8 | `compareProductsWithinGroup` | function | 140 |
 | 9 | `resolveGroupKey` | function | 155 |
 
-### 3.196 `frontend/src/utils/publicAssetUrls.ts`
+### 3.187 `frontend/src/utils/publicAssetUrls.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2578,31 +2533,31 @@ Total files documented: **207**
 | 5 | `getSafeCurrentOrigin` | function | 42 |
 | 6 | `api` | const arrow | 57 |
 
-### 3.197 `frontend/src/utils/receiptAppliedConfig.ts`
+### 3.188 `frontend/src/utils/receiptAppliedConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `parseObject` | function | 67 |
 
-### 3.198 `frontend/src/utils/scriptTypography.ts`
+### 3.189 `frontend/src/utils/scriptTypography.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.199 `frontend/src/utils/settingsRefresh.ts`
+### 3.190 `frontend/src/utils/settingsRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeSettingKeys` | function | 62 |
 
-### 3.200 `frontend/src/utils/settingsWriteOptions.ts`
+### 3.191 `frontend/src/utils/settingsWriteOptions.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.201 `frontend/src/web-api.js`
+### 3.192 `frontend/src/web-api.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.202 `frontend/src/web-api.ts`
+### 3.193 `frontend/src/web-api.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2640,7 +2595,7 @@ Total files documented: **207**
 | 32 | `forwardServiceWorkerOutboxEvent` | function | 599 |
 | 33 | `forwardServiceWorkerAppEvent` | function | 693 |
 
-### 3.203 `ops/scripts/frontend/verify-i18n.ts`
+### 3.194 `ops/scripts/frontend/verify-i18n.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2651,7 +2606,7 @@ Total files documented: **207**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.204 `ops/scripts/frontend/verify-performance.ts`
+### 3.195 `ops/scripts/frontend/verify-performance.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2660,7 +2615,7 @@ Total files documented: **207**
 | 3 | `trackedFiles` | function | 37 |
 | 4 | `assert` | function | 47 |
 
-### 3.205 `ops/scripts/frontend/verify-ui.ts`
+### 3.196 `ops/scripts/frontend/verify-ui.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2676,7 +2631,7 @@ Total files documented: **207**
 | 10 | `printAuditSummary` | function | 202 |
 | 11 | `main` | function | 220 |
 
-### 3.206 `frontend/vite.config.ts`
+### 3.197 `frontend/vite.config.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2686,7 +2641,7 @@ Total files documented: **207**
 | 4 | `shouldDeferModulePreload` | function | 115 |
 | 5 | `manualChunks` | function | 119 |
 
-### 3.207 `frontend/tailwind.config.ts`
+### 3.198 `frontend/tailwind.config.ts`
 
 - No top-level named function/class symbols detected.
 

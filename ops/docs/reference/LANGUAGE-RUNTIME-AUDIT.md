@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T03:55:26.159Z
+Generated: 2026-05-28T04:03:26.305Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 462
+- Files scanned: 453
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -22,9 +22,9 @@ Generated: 2026-05-28T03:55:26.159Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 228 |
+| TypeScript | 226 |
 | React JSX | 107 |
-| JavaScript | 95 |
+| JavaScript | 88 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |
@@ -36,7 +36,6 @@ Generated: 2026-05-28T03:55:26.159Z
 
 | Track | File | Lines | Score | Rule |
 | --- | --- | --- | --- | --- |
-| Web Worker extraction | frontend/src/utils/csv.ts | 234 | 6 | Browser CPU/file parsing/media work candidate. |
 | Web Worker extraction | frontend/src/components/products/scanning/scanbotScanner.ts | 180 | 5 | Browser CPU/file parsing/media work candidate. |
 
 ## First Executable Slices
@@ -44,7 +43,7 @@ Generated: 2026-05-28T03:55:26.159Z
 | Track | First candidate | Lines | Score | Required proof |
 | --- | --- | --- | --- | --- |
 | TypeScript utility conversion | none | 0 | 0 | `npm.cmd --prefix frontend run typecheck`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`rg old import path after rename or extension change` |
-| Web Worker extraction | `frontend/src/utils/csv.ts` | 234 | 6 | `npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright flow for the affected import/scanner/media action`<br>`fallback path when Worker construction fails` |
+| Web Worker extraction | `frontend/src/components/products/scanning/scanbotScanner.ts` | 180 | 5 | `npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright flow for the affected import/scanner/media action`<br>`fallback path when Worker construction fails` |
 | SQL/DuckDB/data-path optimization | none | 0 | 0 | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.ts`<br>`backup/restore or count-diff rehearsal for changed data paths`<br>`before/after timing on the same fixture` |
 
 ## Verification Matrix
@@ -95,13 +94,13 @@ Generated: 2026-05-28T03:55:26.159Z
 | `frontend/src/components/contacts/contactOptionUtils.ts` | yes | retired after contact callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/inventory/movementGroups.ts` | yes | retired after inventory callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryMovementGroups.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/pos/posCore.ts` | yes | `frontend/src/components/pos/posCore.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\posCore.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/csvImport.ts` | yes | `frontend/src/utils/csvImport.js` | yes | `frontend/src/utils/pricing.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\csvImport.test.ts`<br>`node frontend\tests\productImportPlanner.test.ts` |
+| `frontend/src/utils/csvImport.ts` | yes | retired after CSV import callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\csvImport.test.ts`<br>`node frontend\tests\productImportPlanner.test.ts` |
 | `frontend/src/utils/csvRowCounter.ts` | yes | retired after import modals and workers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryImportWorker.test.ts`<br>`node frontend\tests\salesImportWorker.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/formatters.ts` | yes | retired after frontend callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\formatters.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/groupedRecords.ts` | yes | retired after list surfaces and tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\groupedRecords.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/initials.ts` | yes | retired after product, inventory, POS, catalog, and tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\initials.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/mediaUpload.ts` | yes | retired after frontend callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\mediaUploadHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/pricing.ts` | yes | `frontend/src/utils/pricing.js` | yes | `frontend/src/utils/pricing.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/pricing.ts` | yes | retired after pricing callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/productGrouping.ts` | yes | retired after Products, Inventory, POS, and tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productGrouping.test.ts`<br>`node frontend\tests\posCore.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | yes | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productDisplayHelpers.test.ts`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | yes | `frontend/src/components/products/helpers/productFilterHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productFilterHelpers.test.ts`<br>`node frontend\tests\productSearchPagination.test.ts`<br>`npm.cmd --prefix frontend run build` |
@@ -128,10 +127,10 @@ Generated: 2026-05-28T03:55:26.159Z
 | `frontend/src/utils/color.ts` | yes | retired after frontend callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`node frontend\tests\productSearchPagination.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/dateHelpers.ts` | yes | retired after frontend callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\dateHelpers.test.ts`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/deviceInfo.ts` | yes | retired after frontend callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\deviceInfo.test.ts`<br>`node frontend\tests\apiHttp.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/exportPackage.ts` | yes | `frontend/src/utils/exportPackage.js` | yes | `frontend/src/utils/csv.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\exportPackages.test.ts`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/exportPackage.ts` | yes | retired after export package callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\exportPackages.test.ts`<br>`node frontend\tests\dashboardDataReliability.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/historyHelpers.ts` | yes | retired frontend/src/utils/historyHelpers.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\historyHelpers.test.ts`<br>`node frontend\tests\productHistoryHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/importJobRefresh.ts` | yes | `frontend/src/utils/importJobRefresh.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\importJobRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/index.ts` | yes | `frontend/src/utils/index.js` | yes | `frontend/src/utils/csv.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\formatters.test.ts`<br>`node frontend\tests\dateHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/importJobRefresh.ts` | yes | retired after background import tracker moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\importJobRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/index.ts` | yes | retired after utility barrel callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\formatters.test.ts`<br>`node frontend\tests\dateHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/permissions.ts` | yes | retired after frontend callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\permissions.test.ts`<br>`node frontend\tests\permissionEditor.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/productBatches.ts` | yes | retired frontend/src/utils/productBatches.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productBatches.test.ts`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/scriptTypography.ts` | yes | retired after frontend callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\scriptTypography.test.ts`<br>`node frontend\tests\portalCatalogDisplay.test.ts`<br>`npm.cmd --prefix frontend run build` |
@@ -146,7 +145,7 @@ Generated: 2026-05-28T03:55:26.159Z
 | `frontend/src/components/contacts/ContactImportModal.jsx` | yes | `frontend/src/components/contacts/contactImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\contactImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright contact import modal flow` |
 | `frontend/src/components/inventory/InventoryImportModal.jsx` | yes | `frontend/src/components/inventory/inventoryImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright inventory import modal flow` |
 | `frontend/src/components/sales/SalesImportModal.jsx` | yes | `frontend/src/components/sales/salesImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\salesImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright sales import modal flow` |
-| `frontend/src/utils/csv.js` | yes | `frontend/src/utils/csvExportWorker.ts` | yes | `frontend/src/utils/csv.js` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\exportPackages.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright dashboard/inventory/contact export flow` |
+| `frontend/src/utils/csv.ts` | yes | `frontend/src/utils/csvExportWorker.ts` | yes | `frontend/src/utils/csv.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\exportPackages.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright dashboard/inventory/contact export flow` |
 
 ## Completed Data-Path Optimizations
 
