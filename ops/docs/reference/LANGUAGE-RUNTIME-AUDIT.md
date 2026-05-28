@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T03:29:08.241Z
+Generated: 2026-05-28T03:35:59.010Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 487
+- Files scanned: 481
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -22,8 +22,8 @@ Generated: 2026-05-28T03:29:08.241Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 230 |
-| JavaScript | 118 |
+| TypeScript | 228 |
+| JavaScript | 114 |
 | React JSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
@@ -100,14 +100,14 @@ Generated: 2026-05-28T03:29:08.241Z
 | `frontend/src/utils/formatters.ts` | yes | `frontend/src/utils/formatters.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\formatters.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/groupedRecords.ts` | yes | retired after list surfaces and tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\groupedRecords.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/initials.ts` | yes | retired after product, inventory, POS, catalog, and tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\initials.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/mediaUpload.ts` | yes | `frontend/src/utils/mediaUpload.js` | yes | `frontend/src/utils/publicAssetUrls.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\mediaUploadHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/mediaUpload.ts` | yes | `frontend/src/utils/mediaUpload.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\mediaUploadHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/pricing.ts` | yes | `frontend/src/utils/pricing.js` | yes | `frontend/src/utils/pricing.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\pricingContacts.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/productGrouping.ts` | yes | retired after Products, Inventory, POS, and tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productGrouping.test.ts`<br>`node frontend\tests\posCore.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | yes | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productDisplayHelpers.test.ts`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | yes | `frontend/src/components/products/helpers/productFilterHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productFilterHelpers.test.ts`<br>`node frontend\tests\productSearchPagination.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | yes | `frontend/src/components/products/helpers/productMenuHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productMenuHelpers.test.ts`<br>`node frontend\tests\productSearchPagination.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | yes | `frontend/src/components/products/helpers/productWriteHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productWriteHelpers.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/components/products/helpers/productGalleryHelpers.ts` | yes | retired after Products and focused tests moved to TypeScript source | n/a | `frontend/src/utils/publicAssetUrls.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productGalleryHelpers.test.ts`<br>`node frontend\tests\productWriteHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/components/products/helpers/productGalleryHelpers.ts` | yes | retired after Products and focused tests moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productGalleryHelpers.test.ts`<br>`node frontend\tests\productWriteHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | yes | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productGroupViewHelpers.test.ts`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | yes | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productSelectionHelpers.test.ts`<br>`node frontend\tests\productSearchPagination.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/history/productHistoryHelpers.ts` | yes | `frontend/src/components/products/history/productHistoryHelpers.ts` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productHistoryHelpers.test.ts`<br>`node frontend\tests\historyHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
@@ -135,7 +135,7 @@ Generated: 2026-05-28T03:29:08.241Z
 | `frontend/src/utils/permissions.ts` | yes | `frontend/src/utils/permissions.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\permissions.test.ts`<br>`node frontend\tests\permissionEditor.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/productBatches.ts` | yes | retired frontend/src/utils/productBatches.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productBatches.test.ts`<br>`node frontend\tests\productPageHelpers.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/utils/scriptTypography.ts` | yes | `frontend/src/utils/scriptTypography.js` | yes | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\scriptTypography.test.ts`<br>`node frontend\tests\portalCatalogDisplay.test.ts`<br>`npm.cmd --prefix frontend run build` |
-| `frontend/src/utils/settingsRefresh.ts` | yes | `frontend/src/utils/settingsRefresh.js` | yes | `frontend/src/utils/appRefresh.d.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`node frontend\tests\appRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/utils/settingsRefresh.ts` | yes | retired after API methods and settings callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\settingsRefresh.test.ts`<br>`node frontend\tests\appRefresh.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/products/config/productPageConfig.ts` | yes | retired frontend/src/components/products/config/productPageConfig.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\actionStability.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build` |
 
 ## Completed Web Worker Slices

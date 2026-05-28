@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:29:08.241Z",
+  "generatedAt": "2026-05-28T03:35:59.010Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 487,
+  "sourceFiles": 481,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -21,11 +21,11 @@
   "languageCounts": [
     [
       "TypeScript",
-      230
+      228
     ],
     [
       "JavaScript",
-      118
+      114
     ],
     [
       "React JSX",
@@ -59,11 +59,11 @@
   "extensionCounts": [
     [
       ".ts",
-      230
+      228
     ],
     [
       ".js",
-      118
+      114
     ],
     [
       ".jsx",
@@ -738,7 +738,7 @@
     {
       "implementation": "frontend/src/utils/mediaUpload.ts",
       "compatibilityWrapper": "frontend/src/utils/mediaUpload.js",
-      "declarationSupport": "frontend/src/utils/publicAssetUrls.d.ts",
+      "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\mediaUploadHelpers.test.ts",
@@ -856,7 +856,7 @@
       "implementation": "frontend/src/components/products/helpers/productGalleryHelpers.ts",
       "compatibilityWrapper": "",
       "wrapperStatus": "retired after Products and focused tests moved to TypeScript source",
-      "declarationSupport": "frontend/src/utils/publicAssetUrls.d.ts",
+      "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\productGalleryHelpers.test.ts",
@@ -1330,8 +1330,9 @@
     },
     {
       "implementation": "frontend/src/utils/settingsRefresh.ts",
-      "compatibilityWrapper": "frontend/src/utils/settingsRefresh.js",
-      "declarationSupport": "frontend/src/utils/appRefresh.d.ts",
+      "compatibilityWrapper": "",
+      "wrapperStatus": "retired after API methods and settings callers moved to TypeScript source",
+      "declarationSupport": "",
       "proof": [
         "npm.cmd --prefix frontend run typecheck",
         "node frontend\\tests\\settingsRefresh.test.ts",
@@ -1339,8 +1340,7 @@
         "npm.cmd --prefix frontend run build"
       ],
       "implementationExists": true,
-      "wrapperStatus": "",
-      "wrapperRequired": true,
+      "wrapperRequired": false,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
