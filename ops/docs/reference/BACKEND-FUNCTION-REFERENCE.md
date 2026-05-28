@@ -1,6 +1,6 @@
 # Backend Function Reference
 
-Auto-generated symbol and route inventory for backend files. Regenerate with `node ops/scripts/docs/generate-doc-reference.js`.
+Auto-generated symbol and route inventory for backend files. Regenerate with `node ops/scripts/docs/generate-doc-reference.ts`.
 
 ## 1. Coverage Summary
 

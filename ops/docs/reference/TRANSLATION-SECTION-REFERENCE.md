@@ -6,7 +6,7 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 
 - Total unique keys: **2024**
 - English keys: **2014**
-- Khmer keys: **2009**
+- Khmer keys: **2024**
 
 ## 2. Domain Group Matrix
 
@@ -240,27 +240,27 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 | 12 | `branch_required` | YES | YES |
 | 13 | `branch_required_alert` | YES | YES |
 | 14 | `branch_short` | YES | YES |
-| 15 | `branch_stat_branches_detail` | YES | NO |
-| 16 | `branch_stat_in_stock_detail` | YES | NO |
-| 17 | `branch_stat_low_stock_detail` | YES | NO |
-| 18 | `branch_stat_out_stock_detail` | YES | NO |
-| 19 | `branch_stat_products_detail` | YES | NO |
-| 20 | `branch_stat_value_detail` | YES | NO |
+| 15 | `branch_stat_branches_detail` | YES | YES |
+| 16 | `branch_stat_in_stock_detail` | YES | YES |
+| 17 | `branch_stat_low_stock_detail` | YES | YES |
+| 18 | `branch_stat_out_stock_detail` | YES | YES |
+| 19 | `branch_stat_products_detail` | YES | YES |
+| 20 | `branch_stat_value_detail` | YES | YES |
 | 21 | `branch_stock` | YES | YES |
 | 22 | `branch_stock_count` | YES | YES |
-| 23 | `branch_stock_in_detail` | YES | NO |
-| 24 | `branch_stock_low_detail` | YES | NO |
-| 25 | `branch_stock_out_detail` | YES | NO |
-| 26 | `branch_stock_total_detail` | YES | NO |
+| 23 | `branch_stock_in_detail` | YES | YES |
+| 24 | `branch_stock_low_detail` | YES | YES |
+| 25 | `branch_stock_out_detail` | YES | YES |
+| 26 | `branch_stock_total_detail` | YES | YES |
 | 27 | `branch_stock_value` | YES | YES |
-| 28 | `branch_stock_value_detail` | YES | NO |
+| 28 | `branch_stock_value_detail` | YES | YES |
 | 29 | `branch_updated` | YES | YES |
 | 30 | `branch_value` | YES | YES |
 | 31 | `branch_warehouse` | YES | YES |
 | 32 | `branches_deleted` | YES | YES |
 | 33 | `branches_load_slow` | YES | YES |
 | 34 | `branches_refresh_failed` | YES | YES |
-| 35 | `branches_short` | YES | NO |
+| 35 | `branches_short` | YES | YES |
 | 36 | `branches_warehouses` | YES | YES |
 
 ### 3.5 Contacts
@@ -442,7 +442,7 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 | 27 | `hide_stock` | YES | YES |
 | 28 | `import_inventory_button` | YES | YES |
 | 29 | `in_stock` | YES | YES |
-| 30 | `in_stock_short` | YES | NO |
+| 30 | `in_stock_short` | YES | YES |
 | 31 | `initial_stock` | YES | YES |
 | 32 | `inventory` | YES | YES |
 | 33 | `inventory_and_or_tip` | YES | YES |
@@ -517,7 +517,7 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 | 102 | `stock_transfer` | YES | YES |
 | 103 | `stock_val` | YES | YES |
 | 104 | `stock_value` | YES | YES |
-| 105 | `stock_value_short` | YES | NO |
+| 105 | `stock_value_short` | YES | YES |
 | 106 | `tab_stock` | YES | YES |
 | 107 | `transfer_stock` | YES | YES |
 | 108 | `transfer_stock_link` | YES | YES |
@@ -1938,7 +1938,7 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 | 1113 | `total_refunded` | YES | YES |
 | 1114 | `total_refunded_label` | YES | YES |
 | 1115 | `total_revenue` | YES | YES |
-| 1116 | `total_short` | YES | NO |
+| 1116 | `total_short` | YES | YES |
 | 1117 | `total_transactions` | YES | YES |
 | 1118 | `totals` | YES | YES |
 | 1119 | `totals_section` | YES | YES |

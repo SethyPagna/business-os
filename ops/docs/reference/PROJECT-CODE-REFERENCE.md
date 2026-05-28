@@ -4,7 +4,7 @@ Auto-generated symbol inventory for root-level code files and project scripts.
 
 ## 1. Coverage Summary
 
-Total files documented: **18**
+Total files documented: **12**
 
 ## 2. Symbol Count by File
 
@@ -12,22 +12,16 @@ Total files documented: **18**
 |---:|---|---:|
 | 1 | `ops/scripts/backend/schema-audit.js` | 25 |
 | 2 | `ops/scripts/backend/verify-data-integrity.js` | 27 |
-| 3 | `ops/scripts/docs/generate-doc-reference.js` | 15 |
-| 4 | `ops/scripts/docs/generate-full-project-docs.js` | 19 |
-| 5 | `ops/scripts/docs/performance-scan.js` | 8 |
-| 6 | `ops/scripts/frontend/verify-i18n.js` | 6 |
-| 7 | `ops/scripts/frontend/verify-performance.js` | 4 |
-| 8 | `ops/scripts/frontend/verify-ui.js` | 11 |
-| 9 | `ops/scripts/lib/fs-utils.js` | 16 |
-| 10 | `ops/scripts/lib/report-utils.js` | 5 |
-| 11 | `ops/scripts/powershell/clean-generated.ps1` | 0 |
-| 12 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | 0 |
-| 13 | `ops/scripts/powershell/docker-release.ps1` | 1 |
-| 14 | `ops/scripts/powershell/full-automation.ps1` | 1 |
-| 15 | `ops/scripts/powershell/npm-install-mode.ps1` | 0 |
-| 16 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
-| 17 | `ops/scripts/powershell/start-runtime.ps1` | 1 |
-| 18 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | 0 |
+| 3 | `ops/scripts/lib/fs-utils.js` | 16 |
+| 4 | `ops/scripts/lib/report-utils.js` | 5 |
+| 5 | `ops/scripts/powershell/clean-generated.ps1` | 0 |
+| 6 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | 0 |
+| 7 | `ops/scripts/powershell/docker-release.ps1` | 1 |
+| 8 | `ops/scripts/powershell/full-automation.ps1` | 1 |
+| 9 | `ops/scripts/powershell/npm-install-mode.ps1` | 0 |
+| 10 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
+| 11 | `ops/scripts/powershell/start-runtime.ps1` | 1 |
+| 12 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -93,100 +87,7 @@ Total files documented: **18**
 | 26 | `writeReport` | function | 646 |
 | 27 | `run` | function | 656 |
 
-### 3.3 `ops/scripts/docs/generate-doc-reference.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `getFilesRecursive` | function | 25 |
-| 2 | `getRootCodeFiles` | function | 30 |
-| 3 | `findSymbols` | function | 35 |
-| 4 | `findRouteHandlers` | function | 64 |
-| 5 | `collectScriptMetadata` | function | 80 |
-| 6 | `markdownHeader` | function | 103 |
-| 7 | `markdownSection` | function | 107 |
-| 8 | `writeBackendReference` | function | 111 |
-| 9 | `writeFrontendReference` | function | 166 |
-| 10 | `groupByPrefix` | function | 208 |
-| 11 | `writeTranslationReference` | function | 217 |
-| 12 | `writeRunReleaseReference` | function | 273 |
-| 13 | `writeModuleNamingGuide` | function | 347 |
-| 14 | `writeProjectCodeReference` | function | 395 |
-| 15 | `main` | function | 436 |
-
-### 3.4 `ops/scripts/docs/generate-full-project-docs.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `rel` | function | 53 |
-| 2 | `shouldSkipDir` | function | 57 |
-| 3 | `getAllProjectFilesAndFolders` | function | 61 |
-| 4 | `fileCategory` | function | 80 |
-| 5 | `inferPurpose` | function | 101 |
-| 6 | `markdownHeader` | function | 125 |
-| 7 | `markdownSection` | function | 129 |
-| 8 | `extractImportsExports` | function | 133 |
-| 9 | `findSymbols` | function | 173 |
-| 10 | `writeAllFunctionReference` | function | 199 |
-| 11 | `resolveInternalImport` | function | 237 |
-| 12 | `writeAllFileInventory` | function | 260 |
-| 13 | `folderPurpose` | function | 282 |
-| 14 | `writeFolderCoverage` | function | 299 |
-| 15 | `writeImportExportReference` | function | 358 |
-| 16 | `translationSectionForKey` | function | 432 |
-| 17 | `writeTranslationSectionReference` | function | 483 |
-| 18 | `writeMainCoverageSummary` | function | 532 |
-| 19 | `main` | function | 561 |
-
-### 3.5 `ops/scripts/docs/performance-scan.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `kb` | function | 65 |
-| 2 | `topN` | function | 70 |
-| 3 | `compactRows` | function | 78 |
-| 4 | `readSourceRow` | function | 86 |
-| 5 | `readChunkRow` | function | 98 |
-| 6 | `readManualNotes` | function | 103 |
-| 7 | `buildPerformanceSummary` | function | 123 |
-| 8 | `main` | function | 157 |
-
-### 3.6 `ops/scripts/frontend/verify-i18n.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `collectUsedKeys` | function | 29 |
-| 2 | `flattenTranslationTree` | function | 69 |
-| 3 | `listMissing` | function | 83 |
-| 4 | `listEmptyValues` | function | 88 |
-| 5 | `printList` | function | 95 |
-| 6 | `main` | function | 102 |
-
-### 3.7 `ops/scripts/frontend/verify-performance.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `read` | function | 15 |
-| 2 | `walk` | function | 19 |
-| 3 | `trackedFiles` | function | 37 |
-| 4 | `assert` | function | 47 |
-
-### 3.8 `ops/scripts/frontend/verify-ui.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `flatten` | function | 62 |
-| 2 | `walkFiles` | function | 75 |
-| 3 | `isIntentionalLatin` | function | 87 |
-| 4 | `report` | function | 95 |
-| 5 | `checkKhmerQuality` | function | 101 |
-| 6 | `checkPortalDarkModeContracts` | function | 125 |
-| 7 | `checkPortalVisibleStrings` | function | 147 |
-| 8 | `checkFormControlLabels` | function | 169 |
-| 9 | `checkVerificationWiring` | function | 189 |
-| 10 | `printAuditSummary` | function | 202 |
-| 11 | `main` | function | 220 |
-
-### 3.9 `ops/scripts/lib/fs-utils.js`
+### 3.3 `ops/scripts/lib/fs-utils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -207,7 +108,7 @@ Total files documented: **18**
 | 15 | `collectRootFiles` | function | 166 |
 | 16 | `isProbablyText` | function | 185 |
 
-### 3.10 `ops/scripts/lib/report-utils.js`
+### 3.4 `ops/scripts/lib/report-utils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -217,43 +118,43 @@ Total files documented: **18**
 | 4 | `outputTail` | function | 31 |
 | 5 | `formatBytes` | function | 38 |
 
-### 3.11 `ops/scripts/powershell/clean-generated.ps1`
+### 3.5 `ops/scripts/powershell/clean-generated.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.12 `ops/scripts/powershell/clear-stale-node-processes.ps1`
+### 3.6 `ops/scripts/powershell/clear-stale-node-processes.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.13 `ops/scripts/powershell/docker-release.ps1`
+### 3.7 `ops/scripts/powershell/docker-release.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 14 |
 
-### 3.14 `ops/scripts/powershell/full-automation.ps1`
+### 3.8 `ops/scripts/powershell/full-automation.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 33 |
 
-### 3.15 `ops/scripts/powershell/npm-install-mode.ps1`
+### 3.9 `ops/scripts/powershell/npm-install-mode.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.16 `ops/scripts/powershell/runtime-bootstrap.ps1`
+### 3.10 `ops/scripts/powershell/runtime-bootstrap.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 25 |
 
-### 3.17 `ops/scripts/powershell/start-runtime.ps1`
+### 3.11 `ops/scripts/powershell/start-runtime.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 11 |
 
-### 3.18 `ops/scripts/powershell/tailscale-health-monitor.ps1`
+### 3.12 `ops/scripts/powershell/tailscale-health-monitor.ps1`
 
 - No top-level named function/class symbols detected.
 

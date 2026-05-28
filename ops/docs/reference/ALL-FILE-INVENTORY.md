@@ -342,7 +342,7 @@ Total files documented: **569**
 | 330 | `frontend/src/constants.ts` | frontend-core | 185 | 4.6 | Project source/support file |
 | 331 | `frontend/src/index.jsx` | frontend-core | 194 | 6.4 | Project source/support file |
 | 332 | `frontend/src/lang/en.json` | frontend-i18n | 2721 | 134.5 | Localization dictionary |
-| 333 | `frontend/src/lang/km.json` | frontend-i18n | 2715 | 244.9 | Localization dictionary |
+| 333 | `frontend/src/lang/km.json` | frontend-i18n | 2730 | 246.7 | Localization dictionary |
 | 334 | `frontend/src/platform/runtime/clientRuntime.js` | frontend-core | 2 | 0.0 | Project source/support file |
 | 335 | `frontend/src/platform/runtime/clientRuntime.ts` | frontend-core | 249 | 9.1 | Project source/support file |
 | 336 | `frontend/src/platform/storage/storagePolicy.ts` | frontend-core | 40 | 1.3 | Project source/support file |
@@ -497,9 +497,9 @@ Total files documented: **569**
 | 485 | `ops/scripts/backend/schema-primary-key-preflight.ts` | project-scripts | 216 | 8.3 | Project source/support file |
 | 486 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |
 | 487 | `ops/scripts/backend/verify-data-integrity.js` | project-scripts | 689 | 29.0 | Project source/support file |
-| 488 | `ops/scripts/frontend/verify-i18n.js` | project-scripts | 145 | 4.3 | Project source/support file |
-| 489 | `ops/scripts/frontend/verify-performance.js` | project-scripts | 144 | 9.6 | Project source/support file |
-| 490 | `ops/scripts/frontend/verify-ui.js` | project-scripts | 243 | 8.7 | Project source/support file |
+| 488 | `ops/scripts/frontend/verify-i18n.ts` | project-scripts | 145 | 4.3 | Project source/support file |
+| 489 | `ops/scripts/frontend/verify-performance.ts` | project-scripts | 144 | 9.6 | Project source/support file |
+| 490 | `ops/scripts/frontend/verify-ui.ts` | project-scripts | 243 | 8.7 | Project source/support file |
 | 491 | `ops/scripts/lib/fs-utils.js` | project-scripts | 214 | 5.3 | Project source/support file |
 | 492 | `ops/scripts/lib/report-utils.js` | project-scripts | 57 | 1.5 | Project source/support file |
 | 493 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 265 | 7.9 | Project source/support file |

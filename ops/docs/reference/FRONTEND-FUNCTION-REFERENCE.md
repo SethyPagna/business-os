@@ -1,6 +1,6 @@
 # Frontend Function Reference
 
-Auto-generated symbol inventory for frontend files. Regenerate with `node ops/scripts/docs/generate-doc-reference.js`.
+Auto-generated symbol inventory for frontend files. Regenerate with `node ops/scripts/docs/generate-doc-reference.ts`.
 
 ## 1. Coverage Summary
 
@@ -238,9 +238,9 @@ Total files documented: **233**
 | 226 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
 | 227 | `frontend/src/web-api.js` | 0 |
 | 228 | `frontend/src/web-api.ts` | 33 |
-| 229 | `ops/scripts/frontend/verify-i18n.js` | 6 |
-| 230 | `ops/scripts/frontend/verify-performance.js` | 4 |
-| 231 | `ops/scripts/frontend/verify-ui.js` | 11 |
+| 229 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
+| 230 | `ops/scripts/frontend/verify-performance.ts` | 4 |
+| 231 | `ops/scripts/frontend/verify-ui.ts` | 11 |
 | 232 | `frontend/vite.config.ts` | 5 |
 | 233 | `frontend/tailwind.config.ts` | 0 |
 
@@ -2770,7 +2770,7 @@ Total files documented: **233**
 | 32 | `forwardServiceWorkerOutboxEvent` | function | 599 |
 | 33 | `forwardServiceWorkerAppEvent` | function | 693 |
 
-### 3.229 `ops/scripts/frontend/verify-i18n.js`
+### 3.229 `ops/scripts/frontend/verify-i18n.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2781,7 +2781,7 @@ Total files documented: **233**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.230 `ops/scripts/frontend/verify-performance.js`
+### 3.230 `ops/scripts/frontend/verify-performance.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2790,7 +2790,7 @@ Total files documented: **233**
 | 3 | `trackedFiles` | function | 37 |
 | 4 | `assert` | function | 47 |
 
-### 3.231 `ops/scripts/frontend/verify-ui.js`
+### 3.231 `ops/scripts/frontend/verify-ui.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

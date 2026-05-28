@@ -466,9 +466,9 @@ Code files scanned: **506**
 | 454 | `ops/scripts/backend/schema-audit.js` | 25 |
 | 455 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 5 |
 | 456 | `ops/scripts/backend/verify-data-integrity.js` | 27 |
-| 457 | `ops/scripts/frontend/verify-i18n.js` | 6 |
-| 458 | `ops/scripts/frontend/verify-performance.js` | 4 |
-| 459 | `ops/scripts/frontend/verify-ui.js` | 11 |
+| 457 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
+| 458 | `ops/scripts/frontend/verify-performance.ts` | 4 |
+| 459 | `ops/scripts/frontend/verify-ui.ts` | 11 |
 | 460 | `ops/scripts/lib/fs-utils.js` | 16 |
 | 461 | `ops/scripts/lib/report-utils.js` | 5 |
 | 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 5 |
@@ -6409,7 +6409,7 @@ Code files scanned: **506**
 | 26 | `writeReport` | function | 646 |
 | 27 | `run` | function | 656 |
 
-### 3.457 `ops/scripts/frontend/verify-i18n.js`
+### 3.457 `ops/scripts/frontend/verify-i18n.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6420,7 +6420,7 @@ Code files scanned: **506**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.458 `ops/scripts/frontend/verify-performance.js`
+### 3.458 `ops/scripts/frontend/verify-performance.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6429,7 +6429,7 @@ Code files scanned: **506**
 | 3 | `trackedFiles` | function | 37 |
 | 4 | `assert` | function | 47 |
 
-### 3.459 `ops/scripts/frontend/verify-ui.js`
+### 3.459 `ops/scripts/frontend/verify-ui.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

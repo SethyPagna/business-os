@@ -466,9 +466,9 @@ Code files documented: **506**
 | 454 | `ops/scripts/backend/schema-audit.js` | 2 | 0 | 0 | 0 |
 | 455 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
 | 456 | `ops/scripts/backend/verify-data-integrity.js` | 3 | 0 | 0 | 0 |
-| 457 | `ops/scripts/frontend/verify-i18n.js` | 2 | 0 | 1 | 0 |
-| 458 | `ops/scripts/frontend/verify-performance.js` | 3 | 0 | 0 | 0 |
-| 459 | `ops/scripts/frontend/verify-ui.js` | 3 | 0 | 1 | 0 |
+| 457 | `ops/scripts/frontend/verify-i18n.ts` | 2 | 0 | 1 | 0 |
+| 458 | `ops/scripts/frontend/verify-performance.ts` | 3 | 0 | 0 | 0 |
+| 459 | `ops/scripts/frontend/verify-ui.ts` | 3 | 0 | 1 | 0 |
 | 460 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 13 |
 | 461 | `ops/scripts/lib/report-utils.js` | 1 | 1 | 0 | 5 |
 | 462 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 4 | 0 | 1 | 0 |
@@ -7587,7 +7587,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.457 `ops/scripts/frontend/verify-i18n.js`
+### 3.457 `ops/scripts/frontend/verify-i18n.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7598,7 +7598,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.458 `ops/scripts/frontend/verify-performance.js`
+### 3.458 `ops/scripts/frontend/verify-performance.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7610,7 +7610,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.459 `ops/scripts/frontend/verify-ui.js`
+### 3.459 `ops/scripts/frontend/verify-ui.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7635,8 +7635,8 @@ Code files documented: **506**
   - `ops/scripts/architecture/language-runtime-audit.ts`
   - `ops/scripts/architecture/organization-audit.ts`
   - `ops/scripts/architecture/phase29-audit.ts`
-  - `ops/scripts/frontend/verify-i18n.js`
-  - `ops/scripts/frontend/verify-ui.js`
+  - `ops/scripts/frontend/verify-i18n.ts`
+  - `ops/scripts/frontend/verify-ui.ts`
   - `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
   - `ops/scripts/verification/verify-backup-reliability.ts`
   - `ops/scripts/verification/verify-docker-release.ts`

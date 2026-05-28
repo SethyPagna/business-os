@@ -148,9 +148,9 @@ Total scripts documented: **23**
 - File type: `.sh`
 - Total lines: **62**
 
-## ops/scripts/frontend/verify-i18n.js
+## ops/scripts/frontend/verify-i18n.ts
 
-- File type: `.js`
+- File type: `.ts`
 - Total lines: **145**
 
 ## ops/scripts/backend/verify-data-integrity.js
@@ -158,18 +158,18 @@ Total scripts documented: **23**
 - File type: `.js`
 - Total lines: **689**
 
-## ops/scripts/docs/generate-doc-reference.js
+## ops/scripts/docs/generate-doc-reference.ts
 
-- File type: `.js`
+- File type: `.ts`
 - Total lines: **448**
 
-## ops/scripts/docs/generate-full-project-docs.js
+## ops/scripts/docs/generate-full-project-docs.ts
 
-- File type: `.js`
+- File type: `.ts`
 - Total lines: **574**
 
-## ops/scripts/docs/performance-scan.js
+## ops/scripts/docs/performance-scan.ts
 
-- File type: `.js`
+- File type: `.ts`
 - Total lines: **237**
 

@@ -1543,9 +1543,9 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `verify-i18n.js` | Project source/support file |
-| 2 | `verify-performance.js` | Project source/support file |
-| 3 | `verify-ui.js` | Project source/support file |
+| 1 | `verify-i18n.ts` | Project source/support file |
+| 2 | `verify-performance.ts` | Project source/support file |
+| 3 | `verify-ui.ts` | Project source/support file |
 
 
 ### 3.70 Folder: `ops/scripts/lib`
