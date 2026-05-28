@@ -1,13 +1,32 @@
-import React from 'react'
+import type { ComponentType, ReactNode } from 'react'
 
-function statusClass(status) {
+type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock' | string
+type SummaryTone = 'blue' | 'dark' | 'green' | 'amber'
+type SectionShellProps = {
+  title: ReactNode
+  subtitle?: ReactNode
+  action?: ReactNode
+  children: ReactNode
+}
+type SummaryTileProps = {
+  icon: ComponentType<{ className?: string }>
+  label: ReactNode
+  value: ReactNode
+  tone?: SummaryTone
+}
+type StatusPillProps = {
+  status: StockStatus
+  copy: (key: string, fallback?: string) => ReactNode
+}
+
+function statusClass(status: StockStatus): string {
   if (status === 'out_of_stock') return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200'
   if (status === 'low_stock') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200'
   return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-200'
 }
 
 /** Shared shell block for portal sections. */
-export function SectionShell({ title, subtitle, action, children }) {
+export function SectionShell({ title, subtitle, action, children }: SectionShellProps) {
   return (
     <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
       <div className="mb-5 flex items-start justify-between gap-4">
@@ -23,7 +42,7 @@ export function SectionShell({ title, subtitle, action, children }) {
 }
 
 /** Summary metric tile used in top-level portal overview cards. */
-export function SummaryTile({ icon: Icon, label, value, tone }) {
+export function SummaryTile({ icon: Icon, label, value, tone = 'dark' }: SummaryTileProps) {
   const tones = {
     blue: 'from-sky-600 to-blue-700 text-white',
     dark: 'from-slate-900 to-slate-700 text-white dark:from-slate-800 dark:to-slate-950',
@@ -32,7 +51,7 @@ export function SummaryTile({ icon: Icon, label, value, tone }) {
   }
 
   return (
-    <div className={`rounded-[24px] bg-gradient-to-br p-4 shadow-sm ${tones[tone] || tones.dark}`}>
+    <div className={`rounded-[24px] bg-gradient-to-br p-4 shadow-sm ${tones[tone]}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[11px] uppercase tracking-[0.18em] opacity-80">{label}</div>
@@ -47,7 +66,7 @@ export function SummaryTile({ icon: Icon, label, value, tone }) {
 }
 
 /** Stock status badge component for product and membership cards. */
-export function StatusPill({ status, copy }) {
+export function StatusPill({ status, copy }: StatusPillProps) {
   const labelKey = status === 'out_of_stock'
     ? 'outOfStock'
     : status === 'low_stock'

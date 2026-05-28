@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 500 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 501 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 60 `.jsx`
+  - 59 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 47 `.tsx`
+  - 48 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -3933,6 +3933,11 @@ Decision rule:
     planner path, synchronous fallback, image ZIP/browser upload flows,
     review/undo loops, and import-job lifecycle intact while routing `window.api`
     calls through a typed product-import boundary.
+501. Convert catalog shared UI primitives to TSX. Done: `catalogUi.tsx` now
+    types portal section shells, summary metric tiles, status pills, stock
+    status labels, tone names, icon components, actions, and children. The
+    conversion keeps the small shared catalog presentation layer intact, updates
+    the UI verifier path, and leaves catalog page import paths extensionless.
 
 ## Safety Gates
 

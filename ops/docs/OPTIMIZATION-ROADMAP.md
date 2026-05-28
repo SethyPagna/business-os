@@ -5465,3 +5465,11 @@ Move 500 status:
   CSV planner plus synchronous fallback, image upload paths, inline review
   editing, and import-job lifecycle intact while moving product import API calls
   behind a typed accessor.
+
+Move 501 status:
+- Move 501 converts the catalog shared UI primitives `catalogUi.tsx`. The typed
+  boundary now covers portal section shell props, summary metric tile props,
+  status pill copy callbacks, stock status strings, tone names, icon component
+  props, actions, and children. The conversion keeps the shared catalog
+  presentation behavior unchanged while updating UI verification to the TSX
+  source path.

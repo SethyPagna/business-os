@@ -30,7 +30,7 @@ const PORTAL_FILES = [
   path.join(COMPONENT_ROOT, 'catalog', 'CatalogPage.jsx'),
   path.join(COMPONENT_ROOT, 'catalog', 'CatalogProductsSection.jsx'),
   path.join(COMPONENT_ROOT, 'catalog', 'CatalogSecondaryTabs.jsx'),
-  path.join(COMPONENT_ROOT, 'catalog', 'catalogUi.jsx'),
+  path.join(COMPONENT_ROOT, 'catalog', 'catalogUi.tsx'),
 ]
 
 const INTENTIONAL_PUBLIC_TERMS = [
