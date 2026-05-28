@@ -401,7 +401,7 @@ Mini phases:
   logic failures.
 
 Tests and analysis:
-- Extend `frontend/tests/apiHttp.test.mjs`.
+- Extend `frontend/tests/apiHttp.test.ts`.
 - Add backend route contract checks for health, auth, and upload routes.
 - Add Playwright smoke tests for local and public admin URLs.
 
@@ -790,7 +790,7 @@ Mini phases:
 - 18.5 Add version mismatch handling for incompatible contract changes.
 
 Tests and analysis:
-- Extend `frontend/tests/apiHttp.test.mjs`.
+- Extend `frontend/tests/apiHttp.test.ts`.
 - Add backend contract fixtures for representative payloads.
 
 Safety gate:
@@ -3527,7 +3527,7 @@ Move 321 status:
   lines. The helper skips the current product inline while mapping options, so
   large destination lists avoid allocating `summary.filter(...).map(...)`
   arrays during render. Focused coverage in
-  `frontend/tests/performanceLoadingUx.test.mjs` guards the helper and blocks
+  `frontend/tests/performanceLoadingUx.test.ts` guards the helper and blocks
   the old filtered render pattern. No folder move or language conversion was
   needed.
 
@@ -3549,7 +3549,7 @@ Move 323 status:
   ID list for selection cleanup/select-all, normalizes grouped selection IDs
   through `normalizeFiniteIds()`, counts partial selection state through
   `countSelectedIds()`, and counts active filters through `countActiveFlags()`.
-  Focused coverage in `frontend/tests/performanceLoadingUx.test.mjs` guards the
+  Focused coverage in `frontend/tests/performanceLoadingUx.test.ts` guards the
   helper paths and blocks the old repeated map/filter and filter-count
   allocation patterns. No folder move or language conversion was needed.
 
@@ -3561,7 +3561,7 @@ Move 324 status:
   `countSelectedIds()`, counts active filters through `countActiveFlags()`, and
   builds customer/supplier row sets plus refund/restock/writeoff/refund-only/
   compensation/loss totals in a single `returnScopeSummary` pass over filtered
-  returns. Focused coverage in `frontend/tests/performanceLoadingUx.test.mjs`
+  returns. Focused coverage in `frontend/tests/performanceLoadingUx.test.ts`
   guards the helper paths and blocks the old repeated visible-ID, stats-filter,
   and filter-count allocation patterns. No folder move or language conversion
   was needed.
@@ -3573,7 +3573,7 @@ Move 325 status:
   selection IDs through `normalizeFiniteIds()`, counts partial selection state
   through `countSelectedIds()`, and counts active filters through
   `countActiveFlags()`. Focused coverage in
-  `frontend/tests/performanceLoadingUx.test.mjs` guards the helper paths and
+  `frontend/tests/performanceLoadingUx.test.ts` guards the helper paths and
   blocks the old repeated visible-ID and filter-count allocation patterns. No
   folder move or language conversion was needed.
 - Move 325 also hardens Docker release kit packaging after the first release
@@ -3594,7 +3594,7 @@ Move 326 status:
   through Set membership instead of scanning selected IDs with
   `Array.includes()` for every visible row. The tabs also reuse a `failedIdSet`
   when filtering successful delete snapshots after partial failures. Focused
-  coverage in `frontend/tests/performanceLoadingUx.test.mjs` guards the shared
+  coverage in `frontend/tests/performanceLoadingUx.test.ts` guards the shared
   helpers and blocks the old repeated filter/count and selected-id scan
   patterns. No folder move or language conversion was needed.
 - Move 326 also hardens Docker release kit replacement after the first rerun
@@ -3612,7 +3612,7 @@ Move 327 status:
   brand, branch, stock, group, and supplier filters through a local
   `countActiveFlags()` loop instead of allocating a temporary boolean array and
   filtering it during render. Focused coverage in
-  `frontend/tests/performanceLoadingUx.test.mjs` guards the helper and blocks
+  `frontend/tests/performanceLoadingUx.test.ts` guards the helper and blocks
   the old `.filter(Boolean).length` pattern. No folder move or language
   conversion was needed.
 
@@ -3624,7 +3624,7 @@ Move 328 status:
   requests. The helper skips null/undefined and, by default, empty strings
   without allocating filtered `Object.entries()` arrays for each call; existing
   sales/returns calls that preserved empty values pass `skipEmpty: false`.
-  Focused coverage in `frontend/tests/apiHttp.test.mjs` guards the shared
+  Focused coverage in `frontend/tests/apiHttp.test.ts` guards the shared
   helper, the skip-empty exception, and blocks the old repeated
   `new URLSearchParams(Object.entries(...).filter(...))` pattern. No folder
   move or language conversion was needed.
@@ -3643,7 +3643,7 @@ Move 329 status:
   job, file, action history, RFID, sales, analytics, contact, audit log,
   return, and export reads. This keeps the Move 328 query builder as the only
   parameter encoder and removes repeated `q ? ?q : ''` URL assembly from the
-  hot read registry. Focused coverage in `frontend/tests/apiHttp.test.mjs`
+  hot read registry. Focused coverage in `frontend/tests/apiHttp.test.ts`
   guards the helper, required paged search routes, and the absence of the old
   query-suffix patterns. No folder move or language conversion was needed.
 
@@ -3653,7 +3653,7 @@ Move 330 status:
   `getProductsByIds()`, replacing the prior chained `map()`, `filter()`,
   `Set`, `Array.from()`, and `slice()` expression with one bounded loop that
   converts, validates, dedupes, and stops at the request limit. Focused
-  coverage in `frontend/tests/apiHttp.test.mjs` guards the helper and blocks
+  coverage in `frontend/tests/apiHttp.test.ts` guards the helper and blocks
   the old intermediate array pattern. No folder move or language conversion
   was needed.
 
@@ -3665,7 +3665,7 @@ Move 331 status:
   path. `clearCachedQueryResults()` now normalizes prefixes and scans matching
   local-storage query-cache keys with direct loops instead of chained
   `map()`/`filter()` passes. Focused coverage in
-  `frontend/tests/apiHttp.test.mjs` guards both helpers and blocks the old
+  `frontend/tests/apiHttp.test.ts` guards both helpers and blocks the old
   allocation patterns. No folder move or language conversion was needed.
 
 Move 332 status:
@@ -3674,7 +3674,7 @@ Move 332 status:
   table names with one direct loop and resolves table objects with another
   direct loop, replacing the prior spread `Set` over `map().filter()` plus a
   second `map().filter()` table-resolution pass. Focused coverage in
-  `frontend/tests/adminShellMediaGuards.test.mjs` guards the in-place table
+  `frontend/tests/adminShellMediaGuards.test.ts` guards the in-place table
   cleanup strategy and blocks the old table-name allocation pattern. No folder
   move or language conversion was needed.
 

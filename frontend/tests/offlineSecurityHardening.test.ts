@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
+type TestCallback = () => void | Promise<void>
+
 let failed = 0
 
-async function runTest(name, fn) {
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -84,7 +86,7 @@ await runTest('UX exposes vault, conflicts, storage, security, and update states
 })
 
 await runTest('offline security hardening test is part of the utility suite', () => {
-  assert.match(packageSource, /offlineSecurityHardening\.test\.mjs/)
+  assert.match(packageSource, /offlineSecurityHardening\.test\.ts/)
 })
 
 if (failed > 0) {

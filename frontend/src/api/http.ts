@@ -235,7 +235,7 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   return error
 }
 
-export function isCloudflareAccessRedirectResponse(response: Response | null | undefined): boolean {
+export function isCloudflareAccessRedirectResponse(response: Response | LooseRecord | null | undefined): boolean {
   if (!response) return false
   if (response.type === 'opaqueredirect') return true
   const status = Number(response.status || 0)
@@ -497,7 +497,7 @@ export function __resetApiWriteDedupeForTests(): void {
 }
 
 // HTTP helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs = SYNC.REQUEST_TIMEOUT_MS, options: ApiFetchOptions = {}): Promise<any> {
+export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs: number = SYNC.REQUEST_TIMEOUT_MS, options: ApiFetchOptions = {}): Promise<any> {
   const normalizedMethod = String(method || 'GET').toUpperCase()
   if (normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
     const mismatchError = getApiVersionMismatchCooldown(path)

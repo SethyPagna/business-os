@@ -228,10 +228,10 @@ Last updated: 2026-05-18
 - Runtime restart stability improved in `ops/docker/compose.scale.yml`: the Docker app container now skips frontend `npm ci` when `frontend/dist/index.html` already exists, so normal restarts do not depend on downloading frontend dev packages from the registry.
 - Verification after Phase 8.4 checkpoint:
   - `node test/routeContracts.test.js`
-  - `node tests/actionStability.test.mjs`
+  - `node tests/actionStability.test.ts`
   - `node tests/actionGuards.test.ts`
-  - `node tests/performanceLoadingUx.test.mjs`
-  - `node tests/apiHttp.test.mjs`
+  - `node tests/performanceLoadingUx.test.ts`
+  - `node tests/apiHttp.test.ts`
   - Backend `npm.cmd run test:utils`
   - `npm.cmd run typecheck`
   - Frontend `npm.cmd run test:utils`

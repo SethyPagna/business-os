@@ -189,8 +189,8 @@ const FOCUSED_TEST_COVERAGE = [
     candidate: 'frontend/src/components/contacts/ContactImportModal.jsx',
     tests: [
       'frontend/tests/contactImportWorker.test.ts',
-      'frontend/tests/actionStability.test.mjs',
-      'frontend/tests/performanceLoadingUx.test.mjs',
+      'frontend/tests/actionStability.test.ts',
+      'frontend/tests/performanceLoadingUx.test.ts',
     ],
     command: 'npm.cmd --prefix frontend run test:utils plus focused Playwright import flow',
     reason: 'Contact import upload, loader timeout, and action guard contracts must survive worker extraction.',
@@ -200,8 +200,8 @@ const FOCUSED_TEST_COVERAGE = [
     candidate: 'frontend/src/components/inventory/InventoryImportModal.jsx',
     tests: [
       'frontend/tests/inventoryImportWorker.test.ts',
-      'frontend/tests/actionStability.test.mjs',
-      'frontend/tests/performanceLoadingUx.test.mjs',
+      'frontend/tests/actionStability.test.ts',
+      'frontend/tests/performanceLoadingUx.test.ts',
     ],
     command: 'npm.cmd --prefix frontend run test:utils plus focused Playwright import flow',
     reason: 'Inventory import upload, loader timeout, row-count fallback, and action guard contracts must survive worker extraction.',
@@ -211,8 +211,8 @@ const FOCUSED_TEST_COVERAGE = [
     candidate: 'frontend/src/components/sales/SalesImportModal.jsx',
     tests: [
       'frontend/tests/salesImportWorker.test.ts',
-      'frontend/tests/actionStability.test.mjs',
-      'frontend/tests/performanceLoadingUx.test.mjs',
+      'frontend/tests/actionStability.test.ts',
+      'frontend/tests/performanceLoadingUx.test.ts',
     ],
     command: 'npm.cmd --prefix frontend run test:utils plus focused Playwright import flow',
     reason: 'Sales import upload, loader timeout, row-count fallback, and action guard contracts must survive worker extraction.',
@@ -452,7 +452,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productWriteHelpers.test.ts',
-      'node frontend\\tests\\actionStability.test.mjs',
+      'node frontend\\tests\\actionStability.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -530,7 +530,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\bulkOps.test.ts',
-      'node frontend\\tests\\actionStability.test.mjs',
+      'node frontend\\tests\\actionStability.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -541,7 +541,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productImportPlanner.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -552,7 +552,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productImportPlanner.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -574,7 +574,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\pricingContacts.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -585,7 +585,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\dashboardDataReliability.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -641,7 +641,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\storagePolicy.test.ts',
-      'node frontend\\tests\\apiHttp.test.mjs',
+      'node frontend\\tests\\apiHttp.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -652,7 +652,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\actionGuards.test.ts',
-      'node frontend\\tests\\actionStability.test.mjs',
+      'node frontend\\tests\\actionStability.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -685,7 +685,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\deviceInfo.test.ts',
-      'node frontend\\tests\\apiHttp.test.mjs',
+      'node frontend\\tests\\apiHttp.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -782,8 +782,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
-      'node frontend\\tests\\actionStability.test.mjs',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
+      'node frontend\\tests\\actionStability.test.ts',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
       'npm.cmd --prefix frontend run build',
     ],
   },
@@ -799,7 +799,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\productImportWorkerFallback.test.ts',
       'node frontend\\tests\\productImportPlanner.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
       'npm.cmd --prefix frontend run build',
       'focused Playwright product import modal flow',
     ],
@@ -812,8 +812,8 @@ const COMPLETED_WEB_WORKER_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\contactImportWorker.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
-      'node frontend\\tests\\actionStability.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
+      'node frontend\\tests\\actionStability.test.ts',
       'npm.cmd --prefix frontend run build',
       'focused Playwright contact import modal flow',
     ],
@@ -826,8 +826,8 @@ const COMPLETED_WEB_WORKER_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\inventoryImportWorker.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
-      'node frontend\\tests\\actionStability.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
+      'node frontend\\tests\\actionStability.test.ts',
       'npm.cmd --prefix frontend run build',
       'focused Playwright inventory import modal flow',
     ],
@@ -840,8 +840,8 @@ const COMPLETED_WEB_WORKER_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\salesImportWorker.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
-      'node frontend\\tests\\actionStability.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
+      'node frontend\\tests\\actionStability.test.ts',
       'npm.cmd --prefix frontend run build',
       'focused Playwright sales import modal flow',
     ],
@@ -854,7 +854,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\exportPackages.test.ts',
-      'node frontend\\tests\\performanceLoadingUx.test.mjs',
+      'node frontend\\tests\\performanceLoadingUx.test.ts',
       'npm.cmd --prefix frontend run build',
       'focused Playwright dashboard/inventory/contact export flow',
     ],

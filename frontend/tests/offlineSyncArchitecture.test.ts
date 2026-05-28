@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
+type TestCallback = () => void | Promise<void>
+
 let failed = 0
 
-async function runTest(name, fn) {
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)

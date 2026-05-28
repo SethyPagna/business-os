@@ -1719,11 +1719,13 @@ assert.doesNotMatch(
   'AI response reads should keep previous responses visible when a refresh fails',
 )
 
-for (const [source, label, prefix, jobTypePattern] of [
+const importModalCases: Array<[source: string, label: string, prefix: string, jobTypePattern: RegExp]> = [
   [contactImportModal, 'contact', 'CONTACT', /type: config\.jobType/],
   [salesImportModal, 'sales', 'SALES', /type: 'sales'/],
   [inventoryImportModal, 'inventory', 'INVENTORY', /type: 'inventory'/],
-]) {
+]
+
+for (const [source, label, prefix, jobTypePattern] of importModalCases) {
   assert.match(
     source,
     new RegExp(`const ${prefix}_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000`),

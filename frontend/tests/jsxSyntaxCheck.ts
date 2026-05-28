@@ -7,9 +7,9 @@ import { transformWithEsbuild } from 'vite'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const srcDir = path.join(root, 'src')
 
-async function listSourceFiles(dir) {
+async function listSourceFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true })
-  const nested = await Promise.all(entries.map(async (entry) => {
+  const nested: string[][] = await Promise.all(entries.map(async (entry): Promise<string[]> => {
     const fullPath = path.join(dir, entry.name)
     if (entry.isDirectory()) return listSourceFiles(fullPath)
     return /\.(jsx|js|mjs)$/.test(entry.name) ? [fullPath] : []
@@ -27,7 +27,7 @@ for (const file of files) {
     const loader = file.endsWith('.jsx') ? 'jsx' : 'js'
     await transformWithEsbuild(source, file, { loader, jsx: 'automatic' })
   } catch (error) {
-    failures.push(`${path.relative(root, file)}: ${error?.message || error}`)
+    failures.push(`${path.relative(root, file)}: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 

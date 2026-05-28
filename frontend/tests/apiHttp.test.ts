@@ -16,9 +16,12 @@ import {
   setSyncToken,
 } from '../src/api/http.js'
 
+type TestCallback = () => void | Promise<void>
+type FetchCall = Parameters<typeof fetch>
+
 let failed = 0
 
-async function runTest(name, fn) {
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)
@@ -29,9 +32,9 @@ async function runTest(name, fn) {
   }
 }
 
-function createDeferredResponse(payload = { ok: true }) {
-  let resolve
-  const promise = new Promise((done) => {
+function createDeferredResponse(payload: unknown = { ok: true }): { promise: Promise<Response>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<Response>((done) => {
     resolve = () => done(new Response(JSON.stringify(payload), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -63,11 +66,11 @@ await runTest('identical in-flight write requests reuse one network call', async
   setSyncServerUrl('https://sync.example.test')
   const originalFetch = globalThis.fetch
   const deferred = createDeferredResponse({ success: true, id: 7 })
-  const calls = []
-  globalThis.fetch = (...args) => {
+  const calls: FetchCall[] = []
+  globalThis.fetch = ((...args: FetchCall) => {
     calls.push(args)
     return deferred.promise
-  }
+  }) as typeof fetch
 
   try {
     const first = apiFetch('POST', '/api/products', { name: 'Serum', qty: 1, client_request_id: 'first' }, 1000)
@@ -88,15 +91,15 @@ await runTest('write dedupe clears after settle and keeps different writes separ
   setSyncServerUrl('https://sync.example.test')
   const originalFetch = globalThis.fetch
   const payloads = [{ success: true, id: 1 }, { success: true, id: 2 }, { success: true, id: 3 }]
-  const calls = []
-  globalThis.fetch = (...args) => {
+  const calls: FetchCall[] = []
+  globalThis.fetch = ((...args: FetchCall) => {
     calls.push(args)
     const payload = payloads.shift()
     return Promise.resolve(new Response(JSON.stringify(payload), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
-  }
+  }) as typeof fetch
 
   try {
     assert.deepEqual(await apiFetch('POST', '/api/products', { name: 'A' }, 1000), { success: true, id: 1 })
@@ -113,14 +116,14 @@ await runTest('GET, HEAD, and OPTIONS requests never serialize a request body', 
   resetApiState()
   setSyncServerUrl('https://sync.example.test')
   const originalFetch = globalThis.fetch
-  const calls = []
-  globalThis.fetch = (...args) => {
+  const calls: FetchCall[] = []
+  globalThis.fetch = ((...args: FetchCall) => {
     calls.push(args)
     return Promise.resolve(new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
-  }
+  }) as typeof fetch
 
   try {
     await apiFetch('GET', '/api/system/integration-doctor', null, 1000)
@@ -128,6 +131,7 @@ await runTest('GET, HEAD, and OPTIONS requests never serialize a request body', 
     await apiFetch('OPTIONS', '/api/products', { unsafe: true }, 1000)
 
     for (const [, init] of calls) {
+      assert.ok(init)
       assert.ok(!Object.prototype.hasOwnProperty.call(init, 'body') || init.body === undefined)
     }
   } finally {
@@ -140,19 +144,20 @@ await runTest('apiFetch uses HttpOnly cookie credentials and no JS-readable auth
   resetApiState()
   setSyncServerUrl('https://sync.example.test')
   const originalFetch = globalThis.fetch
-  const calls = []
-  globalThis.fetch = (...args) => {
+  const calls: FetchCall[] = []
+  globalThis.fetch = ((...args: FetchCall) => {
     calls.push(args)
     return Promise.resolve(new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
-  }
+  }) as typeof fetch
 
   try {
     await apiFetch('POST', '/api/products', { name: 'Cookie Only' }, 1000)
     assert.equal(calls.length, 1)
     const [, init] = calls[0]
+    assert.ok(init)
     assert.equal(init.credentials, 'include')
     assert.equal(Object.prototype.hasOwnProperty.call(init.headers, `x-auth-${'session'}`), false)
   } finally {
@@ -184,19 +189,19 @@ await runTest('api requests detect Cloudflare Access redirects without following
   resetApiState()
   setSyncServerUrl('https://admin.example.test')
   const originalFetch = globalThis.fetch
-  const calls = []
-  globalThis.fetch = (...args) => {
+  const calls: FetchCall[] = []
+  globalThis.fetch = ((...args: FetchCall) => {
     calls.push(args)
     return Promise.resolve(new Response('', {
       status: 302,
       headers: { Location: 'https://team.cloudflareaccess.com/cdn-cgi/access/login/admin.example.test?redirect_url=%2Fapi%2Fproducts' },
     }))
-  }
+  }) as typeof fetch
 
   try {
     await assert.rejects(
       () => apiFetch('GET', '/api/products', undefined, 1000),
-      (error) => error?.code === 'cloudflare_access_required',
+      (error: unknown) => (error as { code?: string })?.code === 'cloudflare_access_required',
     )
     assert.equal(calls.length, 1)
     assert.equal(calls[0][1]?.redirect, 'manual')
@@ -218,23 +223,25 @@ await runTest('read routes return fallback on transient gateway errors without s
   const originalFetch = globalThis.fetch
   const originalWindow = globalThis.window
   const originalCustomEvent = globalThis.CustomEvent
-  const events = []
+  const events: Event[] = []
   if (typeof globalThis.CustomEvent === 'undefined') {
-    globalThis.CustomEvent = class CustomEvent {
-      constructor(type, init = {}) {
-        this.type = type
+    globalThis.CustomEvent = class TestCustomEvent extends Event {
+      detail: unknown
+
+      constructor(type: string, init: CustomEventInit = {}) {
+        super(type)
         this.detail = init.detail
       }
-    }
+    } as unknown as typeof CustomEvent
   }
   globalThis.window = {
     setTimeout,
     clearTimeout,
-    dispatchEvent: (event) => events.push(event),
+    dispatchEvent: (event: Event) => events.push(event),
     addEventListener: () => {},
     removeEventListener: () => {},
-  }
-  globalThis.fetch = () => Promise.resolve(new Response('Gateway unavailable', { status: 530 }))
+  } as unknown as Window & typeof globalThis
+  globalThis.fetch = (() => Promise.resolve(new Response('Gateway unavailable', { status: 530 }))) as typeof fetch
 
   try {
     const result = await route(

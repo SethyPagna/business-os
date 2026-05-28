@@ -7,17 +7,19 @@ const testDir = dirname(fileURLToPath(import.meta.url))
 const frontendRoot = resolve(testDir, '..')
 const repoRoot = resolve(frontendRoot, '..')
 
-function readFrontend(path) {
+type TestCallback = () => void | Promise<void>
+
+function readFrontend(path: string): string {
   return readFileSync(resolve(frontendRoot, path), 'utf8')
 }
 
-function readRepo(path) {
+function readRepo(path: string): string {
   return readFileSync(resolve(repoRoot, path), 'utf8')
 }
 
 let failed = 0
 
-async function runTest(name, fn) {
+async function runTest(name: string, fn: TestCallback): Promise<void> {
   try {
     await fn()
     console.log(`PASS ${name}`)

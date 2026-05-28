@@ -87,7 +87,7 @@ First safe candidates:
 
 Verification:
 - `npm.cmd run check:jsx`
-- `node tests/actionStability.test.mjs`
+- `node tests/actionStability.test.ts`
 - `npm.cmd run build`
 - focused Products Playwright checks.
 
@@ -512,7 +512,7 @@ Decision rule:
     sync preferences, OAuth start, manual sync queueing, disconnect, credential
     forget, backup export/restore queueing, and system-job cancellation in
     explicit timeout contracts while keeping the existing same-tick action
-    locks. `frontend/tests/backupJobs.test.mjs` now source-tests those timeout
+    locks. `frontend/tests/backupJobs.test.ts` now source-tests those timeout
     wrappers. Backup source tests, JSX check, typecheck, production build,
     focused diff whitespace check, in-app browser Backup action verification,
     and the broad Phase 8.4 Playwright UI live check passed on frontend hash
@@ -2362,7 +2362,7 @@ Decision rule:
     request during every settings load. The saved local settings metadata path
     is preserved for write-conflict protection, but app startup and later
     settings refreshes now use one authenticated settings request instead of
-    two. `performanceLoadingUx.test.mjs` and `verify-performance.js` now guard
+    two. `performanceLoadingUx.test.ts` and `verify-performance.js` now guard
     against reintroducing that waterfall. Focused performance guards,
     frontend typecheck, JSX check, full frontend utility tests, and production
     build pass.
@@ -2553,7 +2553,7 @@ Decision rule:
     through `mapOfflineFileChunkStatusUpdates()` with
     `OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3`, avoiding an unbounded
     IndexedDB write burst when a large offline file upload pauses or fails.
-    `frontend/tests/offlineSyncArchitecture.test.mjs` guards the bounded
+    `frontend/tests/offlineSyncArchitecture.test.ts` guards the bounded
     pathway. Offline sync/security tests, full frontend utility tests, JSX
     check, performance verifier, and production build pass.
 301. Bound lookup snapshot name scans. Done:
