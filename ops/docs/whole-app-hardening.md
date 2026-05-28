@@ -76,7 +76,7 @@ Last updated: 2026-05-18
   recommendations for primary keys, idempotency indexes, detail-read indexes,
   staged foreign keys, JSONB conversion, product taxonomy rewiring, stock
   source-of-truth cleanup, and file usage normalization.
-- Added `ops/scripts/backend/schema-audit.js` and generated
+- Added `ops/scripts/backend/schema-audit.ts` and generated
   `ops/docs/reference/SCHEMA-AUDIT.md` so the Phase 6 schema sweep can be
   repeated without relying on memory. The latest generated audit confirms 45
   static Postgres tables, 0 missing relationship-doc entities, and 0 declared

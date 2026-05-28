@@ -171,7 +171,7 @@ function buildCheckPlan(args) {
   ]
 
   if (!args.skipIntegrity) {
-    checks.push(() => nodeCheck('comprehensive data integrity', 'ops/scripts/backend/verify-data-integrity.js', [
+    checks.push(() => nodeCheck('comprehensive data integrity', 'ops/scripts/backend/verify-data-integrity.ts', [
       '--comprehensive',
       '--output',
       'ops/runtime/reports/data-integrity-comprehensive-latest.json',

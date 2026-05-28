@@ -25,7 +25,7 @@ const CHECKS = [
   {
     label: 'Schema audit',
     command: process.execPath,
-    args: ['ops/scripts/backend/schema-audit.js'],
+    args: ['ops/scripts/backend/schema-audit.ts'],
     reports: ['ops/docs/reference/SCHEMA-AUDIT.md', 'ops/docs/reference/SCHEMA-AUDIT.json'],
   },
   {

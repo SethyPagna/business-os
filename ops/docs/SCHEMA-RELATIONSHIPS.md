@@ -25,7 +25,7 @@ The repeatable generated companion report is `ops/docs/reference/SCHEMA-AUDIT.md
 Regenerate it with:
 
 ```powershell
-node ops\scripts\backend\schema-audit.js
+node ops\scripts\backend\schema-audit.ts
 ```
 
 The canonical server database is Postgres. The backend still exposes a synchronous SQLite-like compatibility API through `postgresDatabase.js`, so many SQL statements are written in SQLite-ish style and translated before execution. The frontend mirrors a subset into IndexedDB/Dexie for offline fallback and queueing. Redis is used for import/media queues and runtime cache. Object files live in MinIO/R2-compatible object storage and are referenced by database rows.
@@ -37,7 +37,7 @@ The canonical server database is Postgres. The backend still exposes a synchrono
 3. Relationship pass: scanned backend routes/services for joins, `*_id` filters, manual cascade deletes, and denormalized snapshot fields.
 4. Implicit schema pass: scanned JSON/text payload columns, dynamic custom-table creation, backup table order, Dexie offline stores, Redis queue/cache, and object-storage references.
 5. Plan update pass: updated this document and the optimization roadmap with new repeated schema-analysis mini phases and recommendations.
-6. Automated verification pass: added `ops/scripts/backend/schema-audit.js`, which parses canonical SQL, runtime DDL, Dexie stores, and backup table coverage, then regenerates `ops/docs/reference/SCHEMA-AUDIT.md`.
+6. Automated verification pass: added `ops/scripts/backend/schema-audit.ts`, which parses canonical SQL, runtime DDL, Dexie stores, and backup table coverage, then regenerates `ops/docs/reference/SCHEMA-AUDIT.md`.
 
 ## Repeated Verification Protocol
 
@@ -462,7 +462,7 @@ Repeat these six passes for each schema rewire slice:
 1. Scan files: schema dump, runtime DDL, routes, services, tests, frontend API, Dexie, backup config.
 2. Read and map: identify entities, attributes, relationships, data flows, JSON payloads, and polymorphic references.
 3. Draft/update schema: edit this document and any generated diagram.
-4. Verify pass A: run `node ops\scripts\backend\schema-audit.js` and cross-check against canonical SQL and runtime DDL.
+4. Verify pass A: run `node ops\scripts\backend\schema-audit.ts` and cross-check against canonical SQL and runtime DDL.
 5. Verify pass B: cross-check against route/service queries and backup/Dexie usage.
 6. Analyze and recommend: update indexes, FK plan, normalization trade-offs, migration safety, and tests.
 

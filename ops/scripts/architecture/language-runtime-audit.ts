@@ -145,7 +145,7 @@ function verificationMatrix() {
       track: 'SQL/DuckDB/data-path optimization',
       requiredProof: [
         'npm.cmd --prefix backend run test:utils',
-        'node ops\\scripts\\backend\\schema-audit.js',
+        'node ops\\scripts\\backend\\schema-audit.ts',
         'backup/restore or count-diff rehearsal for changed data paths',
         'before/after timing on the same fixture',
       ],
@@ -871,7 +871,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Revert readTableRows to OFFSET-only paging; streamed checksum/package format remains unchanged.',
     proof: [
       'npm.cmd --prefix backend run test:utils',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
       'backend/test/backupPerformanceHardening.test.js keyset guard',
     ],
     tests: [
@@ -886,7 +886,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Remove getProductsByNameForImport, rememberProductForImport, supplierMap, and return to per-row database lookups; import job schema and row decisions remain unchanged.',
     proof: [
       'npm.cmd --prefix backend run test:utils',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
       'backend/test/importDecisionIntegrity.test.js cache guards',
     ],
     tests: [
@@ -897,12 +897,12 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
   },
   {
-    target: 'ops/scripts/backend/schema-audit.js',
+    target: 'ops/scripts/backend/schema-audit.ts',
     optimization: 'Schema audit now parses ALTER TABLE primary-key constraints in a single pre-pass map before walking CREATE TABLE bodies, avoiding one whole-schema regex scan per table.',
     rollback: 'Restore parsePrimaryKey to run a table-specific ALTER TABLE regex against the full schema text for every parsed table; generated report fields remain unchanged.',
     proof: [
-      'node ops\\scripts\\backend\\schema-audit.js',
-      'Measure-Command { node ops\\scripts\\backend\\schema-audit.js | Out-Null }',
+      'node ops\\scripts\\backend\\schema-audit.ts',
+      'Measure-Command { node ops\\scripts\\backend\\schema-audit.ts | Out-Null }',
       'npm.cmd --prefix ops run phase29:audit:repeat',
     ],
     tests: [],
@@ -913,7 +913,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Restore the per-field COUNT and pg_index subqueries inside each json_build_object table block; the output schema remains unchanged.',
     proof: [
       'npm.cmd --prefix ops run schema-pk-preflight',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
       'npm.cmd --prefix backend run test:utils',
       'npm.cmd --prefix ops run phase29:audit:repeat',
     ],
@@ -928,7 +928,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     proof: [
       'npm.cmd --prefix backend run test:utils',
       'node backend\\test\\importDecisionIntegrity.test.js',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
       'backend/test/importDecisionIntegrity.test.js',
@@ -958,7 +958,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     proof: [
       'npm.cmd --prefix backend run test:utils',
       'node backend\\test\\rfidRoutes.test.js',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
       'backend/test/rfidRoutes.test.js',
@@ -973,7 +973,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     proof: [
       'npm.cmd --prefix backend run test:utils',
       'node backend\\test\\portalInventoryRegression.test.js',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
       'backend/test/portalInventoryRegression.test.js',
@@ -988,7 +988,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     proof: [
       'npm.cmd --prefix backend run test:utils',
       'node backend\\test\\productSearchPagination.test.js',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
       'backend/test/productSearchPagination.test.js',
@@ -1003,7 +1003,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     proof: [
       'npm.cmd --prefix backend run test:utils',
       'node backend\\test\\productBatchHierarchy.test.js',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
       'backend/test/productBatchHierarchy.test.js',
@@ -1018,7 +1018,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     proof: [
       'npm.cmd --prefix backend run test:utils',
       'node backend\\test\\routeContracts.test.js',
-      'node ops\\scripts\\backend\\schema-audit.js',
+      'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
       'backend/test/routeContracts.test.js',

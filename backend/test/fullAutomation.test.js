@@ -449,7 +449,7 @@ runTest('phase 29 audit orchestrates non-mutating sweep gates', () => {
     'rootWalkMode',
     'rootWalkConcurrency',
     'fileReadConcurrency',
-    'schema-audit.js',
+    'schema-audit.ts',
     'performance-scan.ts',
     'language-runtime-audit.ts',
     'verify-docker-release.ts',
@@ -737,9 +737,9 @@ runTest('architecture audits share bounded worker helper', () => {
 })
 
 runTest('backend data integrity verifier reports FK candidate orphans', () => {
-  const verifier = read('ops/scripts/backend/verify-data-integrity.js')
+  const verifier = read('ops/scripts/backend/verify-data-integrity.ts')
   const backendPackage = JSON.parse(read('backend/package.json'))
-  assert.equal(backendPackage.scripts['verify:integrity:comprehensive'], 'node ../ops/scripts/backend/verify-data-integrity.js --comprehensive --output ../ops/runtime/reports/data-integrity-comprehensive-latest.json')
+  assert.equal(backendPackage.scripts['verify:integrity:comprehensive'], 'node ../ops/scripts/backend/verify-data-integrity.ts --comprehensive --output ../ops/runtime/reports/data-integrity-comprehensive-latest.json')
   ;[
     '--comprehensive',
     '--output',
@@ -842,7 +842,7 @@ runTest('post-live hygiene gate fails on residue or empty datasets', () => {
     'dataset-readiness.ts',
     '--fail-if-empty',
     'Dataset readiness is',
-    'verify-data-integrity.js',
+    'verify-data-integrity.ts',
     'buildCheckPlan',
     'runChecks',
     "executionMode: 'contention-safe-sequential-checks'",

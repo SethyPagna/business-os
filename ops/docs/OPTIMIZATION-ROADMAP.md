@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 469.
+- Latest completed implementation move in this roadmap: Move 470.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -336,7 +336,7 @@ Mini phases:
   - taxonomy ID migration
 - 6.11 For every DDL candidate, write the cleanup query, migration query,
   rollback query, and verification query before implementation.
-- 6.12 Keep `ops/scripts/backend/schema-audit.js` as the repeatable schema
+- 6.12 Keep `ops/scripts/backend/schema-audit.ts` as the repeatable schema
   coverage guard, and regenerate `ops/docs/reference/SCHEMA-AUDIT.md` after any
   schema, backup, restore, or Dexie-store change.
 - 6.13 Classify backup coverage gaps found by the generated audit:
@@ -351,7 +351,7 @@ Mini phases:
 
 Tests and analysis:
 - Keep the generated schema audit script green:
-  `node ops\scripts\backend\schema-audit.js`.
+  `node ops\scripts\backend\schema-audit.ts`.
 - Add a restore rehearsal that imports a backup into a throwaway DB and compares
   critical counts.
 - Add a generated schema diagram artifact under `ops/docs/reference/`.
@@ -974,7 +974,7 @@ Current checkpoint:
   schemas, Dexie offline stores, Redis queue/cache usage, object-storage path
   references, and optimized DDL recommendations.
 - Phase 6 now has a repeatable generated audit:
-  `ops/scripts/backend/schema-audit.js` writes
+  `ops/scripts/backend/schema-audit.ts` writes
   `ops/docs/reference/SCHEMA-AUDIT.md`. Latest generated counts: 45 static
   Postgres tables, 9 runtime `CREATE TABLE` statements, 21 runtime
   `ALTER TABLE ... ADD COLUMN` statements, Dexie version 5 with 24 stores,
@@ -2420,7 +2420,7 @@ Cleanup checkpoint:
   filters those files so future worker slices focus on transferable CPU,
   parsing, image preprocessing, scanner-engine, or media work.
 - Move 170 completes the schema-audit data-path parser optimization:
-  `ops/scripts/backend/schema-audit.js` now pre-parses ALTER TABLE primary-key
+  `ops/scripts/backend/schema-audit.ts` now pre-parses ALTER TABLE primary-key
   constraints into a map before walking static table bodies. The audit keeps
   the same generated Markdown/JSON contract, but avoids one full-schema
   primary-key regex scan per parsed table as the schema grows.
@@ -2982,7 +2982,7 @@ Cleanup checkpoint:
   writes a latest postcheck report. This catches interrupted or partial
   undo/redo cleanup before the broader full-automation postcheck layer.
 - Move 252 adds comprehensive relationship-orphan reporting:
-  `verify-data-integrity.js --comprehensive` now checks the schema FK-candidate
+  `verify-data-integrity.ts --comprehensive` now checks the schema FK-candidate
   backlog before any `NOT VALID` foreign-key migration proceeds, and
   `backend` exposes `verify:integrity:comprehensive` to write the latest report
   under ignored runtime reports. The first live report is non-mutating and
@@ -3027,7 +3027,7 @@ Cleanup checkpoint:
   dataset is now empty for products/sales/returns/batches/movements, so any
   production dataset must be restored or re-imported from a verified source.
 - Move 258 adds dataset readiness to comprehensive integrity:
-  `verify-data-integrity.js --comprehensive` now writes `datasetSummary` with
+  `verify-data-integrity.ts --comprehensive` now writes `datasetSummary` with
   transactional table counts and labels the current runtime as `empty` when
   products, batches, branch stock, sales, returns, movements, and transfers have
   no rows. This is a passing readiness signal for verification, but it keeps the
@@ -3278,7 +3278,7 @@ Cleanup checkpoint:
   path. Focused route contracts, full backend utility tests, and schema audit
   pass.
 - Move 294 batches integrity verifier FK orphan counts:
-  `ops/scripts/backend/verify-data-integrity.js` now checks all relationship
+  `ops/scripts/backend/verify-data-integrity.ts` now checks all relationship
   orphan counts with one generated `UNION ALL` query instead of one Docker
   `psql` call per FK candidate, while keeping bounded sample queries only for
   relationships that actually have orphans. Generated identifiers are quoted,
@@ -5188,3 +5188,14 @@ Move 469 status:
   Markdown tables, digest summaries, output tailing, and byte formatting. A
   later runner move can promote those boundaries to native TypeScript syntax
   once package scripts use a compiled or `tsx` execution path.
+
+Move 470 status:
+- Move 470 converts the backend ops audit entrypoints to TypeScript.
+  `ops/scripts/backend/schema-audit.ts` and
+  `ops/scripts/backend/verify-data-integrity.ts` replace their `.js`
+  entrypoints. Phase 29, backend package verification scripts,
+  post-live-hygiene, schema docs, language/runtime audit proof references, and
+  backend full automation assertions now reference the TypeScript paths. This
+  keeps the schema and data-integrity loop on the direct Node/CommonJS path
+  while removing two more JavaScript source entrypoints from the recurring
+  verification surface.

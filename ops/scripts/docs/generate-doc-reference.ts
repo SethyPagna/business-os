@@ -291,7 +291,7 @@ function writeRunReleaseReference() {
     'run/sh/start-server.sh',
     'run/sh/stop-server.sh',
     'ops/scripts/frontend/verify-i18n.ts',
-    'ops/scripts/backend/verify-data-integrity.js',
+    'ops/scripts/backend/verify-data-integrity.ts',
     'ops/scripts/docs/generate-doc-reference.ts',
     'ops/scripts/docs/generate-full-project-docs.ts',
     'ops/scripts/docs/performance-scan.ts',

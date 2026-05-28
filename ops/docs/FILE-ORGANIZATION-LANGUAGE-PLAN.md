@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 459 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 460 in this file.
 
 ## Goal
 
@@ -917,7 +917,7 @@ Decision rule:
     fields across repeat cycles, so loop/function and large-module work has a
     stable machine-readable gate before deeper refactors.
 95. Add schema JSON drift checks to Phase 29 repeat audit. Done:
-    `ops/scripts/backend/schema-audit.js` now writes
+    `ops/scripts/backend/schema-audit.ts` now writes
     `ops/docs/reference/SCHEMA-AUDIT.json` with static/runtime table counts,
     Dexie store counts, backup coverage counts, relationship coverage counts,
     and stable schema entity lists. `phase29-audit.ts` now includes that JSON
@@ -1480,7 +1480,7 @@ Decision rule:
     `sync:update` `CustomEvent`s on `window`. This keeps the worker backlog
     focused on real transferable CPU/file/media work.
 170. Optimize schema-audit primary-key parsing. Done:
-    `ops/scripts/backend/schema-audit.js` now builds one ALTER TABLE
+    `ops/scripts/backend/schema-audit.ts` now builds one ALTER TABLE
     primary-key map before parsing CREATE TABLE bodies, then uses that map as
     the fallback when a table has no inline primary key. This removes repeated
     whole-schema regex scans from the generated schema audit while preserving
@@ -2034,7 +2034,7 @@ Decision rule:
     own sessions, verification codes, audit logs, and user row, and a follow-up
     live database check confirmed zero `bos_auth_security_*` leftovers.
 243. Count runtime unique indexes in schema audit. Done:
-    `ops/scripts/backend/schema-audit.js` now parses both
+    `ops/scripts/backend/schema-audit.ts` now parses both
     `CREATE INDEX IF NOT EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS`,
     marks unique runtime index rows in the generated report, writes
     `runtimeUniqueIndexes` and `runtimeIndexNames` to
@@ -2099,7 +2099,7 @@ Decision rule:
     and zero leftover rows for its exact `QA Action History` prefix before full
     automation reaches the broader postcheck gate.
 252. Add comprehensive relationship-orphan integrity reporting. Done:
-    `ops/scripts/backend/verify-data-integrity.js --comprehensive` now checks
+    `ops/scripts/backend/verify-data-integrity.ts --comprehensive` now checks
     the FK-candidate backlog from the schema plan for orphaned child rows and
     can write a workspace-bounded JSON report with `--output`. The backend
     package exposes `verify:integrity:comprehensive`, writing
@@ -2157,7 +2157,7 @@ Decision rule:
     so any real imported business dataset should be restored or re-imported from
     a verified backup/source before production use.
 258. Add dataset-readiness status to integrity reports. Done:
-    `verify-data-integrity.js --comprehensive` now writes `datasetSummary` with
+    `verify-data-integrity.ts --comprehensive` now writes `datasetSummary` with
     product, batch, branch-stock, sales, return, movement, transfer,
     action-history, and audit-log counts. The check passes but explicitly labels
     the runtime dataset as `empty` when transactional business tables have no
@@ -2278,7 +2278,7 @@ Decision rule:
     dependencies, regenerable build output, and safe cleanup targets without
     re-reading every target row manually.
 269. Promote schema primary-key gaps into generated evidence. Done:
-    `ops/scripts/backend/schema-audit.js` now emits `staticPrimaryKeyGaps`,
+    `ops/scripts/backend/schema-audit.ts` now emits `staticPrimaryKeyGaps`,
     `staticPrimaryKeyGapTables`, and `staticPrimaryKeyGapDetails`, and renders a
     "Primary Key Gaps" section in `SCHEMA-AUDIT.md`. Phase 29 repeat compares
     those fields across cycles. The current explicit backlog is `import_jobs`
@@ -2499,7 +2499,7 @@ Decision rule:
     the single route-layer pathway for stable schema-shape checks. Focused
     route contracts, full backend utility tests, and schema audit pass.
 294. Batch integrity verifier FK orphan counts. Done:
-    `ops/scripts/backend/verify-data-integrity.js` now checks all relationship
+    `ops/scripts/backend/verify-data-integrity.ts` now checks all relationship
     orphan counts with one generated `UNION ALL` query instead of one Docker
     `psql` call per FK candidate, while keeping bounded sample queries only for
     relationships that actually have orphans. The verifier also quotes
@@ -3674,6 +3674,15 @@ Decision rule:
     walking, bounded concurrency, Markdown table generation, byte formatting,
     and stable digest helpers until the ops runner moves to a compiled or
     `tsx`-backed TypeScript path.
+460. Convert backend ops audit entrypoints to TypeScript. Done:
+    `ops/scripts/backend/schema-audit.ts` and
+    `ops/scripts/backend/verify-data-integrity.ts` replace their `.js`
+    entrypoints. Phase 29, backend package verification scripts,
+    post-live-hygiene, docs, language/runtime audit proof text, and backend
+    full automation assertions now reference the TypeScript paths. The scripts
+    preserve the direct Node/CommonJS execution contract while removing two
+    more `.js` source entrypoints from the schema and data-integrity guardrail
+    loop.
 
 ## Safety Gates
 
