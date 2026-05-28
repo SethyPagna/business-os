@@ -221,8 +221,8 @@ Code files documented: **540**
 | 209 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 4 | 1 | 2 | 1 |
 | 210 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 4 | 1 | 2 | 1 |
 | 211 | `frontend/src/components/inventory/InventoryRfidSurface.jsx` | 0 | 1 | 0 | 1 |
-| 212 | `frontend/src/components/inventory/movementGroups.js` | 0 | 0 | 0 | 2 |
-| 213 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 0 |
+| 212 | `frontend/src/components/inventory/movementGroups.js` | 0 | 0 | 0 | 1 |
+| 213 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 1 |
 | 214 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 | 1 | 2 | 1 |
 | 215 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 7 | 1 | 5 | 1 |
 | 216 | `frontend/src/components/navigation/Sidebar.jsx` | 7 | 1 | 6 | 1 |
@@ -280,15 +280,15 @@ Code files documented: **540**
 | 268 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 3 | 4 | 3 | 0 |
 | 269 | `frontend/src/components/products/surfaces/ProductsListSurface.jsx` | 2 | 1 | 0 | 1 |
 | 270 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
-| 271 | `frontend/src/components/receipt-settings/constants.js` | 0 | 0 | 0 | 4 |
-| 272 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 1 |
+| 271 | `frontend/src/components/receipt-settings/constants.js` | 0 | 0 | 0 | 3 |
+| 272 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 2 |
 | 273 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
 | 274 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
 | 275 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
 | 276 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 3 | 1 | 2 | 1 |
 | 277 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
-| 278 | `frontend/src/components/receipt-settings/template.js` | 0 | 0 | 0 | 3 |
-| 279 | `frontend/src/components/receipt-settings/template.ts` | 2 | 2 | 2 | 0 |
+| 278 | `frontend/src/components/receipt-settings/template.js` | 0 | 0 | 0 | 2 |
+| 279 | `frontend/src/components/receipt-settings/template.ts` | 2 | 2 | 2 | 1 |
 | 280 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
 | 281 | `frontend/src/components/returns/EditReturnModal.jsx` | 4 | 1 | 3 | 1 |
 | 282 | `frontend/src/components/returns/NewReturnModal.jsx` | 4 | 1 | 3 | 1 |
@@ -309,8 +309,8 @@ Code files documented: **540**
 | 297 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 7 | 1 | 5 | 1 |
 | 298 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 7 |
 | 299 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
-| 300 | `frontend/src/components/shared/globalScroll.js` | 0 | 0 | 0 | 2 |
-| 301 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 0 |
+| 300 | `frontend/src/components/shared/globalScroll.js` | 0 | 0 | 0 | 1 |
+| 301 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 1 |
 | 302 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
 | 303 | `frontend/src/components/shared/LoadingWatchdog.jsx` | 1 | 1 | 0 | 6 |
 | 304 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 22 |
@@ -397,8 +397,8 @@ Code files documented: **540**
 | 385 | `frontend/src/utils/permissions.js` | 0 | 0 | 0 | 1 |
 | 386 | `frontend/src/utils/permissions.ts` | 0 | 1 | 0 | 1 |
 | 387 | `frontend/src/utils/pricing.d.ts` | 0 | 8 | 0 | 0 |
-| 388 | `frontend/src/utils/pricing.js` | 0 | 0 | 0 | 17 |
-| 389 | `frontend/src/utils/pricing.ts` | 0 | 8 | 0 | 0 |
+| 388 | `frontend/src/utils/pricing.js` | 0 | 0 | 0 | 16 |
+| 389 | `frontend/src/utils/pricing.ts` | 0 | 8 | 0 | 1 |
 | 390 | `frontend/src/utils/printReceipt.js` | 0 | 0 | 0 | 2 |
 | 391 | `frontend/src/utils/printReceipt.ts` | 1 | 12 | 1 | 0 |
 | 392 | `frontend/src/utils/productBatches.mjs` | 0 | 0 | 0 | 4 |
@@ -434,27 +434,27 @@ Code files documented: **540**
 | 422 | `frontend/tests/deviceInfo.test.ts` | 2 | 0 | 1 | 0 |
 | 423 | `frontend/tests/exportPackages.test.ts` | 4 | 0 | 2 | 0 |
 | 424 | `frontend/tests/formatters.test.ts` | 2 | 0 | 1 | 0 |
-| 425 | `frontend/tests/globalScroll.test.mjs` | 2 | 0 | 0 | 0 |
-| 426 | `frontend/tests/globalScrollControls.test.mjs` | 2 | 0 | 1 | 0 |
+| 425 | `frontend/tests/globalScroll.test.ts` | 2 | 0 | 0 | 0 |
+| 426 | `frontend/tests/globalScrollControls.test.ts` | 2 | 0 | 1 | 0 |
 | 427 | `frontend/tests/groupedRecords.test.ts` | 2 | 0 | 1 | 0 |
 | 428 | `frontend/tests/historyHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 429 | `frontend/tests/importJobRefresh.test.ts` | 1 | 0 | 0 | 0 |
 | 430 | `frontend/tests/initials.test.ts` | 1 | 0 | 0 | 0 |
 | 431 | `frontend/tests/inventoryImportWorker.test.ts` | 3 | 0 | 1 | 0 |
-| 432 | `frontend/tests/inventoryMobileCardLayout.test.mjs` | 2 | 0 | 0 | 0 |
-| 433 | `frontend/tests/inventoryMovementGroups.test.mjs` | 2 | 0 | 1 | 0 |
+| 432 | `frontend/tests/inventoryMobileCardLayout.test.ts` | 2 | 0 | 0 | 0 |
+| 433 | `frontend/tests/inventoryMovementGroups.test.ts` | 2 | 0 | 1 | 0 |
 | 434 | `frontend/tests/inventoryRfidSection.test.mjs` | 2 | 0 | 0 | 0 |
 | 435 | `frontend/tests/jsxSyntaxCheck.mjs` | 5 | 0 | 0 | 0 |
 | 436 | `frontend/tests/loaders.test.ts` | 1 | 0 | 0 | 0 |
 | 437 | `frontend/tests/mediaUploadHelpers.test.ts` | 2 | 0 | 1 | 0 |
 | 438 | `frontend/tests/navigationConfig.test.ts` | 2 | 0 | 1 | 0 |
-| 439 | `frontend/tests/notificationBadge.test.mjs` | 2 | 0 | 0 | 0 |
+| 439 | `frontend/tests/notificationBadge.test.ts` | 2 | 0 | 0 | 0 |
 | 440 | `frontend/tests/offlineSalesQueue.test.mjs` | 2 | 0 | 0 | 0 |
 | 441 | `frontend/tests/offlineSecurityHardening.test.mjs` | 2 | 0 | 0 | 0 |
 | 442 | `frontend/tests/offlineSyncArchitecture.test.mjs` | 2 | 0 | 0 | 0 |
 | 443 | `frontend/tests/ownedGoogleAuth.test.mjs` | 2 | 0 | 0 | 0 |
 | 444 | `frontend/tests/performanceLoadingUx.test.mjs` | 2 | 0 | 0 | 0 |
-| 445 | `frontend/tests/permissionEditor.test.mjs` | 2 | 0 | 0 | 0 |
+| 445 | `frontend/tests/permissionEditor.test.ts` | 2 | 0 | 0 | 0 |
 | 446 | `frontend/tests/permissions.test.ts` | 2 | 0 | 1 | 0 |
 | 447 | `frontend/tests/portalCatalogDisplay.test.ts` | 2 | 0 | 0 | 0 |
 | 448 | `frontend/tests/portalContentI18n.test.ts` | 1 | 0 | 0 | 0 |
@@ -463,9 +463,9 @@ Code files documented: **540**
 | 451 | `frontend/tests/portalLanguagePacks.test.ts` | 1 | 0 | 0 | 0 |
 | 452 | `frontend/tests/portalTranslateController.test.ts` | 1 | 0 | 0 | 0 |
 | 453 | `frontend/tests/posCore.test.ts` | 1 | 0 | 0 | 0 |
-| 454 | `frontend/tests/pricingContacts.test.mjs` | 3 | 0 | 1 | 0 |
+| 454 | `frontend/tests/pricingContacts.test.ts` | 3 | 0 | 1 | 0 |
 | 455 | `frontend/tests/productBatches.test.ts` | 2 | 0 | 1 | 0 |
-| 456 | `frontend/tests/productDiscountUx.test.mjs` | 2 | 0 | 0 | 0 |
+| 456 | `frontend/tests/productDiscountUx.test.ts` | 2 | 0 | 0 | 0 |
 | 457 | `frontend/tests/productDisplayHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 458 | `frontend/tests/productFilterHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 459 | `frontend/tests/productGalleryHelpers.test.ts` | 1 | 0 | 0 | 0 |
@@ -476,13 +476,13 @@ Code files documented: **540**
 | 464 | `frontend/tests/productImportWorkerFallback.test.ts` | 3 | 0 | 1 | 0 |
 | 465 | `frontend/tests/productMenuHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 466 | `frontend/tests/productPageHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 467 | `frontend/tests/productSearchPagination.test.mjs` | 2 | 0 | 0 | 0 |
+| 467 | `frontend/tests/productSearchPagination.test.ts` | 2 | 0 | 0 | 0 |
 | 468 | `frontend/tests/productSelectionHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 469 | `frontend/tests/productWriteHelpers.test.ts` | 1 | 0 | 0 | 0 |
 | 470 | `frontend/tests/publicErrorRecovery.test.ts` | 1 | 0 | 0 | 0 |
-| 471 | `frontend/tests/receiptSettingsSync.test.mjs` | 2 | 0 | 0 | 0 |
-| 472 | `frontend/tests/receiptTemplate.test.mjs` | 4 | 0 | 2 | 0 |
-| 473 | `frontend/tests/returnsLayout.test.mjs` | 2 | 0 | 0 | 0 |
+| 471 | `frontend/tests/receiptSettingsSync.test.ts` | 2 | 0 | 0 | 0 |
+| 472 | `frontend/tests/receiptTemplate.test.ts` | 4 | 0 | 2 | 0 |
+| 473 | `frontend/tests/returnsLayout.test.ts` | 2 | 0 | 0 | 0 |
 | 474 | `frontend/tests/runtimeErrorClassifier.test.ts` | 1 | 0 | 0 | 0 |
 | 475 | `frontend/tests/salesImportWorker.test.ts` | 3 | 0 | 1 | 0 |
 | 476 | `frontend/tests/scanbotScanner.test.ts` | 2 | 0 | 1 | 0 |
@@ -4228,9 +4228,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/tests/inventoryMovementGroups.test.mjs`
 
 ### 3.213 `frontend/src/components/inventory/movementGroups.ts`
 
@@ -4239,8 +4238,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/inventoryMovementGroups.test.ts`
 
 ### 3.214 `frontend/src/components/inventory/ProductDetailModal.jsx`
 
@@ -5051,11 +5050,10 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (4)
+- Referenced by (3)
   - `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt-settings/template.ts`
-  - `frontend/tests/receiptTemplate.test.mjs`
 
 ### 3.272 `frontend/src/components/receipt-settings/constants.ts`
 
@@ -5064,8 +5062,9 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (1)
+- Referenced by (2)
   - `frontend/src/components/receipt-settings/template.ts`
+  - `frontend/tests/receiptTemplate.test.ts`
 
 ### 3.273 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
 
@@ -5150,10 +5149,9 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (3)
+- Referenced by (2)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
-  - `frontend/tests/receiptTemplate.test.mjs`
 
 ### 3.279 `frontend/src/components/receipt-settings/template.ts`
 
@@ -5164,8 +5162,8 @@ Code files documented: **540**
 - Internal dependencies (2)
   - `frontend/src/components/receipt-settings/constants.js`
   - `frontend/src/components/receipt-settings/constants.ts`
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/receiptTemplate.test.ts`
 
 ### 3.280 `frontend/src/components/receipt/Receipt.jsx`
 
@@ -5547,9 +5545,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (1)
   - `frontend/src/App.jsx`
-  - `frontend/tests/globalScrollControls.test.mjs`
 
 ### 3.301 `frontend/src/components/shared/globalScroll.ts`
 
@@ -5558,8 +5555,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/globalScrollControls.test.ts`
 
 ### 3.302 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
 
@@ -6787,7 +6784,7 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (17)
+- Referenced by (16)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/catalog/portalCatalogDisplay.ts`
   - `frontend/src/components/dashboard/Dashboard.jsx`
@@ -6804,7 +6801,6 @@ Code files documented: **540**
   - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
   - `frontend/src/components/products/surfaces/ProductRowParts.jsx`
   - `frontend/src/utils/csvImport.ts`
-  - `frontend/tests/pricingContacts.test.mjs`
 
 ### 3.389 `frontend/src/utils/pricing.ts`
 
@@ -6813,8 +6809,8 @@ Code files documented: **540**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (0)
-  - none
+- Referenced by (1)
+  - `frontend/tests/pricingContacts.test.ts`
 
 ### 3.390 `frontend/src/utils/printReceipt.js`
 
@@ -7222,7 +7218,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.425 `frontend/tests/globalScroll.test.mjs`
+### 3.425 `frontend/tests/globalScroll.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7233,14 +7229,14 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.426 `frontend/tests/globalScrollControls.test.mjs`
+### 3.426 `frontend/tests/globalScrollControls.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/components/shared/globalScroll.js`
+  - `../src/components/shared/globalScroll.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/components/shared/globalScroll.js`
+  - `frontend/src/components/shared/globalScroll.ts`
 - Referenced by (0)
   - none
 
@@ -7297,7 +7293,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.432 `frontend/tests/inventoryMobileCardLayout.test.mjs`
+### 3.432 `frontend/tests/inventoryMobileCardLayout.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7308,14 +7304,14 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.433 `frontend/tests/inventoryMovementGroups.test.mjs`
+### 3.433 `frontend/tests/inventoryMovementGroups.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/components/inventory/movementGroups.js`
+  - `../src/components/inventory/movementGroups.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `frontend/src/components/inventory/movementGroups.js`
+  - `frontend/src/components/inventory/movementGroups.ts`
 - Referenced by (0)
   - none
 
@@ -7376,7 +7372,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.439 `frontend/tests/notificationBadge.test.mjs`
+### 3.439 `frontend/tests/notificationBadge.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7442,7 +7438,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.445 `frontend/tests/permissionEditor.test.mjs`
+### 3.445 `frontend/tests/permissionEditor.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7535,15 +7531,15 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.454 `frontend/tests/pricingContacts.test.mjs`
+### 3.454 `frontend/tests/pricingContacts.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/utils/pricing.js`
+  - `../src/utils/pricing.ts`
   - `node:assert/strict`
   - `node:fs`
 - Internal dependencies (1)
-  - `frontend/src/utils/pricing.js`
+  - `frontend/src/utils/pricing.ts`
 - Referenced by (0)
   - none
 
@@ -7558,7 +7554,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.456 `frontend/tests/productDiscountUx.test.mjs`
+### 3.456 `frontend/tests/productDiscountUx.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7675,7 +7671,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.467 `frontend/tests/productSearchPagination.test.mjs`
+### 3.467 `frontend/tests/productSearchPagination.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7716,7 +7712,7 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.471 `frontend/tests/receiptSettingsSync.test.mjs`
+### 3.471 `frontend/tests/receiptSettingsSync.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7727,21 +7723,21 @@ Code files documented: **540**
 - Referenced by (0)
   - none
 
-### 3.472 `frontend/tests/receiptTemplate.test.mjs`
+### 3.472 `frontend/tests/receiptTemplate.test.ts`
 
 - Declared exports: none detected
 - Imports (4)
-  - `../src/components/receipt-settings/constants.js`
-  - `../src/components/receipt-settings/template.js`
+  - `../src/components/receipt-settings/constants.ts`
+  - `../src/components/receipt-settings/template.ts`
   - `node:assert/strict`
   - `node:fs`
 - Internal dependencies (2)
-  - `frontend/src/components/receipt-settings/constants.js`
-  - `frontend/src/components/receipt-settings/template.js`
+  - `frontend/src/components/receipt-settings/constants.ts`
+  - `frontend/src/components/receipt-settings/template.ts`
 - Referenced by (0)
   - none
 
-### 3.473 `frontend/tests/returnsLayout.test.mjs`
+### 3.473 `frontend/tests/returnsLayout.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
