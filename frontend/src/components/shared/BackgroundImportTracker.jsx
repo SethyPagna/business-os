@@ -2,7 +2,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, Trash2, XCircle } from 'lucide-react'
 import { useApp } from '../../AppContext'
 import { isTransientGatewayError } from '../../api/http.js'
-import { dispatchImportCompletionRefresh, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.js'
+import { dispatchImportCompletionRefresh, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.ts'
 import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 

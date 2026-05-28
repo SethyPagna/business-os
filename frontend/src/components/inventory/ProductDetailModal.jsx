@@ -1,6 +1,6 @@
 // ProductDetailModal (Inventory)
 // Shows full stock details for a product across all branches.
-import { calculateProductDiscount } from '../../utils/pricing.js'
+import { calculateProductDiscount } from '../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../utils/productBatches.ts'
 
 export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onMoveRow, fmtUSD, fmtKHR, t }) {

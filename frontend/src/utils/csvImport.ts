@@ -1,4 +1,4 @@
-import { normalizeDiscountPercent, normalizePriceValue } from './pricing.js'
+import { normalizeDiscountPercent, normalizePriceValue } from './pricing.ts'
 
 const KHMER_ZERO = 0x17E0
 const ARABIC_INDIC_ZERO = 0x0660

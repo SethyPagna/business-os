@@ -1,4 +1,4 @@
-import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
+import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'

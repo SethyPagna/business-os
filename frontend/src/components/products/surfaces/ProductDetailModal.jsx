@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
 import { getContrastingTextColor } from '../../../utils/color.ts'
-import { calculateProductDiscount } from '../../../utils/pricing.js'
+import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../../utils/productBatches.ts'
 
 export default function ProductDetailModal({

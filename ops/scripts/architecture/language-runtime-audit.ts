@@ -326,8 +326,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/csvImport.ts',
-    compatibilityWrapper: 'frontend/src/utils/csvImport.js',
-    declarationSupport: 'frontend/src/utils/pricing.d.ts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after CSV import callers moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\csvImport.test.ts',
@@ -392,8 +393,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/pricing.ts',
-    compatibilityWrapper: 'frontend/src/utils/pricing.js',
-    declarationSupport: 'frontend/src/utils/pricing.d.ts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after pricing callers moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\pricingContacts.test.ts',
@@ -701,8 +703,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/exportPackage.ts',
-    compatibilityWrapper: 'frontend/src/utils/exportPackage.js',
-    declarationSupport: 'frontend/src/utils/csv.d.ts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after export package callers moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\exportPackages.test.ts',
@@ -723,7 +726,8 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/importJobRefresh.ts',
-    compatibilityWrapper: 'frontend/src/utils/importJobRefresh.js',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after background import tracker moved to TypeScript source',
     declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
@@ -733,8 +737,9 @@ const CONVERTED_TYPESCRIPT_SLICES = [
   },
   {
     implementation: 'frontend/src/utils/index.ts',
-    compatibilityWrapper: 'frontend/src/utils/index.js',
-    declarationSupport: 'frontend/src/utils/csv.d.ts',
+    compatibilityWrapper: '',
+    wrapperStatus: 'retired after utility barrel callers moved to TypeScript source',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\formatters.test.ts',
@@ -860,10 +865,10 @@ const COMPLETED_WEB_WORKER_SLICES = [
     ],
   },
   {
-    surface: 'frontend/src/utils/csv.js',
+    surface: 'frontend/src/utils/csv.ts',
     worker: 'frontend/src/utils/csvExportWorker.ts',
     compatibilityWrapper: 'frontend/src/utils/csvExportWorker.mjs',
-    fallback: 'frontend/src/utils/csv.js',
+    fallback: 'frontend/src/utils/csv.ts',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\exportPackages.test.ts',

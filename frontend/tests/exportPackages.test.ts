@@ -96,7 +96,7 @@ await runTest('zip worker path keeps a synchronous fallback oracle', async () =>
   assert.match(csvSource, /new Worker\(new URL\('\.\/csvExportWorker\.ts', import\.meta\.url\), \{ type: 'module' \}\)/)
   assert.match(csvSource, /finish\(buildZip\(files\)\)/)
   assert.match(csvSource, /ZIP_EXPORT_WORKER_TIMEOUT_MS = 30000/)
-  assert.match(workerSource, /import \{ buildZip \} from '\.\/csv\.js'/)
+  assert.match(workerSource, /import \{ buildZip \} from '\.\/csv\.ts'/)
 })
 
 if (failed > 0) {

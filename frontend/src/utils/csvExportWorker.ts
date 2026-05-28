@@ -1,4 +1,4 @@
-import { buildZip } from './csv.js'
+import { buildZip } from './csv.ts'
 
 interface CsvExportWorkerRequest {
   id?: unknown

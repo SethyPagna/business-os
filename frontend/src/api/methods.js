@@ -30,7 +30,7 @@ import {
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.js'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { STORAGE_KEYS, SYNC } from '../constants'
-import { decodeTextBuffer } from '../utils/csvImport.js'
+import { decodeTextBuffer } from '../utils/csvImport.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
 import {

@@ -1,4 +1,4 @@
-import { calculateProductDiscount } from '../../../utils/pricing.js'
+import { calculateProductDiscount } from '../../../utils/pricing.ts'
 
 type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock'
 

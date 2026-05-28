@@ -10,8 +10,8 @@
 
 import Dexie from 'dexie'
 import type { Table } from 'dexie'
-import { parseCsvRows } from '../utils/csvImport.js'
-import { UTF8_BOM } from '../utils/csv.js'
+import { parseCsvRows } from '../utils/csvImport.ts'
+import { UTF8_BOM } from '../utils/csv.ts'
 
 type LocalRow = Record<string, unknown>
 type SettingsMap = Record<string, string>

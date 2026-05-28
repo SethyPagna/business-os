@@ -1,4 +1,4 @@
-import { normalizePriceValue } from '../../utils/pricing.js'
+import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
 export default function CartItem({

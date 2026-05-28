@@ -4,7 +4,7 @@ import { Fragment, Suspense, lazy, useState, useEffect, useLayoutEffect, useCall
 import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
-import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing.js'
+import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing.ts'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'

@@ -1042,12 +1042,13 @@ Decision rule:
 113. Convert CSV import helper to TypeScript. Done:
     The CSV import implementation moved to
     `frontend/src/utils/csvImport.ts`, while `frontend/src/utils/csvImport.js`
-    remains as a tiny compatibility wrapper for existing runtime and Node test
-    imports. `frontend/src/utils/pricing.d.ts` documents the pricing helper
-    boundary used by the converted module. `language-runtime-audit.ts` now
-    records `convertedTypeScriptSlices`, ignores thin `.js` wrappers that export
-    from `.ts`, and fails with `convertedTypeScriptCoverageGaps` if the
-    implementation, wrapper, or declaration support disappears.
+    initially remained as a tiny compatibility wrapper for existing runtime and
+    Node test imports, then was retired in Move 480 after callers moved to the
+    TypeScript source. The obsolete `frontend/src/utils/pricing.d.ts`
+    declaration shim was also removed because `pricing.ts` now owns the typed
+    contract. `language-runtime-audit.ts` records
+    `convertedTypeScriptSlices` and fails with
+    `convertedTypeScriptCoverageGaps` if implementation proof disappears.
 114. Convert formatter helper to TypeScript. Done:
     The shared formatter implementation moved to
     `frontend/src/utils/formatters.ts`, while `frontend/src/utils/formatters.js`
@@ -1086,9 +1087,10 @@ Decision rule:
 118. Convert pricing helper to TypeScript. Done:
     The shared pricing and product-discount helper moved to
     `frontend/src/utils/pricing.ts`, while `frontend/src/utils/pricing.js`
-    remains as the compatibility wrapper for app context, POS, products,
-    catalog, inventory, CSV import, and tests. Kept `pricing.d.ts` as the
-    public `.js` wrapper declaration used by converted TypeScript callers.
+    initially remained as the compatibility wrapper for app context, POS,
+    products, catalog, inventory, CSV import, and tests, then was retired in
+    Move 480 after callers moved to the TypeScript source. The obsolete
+    `pricing.d.ts` shim was removed with the wrapper.
     Focused pricing, POS, portal catalog, and product write helper tests passed.
 119. Convert product grouping helper to TypeScript. Done:
     The product family/grouping implementation moved to
@@ -1176,11 +1178,12 @@ Decision rule:
     cover browser/OS detection and header names.
 129. Convert report export package helper to TypeScript. Done:
     The report manifest and package file helpers moved to
-    `frontend/src/utils/exportPackage.ts`, while `exportPackage.js` remains as
-    the compatibility wrapper for Dashboard, Inventory, and tests. Added
-    `frontend/src/utils/csv.d.ts` to document the CSV helper boundary used by
-    this typed module, and focused export package tests cover manifest rows,
-    CSV package ordering, and HTML report inclusion.
+    `frontend/src/utils/exportPackage.ts`, while `exportPackage.js` initially
+    remained as the compatibility wrapper for Dashboard, Inventory, and tests,
+    then was retired in Move 480 after callers moved to the TypeScript source.
+    The obsolete `frontend/src/utils/csv.d.ts` shim was removed with the CSV
+    wrapper, and focused export package tests cover manifest rows, CSV package
+    ordering, and HTML report inclusion.
 130. Convert history snapshot helper to TypeScript. Done:
     The shared action-history snapshot cloning, result-id extraction, and
     created-snapshot resolution helpers moved to
@@ -1190,8 +1193,9 @@ Decision rule:
     product history tests protect undo/redo snapshot resolution.
 131. Convert shared utility barrel to TypeScript. Done:
     The shared utility re-export barrel moved to `frontend/src/utils/index.ts`,
-    while `index.js` remains as the compatibility wrapper for any stable
-    `utils` entrypoint imports. The barrel now re-exports formatter, CSV
+    while `index.js` initially remained as the compatibility wrapper for any
+    stable `utils` entrypoint imports, then was retired in Move 480 after
+    callers moved to the TypeScript source. The barrel now re-exports formatter, CSV
     download, and local date helpers through a checked module boundary.
 132. Convert permission parser utility to TypeScript. Done:
     The permission parsing helper moved to `frontend/src/utils/permissions.ts`,
@@ -1452,13 +1456,13 @@ Decision rule:
     polling and bounded UI orchestration, not file parsing, media decoding, or
     a CPU-heavy browser loop. `language-runtime-audit.ts` now records it in
     `rejectedWebWorkerCandidates`, removes it from future worker rankings, and
-    promotes the next measurable candidates: `frontend/src/utils/csv.js` for
+    promotes the next measurable candidates: `frontend/src/utils/csv.ts` for
     browser export/ZIP work and `backend/src/services/backupPackages.js` for
     SQL/DuckDB data-path optimization.
 166. Move CSV/ZIP package building into a Web Worker. Done:
     `frontend/src/utils/csvExportWorker.ts` now builds export ZIP blobs off the
     UI thread, with `csvExportWorker.mjs` as the Vite module-worker wrapper.
-    `frontend/src/utils/csv.js` keeps `buildZip()` as the synchronous fallback
+    `frontend/src/utils/csv.ts` keeps `buildZip()` as the synchronous fallback
     and correctness oracle, adds `buildZipInWorker()` plus
     `downloadZipFilesAsync()`, and normalizes both `{ name, content }` and
     `{ filename, rows }` descriptors so contacts all-export produces real CSV
@@ -2545,7 +2549,7 @@ Decision rule:
     `business-os:v6.0.0-202605211541`, and the full Phase 8.4 Playwright live
     suite pass on frontend hash `06a20c2b662bb3e2`.
 298. Bound receipt export asset inlining. Done:
-    `frontend/src/utils/printReceipt.js` now uses `mapReceiptAssets()` and
+    `frontend/src/utils/printReceipt.ts` now uses `mapReceiptAssets()` and
     `RECEIPT_ASSET_INLINE_CONCURRENCY = 3` for receipt image/style asset
     inlining instead of eager `Promise.all(images.map(...))` and
     `Promise.all(nodes.map(...))` work. This preserves printable receipt image
@@ -3769,6 +3773,13 @@ Decision rule:
     removed after the Settings conflict import and barrel test moved to typed
     paths, reducing the remaining frontend JavaScript wrapper surface without
     changing component ownership.
+480. Retire frontend utility barrel/export wrappers. Done:
+    `csv.ts`, `csvImport.ts`, `exportPackage.ts`, `importJobRefresh.ts`,
+    `pricing.ts`, `printReceipt.ts`, and `utils/index.ts` now serve direct
+    TypeScript imports. Their one-line `.js` wrappers plus obsolete
+    `csv.d.ts`/`pricing.d.ts` declaration shims were removed after exact import
+    rewrites, keeping CSV parsing, export packaging, import-job refresh events,
+    pricing, and receipt printing on typed source paths.
 
 ## Safety Gates
 

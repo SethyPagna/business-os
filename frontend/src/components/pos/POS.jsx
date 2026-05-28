@@ -49,7 +49,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
-import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
+import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'

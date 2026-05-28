@@ -1,5 +1,5 @@
 import { matchesYearMonthFilters } from '../../../utils/groupedRecords.ts'
-import { formatPriceNumber } from '../../../utils/pricing.js'
+import { formatPriceNumber } from '../../../utils/pricing.ts'
 
 interface BranchStockRecord {
   branch_id?: unknown

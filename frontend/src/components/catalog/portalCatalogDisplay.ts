@@ -1,4 +1,4 @@
-import { calculateProductDiscount } from '../../utils/pricing.js'
+import { calculateProductDiscount } from '../../utils/pricing.ts'
 
 type PortalProduct = Record<string, unknown>
 

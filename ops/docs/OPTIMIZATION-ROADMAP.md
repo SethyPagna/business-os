@@ -2069,11 +2069,11 @@ Cleanup checkpoint:
   `focusedTestCoverageGaps` fails Phase 29 if that safety coverage disappears.
 - The first TypeScript helper slice is now complete: the CSV import
   implementation lives in `frontend/src/utils/csvImport.ts`, the old
-  `csvImport.js` path remains as a compatibility wrapper, and
-  `pricing.d.ts` documents the JS pricing boundary. The language audit records
-  `convertedTypeScriptSlices` and fails with
-  `convertedTypeScriptCoverageGaps` if that implementation/wrapper/declaration
-  set disappears.
+  `csvImport.js` path initially remained as a compatibility wrapper, then was
+  retired in Move 480 after callers moved to the TypeScript source. The
+  obsolete `pricing.d.ts` shim was removed with the pricing wrapper. The
+  language audit records `convertedTypeScriptSlices` and fails with
+  `convertedTypeScriptCoverageGaps` if implementation proof disappears.
 - The next TypeScript helper slice is also complete:
   `frontend/src/utils/formatters.ts` owns the formatter implementation,
   `formatters.js` remains as a compatibility wrapper, and
@@ -2102,10 +2102,11 @@ Cleanup checkpoint:
   frontend build hash.
 - The pricing helper slice is now complete:
   `frontend/src/utils/pricing.ts` owns shared price normalization and product
-  discount calculation, while `pricing.js` remains as the compatibility wrapper
-  for POS, products, catalog, inventory, app context, CSV import, and tests.
-  `pricing.d.ts` stays as the public wrapper declaration for converted
-  TypeScript callers.
+  discount calculation, while `pricing.js` initially remained as the
+  compatibility wrapper for POS, products, catalog, inventory, app context, CSV
+  import, and tests, then was retired in Move 480 after callers moved to the
+  TypeScript source. The obsolete `pricing.d.ts` shim was removed with the
+  wrapper.
 - The product grouping helper slice is now complete:
   `frontend/src/utils/productGrouping.ts` owns product family expansion,
   same-name option grouping, variant ordering, section labels, and group
@@ -2167,9 +2168,10 @@ Cleanup checkpoint:
   reads `globalThis.navigator` for safer non-browser execution.
 - The report export package helper slice is now complete:
   `frontend/src/utils/exportPackage.ts` owns report manifest normalization and
-  report package file assembly, while `exportPackage.js` remains as the
-  compatibility wrapper for Dashboard, Inventory, and tests. `csv.d.ts`
-  documents the CSV helper boundary used by this typed module.
+  report package file assembly, while `exportPackage.js` initially remained as
+  the compatibility wrapper for Dashboard, Inventory, and tests, then was
+  retired in Move 480 after callers moved to the TypeScript source. The
+  obsolete `csv.d.ts` shim was removed with the CSV wrapper.
 - The history snapshot helper slice is now complete:
   `frontend/src/utils/historyHelpers.ts` owns action-history snapshot cloning,
   result-id extraction, and created-snapshot resolution, while
@@ -2177,8 +2179,9 @@ Cleanup checkpoint:
   undo/redo import boundary across business modules.
 - The shared utility barrel slice is now complete:
   `frontend/src/utils/index.ts` owns formatter, CSV download, and local date
-  helper re-exports, while `index.js` remains as the compatibility wrapper for
-  the stable utility entrypoint.
+  helper re-exports, while `index.js` initially remained as the compatibility
+  wrapper for the stable utility entrypoint, then was retired in Move 480 after
+  callers moved to the TypeScript source.
 - The permission parser utility slice is now complete:
   `frontend/src/utils/permissions.ts` owns permission map parsing, while
   `permissions.js` remains as the compatibility wrapper for AppContext and
@@ -2397,11 +2400,11 @@ Cleanup checkpoint:
   message overhead without removing meaningful browser CPU work. The
   language/runtime audit now records this decision under
   `rejectedWebWorkerCandidates` and promotes the next real candidates:
-  `frontend/src/utils/csv.js` for export/ZIP work and
+  `frontend/src/utils/csv.ts` for export/ZIP work and
   `backend/src/services/backupPackages.js` for backup data-path optimization.
-- Move 166 completes the `frontend/src/utils/csv.js` worker slice:
+- Move 166 completes the `frontend/src/utils/csv.ts` worker slice:
   `csvExportWorker.ts` now builds export ZIP blobs away from the UI thread,
-  `csvExportWorker.mjs` is the stable Vite worker wrapper, and `csv.js` keeps
+  `csvExportWorker.mjs` is the stable Vite worker wrapper, and `csv.ts` keeps
   `buildZip()` as the synchronous fallback. `downloadZipFilesAsync()` is now
   used by Dashboard, Inventory, and Contacts package exports, while row-based
   descriptors are normalized so Contacts all-export writes actual CSV files
@@ -3330,7 +3333,7 @@ Cleanup checkpoint:
   40 products with zero failed responses, and post-live hygiene reported
   dataset `loaded` with zero generated-integrity matches.
 - Move 298 bounds receipt export asset inlining:
-  `frontend/src/utils/printReceipt.js` now inlines receipt image and inline
+  `frontend/src/utils/printReceipt.ts` now inlines receipt image and inline
   style assets through `mapReceiptAssets()` with
   `RECEIPT_ASSET_INLINE_CONCURRENCY = 3` instead of starting every
   fetch/blob/base64 conversion at once with `Promise.all(images.map(...))` and
@@ -5298,3 +5301,10 @@ Move 479 status:
   `utils-settings/index.ts`, and `utils-settings/settingsConflict.ts` now serve
   direct TypeScript imports, while the matching one-line `.js` wrappers are
   removed.
+
+Move 480 status:
+- Move 480 retires seven frontend utility/export wrappers after exact caller
+  rewrites. `csv.ts`, `csvImport.ts`, `exportPackage.ts`,
+  `importJobRefresh.ts`, `pricing.ts`, `printReceipt.ts`, and `utils/index.ts`
+  now serve direct TypeScript imports, while the matching one-line `.js`
+  wrappers and obsolete `csv.d.ts`/`pricing.d.ts` shims are removed.

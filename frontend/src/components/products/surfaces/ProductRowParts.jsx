@@ -1,5 +1,5 @@
 import { ThreeDotPortal } from '../../shared/PortalMenu'
-import { calculateProductDiscount } from '../../../utils/pricing.js'
+import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 
 export function ProductDiscountBadge({ product, promotion, fmtUSD, label, overlay = false }) {

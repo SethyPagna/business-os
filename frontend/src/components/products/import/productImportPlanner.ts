@@ -4,7 +4,7 @@ import {
   normalizeCsvPercent,
   parseCsvNumber,
   parseCsvRows,
-} from '../../../utils/csvImport.js'
+} from '../../../utils/csvImport.ts'
 
 export const PRODUCT_MONEY_FIELDS = [
   'selling_price_usd',

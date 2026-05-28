@@ -1,4 +1,4 @@
-import { buildCSV } from './csv.js'
+import { buildCSV } from './csv.ts'
 
 export interface ReportManifestInputRow {
   section?: string
