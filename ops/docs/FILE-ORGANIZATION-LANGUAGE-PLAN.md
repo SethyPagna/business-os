@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 493 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 494 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 67 `.jsx`
+  - 66 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 40 `.tsx`
+  - 41 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -182,7 +182,7 @@ Decision rule:
    `productLookupSnapshots.mjs` now live in
    `frontend/src/components/products/lookups`. Category, Unit, and Brand
    lookup Playwright checks passed on frontend hash `3296f6327bd7aa53`.
-7. Move the first product form cluster. Done: `VariantFormModal.jsx` now lives
+7. Move the first product form cluster. Done: `VariantFormModal.tsx` now lives
    in `frontend/src/components/products/forms`. Focused source checks,
    production build, runtime health, and Product variant Playwright verification
    passed on frontend hash `42378a84fc53ab2f`.
@@ -3883,6 +3883,13 @@ Decision rule:
     `BulkAddStockModal.tsx` now types selected products, branch choices,
     bulk stock results, and adjust-stock API payloads, and normalizes product
     ids, branch ids, and positive quantities before each mutation.
+494. Convert product variant creation to TSX. Done:
+    `VariantFormModal.tsx` now types parent product, unit, branch, user,
+    translation, mutation response, and completion payload contracts. The
+    conversion restores valid Khmer fallback text, routes the variant create
+    call through a typed `getProductVariantApi` boundary, preserves the shared
+    single-action guard and loader timeout, and keeps numeric form fields
+    sanitized before mutation.
 
 ## Safety Gates
 

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { useApp } from '../../../AppContext'
+import { useApp as useAppHook } from '../../../AppContext.jsx'
 import Modal from '../../shared/Modal'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
@@ -9,14 +9,114 @@ import { withLoaderTimeout } from '../../../utils/loaders.ts'
 
 const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000
 
-export default function VariantFormModal({ parent, units, branches, user, onClose, onDone, t, usdSymbol }) {
+type EntityId = string | number
+
+interface VariantParentProduct {
+  id: EntityId
+  name: string
+  supplier?: string | null
+  unit?: string | null
+  category?: string | null
+  purchase_price_usd?: number | string | null
+  purchase_price_khr?: number | string | null
+  selling_price_usd?: number | string | null
+  selling_price_khr?: number | string | null
+  special_price_usd?: number | string | null
+  special_price_khr?: number | string | null
+}
+
+interface UnitOption {
+  id: EntityId
+  name: string
+}
+
+interface BranchOption {
+  id: EntityId
+  name: string
+  is_default?: boolean | number | null
+}
+
+interface VariantUser {
+  id?: EntityId
+  name?: string
+}
+
+interface VariantFormState {
+  name: string
+  sku: string
+  barcode: string
+  description: string
+  supplier: string
+  purchase_price_usd: string
+  purchase_price_khr: string
+  selling_price_usd: string
+  selling_price_khr: string
+  special_price_usd: string
+  special_price_khr: string
+  stock_quantity: string
+  branch_id: EntityId | ''
+  unit: string
+  category: string
+}
+
+type NumericVariantField =
+  | 'purchase_price_usd'
+  | 'purchase_price_khr'
+  | 'selling_price_usd'
+  | 'selling_price_khr'
+  | 'special_price_usd'
+  | 'special_price_khr'
+  | 'stock_quantity'
+
+interface VariantMutationResponse {
+  success?: boolean
+  error?: string
+  id?: unknown
+  data?: { id?: unknown } | null
+  item?: { id?: unknown } | null
+}
+
+interface ProductVariantApi {
+  createProductVariant: (payload: Record<string, unknown>) => Promise<VariantMutationResponse | undefined>
+}
+
+interface VariantDonePayload {
+  createdProductId: number
+  clientRequestId: string
+  snapshot: Record<string, unknown>
+}
+
+interface VariantFormModalProps {
+  parent: VariantParentProduct
+  units: UnitOption[]
+  branches: BranchOption[]
+  user?: VariantUser | null
+  onClose: () => void
+  onDone?: (payload: VariantDonePayload) => void
+  t: (key: string) => string | undefined
+  usdSymbol: string
+}
+
+const useApp = useAppHook as () => {
+  notify: (message: string, type?: string) => void
+}
+
+function getProductVariantApi(): ProductVariantApi {
+  return (window as unknown as { api: ProductVariantApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+export default function VariantFormModal({ parent, units, branches, user, onClose, onDone, t, usdSymbol }: VariantFormModalProps) {
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<VariantFormState>({
     name: `${parent.name} (${t('product_variant') || 'Variant'})`,
     sku: '',
     barcode: '',
@@ -28,7 +128,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     selling_price_khr: formatPriceNumber(parent.selling_price_khr || 0),
     special_price_usd: formatPriceNumber((parent.special_price_usd ?? parent.selling_price_usd) || 0),
     special_price_khr: formatPriceNumber((parent.special_price_khr ?? parent.selling_price_khr) || 0),
-    stock_quantity: 0,
+    stock_quantity: '0',
     branch_id: branches.find((branch) => branch.is_default)?.id || '',
     unit: parent.unit || 'pcs',
     category: parent.category || '',
@@ -38,13 +138,15 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   const saveInFlightRef = useRef(false)
   const { notify } = useApp()
 
-  const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }))
-  const setNumeric = (key, value) => setField(key, sanitizeNumericInput(value))
-  const runVariantMutation = useCallback((loader, label) => (
+  const setField = <Key extends keyof VariantFormState>(key: Key, value: VariantFormState[Key]): void => {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+  const setNumeric = (key: NumericVariantField, value: string): void => setField(key, sanitizeNumericInput(value))
+  const runVariantMutation = useCallback((loader: () => Promise<VariantMutationResponse | undefined>, label: string) => (
     withLoaderTimeout(loader, label, PRODUCT_VARIANT_MUTATION_TIMEOUT_MS)
   ), [])
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<void> => {
     if (saving) return
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
     if (!form.name.trim()) {
@@ -57,7 +159,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     setErr('')
     try {
       const clientRequestId = `variant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      const response = await runVariantMutation(() => window.api.createProductVariant({
+      const response = await runVariantMutation(() => getProductVariantApi().createProductVariant({
         client_request_id: clientRequestId,
         ...form,
         parent_id: parent.id,
@@ -104,7 +206,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
         },
       })
     } catch (error) {
-      setErr(error?.message || tr('failed', 'Failed', 'បរាជ័យ'))
+      setErr(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
       finishSingleAction(saveInFlightRef)
       setSaving(false)

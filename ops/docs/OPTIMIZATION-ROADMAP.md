@@ -1004,7 +1004,7 @@ Current checkpoint:
   modals and `productLookupSnapshots.mjs`. Product category, unit, and brand
   live checks passed on frontend hash `3296f6327bd7aa53`.
 - Third Phase 26 physical move complete: Product form files have started moving
-  under `frontend/src/components/products/forms`; `VariantFormModal.jsx` now
+  under `frontend/src/components/products/forms`; `VariantFormModal.tsx` now
   lives there. The Product variant live check passed on frontend hash
   `42378a84fc53ab2f`.
 - Fourth Phase 26 physical move complete: Product stock-helper form files
@@ -1618,7 +1618,7 @@ Safety gate:
 
 Checkpoint:
 - `products/lookups` split is complete for lookup modals and lookup snapshot
-  helpers. `products/forms` split has started with `VariantFormModal.jsx`,
+  helpers. `products/forms` split has started with `VariantFormModal.tsx`,
   `BulkAddStockModal.tsx`, and `BranchStockAdjuster.tsx`. `products/import`
   split is complete for the import modal, planner, and worker.
   `products/scanning` split is complete for the barcode scanner modal and
@@ -5407,3 +5407,11 @@ Move 493 status:
   add modal now has typed product selection, branch selection, mutation result,
   and stock API contracts, with product ids, branch ids, and quantities
   normalized before mutation calls.
+
+Move 494 status:
+- Move 494 converts product variant creation `VariantFormModal.tsx`. The typed
+  boundary now covers parent products, units, branches, users, translation
+  fallbacks, mutation responses, and completion snapshots. The conversion also
+  restores valid Khmer fallback text, keeps the shared single-action guard and
+  loader timeout, and routes the create mutation through a typed app API
+  accessor.

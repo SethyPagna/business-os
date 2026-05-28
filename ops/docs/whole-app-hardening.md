@@ -346,7 +346,7 @@ Last updated: 2026-05-18
     `frontend/src/components/products/lookups`; Product category, unit, and
     brand live checks passed on frontend hash `3296f6327bd7aa53`.
   - Third Phase 26 physical move complete: Product form files have started
-    moving into `frontend/src/components/products/forms`; `VariantFormModal.jsx`
+    moving into `frontend/src/components/products/forms`; `VariantFormModal.tsx`
     now lives there, and the Product variant live check passed on frontend hash
     `42378a84fc53ab2f`.
   - Fourth Phase 26 physical move complete: Product stock-helper form files

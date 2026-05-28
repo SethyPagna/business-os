@@ -586,16 +586,16 @@ await runTest('product brand manager actions use shared guards and bounded mutat
 })
 
 await runTest('product variant creation uses shared guard and bounded mutation', () => {
-  const source = readFrontend('src/components/products/forms/VariantFormModal.jsx')
+  const source = readFrontend('src/components/products/forms/VariantFormModal.tsx')
   const mutationLines = source
     .split('\n')
-    .filter((line) => /window\.api\.createProductVariant\(/.test(line))
+    .filter((line) => /getProductVariantApi\(\)\.createProductVariant\(/.test(line))
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.ts'/)
   assert.match(source, /const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
-  assert.match(source, /const runVariantMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_VARIANT_MUTATION_TIMEOUT_MS\)/)
+  assert.match(source, /const runVariantMutation = useCallback\(\(loader: \(\) => Promise<VariantMutationResponse \| undefined>, label: string\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_VARIANT_MUTATION_TIMEOUT_MS\)/)
   assert.match(source, /if \(!beginSingleAction\(saveInFlightRef, \{ blocked: saving \}\)\) return/)
   assert.match(source, /finishSingleAction\(saveInFlightRef\)[\s\S]*return[\s\S]*setSaving\(true\)/, 'blank-name validation should release the guard before returning')
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)[\s\S]*setSaving\(false\)/)
