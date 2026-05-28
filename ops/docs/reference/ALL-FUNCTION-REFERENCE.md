@@ -463,9 +463,9 @@ Code files scanned: **506**
 | 451 | `ops/scripts/architecture/language-runtime-audit.ts` | 20 |
 | 452 | `ops/scripts/architecture/organization-audit.ts` | 15 |
 | 453 | `ops/scripts/architecture/phase29-audit.ts` | 13 |
-| 454 | `ops/scripts/backend/schema-audit.js` | 25 |
+| 454 | `ops/scripts/backend/schema-audit.ts` | 25 |
 | 455 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 5 |
-| 456 | `ops/scripts/backend/verify-data-integrity.js` | 27 |
+| 456 | `ops/scripts/backend/verify-data-integrity.ts` | 27 |
 | 457 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 458 | `ops/scripts/frontend/verify-performance.ts` | 4 |
 | 459 | `ops/scripts/frontend/verify-ui.ts` | 11 |
@@ -6337,7 +6337,7 @@ Code files scanned: **506**
 | 12 | `buildSummary` | function | 498 |
 | 13 | `main` | function | 536 |
 
-### 3.454 `ops/scripts/backend/schema-audit.js`
+### 3.454 `ops/scripts/backend/schema-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6377,7 +6377,7 @@ Code files scanned: **506**
 | 4 | `buildPreflightSql` | function | 70 |
 | 5 | `summarize` | function | 178 |
 
-### 3.456 `ops/scripts/backend/verify-data-integrity.js`
+### 3.456 `ops/scripts/backend/verify-data-integrity.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

@@ -493,10 +493,10 @@ Total files documented: **569**
 | 481 | `ops/scripts/architecture/language-runtime-audit.ts` | project-scripts | 1574 | 67.9 | Project source/support file |
 | 482 | `ops/scripts/architecture/organization-audit.ts` | project-scripts | 381 | 16.9 | Project source/support file |
 | 483 | `ops/scripts/architecture/phase29-audit.ts` | project-scripts | 572 | 19.9 | Project source/support file |
-| 484 | `ops/scripts/backend/schema-audit.js` | project-scripts | 496 | 16.9 | Project source/support file |
+| 484 | `ops/scripts/backend/schema-audit.ts` | project-scripts | 496 | 16.9 | Project source/support file |
 | 485 | `ops/scripts/backend/schema-primary-key-preflight.ts` | project-scripts | 216 | 8.3 | Project source/support file |
 | 486 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |
-| 487 | `ops/scripts/backend/verify-data-integrity.js` | project-scripts | 689 | 29.0 | Project source/support file |
+| 487 | `ops/scripts/backend/verify-data-integrity.ts` | project-scripts | 689 | 29.0 | Project source/support file |
 | 488 | `ops/scripts/frontend/verify-i18n.ts` | project-scripts | 145 | 4.3 | Project source/support file |
 | 489 | `ops/scripts/frontend/verify-performance.ts` | project-scripts | 144 | 9.6 | Project source/support file |
 | 490 | `ops/scripts/frontend/verify-ui.ts` | project-scripts | 243 | 8.7 | Project source/support file |

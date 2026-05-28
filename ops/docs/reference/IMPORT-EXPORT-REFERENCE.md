@@ -463,9 +463,9 @@ Code files documented: **506**
 | 451 | `ops/scripts/architecture/language-runtime-audit.ts` | 4 | 0 | 2 | 0 |
 | 452 | `ops/scripts/architecture/organization-audit.ts` | 4 | 0 | 2 | 0 |
 | 453 | `ops/scripts/architecture/phase29-audit.ts` | 5 | 0 | 2 | 0 |
-| 454 | `ops/scripts/backend/schema-audit.js` | 2 | 0 | 0 | 0 |
+| 454 | `ops/scripts/backend/schema-audit.ts` | 2 | 0 | 0 | 0 |
 | 455 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
-| 456 | `ops/scripts/backend/verify-data-integrity.js` | 3 | 0 | 0 | 0 |
+| 456 | `ops/scripts/backend/verify-data-integrity.ts` | 3 | 0 | 0 | 0 |
 | 457 | `ops/scripts/frontend/verify-i18n.ts` | 2 | 0 | 1 | 0 |
 | 458 | `ops/scripts/frontend/verify-performance.ts` | 3 | 0 | 0 | 0 |
 | 459 | `ops/scripts/frontend/verify-ui.ts` | 3 | 0 | 1 | 0 |
@@ -7552,7 +7552,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.454 `ops/scripts/backend/schema-audit.js`
+### 3.454 `ops/scripts/backend/schema-audit.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7575,7 +7575,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.456 `ops/scripts/backend/verify-data-integrity.js`
+### 3.456 `ops/scripts/backend/verify-data-integrity.ts`
 
 - Declared exports: none detected
 - Imports (3)

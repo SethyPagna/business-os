@@ -1527,10 +1527,10 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `schema-audit.js` | Project source/support file |
+| 1 | `schema-audit.ts` | Project source/support file |
 | 2 | `schema-primary-key-preflight.ts` | Project source/support file |
 | 3 | `schema-primary-key-rollback.sql` | Project source/support file |
-| 4 | `verify-data-integrity.js` | Project source/support file |
+| 4 | `verify-data-integrity.ts` | Project source/support file |
 
 
 ### 3.69 Folder: `ops/scripts/frontend`

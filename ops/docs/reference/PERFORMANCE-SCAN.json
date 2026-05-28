@@ -3,7 +3,7 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 391,
   "distAssets": 87,
-  "totalSourceBytes": 6135605,
+  "totalSourceBytes": 6135604,
   "totalSourceLines": 136242,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,

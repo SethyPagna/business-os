@@ -153,9 +153,9 @@ Total scripts documented: **23**
 - File type: `.ts`
 - Total lines: **145**
 
-## ops/scripts/backend/verify-data-integrity.js
+## ops/scripts/backend/verify-data-integrity.ts
 
-- File type: `.js`
+- File type: `.ts`
 - Total lines: **689**
 
 ## ops/scripts/docs/generate-doc-reference.ts
