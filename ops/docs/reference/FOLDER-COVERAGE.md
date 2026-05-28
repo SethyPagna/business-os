@@ -1620,7 +1620,7 @@ Total folders documented: **81**
 | 3 | `audit-manifest.ts` | Project source/support file |
 | 4 | `audit-report-html.ts` | Project source/support file |
 | 5 | `deep-live-audit.mjs` | Project source/support file |
-| 6 | `full-app-audit.mjs` | Project source/support file |
+| 6 | `full-app-audit.ts` | Project source/support file |
 
 
 ### 3.74 Folder: `ops/scripts/runtime/cloudflare`

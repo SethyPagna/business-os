@@ -476,7 +476,7 @@ Code files documented: **506**
 | 464 | `ops/scripts/runtime/audits/audit-manifest.ts` | 0 | 7 | 0 | 3 |
 | 465 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
 | 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 9 | 0 | 3 | 0 |
-| 467 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 9 | 0 | 3 | 0 |
+| 467 | `ops/scripts/runtime/audits/full-app-audit.ts` | 9 | 0 | 3 | 0 |
 | 468 | `ops/scripts/runtime/browser-action-smoke.ts` | 8 | 0 | 3 | 0 |
 | 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
 | 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 3 | 0 | 0 | 0 |
@@ -7682,7 +7682,7 @@ Code files documented: **506**
 - Referenced by (18)
   - `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
-  - `ops/scripts/runtime/audits/full-app-audit.mjs`
+  - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
   - `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
@@ -7708,7 +7708,7 @@ Code files documented: **506**
   - none
 - Referenced by (3)
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
-  - `ops/scripts/runtime/audits/full-app-audit.mjs`
+  - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
 
 ### 3.465 `ops/scripts/runtime/audits/audit-report-html.ts`
@@ -7723,7 +7723,7 @@ Code files documented: **506**
   - `ops/scripts/lib/report-utils.js`
 - Referenced by (3)
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
-  - `ops/scripts/runtime/audits/full-app-audit.mjs`
+  - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
 
 ### 3.466 `ops/scripts/runtime/audits/deep-live-audit.mjs`
@@ -7746,7 +7746,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.467 `ops/scripts/runtime/audits/full-app-audit.mjs`
+### 3.467 `ops/scripts/runtime/audits/full-app-audit.ts`
 
 - Declared exports: none detected
 - Imports (9)

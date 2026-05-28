@@ -476,7 +476,7 @@ Code files scanned: **506**
 | 464 | `ops/scripts/runtime/audits/audit-manifest.ts` | 3 |
 | 465 | `ops/scripts/runtime/audits/audit-report-html.ts` | 11 |
 | 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 43 |
-| 467 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 22 |
+| 467 | `ops/scripts/runtime/audits/full-app-audit.ts` | 22 |
 | 468 | `ops/scripts/runtime/browser-action-smoke.ts` | 32 |
 | 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 16 |
 | 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
@@ -6569,32 +6569,32 @@ Code files scanned: **506**
 | 42 | `compareWithPreviousBaseline` | function | 1319 |
 | 43 | `main` | function | 1367 |
 
-### 3.467 `ops/scripts/runtime/audits/full-app-audit.mjs`
+### 3.467 `ops/scripts/runtime/audits/full-app-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `wait` | function | 42 |
-| 2 | `pushFinding` | function | 46 |
-| 3 | `assert` | function | 55 |
-| 4 | `isJsonResponse` | function | 59 |
-| 5 | `fetchWithTimeout` | function | 63 |
-| 6 | `request` | function | 73 |
-| 7 | `recordApi` | function | 112 |
-| 8 | `login` | function | 130 |
-| 9 | `captureHealth` | function | 143 |
-| 10 | `auditHtmlRoutes` | function | 157 |
-| 11 | `auditReadEndpoints` | function | 184 |
-| 12 | `getActiveBranches` | function | 218 |
-| 13 | `runFefoWriteFlow` | function | 227 |
-| 14 | `runImportFlow` | function | 382 |
-| 15 | `tinyPngBytes` | function | 432 |
-| 16 | `runFilesFlow` | function | 439 |
-| 17 | `runBackupFlow` | function | 454 |
-| 18 | `pollSystemJob` | function | 491 |
-| 19 | `cleanupAuditData` | function | 504 |
-| 20 | `auditRemotePublic` | function | 535 |
-| 21 | `writeSummary` | function | 570 |
-| 22 | `main` | function | 581 |
+| 1 | `wait` | function | 61 |
+| 2 | `pushFinding` | function | 65 |
+| 3 | `assert` | function | 74 |
+| 4 | `isJsonResponse` | function | 78 |
+| 5 | `fetchWithTimeout` | function | 82 |
+| 6 | `request` | function | 92 |
+| 7 | `recordApi` | function | 138 |
+| 8 | `login` | function | 156 |
+| 9 | `captureHealth` | function | 169 |
+| 10 | `auditHtmlRoutes` | function | 183 |
+| 11 | `auditReadEndpoints` | function | 210 |
+| 12 | `getActiveBranches` | function | 244 |
+| 13 | `runFefoWriteFlow` | function | 253 |
+| 14 | `runImportFlow` | function | 408 |
+| 15 | `tinyPngBytes` | function | 458 |
+| 16 | `runFilesFlow` | function | 465 |
+| 17 | `runBackupFlow` | function | 480 |
+| 18 | `pollSystemJob` | function | 517 |
+| 19 | `cleanupAuditData` | function | 535 |
+| 20 | `auditRemotePublic` | function | 566 |
+| 21 | `writeSummary` | function | 601 |
+| 22 | `main` | function | 612 |
 
 ### 3.468 `ops/scripts/runtime/browser-action-smoke.ts`
 
