@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-3YHUNEiJ.js` | 185.7 |
+| `frontend/dist/assets/catalog-CenxhzVC.js` | 185.7 |
 | `frontend/dist/assets/index-DQztsXP7.css` | 151.6 |
-| `frontend/dist/assets/Inventory-Skt2vO6g.js` | 143.6 |
-| `frontend/dist/assets/index-DPoXIY5O.js` | 127.8 |
+| `frontend/dist/assets/Inventory-BonSlzKg.js` | 143.6 |
+| `frontend/dist/assets/index-BvPs9Ef_.js` | 127.8 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/app-shared-Gzmh9g16.js` | 94.0 |
-| `frontend/dist/assets/Products-D5_1VlAx.js` | 91.2 |
-| `frontend/dist/assets/POS-DRvl_WXp.js` | 75.0 |
+| `frontend/dist/assets/app-shared-D6GzTnj4.js` | 94.0 |
+| `frontend/dist/assets/Products-TtyWThf3.js` | 91.2 |
+| `frontend/dist/assets/POS-GCFnqcmc.js` | 75.0 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/catalog-editor-DiqYIO6v.js` | 70.4 |
-| `frontend/dist/assets/Dashboard-CAl8qH4D.js` | 70.2 |
-| `frontend/dist/assets/BulkImportModal-BbboA3ii.js` | 68.2 |
-| `frontend/dist/assets/catalog-preview-B01RCOlA.js` | 64.0 |
-| `frontend/dist/assets/app-api-methods-BJh1CQjt.js` | 60.1 |
-| `frontend/dist/assets/Backup-kufychX0.js` | 57.7 |
+| `frontend/dist/assets/catalog-editor-CZyVuWRw.js` | 70.4 |
+| `frontend/dist/assets/Dashboard-BzgOgm44.js` | 70.2 |
+| `frontend/dist/assets/BulkImportModal-M62haIMN.js` | 68.2 |
+| `frontend/dist/assets/catalog-preview-Cn-g8VoV.js` | 64.0 |
+| `frontend/dist/assets/app-api-methods-DXTk-qYg.js` | 60.1 |
+| `frontend/dist/assets/Backup-6zq7SlPA.js` | 57.7 |
 | `frontend/dist/assets/vendor-lucide-B4xjFBi_.js` | 52.5 |
-| `frontend/dist/assets/Settings-2n_Y1Pqb.js` | 51.8 |
-| `frontend/dist/assets/Users-BnbMmUDQ.js` | 40.2 |
-| `frontend/dist/assets/Branches-i6JQd175.js` | 37.4 |
-| `frontend/dist/assets/ReceiptSettings-DbuJTGVp.js` | 37.1 |
-| `frontend/dist/assets/app-api-M8zzHJvu.js` | 37.0 |
-| `frontend/dist/assets/Sales-OfXlmZvb.js` | 34.7 |
+| `frontend/dist/assets/Settings-C18bNy_P.js` | 51.8 |
+| `frontend/dist/assets/Users-BKnyqy36.js` | 40.2 |
+| `frontend/dist/assets/Branches-s1m4LzAh.js` | 37.4 |
+| `frontend/dist/assets/ReceiptSettings-B_d_np_J.js` | 37.1 |
+| `frontend/dist/assets/app-api-CXnbRBNg.js` | 37.0 |
+| `frontend/dist/assets/Sales-BfpGj1qg.js` | 34.7 |
 
 ## 5. Notes
 

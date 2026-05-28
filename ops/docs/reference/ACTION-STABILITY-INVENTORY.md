@@ -131,7 +131,7 @@ Backend:
 | Customer returns | `frontend/src/components/returns/NewReturnModal.jsx`, `frontend/src/components/returns/EditReturnModal.jsx`, `backend/src/routes/returns.js` | Duplicate returns, wrong restored stock | `submitting`, synchronous submit ref, backend idempotency for creates | Add deeper edit conflict Playwright check |
 | Supplier returns | `frontend/src/components/returns/NewSupplierReturnModal.jsx`, `backend/src/routes/returns.js` | Duplicate supplier stock removal | `submitting`, synchronous submit ref, backend idempotency | Add live form-state Playwright check |
 | Product import/apply | `frontend/src/components/products/import/BulkImportModal.jsx`, `frontend/src/api/methods.js`, `backend/src/routes/importJobs.js` | Multiple import jobs, repeated uploads, conflicting apply | `loading`, synchronous in-flight ref, server job state, rate limits | Add deeper server idempotency review for approve/start |
-| Product media upload | `frontend/src/components/products/forms/ProductForm.jsx`, `frontend/src/api/methods.js`, `backend/src/routes/products.js` | Duplicate media, broken primary image | `saving`, `imageUploading`, synchronous upload/save refs, live-server write requirement | Add failure recovery check |
+| Product media upload | `frontend/src/components/products/forms/ProductForm.tsx`, `frontend/src/api/methods.js`, `backend/src/routes/products.js` | Duplicate media, broken primary image | `saving`, `imageUploading`, synchronous upload/save refs, live-server write requirement | Add failure recovery check |
 | Catalog/public media | `frontend/src/components/catalog/CatalogPage.jsx`, `frontend/src/components/catalog/CatalogEditorSurface.jsx`, `frontend/src/components/catalog/CatalogImageField.jsx` | Broken public media refs | per-block upload status, per-target synchronous upload guard | Add path ownership and retry checks |
 | File library upload/delete | `frontend/src/components/files/FilePickerModal.jsx`, `frontend/src/components/files/FilesPage.jsx`, `backend/src/routes/files.js` | Duplicate assets, wrong delete | `uploading`, delete id state, synchronous upload/delete refs | Add live file-picker Playwright check |
 | Backup export/restore | `frontend/src/components/utils-settings/Backup.jsx`, `backend/src/routes/system/index.js`, `backend/src/systemJobs.js` | Data loss, duplicate destructive jobs | `loading`, active job disable, backend dedupe key | Keep regression proving UI + backend job dedupe |
@@ -544,7 +544,7 @@ Continue with Phase 8.4:
   and
   `ops/runtime/reports/phase84-ui-live-check-2026-05-18T07-05-08-089Z/report.json`.
   The tenth physical move placed the main product form at
-  `frontend/src/components/products/forms/ProductForm.jsx`; action-stability
+  `frontend/src/components/products/forms/ProductForm.tsx`; action-stability
   source checks, performance-loading source checks, the Product page action live
   check, and the Product scanner live check passed against frontend hash
   `d1de3f08c3064e4d`. Latest reports:

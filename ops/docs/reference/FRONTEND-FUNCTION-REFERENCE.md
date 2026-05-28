@@ -77,7 +77,7 @@ Total files documented: **193**
 | 65 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
 | 66 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 6 |
 | 67 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 6 |
-| 68 | `frontend/src/components/products/forms/ProductForm.jsx` | 17 |
+| 68 | `frontend/src/components/products/forms/ProductForm.tsx` | 18 |
 | 69 | `frontend/src/components/products/forms/VariantFormModal.tsx` | 3 |
 | 70 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 1 |
 | 71 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 5 |
@@ -1313,27 +1313,28 @@ Total files documented: **193**
 | 5 | `BulkAddStockModal` | component/function | 88 |
 | 6 | `handleSave` | const arrow | 101 |
 
-### 3.68 `frontend/src/components/products/forms/ProductForm.jsx`
+### 3.68 `frontend/src/components/products/forms/ProductForm.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizeGallery` | function | 20 |
-| 2 | `editablePrice` | function | 36 |
-| 3 | `pickImageFiles` | function | 41 |
-| 4 | `ProductForm` | component/function | 60 |
-| 5 | `tr` | const arrow | 147 |
-| 6 | `loadSuppliers` | function | 192 |
-| 7 | `setField` | function | 211 |
-| 8 | `setNumericField` | function | 215 |
-| 9 | `addImages` | function | 219 |
-| 10 | `addPhoto` | function | 224 |
-| 11 | `uploadPickedImages` | function | 229 |
-| 12 | `removeImage` | function | 274 |
-| 13 | `setPrimaryImage` | function | 278 |
-| 14 | `saveForm` | function | 288 |
-| 15 | `openScanner` | function | 339 |
-| 16 | `closeScanner` | function | 344 |
-| 17 | `applyScannedValue` | function | 348 |
+| 1 | `getProductFormApi` | function | 188 |
+| 2 | `getErrorMessage` | function | 192 |
+| 3 | `normalizeGallery` | function | 196 |
+| 4 | `editablePrice` | function | 212 |
+| 5 | `pickImageFiles` | function | 217 |
+| 6 | `ProductForm` | component/function | 236 |
+| 7 | `loadSuppliers` | function | 371 |
+| 8 | `setField` | function | 392 |
+| 9 | `setNumericField` | function | 396 |
+| 10 | `addImages` | function | 400 |
+| 11 | `addPhoto` | function | 405 |
+| 12 | `uploadPickedImages` | function | 410 |
+| 13 | `removeImage` | function | 457 |
+| 14 | `setPrimaryImage` | function | 461 |
+| 15 | `saveForm` | function | 471 |
+| 16 | `openScanner` | function | 522 |
+| 17 | `closeScanner` | function | 527 |
+| 18 | `applyScannedValue` | function | 531 |
 
 ### 3.69 `frontend/src/components/products/forms/VariantFormModal.tsx`
 

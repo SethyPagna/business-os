@@ -220,7 +220,7 @@ Code files documented: **466**
 | 208 | `frontend/src/components/products/config/productPageConfig.ts` | 0 | 9 | 0 | 0 |
 | 209 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 3 | 1 | 2 | 1 |
 | 210 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 3 | 1 | 2 | 1 |
-| 211 | `frontend/src/components/products/forms/ProductForm.jsx` | 9 | 1 | 7 | 1 |
+| 211 | `frontend/src/components/products/forms/ProductForm.tsx` | 9 | 1 | 7 | 1 |
 | 212 | `frontend/src/components/products/forms/VariantFormModal.tsx` | 8 | 1 | 7 | 1 |
 | 213 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 1 | 7 | 1 | 0 |
 | 214 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 2 | 4 | 2 | 0 |
@@ -3811,7 +3811,7 @@ Code files documented: **466**
 - Referenced by (5)
   - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
   - `frontend/src/components/contacts/ContactImportModal.jsx`
-  - `frontend/src/components/products/forms/ProductForm.jsx`
+  - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
 
@@ -4189,7 +4189,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/forms/ProductForm.jsx`
+  - `frontend/src/components/products/forms/ProductForm.tsx`
 
 ### 3.210 `frontend/src/components/products/forms/BulkAddStockModal.tsx`
 
@@ -4204,13 +4204,13 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.211 `frontend/src/components/products/forms/ProductForm.jsx`
+### 3.211 `frontend/src/components/products/forms/ProductForm.tsx`
 
 - Declared exports: `function`
 - Imports (9)
   - `../../../utils/mediaUpload.ts`
   - `../../../utils/pricing.ts`
-  - `../../files/FilePickerModal`
+  - `../../files/FilePickerModal.jsx`
   - `../../shared/Modal`
   - `../scanning/BarcodeScannerModal`
   - `../shared/primitives`
@@ -4493,7 +4493,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/api/http.ts`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
-  - `frontend/src/components/products/forms/ProductForm.jsx`
+  - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/history/productHistoryHelpers.ts`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
@@ -4551,7 +4551,7 @@ Code files documented: **466**
   - `frontend/src/components/products/scanning/scanbotScanner.ts`
   - `frontend/src/components/shared/Modal.tsx`
 - Referenced by (1)
-  - `frontend/src/components/products/forms/ProductForm.jsx`
+  - `frontend/src/components/products/forms/ProductForm.tsx`
 
 ### 3.232 `frontend/src/components/products/scanning/barcodeScannerState.ts`
 
@@ -4590,7 +4590,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogPreviewSurface.jsx`
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/pos/ProductImage.tsx`
-  - `frontend/src/components/products/forms/ProductForm.jsx`
+  - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
@@ -5189,7 +5189,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
-  - `frontend/src/components/products/forms/ProductForm.jsx`
+  - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/import/BulkImportModal.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
@@ -6054,7 +6054,7 @@ Code files documented: **466**
   - `frontend/src/utils/publicAssetUrls.ts`
 - Referenced by (3)
   - `frontend/src/components/catalog/CatalogImageField.jsx`
-  - `frontend/src/components/products/forms/ProductForm.jsx`
+  - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/tests/mediaUploadHelpers.test.ts`
 
 ### 3.321 `frontend/src/utils/permissions.ts`
@@ -6084,7 +6084,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/pos/posCore.ts`
-  - `frontend/src/components/products/forms/ProductForm.jsx`
+  - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/helpers/productDisplayHelpers.ts`
   - `frontend/src/components/products/helpers/productFilterHelpers.ts`

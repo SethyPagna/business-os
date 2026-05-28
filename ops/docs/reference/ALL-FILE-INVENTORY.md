@@ -243,7 +243,7 @@ Total files documented: **529**
 | 231 | `frontend/src/components/products/config/productPageConfig.ts` | frontend-ui | 24 | 0.7 | UI component/page |
 | 232 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | frontend-ui | 193 | 6.5 | UI component/page |
 | 233 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | frontend-ui | 180 | 6.2 | UI component/page |
-| 234 | `frontend/src/components/products/forms/ProductForm.jsx` | frontend-ui | 940 | 46.9 | UI component/page |
+| 234 | `frontend/src/components/products/forms/ProductForm.tsx` | frontend-ui | 1129 | 52.2 | UI component/page |
 | 235 | `frontend/src/components/products/forms/VariantFormModal.tsx` | frontend-ui | 376 | 15.7 | UI component/page |
 | 236 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | frontend-ui | 156 | 5.8 | UI component/page |
 | 237 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | frontend-ui | 216 | 9.0 | UI component/page |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 92.9 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 92.8 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |

@@ -953,7 +953,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `BranchStockAdjuster.tsx` | UI component/page |
 | 2 | `BulkAddStockModal.tsx` | UI component/page |
-| 3 | `ProductForm.jsx` | UI component/page |
+| 3 | `ProductForm.tsx` | UI component/page |
 | 4 | `VariantFormModal.tsx` | UI component/page |
 
 
