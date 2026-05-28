@@ -63,7 +63,7 @@ function cleanupLiveSmokeData(seed) {
   if (!CLEANUP_TEST_DATA || !seed) return
   const outputPath = path.join(ROOT_DIR, 'ops/runtime/reports/live-smoke-cleanup-latest.json')
   const result = spawnSync(process.execPath, [
-    path.join(ROOT_DIR, 'ops/scripts/runtime/storage/cleanup-test-data.mjs'),
+    path.join(ROOT_DIR, 'ops/scripts/runtime/storage/cleanup-test-data.ts'),
     '--prefix',
     seed,
     '--apply',

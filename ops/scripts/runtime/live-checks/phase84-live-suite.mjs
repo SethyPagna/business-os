@@ -22,7 +22,7 @@ const SUITE_STEPS = [
   },
   {
     name: 'post-live hygiene gate',
-    script: 'ops/scripts/runtime/storage/post-live-hygiene.mjs',
+    script: 'ops/scripts/runtime/storage/post-live-hygiene.ts',
     flag: 'skipHygiene',
     reportPath: 'ops/runtime/reports/post-live-hygiene-latest.json',
   },

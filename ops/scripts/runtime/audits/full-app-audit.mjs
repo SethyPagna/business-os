@@ -508,7 +508,7 @@ async function cleanupAuditData() {
   }
   const outputPath = path.join(REPORT_DIR, 'test-data-cleanup.json')
   const result = spawnSync(process.execPath, [
-    path.join(ROOT_DIR, 'ops/scripts/runtime/storage/cleanup-test-data.mjs'),
+    path.join(ROOT_DIR, 'ops/scripts/runtime/storage/cleanup-test-data.ts'),
     '--all-qa',
     '--apply',
     '--output',

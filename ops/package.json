@@ -13,14 +13,14 @@
     "generated-bulk-audit": "node scripts/architecture/generated-bulk-audit.ts",
     "language-runtime-audit": "node scripts/architecture/language-runtime-audit.ts",
     "phase29:audit": "node scripts/architecture/phase29-audit.ts",
-    "cleanup-test-data": "node scripts/runtime/storage/cleanup-test-data.mjs",
-    "cleanup-test-data:check": "node scripts/runtime/storage/cleanup-test-data.mjs --all-qa --dry-run --fail-on-match",
-    "cleanup-test-data:check-smoke": "node scripts/runtime/storage/cleanup-test-data.mjs --prefix \"QA Smoke\" --dry-run --fail-on-match",
-    "cleanup-test-data:check-action-history": "node scripts/runtime/storage/cleanup-test-data.mjs --prefix \"QA Action History\" --dry-run --fail-on-match",
-    "cleanup-integrity-backlog": "node scripts/runtime/storage/cleanup-integrity-backlog.mjs --dry-run --output ops/runtime/reports/cleanup-integrity-backlog-preview-latest.json",
-    "cleanup-integrity-backlog:apply": "node scripts/runtime/storage/cleanup-integrity-backlog.mjs --apply --output ops/runtime/reports/cleanup-integrity-backlog-apply-latest.json",
-    "post-live-hygiene": "node scripts/runtime/storage/post-live-hygiene.mjs",
-    "live-hygiene:check": "node scripts/runtime/storage/post-live-hygiene.mjs",
+    "cleanup-test-data": "node scripts/runtime/storage/cleanup-test-data.ts",
+    "cleanup-test-data:check": "node scripts/runtime/storage/cleanup-test-data.ts --all-qa --dry-run --fail-on-match",
+    "cleanup-test-data:check-smoke": "node scripts/runtime/storage/cleanup-test-data.ts --prefix \"QA Smoke\" --dry-run --fail-on-match",
+    "cleanup-test-data:check-action-history": "node scripts/runtime/storage/cleanup-test-data.ts --prefix \"QA Action History\" --dry-run --fail-on-match",
+    "cleanup-integrity-backlog": "node scripts/runtime/storage/cleanup-integrity-backlog.ts --dry-run --output ops/runtime/reports/cleanup-integrity-backlog-preview-latest.json",
+    "cleanup-integrity-backlog:apply": "node scripts/runtime/storage/cleanup-integrity-backlog.ts --apply --output ops/runtime/reports/cleanup-integrity-backlog-apply-latest.json",
+    "post-live-hygiene": "node scripts/runtime/storage/post-live-hygiene.ts",
+    "live-hygiene:check": "node scripts/runtime/storage/post-live-hygiene.ts",
     "phase84:live-suite": "node scripts/runtime/live-checks/phase84-live-suite.mjs",
     "dataset-readiness": "node scripts/runtime/storage/dataset-readiness.ts --output ops/runtime/reports/dataset-readiness-latest.json",
     "dataset-readiness:loaded": "node scripts/runtime/storage/dataset-readiness.ts --fail-if-empty --output ops/runtime/reports/dataset-readiness-latest.json",
@@ -30,8 +30,8 @@
     "schema-pk-preflight": "node scripts/backend/schema-primary-key-preflight.ts",
     "schema-pk-preflight:strict": "node scripts/backend/schema-primary-key-preflight.ts --fail-on-blocker",
     "phase29:audit:repeat": "node scripts/architecture/phase29-audit.ts --repeat 3",
-    "prune-storage": "node scripts/runtime/storage/prune-storage.mjs",
-    "prune-storage:preview": "node scripts/runtime/storage/prune-storage.mjs --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json"
+    "prune-storage": "node scripts/runtime/storage/prune-storage.ts",
+    "prune-storage:preview": "node scripts/runtime/storage/prune-storage.ts --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json"
   },
   "devDependencies": {
     "playwright": "^1.59.1"

@@ -492,7 +492,7 @@ Decision rule:
     page Playwright, and focused Product scanner Playwright passed on frontend
     hash `875d7a0928f443de`.
 42. Add storage-retention cleanup lane. Done:
-    `ops/scripts/runtime/storage/prune-storage.mjs` owns generated runtime report
+    `ops/scripts/runtime/storage/prune-storage.ts` owns generated runtime report
     pruning, local datasync backup pruning across root and organization backup
     folders, optional ignored demo artifact removal, and Cloudflare R2 backup
     mirror pruning. Backend backup packages now expose pure retention planning
@@ -673,7 +673,7 @@ Decision rule:
     packages and leaves unrelated folders untouched. This folds the manual
     Phase 29 cleanup rule into the standard `prune-storage` path.
 60. Add recovery-report retention to standard cleanup. Done:
-    `ops/scripts/runtime/storage/prune-storage.mjs` owns
+    `ops/scripts/runtime/storage/prune-storage.ts` owns
     `ops/runtime/recovery-reports` retention with a default latest-five policy
     and optional `--recovery-reports-keep` override. The helper can prune both
     recovery-report directories and generated top-level files when explicitly
@@ -682,7 +682,7 @@ Decision rule:
     newest Khmer repair reports.
 61. Group storage cleanup runtime script. Done:
     The storage retention implementation moved to
-    `ops/scripts/runtime/storage/prune-storage.mjs`. `ops/package.json` and
+    `ops/scripts/runtime/storage/prune-storage.ts`. `ops/package.json` and
     full automation point at the grouped storage path directly. The temporary
     root runtime compatibility wrapper stayed in place until Move 74, when the
     remaining test and plan references were rewired and the wrapper was
@@ -775,7 +775,7 @@ Decision rule:
     reported zero active references.
 74. Delete the storage cleanup compatibility wrapper. Done:
     `ops/package.json`, full automation, and storage-retention tests now rely on
-    `ops/scripts/runtime/storage/prune-storage.mjs` directly. The old root
+    `ops/scripts/runtime/storage/prune-storage.ts` directly. The old root
     runtime storage wrapper had no remaining command entrypoint responsibility
     and was deleted after its final test assertion was converted into an
     absence check.
@@ -832,7 +832,7 @@ Decision rule:
     stopped container plus builder cache; volumes and current release images
     were preserved to avoid data loss.
 83. Add opt-in Docker-safe prune to storage retention. Done:
-    `ops/scripts/runtime/storage/prune-storage.mjs` now accepts
+    `ops/scripts/runtime/storage/prune-storage.ts` now accepts
     `--docker-safe-prune`, reports `docker system df`, and prunes only stopped
     containers plus builder cache. It never prunes Docker volumes, images, or
     the whole Docker system. `ops/automation/business-os-automation.json`
@@ -1906,7 +1906,7 @@ Decision rule:
     backup objects to delete, and ran Docker-safe prune without touching Docker
     images or volumes.
 230. Include standalone report files in runtime retention. Done:
-    `ops/scripts/runtime/storage/prune-storage.mjs` now prunes generated report
+    `ops/scripts/runtime/storage/prune-storage.ts` now prunes generated report
     files and report folders together under the same `--reports-keep` limit.
     The Docker release guardrail checks this with `cloudflareRuntimeCoverage`.
     Running the updated retention command removed three older Cloudflare report
@@ -1914,7 +1914,7 @@ Decision rule:
     freeing 1,199,593 bytes while preserving secrets, uploads, latest backups,
     Docker images, and Docker volumes.
 231. Compact generated runtime logs instead of deleting log paths. Done:
-    `ops/scripts/runtime/storage/prune-storage.mjs` now accepts
+    `ops/scripts/runtime/storage/prune-storage.ts` now accepts
     `--log-file-max-bytes` and compacts oversized `.log` files under
     `ops/runtime/logs` and `ops/runtime/pm2` by keeping the newest tail plus a
     compaction header. This preserves expected log paths for PM2, Cloudflare,
@@ -1923,7 +1923,7 @@ Decision rule:
     generated logs and freed 12,381,136 bytes without touching secrets, env
     files, uploads, backups, Docker images, or Docker volumes.
 232. Centralize runtime cleanup defaults in the automation policy. Done:
-    `ops/scripts/runtime/storage/prune-storage.mjs` now accepts `--policy` and
+    `ops/scripts/runtime/storage/prune-storage.ts` now accepts `--policy` and
     loads report retention, recovery-report retention, local backup retention,
     Cloudflare R2 backup retention, demo cleanup, Docker-safe prune, and
     runtime log cap defaults from `ops/automation/business-os-automation.json`.
@@ -1932,7 +1932,7 @@ Decision rule:
     guardrail and Phase 29 repeat audit now check this policy-driven path so
     cleanup strategy changes stay centralized and measurable.
 233. Write the latest runtime cleanup ledger from automation. Done:
-    `ops/scripts/runtime/storage/prune-storage.mjs` now accepts `--output` and
+    `ops/scripts/runtime/storage/prune-storage.ts` now accepts `--output` and
     writes the full retention summary JSON to a workspace-bounded path after
     every run. `ops/scripts/powershell/full-automation.ps1` writes
     `ops/runtime/reports/prune-storage-latest.json`, giving future sessions one
@@ -1949,7 +1949,7 @@ Decision rule:
     runtime, Cloudflare, or cleanup rewires must preserve the generated cleanup
     ledger, its automation wiring, and its ignored-runtime boundary.
 235. Clean accumulated QA/smoke business data and prevent repeat pollution. Done:
-    `ops/scripts/runtime/storage/cleanup-test-data.mjs` and the
+    `ops/scripts/runtime/storage/cleanup-test-data.ts` and the
     `ops` package script `cleanup-test-data` now provide a guarded dry-run/apply
     cleanup for `QA Audit ...` smoke data. The cleanup removes matched products,
     product batches, sales, returns, inventory movements, stock transfers,
@@ -1977,7 +1977,7 @@ Decision rule:
     so future audit/test rewires cannot silently reintroduce test data buildup.
 237. Make live smoke tests self-cleaning by prefix. Done:
     `ops/scripts/runtime/smoke/live-smoke.mjs` now calls the guarded
-    `cleanup-test-data.mjs` path in `finally` with the exact `QA Smoke ...`
+    `cleanup-test-data.ts` path in `finally` with the exact `QA Smoke ...`
     prefix it created, writing
     `ops/runtime/reports/live-smoke-cleanup-latest.json`. The cleanup script now
     also matches prefix-based import job file paths and generated import
@@ -1986,7 +1986,7 @@ Decision rule:
     `testDataCleanupCoverage` now checks this live-smoke wiring, prefix import
     cleanup support, and the runtime-only cleanup report.
 238. Add no-leftover QA/smoke postcheck gates. Done:
-    `ops/scripts/runtime/storage/cleanup-test-data.mjs` now supports
+    `ops/scripts/runtime/storage/cleanup-test-data.ts` now supports
     `--fail-on-match` for dry-run postchecks, returning a failing exit code if
     any matched database rows or generated import directories remain. The `ops`
     package now exposes `cleanup-test-data:check` for `QA Audit ...` data and
@@ -2002,7 +2002,7 @@ Decision rule:
     creates one reversible `QA Action History ...` row, calls the server
     `/undo` and `/redo` transitions, verifies payload round-trip plus the final
     `undoable` state, then removes its own action-history and audit-log rows via
-    `cleanup-test-data.mjs` in `finally`. The `ops` package exposes
+    `cleanup-test-data.ts` in `finally`. The `ops` package exposes
     `action-history:check`, full automation runs it before the QA/smoke
     postchecks, and the Docker release guardrail verifies the script, package
     entry, cleanup report, and full-automation wiring.
@@ -2067,14 +2067,14 @@ Decision rule:
     `idx_rfid_events_dedupe_key_unique` index, reducing duplicate raw-event
     growth without losing session review counts.
 247. Broaden test-data residue guardrails. Done:
-    `cleanup-test-data.mjs` now treats `QA Audit`, `QA Smoke`, and
+    `cleanup-test-data.ts` now treats `QA Audit`, `QA Smoke`, and
     `QA Action History` as generated verification data in its broad QA scan,
     including smoke import files under generated import folders. The ops package
     now exposes `cleanup-test-data:check-action-history`, full automation writes
     `action-history-cleanup-postcheck-latest.json`, and the Docker release
     guardrail verifies the stronger no-leftover postcheck wiring.
 248. Make storage-prune previews non-destructive by construction. Done:
-    `prune-storage.mjs` now refuses to write a preview-named report unless
+    `prune-storage.ts` now refuses to write a preview-named report unless
     `--dry-run` is present, and `ops/package.json` exposes
     `prune-storage:preview` for safe local review. Normal automation keeps using
     the apply path, while ad hoc preview commands cannot accidentally delete old
@@ -2087,7 +2087,7 @@ Decision rule:
 250. Make live-smoke lookup residue prefix-scoped. Done:
     `ops/scripts/runtime/smoke/live-smoke.mjs` now writes the unique `QA Smoke`
     seed into product category and brand fields, including imported smoke CSV
-    rows, instead of using generic `Smoke` metadata. `cleanup-test-data.mjs`
+    rows, instead of using generic `Smoke` metadata. `cleanup-test-data.ts`
     now counts and removes empty QA-prefixed category/unit lookup rows in both
     dry-run postchecks and apply mode, so future smoke/import verification does
     not leave hidden lookup residue after product rows are cleaned.
@@ -2132,7 +2132,7 @@ Decision rule:
     `5506, 5507, 5509, 5510, 5512` and unclassified IDs
     `5505, 5508, 5511, 5514, 5517` at sample limit 5.
 256. Add guarded generated-integrity cleanup pathway. Done:
-    `ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs` now gives ops a
+    `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` now gives ops a
     dry-run-first cleanup path for generated-like integrity residue only. The
     ops package exposes `cleanup-integrity-backlog` for preview reports and
     `cleanup-integrity-backlog:apply` for explicit transaction-backed cleanup.
@@ -2145,7 +2145,7 @@ Decision rule:
     restore/import decisions must use verified backup packages, not broad
     cleanup assumptions.
 257. Apply generated QA runtime cleanup after backup. Done:
-    With the backup from Move 256 in place, `cleanup-test-data.mjs --all-qa
+    With the backup from Move 256 in place, `cleanup-test-data.ts --all-qa
     --apply` removed the remaining generated QA smoke/deep-audit rows from the
     active release database: 8 products, 14 product batches, 8 branch-stock
     rows, 2 sales, 2 sale items, 2 returns, 2 return items, 17 inventory
@@ -2242,7 +2242,7 @@ Decision rule:
     release kit can be regenerated later with `run/docker/release.bat`; the
     Docker image and restored Postgres volume were not deleted.
 265. Add a reusable post-live hygiene gate. Done:
-    `ops/scripts/runtime/storage/post-live-hygiene.mjs` is now the standard
+    `ops/scripts/runtime/storage/post-live-hygiene.ts` is now the standard
     one-command postcheck after smoke, Playwright, and public-portal runs. It
     runs broad QA, `QA Smoke`, and `QA Action History` cleanup postchecks with
     `--fail-on-match`, previews generated-integrity cleanup and fails if any
@@ -2507,7 +2507,7 @@ Decision rule:
     Syntax check, focused automation coverage, live comprehensive integrity
     verification, full backend utility tests, and schema audit pass.
 295. Tighten and apply generated test-data cleanup. Done:
-    `ops/scripts/runtime/storage/cleanup-test-data.mjs` now includes
+    `ops/scripts/runtime/storage/cleanup-test-data.ts` now includes
     `QA Deep Audit` in the bounded `--all-qa` selector for products,
     text payloads, lookup names, and import-job JSON. The matching Docker
     release guard now requires that selector coverage. A live cleanup removed
@@ -2517,7 +2517,7 @@ Decision rule:
     The zero-residue postcheck, dataset readiness, comprehensive integrity,
     full backend utility suite, and Docker release cleanup guard pass.
 296. Make post-live hygiene resource-aware. Done:
-    `ops/scripts/runtime/storage/post-live-hygiene.mjs` now builds explicit
+    `ops/scripts/runtime/storage/post-live-hygiene.ts` now builds explicit
     hygiene check tasks and runs the Docker/Postgres-backed checks as
     `contention-safe-sequential-checks`. A live fully parallel trial showed
     Docker `psql` contention, so the final scheduler favors predictable
@@ -2878,7 +2878,7 @@ Decision rule:
     precomputed product/cost values. This was a backend route cleanup only; no
     folder move, schema migration, or runtime conversion was needed.
 351. Apply guarded runtime report and Docker safe-prune cleanup. Done:
-    `ops/scripts/runtime/storage/prune-storage.mjs` removed three old Phase
+    `ops/scripts/runtime/storage/prune-storage.ts` removed three old Phase
     8.4 report folders after a preview and postcheck, freeing 703,101 bytes.
     Business data, uploads, secrets, backups, Docker images, and Docker volumes
     were preserved. This was a retention cleanup only; no folder move, schema
@@ -3518,7 +3518,7 @@ Decision rule:
     the existing npm command names. The scripts now carry typed argument,
     count, package, and Docker option shapes, keep workspace path guards, and
     remain directly executable by Node 24 without changing the ops package
-    module type. `post-live-hygiene.mjs` and full-automation tests now call the
+    module type. `post-live-hygiene.ts` and full-automation tests now call the
     TypeScript storage readiness path.
 439. Convert route contract and post-start diagnostics smoke checks to
     TypeScript. Done: `check-route-contract.ts` and
@@ -3549,6 +3549,14 @@ Decision rule:
     backend automation tests now point at the TypeScript paths while preserving
     direct Node execution for tunnel origin updates, token rotation, Access/WAF
     verification, and R2 object-store checks.
+443. Convert storage cleanup and retention entrypoints to TypeScript. Done:
+    `cleanup-test-data.ts`, `cleanup-integrity-backlog.ts`,
+    `post-live-hygiene.ts`, and `prune-storage.ts` replace the storage `.mjs`
+    entrypoints. Ops package scripts, full automation, backend guardrails,
+    live-smoke cleanup calls, action-history cleanup calls, and Phase 8.4
+    hygiene orchestration now point at the TypeScript paths while preserving
+    guarded dry-run defaults, prefix-scoped QA cleanup, report retention, and
+    backup prune behavior.
 
 ## Safety Gates
 

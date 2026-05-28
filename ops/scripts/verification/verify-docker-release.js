@@ -11,8 +11,8 @@ const dockerfilePath = path.join(root, 'ops', 'docker', 'Dockerfile.release')
 const scriptPath = path.join(root, 'ops', 'scripts', 'powershell', 'docker-release.ps1')
 const dockerignorePath = path.join(root, '.dockerignore')
 const gitignorePath = path.join(root, '.gitignore')
-const pruneStoragePath = path.join(root, 'ops', 'scripts', 'runtime', 'storage', 'prune-storage.mjs')
-const cleanupTestDataPath = path.join(root, 'ops', 'scripts', 'runtime', 'storage', 'cleanup-test-data.mjs')
+const pruneStoragePath = path.join(root, 'ops', 'scripts', 'runtime', 'storage', 'prune-storage.ts')
+const cleanupTestDataPath = path.join(root, 'ops', 'scripts', 'runtime', 'storage', 'cleanup-test-data.ts')
 const actionHistoryCheckPath = path.join(root, 'ops', 'scripts', 'runtime', 'audits', 'action-history-undo-redo-check.ts')
 const liveSmokePath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'live-smoke.mjs')
 const routeContractPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'check-route-contract.ts')
@@ -153,7 +153,7 @@ function buildCloudflareRuntimeCoverage({ policy, policyParseError, pruneStorage
         pruneStorage.includes('outputPath') &&
         pruneStorage.includes('Refusing to write a preview-named prune report without --dry-run') &&
         pruneStorage.includes('fs.writeFileSync(args.outputPath'),
-      previewScriptDryRun: opsPackage?.scripts?.['prune-storage:preview'] === 'node scripts/runtime/storage/prune-storage.mjs --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json',
+      previewScriptDryRun: opsPackage?.scripts?.['prune-storage:preview'] === 'node scripts/runtime/storage/prune-storage.ts --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json',
       previewNameRequiresDryRun: pruneStorage.includes('preview-named prune report') &&
         pruneStorage.includes('!args.dryRun'),
       latestCleanupReportWrittenByAutomation: fullAutomation.includes('$StoragePruneReport') &&
@@ -177,7 +177,7 @@ function buildCloudflareRuntimeCoverage({ policy, policyParseError, pruneStorage
       dockerSafePruneOnly: pruneStorage.includes("args: ['container', 'prune', '-f']") &&
         pruneStorage.includes("args: ['builder', 'prune', '-f']") &&
         pruneStorage.includes('Volumes and images are never pruned'),
-      fullAutomationRunsRetention: fullAutomation.includes('prune-storage.mjs') &&
+      fullAutomationRunsRetention: fullAutomation.includes('prune-storage.ts') &&
         fullAutomation.includes('--policy') &&
         !fullAutomation.includes('--docker-safe-prune'),
     },
@@ -215,7 +215,7 @@ function buildTestDataCleanupCoverage({ cleanupTestData, actionHistoryCheck, ful
     actionHistoryCheckPresent: fs.existsSync(actionHistoryCheckPath),
     liveSmokeScriptPresent: fs.existsSync(liveSmokePath),
     actionHistoryPackageScriptPresent: opsPackage?.scripts?.['action-history:check'] === 'node scripts/runtime/audits/action-history-undo-redo-check.ts',
-    packageScriptPresent: opsPackage?.scripts?.['cleanup-test-data'] === 'node scripts/runtime/storage/cleanup-test-data.mjs',
+    packageScriptPresent: opsPackage?.scripts?.['cleanup-test-data'] === 'node scripts/runtime/storage/cleanup-test-data.ts',
     packagePostcheckScriptsPresent: opsPackage?.scripts?.['cleanup-test-data:check']?.includes('--fail-on-match') &&
       opsPackage?.scripts?.['cleanup-test-data:check-smoke']?.includes('--fail-on-match') &&
       opsPackage?.scripts?.['cleanup-test-data:check-action-history']?.includes('--fail-on-match'),
@@ -273,7 +273,7 @@ function buildTestDataCleanupCoverage({ cleanupTestData, actionHistoryCheck, ful
       cleanupTestData.includes('fs.writeFileSync(args.output'),
     fullAppAuditFinallyCleanup: fullAppAudit.includes('cleanupAuditData') &&
       fullAppAudit.includes('finally') &&
-      fullAppAudit.includes('cleanup-test-data.mjs') &&
+      fullAppAudit.includes('cleanup-test-data.ts') &&
       fullAppAudit.includes('--all-qa') &&
       fullAppAudit.includes('--apply') &&
       fullAppAudit.includes('BOS_AUDIT_CLEANUP'),
@@ -292,7 +292,7 @@ function buildTestDataCleanupCoverage({ cleanupTestData, actionHistoryCheck, ful
     liveSmokeFinallyCleanup: liveSmoke.includes('cleanupLiveSmokeData') &&
       liveSmoke.includes('finally') &&
       liveSmoke.includes('BOS_SMOKE_CLEANUP') &&
-      liveSmoke.includes('cleanup-test-data.mjs') &&
+      liveSmoke.includes('cleanup-test-data.ts') &&
       liveSmoke.includes('--prefix') &&
       liveSmoke.includes('--apply'),
     liveSmokeLookupPrefixScoped: liveSmoke.includes('category: seed') &&

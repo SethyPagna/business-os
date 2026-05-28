@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import { execFileSync } from 'node:child_process'
-import { createRequire } from 'node:module'
-import { fileURLToPath } from 'node:url'
+const fs = require('node:fs')
+const path = require('node:path')
+const { execFileSync } = require('node:child_process')
+const { createRequire } = require('node:module')
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..', '..', '..', '..')
 const requireFromBackend = createRequire(path.join(root, 'backend', 'package.json'))
 const DEFAULT_POLICY_PATH = path.join(root, 'ops', 'automation', 'business-os-automation.json')

@@ -65,7 +65,7 @@ runTest('full automation launcher and policy are present', () => {
     'verify-r2-object-store.ts',
     'Action history undo/redo live verification',
     'action-history-undo-redo-check.ts',
-    'prune-storage.mjs',
+    'prune-storage.ts',
     "'--policy', $PolicyPath",
     "'--output', $StoragePruneReport",
     'prune-storage-latest.json',
@@ -152,14 +152,14 @@ runTest('scaled runtime app and workers self-heal backend dependencies', () => {
 
 runTest('docker release verification protects generated cleanup boundaries', () => {
   const verifier = read('ops/scripts/verification/verify-docker-release.js')
-  const cleanupTestData = read('ops/scripts/runtime/storage/cleanup-test-data.mjs')
+  const cleanupTestData = read('ops/scripts/runtime/storage/cleanup-test-data.ts')
   const actionHistoryCheck = read('ops/scripts/runtime/audits/action-history-undo-redo-check.ts')
   const fullAppAudit = read('ops/scripts/runtime/audits/full-app-audit.mjs')
   const liveSmoke = read('ops/scripts/runtime/smoke/live-smoke.mjs')
   const opsPackage = JSON.parse(read('ops/package.json'))
-  assert.equal(opsPackage.scripts['cleanup-test-data'], 'node scripts/runtime/storage/cleanup-test-data.mjs')
+  assert.equal(opsPackage.scripts['cleanup-test-data'], 'node scripts/runtime/storage/cleanup-test-data.ts')
   assert.equal(opsPackage.scripts['action-history:check'], 'node scripts/runtime/audits/action-history-undo-redo-check.ts')
-  assert.equal(opsPackage.scripts['prune-storage:preview'], 'node scripts/runtime/storage/prune-storage.mjs --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json')
+  assert.equal(opsPackage.scripts['prune-storage:preview'], 'node scripts/runtime/storage/prune-storage.ts --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json')
   assert.match(opsPackage.scripts['cleanup-test-data:check'], /--fail-on-match/)
   assert.match(opsPackage.scripts['cleanup-test-data:check-smoke'], /--fail-on-match/)
   assert.match(opsPackage.scripts['cleanup-test-data:check-action-history'], /--fail-on-match/)
@@ -169,7 +169,7 @@ runTest('docker release verification protects generated cleanup boundaries', () 
   ;[
     '.dockerignore',
     '.gitignore',
-    'prune-storage.mjs',
+    'prune-storage.ts',
     'business-os-automation.json',
     'node_modules',
     '**/node_modules',
@@ -303,7 +303,7 @@ runTest('docker release verification protects generated cleanup boundaries', () 
   ].forEach((token) => assert.match(cleanupTestData, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))))
 
   ;[
-    'cleanup-test-data.mjs',
+    'cleanup-test-data.ts',
     'BOS_AUDIT_CLEANUP',
     'test-data-cleanup.json',
     '--all-qa',
@@ -329,7 +329,7 @@ runTest('docker release verification protects generated cleanup boundaries', () 
     'cleanupLiveSmokeData',
     'BOS_SMOKE_CLEANUP',
     'live-smoke-cleanup-latest.json',
-    'cleanup-test-data.mjs',
+    'cleanup-test-data.ts',
     '--prefix',
     '--apply',
     'finally',
@@ -776,15 +776,15 @@ runTest('backend data integrity verifier reports FK candidate orphans', () => {
 })
 
 runTest('generated integrity backlog cleanup is guarded and dry-run first', () => {
-  const cleanup = read('ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs')
+  const cleanup = read('ops/scripts/runtime/storage/cleanup-integrity-backlog.ts')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(
     opsPackage.scripts['cleanup-integrity-backlog'],
-    'node scripts/runtime/storage/cleanup-integrity-backlog.mjs --dry-run --output ops/runtime/reports/cleanup-integrity-backlog-preview-latest.json',
+    'node scripts/runtime/storage/cleanup-integrity-backlog.ts --dry-run --output ops/runtime/reports/cleanup-integrity-backlog-preview-latest.json',
   )
   assert.equal(
     opsPackage.scripts['cleanup-integrity-backlog:apply'],
-    'node scripts/runtime/storage/cleanup-integrity-backlog.mjs --apply --output ops/runtime/reports/cleanup-integrity-backlog-apply-latest.json',
+    'node scripts/runtime/storage/cleanup-integrity-backlog.ts --apply --output ops/runtime/reports/cleanup-integrity-backlog-apply-latest.json',
   )
   ;[
     'generated-like-integrity-backlog',
@@ -822,21 +822,21 @@ runTest('dataset readiness has a standalone ops check', () => {
 })
 
 runTest('post-live hygiene gate fails on residue or empty datasets', () => {
-  const hygiene = read('ops/scripts/runtime/storage/post-live-hygiene.mjs')
+  const hygiene = read('ops/scripts/runtime/storage/post-live-hygiene.ts')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(
     opsPackage.scripts['post-live-hygiene'],
-    'node scripts/runtime/storage/post-live-hygiene.mjs',
+    'node scripts/runtime/storage/post-live-hygiene.ts',
   )
   assert.equal(
     opsPackage.scripts['live-hygiene:check'],
-    'node scripts/runtime/storage/post-live-hygiene.mjs',
+    'node scripts/runtime/storage/post-live-hygiene.ts',
   )
   ;[
-    'cleanup-test-data.mjs',
+    'cleanup-test-data.ts',
     '--all-qa',
     '--fail-on-match',
-    'cleanup-integrity-backlog.mjs',
+    'cleanup-integrity-backlog.ts',
     'sumMatchedCounts',
     'Generated integrity cleanup preview still matches',
     'dataset-readiness.ts',
@@ -861,7 +861,7 @@ runTest('phase 8.4 live suite runs UI, public portal, then hygiene', () => {
   ;[
     'phase84-ui-live-check.mjs',
     'phase84-public-portal-cloudflare-check.mjs',
-    'post-live-hygiene.mjs',
+    'post-live-hygiene.ts',
     '--skip-ui',
     '--skip-public',
     '--skip-hygiene',

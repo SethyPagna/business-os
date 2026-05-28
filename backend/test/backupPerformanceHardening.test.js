@@ -126,7 +126,7 @@ runTest('backup version listing reads enough objects for recent package pages an
 
   runTest('backup package retention keeps local versions bounded and prunes R2 mirrors', () => {
     const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
-    const automation = fs.readFileSync(path.join(__dirname, '../../ops/scripts/runtime/storage/prune-storage.mjs'), 'utf8')
+    const automation = fs.readFileSync(path.join(__dirname, '../../ops/scripts/runtime/storage/prune-storage.ts'), 'utf8')
     const removedWrapperPath = path.join(
       __dirname,
       '../../ops/scripts/runtime',

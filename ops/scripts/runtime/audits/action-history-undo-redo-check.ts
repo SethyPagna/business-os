@@ -90,7 +90,7 @@ async function request(
 
 function runCleanupCommand(args: string[]): CleanupCommandResult {
   const result = spawnSync(process.execPath, [
-    path.join(ROOT_DIR, 'ops/scripts/runtime/storage/cleanup-test-data.mjs'),
+    path.join(ROOT_DIR, 'ops/scripts/runtime/storage/cleanup-test-data.ts'),
     ...args,
   ], {
     cwd: ROOT_DIR,

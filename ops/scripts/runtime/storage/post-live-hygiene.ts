@@ -1,10 +1,9 @@
 /* eslint-disable no-console */
-import fs from 'node:fs'
-import path from 'node:path'
-import { spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+const fs = require('node:fs')
+const path = require('node:path')
+const { spawn } = require('node:child_process')
 
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
+const ROOT_DIR = path.resolve(__dirname, '../../../..')
 const DEFAULT_REPORT = 'ops/runtime/reports/post-live-hygiene-latest.json'
 const INTEGRITY_BACKLOG_REPORT = 'ops/runtime/reports/cleanup-integrity-backlog-preview-latest.json'
 const DATASET_READINESS_REPORT = 'ops/runtime/reports/dataset-readiness-latest.json'
@@ -114,14 +113,14 @@ function nodeCheck(name, script, args = []) {
 
 function buildCheckPlan(args) {
   const checks = [
-    () => nodeCheck('broad QA cleanup postcheck', 'ops/scripts/runtime/storage/cleanup-test-data.mjs', [
+    () => nodeCheck('broad QA cleanup postcheck', 'ops/scripts/runtime/storage/cleanup-test-data.ts', [
       '--all-qa',
       '--dry-run',
       '--fail-on-match',
       '--output',
       'ops/runtime/reports/test-data-cleanup-postcheck-latest.json',
     ]),
-    () => nodeCheck('QA Smoke cleanup postcheck', 'ops/scripts/runtime/storage/cleanup-test-data.mjs', [
+    () => nodeCheck('QA Smoke cleanup postcheck', 'ops/scripts/runtime/storage/cleanup-test-data.ts', [
       '--prefix',
       'QA Smoke',
       '--dry-run',
@@ -129,7 +128,7 @@ function buildCheckPlan(args) {
       '--output',
       'ops/runtime/reports/live-smoke-cleanup-postcheck-latest.json',
     ]),
-    () => nodeCheck('QA Action History cleanup postcheck', 'ops/scripts/runtime/storage/cleanup-test-data.mjs', [
+    () => nodeCheck('QA Action History cleanup postcheck', 'ops/scripts/runtime/storage/cleanup-test-data.ts', [
       '--prefix',
       'QA Action History',
       '--dry-run',
@@ -138,7 +137,7 @@ function buildCheckPlan(args) {
       'ops/runtime/reports/action-history-cleanup-postcheck-latest.json',
     ]),
     () => withReportCheck(
-      nodeCheck('generated integrity cleanup postcheck', 'ops/scripts/runtime/storage/cleanup-integrity-backlog.mjs', [
+      nodeCheck('generated integrity cleanup postcheck', 'ops/scripts/runtime/storage/cleanup-integrity-backlog.ts', [
         '--dry-run',
         '--output',
         INTEGRITY_BACKLOG_REPORT,
