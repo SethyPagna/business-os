@@ -211,11 +211,11 @@ Code files documented: **466**
 | 199 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 | 1 | 2 | 1 |
 | 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 7 | 1 | 5 | 1 |
 | 201 | `frontend/src/components/navigation/Sidebar.jsx` | 7 | 1 | 6 | 1 |
-| 202 | `frontend/src/components/pos/CartItem.jsx` | 2 | 1 | 2 | 1 |
-| 203 | `frontend/src/components/pos/FilterPanel.jsx` | 1 | 1 | 0 | 1 |
+| 202 | `frontend/src/components/pos/CartItem.tsx` | 2 | 1 | 2 | 1 |
+| 203 | `frontend/src/components/pos/FilterPanel.tsx` | 2 | 1 | 0 | 1 |
 | 204 | `frontend/src/components/pos/POS.jsx` | 18 | 1 | 16 | 1 |
 | 205 | `frontend/src/components/pos/posCore.ts` | 3 | 9 | 3 | 0 |
-| 206 | `frontend/src/components/pos/ProductImage.tsx` | 2 | 1 | 1 | 1 |
+| 206 | `frontend/src/components/pos/ProductImage.tsx` | 1 | 1 | 1 | 1 |
 | 207 | `frontend/src/components/pos/QuickAddModal.tsx` | 1 | 1 | 0 | 1 |
 | 208 | `frontend/src/components/products/config/productPageConfig.ts` | 0 | 9 | 0 | 0 |
 | 209 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | 3 | 1 | 2 | 1 |
@@ -243,7 +243,7 @@ Code files documented: **466**
 | 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 7 | 1 | 4 | 1 |
 | 232 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 | 1 | 0 | 2 |
 | 233 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 0 | 3 | 0 | 2 |
-| 234 | `frontend/src/components/products/shared/primitives.jsx` | 3 | 0 | 1 | 9 |
+| 234 | `frontend/src/components/products/shared/primitives.tsx` | 3 | 0 | 1 | 9 |
 | 235 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 | 1 | 2 | 1 |
 | 236 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 5 | 1 | 4 | 1 |
 | 237 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 3 | 4 | 3 | 0 |
@@ -251,8 +251,8 @@ Code files documented: **466**
 | 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 3 | 1 | 2 | 1 |
 | 240 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 4 |
 | 241 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 | 1 | 0 | 1 |
-| 242 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
-| 243 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
+| 242 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 2 | 1 | 0 | 1 |
+| 243 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 4 | 1 | 2 | 1 |
 | 244 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 | 1 | 2 | 1 |
 | 245 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
 | 246 | `frontend/src/components/receipt-settings/template.ts` | 1 | 2 | 1 | 3 |
@@ -306,7 +306,7 @@ Code files documented: **466**
 | 294 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
 | 295 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
 | 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 7 | 0 | 0 |
-| 297 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 2 |
+| 297 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 3 |
 | 298 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
 | 299 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
 | 300 | `frontend/src/utils/actionHistory.ts` | 2 | 1 | 1 | 16 |
@@ -3257,7 +3257,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogImageField.jsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
   - `frontend/src/components/catalog/catalogUi.jsx`
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
@@ -3296,7 +3296,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
   - `frontend/src/components/catalog/catalogUi.jsx`
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/favicon.ts`
@@ -3326,7 +3326,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (4)
   - `frontend/src/components/files/FilePickerModal.jsx`
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (1)
@@ -3347,7 +3347,7 @@ Code files documented: **466**
 - Internal dependencies (6)
   - `frontend/src/components/catalog/catalogUi.jsx`
   - `frontend/src/components/catalog/portalCatalogDisplay.ts`
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/PaginationControls.tsx`
   - `frontend/src/utils/initials.ts`
   - `frontend/src/utils/scriptTypography.ts`
@@ -4069,7 +4069,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.202 `frontend/src/components/pos/CartItem.jsx`
+### 3.202 `frontend/src/components/pos/CartItem.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -4081,11 +4081,12 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.203 `frontend/src/components/pos/FilterPanel.jsx`
+### 3.203 `frontend/src/components/pos/FilterPanel.tsx`
 
 - Declared exports: `function`
-- Imports (1)
+- Imports (2)
   - `lucide-react`
+  - `react`
 - Internal dependencies (0)
   - none
 - Referenced by (1)
@@ -4116,8 +4117,8 @@ Code files documented: **466**
 - Internal dependencies (16)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
-  - `frontend/src/components/pos/CartItem.jsx`
-  - `frontend/src/components/pos/FilterPanel.jsx`
+  - `frontend/src/components/pos/CartItem.tsx`
+  - `frontend/src/components/pos/FilterPanel.tsx`
   - `frontend/src/components/pos/ProductImage.tsx`
   - `frontend/src/components/pos/QuickAddModal.tsx`
   - `frontend/src/components/receipt/Receipt.jsx`
@@ -4150,11 +4151,10 @@ Code files documented: **466**
 ### 3.206 `frontend/src/components/pos/ProductImage.tsx`
 
 - Declared exports: `function`
-- Imports (2)
-  - `../products/shared/primitives.jsx`
-  - `react`
+- Imports (1)
+  - `../products/shared/primitives`
 - Internal dependencies (1)
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
@@ -4221,7 +4221,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/products/forms/BranchStockAdjuster.jsx`
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/mediaUpload.ts`
   - `frontend/src/utils/pricing.ts`
@@ -4242,7 +4242,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (7)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/historyHelpers.ts`
@@ -4500,7 +4500,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageBrandsModal.jsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.jsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.jsx`
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/products/surfaces/HeaderActions.jsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
   - `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
@@ -4575,7 +4575,7 @@ Code files documented: **466**
   - `frontend/src/components/products/scanning/BarcodeScannerModal.jsx`
   - `frontend/tests/scanbotScanner.test.ts`
 
-### 3.234 `frontend/src/components/products/shared/primitives.jsx`
+### 3.234 `frontend/src/components/products/shared/primitives.tsx`
 
 - Declared exports: none detected
 - Imports (3)
@@ -4618,7 +4618,7 @@ Code files documented: **466**
   - `../shared/primitives`
   - `lucide-react`
 - Internal dependencies (4)
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/utils/color.ts`
   - `frontend/src/utils/pricing.ts`
   - `frontend/src/utils/productBatches.ts`
@@ -4686,7 +4686,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.242 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
+### 3.242 `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -4697,14 +4697,16 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.243 `frontend/src/components/receipt-settings/PrintSettings.jsx`
+### 3.243 `frontend/src/components/receipt-settings/PrintSettings.tsx`
 
 - Declared exports: `function`
-- Imports (3)
+- Imports (4)
+  - `../../types/receiptContracts`
   - `../../utils/printReceipt`
   - `lucide-react`
   - `react`
-- Internal dependencies (1)
+- Internal dependencies (2)
+  - `frontend/src/types/receiptContracts.ts`
   - `frontend/src/utils/printReceipt.ts`
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
@@ -4742,8 +4744,8 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
-  - `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
-  - `frontend/src/components/receipt-settings/PrintSettings.jsx`
+  - `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
+  - `frontend/src/components/receipt-settings/PrintSettings.tsx`
   - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
   - `frontend/src/components/receipt-settings/constants.ts`
   - `frontend/src/components/receipt-settings/template.ts`
@@ -5657,7 +5659,8 @@ Code files documented: **466**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (3)
+  - `frontend/src/components/receipt-settings/PrintSettings.tsx`
   - `frontend/src/utils/printReceipt.ts`
   - `frontend/src/utils/receiptAppliedConfig.ts`
 
@@ -6075,7 +6078,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/ProductDetailModal.jsx`
-  - `frontend/src/components/pos/CartItem.jsx`
+  - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/pos/posCore.ts`
   - `frontend/src/components/products/forms/ProductForm.jsx`
@@ -6096,7 +6099,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/types/receiptContracts.ts`
 - Referenced by (2)
-  - `frontend/src/components/receipt-settings/PrintSettings.jsx`
+  - `frontend/src/components/receipt-settings/PrintSettings.tsx`
   - `frontend/src/components/receipt/Receipt.jsx`
 
 ### 3.324 `frontend/src/utils/productBatches.ts`
@@ -6139,7 +6142,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/helpers/productGalleryHelpers.ts`
-  - `frontend/src/components/products/shared/primitives.jsx`
+  - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/utils/mediaUpload.ts`
 
 ### 3.327 `frontend/src/utils/receiptAppliedConfig.ts`
@@ -6164,7 +6167,7 @@ Code files documented: **466**
 - Referenced by (6)
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
-  - `frontend/src/components/pos/CartItem.jsx`
+  - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/scriptTypography.test.ts`

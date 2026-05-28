@@ -893,8 +893,8 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `CartItem.jsx` | UI component/page |
-| 2 | `FilterPanel.jsx` | UI component/page |
+| 1 | `CartItem.tsx` | UI component/page |
+| 2 | `FilterPanel.tsx` | UI component/page |
 | 3 | `POS.jsx` | UI component/page |
 | 4 | `posCore.ts` | UI component/page |
 | 5 | `ProductImage.tsx` | UI component/page |
@@ -1047,7 +1047,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `primitives.jsx` | UI component/page |
+| 1 | `primitives.tsx` | UI component/page |
 
 
 ### 3.48 Folder: `frontend/src/components/products/surfaces`
@@ -1092,8 +1092,8 @@ Total folders documented: **81**
 | 1 | `AllFieldsPanel.tsx` | UI component/page |
 | 2 | `constants.ts` | UI component/page |
 | 3 | `ErrorBoundary.tsx` | UI component/page |
-| 4 | `FieldOrderManager.jsx` | UI component/page |
-| 5 | `PrintSettings.jsx` | UI component/page |
+| 4 | `FieldOrderManager.tsx` | UI component/page |
+| 5 | `PrintSettings.tsx` | UI component/page |
 | 6 | `ReceiptPreview.tsx` | UI component/page |
 | 7 | `ReceiptSettings.jsx` | UI component/page |
 | 8 | `template.ts` | UI component/page |

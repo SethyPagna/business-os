@@ -211,8 +211,8 @@ Code files scanned: **466**
 | 199 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
 | 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
 | 201 | `frontend/src/components/navigation/Sidebar.jsx` | 7 |
-| 202 | `frontend/src/components/pos/CartItem.jsx` | 1 |
-| 203 | `frontend/src/components/pos/FilterPanel.jsx` | 6 |
+| 202 | `frontend/src/components/pos/CartItem.tsx` | 2 |
+| 203 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
 | 204 | `frontend/src/components/pos/POS.jsx` | 22 |
 | 205 | `frontend/src/components/pos/posCore.ts` | 10 |
 | 206 | `frontend/src/components/pos/ProductImage.tsx` | 1 |
@@ -243,7 +243,7 @@ Code files scanned: **466**
 | 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | 5 |
 | 232 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
 | 233 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 9 |
-| 234 | `frontend/src/components/products/shared/primitives.jsx` | 11 |
+| 234 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
 | 235 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | 3 |
 | 236 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | 3 |
 | 237 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | 5 |
@@ -251,8 +251,8 @@ Code files scanned: **466**
 | 239 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
 | 240 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
 | 241 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 |
-| 242 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 9 |
-| 243 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 9 |
+| 242 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 9 |
+| 243 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 8 |
 | 244 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
 | 245 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
 | 246 | `frontend/src/components/receipt-settings/template.ts` | 4 |
@@ -4013,22 +4013,22 @@ Code files scanned: **466**
 | 6 | `announcePageIntent` | function | 94 |
 | 7 | `Sidebar` | export default function | 101 |
 
-### 3.202 `frontend/src/components/pos/CartItem.jsx`
+### 3.202 `frontend/src/components/pos/CartItem.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `CartItem` | export default function | 4 |
+| 1 | `translate` | function | 41 |
+| 2 | `CartItem` | export default function | 45 |
 
-### 3.203 `frontend/src/components/pos/FilterPanel.jsx`
+### 3.203 `frontend/src/components/pos/FilterPanel.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `countActiveFlags` | function | 3 |
-| 2 | `POSFilterPanel` | export default function | 11 |
-| 3 | `T` | const arrow | 33 |
-| 4 | `clearAll` | const arrow | 44 |
-| 5 | `chip` | const arrow | 53 |
-| 6 | `SectionLabel` | const arrow | 59 |
+| 1 | `countActiveFlags` | function | 42 |
+| 2 | `SectionLabel` | function | 50 |
+| 3 | `POSFilterPanel` | export default function | 61 |
+| 4 | `clearAll` | const arrow | 94 |
+| 5 | `chip` | const arrow | 103 |
 
 ### 3.204 `frontend/src/components/pos/POS.jsx`
 
@@ -4076,7 +4076,7 @@ Code files scanned: **466**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductImage` | export default function | 12 |
+| 1 | `ProductImage` | export default function | 9 |
 
 ### 3.207 `frontend/src/components/pos/QuickAddModal.tsx`
 
@@ -4462,21 +4462,22 @@ Code files scanned: **466**
 | 8 | `getInitializedScanbot` | function | 143 |
 | 9 | `scanBarcodeWithScanbot` | export function | 158 |
 
-### 3.234 `frontend/src/components/products/shared/primitives.jsx`
+### 3.234 `frontend/src/components/products/shared/primitives.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `isRecentlyBrokenProductImage` | function | 11 |
-| 2 | `markBrokenProductImage` | function | 19 |
-| 3 | `sanitizeNumericInput` | function | 24 |
-| 4 | `parseNumericInput` | function | 34 |
-| 5 | `ProductImg` | function | 40 |
-| 6 | `loadImageData` | function | 82 |
-| 7 | `ProductImagePlaceholder` | function | 126 |
-| 8 | `MarginCard` | function | 134 |
-| 9 | `DualPriceInput` | function | 166 |
-| 10 | `handleUsdChange` | const arrow | 167 |
-| 11 | `handleKhrChange` | const arrow | 168 |
+| 1 | `getImageApi` | function | 49 |
+| 2 | `isRecentlyBrokenProductImage` | function | 53 |
+| 3 | `markBrokenProductImage` | function | 61 |
+| 4 | `sanitizeNumericInput` | function | 66 |
+| 5 | `parseNumericInput` | function | 76 |
+| 6 | `ProductImg` | function | 82 |
+| 7 | `loadImageData` | function | 125 |
+| 8 | `ProductImagePlaceholder` | function | 169 |
+| 9 | `MarginCard` | function | 177 |
+| 10 | `DualPriceInput` | function | 209 |
+| 11 | `handleUsdChange` | const arrow | 210 |
+| 12 | `handleKhrChange` | const arrow | 211 |
 
 ### 3.235 `frontend/src/components/products/surfaces/HeaderActions.jsx`
 
@@ -4534,33 +4535,32 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `formatError` | function | 11 |
 
-### 3.242 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
+### 3.242 `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSectionOrderItems` | function | 4 |
-| 2 | `buildList` | function | 23 |
-| 3 | `toKeys` | function | 48 |
-| 4 | `FieldOrderManager` | export default function | 52 |
-| 5 | `moveItem` | const arrow | 66 |
-| 6 | `addDivider` | const arrow | 74 |
-| 7 | `removeDivider` | const arrow | 85 |
-| 8 | `handleDragStart` | const arrow | 91 |
-| 9 | `handleDragOver` | const arrow | 96 |
+| 1 | `getSectionOrderItems` | function | 20 |
+| 2 | `buildList` | function | 39 |
+| 3 | `toKeys` | function | 64 |
+| 4 | `FieldOrderManager` | export default function | 68 |
+| 5 | `moveItem` | const arrow | 82 |
+| 6 | `addDivider` | const arrow | 90 |
+| 7 | `removeDivider` | const arrow | 101 |
+| 8 | `handleDragStart` | const arrow | 107 |
+| 9 | `handleDragOver` | const arrow | 112 |
 
-### 3.243 `frontend/src/components/receipt-settings/PrintSettings.jsx`
+### 3.243 `frontend/src/components/receipt-settings/PrintSettings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `Section` | function | 5 |
-| 2 | `buildFallbackPreviewHtml` | function | 17 |
-| 3 | `buildSafePreviewSource` | function | 35 |
-| 4 | `PrintSettings` | export default function | 46 |
-| 5 | `T` | const arrow | 47 |
-| 6 | `persistPrintSettings` | const arrow | 69 |
-| 7 | `setValue` | const arrow | 85 |
-| 8 | `resetMargins` | const arrow | 94 |
-| 9 | `getPreviewSource` | const arrow | 110 |
+| 1 | `Section` | function | 31 |
+| 2 | `buildFallbackPreviewHtml` | function | 43 |
+| 3 | `buildSafePreviewSource` | function | 61 |
+| 4 | `PrintSettings` | export default function | 73 |
+| 5 | `persistPrintSettings` | const arrow | 96 |
+| 6 | `setValue` | const arrow | 112 |
+| 7 | `resetMargins` | const arrow | 121 |
+| 8 | `getPreviewSource` | const arrow | 144 |
 
 ### 3.244 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
 

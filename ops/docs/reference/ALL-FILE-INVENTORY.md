@@ -234,11 +234,11 @@ Total files documented: **529**
 | 222 | `frontend/src/components/inventory/ProductDetailModal.jsx` | frontend-ui | 202 | 13.4 | UI component/page |
 | 223 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | frontend-ui | 625 | 35.7 | UI component/page |
 | 224 | `frontend/src/components/navigation/Sidebar.jsx` | frontend-ui | 335 | 15.3 | UI component/page |
-| 225 | `frontend/src/components/pos/CartItem.jsx` | frontend-ui | 106 | 5.2 | UI component/page |
-| 226 | `frontend/src/components/pos/FilterPanel.jsx` | frontend-ui | 237 | 8.3 | UI component/page |
+| 225 | `frontend/src/components/pos/CartItem.tsx` | frontend-ui | 158 | 6.3 | UI component/page |
+| 226 | `frontend/src/components/pos/FilterPanel.tsx` | frontend-ui | 289 | 9.3 | UI component/page |
 | 227 | `frontend/src/components/pos/POS.jsx` | frontend-ui | 1919 | 107.6 | UI component/page |
 | 228 | `frontend/src/components/pos/posCore.ts` | frontend-ui | 167 | 6.4 | UI component/page |
-| 229 | `frontend/src/components/pos/ProductImage.tsx` | frontend-ui | 15 | 0.4 | UI component/page |
+| 229 | `frontend/src/components/pos/ProductImage.tsx` | frontend-ui | 12 | 0.3 | UI component/page |
 | 230 | `frontend/src/components/pos/QuickAddModal.tsx` | frontend-ui | 49 | 1.8 | UI component/page |
 | 231 | `frontend/src/components/products/config/productPageConfig.ts` | frontend-ui | 24 | 0.7 | UI component/page |
 | 232 | `frontend/src/components/products/forms/BranchStockAdjuster.jsx` | frontend-ui | 119 | 5.0 | UI component/page |
@@ -266,7 +266,7 @@ Total files documented: **529**
 | 254 | `frontend/src/components/products/scanning/BarcodeScannerModal.jsx` | frontend-ui | 581 | 28.0 | UI component/page |
 | 255 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | frontend-ui | 82 | 2.5 | UI component/page |
 | 256 | `frontend/src/components/products/scanning/scanbotScanner.ts` | frontend-ui | 180 | 6.0 | UI component/page |
-| 257 | `frontend/src/components/products/shared/primitives.jsx` | frontend-ui | 207 | 7.2 | UI component/page |
+| 257 | `frontend/src/components/products/shared/primitives.tsx` | frontend-ui | 250 | 8.1 | UI component/page |
 | 258 | `frontend/src/components/products/surfaces/HeaderActions.jsx` | frontend-ui | 140 | 5.9 | UI component/page |
 | 259 | `frontend/src/components/products/surfaces/ProductDetailModal.jsx` | frontend-ui | 241 | 12.2 | UI component/page |
 | 260 | `frontend/src/components/products/surfaces/ProductRowParts.jsx` | frontend-ui | 84 | 4.5 | UI component/page |
@@ -275,8 +275,8 @@ Total files documented: **529**
 | 263 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | frontend-ui | 121 | 4.5 | UI component/page |
 | 264 | `frontend/src/components/receipt-settings/constants.ts` | frontend-ui | 156 | 7.9 | UI component/page |
 | 265 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | frontend-ui | 45 | 1.2 | UI component/page |
-| 266 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | frontend-ui | 190 | 9.4 | UI component/page |
-| 267 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | frontend-ui | 245 | 11.0 | UI component/page |
+| 266 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | frontend-ui | 206 | 10.0 | UI component/page |
+| 267 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | frontend-ui | 274 | 12.3 | UI component/page |
 | 268 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | frontend-ui | 130 | 4.2 | UI component/page |
 | 269 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | frontend-ui | 443 | 26.3 | UI component/page |
 | 270 | `frontend/src/components/receipt-settings/template.ts` | frontend-ui | 33 | 0.9 | UI component/page |
@@ -516,7 +516,7 @@ Total files documented: **529**
 | 504 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
 | 505 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
 | 506 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
-| 507 | `README.md` | project-root | 159 | 11.6 | Project documentation entrypoint |
+| 507 | `README.md` | project-root | 159 | 11.7 | Project documentation entrypoint |
 | 508 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
 | 509 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
 | 510 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |
