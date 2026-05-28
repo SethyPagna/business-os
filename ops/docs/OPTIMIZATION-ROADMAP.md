@@ -5517,3 +5517,11 @@ Move 506 status:
   mutation payloads, transfer API responses, selected-product state, and
   tracked branch-stock refreshes. Catalog/product modal imports plus stability
   and loading tests now point at the TSX modal paths.
+
+Move 507 status:
+- Move 507 converts the standalone export-report renderer to
+  `exportReports.tsx`. The typed boundary now covers summary cards, metadata
+  groups, chart descriptors, table rows, notes, and report-build options. The
+  conversion keeps dynamic report imports extensionless, renders the existing
+  dashboard SVG charts through typed component boundaries, and tightens HTML
+  escaping for generated self-contained reports.

@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ComponentType } from 'react'
 import { BarChart, DonutChart, LineChart } from '../components/dashboard/charts'
 import { fmtTime } from './formatters'
 
@@ -195,37 +196,93 @@ const REPORT_STYLES = `
   }
 `
 
-function escapeHtml(value) {
+type ReportRow = Record<string, unknown>
+
+type MetadataRow = {
+  label?: unknown
+  value?: unknown
+}
+
+type MetadataGroup = {
+  title?: string
+  subtitle?: string
+  rows?: MetadataRow[]
+}
+
+type SummaryCard = {
+  label?: string
+  value?: unknown
+  sub?: string
+}
+
+type ChartProps = {
+  data?: unknown[]
+  [key: string]: unknown
+}
+
+type ReportChart = {
+  type?: 'line' | 'bar' | 'donut' | string
+  title?: string
+  subtitle?: string
+  props?: ChartProps
+}
+
+type ReportTable = {
+  title?: string
+  subtitle?: string
+  rows?: ReportRow[]
+  limit?: number
+  emptyLabel?: string
+}
+
+type StandaloneReportOptions = {
+  title: string
+  subtitle?: string
+  exportedAt?: string
+  summaryCards?: SummaryCard[]
+  metadataGroups?: MetadataGroup[]
+  charts?: ReportChart[]
+  tables?: ReportTable[]
+  notes?: unknown[]
+}
+
+type RenderedChart = ReportChart & { markup: string }
+
+const ReportLineChart = LineChart as unknown as ComponentType<ChartProps>
+const ReportBarChart = BarChart as unknown as ComponentType<ChartProps>
+const ReportDonutChart = DonutChart as unknown as ComponentType<ChartProps>
+
+function escapeHtml(value: unknown): string {
   return String(value ?? '')
-    .replaceAll('&', '&')
+    .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;')
 }
 
-function formatCellValue(value) {
+function formatCellValue(value: unknown): string {
   if (value === undefined || value === null || value === '') return '&mdash;'
   return escapeHtml(value)
 }
 
-function renderChartMarkup(chart) {
+function renderChartMarkup(chart: ReportChart): string {
   if (!chart?.type) return ''
   const props = chart.props || {}
   if (!Array.isArray(props.data) || !props.data.length) return ''
   if (chart.type === 'line') {
-    return renderToStaticMarkup(<LineChart {...props} />)
+    return renderToStaticMarkup(<ReportLineChart {...props} />)
   }
   if (chart.type === 'bar') {
-    return renderToStaticMarkup(<BarChart {...props} />)
+    return renderToStaticMarkup(<ReportBarChart {...props} />)
   }
   if (chart.type === 'donut') {
-    return renderToStaticMarkup(<DonutChart {...props} />)
+    return renderToStaticMarkup(<ReportDonutChart {...props} />)
   }
   return ''
 }
 
-function renderMetadataGroups(groups = []) {
+function renderMetadataGroups(groups: MetadataGroup[] = []): string {
   if (!groups.length) return ''
   return `
     <section class="meta-grid">
@@ -247,7 +304,7 @@ function renderMetadataGroups(groups = []) {
   `
 }
 
-function renderSummaryCards(cards = []) {
+function renderSummaryCards(cards: SummaryCard[] = []): string {
   if (!cards.length) return ''
   return `
     <section class="summary-grid">
@@ -262,9 +319,9 @@ function renderSummaryCards(cards = []) {
   `
 }
 
-function renderCharts(charts = []) {
+function renderCharts(charts: ReportChart[] = []): string {
   const usableCharts = charts
-    .map((chart) => ({ ...chart, markup: renderChartMarkup(chart) }))
+    .map((chart): RenderedChart => ({ ...chart, markup: renderChartMarkup(chart) }))
     .filter((chart) => chart.markup)
   if (!usableCharts.length) return ''
   return `
@@ -280,7 +337,7 @@ function renderCharts(charts = []) {
   `
 }
 
-function renderTables(tables = []) {
+function renderTables(tables: ReportTable[] = []): string {
   const usableTables = (tables || []).filter((table) => table && table.title)
   if (!usableTables.length) return ''
   return `
@@ -314,7 +371,7 @@ function renderTables(tables = []) {
   `
 }
 
-function renderNotes(notes = []) {
+function renderNotes(notes: unknown[] = []): string {
   if (!notes.length) return ''
   return `
     <section class="table-card">
@@ -335,7 +392,7 @@ export function buildStandaloneReportHtml({
   charts = [],
   tables = [],
   notes = [],
-}) {
+}: StandaloneReportOptions): string {
   const formattedExportTime = fmtTime(exportedAt)
   return `<!DOCTYPE html>
 <html lang="en">

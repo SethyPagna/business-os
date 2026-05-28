@@ -3976,6 +3976,13 @@ Decision rule:
     mutation payloads, transfer API responses, product selection, quantity
     validation, and tracked branch-stock refreshes. Catalog/product lazy
     imports plus stability/loading tests now read the TSX modal paths.
+507. Convert standalone export report renderer to TSX. Done:
+    `exportReports.tsx` now types summary cards, metadata groups, chart
+    descriptors, table rows, notes, and the public report-build options. The
+    conversion keeps the dashboard/inventory dynamic export path extensionless,
+    renders existing SVG chart components through typed component boundaries,
+    and fixes HTML escaping so ampersands are emitted as `&amp;` in generated
+    self-contained reports.
 
 ## Safety Gates
 
