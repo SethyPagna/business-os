@@ -10,7 +10,7 @@ const {
   mapLimit,
   walkFilesRecursive,
   collectRootFiles,
-} = require('../lib/fs-utils')
+} = require('../lib/fs-utils.ts')
 
 // Resolve from the script location so metrics can be generated from any
 // working directory.

@@ -2,18 +2,35 @@
 
 const { createHash } = require('crypto')
 
+/**
+ * @typedef {string | number | boolean | null | undefined} MarkdownCell
+ */
+
+/**
+ * @param {string[]} headers
+ * @param {MarkdownCell[][]} rows
+ * @returns {string}
+ */
 function markdownTable(headers, rows) {
   return [
     `| ${headers.join(' | ')} |`,
     `| ${headers.map(() => '---').join(' | ')} |`,
-    ...rows.map((row) => `| ${row.join(' | ')} |`),
+    ...rows.map((row) => `| ${row.map((cell) => String(cell ?? '')).join(' | ')} |`),
   ].join('\n')
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function stableDigest(value) {
   return createHash('sha256').update(String(value)).digest('hex').slice(0, 12)
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function summarizeReportValue(value) {
   const text = String(value)
   if (text.length <= 120) return text
@@ -28,6 +45,11 @@ function summarizeReportValue(value) {
   return `${sizeLabel}; sha256:${stableDigest(text)}; preview:${text.slice(0, 96)}...`
 }
 
+/**
+ * @param {unknown} value
+ * @param {number} [limit]
+ * @returns {string}
+ */
 function outputTail(value, limit = 4000) {
   const text = String(value || '').trim()
   if (!text) return ''
@@ -35,6 +57,10 @@ function outputTail(value, limit = 4000) {
   return `...${text.slice(text.length - limit)}`
 }
 
+/**
+ * @param {number} bytes
+ * @returns {string}
+ */
 function formatBytes(bytes) {
   if (!bytes) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']

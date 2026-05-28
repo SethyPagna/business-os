@@ -3,7 +3,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const https = require('node:https')
-const { readJson, readUtf8 } = require('../../lib/fs-utils.js')
+const { readJson, readUtf8 } = require('../../lib/fs-utils.ts')
 
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const DEFAULT_POLICY = path.join(ROOT, 'ops', 'automation', 'business-os-automation.json')

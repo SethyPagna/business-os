@@ -1,8 +1,8 @@
 /* eslint-disable no-console */
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const { mapLimit, pathExists, readJsonAsync, toPosix: normalizePath } = require('../lib/fs-utils.js')
-const { markdownTable } = require('../lib/report-utils.js')
+const { mapLimit, pathExists, readJsonAsync, toPosix: normalizePath } = require('../lib/fs-utils.ts')
+const { markdownTable } = require('../lib/report-utils.ts')
 const ROOT_DIR = path.resolve(__dirname, '../../..')
 const REPORT_PATH = path.join(ROOT_DIR, 'ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md')
 const SUMMARY_PATH = path.join(ROOT_DIR, 'ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json')
@@ -1044,7 +1044,7 @@ const REJECTED_DATA_PATH_CANDIDATES = [
     evidence: 'Move 179 inspection found the remaining SQL/DuckDB candidate was the audit script itself after backend routes and service data paths were optimized or governed by schema protocol.',
   },
   {
-    file: 'ops/scripts/lib/report-utils.js',
+    file: 'ops/scripts/lib/report-utils.ts',
     decision: 'keep as a shared Node.js report helper and exclude from SQL/DuckDB conversion queue',
     reason: 'The helper only formats Markdown tables, digests, output tails, and byte labels. It is flagged by path/text report keywords, not by query-heavy runtime behavior or data-volume processing.',
     evidence: 'Move 210 inspection found no database reads, joins, imports, exports, backup streaming, or analytics loops in the file; converting it would add churn without measurable speed, stability, or packaging benefit.',

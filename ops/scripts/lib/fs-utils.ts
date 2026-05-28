@@ -4,6 +4,12 @@ const fs = require('fs')
 const path = require('path')
 
 /**
+ * @typedef {Record<string, unknown> | unknown[] | string | number | boolean | null} JsonFallback
+ * @typedef {{ excludeDirs?: Set<string>, extensions?: Set<string> | null }} FileWalkOptions
+ * @typedef {{ extensions?: Set<string> | null, excludedFiles?: Set<string> }} RootFileOptions
+ */
+
+/**
  * 1. Filesystem Utility Library
  * 1.1 Purpose
  * - Centralize shared script helpers used across project scripts.
@@ -13,10 +19,18 @@ const path = require('path')
 /**
  * 1.2 Path helpers
  */
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function toPosix(value) {
   return String(value || '').replace(/\\/g, '/')
 }
 
+/**
+ * @param {string} [startDir]
+ * @returns {string}
+ */
 function resolveProjectRoot(startDir = __dirname) {
   let current = path.resolve(startDir)
   while (true) {
@@ -32,12 +46,22 @@ function resolveProjectRoot(startDir = __dirname) {
   }
 }
 
+/**
+ * @param {string} rootDir
+ * @param {string} absPath
+ * @returns {string}
+ */
 function relFrom(rootDir, absPath) {
   return toPosix(path.relative(rootDir, absPath))
 }
 
 /**
  * 1.3 Read helpers
+ */
+/**
+ * @param {string} filePath
+ * @param {string} [fallback]
+ * @returns {string}
  */
 function readUtf8(filePath, fallback = '') {
   try {
@@ -47,7 +71,13 @@ function readUtf8(filePath, fallback = '') {
   }
 }
 
-function readJson(filePath, fallback = {}) {
+/**
+ * @template [T=JsonFallback]
+ * @param {string} filePath
+ * @param {T} [fallback]
+ * @returns {T}
+ */
+function readJson(filePath, fallback = /** @type {T} */ ({})) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'))
   } catch (_) {
@@ -55,6 +85,11 @@ function readJson(filePath, fallback = {}) {
   }
 }
 
+/**
+ * @param {string} filePath
+ * @param {string} [fallback]
+ * @returns {Promise<string>}
+ */
 async function readUtf8Async(filePath, fallback = '') {
   try {
     return await fs.promises.readFile(filePath, 'utf8')
@@ -63,7 +98,13 @@ async function readUtf8Async(filePath, fallback = '') {
   }
 }
 
-async function readJsonAsync(filePath, fallback = {}) {
+/**
+ * @template [T=JsonFallback]
+ * @param {string} filePath
+ * @param {T} [fallback]
+ * @returns {Promise<T>}
+ */
+async function readJsonAsync(filePath, fallback = /** @type {T} */ ({})) {
   try {
     return JSON.parse(await fs.promises.readFile(filePath, 'utf8'))
   } catch (_) {
@@ -71,11 +112,19 @@ async function readJsonAsync(filePath, fallback = {}) {
   }
 }
 
+/**
+ * @param {unknown} text
+ * @returns {number}
+ */
 function lineCount(text) {
   if (!text) return 0
   return String(text).split(/\r?\n/).length
 }
 
+/**
+ * @param {string} filePath
+ * @returns {Promise<boolean>}
+ */
 async function pathExists(filePath) {
   try {
     await fs.promises.access(filePath)
@@ -85,6 +134,14 @@ async function pathExists(filePath) {
   }
 }
 
+/**
+ * @template T
+ * @template R
+ * @param {T[]} items
+ * @param {number} limit
+ * @param {(item: T, index: number) => Promise<R> | R} mapper
+ * @returns {Promise<R[]>}
+ */
 async function mapLimit(items, limit, mapper) {
   const output = new Array(items.length)
   let nextIndex = 0
@@ -103,10 +160,20 @@ async function mapLimit(items, limit, mapper) {
 /**
  * 1.4 File collection helpers
  */
+/**
+ * @param {unknown} entryName
+ * @param {Set<string>} excludeDirs
+ * @returns {boolean}
+ */
 function shouldSkipDirectory(entryName, excludeDirs) {
   return excludeDirs.has(String(entryName || '').toLowerCase())
 }
 
+/**
+ * @param {string} startDir
+ * @param {FileWalkOptions} [options]
+ * @returns {string[]}
+ */
 function walkFilesRecursive(startDir, options = {}) {
   const {
     excludeDirs = new Set(['node_modules', 'dist', '.git', '.pm2', 'release']),
@@ -117,6 +184,7 @@ function walkFilesRecursive(startDir, options = {}) {
   const stack = [startDir]
   while (stack.length) {
     const current = stack.pop()
+    if (!current) continue
     const entries = fs.readdirSync(current, { withFileTypes: true })
     entries.forEach((entry) => {
       const abs = path.join(current, entry.name)
@@ -134,6 +202,11 @@ function walkFilesRecursive(startDir, options = {}) {
   return out
 }
 
+/**
+ * @param {string} startDir
+ * @param {FileWalkOptions} [options]
+ * @returns {{ files: string[], folders: string[] }}
+ */
 function collectFilesAndFolders(startDir, options = {}) {
   const {
     excludeDirs = new Set(['node_modules', 'dist', '.git', '.pm2', 'release']),
@@ -145,6 +218,7 @@ function collectFilesAndFolders(startDir, options = {}) {
   const stack = [startDir]
   while (stack.length) {
     const current = stack.pop()
+    if (!current) continue
     folders.push(current)
     const entries = fs.readdirSync(current, { withFileTypes: true })
     entries.forEach((entry) => {
@@ -163,6 +237,11 @@ function collectFilesAndFolders(startDir, options = {}) {
   return { files, folders }
 }
 
+/**
+ * @param {string} rootDir
+ * @param {RootFileOptions} [options]
+ * @returns {string[]}
+ */
 function collectRootFiles(rootDir, options = {}) {
   const {
     extensions = null,
@@ -182,6 +261,10 @@ function collectRootFiles(rootDir, options = {}) {
   return out
 }
 
+/**
+ * @param {string} filePath
+ * @returns {boolean}
+ */
 function isProbablyText(filePath) {
   try {
     const fd = fs.openSync(filePath, 'r')

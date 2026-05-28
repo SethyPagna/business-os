@@ -5,7 +5,7 @@
 const { execFileSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
-const { readUtf8 } = require('../lib/fs-utils.js')
+const { readUtf8 } = require('../lib/fs-utils.ts')
 
 const root = path.resolve(__dirname, '../../..')
 const tracked = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' })

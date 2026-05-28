@@ -81,7 +81,7 @@ runTest('full automation launcher and policy are present', () => {
     'git push origin main',
   ].forEach((token) => assert.match(script, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))))
 
-  assert.match(secretHygieneVerify, /require\('\.\.\/lib\/fs-utils\.js'\)/)
+  assert.match(secretHygieneVerify, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(secretHygieneVerify, /readUtf8/)
   assert.doesNotMatch(secretHygieneVerify, /fs\.readFileSync\(absolute, 'utf8'\)/)
 })
@@ -92,7 +92,7 @@ runTest('cloudflare automation is explicit about account-level permissions', () 
   const oldWrapperPath = path.join(root, 'ops', 'scripts', 'runtime', 'verify-cloudflare-automation.ts')
   const readme = read('ops/automation/README.md')
   assert.match(script, /cloudflare-api-token\.txt/)
-  assert.match(script, /require\('\.\.\/\.\.\/lib\/fs-utils\.js'\)/)
+  assert.match(script, /require\('\.\.\/\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(script, /readJson/)
   assert.match(script, /readUtf8/)
   assert.match(script, /access\/apps/)
@@ -123,7 +123,7 @@ runTest('cloudflare automation is explicit about account-level permissions', () 
 runTest('scaled runtime profile includes the cloudflare connector', () => {
   const compose = read('ops/docker/compose.scale.yml')
   const scaleVerify = read('ops/scripts/verification/verify-scale-services.ts')
-  assert.match(scaleVerify, /require\('\.\.\/lib\/fs-utils\.js'\)/)
+  assert.match(scaleVerify, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(scaleVerify, /readUtf8/)
   assert.doesNotMatch(scaleVerify, /fs\.readFileSync\(COMPOSE_FILE, 'utf8'\)/)
   assert.match(compose, /cloudflared:\s+image:\s+cloudflare\/cloudflared:latest/s)
@@ -163,7 +163,7 @@ runTest('docker release verification protects generated cleanup boundaries', () 
   assert.match(opsPackage.scripts['cleanup-test-data:check'], /--fail-on-match/)
   assert.match(opsPackage.scripts['cleanup-test-data:check-smoke'], /--fail-on-match/)
   assert.match(opsPackage.scripts['cleanup-test-data:check-action-history'], /--fail-on-match/)
-  assert.match(verifier, /require\('\.\.\/lib\/fs-utils\.js'\)/)
+  assert.match(verifier, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(verifier, /readUtf8/)
   assert.doesNotMatch(verifier, /fs\.readFileSync\(file, 'utf8'\)/)
   ;[
@@ -554,7 +554,7 @@ runTest('performance scan preserves phase 29 manual notes', () => {
     'phase29-manual-notes:start',
   ].forEach((token) => assert.match(script, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))))
 
-  const fsUtils = read('ops/scripts/lib/fs-utils.js')
+  const fsUtils = read('ops/scripts/lib/fs-utils.ts')
   ;[
     'async function mapLimit',
     'async function pathExists',
@@ -577,7 +577,7 @@ runTest('architecture audits share bounded worker helper', () => {
   const backupReliabilityVerify = read('ops/scripts/verification/verify-backup-reliability.ts')
   const frontendVerifyUi = read('ops/scripts/frontend/verify-ui.ts')
   const auditReportHtml = read('ops/scripts/runtime/audits/audit-report-html.ts')
-  const reportUtils = read('ops/scripts/lib/report-utils.js')
+  const reportUtils = read('ops/scripts/lib/report-utils.ts')
 
   ;[
     generatedBulkAudit,
@@ -586,8 +586,8 @@ runTest('architecture audits share bounded worker helper', () => {
     languageRuntimeAudit,
   ].forEach((source) => {
     assert.match(source, /require\('node:/)
-    assert.match(source, /require\('\.\.\/lib\/fs-utils\.js'\)/)
-    assert.match(source, /require\('\.\.\/lib\/report-utils\.js'\)/)
+    assert.match(source, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
+    assert.match(source, /require\('\.\.\/lib\/report-utils\.ts'\)/)
     assert.match(source, /toPosix: normalizePath/)
     assert.doesNotMatch(source, /function normalizePath/)
     assert.doesNotMatch(source, /function markdownTable/)
@@ -650,14 +650,14 @@ runTest('architecture audits share bounded worker helper', () => {
   assert.doesNotMatch(generatedBulkAudit, /async function readJsonFile/)
   assert.doesNotMatch(generatedBulkAudit, /Promise\.all\(TARGETS\.map/)
 
-  assert.match(hardeningPolicyVerify, /require\('\.\.\/lib\/fs-utils\.js'\)/)
+  assert.match(hardeningPolicyVerify, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(hardeningPolicyVerify, /readJson/)
   assert.match(hardeningPolicyVerify, /readUtf8/)
   assert.match(hardeningPolicyVerify, /--exclude-standard/)
   assert.doesNotMatch(hardeningPolicyVerify, /function readText/)
   assert.doesNotMatch(hardeningPolicyVerify, /function readJson/)
 
-  assert.match(runtimeDepsVerify, /require\('\.\.\/lib\/fs-utils\.js'\)/)
+  assert.match(runtimeDepsVerify, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(runtimeDepsVerify, /readJson/)
   assert.match(runtimeDepsVerify, /readUtf8/)
   ;[
@@ -720,18 +720,18 @@ runTest('architecture audits share bounded worker helper', () => {
   ].forEach((token) => assert.match(runtimeDepsVerify, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))))
   assert.doesNotMatch(runtimeDepsVerify, /function readJson/)
 
-  assert.match(backupReliabilityVerify, /require\('\.\.\/lib\/fs-utils\.js'\)/)
+  assert.match(backupReliabilityVerify, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(backupReliabilityVerify, /readUtf8/)
   assert.doesNotMatch(backupReliabilityVerify, /fs\.readFileSync\(path\.join\(root, relativePath\)/)
 
-  assert.match(frontendVerifyUi, /require\('\.\.\/lib\/fs-utils\.js'\)/)
+  assert.match(frontendVerifyUi, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(frontendVerifyUi, /readJson/)
   assert.match(frontendVerifyUi, /readUtf8/)
   assert.doesNotMatch(frontendVerifyUi, /function readText/)
   assert.doesNotMatch(frontendVerifyUi, /function readJson/)
 
   assert.match(auditReportHtml, /createRequire/)
-  assert.match(auditReportHtml, /require\('\.\.\/\.\.\/lib\/report-utils\.js'\)/)
+  assert.match(auditReportHtml, /require\('\.\.\/\.\.\/lib\/report-utils\.ts'\)/)
   assert.match(auditReportHtml, /formatBytes/)
   assert.doesNotMatch(auditReportHtml, /function formatBytes/)
 })

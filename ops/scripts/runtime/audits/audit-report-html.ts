@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 
 const require = createRequire(import.meta.url)
-const { formatBytes } = require('../../lib/report-utils.js')
+const { formatBytes } = require('../../lib/report-utils.ts')
 
 type AuditFinding = {
   priority?: number | string

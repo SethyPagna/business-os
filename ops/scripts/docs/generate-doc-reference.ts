@@ -11,7 +11,7 @@ const {
   lineCount,
   walkFilesRecursive,
   collectRootFiles,
-} = require('../lib/fs-utils')
+} = require('../lib/fs-utils.ts')
 
 // Resolve the repo root from the script path so this command still works when
 // launched from backend/, frontend/, or another subfolder.

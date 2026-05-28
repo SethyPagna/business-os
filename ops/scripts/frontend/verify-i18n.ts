@@ -6,7 +6,7 @@ const {
   readJson,
   readUtf8,
   walkFilesRecursive,
-} = require('../lib/fs-utils')
+} = require('../lib/fs-utils.ts')
 
 /**
  * 1. Script Configuration

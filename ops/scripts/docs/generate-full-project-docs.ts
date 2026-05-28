@@ -12,7 +12,7 @@ const {
   collectRootFiles,
   collectFilesAndFolders,
   isProbablyText,
-} = require('../lib/fs-utils')
+} = require('../lib/fs-utils.ts')
 
 // Keep report generation stable even when the current working directory is not
 // the repository root.

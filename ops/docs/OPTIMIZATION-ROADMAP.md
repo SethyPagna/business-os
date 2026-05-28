@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 445.
+- Latest completed implementation move in this roadmap: Move 469.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2521,14 +2521,14 @@ Cleanup checkpoint:
   `chunkStatConcurrency`, and Phase 29 repeat consistency compares those fields
   so the faster scan path stays guarded.
 - Move 187 shares the bounded worker-loop helper:
-  `ops/scripts/lib/fs-utils.js` now owns `mapLimit()`, and the generated-bulk,
+  `ops/scripts/lib/fs-utils.ts` now owns `mapLimit()`, and the generated-bulk,
   organization, and performance scan scripts use that shared helper. This
   removes duplicate bounded async loop implementations while keeping the
   script-specific concurrency limits intact.
 - Move 188 shares architecture path normalization:
   `generated-bulk-audit.ts`, `organization-audit.ts`,
   `phase29-audit.ts`, and `language-runtime-audit.ts` now import `toPosix`
-  from `ops/scripts/lib/fs-utils.js` as `normalizePath`, removing repeated
+  from `ops/scripts/lib/fs-utils.ts` as `normalizePath`, removing repeated
   slash-normalization helpers while preserving report path output.
 - Move 189 bounds language/runtime source reads:
   `ops/scripts/architecture/language-runtime-audit.ts` now reads scanned
@@ -2537,7 +2537,7 @@ Cleanup checkpoint:
   and `fileReadConcurrency`, and Phase 29 repeat consistency compares those
   fields.
 - Move 190 shares audit existence checks:
-  `ops/scripts/lib/fs-utils.js` now owns `pathExists()`, and the organization,
+  `ops/scripts/lib/fs-utils.ts` now owns `pathExists()`, and the organization,
   language/runtime, and Phase 29 audit scripts reuse that helper instead of
   carrying local `fs.access()` wrappers. This keeps repeat-sweep path checks
   consistent while reducing helper duplication in the audit layer.
@@ -2569,25 +2569,25 @@ Cleanup checkpoint:
   `executionMode: bounded-parallel-reference-writers-then-organization`, and
   exposes `parallelCheckConcurrency: 3` in the Phase 29 summary.
 - Move 195 shares report-format helpers:
-  `ops/scripts/lib/report-utils.js` now owns the shared Markdown table,
+  `ops/scripts/lib/report-utils.ts` now owns the shared Markdown table,
   long-value summary, stable digest, and output-tail helpers used by the
   architecture audit scripts. `generated-bulk-audit.ts`,
   `organization-audit.ts`, `language-runtime-audit.ts`, and
   `phase29-audit.ts` import the shared helper instead of carrying local
   `markdownTable()` copies.
 - Move 196 shares byte formatting:
-  `ops/scripts/lib/report-utils.js` now also owns `formatBytes()`, and
+  `ops/scripts/lib/report-utils.ts` now also owns `formatBytes()`, and
   `generated-bulk-audit.ts` imports it instead of carrying a local byte-size
   formatter. This keeps cleanup-size reporting consistent with the shared
   report utility layer.
 - Move 197 shares async read helpers:
-  `ops/scripts/lib/fs-utils.js` now owns `readUtf8Async()` and
+  `ops/scripts/lib/fs-utils.ts` now owns `readUtf8Async()` and
   `readJsonAsync()`, and `generated-bulk-audit.ts` uses those helpers instead
   of local `readText()` and `readJsonFile()` wrappers. This keeps generated
   cleanup inventory reads on the shared filesystem utility path.
 - Move 198 shares verification read helpers:
   `ops/scripts/verification/verify-hardening-policy.ts` now imports
-  `readJson()` and `readUtf8()` from `ops/scripts/lib/fs-utils.js` instead of
+  `readJson()` and `readUtf8()` from `ops/scripts/lib/fs-utils.ts` instead of
   carrying local synchronous JSON/text read wrappers. This keeps full
   automation hardening checks on the same filesystem utility layer as the Phase
   29 audit scripts, and the hardening policy now points at the grouped
@@ -2596,52 +2596,52 @@ Cleanup checkpoint:
   script moves can be verified before staging.
 - Move 199 shares runtime report byte formatting:
   `ops/scripts/runtime/audits/audit-report-html.ts` now imports
-  `formatBytes()` from `ops/scripts/lib/report-utils.js` instead of carrying a
+  `formatBytes()` from `ops/scripts/lib/report-utils.ts` instead of carrying a
   local formatter. Runtime audit HTML and Phase 29 generated-bulk reports now
   use the same byte-size display helper.
 - Move 200 shares runtime dependency JSON reads:
   `ops/scripts/verification/verify-runtime-deps.ts` now imports `readJson()`
-  from `ops/scripts/lib/fs-utils.js` instead of carrying a local package JSON
+  from `ops/scripts/lib/fs-utils.ts` instead of carrying a local package JSON
   reader. This keeps verification scripts on the shared filesystem utility
   path while preserving the `run/verify-local.bat` entrypoint.
 - Move 201 shares frontend UI verifier reads:
   `ops/scripts/frontend/verify-ui.ts` now imports `readJson()` and
-  `readUtf8()` from `ops/scripts/lib/fs-utils.js` instead of carrying local
+  `readUtf8()` from `ops/scripts/lib/fs-utils.ts` instead of carrying local
   text/JSON readers. This keeps UI verification file reads aligned with the
   shared ops filesystem utility layer while preserving the frontend
   `verify:ui` script.
 - Move 202 shares language audit JSON reads:
   `ops/scripts/architecture/language-runtime-audit.ts` now imports
-  `readJsonAsync()` from `ops/scripts/lib/fs-utils.js` for package manifest
+  `readJsonAsync()` from `ops/scripts/lib/fs-utils.ts` for package manifest
   reads instead of carrying a local async JSON helper. This keeps Phase 29's
   language/runtime audit on the same filesystem utility path as the generated
   bulk audit.
 - Move 203 shares Cloudflare automation file reads:
   `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` now imports
-  `readJson()` and `readUtf8()` from `ops/scripts/lib/fs-utils.js` for policy,
+  `readJson()` and `readUtf8()` from `ops/scripts/lib/fs-utils.ts` for policy,
   token, and allowed-email file reads instead of carrying local JSON/text read
   wrappers. The Cloudflare API request logic remains local to the verifier.
 - Move 204 shares backup reliability source reads:
   `ops/scripts/verification/verify-backup-reliability.ts` now imports
-  `readUtf8()` from `ops/scripts/lib/fs-utils.js` for its source manifest reads
+  `readUtf8()` from `ops/scripts/lib/fs-utils.ts` for its source manifest reads
   instead of carrying a local root-relative `fs.readFileSync()` wrapper. The
   grouped backup, Drive, UI, offline, and automation guard strings remain
   unchanged.
 - Move 205 shares Docker release guardrail reads:
   `ops/scripts/verification/verify-docker-release.ts` now imports `readUtf8()`
-  from `ops/scripts/lib/fs-utils.js` for tolerant source/config reads instead
+  from `ops/scripts/lib/fs-utils.ts` for tolerant source/config reads instead
   of carrying a local `fs.readFileSync()` wrapper. The generated
   `DOCKER-RELEASE-GUARDRAIL.json` output and release boundary checks remain
   unchanged.
 - Move 206 shares secret hygiene source reads:
   `ops/scripts/verification/verify-secret-hygiene.ts` now imports `readUtf8()`
-  from `ops/scripts/lib/fs-utils.js` for tracked-file text reads after its
+  from `ops/scripts/lib/fs-utils.ts` for tracked-file text reads after its
   existing size guard. The secret-pattern scan, tracked-file list, and
   skip-large-file behavior remain unchanged.
 - Move 207 shares scale-service verifier reads and completes the first Phase
   29 baseline:
   `ops/scripts/verification/verify-scale-services.ts` now imports `readUtf8()`
-  from `ops/scripts/lib/fs-utils.js` for scale Compose reads after the existing
+  from `ops/scripts/lib/fs-utils.ts` for scale Compose reads after the existing
   file-existence check. Docker CLI discovery, secret/license ignore checks, and
   optional service reachability behavior remain unchanged. The first Phase 29
   baseline is complete, and Phase 29 remains active as the recurring guardrail
@@ -2668,7 +2668,7 @@ Cleanup checkpoint:
   Phase 8.4 UI live check, and public portal live check passed after the tunnel
   connector was restarted.
 - Move 210 rejects the final language/runtime false-positive:
-  `ops/scripts/lib/report-utils.js` stays as a small shared Node.js report
+  `ops/scripts/lib/report-utils.ts` stays as a small shared Node.js report
   helper for Markdown tables, digests, output tails, and byte labels. The
   language/runtime audit now records it as rejected from the SQL/DuckDB queue
   because it has no database reads, joins, import/export streaming, backup
@@ -5175,3 +5175,16 @@ Move 468 status:
   runtime dependency guards, docs, and backend source assertions now reference
   the TypeScript entrypoints. The converted i18n verifier also closed the
   missing Khmer branch stat/detail keys it exposed.
+
+Move 469 status:
+- Move 469 converts the shared ops script helper layer to TypeScript.
+  `ops/scripts/lib/fs-utils.ts` and `ops/scripts/lib/report-utils.ts`
+  replace their `.js` entrypoints and are referenced by architecture audits,
+  docs generation, frontend verifiers, runtime Cloudflare/audit-report helpers,
+  backend full automation assertions, and verification guardrails. Because the
+  current ops runner executes `.ts` files directly with Node/CommonJS, these
+  helpers preserve runtime-compatible JavaScript syntax and add JSDoc type
+  contracts around filesystem walking, bounded parallel mapping, JSON reads,
+  Markdown tables, digest summaries, output tailing, and byte formatting. A
+  later runner move can promote those boundaries to native TypeScript syntax
+  once package scripts use a compiled or `tsx` execution path.

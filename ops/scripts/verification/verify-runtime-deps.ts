@@ -2,7 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { readJson, readUtf8 } = require('../lib/fs-utils.js')
+const { readJson, readUtf8 } = require('../lib/fs-utils.ts')
 
 const ROOT = path.resolve(__dirname, '..', '..', '..')
 const ROOT_PACKAGE_JSON = path.join(ROOT, 'package.json')

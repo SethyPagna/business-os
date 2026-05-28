@@ -1,8 +1,8 @@
 /* eslint-disable no-console */
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const { mapLimit, readJsonAsync, readUtf8Async, toPosix: normalizePath } = require('../lib/fs-utils.js')
-const { formatBytes, markdownTable } = require('../lib/report-utils.js')
+const { mapLimit, readJsonAsync, readUtf8Async, toPosix: normalizePath } = require('../lib/fs-utils.ts')
+const { formatBytes, markdownTable } = require('../lib/report-utils.ts')
 const ROOT_DIR = path.resolve(__dirname, '../../..')
 const REPORT_PATH = path.join(ROOT_DIR, 'ops/docs/reference/GENERATED-BULK-AUDIT.md')
 const SUMMARY_PATH = path.join(ROOT_DIR, 'ops/docs/reference/GENERATED-BULK-AUDIT.json')

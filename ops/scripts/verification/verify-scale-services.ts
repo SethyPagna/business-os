@@ -4,7 +4,7 @@
 const fs = require('fs')
 const path = require('path')
 const { execFileSync, spawnSync } = require('child_process')
-const { readUtf8 } = require('../lib/fs-utils.js')
+const { readUtf8 } = require('../lib/fs-utils.ts')
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../..')
 const DOCKER_CONFIG = path.join(PROJECT_ROOT, 'ops', 'runtime', 'docker-config')

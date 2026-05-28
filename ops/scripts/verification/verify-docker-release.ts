@@ -3,7 +3,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { readUtf8 } = require('../lib/fs-utils.js')
+const { readUtf8 } = require('../lib/fs-utils.ts')
 
 const root = path.resolve(__dirname, '../../..')
 const composePath = path.join(root, 'ops', 'docker', 'compose.release.yml')

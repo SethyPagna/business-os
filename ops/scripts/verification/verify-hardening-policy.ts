@@ -5,7 +5,7 @@
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
-const { readJson, readUtf8 } = require('../lib/fs-utils.js')
+const { readJson, readUtf8 } = require('../lib/fs-utils.ts')
 
 const root = path.resolve(__dirname, '..', '..', '..')
 const policyPath = path.join(root, 'ops', 'policies', 'hardening-policy.json')

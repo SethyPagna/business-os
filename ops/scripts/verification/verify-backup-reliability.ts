@@ -4,7 +4,7 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { readUtf8 } = require('../lib/fs-utils.js')
+const { readUtf8 } = require('../lib/fs-utils.ts')
 
 const root = path.resolve(__dirname, '..', '..', '..')
 

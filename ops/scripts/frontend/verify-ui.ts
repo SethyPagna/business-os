@@ -3,7 +3,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { readJson, readUtf8 } = require('../lib/fs-utils.js')
+const { readJson, readUtf8 } = require('../lib/fs-utils.ts')
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../..')
 const FRONTEND_ROOT = path.join(PROJECT_ROOT, 'frontend')

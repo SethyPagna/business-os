@@ -1,8 +1,8 @@
 /* eslint-disable no-console */
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const { mapLimit, pathExists, toPosix: normalizePath } = require('../lib/fs-utils.js')
-const { markdownTable } = require('../lib/report-utils.js')
+const { mapLimit, pathExists, toPosix: normalizePath } = require('../lib/fs-utils.ts')
+const { markdownTable } = require('../lib/report-utils.ts')
 const ROOT_DIR = path.resolve(__dirname, '../../..')
 const REPORT_PATH = path.join(ROOT_DIR, 'ops/docs/reference/ORGANIZATION-AUDIT.md')
 const SUMMARY_PATH = path.join(ROOT_DIR, 'ops/docs/reference/ORGANIZATION-AUDIT.json')
