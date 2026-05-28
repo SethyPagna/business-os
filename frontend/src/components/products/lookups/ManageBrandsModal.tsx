@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
-import { useApp } from '../../../AppContext'
+import { useApp as useAppHook } from '../../../AppContext.jsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
 import { beginNamedAction, finishNamedAction } from '../../../utils/actionGuards.ts'
 import {
@@ -20,7 +21,80 @@ const DEFAULT_BRAND_COLOR = '#f97316'
 const PRODUCT_BRAND_LOOKUP_TIMEOUT_MS = 10000
 const PRODUCT_BRAND_PRODUCTS_TIMEOUT_MS = 12000
 const PRODUCT_BRAND_MUTATION_TIMEOUT_MS = 12000
-const BRAND_REVIEW_RULES = {
+
+type BrandReviewTone = 'safe' | 'review'
+
+interface BrandReviewRule {
+  tone: BrandReviewTone
+  suggestedName?: string
+  reason: string
+}
+
+interface BrandUsageEntry {
+  name?: unknown
+  usage_count?: unknown
+  unresolved_count?: unknown
+  sample_products?: ProductSample[]
+}
+
+interface ProductSample {
+  name?: unknown
+}
+
+type ProductRow = Record<string, unknown> & {
+  id?: unknown
+  name?: unknown
+}
+
+type ProductPayload = ProductRow[] | {
+  items?: ProductRow[]
+  total?: unknown
+  pageSize?: unknown
+  totalPages?: unknown
+}
+
+interface BrandWithUsage {
+  name: string
+  usage: number
+  unresolvedCount: number
+  sampleProducts: ProductSample[]
+  color: string
+  reviewRule: BrandReviewRule | null
+}
+
+type BrandColorMap = Record<string, string>
+
+interface SavedBrandLibrary {
+  brands: string[]
+  colorMap: BrandColorMap
+}
+
+interface BrandApi {
+  getProductLookupUsage: () => Promise<{ brands?: BrandUsageEntry[] } | unknown>
+  saveSettings: (payload: Record<string, unknown>) => Promise<unknown> | unknown
+  replaceProductLookupValues: (payload: Record<string, unknown>) => Promise<unknown> | unknown
+  searchProducts?: (params: Record<string, unknown>) => Promise<ProductPayload> | ProductPayload
+  getProductsByIds?: (ids: number[], options: { include: string }) => Promise<ProductPayload> | ProductPayload
+  updateProduct?: (id: number, payload: Record<string, unknown>) => Promise<unknown> | unknown
+}
+
+interface ManageBrandsModalProps {
+  onClose: () => void
+  onDone?: () => void
+  onReviewSelection?: (selection: { type: 'brand'; value: string }) => void
+  user?: { id?: unknown; name?: unknown } | null
+  t: (key: string) => string
+}
+
+interface AppContextValue {
+  settings?: {
+    product_brand_options?: unknown
+    product_brand_color_map?: unknown
+  } | null
+  notify: (message: string, type?: string) => void
+}
+
+const BRAND_REVIEW_RULES: Record<string, BrandReviewRule> = {
   advanced: { tone: 'safe', suggestedName: 'Advanced Clinicals', reason: 'All current matches use the Advanced Clinicals name.' },
   patrick: { tone: 'safe', suggestedName: 'Patrick Ta', reason: 'Current matches consistently use Patrick Ta in the product title.' },
   real: { tone: 'safe', suggestedName: 'Real Techniques', reason: 'Current matches consistently use Real Techniques in the product title.' },
@@ -37,10 +111,20 @@ const BRAND_REVIEW_RULES = {
   tree: { tone: 'review', reason: 'Contains Tree Hut and unrelated Too Faced rows.' },
 }
 
-function parseBrandOptions(raw) {
+const useApp = useAppHook as () => AppContextValue
+
+function getBrandApi(): BrandApi {
+  return (window as unknown as { api: BrandApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function parseBrandOptions(raw: unknown): string[] {
   if (!raw) return []
   try {
-    const parsed = JSON.parse(raw)
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!Array.isArray(parsed)) return []
     return parsed
       .map((entry) => String(entry || '').trim())
@@ -50,17 +134,22 @@ function parseBrandOptions(raw) {
   }
 }
 
-function parseBrandColorMap(raw) {
+function parseBrandColorMap(raw: unknown): BrandColorMap {
   if (!raw) return {}
   try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([key, value]) => [normalizeLookup(key), String(value || '').trim()])
+        .filter(([key, value]) => key && value),
+    )
   } catch (_) {
     return {}
   }
 }
 
-function toTitleCase(value) {
+function toTitleCase(value: unknown): string {
   return String(value || '')
     .trim()
     .split(/\s+/)
@@ -68,18 +157,22 @@ function toTitleCase(value) {
     .join(' ')
 }
 
-function getBrandReviewRule(name) {
+function getBrandReviewRule(name: unknown): BrandReviewRule | null {
   return BRAND_REVIEW_RULES[normalizeLookup(name)] || null
 }
 
-function getBrandSortScore(entry) {
+function getBrandSortScore(entry: Pick<BrandWithUsage, 'reviewRule'> | null | undefined): number {
   if (entry?.reviewRule?.tone === 'review') return 0
   if (entry?.reviewRule?.tone === 'safe') return 1
   return 2
 }
 
-function buildSavedLibrary(brands = [], colorOverrides = {}, existingColorMap = {}) {
-  const normalizedMap = new Map()
+function buildSavedLibrary(
+  brands: unknown[] = [],
+  colorOverrides: BrandColorMap = {},
+  existingColorMap: BrandColorMap = {},
+): SavedBrandLibrary {
+  const normalizedMap = new Map<string, string>()
   ;(brands || [])
     .map((entry) => toTitleCase(entry))
     .filter(Boolean)
@@ -88,7 +181,7 @@ function buildSavedLibrary(brands = [], colorOverrides = {}, existingColorMap = 
       if (!normalizedMap.has(key)) normalizedMap.set(key, entry)
     })
   const clean = Array.from(normalizedMap.values()).sort((a, b) => a.localeCompare(b))
-  const cleanColorMap = {}
+  const cleanColorMap: BrandColorMap = {}
   clean.forEach((name) => {
     const lookup = normalizeLookup(name)
     cleanColorMap[lookup] = colorOverrides[lookup] || existingColorMap[lookup] || DEFAULT_BRAND_COLOR
@@ -102,9 +195,10 @@ export default function ManageBrandsModal({
   onReviewSelection,
   user,
   t,
-}) {
+}: ManageBrandsModalProps) {
   const { settings, notify } = useApp()
   const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-brands' })
+  const actionHistoryForBar = actionHistory as unknown as ComponentProps<typeof ActionHistoryBar>['history']
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
     ? t('review_products')
     : 'Review products'
@@ -115,8 +209,8 @@ export default function ManageBrandsModal({
   const [renameColor, setRenameColor] = useState(DEFAULT_BRAND_COLOR)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [selectedBrands, setSelectedBrands] = useState(() => new Set())
-  const [usageSummary, setUsageSummary] = useState([])
+  const [selectedBrands, setSelectedBrands] = useState<Set<string>>(() => new Set())
+  const [usageSummary, setUsageSummary] = useState<BrandUsageEntry[]>([])
   const loadRequestRef = useRef(0)
   const actionInFlightRef = useRef('')
 
@@ -132,13 +226,14 @@ export default function ManageBrandsModal({
   const reloadUsageSummary = useCallback(async (label = 'Brand usage') => {
     const requestId = beginTrackedRequest(loadRequestRef)
     try {
-      const result = await withLoaderTimeout(() => window.api.getProductLookupUsage(), label, PRODUCT_BRAND_LOOKUP_TIMEOUT_MS)
+      const result = await withLoaderTimeout(() => getBrandApi().getProductLookupUsage(), label, PRODUCT_BRAND_LOOKUP_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
-      setUsageSummary(Array.isArray(result?.brands) ? result.brands : [])
+      const brandRows = (result as { brands?: BrandUsageEntry[] } | null | undefined)?.brands
+      setUsageSummary(Array.isArray(brandRows) ? brandRows : [])
       return result
     } catch (loadError) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
-      setError(loadError?.message || 'Failed to load brand usage')
+      setError(getErrorMessage(loadError, 'Failed to load brand usage'))
       return null
     }
   }, [])
@@ -150,7 +245,7 @@ export default function ManageBrandsModal({
       ...Array.from(usageMap.values()).map((entry) => String(entry?.name || '').trim()).filter(Boolean),
     ])
     return Array.from(merged)
-      .map((name) => {
+      .map((name): BrandWithUsage => {
         const usage = usageMap.get(normalizeLookup(name))
         return {
           name,
@@ -189,7 +284,9 @@ export default function ManageBrandsModal({
 
   useEffect(() => {
     reloadUsageSummary()
-    return () => invalidateTrackedRequest(loadRequestRef)
+    return () => {
+      invalidateTrackedRequest(loadRequestRef)
+    }
   }, [reloadUsageSummary])
 
   useEffect(() => {
@@ -200,22 +297,22 @@ export default function ManageBrandsModal({
     })
   }, [brandsWithUsage])
 
-  const runBrandMutation = useCallback((loader, label) => (
+  const runBrandMutation = useCallback(<T,>(loader: () => T | Promise<T>, label: string): Promise<T> => (
     withLoaderTimeout(loader, label, PRODUCT_BRAND_MUTATION_TIMEOUT_MS)
   ), [])
 
-  const saveLibrary = async (brands, colorOverrides = {}) => {
+  const saveLibrary = async (brands: unknown[], colorOverrides: BrandColorMap = {}): Promise<void> => {
     const { brands: clean, colorMap: cleanColorMap } = buildSavedLibrary(brands, colorOverrides, brandColorMap)
 
-    await runBrandMutation(() => window.api.saveSettings({
+    await runBrandMutation(() => getBrandApi().saveSettings({
       product_brand_options: JSON.stringify(clean),
       product_brand_color_map: JSON.stringify(cleanColorMap),
     }), 'Save brand library')
   }
 
-  const restoreProductFieldSnapshots = async (field, snapshots = []) => {
+  const restoreProductFieldSnapshots = async (field: string, snapshots: Record<string, unknown>[] = []): Promise<void> => {
     await restoreLookupProductSnapshots({
-      api: window.api,
+      api: getBrandApi(),
       field,
       snapshots,
       label: 'Brand product restore',
@@ -227,7 +324,7 @@ export default function ManageBrandsModal({
     })
   }
 
-  const addLibraryBrand = async () => {
+  const addLibraryBrand = async (): Promise<void> => {
     const clean = toTitleCase(newBrand)
     if (!clean) return
     if (!beginNamedAction(actionInFlightRef, 'add-brand', { blocked: busy })) return
@@ -256,14 +353,14 @@ export default function ManageBrandsModal({
       actionHistory.pushAction({
         label: `Add brand ${clean}`.trim(),
         undo: async () => {
-          await runBrandMutation(() => window.api.saveSettings({
+          await runBrandMutation(() => getBrandApi().saveSettings({
             product_brand_options: JSON.stringify(previousLibrary),
             product_brand_color_map: JSON.stringify(previousColorMap),
           }), 'Undo brand creation')
           await reloadUsageSummary()
         },
         redo: async () => {
-          await runBrandMutation(() => window.api.saveSettings({
+          await runBrandMutation(() => getBrandApi().saveSettings({
             product_brand_options: JSON.stringify(nextLibraryState.brands),
             product_brand_color_map: JSON.stringify(nextLibraryState.colorMap),
           }), 'Redo brand creation')
@@ -272,14 +369,14 @@ export default function ManageBrandsModal({
       })
       onDone?.()
     } catch (e) {
-      setError(e?.message || 'Failed to save brand')
+      setError(getErrorMessage(e, 'Failed to save brand'))
     } finally {
       finishNamedAction(actionInFlightRef, 'add-brand')
       setBusy(false)
     }
   }
 
-  const renameBrand = async (fromName, toNameRaw) => {
+  const renameBrand = async (fromName: unknown, toNameRaw: unknown): Promise<void> => {
     const from = String(fromName || '').trim()
     const to = toTitleCase(toNameRaw)
     if (!from || !to) return
@@ -294,13 +391,13 @@ export default function ManageBrandsModal({
       const previousLibrary = [...libraryBrands]
       const previousColorMap = { ...brandColorMap }
       const productSnapshots = await fetchLookupProductSnapshots({
-        api: window.api,
+        api: getBrandApi(),
         field: 'brand',
         names: [from, to],
         label: 'Brand product snapshots',
         timeoutMs: PRODUCT_BRAND_PRODUCTS_TIMEOUT_MS,
       })
-      await runBrandMutation(() => window.api.replaceProductLookupValues({
+      await runBrandMutation(() => getBrandApi().replaceProductLookupValues({
         type: 'brand',
         from: [from, to],
         to,
@@ -328,7 +425,7 @@ export default function ManageBrandsModal({
       actionHistory.pushAction({
         label: `${targetAlreadyExists ? 'Merge' : 'Rename'} brand ${from} to ${to}`.trim(),
         undo: async () => {
-          await runBrandMutation(() => window.api.saveSettings({
+          await runBrandMutation(() => getBrandApi().saveSettings({
             product_brand_options: JSON.stringify(previousLibrary),
             product_brand_color_map: JSON.stringify(previousColorMap),
           }), 'Undo brand library rename')
@@ -336,14 +433,14 @@ export default function ManageBrandsModal({
           await reloadUsageSummary()
         },
         redo: async () => {
-          await runBrandMutation(() => window.api.replaceProductLookupValues({
+          await runBrandMutation(() => getBrandApi().replaceProductLookupValues({
             type: 'brand',
             from: [from, to],
             to,
             userId: user?.id,
             userName: user?.name,
           }), 'Redo product brand replacement')
-          await runBrandMutation(() => window.api.saveSettings({
+          await runBrandMutation(() => getBrandApi().saveSettings({
             product_brand_options: JSON.stringify(nextLibraryState.brands),
             product_brand_color_map: JSON.stringify(nextLibraryState.colorMap),
           }), 'Redo brand library rename')
@@ -352,14 +449,14 @@ export default function ManageBrandsModal({
       })
       onDone?.()
     } catch (e) {
-      setError(e?.message || 'Failed to rename brand')
+      setError(getErrorMessage(e, 'Failed to rename brand'))
     } finally {
       finishNamedAction(actionInFlightRef, 'rename-brand')
       setBusy(false)
     }
   }
 
-  const removeBrands = async (names) => {
+  const removeBrands = async (names: unknown[]): Promise<void> => {
     const brandNames = Array.from(new Set((names || []).map((name) => String(name || '').trim()).filter(Boolean)))
     if (!brandNames.length) return
     if (!beginNamedAction(actionInFlightRef, 'delete-brand', { blocked: busy })) return
@@ -382,7 +479,7 @@ export default function ManageBrandsModal({
     setError('')
     try {
       const productSnapshots = await fetchLookupProductSnapshots({
-        api: window.api,
+        api: getBrandApi(),
         field: 'brand',
         names: brandNames,
         label: 'Brand product snapshots',
@@ -390,7 +487,7 @@ export default function ManageBrandsModal({
       })
       const previousLibrary = [...libraryBrands]
       const previousColorMap = { ...brandColorMap }
-      await runBrandMutation(() => window.api.replaceProductLookupValues({
+      await runBrandMutation(() => getBrandApi().replaceProductLookupValues({
         type: 'brand',
         from: brandNames,
         to: null,
@@ -408,7 +505,7 @@ export default function ManageBrandsModal({
       actionHistory.pushAction({
         label: `Delete ${brandNames.length} brand${brandNames.length === 1 ? '' : 's'}`.trim(),
         undo: async () => {
-          await runBrandMutation(() => window.api.saveSettings({
+          await runBrandMutation(() => getBrandApi().saveSettings({
             product_brand_options: JSON.stringify(previousLibrary),
             product_brand_color_map: JSON.stringify(previousColorMap),
           }), 'Undo brand deletion')
@@ -416,14 +513,14 @@ export default function ManageBrandsModal({
           await reloadUsageSummary()
         },
         redo: async () => {
-          await runBrandMutation(() => window.api.replaceProductLookupValues({
+          await runBrandMutation(() => getBrandApi().replaceProductLookupValues({
             type: 'brand',
             from: brandNames,
             to: null,
             userId: user?.id,
             userName: user?.name,
           }), 'Redo product brand clearing')
-          await runBrandMutation(() => window.api.saveSettings({
+          await runBrandMutation(() => getBrandApi().saveSettings({
             product_brand_options: JSON.stringify(nextLibraryState.brands),
             product_brand_color_map: JSON.stringify(nextLibraryState.colorMap),
           }), 'Redo brand deletion')
@@ -432,22 +529,22 @@ export default function ManageBrandsModal({
       })
       onDone?.()
     } catch (e) {
-      setError(e?.message || 'Failed to remove brand')
+      setError(getErrorMessage(e, 'Failed to remove brand'))
     } finally {
       finishNamedAction(actionInFlightRef, 'delete-brand')
       setBusy(false)
     }
   }
 
-  const removeBrand = (name) => removeBrands([name])
+  const removeBrand = (name: string): Promise<void> => removeBrands([name])
 
-  const applySuggestedNormalization = async (entry) => {
+  const applySuggestedNormalization = async (entry: BrandWithUsage): Promise<void> => {
     const reviewRule = entry?.reviewRule
     if (!reviewRule?.suggestedName || reviewRule.tone !== 'safe') return
     await renameBrand(entry.name, reviewRule.suggestedName)
   }
 
-  const toggleSelectedBrand = (name) => {
+  const toggleSelectedBrand = (name: string): void => {
     setSelectedBrands((current) => {
       const next = new Set(current)
       if (next.has(name)) next.delete(name)
@@ -456,7 +553,7 @@ export default function ManageBrandsModal({
     })
   }
 
-  const toggleAllVisibleBrands = () => {
+  const toggleAllVisibleBrands = (): void => {
     setSelectedBrands((current) => {
       const names = brandsWithUsage.map((entry) => entry.name)
       const allSelected = names.length > 0 && names.every((name) => current.has(name))
@@ -473,7 +570,7 @@ export default function ManageBrandsModal({
     <Modal title={`${t('brand') || 'Brand'} ${t('manage') || 'Manage'}`} onClose={onClose}>
       <div className="space-y-4">
         {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{error}</div> : null}
-        <ActionHistoryBar history={actionHistory} />
+        <ActionHistoryBar history={actionHistoryForBar} />
 
         <div className="flex items-end gap-2">
           <div className="flex-1">

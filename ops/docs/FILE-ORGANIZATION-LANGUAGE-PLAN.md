@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 496 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 497 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 64 `.jsx`
+  - 63 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 43 `.tsx`
+  - 44 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -2608,7 +2608,7 @@ Decision rule:
     `find()` scans from bulk lookup cleanup while preserving undo/redo
     behavior and expected-updated-at guards.
 306. Index brand lookup bulk delete impact. Done:
-    `frontend/src/components/products/lookups/ManageBrandsModal.jsx` now builds
+    `frontend/src/components/products/lookups/ManageBrandsModal.tsx` now builds
     `brandsByLookup` once per render and uses it to calculate selected-brand
     usage impact before delete confirmation. This removes repeated full-list
     filtering from bulk brand cleanup and keeps the three lookup managers
@@ -3904,6 +3904,13 @@ Decision rule:
     the existing bounded product snapshot/restore reads, keeps bulk delete and
     undo/redo loops explicit, and routes category API calls through a typed
     `getCategoryApi` boundary.
+497. Convert product brand lookup manager to TSX. Done:
+    `ManageBrandsModal.tsx` now types settings-backed brand options, color
+    maps, usage rows, review rules, selected-brand sets, lookup snapshot APIs,
+    and the settings/product-rewrite mutation surface. The conversion preserves
+    the existing indexed delete-impact path, keeps brand undo/redo loops
+    explicit, and routes settings plus product brand rewrite calls through a
+    typed `getBrandApi` boundary.
 
 ## Safety Gates
 

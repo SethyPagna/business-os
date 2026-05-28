@@ -41,7 +41,7 @@ const productForm = fs.readFileSync(new URL('../src/components/products/forms/Pr
 const bulkImportModal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.jsx', import.meta.url), 'utf8')
 const manageCategoriesModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageCategoriesModal.tsx', import.meta.url), 'utf8')
 const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageUnitsModal.tsx', import.meta.url), 'utf8')
-const manageBrandsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageBrandsModal.jsx', import.meta.url), 'utf8')
+const manageBrandsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageBrandsModal.tsx', import.meta.url), 'utf8')
 const productLookupSnapshots = fs.readFileSync(new URL('../src/components/products/lookups/productLookupSnapshots.ts', import.meta.url), 'utf8')
 const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.jsx', import.meta.url), 'utf8')
 const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePickerModal.jsx', import.meta.url), 'utf8')
@@ -2066,7 +2066,7 @@ assert.doesNotMatch(
 )
 assert.match(
   manageBrandsModal,
-  /withLoaderTimeout\(\(\) => window\.api\.getProductLookupUsage\(\), label, PRODUCT_BRAND_LOOKUP_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => getBrandApi\(\)\.getProductLookupUsage\(\), label, PRODUCT_BRAND_LOOKUP_TIMEOUT_MS\)/,
   'brand lookup manager should timeout usage reads',
 )
 assert.doesNotMatch(

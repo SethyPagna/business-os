@@ -562,15 +562,15 @@ await runTest('product unit manager actions use shared guards and bounded mutati
 })
 
 await runTest('product brand manager actions use shared guards and bounded mutations', () => {
-  const source = readFrontend('src/components/products/lookups/ManageBrandsModal.jsx')
+  const source = readFrontend('src/components/products/lookups/ManageBrandsModal.tsx')
   const mutationLines = source
     .split('\n')
-    .filter((line) => /window\.api\.(saveSettings|replaceProductLookupValues)\(/.test(line))
+    .filter((line) => /getBrandApi\(\)\.(saveSettings|replaceProductLookupValues)\(/.test(line))
 
   assert.match(source, /import \{ beginNamedAction, finishNamedAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const PRODUCT_BRAND_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const actionInFlightRef = useRef\(''\)/)
-  assert.match(source, /const runBrandMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_BRAND_MUTATION_TIMEOUT_MS\)/)
+  assert.match(source, /const runBrandMutation = useCallback\(<T,>\(loader: \(\) => T \| Promise<T>, label: string\): Promise<T> => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_BRAND_MUTATION_TIMEOUT_MS\)/)
   assert.match(source, /if \(!beginNamedAction\(actionInFlightRef, 'add-brand', \{ blocked: busy \}\)\) return/)
   assert.match(source, /if \(!beginNamedAction\(actionInFlightRef, 'rename-brand', \{ blocked: busy \}\)\) return/)
   assert.match(source, /if \(!beginNamedAction\(actionInFlightRef, 'delete-brand', \{ blocked: busy \}\)\) return/)

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 474.
+- Latest completed implementation move in this roadmap: Move 497.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -3393,7 +3393,7 @@ Cleanup checkpoint:
   the visible lookup rows with `ids.map(...find(...))`, preserving undo/redo
   snapshots while making large lookup cleanup linear.
 - Move 306 indexes brand lookup bulk delete impact:
-  `ManageBrandsModal.jsx` now builds `brandsByLookup` with `useMemo()` and uses
+  `ManageBrandsModal.tsx` now builds `brandsByLookup` with `useMemo()` and uses
   that index to calculate selected-brand usage impact. Bulk brand cleanup no
   longer filters the whole brand list for every selected name before asking for
   confirmation, keeping category, unit, and brand lookup cleanup on the same
@@ -5431,3 +5431,11 @@ Move 496 status:
   lookup snapshot APIs, and category mutation results. The conversion keeps
   bulk delete and undo/redo loops explicit, routes category API calls through a
   typed accessor, and updates source-reading tests to the TSX path.
+
+Move 497 status:
+- Move 497 converts product brand lookup manager `ManageBrandsModal.tsx`. The
+  typed boundary now covers settings-backed brand options, color maps, usage
+  rows, review rules, selected-brand sets, lookup snapshot APIs, and the
+  settings/product-rewrite mutation surface. The conversion keeps the indexed
+  delete-impact path, routes settings plus product brand rewrite calls through
+  a typed accessor, and updates source-reading tests to the TSX path.
