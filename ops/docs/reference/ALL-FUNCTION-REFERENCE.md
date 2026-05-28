@@ -485,8 +485,8 @@ Code files scanned: **506**
 | 473 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
 | 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 2 |
 | 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
-| 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
-| 477 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 3 |
+| 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 2 |
+| 477 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 3 |
 | 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 11 |
 | 479 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 3 |
 | 480 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 2 |
@@ -496,7 +496,7 @@ Code files scanned: **506**
 | 484 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 2 |
 | 485 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 3 |
 | 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
-| 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
+| 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 2 |
 | 488 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs` | 2 |
 | 489 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
 | 490 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
@@ -6726,20 +6726,20 @@ Code files scanned: **506**
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 36 |
 
-### 3.476 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
+### 3.476 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `main` | function | 25 |
+| 1 | `assert` | function | 29 |
+| 2 | `main` | function | 36 |
 
-### 3.477 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs`
+### 3.477 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `openFirstProductDetail` | function | 26 |
-| 3 | `main` | function | 35 |
+| 1 | `assert` | function | 29 |
+| 2 | `openFirstProductDetail` | function | 37 |
+| 3 | `main` | function | 46 |
 
 ### 3.478 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
 
@@ -6819,12 +6819,12 @@ Code files scanned: **506**
 | 4 | `endpointStatus` | function | 70 |
 | 5 | `main` | function | 74 |
 
-### 3.487 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs`
+### 3.487 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `main` | function | 25 |
+| 1 | `assert` | function | 33 |
+| 2 | `main` | function | 40 |
 
 ### 3.488 `ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs`
 
