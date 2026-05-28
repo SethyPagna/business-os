@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 503 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 504 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 57 `.jsx`
+  - 54 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 50 `.tsx`
+  - 53 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -3833,7 +3833,7 @@ Decision rule:
     divider, custom-content, and three-dot action contracts; `ActionHistoryBar`
     now carries typed undo/redo/server-history and admin user-filter shapes;
     `UserDetailSheet.tsx` now has typed role/user/permission boundaries while
-    keeping `PermissionEditor.jsx` as the current permission-definition source.
+    using `PermissionEditor.tsx` as the current permission-definition source.
     Callers no longer import the old ActionHistoryBar JSX path, and TSX menu wrappers now
     import the typed `PortalMenu` directly instead of casting the JSX module.
 488. Convert shared pagination, write-conflict, and dashboard chart leaves to
@@ -3951,6 +3951,14 @@ Decision rule:
     keeps the preview shell render path, public sticky navigation, translation
     menu, theme toggle, scroll controls, gallery modals, and Vite catalog
     preview chunk placement intact.
+504. Convert branch, return detail, and permission leaves to TSX. Done:
+    `BranchForm.tsx` now types branch form rows, mutation payloads, and field
+    updates while removing the stale visible default-branch helper text.
+    `ReturnDetailModal.tsx` now types return records, line items, scope
+    normalization, currency display, and optional edit actions.
+    `PermissionEditor.tsx` now types permission sections, definitions,
+    sensitivity labels, parsed permission state, and change callbacks while
+    `UserDetailSheet.tsx` imports the TSX permission source directly.
 
 ## Safety Gates
 

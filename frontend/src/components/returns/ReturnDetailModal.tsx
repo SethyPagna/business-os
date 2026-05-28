@@ -1,15 +1,69 @@
-import { useApp } from '../../AppContext'
-import { fmtTime } from '../../utils/formatters'
+import { useApp as useAppHook } from '../../AppContext.jsx'
+import { fmtTime } from '../../utils/formatters.ts'
 
 const CUSTOMER_SCOPE = 'customer'
+const SUPPLIER_SCOPE = 'supplier'
 
-function normalizeScope(value) {
-  return value === 'supplier' ? 'supplier' : CUSTOMER_SCOPE
+type ReturnScope = typeof CUSTOMER_SCOPE | typeof SUPPLIER_SCOPE
+
+interface ReturnLineItem {
+  id?: string | number | null
+  product_id?: string | number | null
+  product_name?: string | null
+  quantity?: number | string | null
+  total_usd?: number | string | null
+  total_khr?: number | string | null
 }
 
-export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR }) {
+interface ReturnDetail {
+  return_number?: string | null
+  created_at?: string | Date | null
+  items?: ReturnLineItem[] | null
+  return_scope?: string | null
+  supplier_settlement?: string | null
+  return_type?: string | null
+  receipt_number?: string | null
+  supplier_name?: string | null
+  customer_name?: string | null
+  branch_name?: string | null
+  cashier_name?: string | null
+  reason?: string | null
+  notes?: string | null
+  supplier_compensation_usd?: number | string | null
+  supplier_loss_usd?: number | string | null
+  supplier_compensation_khr?: number | string | null
+  supplier_loss_khr?: number | string | null
+  total_refund_usd?: number | string | null
+  total_refund_khr?: number | string | null
+}
+
+interface ReturnDetailModalProps {
+  ret?: ReturnDetail | null
+  onClose: () => void
+  onEdit?: () => void
+  fmtUSD: (value: number | string) => string
+  fmtKHR: (value: number | string) => string
+}
+
+const useApp = useAppHook as () => {
+  t?: (key: string) => string | undefined
+}
+
+function normalizeScope(value: unknown): ReturnScope {
+  return value === SUPPLIER_SCOPE ? SUPPLIER_SCOPE : CUSTOMER_SCOPE
+}
+
+function coerceMoney(value: number | string | null | undefined): number | string {
+  return value || 0
+}
+
+function isPositiveMoney(value: number | string | null | undefined): boolean {
+  return Number(value || 0) > 0
+}
+
+export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR }: ReturnDetailModalProps) {
   const { t } = useApp()
-  const tr = (key, fallback) => {
+  const tr = (key: string, fallback: string): string => {
     const value = t?.(key)
     return value && value !== key ? value : fallback
   }
@@ -17,7 +71,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
   if (!ret) return null
   const items = Array.isArray(ret.items) ? ret.items : []
   const scope = normalizeScope(ret.return_scope)
-  const isSupplier = scope === 'supplier'
+  const isSupplier = scope === SUPPLIER_SCOPE
 
   const typeLabel = isSupplier
     ? (ret.supplier_settlement || tr('settlement_refund', 'refund'))
@@ -33,9 +87,9 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
           </div>
           <div className="flex items-center gap-2">
             {onEdit ? (
-              <button onClick={onEdit} className="btn-secondary px-3 py-1.5 text-xs">{tr('edit', 'Edit')}</button>
+              <button type="button" onClick={onEdit} className="btn-secondary px-3 py-1.5 text-xs">{tr('edit', 'Edit')}</button>
             ) : null}
-            <button onClick={onClose} className="h-8 w-8 text-2xl leading-none text-gray-400 hover:text-gray-600">x</button>
+            <button type="button" onClick={onClose} className="h-8 w-8 text-2xl leading-none text-gray-400 hover:text-gray-600">x</button>
           </div>
         </div>
 
@@ -91,8 +145,8 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                     <div className="text-xs text-gray-400">{tr('quantity', 'Qty')}: {item.quantity || 0}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtUSD(item.total_usd || 0)}</div>
-                    {(item.total_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(item.total_khr || 0)}</div> : null}
+                    <div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtUSD(coerceMoney(item.total_usd))}</div>
+                    {isPositiveMoney(item.total_khr) ? <div className="text-xs text-gray-400">{fmtKHR(coerceMoney(item.total_khr))}</div> : null}
                   </div>
                 </div>
               ))}
@@ -103,24 +157,24 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
             <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-700/40">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-300">{tr('supplier_compensation', 'Supplier compensation')}</span>
-                <span className="font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(ret.supplier_compensation_usd || 0)}</span>
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(coerceMoney(ret.supplier_compensation_usd))}</span>
               </div>
               <div className="mt-1 flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-300">{tr('business_loss', 'Business loss')}</span>
-                <span className="font-semibold text-rose-600 dark:text-rose-400">{fmtUSD(ret.supplier_loss_usd || 0)}</span>
+                <span className="font-semibold text-rose-600 dark:text-rose-400">{fmtUSD(coerceMoney(ret.supplier_loss_usd))}</span>
               </div>
               <div className="mt-1 text-xs text-gray-400">
-                {fmtKHR(ret.supplier_compensation_khr || 0)} / {fmtKHR(ret.supplier_loss_khr || 0)}
+                {fmtKHR(coerceMoney(ret.supplier_compensation_khr))} / {fmtKHR(coerceMoney(ret.supplier_loss_khr))}
               </div>
             </div>
           ) : (
             <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-700/40">
               <div className="flex justify-between text-base font-bold text-gray-900 dark:text-white">
                 <span>{tr('total_refunded', 'Total Refunded')}</span>
-                <span>{fmtUSD(ret.total_refund_usd || 0)}</span>
+                <span>{fmtUSD(coerceMoney(ret.total_refund_usd))}</span>
               </div>
-              {(ret.total_refund_khr || 0) > 0 ? (
-                <div className="text-right text-xs text-gray-400">{fmtKHR(ret.total_refund_khr || 0)}</div>
+              {isPositiveMoney(ret.total_refund_khr) ? (
+                <div className="text-right text-xs text-gray-400">{fmtKHR(coerceMoney(ret.total_refund_khr))}</div>
               ) : null}
             </div>
           )}

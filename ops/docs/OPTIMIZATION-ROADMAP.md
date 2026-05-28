@@ -5353,7 +5353,7 @@ Move 487 status:
 - Move 487 converts `PortalMenu.tsx`, `ActionHistoryBar.tsx`, and
   `UserDetailSheet.tsx`. The typed contracts cover body-portal menu items,
   undo/redo/server-history rows, admin user filters, user roles, and
-  permission boundaries while preserving the current `PermissionEditor.jsx`
+  permission boundaries while preserving the current `PermissionEditor.tsx`
   source.
 
 Move 488 status:
@@ -5489,3 +5489,12 @@ Move 503 status:
   conversion preserves the public preview shell, pinned navigation, translation
   menu, theme toggle, scroll controls, gallery modals, and Vite catalog-preview
   chunk placement.
+
+Move 504 status:
+- Move 504 converts branch, return detail, and permission leaves:
+  `BranchForm.tsx`, `ReturnDetailModal.tsx`, and `PermissionEditor.tsx`. The
+  typed boundaries now cover branch form values and save payloads, return
+  records and line items, return scope/currency display, permission sections,
+  sensitivity labels, parsed permission state, and change callbacks. The branch
+  form also removes the stale visible default-branch helper text, and
+  `UserDetailSheet.tsx` imports the TSX permission definitions directly.

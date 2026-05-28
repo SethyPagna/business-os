@@ -1,4 +1,30 @@
-export const PERMISSION_SECTIONS = [
+type PermissionSensitivity = 'normal' | 'high' | 'critical'
+
+interface PermissionDefinition {
+  key: string
+  tKey: string
+  label: string
+  sensitivity: PermissionSensitivity
+  section?: string
+}
+
+interface PermissionSection {
+  key: string
+  tKey: string
+  label: string
+  description: string
+  permissions: PermissionDefinition[]
+}
+
+type PermissionState = Record<string, boolean>
+
+interface PermissionEditorProps {
+  permissions?: string | Record<string, unknown> | null
+  onChange: (permissions: PermissionState) => void
+  t?: (key: string) => string | undefined
+}
+
+export const PERMISSION_SECTIONS: PermissionSection[] = [
   {
     key: 'admin',
     tKey: 'perm_section_admin',
@@ -42,27 +68,41 @@ export const PERMISSION_SECTIONS = [
   },
 ]
 
-export const PERMISSION_DEFS = PERMISSION_SECTIONS.flatMap((section) => (
+export const PERMISSION_DEFS: PermissionDefinition[] = PERMISSION_SECTIONS.flatMap((section) => (
   section.permissions.map((permission) => ({ ...permission, section: section.key }))
 ))
 
-export default function PermissionEditor({ permissions, onChange, t }) {
-  const translate = (key, fallback) => {
+function parsePermissionState(permissions: PermissionEditorProps['permissions']): PermissionState {
+  if (typeof permissions === 'string') {
+    try {
+      return JSON.parse(permissions || '{}') as PermissionState
+    } catch {
+      return {}
+    }
+  }
+  if (!permissions || typeof permissions !== 'object') return {}
+  return Object.fromEntries(
+    Object.entries(permissions).map(([key, value]) => [key, Boolean(value)]),
+  )
+}
+
+export default function PermissionEditor({ permissions, onChange, t }: PermissionEditorProps) {
+  const translate = (key: string, fallback: string): string => {
     if (typeof t !== 'function') return fallback
     const value = t(key)
     return value && value !== key ? value : fallback
   }
 
-  const labelFor = (permission) => translate(permission.tKey, permission.label)
-  const sensitivityLabel = (value) => {
+  const labelFor = (permission: PermissionDefinition): string => translate(permission.tKey, permission.label)
+  const sensitivityLabel = (value: PermissionSensitivity): string => {
     if (value === 'critical') return translate('permission_sensitive_critical', 'Sensitive')
     if (value === 'high') return translate('permission_sensitive_high', 'Review')
     return translate('permission_sensitive_normal', 'Standard')
   }
-  const perms = typeof permissions === 'string' ? JSON.parse(permissions || '{}') : (permissions || {})
+  const perms = parsePermissionState(permissions)
 
-  const toggle = (key) => {
-    const next = { ...perms }
+  const toggle = (key: string) => {
+    const next: PermissionState = { ...perms }
     if (next[key]) delete next[key]
     else next[key] = true
 

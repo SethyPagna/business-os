@@ -1,21 +1,42 @@
 import { useState } from 'react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 
-/**
- * 1. Branch Form Component
- * 1.1 Purpose
- * - Create/update a branch profile.
- * - Validate required branch name before save.
- * - Toggle default branch and active state flags.
- */
-export default function BranchForm({ branch, onSave, onClose }) {
-  const { t, settings } = useApp()
+type BranchFlag = 0 | 1
 
-  /**
-   * 2. Local Form State
-   * 2.1 Hydrates from `branch` when editing.
-   */
-  const [form, setForm] = useState({
+interface BranchRecord {
+  id?: string | number
+  name?: string | null
+  location?: string | null
+  phone?: string | null
+  manager?: string | null
+  notes?: string | null
+  is_default?: BranchFlag | boolean | null
+  is_active?: BranchFlag | boolean | null
+}
+
+interface BranchFormState {
+  name: string
+  location: string
+  phone: string
+  manager: string
+  notes: string
+  is_default: BranchFlag | boolean
+  is_active: BranchFlag | boolean
+}
+
+interface BranchFormProps {
+  branch?: BranchRecord | null
+  onSave: (form: BranchFormState) => Promise<void> | void
+  onClose: () => void
+}
+
+const useApp = useAppHook as () => {
+  t: (key: string) => string | undefined
+}
+
+export default function BranchForm({ branch, onSave, onClose }: BranchFormProps) {
+  const { t } = useApp()
+  const [form, setForm] = useState<BranchFormState>({
     name: branch?.name || '',
     location: branch?.location || '',
     phone: branch?.phone || '',
@@ -27,28 +48,22 @@ export default function BranchForm({ branch, onSave, onClose }) {
   const [saving, setSaving] = useState(false)
   const [nameTouched, setNameTouched] = useState(false)
 
-  /**
-   * 2.1.1 Generic field mutator.
-   */
-  const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }))
-
-  const branchDefaultHint = settings?.language === 'km'
-    ? 'ការលក់ថ្មី និងការកែសម្រួលស្តុក នឹងយកសាខានេះជាលំនាំដើម។'
-    : 'New sales and stock adjustments default to this branch.'
+  const set = <Key extends keyof BranchFormState>(key: Key, value: BranchFormState[Key]) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
 
   const nameInvalid = !form.name.trim()
 
-  /**
-   * 3. Save Action
-   * 3.1 Block save until required fields are valid.
-   */
   const handleSave = async () => {
     setNameTouched(true)
     if (nameInvalid) return
-    setSaving(true)
-    await onSave(form)
-    setSaving(false)
-    onClose()
+    try {
+      setSaving(true)
+      await onSave(form)
+      onClose()
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -56,7 +71,7 @@ export default function BranchForm({ branch, onSave, onClose }) {
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault()
-        handleSave()
+        void handleSave()
       }}
     >
       <div>
@@ -154,10 +169,7 @@ export default function BranchForm({ branch, onSave, onClose }) {
             onChange={(event) => set('is_default', event.target.checked ? 1 : 0)}
             className="h-4 w-4"
           />
-          <div>
-            <div className="text-sm font-medium text-blue-700 dark:text-blue-300">{t('set_default')}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">{branchDefaultHint}</div>
-          </div>
+          <div className="text-sm font-medium text-blue-700 dark:text-blue-300">{t('set_default')}</div>
         </label>
 
         {branch ? (
