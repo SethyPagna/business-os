@@ -5075,3 +5075,11 @@ Move 456 status:
   close behavior for the route-specific live checks. This keeps the repeated
   Playwright checks on one typed helper path before the individual live-check
   entrypoints are converted.
+
+Move 457 status:
+- Move 457 converts the Phase 8.4 live-suite orchestrator to TypeScript.
+  `phase84-live-suite.ts` keeps the same ordered UI/public/hygiene execution
+  model and package script while adding typed CLI options, suite-step records,
+  child report summaries, skipped-step handling, and workspace-safe report
+  output. This leaves the large route-specific Playwright entrypoints as the
+  remaining Phase 8.4 `.mjs` conversion surface.

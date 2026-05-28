@@ -7,7 +7,54 @@ import { fileURLToPath } from 'node:url'
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
 const DEFAULT_REPORT = 'ops/runtime/reports/phase84-live-suite-latest.json'
 
-const SUITE_STEPS = [
+type SuiteArgs = {
+  output: string
+  skipUi: boolean
+  skipPublic: boolean
+  skipHygiene: boolean
+  keepGoing: boolean
+}
+
+type SuiteStep = {
+  name: string
+  script: string
+  flag: keyof Pick<SuiteArgs, 'skipUi' | 'skipPublic' | 'skipHygiene'>
+  reportPrefix?: string
+  reportPath?: string
+}
+
+type StepReport = {
+  checks?: Record<string, unknown>
+  build?: { hash?: string }
+  health?: { frontendHash?: string }
+  ok?: boolean
+  [key: string]: unknown
+}
+
+type HygieneCheck = {
+  name?: string
+  ok?: boolean
+  reportSummary?: {
+    status?: string
+    matchedTotal?: number
+  }
+}
+
+type StepResult = {
+  name: string
+  script: string
+  ok: boolean
+  skipped?: boolean
+  status?: number | null
+  error?: string
+  durationMs: number
+  reportPath?: string
+  reportSummary?: Record<string, unknown> | null
+  stdoutTail?: string
+  stderrTail?: string
+}
+
+const SUITE_STEPS: SuiteStep[] = [
   {
     name: 'broad Phase 8.4 UI live check',
     script: 'ops/scripts/runtime/live-checks/phase84-ui-live-check.mjs',
@@ -28,8 +75,8 @@ const SUITE_STEPS = [
   },
 ]
 
-function parseArgs(argv = process.argv.slice(2)) {
-  const args = {
+function parseArgs(argv = process.argv.slice(2)): SuiteArgs {
+  const args: SuiteArgs = {
     output: DEFAULT_REPORT,
     skipUi: false,
     skipPublic: false,
@@ -51,22 +98,22 @@ function parseArgs(argv = process.argv.slice(2)) {
   return args
 }
 
-function assertInsideWorkspace(target) {
+function assertInsideWorkspace(target: string): string {
   const relative = path.relative(ROOT_DIR, target)
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Refusing output outside workspace: ${target}`)
   return target
 }
 
-function tail(value) {
+function tail(value: unknown): string {
   return String(value || '').slice(-4000)
 }
 
-function readJsonIfExists(target) {
+function readJsonIfExists(target: string): StepReport | null {
   if (!target || !fs.existsSync(target)) return null
   return JSON.parse(fs.readFileSync(target, 'utf8'))
 }
 
-function latestReportPathForPrefix(prefix) {
+function latestReportPathForPrefix(prefix: string | undefined): string {
   if (!prefix) return ''
   const reportsDir = path.join(ROOT_DIR, 'ops/runtime/reports')
   if (!fs.existsSync(reportsDir)) return ''
@@ -84,43 +131,45 @@ function latestReportPathForPrefix(prefix) {
   return candidates[0]?.reportPath || ''
 }
 
-function relativePath(target) {
+function relativePath(target: string): string {
   if (!target) return ''
   return path.relative(ROOT_DIR, target).replace(/\\/g, '/')
 }
 
-function summarizeReport(step, report) {
+function summarizeReport(step: SuiteStep, report: StepReport): Record<string, unknown> | null {
   if (!report) return null
+  const checks = report.checks || {}
   if (step.reportPath?.includes('post-live-hygiene')) {
+    const hygieneChecks = Array.isArray(report.checks) ? report.checks as HygieneCheck[] : []
     return {
       ok: report.ok,
-      checks: report.checks?.length || 0,
-      failedChecks: (report.checks || []).filter((check) => !check.ok).map((check) => check.name),
-      datasetStatus: report.checks?.find((check) => check.name === 'dataset readiness')?.reportSummary?.status,
-      generatedIntegrityMatches: report.checks?.find((check) => check.name === 'generated integrity cleanup postcheck')?.reportSummary?.matchedTotal,
+      checks: hygieneChecks.length,
+      failedChecks: hygieneChecks.filter((check) => !check.ok).map((check) => check.name),
+      datasetStatus: hygieneChecks.find((check) => check.name === 'dataset readiness')?.reportSummary?.status,
+      generatedIntegrityMatches: hygieneChecks.find((check) => check.name === 'generated integrity cleanup postcheck')?.reportSummary?.matchedTotal,
     }
   }
   if (step.reportPrefix?.includes('public-portal')) {
     return {
-      renderedProductCount: report.checks?.renderedProductCount,
-      failedResponseCount: report.checks?.failedResponseCount,
-      relevantConsoleMessages: report.checks?.relevantConsoleMessages,
-      pageErrors: report.checks?.pageErrors,
-      enforcedCspPresent: report.checks?.enforcedCspPresent,
+      renderedProductCount: checks.renderedProductCount,
+      failedResponseCount: checks.failedResponseCount,
+      relevantConsoleMessages: checks.relevantConsoleMessages,
+      pageErrors: checks.pageErrors,
+      enforcedCspPresent: checks.enforcedCspPresent,
     }
   }
   if (step.reportPrefix?.includes('ui-live-check')) {
     return {
       frontendHash: report.build?.hash || report.health?.frontendHash,
-      checkedSignals: report.checks ? Object.keys(report.checks).length : 0,
-      relevantConsoleMessages: report.checks?.relevantConsoleMessages,
-      frameworkOverlayVisible: report.checks?.frameworkOverlayVisible,
+      checkedSignals: Object.keys(checks).length,
+      relevantConsoleMessages: checks.relevantConsoleMessages,
+      frameworkOverlayVisible: checks.frameworkOverlayVisible,
     }
   }
   return null
 }
 
-function readStepReport(step) {
+function readStepReport(step: SuiteStep): Pick<StepResult, 'reportPath' | 'reportSummary'> | Record<string, never> {
   const reportPath = step.reportPath ? path.join(ROOT_DIR, step.reportPath) : latestReportPathForPrefix(step.reportPrefix)
   const report = readJsonIfExists(reportPath)
   if (!report) return {}
@@ -130,7 +179,7 @@ function readStepReport(step) {
   }
 }
 
-function runNodeStep(step) {
+function runNodeStep(step: SuiteStep): StepResult {
   const startedAt = Date.now()
   console.log(`[phase84-suite] ${step.name}`)
   const result = spawnSync(process.execPath, [path.join(ROOT_DIR, step.script)], {
@@ -150,7 +199,7 @@ function runNodeStep(step) {
   }
 }
 
-function skippedStep(step) {
+function skippedStep(step: SuiteStep): StepResult {
   return {
     name: step.name,
     script: step.script,
@@ -160,8 +209,8 @@ function skippedStep(step) {
   }
 }
 
-function runSuite(args) {
-  const steps = []
+function runSuite(args: SuiteArgs): StepResult[] {
+  const steps: StepResult[] = []
   for (const step of SUITE_STEPS) {
     const result = args[step.flag] ? skippedStep(step) : runNodeStep(step)
     steps.push(result)

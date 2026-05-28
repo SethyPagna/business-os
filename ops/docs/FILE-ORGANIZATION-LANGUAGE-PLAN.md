@@ -2253,7 +2253,7 @@ Decision rule:
     future sessions have one gate to prove test rows, undo/redo residue, and
     orphan cleanup debt were not left behind.
 266. Add an ordered Phase 8.4 live-suite runner. Done:
-    `ops/scripts/runtime/live-checks/phase84-live-suite.mjs` now runs the broad
+    `ops/scripts/runtime/live-checks/phase84-live-suite.ts` now runs the broad
     UI Playwright check, public Cloudflare portal check, and post-live hygiene
     gate in that order, writing
     `ops/runtime/reports/phase84-live-suite-latest.json`. The ops package adds
@@ -2263,7 +2263,7 @@ Decision rule:
     exercise buttons/actions, check the public portal, then prove no QA or
     integrity residue remains.
 267. Compact Phase 8.4 live-suite reports. Done:
-    `phase84-live-suite.mjs` now attaches structured child report paths and
+    `phase84-live-suite.ts` now attaches structured child report paths and
     concise summaries instead of embedding large escaped child JSON output for
     successful steps. Broad UI summaries include frontend hash and signal
     counts, public portal summaries include product/error/CSP signals, and the
@@ -3578,6 +3578,13 @@ Decision rule:
     and locator boundaries, and modal close/read-wait contracts. Route-specific
     Phase 8.4 live checks now import the TypeScript utility helper while their
     entrypoints remain queued for later conversion.
+447. Convert the Phase 8.4 live-suite orchestrator to TypeScript. Done:
+    `phase84-live-suite.ts` replaces the `.mjs` orchestrator while preserving
+    the `phase84:live-suite` package command. The suite now has typed CLI
+    options, step definitions, child report summaries, skipped-step records,
+    and workspace-safe report output handling while continuing to run the UI
+    live check, public Cloudflare portal check, and post-live hygiene gate in
+    order.
 
 ## Safety Gates
 
