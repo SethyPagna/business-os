@@ -488,12 +488,12 @@ Code files scanned: **506**
 | 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
 | 477 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.mjs` | 3 |
 | 478 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 11 |
-| 479 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs` | 3 |
-| 480 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs` | 2 |
+| 479 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 3 |
+| 480 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 2 |
 | 481 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs` | 3 |
 | 482 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.mjs` | 2 |
 | 483 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.mjs` | 2 |
-| 484 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs` | 2 |
+| 484 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 2 |
 | 485 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs` | 3 |
 | 486 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
 | 487 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.mjs` | 2 |
@@ -6757,20 +6757,20 @@ Code files scanned: **506**
 | 10 | `skippedStep` | function | 202 |
 | 11 | `runSuite` | function | 212 |
 
-### 3.479 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.mjs`
+### 3.479 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `verifiedContextGet` | function | 24 |
-| 3 | `main` | function | 31 |
+| 1 | `assert` | function | 33 |
+| 2 | `verifiedContextGet` | function | 39 |
+| 3 | `main` | function | 46 |
 
-### 3.480 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.mjs`
+### 3.480 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `main` | function | 25 |
+| 1 | `assert` | function | 28 |
+| 2 | `main` | function | 35 |
 
 ### 3.481 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.mjs`
 
@@ -6794,12 +6794,12 @@ Code files scanned: **506**
 | 1 | `assert` | function | 18 |
 | 2 | `main` | function | 26 |
 
-### 3.484 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.mjs`
+### 3.484 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 18 |
-| 2 | `main` | function | 25 |
+| 1 | `assert` | function | 28 |
+| 2 | `main` | function | 35 |
 
 ### 3.485 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.mjs`
 
