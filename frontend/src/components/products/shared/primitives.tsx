@@ -1,14 +1,56 @@
-// Products Shared Primitives
-// Small reusable display components used across the Products module.
-
 import { useEffect, useRef, useState } from 'react'
+import type { MouseEventHandler } from 'react'
 import { AlertTriangle, ImageOff } from 'lucide-react'
 import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
 
 const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000
-const brokenProductImageUrls = new Map()
+const brokenProductImageUrls = new Map<string, number>()
 
-function isRecentlyBrokenProductImage(src) {
+type ImageApi = {
+  getImageDataUrl?: (src: string) => Promise<string | null | undefined>
+}
+
+interface ProductImgProps {
+  src?: string | null
+  alt?: string
+  className?: string
+  onClick?: MouseEventHandler<HTMLImageElement>
+}
+
+interface ProductImagePlaceholderProps {
+  className?: string
+  compact?: boolean
+}
+
+interface MarginCardProps {
+  purchaseUsd: number
+  sellingUsd: number
+  usdSymbol: string
+}
+
+interface DualPriceInputProps {
+  labelUsd: string
+  labelKhr: string
+  valueUsd?: string | number | null
+  valueKhr?: string | number | null
+  onUsdChange: (value: string) => void
+  onKhrChange: (value: string) => void
+  usdSymbol: string
+  khrSymbol: string
+  exchangeRate?: number
+  t?: (key: string) => string | undefined
+}
+
+interface SanitizeNumericInputOptions {
+  allowDecimal?: boolean
+  allowNegative?: boolean
+}
+
+function getImageApi(): ImageApi | undefined {
+  return (window as Window & { api?: ImageApi }).api
+}
+
+function isRecentlyBrokenProductImage(src: string): boolean {
   const lastFailedAt = Number(brokenProductImageUrls.get(src) || 0)
   if (!lastFailedAt) return false
   if ((Date.now() - lastFailedAt) < BROKEN_PRODUCT_IMAGE_RETRY_MS) return true
@@ -16,12 +58,12 @@ function isRecentlyBrokenProductImage(src) {
   return false
 }
 
-function markBrokenProductImage(src) {
+function markBrokenProductImage(src: string): void {
   if (!src) return
   brokenProductImageUrls.set(src, Date.now())
 }
 
-function sanitizeNumericInput(value, { allowDecimal = true, allowNegative = false } = {}) {
+function sanitizeNumericInput(value: unknown, { allowDecimal = true, allowNegative = false }: SanitizeNumericInputOptions = {}): string {
   let next = String(value ?? '').replace(/,/g, '').replace(/[^\d.-]/g, '')
   if (!allowNegative) next = next.replace(/-/g, '')
   else if (next.includes('-')) next = `${next.startsWith('-') ? '-' : ''}${next.replace(/-/g, '')}`
@@ -31,14 +73,14 @@ function sanitizeNumericInput(value, { allowDecimal = true, allowNegative = fals
   return `${next.slice(0, dotIndex + 1)}${next.slice(dotIndex + 1).replace(/\./g, '')}`
 }
 
-function parseNumericInput(value, fallback = 0) {
+function parseNumericInput(value: unknown, fallback = 0): number {
   if (value === '' || value === null || typeof value === 'undefined') return fallback
   const parsed = Number(String(value).replace(/,/g, ''))
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-function ProductImg({ src, alt, className, onClick }) {
-  const [url, setUrl] = useState(null)
+function ProductImg({ src, alt = '', className, onClick }: ProductImgProps) {
+  const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   const imageRequestRef = useRef(0)
   const safeSrc = String(src || '').trim()
@@ -78,10 +120,11 @@ function ProductImg({ src, alt, className, onClick }) {
         imageRequestRef.current = requestId + 1
       }
     }
-    if (window.api?.getImageDataUrl) {
+    const appApi = getImageApi()
+    if (appApi?.getImageDataUrl) {
       async function loadImageData() {
         try {
-          const data = await window.api.getImageDataUrl(safeSrc)
+          const data = await appApi?.getImageDataUrl?.(safeSrc)
           if (imageRequestRef.current !== requestId) return
           setUrl(data || null)
         } catch {
@@ -89,7 +132,7 @@ function ProductImg({ src, alt, className, onClick }) {
           setUrl(null)
         }
       }
-      loadImageData()
+      void loadImageData()
     } else {
       setUrl(null)
     }
@@ -123,7 +166,7 @@ function ProductImg({ src, alt, className, onClick }) {
   )
 }
 
-function ProductImagePlaceholder({ className = '', compact = false }) {
+function ProductImagePlaceholder({ className = '', compact = false }: ProductImagePlaceholderProps) {
   return (
     <div className={`flex items-center justify-center rounded-xl bg-gray-100 text-gray-400 dark:bg-gray-700/80 dark:text-gray-500 ${className}`}>
       <ImageOff className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
@@ -131,7 +174,7 @@ function ProductImagePlaceholder({ className = '', compact = false }) {
   )
 }
 
-function MarginCard({ purchaseUsd, sellingUsd, usdSymbol }) {
+function MarginCard({ purchaseUsd, sellingUsd, usdSymbol }: MarginCardProps) {
   const margin = sellingUsd - purchaseUsd
   const pct = sellingUsd > 0 ? (margin / sellingUsd * 100) : 0
   const isProfit = margin >= 0
@@ -163,9 +206,9 @@ function MarginCard({ purchaseUsd, sellingUsd, usdSymbol }) {
   )
 }
 
-function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, onKhrChange, usdSymbol, khrSymbol, exchangeRate, t }) {
-  const handleUsdChange = (val) => onUsdChange(sanitizeNumericInput(val))
-  const handleKhrChange = (val) => onKhrChange(sanitizeNumericInput(val))
+function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, onKhrChange, usdSymbol, khrSymbol }: DualPriceInputProps) {
+  const handleUsdChange = (val: string) => onUsdChange(sanitizeNumericInput(val))
+  const handleKhrChange = (val: string) => onKhrChange(sanitizeNumericInput(val))
 
   return (
     <div className="grid grid-cols-2 gap-2">

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
 const receiptSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.jsx', import.meta.url), 'utf8')
-const printSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/PrintSettings.jsx', import.meta.url), 'utf8')
+const printSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/PrintSettings.tsx', import.meta.url), 'utf8')
 const receiptPreviewSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
 const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.jsx', import.meta.url), 'utf8')
 const printUtilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')

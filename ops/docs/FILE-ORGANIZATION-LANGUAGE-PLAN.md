@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 488 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 489 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 81 `.jsx`
+  - 76 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 26 `.tsx`
+  - 31 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -23,8 +23,8 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
   - 83 `.js`
   - 1 `.sql`
   - 3 `.md`
-- Backend tests: 50 `.js` files under `backend/test`.
-- Runtime/ops scripts: 44 `.mjs`, 16 `.js`, 8 `.ps1`, and 1 `.sql` under `ops/scripts`.
+- Backend tests: 50 `.ts` files under `backend/test`.
+- Runtime/ops scripts: 60 `.ts`, 8 `.ps1`, and 1 `.sql` under `ops/scripts`.
 - TypeScript is strict for converted frontend source and the first converted `frontend/tests/**/*.ts` files.
 - React type packages are not currently declared in `frontend/package.json`, so large `.jsx` to `.tsx` conversion needs a dependency/setup phase first.
 - End-state target: no first-party `.js`, `.jsx`, `.mjs`, or `.cjs` remains outside generated/runtime/vendor folders. Every conversion slice must update imports, scripts, docs, and verification references before deleting the old path.
@@ -214,7 +214,7 @@ Decision rule:
     pagination source tests, source checks, typecheck, production build,
     runtime health, and a focused Product page Playwright action check passed
     on frontend hash `e9b985386668bdf9`.
-13. Move the product shared primitive cluster. Done: `primitives.jsx` now lives
+13. Move the product shared primitive cluster. Done: `primitives.tsx` now lives
     in `frontend/src/components/products/shared`, with Products, ProductForm,
     VariantForm, Product surfaces, Catalog, and POS imports rewired. Product,
     POS, and portal catalog source tests, source checks, typecheck, production
@@ -3843,6 +3843,16 @@ Decision rule:
     chart data, hover tooltips, resize refs, and SVG event handlers. Callers no
     longer import the old pagination JSX path, and the chart barrel now exports
     typed chart modules through extensionless imports.
+489. Convert POS leaf controls, receipt print/order controls, and product
+    primitives to TSX. Done: `CartItem.tsx` now types cart line ids, branch
+    options, price-mode labels, and money callbacks; `FilterPanel.tsx` now
+    types category/branch/brand/supplier filter options while keeping the
+    allocation-free active-filter counter; `FieldOrderManager.tsx` now types
+    receipt sections, dividers, drag events, and order updates;
+    `PrintSettings.tsx` now types print settings, preview refs, and
+    auto-save settings payloads; and `products/shared/primitives.tsx` now
+    exposes typed product image, placeholder, margin, dual-price, and numeric
+    parsing primitives. Source-reading tests now target the TSX files.
 
 ## Safety Gates
 

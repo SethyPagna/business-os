@@ -1,11 +1,61 @@
+import type { ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { Boxes, Building2, Package, Tags, Truck, X } from 'lucide-react'
 
-function countActiveFlags(flags = []) {
+type Translate = (key: string) => string | undefined
+type FilterSetter = (value: string) => void
+
+interface NamedOption {
+  id?: string | number
+  name: string
+  color?: string
+  is_default?: boolean
+}
+
+interface POSFilterPanelProps {
+  open: boolean
+  t?: Translate
+  onClose?: () => void
+  categories?: NamedOption[]
+  brands?: string[]
+  branches?: NamedOption[]
+  suppliers?: string[]
+  categoryFilter: string
+  setCategoryFilter: FilterSetter
+  brandFilter: string
+  setBrandFilter: FilterSetter
+  branchFilter: string
+  setBranchFilter: FilterSetter
+  stockFilter: string
+  setStockFilter: FilterSetter
+  groupFilter?: string
+  setGroupFilter?: FilterSetter
+  supplierFilter: string
+  setSupplierFilter: FilterSetter
+}
+
+interface SectionLabelProps {
+  icon: LucideIcon
+  children: ReactNode
+}
+
+function countActiveFlags(flags: boolean[] = []): number {
   let count = 0
   for (const flag of flags) {
     if (flag) count += 1
   }
   return count
+}
+
+function SectionLabel({ icon: Icon, children }: SectionLabelProps) {
+  return (
+    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+      <span className="inline-flex items-center gap-1.5">
+        <Icon className="h-3.5 w-3.5" />
+        {children}
+      </span>
+    </div>
+  )
 }
 
 export default function POSFilterPanel({
@@ -28,9 +78,9 @@ export default function POSFilterPanel({
   setGroupFilter,
   supplierFilter,
   setSupplierFilter,
-}) {
+}: POSFilterPanelProps) {
   if (!open) return null
-  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+  const T = (key: string, fallback: string): string => t?.(key) || fallback
 
   const activeCount = countActiveFlags([
     categoryFilter !== 'all',
@@ -50,19 +100,10 @@ export default function POSFilterPanel({
     setSupplierFilter('all')
   }
 
-  const chip = (active) => (
+  const chip = (active: boolean) => (
     active
       ? 'bg-blue-600 text-white'
       : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
-  )
-
-  const SectionLabel = ({ icon: Icon, children }) => (
-    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-      <span className="inline-flex items-center gap-1.5">
-        <Icon className="h-3.5 w-3.5" />
-        {children}
-      </span>
-    </div>
   )
 
   return (
@@ -90,6 +131,7 @@ export default function POSFilterPanel({
           ].map(([value, label]) => (
             <button
               key={value}
+              type="button"
               onClick={() => setStockFilter(value)}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${chip(stockFilter === value)}`}
             >
@@ -109,6 +151,7 @@ export default function POSFilterPanel({
           ].map(([value, label]) => (
             <button
               key={`group-${value}`}
+              type="button"
               onClick={() => setGroupFilter?.(groupFilter === value && value !== 'all' ? 'all' : value)}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${chip(groupFilter === value)}`}
             >
@@ -123,6 +166,7 @@ export default function POSFilterPanel({
           <SectionLabel icon={Package}>{T('category', 'Category')}</SectionLabel>
           <div className="flex flex-wrap gap-1">
             <button
+              type="button"
               onClick={() => setCategoryFilter('all')}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(categoryFilter === 'all')}`}
             >
@@ -130,7 +174,8 @@ export default function POSFilterPanel({
             </button>
             {categories.map((category) => (
               <button
-                key={category.id}
+                key={category.id || category.name}
+                type="button"
                 onClick={() => setCategoryFilter(categoryFilter === category.name ? 'all' : category.name)}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
                   categoryFilter === category.name
@@ -151,6 +196,7 @@ export default function POSFilterPanel({
           <SectionLabel icon={Building2}>{T('branch', 'Branch')}</SectionLabel>
           <div className="flex flex-wrap gap-1">
             <button
+              type="button"
               onClick={() => setBranchFilter('all')}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(branchFilter === 'all')}`}
             >
@@ -158,7 +204,8 @@ export default function POSFilterPanel({
             </button>
             {branches.map((branch) => (
               <button
-                key={branch.id}
+                key={branch.id || branch.name}
+                type="button"
                 onClick={() => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id))}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(branchFilter === String(branch.id))}`}
               >
@@ -174,6 +221,7 @@ export default function POSFilterPanel({
           <SectionLabel icon={Tags}>{T('brand', 'Brand')}</SectionLabel>
           <div className="flex flex-wrap gap-1">
             <button
+              type="button"
               onClick={() => setBrandFilter('all')}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(brandFilter === 'all')}`}
             >
@@ -182,6 +230,7 @@ export default function POSFilterPanel({
             {brands.map((brand) => (
               <button
                 key={brand}
+                type="button"
                 onClick={() => setBrandFilter(brandFilter === brand ? 'all' : brand)}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
                   brandFilter === brand
@@ -201,6 +250,7 @@ export default function POSFilterPanel({
           <SectionLabel icon={Truck}>{T('supplier', 'Supplier')}</SectionLabel>
           <div className="flex flex-wrap gap-1">
             <button
+              type="button"
               onClick={() => setSupplierFilter('all')}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(supplierFilter === 'all')}`}
             >
@@ -209,6 +259,7 @@ export default function POSFilterPanel({
             {suppliers.map((supplier) => (
               <button
                 key={supplier}
+                type="button"
                 onClick={() => setSupplierFilter(supplierFilter === supplier ? 'all' : supplier)}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
                   supplierFilter === supplier
@@ -225,6 +276,7 @@ export default function POSFilterPanel({
 
       {activeCount > 0 ? (
         <button
+          type="button"
           onClick={clearAll}
           className="text-left text-xs font-medium text-red-500 hover:text-red-700 dark:text-red-400"
         >

@@ -1,12 +1,64 @@
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
+type Translate = (key: string) => string | undefined
+type CurrencyFormatter = (value: number) => string
+type MoneyKind = 'usd' | 'khr'
+
+interface CartLineItem {
+  id: string | number
+  cart_line_id?: string | number
+  name: string
+  quantity: number
+  branch_id?: string | number | null
+  price_mode?: string
+  product_discount_label?: string
+  applied_price_usd: number
+  applied_price_khr: number
+}
+
+interface BranchOption {
+  id: string | number
+  name: string
+  is_default?: boolean
+}
+
+interface CartItemProps {
+  item: CartLineItem
+  branches: BranchOption[]
+  t?: Translate
+  onQtyChange: (lineId: string | number, quantity: number) => void
+  onPriceChange: (lineId: string | number, kind: MoneyKind, value: string) => void
+  onBranchChange: (lineId: string | number, branchId: string) => void
+  onRemove: (lineId: string | number) => void
+  onShowDetails: () => void
+  fmtUSD: CurrencyFormatter
+  fmtKHR: CurrencyFormatter
+  usdSymbol: string
+  khrSymbol: string
+}
+
+function translate(t: Translate | undefined, key: string, fallback: string): string {
+  return t?.(key) || fallback
+}
+
 export default function CartItem({
-  item, branches, t,
-  onQtyChange, onPriceChange, onBranchChange, onRemove, onShowDetails,
-  fmtUSD, fmtKHR, usdSymbol, khrSymbol,
-}) {
+  item,
+  branches,
+  t,
+  onQtyChange,
+  onPriceChange,
+  onBranchChange,
+  onRemove,
+  onShowDetails,
+  fmtUSD,
+  fmtKHR,
+  usdSymbol,
+  khrSymbol,
+}: CartItemProps) {
   const lineId = item.cart_line_id || item.id
+  const specialPriceLabel = translate(t, 'special_price', 'Special price')
+  const promotionPriceLabel = item.product_discount_label || translate(t, 'promotion_price', 'Discount price')
 
   return (
     <div className="border-b border-gray-100 px-3 py-2.5 last:border-0 dark:border-gray-700">
@@ -14,10 +66,10 @@ export default function CartItem({
         <div className="mr-2 min-w-0 flex-1">
           <p {...getKhmerTextProps(item.name, 'leading-snug text-sm font-semibold text-gray-900 dark:text-white')}>{item.name}</p>
           {item.price_mode === 'special' ? (
-            <div {...getKhmerTextProps(t ? t('special_price') : 'Special price', 'mt-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400')}>{t ? t('special_price') : 'Special price'}</div>
+            <div {...getKhmerTextProps(specialPriceLabel, 'mt-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400')}>{specialPriceLabel}</div>
           ) : null}
           {item.price_mode === 'promotion' ? (
-            <div {...getKhmerTextProps(item.product_discount_label || (t ? t('promotion_price') : 'Discount price'), 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}>{item.product_discount_label || (t ? t('promotion_price') : 'Discount price')}</div>
+            <div {...getKhmerTextProps(promotionPriceLabel, 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}>{promotionPriceLabel}</div>
           ) : null}
         </div>
         <div className="flex flex-shrink-0 items-center gap-0.5">
@@ -25,7 +77,7 @@ export default function CartItem({
             type="button"
             onClick={onShowDetails}
             className="flex h-9 min-w-9 items-center justify-center rounded-lg border border-gray-200 px-2 text-base font-bold leading-none text-gray-500 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:text-gray-300"
-            title={t ? t('details') : 'Details'}
+            title={translate(t, 'details', 'Details')}
           >
             ...
           </button>
@@ -33,8 +85,8 @@ export default function CartItem({
             type="button"
             onClick={() => onRemove(lineId)}
             className="px-1 text-base leading-none text-red-400 hover:text-red-600"
-            title={t ? t('remove') : 'Remove'}
-            aria-label={t ? t('remove') : 'Remove'}
+            title={translate(t, 'remove', 'Remove')}
+            aria-label={translate(t, 'remove', 'Remove')}
           >
             x
           </button>
@@ -44,11 +96,11 @@ export default function CartItem({
       {branches.length > 1 ? (
         <div className="mb-2">
           <select
-            className="input text-xs py-1"
+            className="input py-1 text-xs"
             value={item.branch_id || ''}
             onChange={(event) => onBranchChange(lineId, event.target.value)}
           >
-            <option value="">{t ? t('select_branch_placeholder') : 'Select branch'}</option>
+            <option value="">{translate(t, 'select_branch_placeholder', 'Select branch')}</option>
             {branches.map((branch) => (
               <option key={branch.id} value={branch.id}>
                 {branch.name}
@@ -67,7 +119,7 @@ export default function CartItem({
             type="number"
             min="1"
             value={item.quantity}
-            onChange={(event) => onQtyChange(lineId, parseInt(event.target.value, 10) || 1)}
+            onChange={(event) => onQtyChange(lineId, Number.parseInt(event.target.value, 10) || 1)}
           />
           <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" onClick={() => onQtyChange(lineId, item.quantity + 1)}>+</button>
         </div>
@@ -94,7 +146,7 @@ export default function CartItem({
       </div>
 
       <div className="flex items-baseline justify-between">
-        <span className="text-xs text-gray-400">{t ? t('line') : 'Line'}</span>
+        <span className="text-xs text-gray-400">{translate(t, 'line', 'Line')}</span>
         <div className="text-right">
           <span className="text-sm font-bold text-blue-600">{fmtUSD(item.applied_price_usd * item.quantity)}</span>
           {item.applied_price_khr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(item.applied_price_khr * item.quantity)}</div> : null}

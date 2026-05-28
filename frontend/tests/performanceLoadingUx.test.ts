@@ -23,7 +23,7 @@ const customerMembershipNumber = fs.readFileSync(new URL('../src/components/cont
 const suppliers = fs.readFileSync(new URL('../src/components/contacts/SuppliersTab.jsx', import.meta.url), 'utf8')
 const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab.jsx', import.meta.url), 'utf8')
 const pos = fs.readFileSync(new URL('../src/components/pos/POS.jsx', import.meta.url), 'utf8')
-const posFilterPanel = fs.readFileSync(new URL('../src/components/pos/FilterPanel.jsx', import.meta.url), 'utf8')
+const posFilterPanel = fs.readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
 const sales = fs.readFileSync(new URL('../src/components/sales/Sales.jsx', import.meta.url), 'utf8')
 const salesExportModal = fs.readFileSync(new URL('../src/components/sales/ExportModal.jsx', import.meta.url), 'utf8')
 const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.jsx', import.meta.url), 'utf8')
@@ -192,7 +192,7 @@ assert.match(
 )
 assert.match(
   posFilterPanel,
-  /function countActiveFlags\(flags = \[\]\)[\s\S]*for \(const flag of flags\)/,
+  /function countActiveFlags\(flags(?:: [^)]+)? = \[\]\)(?:: [^{]+)? \{[\s\S]*for \(const flag of flags\)/,
   'POS filter panel should count active filter flags without allocation',
 )
 assert.match(

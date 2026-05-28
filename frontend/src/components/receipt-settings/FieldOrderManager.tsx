@@ -1,7 +1,23 @@
 import { useState } from 'react'
+import type { DragEvent } from 'react'
 import { ChevronDown, ChevronUp, GripVertical, Minus, Plus, Trash2 } from 'lucide-react'
 
-function getSectionOrderItems(t) {
+type Translate = (key: string, fallback?: string) => string
+
+interface FieldOrderItem {
+  key: string
+  label: string
+  desc: string
+  isDivider?: boolean
+}
+
+interface FieldOrderManagerProps {
+  order?: string[]
+  onChange: (order: string[]) => void
+  t?: Translate
+}
+
+function getSectionOrderItems(t: Translate): FieldOrderItem[] {
   const T = t || ((key, fallback) => fallback || key)
   return [
     { key: 'header', label: T('receipt_section_header', 'Business Header'), desc: T('fo_desc_header', 'Logo, name, address, and phone') },
@@ -20,9 +36,9 @@ function getSectionOrderItems(t) {
   ]
 }
 
-function buildList(order, items, t) {
+function buildList(order: string[] | undefined, items: FieldOrderItem[], t: Translate): FieldOrderItem[] {
   const base = Array.isArray(order) && order.length ? order : items.map((item) => item.key)
-  const output = []
+  const output: FieldOrderItem[] = []
   let dividerIndex = 0
 
   base.forEach((key) => {
@@ -45,13 +61,13 @@ function buildList(order, items, t) {
   return output
 }
 
-function toKeys(list) {
+function toKeys(list: FieldOrderItem[]): string[] {
   return list.map((item) => (item.isDivider ? '---divider---' : item.key))
 }
 
-export default function FieldOrderManager({ order, onChange, t: tProp }) {
+export default function FieldOrderManager({ order, onChange, t: tProp }: FieldOrderManagerProps) {
   const t = tProp || ((key, fallback) => fallback || key)
-  const [dragIdx, setDragIdx] = useState(null)
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [search, setSearch] = useState('')
 
   const items = getSectionOrderItems(t)
@@ -63,7 +79,7 @@ export default function FieldOrderManager({ order, onChange, t: tProp }) {
       })
     : enriched
 
-  const moveItem = (fromIndex, toIndex) => {
+  const moveItem = (fromIndex: number, toIndex: number) => {
     if (toIndex < 0 || toIndex >= enriched.length) return
     const next = [...enriched]
     const [moved] = next.splice(fromIndex, 1)
@@ -71,7 +87,7 @@ export default function FieldOrderManager({ order, onChange, t: tProp }) {
     onChange(toKeys(next))
   }
 
-  const addDivider = (afterIndex) => {
+  const addDivider = (afterIndex: number) => {
     const next = [...enriched]
     next.splice(afterIndex + 1, 0, {
       key: `divider_${Date.now()}`,
@@ -82,18 +98,18 @@ export default function FieldOrderManager({ order, onChange, t: tProp }) {
     onChange(toKeys(next))
   }
 
-  const removeDivider = (index) => {
+  const removeDivider = (index: number) => {
     const target = enriched[index]
     if (!target?.isDivider) return
     onChange(toKeys(enriched.filter((_, itemIndex) => itemIndex !== index)))
   }
 
-  const handleDragStart = (event, index) => {
+  const handleDragStart = (event: DragEvent<HTMLDivElement>, index: number) => {
     setDragIdx(index)
     event.dataTransfer.effectAllowed = 'move'
   }
 
-  const handleDragOver = (event, index) => {
+  const handleDragOver = (event: DragEvent<HTMLDivElement>, index: number) => {
     event.preventDefault()
     if (dragIdx == null || dragIdx === index) return
     const next = [...enriched]

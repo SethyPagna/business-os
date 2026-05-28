@@ -1,8 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { Download, Printer, Ruler, Scaling, TestTube2 } from 'lucide-react'
 import { downloadReceiptPdf, getPrintSettings, openReceiptPdf, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
+import type { ReceiptPrintSettings } from '../../types/receiptContracts'
 
-function Section({ icon: Icon, title, children }) {
+type Translate = (key: string, fallback?: string) => string | undefined
+type AppSettings = Record<string, unknown> & { receipt_print_settings?: unknown }
+type SaveSettingsOptions = {
+  silentToast?: boolean
+  refreshChannels?: string[]
+  reason?: string
+  source?: string
+}
+type SaveSettings = (settings: Record<string, unknown>, options?: SaveSettingsOptions) => Promise<unknown> | unknown
+
+interface SectionProps {
+  icon?: LucideIcon
+  title: string
+  children: ReactNode
+}
+
+interface PrintSettingsProps {
+  t?: Translate
+  previewTargetRef?: RefObject<HTMLElement | null> | null
+  settings?: AppSettings
+  saveSettings?: SaveSettings | null
+}
+
+function Section({ icon: Icon, title, children }: SectionProps) {
   return (
     <div className="card mb-4 p-4">
       <div className="mb-3 flex items-center gap-2 border-b border-gray-100 pb-2 dark:border-gray-700">
@@ -14,7 +40,7 @@ function Section({ icon: Icon, title, children }) {
   )
 }
 
-function buildFallbackPreviewHtml(printSettings, T) {
+function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string): string {
   return `
     <div style="padding:8px;text-align:center;">
       <div style="font-size:16px;font-weight:bold;margin-bottom:4px;">Business OS</div>
@@ -32,19 +58,20 @@ function buildFallbackPreviewHtml(printSettings, T) {
   `
 }
 
-function buildSafePreviewSource(previewNode, printSettings, T) {
+function buildSafePreviewSource(previewNode: unknown, printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string): string | HTMLElement {
   if (!(previewNode instanceof HTMLElement)) {
     return buildFallbackPreviewHtml(printSettings, T)
   }
   try {
-    return previewNode.querySelector('[data-receipt-export-root="true"]') || previewNode
+    const exportRoot = previewNode.querySelector('[data-receipt-export-root="true"]')
+    return exportRoot instanceof HTMLElement ? exportRoot : previewNode
   } catch (_) {
     return buildFallbackPreviewHtml(printSettings, T)
   }
 }
 
-export default function PrintSettings({ t: tProp, previewTargetRef = null, settings = {}, saveSettings: saveAppSettings = null }) {
-  const T = (key, fallback) => (tProp && tProp(key)) || fallback
+export default function PrintSettings({ t: tProp, previewTargetRef = null, settings = {}, saveSettings: saveAppSettings = null }: PrintSettingsProps) {
+  const T = (key: string, fallback: string): string => tProp?.(key, fallback) || fallback
   const [ps, setPs] = useState(() => {
     try {
       return getPrintSettings(settings)
@@ -52,7 +79,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
       return { ...PRINT_DEFAULTS }
     }
   })
-  const saveTimerRef = useRef(null)
+  const saveTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     try {
@@ -66,7 +93,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
   }, [])
 
-  const persistPrintSettings = (next) => {
+  const persistPrintSettings = (next: ReceiptPrintSettings) => {
     if (typeof saveAppSettings !== 'function') return
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
     saveTimerRef.current = window.setTimeout(() => {
@@ -82,7 +109,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     }, 350)
   }
 
-  const setValue = (key, value) => {
+  const setValue = (key: keyof ReceiptPrintSettings, value: string) => {
     setPs((prev) => {
       const next = { ...prev, [key]: value }
       try { savePrintSettings(next) } catch (_) {}
@@ -98,13 +125,20 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     persistPrintSettings(next)
   }
 
-  const paperSizes = [
+  const paperSizes: Array<{ id: ReceiptPrintSettings['paperSize']; label: string; desc: string }> = [
     { id: '58mm', label: '58mm', desc: T('print_narrow_thermal', 'Narrow thermal') },
     { id: '72mm', label: '72mm', desc: T('print_medium_thermal', 'Medium thermal') },
     { id: '80mm', label: '80mm', desc: T('print_standard_thermal', 'Standard thermal') },
     { id: 'A4', label: 'A4', desc: T('print_standard_office', 'Standard office') },
     { id: 'letter', label: 'Letter', desc: T('print_us_standard', 'US standard') },
     { id: 'custom', label: T('print_set_size', 'Custom'), desc: T('print_set_size', 'Set size') },
+  ]
+
+  const marginFields: Array<[keyof ReceiptPrintSettings, string]> = [
+    ['marginTop', T('print_top', 'Top')],
+    ['marginRight', T('print_right', 'Right')],
+    ['marginBottom', T('print_bottom', 'Bottom')],
+    ['marginLeft', T('print_left', 'Left')],
   ]
 
   const getPreviewSource = () => {
@@ -155,12 +189,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
 
       <Section icon={Ruler} title={T('print_margins', 'Margins (mm)')}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {[
-            ['marginTop', T('print_top', 'Top')],
-            ['marginRight', T('print_right', 'Right')],
-            ['marginBottom', T('print_bottom', 'Bottom')],
-            ['marginLeft', T('print_left', 'Left')],
-          ].map(([key, label]) => (
+          {marginFields.map(([key, label]) => (
             <div key={key}>
               <label htmlFor={`print-${key}`} className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{label}</label>
               <input id={`print-${key}`} name={`print_${key}`} autoComplete="off" className="input text-sm" type="number" min="0" max="30" value={ps[key] || '4'} onChange={(event) => setValue(key, event.target.value)} />
@@ -209,7 +238,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
                 })
               } catch (error) {
                 console.error('[PrintSettings] PDF preview failed:', error)
-                alert(`${T('pdf_preview_failed', 'PDF preview failed')}: ${error?.message || T('unknown_error', 'unknown error')}`)
+                alert(`${T('pdf_preview_failed', 'PDF preview failed')}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`)
               }
             }}
           >
@@ -230,7 +259,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
                 })
               } catch (error) {
                 console.error('[PrintSettings] PDF download failed:', error)
-                alert(`${T('pdf_download_failed', 'PDF download failed')}: ${error?.message || T('unknown_error', 'unknown error')}`)
+                alert(`${T('pdf_download_failed', 'PDF download failed')}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`)
               }
             }}
           >

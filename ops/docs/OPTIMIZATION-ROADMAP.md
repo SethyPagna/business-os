@@ -1035,7 +1035,7 @@ Current checkpoint:
   build, runtime health, and the focused Product page action live check passed
   on frontend hash `e9b985386668bdf9`.
 - Ninth Phase 26 physical move complete: Product shared primitives
-  `primitives.jsx` now lives under `frontend/src/components/products/shared`.
+  `primitives.tsx` now lives under `frontend/src/components/products/shared`.
   Products, ProductForm, VariantForm, Product surfaces, Catalog, and POS imports
   were rewired. Product, POS, and portal catalog source tests, source checks,
   typecheck, production build, runtime health, a focused Product page action
@@ -3623,7 +3623,7 @@ Move 326 status:
 
 Move 327 status:
 - Move 327 removes the POS filter-panel active-count allocation:
-  `frontend/src/components/pos/FilterPanel.jsx` now counts active category,
+  `frontend/src/components/pos/FilterPanel.tsx` now counts active category,
   brand, branch, stock, group, and supplier filters through a local
   `countActiveFlags()` loop instead of allocating a temporary boolean array and
   filtering it during render. Focused coverage in
@@ -5364,3 +5364,12 @@ Move 488 status:
   chart data records, resize refs, hover tooltip state, and SVG event handlers.
   Callers now use extensionless imports for the converted pagination and chart
   modules.
+
+Move 489 status:
+- Move 489 converts POS `CartItem.tsx` and `FilterPanel.tsx`, receipt-settings
+  `FieldOrderManager.tsx` and `PrintSettings.tsx`, and product shared
+  `primitives.tsx`. The typed contracts cover cart line ids, branch/filter
+  options, allocation-free filter counting, receipt field drag ordering,
+  print-setting persistence, preview refs, product image loading, placeholders,
+  margin display, dual-price input, and numeric parsing helpers. Source-reading
+  tests now target the TSX paths.
