@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 473.
+- Latest completed implementation move in this roadmap: Move 474.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2924,7 +2924,7 @@ Cleanup checkpoint:
   cookie-session lookup and prevents accidental duplicate token rows while
   leaving user-session foreign-key validation for a later cleanup-backed pass.
 - Move 242 hardens auth security-flow verification:
-  `backend/test/authSecurityFlow.test.js` now runs mutable auth checks serially,
+  `backend/test/authSecurityFlow.test.ts` now runs mutable auth checks serially,
   starts child servers with an explicit local Postgres URL fallback, captures
   child-server output for diagnostics, and uses a disposable
   `bos_auth_security_*` user instead of depending on the live `admin` password.
@@ -3880,7 +3880,7 @@ Move 347 status:
   JSON shape, duplicate reason key, sort order, and search limit remain
   unchanged. Focused inventory settings/media, route contract, product search,
   portal inventory regression, schema-audit, and full backend utility tests
-  passed. The standalone `branchStockSearch.test.js` still cannot complete in
+  passed. The standalone `branchStockSearch.test.ts` still cannot complete in
   this shell because its temporary server inherits Postgres mode without a
   usable `DATABASE_URL`, causing a test-server reset before assertions run.
 
@@ -4165,7 +4165,7 @@ Move 372 status:
   merging, admin flags, role-system flags, and response shapes remain
   unchanged. Focused route contract and permission-policy tests, schema-audit,
   and full backend utility tests passed. A separate
-  `authSecurityFlow.test.js` run still fails before this change path because
+  `authSecurityFlow.test.ts` run still fails before this change path because
   the harness resets the fetch connection and then cleanup requires missing
   native `libpq` bindings; this remains outside the standard utility suite.
 
@@ -4293,7 +4293,7 @@ Move 382 status:
   order, inventory movement writes, audit payloads, broadcasts, and response
   shapes remain unchanged. Focused syntax, callback-chain scan, route contract
   tests, schema-audit, and full backend utility tests passed. The standalone
-  `branchStockSearch.test.js` harness still fails before assertions on this
+  `branchStockSearch.test.ts` harness still fails before assertions on this
   machine with `ECONNRESET`, matching the known spawned-server harness
   instability outside the standard backend utility suite.
 
@@ -5235,3 +5235,17 @@ Move 473 status:
   their `.js` test entrypoints. The backend `test:utils` command and
   language/runtime proof references now call the TypeScript paths, keeping the
   production runtime and release packaging unchanged.
+
+Move 474 status:
+- Move 474 converts the remaining non-fullAutomation backend tests to
+  TypeScript. `fileAssetUsageCache.test.ts`, `accessControl.test.ts`,
+  `defaultRoles.test.ts`, `settingsSnapshotObjectStorage.test.ts`,
+  `importDecisionIntegrity.test.ts`, `backupPerformanceHardening.test.ts`,
+  `fileRouteSecurityFlow.test.ts`, `routeContracts.test.ts`,
+  `serverUtils.test.ts`, `branchStockSearch.test.ts`,
+  `authSecurityFlow.test.ts`, and `importJobStateMachine.test.ts` replace
+  their `.js` entrypoints. The backend `test:utils` suite passed with the
+  converted files. Standalone live/security/state-machine harnesses remain
+  gated by their existing runtime prerequisites (`DATABASE_URL`,
+  pg-native/libpq, or a live server), so this move records those as residual
+  environment requirements rather than source-conversion failures.

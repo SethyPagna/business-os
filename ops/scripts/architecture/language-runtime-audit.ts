@@ -217,7 +217,7 @@ const FOCUSED_TEST_COVERAGE = [
     track: 'SQL/DuckDB/data-path optimization',
     candidate: 'backend/src/services/backupPackages.js',
     tests: [
-      'backend/test/backupPerformanceHardening.test.js',
+      'backend/test/backupPerformanceHardening.test.ts',
       'backend/test/backupRetention.test.ts',
       'backend/test/backupSchema.test.ts',
     ],
@@ -872,10 +872,10 @@ const COMPLETED_DATA_PATH_SLICES = [
     proof: [
       'npm.cmd --prefix backend run test:utils',
       'node ops\\scripts\\backend\\schema-audit.ts',
-      'backend/test/backupPerformanceHardening.test.js keyset guard',
+      'backend/test/backupPerformanceHardening.test.ts keyset guard',
     ],
     tests: [
-      'backend/test/backupPerformanceHardening.test.js',
+      'backend/test/backupPerformanceHardening.test.ts',
       'backend/test/backupRetention.test.ts',
       'backend/test/backupSchema.test.ts',
     ],
@@ -887,10 +887,10 @@ const COMPLETED_DATA_PATH_SLICES = [
     proof: [
       'npm.cmd --prefix backend run test:utils',
       'node ops\\scripts\\backend\\schema-audit.ts',
-      'backend/test/importDecisionIntegrity.test.js cache guards',
+      'backend/test/importDecisionIntegrity.test.ts cache guards',
     ],
     tests: [
-      'backend/test/importDecisionIntegrity.test.js',
+      'backend/test/importDecisionIntegrity.test.ts',
       'backend/test/importScaleSmoke.test.ts',
       'backend/test/importCsv.test.ts',
       'backend/test/productImportPolicies.test.ts',
@@ -927,12 +927,12 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Remove getPermittedImportTypes, call listImportJobs with only the limit, and restore the route-level JavaScript permission filter.',
     proof: [
       'npm.cmd --prefix backend run test:utils',
-      'node backend\\test\\importDecisionIntegrity.test.js',
+      'node backend\\test\\importDecisionIntegrity.test.ts',
       'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
-      'backend/test/importDecisionIntegrity.test.js',
-      'backend/test/routeContracts.test.js',
+      'backend/test/importDecisionIntegrity.test.ts',
+      'backend/test/routeContracts.test.ts',
       'backend/test/importScaleSmoke.test.ts',
     ],
   },
@@ -947,7 +947,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
     tests: [
       'backend/test/fullAutomation.test.js',
-      'backend/test/backupPerformanceHardening.test.js',
+      'backend/test/backupPerformanceHardening.test.ts',
       'backend/test/backupRetention.test.ts',
     ],
   },
@@ -962,7 +962,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
     tests: [
       'backend/test/rfidRoutes.test.ts',
-      'backend/test/routeContracts.test.js',
+      'backend/test/routeContracts.test.ts',
       'backend/test/productBatchHierarchy.test.ts',
     ],
   },
@@ -978,7 +978,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     tests: [
       'backend/test/portalInventoryRegression.test.ts',
       'backend/test/portalUtils.test.ts',
-      'backend/test/routeContracts.test.js',
+      'backend/test/routeContracts.test.ts',
     ],
   },
   {
@@ -992,8 +992,8 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
     tests: [
       'backend/test/productSearchPagination.test.ts',
-      'backend/test/importDecisionIntegrity.test.js',
-      'backend/test/routeContracts.test.js',
+      'backend/test/importDecisionIntegrity.test.ts',
+      'backend/test/routeContracts.test.ts',
     ],
   },
   {
@@ -1007,7 +1007,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
     tests: [
       'backend/test/productBatchHierarchy.test.ts',
-      'backend/test/routeContracts.test.js',
+      'backend/test/routeContracts.test.ts',
       'backend/test/portalInventoryRegression.test.ts',
     ],
   },
@@ -1017,11 +1017,11 @@ const COMPLETED_DATA_PATH_SLICES = [
     rollback: 'Remove deleteSetting and inline db.prepare("DELETE FROM settings WHERE key = ?") in the null-value branch; settings write behavior remains unchanged.',
     proof: [
       'npm.cmd --prefix backend run test:utils',
-      'node backend\\test\\routeContracts.test.js',
+      'node backend\\test\\routeContracts.test.ts',
       'node ops\\scripts\\backend\\schema-audit.ts',
     ],
     tests: [
-      'backend/test/routeContracts.test.js',
+      'backend/test/routeContracts.test.ts',
       'backend/test/systemJobs.test.ts',
       'backend/test/fullAutomation.test.js',
     ],

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 463 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 464 in this file.
 
 ## Goal
 
@@ -1546,7 +1546,7 @@ Decision rule:
     `writeSystemSettings()`. Removing null-valued settings no longer rebuilds
     the same `DELETE FROM settings WHERE key = ?` statement for every entry,
     while preserving the existing transaction and settings behavior.
-    `backend/test/routeContracts.test.js` guards the source shape.
+    `backend/test/routeContracts.test.ts` guards the source shape.
 179. Close the self-referential language audit candidate. Done:
     `ops/scripts/architecture/language-runtime-audit.ts` now records itself as
     a rejected SQL/DuckDB conversion candidate. After the backend route and
@@ -2025,7 +2025,7 @@ Decision rule:
     completed, with user-session foreign keys still left for a later
     relationship-hardening pass.
 242. Harden auth security-flow verification cleanup. Done:
-    `backend/test/authSecurityFlow.test.js` now runs its mutable auth checks
+    `backend/test/authSecurityFlow.test.ts` now runs its mutable auth checks
     serially, gives spawned test servers an explicit local Postgres URL fallback,
     captures child-server output for easier failure triage, and uses a
     disposable `bos_auth_security_*` user instead of assuming the live `admin`
@@ -2493,7 +2493,7 @@ Decision rule:
     probes fail. `backend/package.json` wires the test into `test:utils`.
     Focused helper tests, full backend utility tests, and schema audit pass.
 293. Guard production routes against direct schema metadata probes. Done:
-    `backend/test/routeContracts.test.js` now scans `backend/src/routes/*.js`
+    `backend/test/routeContracts.test.ts` now scans `backend/src/routes/*.js`
     and fails if any production route bypasses `schemaMetadata.js` with a direct
     `information_schema.columns` query. This keeps the shared process cache as
     the single route-layer pathway for stable schema-shape checks. Focused
@@ -3711,6 +3711,17 @@ Decision rule:
     The backend `test:utils` command and language/runtime proof references now
     call the TypeScript paths. The batch keeps production runtime files stable
     and continues shrinking backend `.js` from the verified test surface first.
+464. Convert the remaining non-fullAutomation backend tests to TypeScript. Done:
+    Twelve backend tests now run as `.ts` entrypoints: `fileAssetUsageCache`,
+    `accessControl`, `defaultRoles`, `settingsSnapshotObjectStorage`,
+    `importDecisionIntegrity`, `backupPerformanceHardening`,
+    `fileRouteSecurityFlow`, `routeContracts`, `serverUtils`,
+    `branchStockSearch`, `authSecurityFlow`, and `importJobStateMachine`. The
+    backend `test:utils` suite passed with the converted tests. The standalone
+    live/security/state-machine harnesses still need their pre-existing local
+    runtime prerequisites (`DATABASE_URL`, pg-native/libpq, or a live server)
+    before they can run assertions; this move only changes their source
+    extension and package/doc references.
 
 ## Safety Gates
 
