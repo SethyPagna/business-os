@@ -164,7 +164,7 @@ Code files documented: **466**
 | 152 | `frontend/src/components/auth/Login.jsx` | 5 | 1 | 4 | 1 |
 | 153 | `frontend/src/components/branches/Branches.jsx` | 13 | 1 | 11 | 1 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 | 1 | 1 | 1 |
-| 155 | `frontend/src/components/branches/TransferModal.jsx` | 3 | 1 | 2 | 1 |
+| 155 | `frontend/src/components/branches/TransferModal.tsx` | 3 | 1 | 2 | 1 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 5 | 1 | 4 | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 2 | 1 | 1 | 1 |
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 12 | 1 | 11 | 1 |
@@ -196,7 +196,7 @@ Code files documented: **466**
 | 184 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 | 1 | 1 | 3 |
 | 185 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 | 1 | 14 | 1 |
 | 186 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 | 1 | 0 | 1 |
-| 187 | `frontend/src/components/files/FilePickerModal.jsx` | 4 | 1 | 3 | 5 |
+| 187 | `frontend/src/components/files/FilePickerModal.tsx` | 4 | 1 | 3 | 5 |
 | 188 | `frontend/src/components/files/FilesPage.jsx` | 11 | 1 | 10 | 1 |
 | 189 | `frontend/src/components/files/FilesProvidersTab.jsx` | 0 | 1 | 0 | 1 |
 | 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 0 | 1 | 0 | 1 |
@@ -3122,7 +3122,7 @@ Code files documented: **466**
   - `frontend/src/components/auth/Login.jsx`
   - `frontend/src/components/branches/Branches.jsx`
   - `frontend/src/components/branches/BranchForm.tsx`
-  - `frontend/src/components/branches/TransferModal.jsx`
+  - `frontend/src/components/branches/TransferModal.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/contacts/Contacts.jsx`
@@ -3133,7 +3133,7 @@ Code files documented: **466**
   - `frontend/src/components/custom-tables/CustomTables.jsx`
   - `frontend/src/components/dashboard/charts/NoData.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
-  - `frontend/src/components/files/FilePickerModal.jsx`
+  - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
@@ -3208,7 +3208,7 @@ Code files documented: **466**
 - Internal dependencies (11)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/branches/BranchForm.tsx`
-  - `frontend/src/components/branches/TransferModal.jsx`
+  - `frontend/src/components/branches/TransferModal.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
@@ -3231,11 +3231,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/branches/Branches.jsx`
 
-### 3.155 `frontend/src/components/branches/TransferModal.jsx`
+### 3.155 `frontend/src/components/branches/TransferModal.tsx`
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `react`
 - Internal dependencies (2)
@@ -3318,14 +3318,14 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (6)
-  - `../files/FilePickerModal.jsx`
+  - `../files/FilePickerModal`
   - `../products/shared/primitives`
   - `../shared/ImageGalleryLightbox`
   - `../shared/PortalMenu`
   - `lucide-react`
   - `react`
 - Internal dependencies (4)
-  - `frontend/src/components/files/FilePickerModal.jsx`
+  - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/PortalMenu.tsx`
@@ -3442,7 +3442,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (7)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/files/FilePickerModal.jsx`
+  - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/csvRowCounter.ts`
@@ -3796,11 +3796,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/dashboard/Dashboard.jsx`
 
-### 3.187 `frontend/src/components/files/FilePickerModal.jsx`
+### 3.187 `frontend/src/components/files/FilePickerModal.tsx`
 
 - Declared exports: `function`
 - Imports (4)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/publicAssetUrls.ts`
   - `../shared/Modal`
   - `react`
@@ -4210,7 +4210,7 @@ Code files documented: **466**
 - Imports (9)
   - `../../../utils/mediaUpload.ts`
   - `../../../utils/pricing.ts`
-  - `../../files/FilePickerModal.jsx`
+  - `../../files/FilePickerModal`
   - `../../shared/Modal`
   - `../scanning/BarcodeScannerModal`
   - `../shared/primitives`
@@ -4218,7 +4218,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (7)
-  - `frontend/src/components/files/FilePickerModal.jsx`
+  - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
   - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
@@ -4352,12 +4352,12 @@ Code files documented: **466**
 - Imports (6)
   - `../../../utils/actionGuards.ts`
   - `../../../utils/loaders.ts`
-  - `../../files/FilePickerModal.jsx`
+  - `../../files/FilePickerModal`
   - `../../shared/Modal`
   - `lucide-react`
   - `react`
 - Internal dependencies (4)
-  - `frontend/src/components/files/FilePickerModal.jsx`
+  - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/loaders.ts`
@@ -5187,7 +5187,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/shared.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
-  - `frontend/src/components/files/FilePickerModal.jsx`
+  - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
@@ -5381,7 +5381,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (8)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/files/FilePickerModal.jsx`
+  - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/utils-settings/OtpModal.tsx`
@@ -5686,7 +5686,7 @@ Code files documented: **466**
   - none
 - Referenced by (33)
   - `frontend/src/components/branches/Branches.jsx`
-  - `frontend/src/components/branches/TransferModal.jsx`
+  - `frontend/src/components/branches/TransferModal.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
@@ -6141,7 +6141,7 @@ Code files documented: **466**
   - `frontend/src/api/http.ts`
 - Referenced by (7)
   - `frontend/src/components/contacts/ContactImportModal.jsx`
-  - `frontend/src/components/files/FilePickerModal.jsx`
+  - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/helpers/productGalleryHelpers.ts`

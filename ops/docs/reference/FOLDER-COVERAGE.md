@@ -720,7 +720,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `Branches.jsx` | UI component/page |
 | 2 | `BranchForm.tsx` | UI component/page |
-| 3 | `TransferModal.jsx` | UI component/page |
+| 3 | `TransferModal.tsx` | UI component/page |
 
 
 ### 3.29 Folder: `frontend/src/components/catalog`
@@ -830,7 +830,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `FilePickerModal.jsx` | UI component/page |
+| 1 | `FilePickerModal.tsx` | UI component/page |
 | 2 | `FilesPage.jsx` | UI component/page |
 | 3 | `FilesProvidersTab.jsx` | UI component/page |
 | 4 | `FilesResponsesTab.tsx` | UI component/page |

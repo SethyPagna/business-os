@@ -21,7 +21,7 @@ Total files documented: **193**
 | 9 | `frontend/src/components/auth/Login.jsx` | 23 |
 | 10 | `frontend/src/components/branches/Branches.jsx` | 11 |
 | 11 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
-| 12 | `frontend/src/components/branches/TransferModal.jsx` | 4 |
+| 12 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
 | 13 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
 | 14 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 15 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
@@ -53,7 +53,7 @@ Total files documented: **193**
 | 41 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
 | 42 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
 | 43 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
-| 44 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
+| 44 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
 | 45 | `frontend/src/components/files/FilesPage.jsx` | 25 |
 | 46 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
 | 47 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
@@ -601,14 +601,16 @@ Total files documented: **193**
 | 1 | `BranchForm` | component/function | 37 |
 | 2 | `handleSave` | const arrow | 57 |
 
-### 3.12 `frontend/src/components/branches/TransferModal.jsx`
+### 3.12 `frontend/src/components/branches/TransferModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizeTransferStockRows` | function | 14 |
-| 2 | `TransferModal` | component/function | 27 |
-| 3 | `loadStock` | function | 79 |
-| 4 | `handleTransfer` | const arrow | 125 |
+| 1 | `getTransferApi` | function | 71 |
+| 2 | `getErrorMessage` | function | 76 |
+| 3 | `normalizeTransferStockRows` | function | 80 |
+| 4 | `TransferModal` | component/function | 94 |
+| 5 | `loadStock` | function | 146 |
+| 6 | `handleTransfer` | const arrow | 194 |
 
 ### 3.13 `frontend/src/components/catalog/CatalogEditorSurface.jsx`
 
@@ -1041,16 +1043,18 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `MiniStat` | component/function | 13 |
 
-### 3.44 `frontend/src/components/files/FilePickerModal.jsx`
+### 3.44 `frontend/src/components/files/FilePickerModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `AssetPreview` | function | 16 |
-| 2 | `FilePickerModal` | component/function | 39 |
-| 3 | `tr` | const arrow | 61 |
-| 4 | `toggleSelectedPath` | function | 102 |
-| 5 | `handleUpload` | function | 112 |
-| 6 | `handleDelete` | function | 154 |
+| 1 | `getFilePickerApi` | function | 60 |
+| 2 | `getErrorMessage` | function | 65 |
+| 3 | `normalizeFileAssets` | function | 69 |
+| 4 | `AssetPreview` | function | 73 |
+| 5 | `FilePickerModal` | component/function | 96 |
+| 6 | `toggleSelectedPath` | function | 163 |
+| 7 | `handleUpload` | function | 173 |
+| 8 | `handleDelete` | function | 215 |
 
 ### 3.45 `frontend/src/components/files/FilesPage.jsx`
 

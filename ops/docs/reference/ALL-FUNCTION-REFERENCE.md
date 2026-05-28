@@ -164,7 +164,7 @@ Code files scanned: **466**
 | 152 | `frontend/src/components/auth/Login.jsx` | 23 |
 | 153 | `frontend/src/components/branches/Branches.jsx` | 11 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
-| 155 | `frontend/src/components/branches/TransferModal.jsx` | 4 |
+| 155 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
@@ -196,7 +196,7 @@ Code files scanned: **466**
 | 184 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
 | 185 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
 | 186 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
-| 187 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
+| 187 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
 | 188 | `frontend/src/components/files/FilesPage.jsx` | 25 |
 | 189 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
 | 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
@@ -3323,14 +3323,16 @@ Code files scanned: **466**
 | 1 | `BranchForm` | export default function | 37 |
 | 2 | `handleSave` | const arrow | 57 |
 
-### 3.155 `frontend/src/components/branches/TransferModal.jsx`
+### 3.155 `frontend/src/components/branches/TransferModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeTransferStockRows` | function | 14 |
-| 2 | `TransferModal` | export default function | 27 |
-| 3 | `loadStock` | function | 79 |
-| 4 | `handleTransfer` | const arrow | 125 |
+| 1 | `getTransferApi` | function | 71 |
+| 2 | `getErrorMessage` | function | 76 |
+| 3 | `normalizeTransferStockRows` | function | 80 |
+| 4 | `TransferModal` | export default function | 94 |
+| 5 | `loadStock` | function | 146 |
+| 6 | `handleTransfer` | const arrow | 194 |
 
 ### 3.156 `frontend/src/components/catalog/CatalogEditorSurface.jsx`
 
@@ -3826,16 +3828,18 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `MiniStat` | export default function | 13 |
 
-### 3.187 `frontend/src/components/files/FilePickerModal.jsx`
+### 3.187 `frontend/src/components/files/FilePickerModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `AssetPreview` | function | 16 |
-| 2 | `FilePickerModal` | export default function | 39 |
-| 3 | `tr` | const arrow | 61 |
-| 4 | `toggleSelectedPath` | function | 102 |
-| 5 | `handleUpload` | function | 112 |
-| 6 | `handleDelete` | function | 154 |
+| 1 | `getFilePickerApi` | function | 60 |
+| 2 | `getErrorMessage` | function | 65 |
+| 3 | `normalizeFileAssets` | function | 69 |
+| 4 | `AssetPreview` | function | 73 |
+| 5 | `FilePickerModal` | export default function | 96 |
+| 6 | `toggleSelectedPath` | function | 163 |
+| 7 | `handleUpload` | function | 173 |
+| 8 | `handleDelete` | function | 215 |
 
 ### 3.188 `frontend/src/components/files/FilesPage.jsx`
 

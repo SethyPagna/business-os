@@ -187,7 +187,7 @@ Total files documented: **529**
 | 175 | `frontend/src/components/auth/Login.jsx` | frontend-ui | 1084 | 49.4 | UI component/page |
 | 176 | `frontend/src/components/branches/Branches.jsx` | frontend-ui | 907 | 43.4 | UI component/page |
 | 177 | `frontend/src/components/branches/BranchForm.tsx` | frontend-ui | 202 | 6.4 | UI component/page |
-| 178 | `frontend/src/components/branches/TransferModal.jsx` | frontend-ui | 346 | 14.2 | UI component/page |
+| 178 | `frontend/src/components/branches/TransferModal.tsx` | frontend-ui | 415 | 16.0 | UI component/page |
 | 179 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | frontend-ui | 1295 | 95.9 | UI component/page |
 | 180 | `frontend/src/components/catalog/CatalogImageField.tsx` | frontend-ui | 115 | 4.6 | UI component/page |
 | 181 | `frontend/src/components/catalog/CatalogPage.jsx` | frontend-ui | 3218 | 139.2 | UI component/page |
@@ -219,7 +219,7 @@ Total files documented: **529**
 | 207 | `frontend/src/components/dashboard/charts/NoData.tsx` | frontend-ui | 15 | 0.4 | UI component/page |
 | 208 | `frontend/src/components/dashboard/Dashboard.jsx` | frontend-ui | 2063 | 107.5 | UI component/page |
 | 209 | `frontend/src/components/dashboard/MiniStat.tsx` | frontend-ui | 53 | 2.0 | UI component/page |
-| 210 | `frontend/src/components/files/FilePickerModal.jsx` | frontend-ui | 270 | 11.5 | UI component/page |
+| 210 | `frontend/src/components/files/FilePickerModal.tsx` | frontend-ui | 333 | 13.7 | UI component/page |
 | 211 | `frontend/src/components/files/FilesPage.jsx` | frontend-ui | 990 | 47.4 | UI component/page |
 | 212 | `frontend/src/components/files/FilesProvidersTab.jsx` | frontend-ui | 222 | 16.6 | UI component/page |
 | 213 | `frontend/src/components/files/FilesResponsesTab.tsx` | frontend-ui | 197 | 11.0 | UI component/page |
@@ -372,7 +372,7 @@ Total files documented: **529**
 | 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 731 | 59.1 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 733 | 59.2 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 92.7 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 92.8 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |
