@@ -477,7 +477,7 @@ Code files scanned: **506**
 | 465 | `ops/scripts/runtime/audits/audit-report-html.ts` | 11 |
 | 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 43 |
 | 467 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 22 |
-| 468 | `ops/scripts/runtime/browser-action-smoke.mjs` | 32 |
+| 468 | `ops/scripts/runtime/browser-action-smoke.ts` | 32 |
 | 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 16 |
 | 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
 | 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
@@ -6501,9 +6501,9 @@ Code files scanned: **506**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getRouteManifest` | export function | 248 |
-| 2 | `resolveAuditRoutes` | export function | 255 |
-| 3 | `getAuditProfiles` | export function | 296 |
+| 1 | `getRouteManifest` | export function | 249 |
+| 2 | `resolveAuditRoutes` | export function | 256 |
+| 3 | `getAuditProfiles` | export function | 297 |
 
 ### 3.465 `ops/scripts/runtime/audits/audit-report-html.ts`
 
@@ -6596,42 +6596,42 @@ Code files scanned: **506**
 | 21 | `writeSummary` | function | 570 |
 | 22 | `main` | function | 581 |
 
-### 3.468 `ops/scripts/runtime/browser-action-smoke.mjs`
+### 3.468 `ops/scripts/runtime/browser-action-smoke.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 42 |
-| 2 | `readArgs` | function | 49 |
-| 3 | `safeName` | function | 65 |
-| 4 | `escapeRegExp` | function | 69 |
-| 5 | `addFinding` | function | 73 |
-| 6 | `isExternalConsoleNoise` | function | 82 |
-| 7 | `isAppConsoleIssue` | function | 86 |
-| 8 | `requestJson` | function | 92 |
-| 9 | `captureHealth` | function | 104 |
-| 10 | `buildContextOptions` | function | 117 |
-| 11 | `attachConsoleCapture` | function | 126 |
-| 12 | `saveScreenshot` | function | 147 |
-| 13 | `waitForRouteReady` | function | 154 |
-| 14 | `getActiveRouteRoot` | function | 175 |
-| 15 | `dismissTransientUi` | function | 179 |
-| 16 | `clickWithFallback` | function | 197 |
-| 17 | `countVisibleDialogs` | function | 207 |
-| 18 | `countVisibleNamedButtons` | function | 223 |
-| 19 | `countVisiblePortalLayers` | function | 235 |
-| 20 | `clickVisibleButton` | function | 248 |
-| 21 | `findButtonInLocator` | function | 267 |
-| 22 | `openMobileMoreDrawer` | function | 288 |
-| 23 | `navigateViaUi` | function | 297 |
-| 24 | `verifyExpectation` | function | 412 |
-| 25 | `clickNamedButton` | function | 474 |
-| 26 | `clickTestIdButton` | function | 526 |
-| 27 | `performSearchInteraction` | function | 576 |
-| 28 | `findSearchInput` | function | 579 |
-| 29 | `runRouteInteractions` | function | 647 |
-| 30 | `bootstrapProfile` | function | 661 |
-| 31 | `runProfile` | function | 678 |
-| 32 | `main` | function | 746 |
+| 1 | `readArg` | function | 131 |
+| 2 | `readArgs` | function | 138 |
+| 3 | `safeName` | function | 154 |
+| 4 | `escapeRegExp` | function | 158 |
+| 5 | `addFinding` | function | 162 |
+| 6 | `isExternalConsoleNoise` | function | 171 |
+| 7 | `isAppConsoleIssue` | function | 175 |
+| 8 | `requestJson` | function | 181 |
+| 9 | `captureHealth` | function | 193 |
+| 10 | `buildContextOptions` | function | 206 |
+| 11 | `attachConsoleCapture` | function | 215 |
+| 12 | `saveScreenshot` | function | 236 |
+| 13 | `waitForRouteReady` | function | 243 |
+| 14 | `getActiveRouteRoot` | function | 264 |
+| 15 | `dismissTransientUi` | function | 268 |
+| 16 | `clickWithFallback` | function | 286 |
+| 17 | `countVisibleDialogs` | function | 296 |
+| 18 | `countVisibleNamedButtons` | function | 312 |
+| 19 | `countVisiblePortalLayers` | function | 324 |
+| 20 | `clickVisibleButton` | function | 337 |
+| 21 | `findButtonInLocator` | function | 356 |
+| 22 | `openMobileMoreDrawer` | function | 377 |
+| 23 | `navigateViaUi` | function | 386 |
+| 24 | `verifyExpectation` | function | 501 |
+| 25 | `clickNamedButton` | function | 568 |
+| 26 | `clickTestIdButton` | function | 620 |
+| 27 | `performSearchInteraction` | function | 670 |
+| 28 | `findSearchInput` | function | 673 |
+| 29 | `runRouteInteractions` | function | 741 |
+| 30 | `bootstrapProfile` | function | 755 |
+| 31 | `runProfile` | function | 772 |
+| 32 | `main` | function | 840 |
 
 ### 3.469 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
 

@@ -477,7 +477,7 @@ Code files documented: **506**
 | 465 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
 | 466 | `ops/scripts/runtime/audits/deep-live-audit.mjs` | 9 | 0 | 3 | 0 |
 | 467 | `ops/scripts/runtime/audits/full-app-audit.mjs` | 9 | 0 | 3 | 0 |
-| 468 | `ops/scripts/runtime/browser-action-smoke.mjs` | 8 | 0 | 3 | 0 |
+| 468 | `ops/scripts/runtime/browser-action-smoke.ts` | 8 | 0 | 3 | 0 |
 | 469 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
 | 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 3 | 0 | 0 | 0 |
 | 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 4 | 0 | 1 | 0 |
@@ -7683,7 +7683,7 @@ Code files documented: **506**
   - `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
   - `ops/scripts/runtime/audits/full-app-audit.mjs`
-  - `ops/scripts/runtime/browser-action-smoke.mjs`
+  - `ops/scripts/runtime/browser-action-smoke.ts`
   - `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs`
   - `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs`
@@ -7709,7 +7709,7 @@ Code files documented: **506**
 - Referenced by (3)
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
   - `ops/scripts/runtime/audits/full-app-audit.mjs`
-  - `ops/scripts/runtime/browser-action-smoke.mjs`
+  - `ops/scripts/runtime/browser-action-smoke.ts`
 
 ### 3.465 `ops/scripts/runtime/audits/audit-report-html.ts`
 
@@ -7724,7 +7724,7 @@ Code files documented: **506**
 - Referenced by (3)
   - `ops/scripts/runtime/audits/deep-live-audit.mjs`
   - `ops/scripts/runtime/audits/full-app-audit.mjs`
-  - `ops/scripts/runtime/browser-action-smoke.mjs`
+  - `ops/scripts/runtime/browser-action-smoke.ts`
 
 ### 3.466 `ops/scripts/runtime/audits/deep-live-audit.mjs`
 
@@ -7766,7 +7766,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.468 `ops/scripts/runtime/browser-action-smoke.mjs`
+### 3.468 `ops/scripts/runtime/browser-action-smoke.ts`
 
 - Declared exports: none detected
 - Imports (8)

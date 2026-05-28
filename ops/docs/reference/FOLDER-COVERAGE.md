@@ -1602,7 +1602,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `browser-action-smoke.mjs` | Project source/support file |
+| 1 | `browser-action-smoke.ts` | Project source/support file |
 
 
 ### 3.73 Folder: `ops/scripts/runtime/audits`

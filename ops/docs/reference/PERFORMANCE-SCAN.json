@@ -1,10 +1,10 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 374,
+  "sourceFiles": 375,
   "distAssets": 87,
-  "totalSourceBytes": 5868734,
-  "totalSourceLines": 130444,
+  "totalSourceBytes": 5900701,
+  "totalSourceLines": 131314,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 250756,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
