@@ -119,7 +119,7 @@ Total files documented: **569**
 | 107 | `backend/test/fileAssetStorageReconcile.test.ts` | backend-root | 57 | 1.4 | Project source/support file |
 | 108 | `backend/test/fileAssetUsageCache.test.ts` | backend-root | 120 | 3.6 | Project source/support file |
 | 109 | `backend/test/fileRouteSecurityFlow.test.ts` | backend-root | 217 | 7.2 | Project source/support file |
-| 110 | `backend/test/fullAutomation.test.js` | backend-root | 970 | 38.0 | Project source/support file |
+| 110 | `backend/test/fullAutomation.test.ts` | backend-root | 970 | 38.0 | Project source/support file |
 | 111 | `backend/test/googleDriveSyncVersioning.test.ts` | backend-root | 121 | 5.1 | Project source/support file |
 | 112 | `backend/test/idempotency.test.ts` | backend-root | 32 | 0.7 | Project source/support file |
 | 113 | `backend/test/importCsv.test.ts` | backend-root | 83 | 3.0 | Project source/support file |

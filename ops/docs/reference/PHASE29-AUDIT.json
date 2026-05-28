@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:23:37.148Z",
+  "generatedAt": "2026-05-28T03:29:08.690Z",
   "report": "ops/docs/reference/PHASE29-AUDIT.md",
   "summary": "ops/docs/reference/PHASE29-AUDIT.json",
   "policy": "ops/automation/business-os-automation.json",
@@ -14,83 +14,83 @@
   "failures": 0,
   "failedChecks": [],
   "durationSummary": {
-    "totalMs": 5278,
+    "totalMs": 5631,
     "byCheck": [
       {
         "label": "Generated bulk audit",
         "runs": 3,
-        "totalMs": 2194,
-        "maxMs": 764,
-        "averageMs": 731
+        "totalMs": 2610,
+        "maxMs": 966,
+        "averageMs": 870
       },
       {
         "label": "Organization audit",
         "runs": 3,
-        "totalMs": 835,
-        "maxMs": 290,
-        "averageMs": 278
+        "totalMs": 839,
+        "maxMs": 288,
+        "averageMs": 280
       },
       {
         "label": "Language/runtime audit",
         "runs": 3,
-        "totalMs": 620,
-        "maxMs": 217,
-        "averageMs": 207
+        "totalMs": 613,
+        "maxMs": 212,
+        "averageMs": 204
       },
       {
         "label": "Performance/code-flow scan",
         "runs": 3,
-        "totalMs": 495,
-        "maxMs": 179,
-        "averageMs": 165
-      },
-      {
-        "label": "Docker release guardrail",
-        "runs": 3,
-        "totalMs": 389,
-        "maxMs": 144,
-        "averageMs": 130
+        "totalMs": 467,
+        "maxMs": 171,
+        "averageMs": 156
       },
       {
         "label": "Schema audit",
         "runs": 3,
-        "totalMs": 379,
-        "maxMs": 140,
-        "averageMs": 126
+        "totalMs": 392,
+        "maxMs": 141,
+        "averageMs": 131
+      },
+      {
+        "label": "Docker release guardrail",
+        "runs": 3,
+        "totalMs": 371,
+        "maxMs": 137,
+        "averageMs": 124
       },
       {
         "label": "Runtime dependency guardrail",
         "runs": 3,
-        "totalMs": 366,
-        "maxMs": 128,
-        "averageMs": 122
+        "totalMs": 339,
+        "maxMs": 115,
+        "averageMs": 113
       }
     ],
     "slowestRuns": [
       {
-        "cycle": 3,
-        "label": "Generated bulk audit",
-        "durationMs": 764
-      },
-      {
         "cycle": 1,
         "label": "Generated bulk audit",
-        "durationMs": 733
+        "durationMs": 966
       },
       {
         "cycle": 2,
         "label": "Generated bulk audit",
-        "durationMs": 697
+        "durationMs": 827
       },
       {
-        "cycle": 1,
-        "label": "Organization audit",
-        "durationMs": 290
+        "cycle": 3,
+        "label": "Generated bulk audit",
+        "durationMs": 817
       },
       {
         "cycle": 3,
         "label": "Organization audit",
-        "durationMs": 273
+        "durationMs": 288
+      },
+      {
+        "cycle": 1,
+        "label": "Organization audit",
+        "durationMs": 279
       }
     ]
   },
@@ -789,15 +789,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.js\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.jsx\",\"frontend/src/components/branches/Branches.jsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.jsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.jsx\",\"frontend/src/components/contacts/DeliveryTab.jsx\",\"frontend/src/components/contacts/SuppliersTab.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.jsx\",\"frontend/src/components/products/import/BulkImportModal.jsx\",\"frontend/src/components/returns/Returns.jsx\",\"frontend/src/components/sales/Sales.jsx\",\"frontend/src/components/server/ServerPage.jsx\",\"frontend/src/components/users/UserProfileModal.jsx\",\"frontend/src/components/users/Users.jsx\",\"frontend/src/components/utils-settings/AuditLog.jsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
+            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.jsx\",\"frontend/src/components/branches/Branches.jsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.jsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.jsx\",\"frontend/src/components/contacts/DeliveryTab.jsx\",\"frontend/src/components/contacts/SuppliersTab.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.jsx\",\"frontend/src/components/products/import/BulkImportModal.jsx\",\"frontend/src/components/returns/Returns.jsx\",\"frontend/src/components/sales/Sales.jsx\",\"frontend/src/components/server/ServerPage.jsx\",\"frontend/src/components/users/UserProfileModal.jsx\",\"frontend/src/components/users/Users.jsx\",\"frontend/src/components/utils-settings/AuditLog.jsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
           },
           {
             "cycle": 2,
-            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.js\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.jsx\",\"frontend/src/components/branches/Branches.jsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.jsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.jsx\",\"frontend/src/components/contacts/DeliveryTab.jsx\",\"frontend/src/components/contacts/SuppliersTab.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.jsx\",\"frontend/src/components/products/import/BulkImportModal.jsx\",\"frontend/src/components/returns/Returns.jsx\",\"frontend/src/components/sales/Sales.jsx\",\"frontend/src/components/server/ServerPage.jsx\",\"frontend/src/components/users/UserProfileModal.jsx\",\"frontend/src/components/users/Users.jsx\",\"frontend/src/components/utils-settings/AuditLog.jsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
+            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.jsx\",\"frontend/src/components/branches/Branches.jsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.jsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.jsx\",\"frontend/src/components/contacts/DeliveryTab.jsx\",\"frontend/src/components/contacts/SuppliersTab.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.jsx\",\"frontend/src/components/products/import/BulkImportModal.jsx\",\"frontend/src/components/returns/Returns.jsx\",\"frontend/src/components/sales/Sales.jsx\",\"frontend/src/components/server/ServerPage.jsx\",\"frontend/src/components/users/UserProfileModal.jsx\",\"frontend/src/components/users/Users.jsx\",\"frontend/src/components/utils-settings/AuditLog.jsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
           },
           {
             "cycle": 3,
-            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.js\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.jsx\",\"frontend/src/components/branches/Branches.jsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.jsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.jsx\",\"frontend/src/components/contacts/DeliveryTab.jsx\",\"frontend/src/components/contacts/SuppliersTab.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.jsx\",\"frontend/src/components/products/import/BulkImportModal.jsx\",\"frontend/src/components/returns/Returns.jsx\",\"frontend/src/components/sales/Sales.jsx\",\"frontend/src/components/server/ServerPage.jsx\",\"frontend/src/components/users/UserProfileModal.jsx\",\"frontend/src/components/users/Users.jsx\",\"frontend/src/components/utils-settings/AuditLog.jsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
+            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.jsx\",\"frontend/src/components/branches/Branches.jsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.jsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.jsx\",\"frontend/src/components/contacts/DeliveryTab.jsx\",\"frontend/src/components/contacts/SuppliersTab.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.jsx\",\"frontend/src/components/products/import/BulkImportModal.jsx\",\"frontend/src/components/returns/Returns.jsx\",\"frontend/src/components/sales/Sales.jsx\",\"frontend/src/components/server/ServerPage.jsx\",\"frontend/src/components/users/UserProfileModal.jsx\",\"frontend/src/components/users/Users.jsx\",\"frontend/src/components/utils-settings/AuditLog.jsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
           }
         ]
       },
@@ -1758,15 +1758,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[[\"TypeScript\",229],[\"JavaScript\",119],[\"React JSX\",107],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"TypeScript\",230],[\"JavaScript\",118],[\"React JSX\",107],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           },
           {
             "cycle": 2,
-            "value": "[[\"TypeScript\",229],[\"JavaScript\",119],[\"React JSX\",107],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"TypeScript\",230],[\"JavaScript\",118],[\"React JSX\",107],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           },
           {
             "cycle": 3,
-            "value": "[[\"TypeScript\",229],[\"JavaScript\",119],[\"React JSX\",107],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"TypeScript\",230],[\"JavaScript\",118],[\"React JSX\",107],[\"Windows batch\",16],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           }
         ]
       },
@@ -1777,15 +1777,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[[\".ts\",229],[\".js\",119],[\".jsx\",107],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".ts\",230],[\".js\",118],[\".jsx\",107],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           },
           {
             "cycle": 2,
-            "value": "[[\".ts\",229],[\".js\",119],[\".jsx\",107],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".ts\",230],[\".js\",118],[\".jsx\",107],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           },
           {
             "cycle": 3,
-            "value": "[[\".ts\",229],[\".js\",119],[\".jsx\",107],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".ts\",230],[\".js\",118],[\".jsx\",107],[\".bat\",16],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           }
         ]
       },
@@ -2595,14 +2595,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 733,
+      "durationMs": 966,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-28T03:23:32.896Z",
+        "generatedAt": "2026-05-28T03:29:04.294Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -2708,7 +2708,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 599,
+            "measureMs": 827,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -2717,7 +2717,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 318,
+            "measureMs": 511,
             "bytes": 156437173,
             "files": 11226,
             "folders": 981,
@@ -2726,7 +2726,7 @@
           },
           {
             "path": "ops/node_modules",
-            "measureMs": 30,
+            "measureMs": 53,
             "bytes": 13797802,
             "files": 605,
             "folders": 71,
@@ -2735,7 +2735,7 @@
           },
           {
             "path": "ops/runtime",
-            "measureMs": 25,
+            "measureMs": 37,
             "bytes": 191160554,
             "files": 535,
             "folders": 74,
@@ -2744,7 +2744,7 @@
           },
           {
             "path": "business-os-data",
-            "measureMs": 10,
+            "measureMs": 11,
             "bytes": 163307370,
             "files": 52,
             "folders": 35,
@@ -2753,7 +2753,7 @@
           },
           {
             "path": "frontend/dist",
-            "measureMs": 3,
+            "measureMs": 6,
             "bytes": 31627601,
             "files": 123,
             "folders": 6,
@@ -2762,7 +2762,7 @@
           },
           {
             "path": "business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads",
-            "measureMs": 3,
+            "measureMs": 2,
             "bytes": 15495843,
             "files": 12,
             "folders": 1,
@@ -2853,7 +2853,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 140,
+      "durationMs": 141,
       "command": "node.exe ops/scripts/backend/schema-audit.ts",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -3032,7 +3032,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 179,
+      "durationMs": 148,
       "command": "node.exe ops/scripts/docs/performance-scan.ts",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -3472,14 +3472,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 200,
+      "durationMs": 192,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.ts",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-28T03:23:33.423Z",
+        "generatedAt": "2026-05-28T03:29:04.790Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -3501,11 +3501,11 @@
         "languageCounts": [
           [
             "TypeScript",
-            229
+            230
           ],
           [
             "JavaScript",
-            119
+            118
           ],
           [
             "React JSX",
@@ -3539,11 +3539,11 @@
         "extensionCounts": [
           [
             ".ts",
-            229
+            230
           ],
           [
             ".js",
-            119
+            118
           ],
           [
             ".jsx",
@@ -5044,12 +5044,12 @@
               "npm.cmd --prefix ops run phase29:audit:repeat"
             ],
             "tests": [
-              "backend/test/fullAutomation.test.js"
+              "backend/test/fullAutomation.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               }
             ],
@@ -5096,14 +5096,14 @@
               "npm.cmd --prefix ops run phase29:audit:repeat"
             ],
             "tests": [
-              "backend/test/fullAutomation.test.js",
+              "backend/test/fullAutomation.test.ts",
               "backend/test/backupPerformanceHardening.test.ts",
               "backend/test/backupRetention.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               },
               {
@@ -5253,7 +5253,7 @@
             "tests": [
               "backend/test/routeContracts.test.ts",
               "backend/test/systemJobs.test.ts",
-              "backend/test/fullAutomation.test.js"
+              "backend/test/fullAutomation.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
@@ -5266,7 +5266,7 @@
                 "exists": true
               },
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               }
             ],
@@ -5297,7 +5297,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 144,
+      "durationMs": 137,
       "command": "node.exe ops/scripts/verification/verify-docker-release.ts",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -5439,7 +5439,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 120,
+      "durationMs": 111,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.ts",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -5520,7 +5520,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 290,
+      "durationMs": 279,
       "command": "node.exe ops/scripts/architecture/organization-audit.ts",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",
@@ -5694,7 +5694,7 @@
           "backend/src/services/backupPackages.js",
           "backend/src/services/googleDriveSync/index.js",
           "backend/src/services/importJobs.js",
-          "backend/test/fullAutomation.test.js",
+          "backend/test/fullAutomation.test.ts",
           "frontend/src/App.jsx",
           "frontend/src/AppContext.jsx",
           "frontend/src/api/http.ts",
@@ -5762,14 +5762,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 697,
+      "durationMs": 827,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-28T03:23:34.524Z",
+        "generatedAt": "2026-05-28T03:29:06.025Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -5875,7 +5875,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 540,
+            "measureMs": 695,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -5884,7 +5884,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 379,
+            "measureMs": 443,
             "bytes": 156437173,
             "files": 11226,
             "folders": 981,
@@ -5893,7 +5893,7 @@
           },
           {
             "path": "ops/node_modules",
-            "measureMs": 43,
+            "measureMs": 46,
             "bytes": 13797802,
             "files": 605,
             "folders": 71,
@@ -5902,7 +5902,7 @@
           },
           {
             "path": "ops/runtime",
-            "measureMs": 34,
+            "measureMs": 33,
             "bytes": 191160554,
             "files": 535,
             "folders": 74,
@@ -6020,7 +6020,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 122,
+      "durationMs": 131,
       "command": "node.exe ops/scripts/backend/schema-audit.ts",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -6199,7 +6199,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 169,
+      "durationMs": 148,
       "command": "node.exe ops/scripts/docs/performance-scan.ts",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -6639,14 +6639,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 203,
+      "durationMs": 209,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.ts",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-28T03:23:35.053Z",
+        "generatedAt": "2026-05-28T03:29:06.526Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -6668,11 +6668,11 @@
         "languageCounts": [
           [
             "TypeScript",
-            229
+            230
           ],
           [
             "JavaScript",
-            119
+            118
           ],
           [
             "React JSX",
@@ -6706,11 +6706,11 @@
         "extensionCounts": [
           [
             ".ts",
-            229
+            230
           ],
           [
             ".js",
-            119
+            118
           ],
           [
             ".jsx",
@@ -8211,12 +8211,12 @@
               "npm.cmd --prefix ops run phase29:audit:repeat"
             ],
             "tests": [
-              "backend/test/fullAutomation.test.js"
+              "backend/test/fullAutomation.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               }
             ],
@@ -8263,14 +8263,14 @@
               "npm.cmd --prefix ops run phase29:audit:repeat"
             ],
             "tests": [
-              "backend/test/fullAutomation.test.js",
+              "backend/test/fullAutomation.test.ts",
               "backend/test/backupPerformanceHardening.test.ts",
               "backend/test/backupRetention.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               },
               {
@@ -8420,7 +8420,7 @@
             "tests": [
               "backend/test/routeContracts.test.ts",
               "backend/test/systemJobs.test.ts",
-              "backend/test/fullAutomation.test.js"
+              "backend/test/fullAutomation.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
@@ -8433,7 +8433,7 @@
                 "exists": true
               },
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               }
             ],
@@ -8606,7 +8606,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 128,
+      "durationMs": 113,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.ts",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -8861,7 +8861,7 @@
           "backend/src/services/backupPackages.js",
           "backend/src/services/googleDriveSync/index.js",
           "backend/src/services/importJobs.js",
-          "backend/test/fullAutomation.test.js",
+          "backend/test/fullAutomation.test.ts",
           "frontend/src/App.jsx",
           "frontend/src/AppContext.jsx",
           "frontend/src/api/http.ts",
@@ -8929,14 +8929,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 764,
+      "durationMs": 817,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-28T03:23:36.219Z",
+        "generatedAt": "2026-05-28T03:29:07.728Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -9042,7 +9042,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 630,
+            "measureMs": 672,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -9051,7 +9051,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 389,
+            "measureMs": 431,
             "bytes": 156437173,
             "files": 11226,
             "folders": 981,
@@ -9060,7 +9060,7 @@
           },
           {
             "path": "ops/node_modules",
-            "measureMs": 30,
+            "measureMs": 47,
             "bytes": 13797802,
             "files": 605,
             "folders": 71,
@@ -9069,7 +9069,7 @@
           },
           {
             "path": "ops/runtime",
-            "measureMs": 23,
+            "measureMs": 33,
             "bytes": 191160554,
             "files": 535,
             "folders": 74,
@@ -9078,7 +9078,7 @@
           },
           {
             "path": "business-os-data",
-            "measureMs": 8,
+            "measureMs": 9,
             "bytes": 163307370,
             "files": 52,
             "folders": 35,
@@ -9087,7 +9087,7 @@
           },
           {
             "path": "frontend/dist",
-            "measureMs": 3,
+            "measureMs": 2,
             "bytes": 31627601,
             "files": 123,
             "folders": 6,
@@ -9105,7 +9105,7 @@
           },
           {
             "path": "ops/runtime/secrets",
-            "measureMs": 1,
+            "measureMs": 2,
             "bytes": 713,
             "files": 4,
             "folders": 1,
@@ -9187,7 +9187,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 117,
+      "durationMs": 120,
       "command": "node.exe ops/scripts/backend/schema-audit.ts",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -9366,7 +9366,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 147,
+      "durationMs": 171,
       "command": "node.exe ops/scripts/docs/performance-scan.ts",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -9806,14 +9806,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 217,
+      "durationMs": 212,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.ts",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-28T03:23:36.708Z",
+        "generatedAt": "2026-05-28T03:29:08.241Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -9835,11 +9835,11 @@
         "languageCounts": [
           [
             "TypeScript",
-            229
+            230
           ],
           [
             "JavaScript",
-            119
+            118
           ],
           [
             "React JSX",
@@ -9873,11 +9873,11 @@
         "extensionCounts": [
           [
             ".ts",
-            229
+            230
           ],
           [
             ".js",
-            119
+            118
           ],
           [
             ".jsx",
@@ -11378,12 +11378,12 @@
               "npm.cmd --prefix ops run phase29:audit:repeat"
             ],
             "tests": [
-              "backend/test/fullAutomation.test.js"
+              "backend/test/fullAutomation.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               }
             ],
@@ -11430,14 +11430,14 @@
               "npm.cmd --prefix ops run phase29:audit:repeat"
             ],
             "tests": [
-              "backend/test/fullAutomation.test.js",
+              "backend/test/fullAutomation.test.ts",
               "backend/test/backupPerformanceHardening.test.ts",
               "backend/test/backupRetention.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               },
               {
@@ -11587,7 +11587,7 @@
             "tests": [
               "backend/test/routeContracts.test.ts",
               "backend/test/systemJobs.test.ts",
-              "backend/test/fullAutomation.test.js"
+              "backend/test/fullAutomation.test.ts"
             ],
             "targetExists": true,
             "testCoverage": [
@@ -11600,7 +11600,7 @@
                 "exists": true
               },
               {
-                "path": "backend/test/fullAutomation.test.js",
+                "path": "backend/test/fullAutomation.test.ts",
                 "exists": true
               }
             ],
@@ -11631,7 +11631,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 127,
+      "durationMs": 116,
       "command": "node.exe ops/scripts/verification/verify-docker-release.ts",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -11773,7 +11773,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 118,
+      "durationMs": 115,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.ts",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -11854,7 +11854,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 273,
+      "durationMs": 288,
       "command": "node.exe ops/scripts/architecture/organization-audit.ts",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",
@@ -12028,7 +12028,7 @@
           "backend/src/services/backupPackages.js",
           "backend/src/services/googleDriveSync/index.js",
           "backend/src/services/importJobs.js",
-          "backend/test/fullAutomation.test.js",
+          "backend/test/fullAutomation.test.ts",
           "frontend/src/App.jsx",
           "frontend/src/AppContext.jsx",
           "frontend/src/api/http.ts",

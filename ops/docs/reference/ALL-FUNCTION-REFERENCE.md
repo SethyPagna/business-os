@@ -109,7 +109,7 @@ Code files scanned: **506**
 | 97 | `backend/test/fileAssetStorageReconcile.test.ts` | 1 |
 | 98 | `backend/test/fileAssetUsageCache.test.ts` | 1 |
 | 99 | `backend/test/fileRouteSecurityFlow.test.ts` | 9 |
-| 100 | `backend/test/fullAutomation.test.js` | 2 |
+| 100 | `backend/test/fullAutomation.test.ts` | 2 |
 | 101 | `backend/test/googleDriveSyncVersioning.test.ts` | 1 |
 | 102 | `backend/test/idempotency.test.ts` | 1 |
 | 103 | `backend/test/importCsv.test.ts` | 2 |
@@ -2532,7 +2532,7 @@ Code files scanned: **506**
 | 8 | `login` | function | 108 |
 | 9 | `buildForm` | function | 129 |
 
-### 3.100 `backend/test/fullAutomation.test.js`
+### 3.100 `backend/test/fullAutomation.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

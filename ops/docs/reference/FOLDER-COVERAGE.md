@@ -439,7 +439,7 @@ Total folders documented: **81**
 | 13 | `fileAssetStorageReconcile.test.ts` | Project source/support file |
 | 14 | `fileAssetUsageCache.test.ts` | Project source/support file |
 | 15 | `fileRouteSecurityFlow.test.ts` | Project source/support file |
-| 16 | `fullAutomation.test.js` | Project source/support file |
+| 16 | `fullAutomation.test.ts` | Project source/support file |
 | 17 | `googleDriveSyncVersioning.test.ts` | Project source/support file |
 | 18 | `idempotency.test.ts` | Project source/support file |
 | 19 | `importCsv.test.ts` | Project source/support file |

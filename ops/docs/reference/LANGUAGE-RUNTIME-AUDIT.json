@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:23:36.708Z",
+  "generatedAt": "2026-05-28T03:29:08.241Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,11 +21,11 @@
   "languageCounts": [
     [
       "TypeScript",
-      229
+      230
     ],
     [
       "JavaScript",
-      119
+      118
     ],
     [
       "React JSX",
@@ -59,11 +59,11 @@
   "extensionCounts": [
     [
       ".ts",
-      229
+      230
     ],
     [
       ".js",
-      119
+      118
     ],
     [
       ".jsx",
@@ -1564,12 +1564,12 @@
         "npm.cmd --prefix ops run phase29:audit:repeat"
       ],
       "tests": [
-        "backend/test/fullAutomation.test.js"
+        "backend/test/fullAutomation.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
         {
-          "path": "backend/test/fullAutomation.test.js",
+          "path": "backend/test/fullAutomation.test.ts",
           "exists": true
         }
       ],
@@ -1616,14 +1616,14 @@
         "npm.cmd --prefix ops run phase29:audit:repeat"
       ],
       "tests": [
-        "backend/test/fullAutomation.test.js",
+        "backend/test/fullAutomation.test.ts",
         "backend/test/backupPerformanceHardening.test.ts",
         "backend/test/backupRetention.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
         {
-          "path": "backend/test/fullAutomation.test.js",
+          "path": "backend/test/fullAutomation.test.ts",
           "exists": true
         },
         {
@@ -1773,7 +1773,7 @@
       "tests": [
         "backend/test/routeContracts.test.ts",
         "backend/test/systemJobs.test.ts",
-        "backend/test/fullAutomation.test.js"
+        "backend/test/fullAutomation.test.ts"
       ],
       "targetExists": true,
       "testCoverage": [
@@ -1786,7 +1786,7 @@
           "exists": true
         },
         {
-          "path": "backend/test/fullAutomation.test.js",
+          "path": "backend/test/fullAutomation.test.ts",
           "exists": true
         }
       ],

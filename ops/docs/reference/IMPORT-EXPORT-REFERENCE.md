@@ -109,7 +109,7 @@ Code files documented: **506**
 | 97 | `backend/test/fileAssetStorageReconcile.test.ts` | 2 | 0 | 1 | 0 |
 | 98 | `backend/test/fileAssetUsageCache.test.ts` | 3 | 0 | 2 | 0 |
 | 99 | `backend/test/fileRouteSecurityFlow.test.ts` | 6 | 0 | 0 | 0 |
-| 100 | `backend/test/fullAutomation.test.js` | 3 | 0 | 0 | 0 |
+| 100 | `backend/test/fullAutomation.test.ts` | 3 | 0 | 0 | 0 |
 | 101 | `backend/test/googleDriveSyncVersioning.test.ts` | 4 | 0 | 1 | 0 |
 | 102 | `backend/test/idempotency.test.ts` | 2 | 0 | 1 | 0 |
 | 103 | `backend/test/importCsv.test.ts` | 6 | 0 | 2 | 0 |
@@ -2429,7 +2429,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.100 `backend/test/fullAutomation.test.js`
+### 3.100 `backend/test/fullAutomation.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
