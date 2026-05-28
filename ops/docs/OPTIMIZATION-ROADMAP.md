@@ -5331,3 +5331,36 @@ Move 483 status:
   typed props for menu triggers, quick-add actions, sale-status labels, KPI
   stats, and modal sizing, while replacing a stale mojibake modal close glyph
   with an accessible plain `x`.
+
+Move 484 status:
+- Move 484 converts shared preference, loader, header, and section controls to
+  TSX. `QuickPreferenceToggles.tsx`, `LoadingWatchdog.tsx`,
+  `PageHeader.tsx`, and `SectionSwitcher.tsx` now carry explicit prop types
+  and typed app preference/action contracts.
+
+Move 485 status:
+- Move 485 prunes generated runtime reports through the retention command and
+  records the future-framework guardrail for direct Node config files: keep
+  `next.config.mjs` as `.mjs` if a Next.js surface is ever introduced unless
+  a production-build proof replaces that rule.
+
+Move 486 status:
+- Move 486 converts receipt preview, receipt field panel, filter menu, and
+  gallery lightbox surfaces to TSX. The typed boundaries cover receipt
+  settings/template data, app translation access, filter sections/options, and
+  lightbox navigation callbacks.
+
+Move 487 status:
+- Move 487 converts `PortalMenu.tsx`, `ActionHistoryBar.tsx`, and
+  `UserDetailSheet.tsx`. The typed contracts cover body-portal menu items,
+  undo/redo/server-history rows, admin user filters, user roles, and
+  permission boundaries while preserving the current `PermissionEditor.jsx`
+  source.
+
+Move 488 status:
+- Move 488 converts `PaginationControls.tsx`, `WriteConflictModal.tsx`, and
+  dashboard `BarChart.tsx`, `LineChart.tsx`, and `DonutChart.tsx`. The typed
+  contracts cover pagination helpers and callbacks, conflict payload rows,
+  chart data records, resize refs, hover tooltip state, and SVG event handlers.
+  Callers now use extensionless imports for the converted pagination and chart
+  modules.

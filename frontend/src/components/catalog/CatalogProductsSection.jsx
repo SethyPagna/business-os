@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Trophy } from 'lucide-react'
 import { ProductImg } from '../products/shared/primitives'
-import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
+import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'

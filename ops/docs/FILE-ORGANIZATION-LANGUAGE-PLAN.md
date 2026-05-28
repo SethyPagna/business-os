@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 487 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 488 in this file.
 
 ## Goal
 
@@ -8,15 +8,17 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 
 ## Current Shape
 
-- Frontend source: 261 files under `frontend/src`.
-  - 107 `.jsx`
-  - 36 `.js`
-  - 32 `.mjs`
-  - 86 `.ts`
+- Frontend source: 195 files under `frontend/src`.
+  - 81 `.jsx`
+  - 1 `.js`
+  - 80 `.ts`
+  - 26 `.tsx`
+  - 1 `.mts`
+  - 2 `.json`
+  - 3 `.md`
   - 1 `.css`
 - Frontend tests: 76 focused test files under `frontend/tests`.
-  - 11 `.mjs`
-  - 65 `.ts`
+  - 76 `.ts`
 - Backend source: 87 files under `backend/src`.
   - 83 `.js`
   - 1 `.sql`
@@ -3833,6 +3835,14 @@ Decision rule:
     keeping `PermissionEditor.jsx` as the current permission-definition source.
     Callers no longer import the old ActionHistoryBar JSX path, and TSX menu wrappers now
     import the typed `PortalMenu` directly instead of casting the JSX module.
+488. Convert shared pagination, write-conflict, and dashboard chart leaves to
+    TSX. Done: `PaginationControls.tsx` now carries typed pagination helpers,
+    page-size callbacks, and editable input events; `WriteConflictModal.tsx`
+    now types conflict payloads, field rows, and current-value summaries; and
+    dashboard `BarChart.tsx`, `LineChart.tsx`, and `DonutChart.tsx` now type
+    chart data, hover tooltips, resize refs, and SVG event handlers. Callers no
+    longer import the old pagination JSX path, and the chart barrel now exports
+    typed chart modules through extensionless imports.
 
 ## Safety Gates
 

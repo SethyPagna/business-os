@@ -1,15 +1,35 @@
 import { useEffect, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
-export const PAGE_SIZE_OPTIONS = [20, 50, 100]
+export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
 
-export function clampPage(page, totalItems, pageSize) {
+type Translate = (key: string) => string | undefined
+
+type NumericInput = number | string | null | undefined
+
+export interface PaginationControlsProps {
+  page?: NumericInput
+  pageSize?: NumericInput
+  totalItems?: NumericInput
+  onPageChange?: (page: number) => void
+  onPageSizeChange?: (pageSize: number) => void
+  pageSizeOptions?: number[]
+  label?: string
+  t?: Translate
+  className?: string
+  compact?: boolean
+  compactPageInput?: boolean
+  editablePageInput?: boolean
+}
+
+export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
   const safePageSize = Math.max(1, Number(pageSize || PAGE_SIZE_OPTIONS[1]))
   const totalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalItems || 0)) / safePageSize))
   return Math.max(1, Math.min(totalPages, Number(page || 1)))
 }
 
-export function paginateItems(items = [], page = 1, pageSize = PAGE_SIZE_OPTIONS[1]) {
+export function paginateItems<T>(items: readonly T[] = [], page: NumericInput = 1, pageSize: NumericInput = PAGE_SIZE_OPTIONS[1]): T[] {
   const list = Array.isArray(items) ? items : []
   const safePageSize = Math.max(1, Number(pageSize || PAGE_SIZE_OPTIONS[1]))
   const safePage = clampPage(page, list.length, safePageSize)
@@ -30,7 +50,7 @@ export default function PaginationControls({
   compact = false,
   compactPageInput = false,
   editablePageInput = true,
-}) {
+}: PaginationControlsProps) {
   const safePageSize = Math.max(1, Number(pageSize || PAGE_SIZE_OPTIONS[1]))
   const total = Math.max(0, Number(totalItems || 0))
   const totalPages = Math.max(1, Math.ceil(total / safePageSize))
@@ -47,7 +67,7 @@ export default function PaginationControls({
     setPageDraft(String(safePage))
   }, [safePage])
 
-  const commitPageDraft = (value = pageDraft) => {
+  const commitPageDraft = (value: string = pageDraft) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10)
     if (!Number.isFinite(parsed)) {
       setPageDraft(String(safePage))
@@ -58,7 +78,7 @@ export default function PaginationControls({
     setPageDraft(String(next))
   }
 
-  const handlePageInputKeyDown = (event) => {
+  const handlePageInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
       event.preventDefault()
       commitPageDraft(event.currentTarget.value)

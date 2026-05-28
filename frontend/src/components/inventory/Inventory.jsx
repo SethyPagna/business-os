@@ -8,7 +8,7 @@ import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
+import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import InventoryProductsSurface from './InventoryProductsSurface'

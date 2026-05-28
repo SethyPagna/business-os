@@ -4,7 +4,7 @@ import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
-import PaginationControls, { clampPage } from '../shared/PaginationControls.jsx'
+import PaginationControls, { clampPage } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import {

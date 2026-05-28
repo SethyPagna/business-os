@@ -1,79 +1,138 @@
 import Modal from './Modal'
 
-function formatConflictTime(value) {
+type ConflictEntity = 'settings' | 'sale' | 'return' | 'user' | 'role' | string
+type ConflictRecord = Record<string, unknown>
+
+interface ConflictSummaryRow {
+  label: string
+  value: string
+}
+
+interface ConflictFieldRow {
+  label: string
+  attempted: string
+  current: string
+}
+
+interface WriteConflict {
+  entity?: ConflictEntity
+  entityLabel?: string
+  attempted?: ConflictRecord
+  current?: ConflictRecord
+  expectedUpdatedAt?: unknown
+  actualUpdatedAt?: unknown
+}
+
+interface WriteConflictModalProps {
+  conflict?: WriteConflict | null
+  onClose: () => void
+  onReload: () => void
+}
+
+const EMPTY_VALUE = '-'
+
+function asConflictRecord(value: unknown): ConflictRecord {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as ConflictRecord : {}
+}
+
+function isConflictSummaryRow(row: ConflictSummaryRow | null): row is ConflictSummaryRow {
+  return row !== null
+}
+
+function isVisibleFieldRow(row: ConflictFieldRow): boolean {
+  return row.attempted !== EMPTY_VALUE || row.current !== EMPTY_VALUE
+}
+
+function formatConflictTime(value: unknown): string {
   if (!value) return 'Unknown'
-  const date = new Date(value)
+  const date = new Date(String(value))
   if (Number.isNaN(date.getTime())) return String(value)
   return date.toLocaleString()
 }
 
-function summarizeCurrentValue(entity, current) {
-  if (!current || typeof current !== 'object') return []
+function valueToString(value: unknown): string {
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+function summarizeCurrentValue(entity: ConflictEntity | undefined, current: unknown): ConflictSummaryRow[] {
+  const currentRecord = asConflictRecord(current)
+  if (!Object.keys(currentRecord).length) return []
 
   if (entity === 'settings') {
-    return Object.entries(current)
+    return Object.entries(currentRecord)
       .filter(([, value]) => value != null && value !== '')
       .slice(0, 6)
       .map(([key, value]) => ({
         label: key.replace(/_/g, ' '),
-        value: typeof value === 'object' ? JSON.stringify(value) : String(value),
+        value: valueToString(value),
       }))
   }
 
   if (entity === 'sale') {
     return [
-      current.sale_number ? { label: 'Sale', value: String(current.sale_number) } : null,
-      current.status ? { label: 'Status', value: String(current.status) } : null,
-      current.customer_name ? { label: 'Customer', value: String(current.customer_name) } : null,
-      current.updated_at ? { label: 'Updated', value: formatConflictTime(current.updated_at) } : null,
-    ].filter(Boolean)
+      currentRecord.sale_number ? { label: 'Sale', value: String(currentRecord.sale_number) } : null,
+      currentRecord.status ? { label: 'Status', value: String(currentRecord.status) } : null,
+      currentRecord.customer_name ? { label: 'Customer', value: String(currentRecord.customer_name) } : null,
+      currentRecord.updated_at ? { label: 'Updated', value: formatConflictTime(currentRecord.updated_at) } : null,
+    ].filter(isConflictSummaryRow)
   }
 
   if (entity === 'return') {
     return [
-      current.return_number ? { label: 'Return', value: String(current.return_number) } : null,
-      current.reason ? { label: 'Reason', value: String(current.reason) } : null,
-      current.return_type ? { label: 'Type', value: String(current.return_type) } : null,
-      current.updated_at ? { label: 'Updated', value: formatConflictTime(current.updated_at) } : null,
-    ].filter(Boolean)
+      currentRecord.return_number ? { label: 'Return', value: String(currentRecord.return_number) } : null,
+      currentRecord.reason ? { label: 'Reason', value: String(currentRecord.reason) } : null,
+      currentRecord.return_type ? { label: 'Type', value: String(currentRecord.return_type) } : null,
+      currentRecord.updated_at ? { label: 'Updated', value: formatConflictTime(currentRecord.updated_at) } : null,
+    ].filter(isConflictSummaryRow)
   }
 
   if (entity === 'user') {
     return [
-      current.name ? { label: 'Name', value: String(current.name) } : null,
-      current.username ? { label: 'Username', value: String(current.username) } : null,
-      current.email ? { label: 'Email', value: String(current.email) } : null,
-      current.updated_at ? { label: 'Updated', value: formatConflictTime(current.updated_at) } : null,
-    ].filter(Boolean)
+      currentRecord.name ? { label: 'Name', value: String(currentRecord.name) } : null,
+      currentRecord.username ? { label: 'Username', value: String(currentRecord.username) } : null,
+      currentRecord.email ? { label: 'Email', value: String(currentRecord.email) } : null,
+      currentRecord.updated_at ? { label: 'Updated', value: formatConflictTime(currentRecord.updated_at) } : null,
+    ].filter(isConflictSummaryRow)
   }
 
   if (entity === 'role') {
     return [
-      current.name ? { label: 'Role', value: String(current.name) } : null,
-      current.code ? { label: 'Code', value: String(current.code) } : null,
-      current.updated_at ? { label: 'Updated', value: formatConflictTime(current.updated_at) } : null,
-    ].filter(Boolean)
+      currentRecord.name ? { label: 'Role', value: String(currentRecord.name) } : null,
+      currentRecord.code ? { label: 'Code', value: String(currentRecord.code) } : null,
+      currentRecord.updated_at ? { label: 'Updated', value: formatConflictTime(currentRecord.updated_at) } : null,
+    ].filter(isConflictSummaryRow)
   }
 
-  return Object.entries(current)
+  return Object.entries(currentRecord)
     .slice(0, 4)
     .map(([key, value]) => ({
       label: key.replace(/_/g, ' '),
-      value: typeof value === 'object' ? JSON.stringify(value) : String(value),
+      value: valueToString(value),
     }))
 }
 
-function formatValue(value) {
-  if (value == null || value === '') return '—'
+function formatValue(value: unknown): string {
+  if (value == null || value === '') return EMPTY_VALUE
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   if (typeof value === 'number') return String(value)
   return String(value)
 }
 
-function getConflictFieldRows(conflict) {
-  const entity = String(conflict?.entity || '').trim().toLowerCase()
-  const attempted = conflict?.attempted || {}
-  const current = conflict?.current || {}
+function formatItemSummary(value: unknown): string {
+  if (!Array.isArray(value)) return ''
+  return value.map((item) => {
+    const record = asConflictRecord(item)
+    const productName = record.product_name || 'Item'
+    const quantity = record.quantity || ''
+    const noRestock = record.return_to_stock === false ? ' (no restock)' : ''
+    return `${productName} x${quantity}${noRestock}`
+  }).join(', ')
+}
+
+function getConflictFieldRows(conflict: WriteConflict): ConflictFieldRow[] {
+  const entity = String(conflict.entity || '').trim().toLowerCase()
+  const attempted = conflict.attempted || {}
+  const current = conflict.current || {}
 
   if (entity === 'settings') {
     return Object.keys(attempted).map((key) => ({
@@ -84,7 +143,7 @@ function getConflictFieldRows(conflict) {
   }
 
   if (entity === 'sale') {
-    const rows = []
+    const rows: ConflictFieldRow[] = []
     if (Object.prototype.hasOwnProperty.call(attempted, 'sale_status')) {
       rows.push({
         label: 'Status',
@@ -113,18 +172,14 @@ function getConflictFieldRows(conflict) {
   }
 
   if (entity === 'return') {
-    const rows = [
+    const rows: ConflictFieldRow[] = [
       { label: 'Reason', attempted: formatValue(attempted.reason), current: formatValue(current.reason) },
       { label: 'Type', attempted: formatValue(attempted.return_type), current: formatValue(current.return_type) },
       { label: 'Notes', attempted: formatValue(attempted.notes), current: formatValue(current.notes) },
       { label: 'Refund (USD)', attempted: formatValue(attempted.total_refund_usd), current: formatValue(current.total_refund_usd) },
     ]
-    const attemptedItems = Array.isArray(attempted.items)
-      ? attempted.items.map((item) => `${item.product_name || 'Item'} x${item.quantity}${item.return_to_stock === false ? ' (no restock)' : ''}`).join(', ')
-      : ''
-    const currentItems = Array.isArray(current.items)
-      ? current.items.map((item) => `${item.product_name || 'Item'} x${item.quantity}${item.return_to_stock === false ? ' (no restock)' : ''}`).join(', ')
-      : ''
+    const attemptedItems = formatItemSummary(attempted.items)
+    const currentItems = formatItemSummary(current.items)
     if (attemptedItems || currentItems) {
       rows.push({
         label: 'Items',
@@ -143,7 +198,7 @@ function getConflictFieldRows(conflict) {
       { label: 'Phone', attempted: formatValue(attempted.phone), current: formatValue(current.phone) },
       { label: 'Role', attempted: formatValue(attempted.role_name || attempted.role_id), current: formatValue(current.role_name || current.role_id) },
       { label: 'Active', attempted: formatValue(attempted.is_active), current: formatValue(current.is_active) },
-    ].filter((row) => row.attempted !== '—' || row.current !== '—')
+    ].filter(isVisibleFieldRow)
   }
 
   if (entity === 'role') {
@@ -162,13 +217,13 @@ function getConflictFieldRows(conflict) {
             : current.permissions,
         ),
       },
-    ].filter((row) => row.attempted !== '—' || row.current !== '—')
+    ].filter(isVisibleFieldRow)
   }
 
   return []
 }
 
-export default function WriteConflictModal({ conflict, onClose, onReload }) {
+export default function WriteConflictModal({ conflict, onClose, onReload }: WriteConflictModalProps) {
   if (!conflict) return null
 
   const entityLabel = conflict.entityLabel || 'Item'
@@ -242,7 +297,7 @@ export default function WriteConflictModal({ conflict, onClose, onReload }) {
                   <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {row.label}
                   </span>
-                  <span className="max-w-[60%] text-right text-gray-900 dark:text-white break-words">
+                  <span className="max-w-[60%] break-words text-right text-gray-900 dark:text-white">
                     {row.value}
                   </span>
                 </div>
@@ -252,10 +307,10 @@ export default function WriteConflictModal({ conflict, onClose, onReload }) {
         )}
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button onClick={onClose} className="btn-secondary">
+          <button type="button" onClick={onClose} className="btn-secondary">
             Dismiss
           </button>
-          <button onClick={onReload} className="btn-primary">
+          <button type="button" onClick={onReload} className="btn-primary">
             Reload latest
           </button>
         </div>

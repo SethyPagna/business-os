@@ -30,7 +30,7 @@ import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
 import QuickAddModal from './QuickAddModal'
 import FilterPanel from './FilterPanel'
-import PaginationControls from '../shared/PaginationControls.jsx'
+import PaginationControls from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   buildProductsById,

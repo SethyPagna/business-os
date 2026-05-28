@@ -1,4 +1,4 @@
-export { default as BarChart } from './BarChart.jsx'
-export { default as LineChart } from './LineChart.jsx'
-export { default as DonutChart } from './DonutChart.jsx'
+export { default as BarChart } from './BarChart'
+export { default as LineChart } from './LineChart'
+export { default as DonutChart } from './DonutChart'
 export { default as NoData } from './NoData'
