@@ -521,7 +521,7 @@ Total files documented: **569**
 | 509 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | project-scripts | 144 | 6.0 | Project source/support file |
 | 510 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | project-scripts | 285 | 12.0 | Project source/support file |
 | 511 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | project-scripts | 155 | 6.0 | Project source/support file |
-| 512 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | project-scripts | 67 | 2.4 | Project source/support file |
+| 512 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | project-scripts | 123 | 3.6 | Project source/support file |
 | 513 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | project-scripts | 129 | 6.2 | Project source/support file |
 | 514 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | project-scripts | 126 | 5.7 | Project source/support file |
 | 515 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | project-scripts | 125 | 5.9 | Project source/support file |

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T01:42:59.397Z",
+  "generatedAt": "2026-05-28T01:49:41.615Z",
   "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
   "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
   "measurementMode": "bounded-parallel-targets",
@@ -9,8 +9,8 @@
   "fileStatConcurrency": 32,
   "targets": 15,
   "existingTargets": 8,
-  "totalBytes": 683661703,
-  "protectedBytes": 361231511,
+  "totalBytes": 683881673,
+  "protectedBytes": 361451481,
   "cleanupCandidateBytes": 322430192,
   "nestedTargetOverlaps": [
     {
@@ -31,15 +31,15 @@
     }
   ],
   "nestedOverlapBytes": 15496556,
-  "adjustedTotalBytes": 668165147,
-  "adjustedProtectedBytes": 345734955,
+  "adjustedTotalBytes": 668385117,
+  "adjustedProtectedBytes": 345954925,
   "adjustedCleanupCandidateBytes": 322430192,
   "largestProtectedTargets": [
     {
       "path": "ops/runtime",
-      "bytes": 182427585,
-      "files": 478,
-      "folders": 51,
+      "bytes": 182647555,
+      "files": 481,
+      "folders": 52,
       "category": "runtime state",
       "disposition": "retention"
     },
@@ -105,7 +105,7 @@
   "slowestTargetMeasurements": [
     {
       "path": "backend/node_modules",
-      "measureMs": 898,
+      "measureMs": 844,
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
@@ -114,7 +114,7 @@
     },
     {
       "path": "frontend/node_modules",
-      "measureMs": 578,
+      "measureMs": 502,
       "bytes": 156437173,
       "files": 11226,
       "folders": 981,
@@ -123,7 +123,7 @@
     },
     {
       "path": "ops/node_modules",
-      "measureMs": 46,
+      "measureMs": 45,
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
@@ -132,16 +132,16 @@
     },
     {
       "path": "ops/runtime",
-      "measureMs": 28,
-      "bytes": 182427585,
-      "files": 478,
-      "folders": 51,
+      "measureMs": 26,
+      "bytes": 182647555,
+      "files": 481,
+      "folders": 52,
       "category": "runtime state",
       "protected": true
     },
     {
       "path": "business-os-data",
-      "measureMs": 12,
+      "measureMs": 11,
       "bytes": 163307370,
       "files": 52,
       "folders": 35,
@@ -184,9 +184,9 @@
       "targets": 3
     },
     "retention": {
-      "bytes": 182427585,
-      "files": 478,
-      "folders": 51,
+      "bytes": 182647555,
+      "files": 481,
+      "folders": 52,
       "targets": 1
     },
     "reinstallable": {
@@ -247,10 +247,10 @@
     {
       "path": "ops/runtime",
       "exists": true,
-      "bytes": 182427585,
-      "files": 478,
-      "folders": 51,
-      "measureMs": 28,
+      "bytes": 182647555,
+      "files": 481,
+      "folders": 52,
+      "measureMs": 26,
       "category": "runtime state",
       "disposition": "retention",
       "protected": true,
@@ -264,7 +264,7 @@
       "bytes": 163307370,
       "files": 52,
       "folders": 35,
-      "measureMs": 12,
+      "measureMs": 11,
       "category": "business data",
       "disposition": "preserve",
       "protected": true,
@@ -278,7 +278,7 @@
       "bytes": 156437173,
       "files": 11226,
       "folders": 981,
-      "measureMs": 578,
+      "measureMs": 502,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -292,7 +292,7 @@
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
-      "measureMs": 898,
+      "measureMs": 844,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -334,7 +334,7 @@
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
-      "measureMs": 46,
+      "measureMs": 45,
       "category": "dependencies",
       "disposition": "safe cleanup",
       "protected": false,
@@ -390,7 +390,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 0,
+      "measureMs": 1,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -432,7 +432,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 1,
+      "measureMs": 0,
       "category": "release kit",
       "disposition": "regenerable",
       "protected": false,

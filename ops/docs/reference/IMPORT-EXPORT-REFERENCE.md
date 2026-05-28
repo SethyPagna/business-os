@@ -482,7 +482,7 @@ Code files documented: **506**
 | 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 3 | 0 | 0 | 0 |
 | 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 4 | 0 | 1 | 0 |
 | 472 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 4 | 0 | 0 | 0 |
-| 473 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 0 | 7 | 0 | 14 |
+| 473 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 0 | 7 | 0 | 14 |
 | 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 6 | 0 | 2 | 0 |
 | 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 6 | 0 | 2 | 0 |
@@ -7836,7 +7836,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.473 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+### 3.473 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
 - Declared exports: `attachConsoleCollector`, `closeTopModal`, `isIgnoredConsole`, `latestObservedStatus`, `readJson`, `readJsonStatus`, `waitForRead`
 - Imports (0)
@@ -7864,14 +7864,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7880,14 +7880,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7896,14 +7896,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7912,14 +7912,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7941,14 +7941,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7957,14 +7957,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7973,14 +7973,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -7989,14 +7989,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8005,14 +8005,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8021,14 +8021,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8037,14 +8037,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8066,14 +8066,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8082,14 +8082,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 
@@ -8098,14 +8098,14 @@ Code files documented: **506**
 - Declared exports: none detected
 - Imports (6)
   - `../audits/audit-auth.ts`
-  - `./live-check-utils.mjs`
+  - `./live-check-utils.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:url`
   - `playwright`
 - Internal dependencies (2)
   - `ops/scripts/runtime/audits/audit-auth.ts`
-  - `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+  - `ops/scripts/runtime/live-checks/live-check-utils.ts`
 - Referenced by (0)
   - none
 

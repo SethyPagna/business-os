@@ -1649,7 +1649,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `live-check-utils.mjs` | Project source/support file |
+| 1 | `live-check-utils.ts` | Project source/support file |
 | 2 | `phase84-branches-actions-live-check.mjs` | Project source/support file |
 | 3 | `phase84-contacts-live-check.mjs` | Project source/support file |
 | 4 | `phase84-files-providers-actions-live-check.mjs` | Project source/support file |

@@ -482,7 +482,7 @@ Code files scanned: **506**
 | 470 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
 | 471 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
 | 472 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
-| 473 | `ops/scripts/runtime/live-checks/live-check-utils.mjs` | 8 |
+| 473 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
 | 474 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs` | 2 |
 | 475 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.mjs` | 2 |
 | 476 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.mjs` | 2 |
@@ -6699,18 +6699,18 @@ Code files scanned: **506**
 | 7 | `verifyRuntimeObjectStoreFallback` | function | 86 |
 | 8 | `main` | function | 94 |
 
-### 3.473 `ops/scripts/runtime/live-checks/live-check-utils.mjs`
+### 3.473 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `fetchJsonResponse` | function | 1 |
-| 2 | `readJson` | export function | 17 |
-| 3 | `readJsonStatus` | export function | 22 |
-| 4 | `isIgnoredConsole` | export function | 28 |
-| 5 | `attachConsoleCollector` | export function | 32 |
-| 6 | `latestObservedStatus` | export function | 45 |
-| 7 | `waitForRead` | export function | 50 |
-| 8 | `closeTopModal` | export function | 62 |
+| 1 | `fetchJsonResponse` | function | 48 |
+| 2 | `readJson` | export function | 64 |
+| 3 | `readJsonStatus` | export function | 69 |
+| 4 | `isIgnoredConsole` | export function | 75 |
+| 5 | `attachConsoleCollector` | export function | 79 |
+| 6 | `latestObservedStatus` | export function | 96 |
+| 7 | `waitForRead` | export function | 101 |
+| 8 | `closeTopModal` | export function | 118 |
 
 ### 3.474 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.mjs`
 

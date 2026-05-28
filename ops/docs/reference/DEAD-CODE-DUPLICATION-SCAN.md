@@ -20,7 +20,7 @@ reads, JSON parsing, line counts where needed, root file collection, and text
 detection where needed.
 
 The Phase 8.4 Playwright live-check files also now share
-`ops/scripts/runtime/live-checks/live-check-utils.mjs` for guarded JSON reads,
+`ops/scripts/runtime/live-checks/live-check-utils.ts` for guarded JSON reads,
 removing the repeated timeout/fetch/parse helper from the route-specific action
 checks while keeping each check's assertions and button flows local.
 

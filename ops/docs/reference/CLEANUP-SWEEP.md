@@ -642,7 +642,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   shared filesystem helper library, removing its second local recursive file
   walker, root file collector, path formatter, UTF-8 reader, and JSON reader.
 - Consolidated the Phase 8.4 Playwright live-check JSON reader into
-  `ops/scripts/runtime/live-checks/live-check-utils.mjs`, removing repeated
+  `ops/scripts/runtime/live-checks/live-check-utils.ts`, removing repeated
   timeout/fetch/JSON helper code from the route-specific action-check scripts.
 - Hardened the public Cloudflare portal live check so it records and asserts
   the main response CSP header, verifies no report-only CSP header is present,
@@ -650,7 +650,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   page, API, product-rendering, CSP, and page-error checks are clean.
 - Consolidated repeated Phase 8.4 live-check console filtering, observed
   response status lookup, guarded read waits, and top-modal closing into
-  `ops/scripts/runtime/live-checks/live-check-utils.mjs`.
+  `ops/scripts/runtime/live-checks/live-check-utils.ts`.
 - Consolidated local Phase 8.4 live-check console/page-error event wiring into
   `attachConsoleCollector`; the public Cloudflare portal check keeps its
   custom all-console capture for CSP diagnostics.
