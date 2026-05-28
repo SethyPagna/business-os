@@ -801,7 +801,7 @@ Decision rule:
     the same traversal behavior as the full-project and performance docs.
 78. Share Phase 8.4 live-check JSON request helpers. Done:
     The Phase 8.4 Playwright live-check scripts now import
-    `ops/scripts/runtime/live-checks/live-check-utils.mjs` for guarded JSON
+    `ops/scripts/runtime/live-checks/live-check-utils.ts` for guarded JSON
     reads instead of carrying identical timeout/fetch/JSON helper functions in
     each action-check file. This keeps the live-check scripts lighter while
     preserving their route-specific assertions, labels, screenshots, and report
@@ -813,7 +813,7 @@ Decision rule:
     ignores browser report-only CSP console chatter only after the real page,
     API, product-rendering, CSP, and page-error checks remain clean.
 80. Share Phase 8.4 live-check console, response, and modal helpers. Done:
-    `ops/scripts/runtime/live-checks/live-check-utils.mjs` now owns the common
+    `ops/scripts/runtime/live-checks/live-check-utils.ts` now owns the common
     ignored-console filter, latest observed response lookup, guarded
     `waitForRead` helper, and top-modal close helper. Route-specific live-check
     scripts keep their own page flows and assertions, but no longer carry
@@ -3571,6 +3571,13 @@ Decision rule:
     Deep audit, full-app audit, browser-action smoke, focused Phase 8.4 live
     checks, action-history dynamic login, and backend automation source checks
     now point at the TypeScript helper modules.
+446. Convert Phase 8.4 live-check utility helpers to TypeScript. Done:
+    `live-check-utils.ts` replaces the shared `.mjs` utility module for
+    focused live checks. The helper now has typed JSON fetch options, observed
+    request status records, console collection entries, Playwright-like page
+    and locator boundaries, and modal close/read-wait contracts. Route-specific
+    Phase 8.4 live checks now import the TypeScript utility helper while their
+    entrypoints remain queued for later conversion.
 
 ## Safety Gates
 

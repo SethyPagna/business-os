@@ -1873,7 +1873,7 @@ Cleanup checkpoint:
   root-file collection, and recursive source discovery. This removes another
   local docs walker and keeps reference outputs on one traversal policy.
 - Phase 8.4 Playwright live-check scripts now share
-  `ops/scripts/runtime/live-checks/live-check-utils.mjs` for guarded JSON
+  `ops/scripts/runtime/live-checks/live-check-utils.ts` for guarded JSON
   fetches. The route-specific live checks still own their action flows and
   assertions, but the repeated timeout/fetch/parse helper is now centralized.
 - The public Cloudflare portal live check now records and asserts the real
@@ -1884,7 +1884,7 @@ Cleanup checkpoint:
 - Phase 8.4 Playwright live-check scripts now also share the common
   ignored-console filter, latest observed response lookup, guarded
   `waitForRead` helper, and top-modal close helper through
-  `ops/scripts/runtime/live-checks/live-check-utils.mjs`. The route-specific
+  `ops/scripts/runtime/live-checks/live-check-utils.ts`. The route-specific
   scripts still own their button flows and endpoint assertions.
 - Local Phase 8.4 Playwright checks now share console and page-error event
   wiring through `attachConsoleCollector`. The public Cloudflare portal check
@@ -5067,3 +5067,11 @@ Move 455 status:
   backend full-automation source assertions now import the TypeScript helpers
   directly, reducing the remaining `.mjs` surface without changing live audit
   behavior.
+
+Move 456 status:
+- Move 456 converts the shared Phase 8.4 live-check utility helper to
+  TypeScript. `live-check-utils.ts` now owns typed fetch/read helpers, console
+  collection, observed-request status lookup, read-response waits, and modal
+  close behavior for the route-specific live checks. This keeps the repeated
+  Playwright checks on one typed helper path before the individual live-check
+  entrypoints are converted.
