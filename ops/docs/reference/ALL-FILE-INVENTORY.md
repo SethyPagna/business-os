@@ -318,10 +318,10 @@ Total files documented: **529**
 | 306 | `frontend/src/components/users/Users.jsx` | frontend-ui | 1036 | 50.4 | UI component/page |
 | 307 | `frontend/src/components/utils-settings/AuditLog.jsx` | frontend-ui | 1198 | 56.2 | UI component/page |
 | 308 | `frontend/src/components/utils-settings/Backup.jsx` | frontend-ui | 1490 | 70.5 | UI component/page |
-| 309 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | frontend-ui | 58 | 3.0 | UI component/page |
+| 309 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | frontend-ui | 73 | 3.0 | UI component/page |
 | 310 | `frontend/src/components/utils-settings/index.ts` | frontend-ui | 7 | 0.3 | UI component/page |
-| 311 | `frontend/src/components/utils-settings/OtpModal.jsx` | frontend-ui | 258 | 10.2 | UI component/page |
-| 312 | `frontend/src/components/utils-settings/ResetData.jsx` | frontend-ui | 297 | 13.5 | UI component/page |
+| 311 | `frontend/src/components/utils-settings/OtpModal.tsx` | frontend-ui | 294 | 11.6 | UI component/page |
+| 312 | `frontend/src/components/utils-settings/ResetData.tsx` | frontend-ui | 366 | 15.4 | UI component/page |
 | 313 | `frontend/src/components/utils-settings/Settings.jsx` | frontend-ui | 1730 | 80.6 | UI component/page |
 | 314 | `frontend/src/components/utils-settings/settingsConflict.ts` | frontend-ui | 64 | 1.8 | UI component/page |
 | 315 | `frontend/src/constants.ts` | frontend-core | 185 | 4.6 | Project source/support file |
@@ -333,7 +333,7 @@ Total files documented: **529**
 | 321 | `frontend/src/README.md` | frontend-core | 37 | 1.5 | Documentation |
 | 322 | `frontend/src/runtime/runtimeErrorClassifier.ts` | frontend-core | 154 | 5.4 | Project source/support file |
 | 323 | `frontend/src/styles/main.css` | frontend-style | 741 | 29.9 | Project source/support file |
-| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 11 | 0.3 | Project source/support file |
+| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 9 | 0.2 | Project source/support file |
 | 325 | `frontend/src/types/receiptContracts.ts` | frontend-core | 67 | 1.6 | Project source/support file |
 | 326 | `frontend/src/types/settingsContracts.ts` | frontend-core | 27 | 0.5 | Project source/support file |
 | 327 | `frontend/src/utils/actionGuards.ts` | frontend-utils | 76 | 2.2 | Utility helper |
@@ -446,7 +446,7 @@ Total files documented: **529**
 | 434 | `frontend/tests/settingsConflictHelpers.test.ts` | frontend-root | 45 | 1.4 | Project source/support file |
 | 435 | `frontend/tests/settingsRefresh.test.ts` | frontend-root | 73 | 1.6 | Project source/support file |
 | 436 | `frontend/tests/storagePolicy.test.ts` | frontend-root | 44 | 1.4 | Project source/support file |
-| 437 | `frontend/tests/utilsSettingsBarrel.test.ts` | frontend-root | 17 | 1.0 | Project source/support file |
+| 437 | `frontend/tests/utilsSettingsBarrel.test.ts` | frontend-root | 17 | 0.9 | Project source/support file |
 | 438 | `frontend/tsconfig.json` | frontend-root | 47 | 1.3 | Configuration/data manifest |
 | 439 | `frontend/vite.config.ts` | frontend-root | 246 | 9.5 | Project source/support file |
 | 440 | `ops/scripts/architecture/generated-bulk-audit.ts` | project-scripts | 603 | 22.8 | Project source/support file |

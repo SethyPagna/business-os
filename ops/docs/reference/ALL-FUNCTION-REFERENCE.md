@@ -294,10 +294,10 @@ Code files scanned: **466**
 | 282 | `frontend/src/components/users/Users.jsx` | 18 |
 | 283 | `frontend/src/components/utils-settings/AuditLog.jsx` | 16 |
 | 284 | `frontend/src/components/utils-settings/Backup.jsx` | 30 |
-| 285 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 |
+| 285 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
 | 286 | `frontend/src/components/utils-settings/index.ts` | 0 |
-| 287 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 |
-| 288 | `frontend/src/components/utils-settings/ResetData.jsx` | 8 |
+| 287 | `frontend/src/components/utils-settings/OtpModal.tsx` | 4 |
+| 288 | `frontend/src/components/utils-settings/ResetData.tsx` | 10 |
 | 289 | `frontend/src/components/utils-settings/Settings.jsx` | 21 |
 | 290 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
 | 291 | `frontend/src/constants.ts` | 3 |
@@ -5056,35 +5056,39 @@ Code files scanned: **466**
 | 29 | `handleFolderExport` | const arrow | 1172 |
 | 30 | `handleFolderImport` | const arrow | 1241 |
 
-### 3.285 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.285 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `FontFamilyPicker` | function | 20 |
+| 1 | `FontFamilyPicker` | export default function | 29 |
 
 ### 3.286 `frontend/src/components/utils-settings/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.287 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.287 `frontend/src/components/utils-settings/OtpModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `OtpModal` | export default function | 17 |
-| 2 | `loadSetup` | function | 52 |
+| 1 | `getOtpApi` | function | 45 |
+| 2 | `getErrorMessage` | function | 49 |
+| 3 | `OtpModal` | export default function | 53 |
+| 4 | `loadSetup` | function | 88 |
 
-### 3.288 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.288 `frontend/src/components/utils-settings/ResetData.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ConfirmReset` | function | 11 |
-| 2 | `T` | const arrow | 24 |
-| 3 | `ResetData` | function | 92 |
-| 4 | `T` | const arrow | 94 |
-| 5 | `doReset` | const arrow | 122 |
-| 6 | `FactoryReset` | function | 192 |
-| 7 | `T` | const arrow | 194 |
-| 8 | `doFactoryReset` | function | 201 |
+| 1 | `ConfirmReset` | function | 72 |
+| 2 | `T` | const arrow | 85 |
+| 3 | `getResetApi` | function | 153 |
+| 4 | `getErrorMessage` | function | 157 |
+| 5 | `ResetData` | function | 161 |
+| 6 | `T` | const arrow | 163 |
+| 7 | `doReset` | const arrow | 191 |
+| 8 | `FactoryReset` | function | 261 |
+| 9 | `T` | const arrow | 263 |
+| 10 | `doFactoryReset` | function | 270 |
 
 ### 3.289 `frontend/src/components/utils-settings/Settings.jsx`
 

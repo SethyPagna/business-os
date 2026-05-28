@@ -294,10 +294,10 @@ Code files documented: **466**
 | 282 | `frontend/src/components/users/Users.jsx` | 14 | 1 | 12 | 1 |
 | 283 | `frontend/src/components/utils-settings/AuditLog.jsx` | 10 | 1 | 8 | 1 |
 | 284 | `frontend/src/components/utils-settings/Backup.jsx` | 10 | 1 | 8 | 1 |
-| 285 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
+| 285 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 2 | 1 | 0 | 1 |
 | 286 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
-| 287 | `frontend/src/components/utils-settings/OtpModal.jsx` | 3 | 1 | 2 | 2 |
-| 288 | `frontend/src/components/utils-settings/ResetData.jsx` | 6 | 0 | 4 | 1 |
+| 287 | `frontend/src/components/utils-settings/OtpModal.tsx` | 3 | 1 | 2 | 2 |
+| 288 | `frontend/src/components/utils-settings/ResetData.tsx` | 6 | 0 | 4 | 1 |
 | 289 | `frontend/src/components/utils-settings/Settings.jsx` | 13 | 1 | 11 | 1 |
 | 290 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 2 |
 | 291 | `frontend/src/constants.ts` | 0 | 12 | 0 | 8 |
@@ -305,7 +305,7 @@ Code files documented: **466**
 | 293 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 2 |
 | 294 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
 | 295 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
-| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 7 | 0 | 0 |
+| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 5 | 0 | 0 |
 | 297 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 3 |
 | 298 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
 | 299 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
@@ -3165,8 +3165,8 @@ Code files documented: **466**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
-  - `frontend/src/components/utils-settings/OtpModal.jsx`
-  - `frontend/src/components/utils-settings/ResetData.jsx`
+  - `frontend/src/components/utils-settings/OtpModal.tsx`
+  - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/src/index.jsx`
   - `frontend/src/utils/actionHistory.ts`
@@ -5382,7 +5382,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
-  - `frontend/src/components/utils-settings/OtpModal.jsx`
+  - `frontend/src/components/utils-settings/OtpModal.tsx`
   - `frontend/src/constants.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/loaders.ts`
@@ -5471,15 +5471,16 @@ Code files documented: **466**
   - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/SectionSwitcher.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
-  - `frontend/src/components/utils-settings/ResetData.jsx`
+  - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/utils/actionHistory.ts`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.285 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.285 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
 
 - Declared exports: `function`
-- Imports (1)
+- Imports (2)
+  - `lucide-react`
   - `react`
 - Internal dependencies (0)
   - none
@@ -5496,11 +5497,11 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.287 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.287 `frontend/src/components/utils-settings/OtpModal.tsx`
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `react`
 - Internal dependencies (2)
@@ -5510,11 +5511,11 @@ Code files documented: **466**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.288 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.288 `frontend/src/components/utils-settings/ResetData.tsx`
 
 - Declared exports: none detected
 - Imports (6)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/appRefresh`
   - `../../utils/loaders.ts`
@@ -5551,8 +5552,8 @@ Code files documented: **466**
   - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/SectionSwitcher.tsx`
   - `frontend/src/components/shared/navigationConfig.ts`
-  - `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
-  - `frontend/src/components/utils-settings/OtpModal.jsx`
+  - `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
+  - `frontend/src/components/utils-settings/OtpModal.tsx`
   - `frontend/src/components/utils-settings/settingsConflict.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/favicon.ts`
@@ -5644,7 +5645,7 @@ Code files documented: **466**
 
 ### 3.296 `frontend/src/types/jsx-modules.d.ts`
 
-- Declared exports: `FactoryReset`, `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `ResetData`, `component`, `useApp`
+- Declared exports: `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `component`, `useApp`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -5712,8 +5713,8 @@ Code files documented: **466**
   - `frontend/src/components/shared/BackgroundImportTracker.jsx`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
-  - `frontend/src/components/utils-settings/OtpModal.jsx`
-  - `frontend/src/components/utils-settings/ResetData.jsx`
+  - `frontend/src/components/utils-settings/OtpModal.tsx`
+  - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
 ### 3.300 `frontend/src/utils/actionHistory.ts`
@@ -5752,7 +5753,7 @@ Code files documented: **466**
 - Referenced by (5)
   - `frontend/src/api/methods.js`
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/utils-settings/ResetData.jsx`
+  - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/utils/settingsRefresh.ts`
   - `frontend/tests/appRefresh.test.ts`
 
@@ -6039,7 +6040,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/ExportModal.jsx`
   - `frontend/src/components/shared/BackgroundImportTracker.jsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
-  - `frontend/src/components/utils-settings/ResetData.jsx`
+  - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
 ### 3.320 `frontend/src/utils/mediaUpload.ts`

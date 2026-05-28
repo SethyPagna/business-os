@@ -1206,10 +1206,10 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `AuditLog.jsx` | UI component/page |
 | 2 | `Backup.jsx` | UI component/page |
-| 3 | `FontFamilyPicker.jsx` | UI component/page |
+| 3 | `FontFamilyPicker.tsx` | UI component/page |
 | 4 | `index.ts` | UI component/page |
-| 5 | `OtpModal.jsx` | UI component/page |
-| 6 | `ResetData.jsx` | UI component/page |
+| 5 | `OtpModal.tsx` | UI component/page |
+| 6 | `ResetData.tsx` | UI component/page |
 | 7 | `Settings.jsx` | UI component/page |
 | 8 | `settingsConflict.ts` | UI component/page |
 
