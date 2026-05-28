@@ -199,9 +199,9 @@ function buildLocalVerificationCoverage() {
   }
   return {
     progressLabelCoverage,
-    runtimeDepsGuard: verifyLocal.includes('verify-runtime-deps.js'),
-    dockerReleaseGuard: verifyLocal.includes('verify-docker-release.js'),
-    secretHygieneGuard: verifyLocal.includes('verify-secret-hygiene.js'),
+    runtimeDepsGuard: verifyLocal.includes('verify-runtime-deps.ts'),
+    dockerReleaseGuard: verifyLocal.includes('verify-docker-release.ts'),
+    secretHygieneGuard: verifyLocal.includes('verify-secret-hygiene.ts'),
     dockerDoctor: verifyLocal.includes('docker-release.ps1') && verifyLocal.includes('-Action Doctor'),
     routeContractSmoke: verifyLocal.includes('check-route-contract.ts') && verifyLocal.includes('--skip-if-unavailable'),
     postStartDiagnostics: verifyLocal.includes('post-start-diagnostics.ts') &&

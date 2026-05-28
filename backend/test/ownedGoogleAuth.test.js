@@ -89,8 +89,8 @@ runTest('integration doctor and Docker release report Google login without Supab
 })
 
 runTest('secret hygiene guards the owned Google OAuth secret', () => {
-  const hygiene = read('ops/scripts/verification/verify-secret-hygiene.js')
-  const oldWrapperPath = path.join(root, 'ops', 'scripts', 'verify-secret-hygiene.js')
+  const hygiene = read('ops/scripts/verification/verify-secret-hygiene.ts')
+  const oldWrapperPath = path.join(root, 'ops', 'scripts', 'verify-secret-hygiene.ts')
   assert.match(hygiene, /GOOGLE_LOGIN_CLIENT_SECRET/)
   assert.match(hygiene, /GOCSPX-/)
   assert.equal(fs.existsSync(oldWrapperPath), false)

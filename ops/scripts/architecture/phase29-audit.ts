@@ -43,13 +43,13 @@ const CHECKS = [
   {
     label: 'Docker release guardrail',
     command: process.execPath,
-    args: ['ops/scripts/verification/verify-docker-release.js'],
+    args: ['ops/scripts/verification/verify-docker-release.ts'],
     reports: ['ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json'],
   },
   {
     label: 'Runtime dependency guardrail',
     command: process.execPath,
-    args: ['ops/scripts/verification/verify-runtime-deps.js'],
+    args: ['ops/scripts/verification/verify-runtime-deps.ts'],
     reports: ['ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json'],
   },
 ]

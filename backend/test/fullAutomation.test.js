@@ -24,7 +24,7 @@ function runTest(name, fn) {
 runTest('full automation launcher and policy are present', () => {
   const launcher = read('run/full-automation.bat')
   const script = read('ops/scripts/powershell/full-automation.ps1')
-  const secretHygieneVerify = read('ops/scripts/verification/verify-secret-hygiene.js')
+  const secretHygieneVerify = read('ops/scripts/verification/verify-secret-hygiene.ts')
   const policy = JSON.parse(read('ops/automation/business-os-automation.json'))
 
   assert.match(launcher, /full-automation\.ps1/)
@@ -60,8 +60,8 @@ runTest('full automation launcher and policy are present', () => {
     'npm.cmd --prefix frontend run build',
     'phase29-audit.ts',
     'Phase 29 schema, organization, cleanup, language, and Docker guardrail audit',
-    'verify-hardening-policy.js',
-    'verify-backup-reliability.js',
+    'verify-hardening-policy.ts',
+    'verify-backup-reliability.ts',
     'verify-r2-object-store.ts',
     'Action history undo/redo live verification',
     'action-history-undo-redo-check.ts',
@@ -122,7 +122,7 @@ runTest('cloudflare automation is explicit about account-level permissions', () 
 
 runTest('scaled runtime profile includes the cloudflare connector', () => {
   const compose = read('ops/docker/compose.scale.yml')
-  const scaleVerify = read('ops/scripts/verification/verify-scale-services.js')
+  const scaleVerify = read('ops/scripts/verification/verify-scale-services.ts')
   assert.match(scaleVerify, /require\('\.\.\/lib\/fs-utils\.js'\)/)
   assert.match(scaleVerify, /readUtf8/)
   assert.doesNotMatch(scaleVerify, /fs\.readFileSync\(COMPOSE_FILE, 'utf8'\)/)
@@ -151,7 +151,7 @@ runTest('scaled runtime app and workers self-heal backend dependencies', () => {
 })
 
 runTest('docker release verification protects generated cleanup boundaries', () => {
-  const verifier = read('ops/scripts/verification/verify-docker-release.js')
+  const verifier = read('ops/scripts/verification/verify-docker-release.ts')
   const cleanupTestData = read('ops/scripts/runtime/storage/cleanup-test-data.ts')
   const actionHistoryCheck = read('ops/scripts/runtime/audits/action-history-undo-redo-check.ts')
   const fullAppAudit = read('ops/scripts/runtime/audits/full-app-audit.ts')
@@ -452,7 +452,7 @@ runTest('phase 29 audit orchestrates non-mutating sweep gates', () => {
     'schema-audit.js',
     'performance-scan.js',
     'language-runtime-audit.ts',
-    'verify-docker-release.js',
+    'verify-docker-release.ts',
     'PHASE29-AUDIT.md',
     'PHASE29-AUDIT.json',
     'ORGANIZATION-AUDIT.json',
@@ -572,9 +572,9 @@ runTest('architecture audits share bounded worker helper', () => {
   const organizationAudit = read('ops/scripts/architecture/organization-audit.ts')
   const phase29Audit = read('ops/scripts/architecture/phase29-audit.ts')
   const languageRuntimeAudit = read('ops/scripts/architecture/language-runtime-audit.ts')
-  const hardeningPolicyVerify = read('ops/scripts/verification/verify-hardening-policy.js')
-  const runtimeDepsVerify = read('ops/scripts/verification/verify-runtime-deps.js')
-  const backupReliabilityVerify = read('ops/scripts/verification/verify-backup-reliability.js')
+  const hardeningPolicyVerify = read('ops/scripts/verification/verify-hardening-policy.ts')
+  const runtimeDepsVerify = read('ops/scripts/verification/verify-runtime-deps.ts')
+  const backupReliabilityVerify = read('ops/scripts/verification/verify-backup-reliability.ts')
   const frontendVerifyUi = read('ops/scripts/frontend/verify-ui.js')
   const auditReportHtml = read('ops/scripts/runtime/audits/audit-report-html.ts')
   const reportUtils = read('ops/scripts/lib/report-utils.js')

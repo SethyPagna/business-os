@@ -937,11 +937,11 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
   },
   {
-    target: 'ops/scripts/verification/verify-backup-reliability.js',
+    target: 'ops/scripts/verification/verify-backup-reliability.ts',
     optimization: 'Backup reliability verification now uses a source manifest and grouped required/forbidden text checks, replacing repeated one-off assertions across the same backup, Drive, UI, offline, and automation files.',
     rollback: 'Inline the individual requireText/forbidText calls again; the checked guard strings and failure messages remain equivalent.',
     proof: [
-      'node ops\\scripts\\verification\\verify-backup-reliability.js',
+      'node ops\\scripts\\verification\\verify-backup-reliability.ts',
       'npm.cmd --prefix backend run test:utils',
       'npm.cmd --prefix ops run phase29:audit:repeat',
     ],

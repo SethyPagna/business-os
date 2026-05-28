@@ -30,19 +30,19 @@ echo.
 cd /d "%ROOT%"
 
 echo [preflight 1/6] Verifying tracked runtime dependencies...
-node ops\scripts\verification\verify-runtime-deps.js
+node ops\scripts\verification\verify-runtime-deps.ts
 if errorlevel 1 exit /b 1
 echo [OK] Runtime dependency manifest check passed
 echo.
 
 echo [preflight 2/6] Verifying Docker-only release automation...
-node ops\scripts\verification\verify-docker-release.js
+node ops\scripts\verification\verify-docker-release.ts
 if errorlevel 1 exit /b 1
 echo [OK] Docker-only release automation check passed
 echo.
 
 echo [preflight 3/6] Verifying tracked secret hygiene...
-node ops\scripts\verification\verify-secret-hygiene.js
+node ops\scripts\verification\verify-secret-hygiene.ts
 if errorlevel 1 exit /b 1
 echo [OK] Tracked secret hygiene check passed
 echo.

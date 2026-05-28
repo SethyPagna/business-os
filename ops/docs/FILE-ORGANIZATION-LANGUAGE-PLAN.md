@@ -839,7 +839,7 @@ Decision rule:
     enables this through `cleanup.dockerSafePrune`, and full automation passes
     the flag during retention cleanup.
 84. Enforce Docker cleanup and release guardrails. Done:
-    `ops/scripts/verification/verify-docker-release.js` now fails if
+    `ops/scripts/verification/verify-docker-release.ts` now fails if
     `.dockerignore` drops generated/runtime exclusions, `.gitignore` drops the
     local render-artifact cleanup rule, storage retention loses the
     `--docker-safe-prune` lane, or the automation policy/full-automation script
@@ -925,7 +925,7 @@ Decision rule:
     cycles, so schema rewires and relationship documentation edits have the
     same deterministic gate as cleanup, organization, and performance work.
 96. Add Docker guardrail JSON drift checks to Phase 29 repeat audit. Done:
-    `ops/scripts/verification/verify-docker-release.js` now writes
+    `ops/scripts/verification/verify-docker-release.ts` now writes
     `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` with required release
     file counts, missing file lists, wrapper counts, retired artifact lists,
     ignore coverage, Docker-prune safety coverage, and automation policy state.
@@ -1493,7 +1493,7 @@ Decision rule:
     SQL `type IN (...)` clause before job decoration, so lower-permission users
     do not make the backend fetch and decorate job rows that will be discarded.
 172. Consolidate backup reliability verification loops. Done:
-    `ops/scripts/verification/verify-backup-reliability.js` now loads its
+    `ops/scripts/verification/verify-backup-reliability.ts` now loads its
     source files through one manifest and runs grouped required/forbidden text
     checks through `checkNeedles()`. The guard strings for streaming backup,
     resumable Drive sync, cancellable system jobs, backup UI actions, offline
@@ -1682,7 +1682,7 @@ Decision rule:
     local `readText()` / `readJsonFile()` wrappers. This keeps generated-bulk
     audit file reads aligned with the shared filesystem utility layer.
 198. Share verification read helpers. Done:
-    `ops/scripts/verification/verify-hardening-policy.js` now reuses
+    `ops/scripts/verification/verify-hardening-policy.ts` now reuses
     `readJson()` and `readUtf8()` from `ops/scripts/lib/fs-utils.js` for policy,
     service-worker, full-automation, and local import reads. This reduces
     duplicate verification script helpers while preserving the public
@@ -1695,7 +1695,7 @@ Decision rule:
     a local byte formatter. This keeps runtime audit report output aligned with
     the Phase 29 report utility layer.
 200. Share runtime dependency JSON reads. Done:
-    `ops/scripts/verification/verify-runtime-deps.js` now reuses `readJson()`
+    `ops/scripts/verification/verify-runtime-deps.ts` now reuses `readJson()`
     from `ops/scripts/lib/fs-utils.js` for package manifest and lockfile reads
     instead of carrying a local JSON reader. The public `run/verify-local.bat`
     verification path remains unchanged.
@@ -1715,20 +1715,20 @@ Decision rule:
     policy, token, and allowed-email file reads. Network request behavior stays
     owned by the Cloudflare verifier.
 204. Share backup reliability source reads. Done:
-    `ops/scripts/verification/verify-backup-reliability.js` now reuses
+    `ops/scripts/verification/verify-backup-reliability.ts` now reuses
     `readUtf8()` from `ops/scripts/lib/fs-utils.js` for root-relative source
     manifest reads. The backup, Drive, UI, offline, and automation guard
     strings remain unchanged.
 205. Share Docker release guardrail reads. Done:
-    `ops/scripts/verification/verify-docker-release.js` now reuses `readUtf8()`
+    `ops/scripts/verification/verify-docker-release.ts` now reuses `readUtf8()`
     from `ops/scripts/lib/fs-utils.js` for tolerant source/config reads. The
     Docker release guardrail JSON and release boundary checks remain unchanged.
 206. Share secret hygiene source reads. Done:
-    `ops/scripts/verification/verify-secret-hygiene.js` now reuses `readUtf8()`
+    `ops/scripts/verification/verify-secret-hygiene.ts` now reuses `readUtf8()`
     from `ops/scripts/lib/fs-utils.js` after its existing tracked-file size
     guard. Secret detection behavior remains unchanged.
 207. Share scale-service verifier reads and complete the first Phase 29 baseline. Done:
-    `ops/scripts/verification/verify-scale-services.js` now reuses `readUtf8()`
+    `ops/scripts/verification/verify-scale-services.ts` now reuses `readUtf8()`
     from `ops/scripts/lib/fs-utils.js` for scale Compose reads after the
     existing file-existence check. Docker discovery, secret/license ignore
     checks, and optional service reachability behavior remain unchanged. The
@@ -1783,7 +1783,7 @@ Decision rule:
     sync with the machine-readable generated-bulk baseline used by Phase 29
     repeat audits.
 215. Strengthen runtime hash verification in the run-file path. Done:
-    `ops/scripts/verification/verify-runtime-deps.js`, called by
+    `ops/scripts/verification/verify-runtime-deps.ts`, called by
     `run/verify-local.bat`, now verifies the stale-bundle protection chain in
     addition to package/config dependency manifests: Vite build-manifest
     emission, service-worker build-hash cache keys, frontend runtime mismatch
@@ -1813,7 +1813,7 @@ Decision rule:
     passes while leaving a structured skipped report. The Docker release
     verifier now guards this local verifier wiring too.
 218. Add machine-readable post-start diagnostics coverage. Done:
-    `ops/scripts/verification/verify-docker-release.js` now writes
+    `ops/scripts/verification/verify-docker-release.ts` now writes
     `postStartDiagnosticsCoverage` into
     `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json`, covering script
     presence, Docker release/start-runtime/local verifier wiring,
@@ -1822,7 +1822,7 @@ Decision rule:
     that coverage object across repeat cycles so diagnostics drift fails the
     whole-codebase guardrail.
 219. Add machine-readable runtime dependency guardrail. Done:
-    `ops/scripts/verification/verify-runtime-deps.js` now writes
+    `ops/scripts/verification/verify-runtime-deps.ts` now writes
     `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` with package version
     parity, required scanner dependency coverage, forbidden legacy config
     coverage, and `runtimeVersionGuardCoverage` for stale-bundle protection.
@@ -1830,7 +1830,7 @@ Decision rule:
     and compares package, dependency, config, and runtime-version guard fields
     across repeat cycles.
 220. Add machine-readable local verification coverage. Done:
-    `ops/scripts/verification/verify-runtime-deps.js` now also reads
+    `ops/scripts/verification/verify-runtime-deps.ts` now also reads
     `run/verify-local.bat` and writes a `localVerificationCoverage` object into
     `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json`. The coverage object guards
     the runtime dependency, Docker release, secret hygiene, Docker Doctor,
@@ -1845,14 +1845,14 @@ Decision rule:
     easier to read and debug when a dependency, runtime, UI, performance, or
     backend integrity step fails.
 222. Guard local verification progress labels. Done:
-    `ops/scripts/verification/verify-runtime-deps.js` now records
+    `ops/scripts/verification/verify-runtime-deps.ts` now records
     `progressLabelCoverage` inside `localVerificationCoverage`, including the
     `preflight`, `frontend`, and `backend` start/end labels and a
     `staleFractionLabelsAbsent` check. Because Phase 29 repeat consistency
     already compares `localVerificationCoverage`, confusing progress label
     drift is now caught automatically.
 223. Fail missing local verification coverage. Done:
-    `ops/scripts/verification/verify-runtime-deps.js` now treats
+    `ops/scripts/verification/verify-runtime-deps.ts` now treats
     `localVerificationCoverage` as a hard source gate: every nested coverage
     flag must be true or the verifier exits with an `is missing coverage`
     message naming the exact missing lane. The runtime build-manifest presence
@@ -1878,17 +1878,17 @@ Decision rule:
     package manifest, and `node_modules/.package-lock.json` timestamp check used
     by `run/setup.bat` and `run/verify-local.bat`. This removes duplicated
     inline PowerShell from the run files while preserving the same skip/install
-    behavior, and `verify-runtime-deps.js` now guards the shared helper wiring.
+    behavior, and `verify-runtime-deps.ts` now guards the shared helper wiring.
 227. Align and guard package versions. Done:
     The ignored local root `package.json` was aligned from `1.0.0` to `6.0.0`
     so local metadata matches the tracked backend, frontend, and ops packages.
-    `ops/scripts/verification/verify-runtime-deps.js` now reads backend,
+    `ops/scripts/verification/verify-runtime-deps.ts` now reads backend,
     frontend, and ops package manifests plus lockfiles, records
     `versionConsistency`, and fails on any app-version drift. Phase 29 repeat
     consistency now compares the version map so stale package or lockfile
     versions cannot quietly linger.
 228. Guard Cloudflare runtime cleanup and retention paths. Done:
-    `ops/scripts/verification/verify-docker-release.js` now records
+    `ops/scripts/verification/verify-docker-release.ts` now records
     `cloudflareRuntimeCoverage` in
     `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json`. The coverage checks the
     Cloudflare token-rotation script, origin switcher, Access/WAF automation,
@@ -1941,7 +1941,7 @@ Decision rule:
     planning. The file is generated runtime state and does not copy secrets,
     uploads, env files, protected backups, Docker images, or Docker volumes.
 234. Make the latest cleanup ledger machine-checkable. Done:
-    `ops/scripts/verification/verify-docker-release.js` now exposes
+    `ops/scripts/verification/verify-docker-release.ts` now exposes
     `pruneStorageOutputFlagSupported`,
     `latestCleanupReportWrittenByAutomation`, and
     `latestCleanupReportRuntimeOnly` inside `cloudflareRuntimeCoverage`.
@@ -1966,7 +1966,7 @@ Decision rule:
     `/undo` and `/redo`, verified the final `undoable` status, and then removed
     that verification row through the same cleanup path.
 236. Add machine-readable QA/smoke cleanup guardrails. Done:
-    `ops/scripts/verification/verify-docker-release.js` now records
+    `ops/scripts/verification/verify-docker-release.ts` now records
     `testDataCleanupCoverage` in
     `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json`. The coverage checks that
     the cleanup script exists, the package script is wired, dry-run is the
@@ -3649,6 +3649,14 @@ Decision rule:
     remote read-only checks, full app audit launch, Docker log scan, baseline
     comparison, and HTML report generation while adding typed summary, command,
     request, route, collector, and finding boundaries.
+457. Convert ops verification guardrails to TypeScript. Done:
+    `verify-backup-reliability.ts`, `verify-docker-release.ts`,
+    `verify-hardening-policy.ts`, `verify-runtime-deps.ts`,
+    `verify-scale-services.ts`, and `verify-secret-hygiene.ts` replace the
+    verification `.js` entrypoints. Run wrappers, full automation, Phase 29,
+    backend source assertions, and organization/language audits now point at
+    the TypeScript paths while preserving the same Docker, runtime dependency,
+    hardening, backup, scale-service, and secret hygiene checks.
 
 ## Safety Gates
 

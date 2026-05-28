@@ -25,8 +25,8 @@ $QaCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\test-data-clean
 $SmokeCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\live-smoke-cleanup-postcheck-latest.json'
 $ActionHistoryCleanupPostcheckReport = Join-Path $Root 'ops\runtime\reports\action-history-cleanup-postcheck-latest.json'
 $Phase29Audit = Join-Path $Root 'ops\scripts\architecture\phase29-audit.ts'
-$HardeningVerify = Join-Path $Root 'ops\scripts\verification\verify-hardening-policy.js'
-$BackupReliabilityVerify = Join-Path $Root 'ops\scripts\verification\verify-backup-reliability.js'
+$HardeningVerify = Join-Path $Root 'ops\scripts\verification\verify-hardening-policy.ts'
+$BackupReliabilityVerify = Join-Path $Root 'ops\scripts\verification\verify-backup-reliability.ts'
 
 function Write-Step($message) { Write-Host "[STEP] $message" }
 function Write-Ok($message) { Write-Host "[OK] $message" }
@@ -103,7 +103,7 @@ function Invoke-TestGate {
     node $Phase29Audit
   }
   Invoke-Checked 'Secret hygiene verification' {
-    node ops\scripts\verification\verify-secret-hygiene.js
+    node ops\scripts\verification\verify-secret-hygiene.ts
   }
   Invoke-Checked 'Hardening policy verification' {
     node $HardeningVerify
