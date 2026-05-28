@@ -350,7 +350,7 @@ Last updated: 2026-05-18
     now lives there, and the Product variant live check passed on frontend hash
     `42378a84fc53ab2f`.
   - Fourth Phase 26 physical move complete: Product stock-helper form files
-    `BulkAddStockModal.jsx` and `BranchStockAdjuster.jsx` now live in
+    `BulkAddStockModal.tsx` and `BranchStockAdjuster.tsx` now live in
     `frontend/src/components/products/forms`, and the Product stock-helper live
     check passed on frontend hash `b79c04b453d1b469`.
   - Fifth Phase 26 physical move complete: Product import files

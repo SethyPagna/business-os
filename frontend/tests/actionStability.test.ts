@@ -642,8 +642,8 @@ await runTest('product page save and delete actions use shared guards and bounde
 })
 
 await runTest('product stock helper modals use shared guards and bounded mutations', () => {
-  const bulk = readFrontend('src/components/products/forms/BulkAddStockModal.jsx')
-  const branch = readFrontend('src/components/products/forms/BranchStockAdjuster.jsx')
+  const bulk = readFrontend('src/components/products/forms/BulkAddStockModal.tsx')
+  const branch = readFrontend('src/components/products/forms/BranchStockAdjuster.tsx')
 
   for (const [label, source, constant, runner] of [
     ['bulk stock add', bulk, 'BULK_ADD_STOCK_MUTATION_TIMEOUT_MS', 'runBulkStockMutation'],
@@ -653,9 +653,9 @@ await runTest('product stock helper modals use shared guards and bounded mutatio
     assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.ts'/, `${label} should import loader timeout helper`)
     assert.match(source, new RegExp(`const ${constant} = 12000`), `${label} should define a stock mutation timeout`)
     assert.match(source, /const saveInFlightRef = useRef\(false\)/, `${label} should keep a same-tick save guard`)
-    assert.match(source, new RegExp(`const ${runner} = useCallback\\(\\(loader, label\\) => \\([\\s\\S]*withLoaderTimeout\\(loader, label, ${constant}\\)`), `${label} should route mutations through a timeout helper`)
+    assert.match(source, new RegExp(`const ${runner} = useCallback\\(\\(loader[^,]*, label[^)]*\\) => \\([\\s\\S]*withLoaderTimeout\\(loader, label, ${constant}\\)`), `${label} should route mutations through a timeout helper`)
     assert.match(source, /if \(!beginSingleAction\(saveInFlightRef, \{ blocked: saving \}\)\) return/, `${label} should block repeat saves`)
-    assert.match(source, new RegExp(`const result = await ${runner}\\(\\(\\) => window\\.api\\.adjustStock\\(`), `${label} adjustStock should be bounded`)
+    assert.match(source, new RegExp(`const result = await ${runner}\\(\\(\\) => getProductApi\\(\\)\\.adjustStock\\(`), `${label} adjustStock should be bounded`)
     assert.match(source, /result\?\.success === false/, `${label} should treat explicit API failures as failures`)
     assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)[\s\S]*setSaving\(false\)/, `${label} should release the guard in finally`)
   }

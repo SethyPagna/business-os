@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 492 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 493 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 69 `.jsx`
+  - 67 `.jsx`
   - 1 `.js`
   - 80 `.ts`
-  - 38 `.tsx`
+  - 40 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -186,8 +186,8 @@ Decision rule:
    in `frontend/src/components/products/forms`. Focused source checks,
    production build, runtime health, and Product variant Playwright verification
    passed on frontend hash `42378a84fc53ab2f`.
-8. Continue the product form split. Done: `BulkAddStockModal.jsx` and
-   `BranchStockAdjuster.jsx` now live in
+8. Continue the product form split. Done: `BulkAddStockModal.tsx` and
+   `BranchStockAdjuster.tsx` now live in
    `frontend/src/components/products/forms`. Focused source checks,
    production build, runtime health, and Product stock-helper Playwright
    verification passed on frontend hash `b79c04b453d1b469`.
@@ -3876,6 +3876,13 @@ Decision rule:
     image lightbox callbacks, and formatter/action callbacks. The conversion
     keeps valid Khmer refresh fallback text and normalizes nullable gallery,
     branch quantity, and batch preview values before rendering.
+493. Convert product stock form leaves to TSX. Done:
+    `BranchStockAdjuster.tsx` now types branch stock rows, stock adjustment
+    payloads, product/user inputs, translation fallbacks, and bounded stock
+    mutations while replacing corrupted fallback text with valid strings.
+    `BulkAddStockModal.tsx` now types selected products, branch choices,
+    bulk stock results, and adjust-stock API payloads, and normalizes product
+    ids, branch ids, and positive quantities before each mutation.
 
 ## Safety Gates
 

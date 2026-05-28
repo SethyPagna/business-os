@@ -4,8 +4,82 @@ import { withLoaderTimeout } from '../../../utils/loaders.ts'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
 
-export default function BranchStockAdjuster({ product, branches, user, onDone, t }) {
-  const [rows, setRows] = useState(
+type Translate = (key: string) => string | undefined
+type StockAdjustmentType = 'add' | 'remove' | 'set'
+
+type Branch = {
+  id: number | string
+  name: string
+}
+
+type BranchStockEntry = {
+  branch_id?: number | string
+  quantity?: number
+}
+
+type Product = {
+  id: number | string
+  name: string
+  unit?: string
+  purchase_price_usd?: number
+  purchase_price_khr?: number
+  branch_stock?: BranchStockEntry[]
+}
+
+type User = {
+  id?: number | string
+  name?: string
+} | null | undefined
+
+type BranchStockRow = {
+  branchId: number | string
+  branchName: string
+  current: number
+  delta: string
+  type: StockAdjustmentType
+}
+
+type AdjustStockPayload = {
+  productId: number | string
+  productName: string
+  type: StockAdjustmentType
+  quantity: number
+  branchId: number | string
+  unitCostUsd: number
+  unitCostKhr: number
+  reason: string
+  userId?: number | string
+  userName?: string
+}
+
+type ApiResult = {
+  success?: boolean
+  error?: string
+}
+
+type ProductApi = {
+  adjustStock: (payload: AdjustStockPayload) => Promise<ApiResult | undefined>
+}
+
+type BranchStockAdjusterProps = {
+  product: Product
+  branches: Branch[]
+  user?: User
+  onDone: () => void
+  t?: Translate
+}
+
+function getProductApi(): ProductApi {
+  return (window as unknown as { api: ProductApi }).api
+}
+
+function parseStockDelta(value: string): number {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : Number.NaN
+}
+
+export default function BranchStockAdjuster({ product, branches, user, onDone, t }: BranchStockAdjusterProps) {
+  const [rows, setRows] = useState<BranchStockRow[]>(
     branches.map((branch) => {
       const branchStock = (product.branch_stock || []).find((item) => item.branch_id === branch.id)
       return {
@@ -18,27 +92,27 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     }),
   )
   const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState(null)
+  const [msg, setMsg] = useState<string | null>(null)
   const saveInFlightRef = useRef(false)
-  const runBranchStockMutation = useCallback((loader, label) => (
+  const runBranchStockMutation = useCallback((loader: () => Promise<ApiResult | undefined>, label: string) => (
     withLoaderTimeout(loader, label, BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS)
   ), [])
   const isKhmer = /[\u1780-\u17FF]/.test((typeof t === 'function' ? t('cancel') : '') || '')
 
-  const T = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const T = (key: string, fallbackEn: string, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
 
-  const setRow = (index, field, value) => {
+  const setRow = (index: number, field: keyof Pick<BranchStockRow, 'delta' | 'type'>, value: string) => {
     setRows((current) => current.map((row, rowIndex) => (
       rowIndex === index ? { ...row, [field]: value } : row
     )))
   }
 
   const handleSave = async () => {
-    const changes = rows.filter((row) => row.delta !== '' && parseFloat(row.delta) >= 0)
+    const changes = rows.filter((row) => row.delta !== '' && parseStockDelta(row.delta) >= 0)
     if (!changes.length) return
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
 
@@ -46,11 +120,11 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     setMsg(null)
     try {
       for (const row of changes) {
-        const result = await runBranchStockMutation(() => window.api.adjustStock({
+        const result = await runBranchStockMutation(() => getProductApi().adjustStock({
           productId: product.id,
           productName: product.name,
           type: row.type,
-          quantity: parseFloat(row.delta),
+          quantity: parseStockDelta(row.delta),
           branchId: row.branchId,
           unitCostUsd: product.purchase_price_usd || 0,
           unitCostKhr: product.purchase_price_khr || 0,
@@ -64,7 +138,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
       setRows((current) => current.map((row) => ({ ...row, delta: '' })))
       onDone()
     } catch (error) {
-      setMsg(error?.message || T('unknown_error', 'Unknown error', 'មានបញ្ហាមិនស្គាល់'))
+      setMsg(error instanceof Error ? error.message : T('unknown_error', 'Unknown error', 'មានបញ្ហាមិនស្គាល់'))
     } finally {
       finishSingleAction(saveInFlightRef)
       setSaving(false)
@@ -104,7 +178,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
         ))}
       </div>
       {msg ? <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">{msg}</p> : null}
-      {rows.some((row) => row.delta !== '' && parseFloat(row.delta) >= 0) ? (
+      {rows.some((row) => row.delta !== '' && parseStockDelta(row.delta) >= 0) ? (
         <button
           className="btn-primary mt-2 w-full text-sm"
           onClick={handleSave}

@@ -1008,7 +1008,7 @@ Current checkpoint:
   lives there. The Product variant live check passed on frontend hash
   `42378a84fc53ab2f`.
 - Fourth Phase 26 physical move complete: Product stock-helper form files
-  `BulkAddStockModal.jsx` and `BranchStockAdjuster.jsx` now live under
+  `BulkAddStockModal.tsx` and `BranchStockAdjuster.tsx` now live under
   `frontend/src/components/products/forms`. The Product stock-helper live check
   passed on frontend hash `b79c04b453d1b469`.
 - Fifth Phase 26 physical move complete: Product import files
@@ -1619,7 +1619,7 @@ Safety gate:
 Checkpoint:
 - `products/lookups` split is complete for lookup modals and lookup snapshot
   helpers. `products/forms` split has started with `VariantFormModal.jsx`,
-  `BulkAddStockModal.jsx`, and `BranchStockAdjuster.jsx`. `products/import`
+  `BulkAddStockModal.tsx`, and `BranchStockAdjuster.tsx`. `products/import`
   split is complete for the import modal, planner, and worker.
   `products/scanning` split is complete for the barcode scanner modal and
   scanner helpers. `products/history` split has started with
@@ -5399,3 +5399,11 @@ Move 492 status:
   modal now has typed product, color-map, formatter, branch-stock, lightbox,
   and action contracts, with nullable gallery, batch preview, and branch
   quantity values normalized before rendering.
+
+Move 493 status:
+- Move 493 converts product stock form leaves `BranchStockAdjuster.tsx` and
+  `BulkAddStockModal.tsx`. The branch stock adjuster now has typed row,
+  product, user, translation, and adjust-stock payload boundaries. The bulk
+  add modal now has typed product selection, branch selection, mutation result,
+  and stock API contracts, with product ids, branch ids, and quantities
+  normalized before mutation calls.
