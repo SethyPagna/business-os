@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T03:05:39.650Z
+Generated: 2026-05-28T03:09:56.701Z
 
 ## Summary
 
@@ -22,8 +22,8 @@ Generated: 2026-05-28T03:05:39.650Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 180 |
-| JavaScript | 168 |
+| TypeScript | 190 |
+| JavaScript | 158 |
 | React JSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
@@ -160,7 +160,7 @@ Generated: 2026-05-28T03:05:39.650Z
 | `ops/scripts/verification/verify-backup-reliability.ts` | yes | Backup reliability verification now uses a source manifest and grouped required/forbidden text checks, replacing repeated one-off assertions across the same backup, Drive, UI, offline, and automation files. | Inline the individual requireText/forbidText calls again; the checked guard strings and failure messages remain equivalent. | `node ops\scripts\verification\verify-backup-reliability.ts`<br>`npm.cmd --prefix backend run test:utils`<br>`npm.cmd --prefix ops run phase29:audit:repeat` |
 | `backend/src/routes/inventory.js` | yes | RFID session apply now prepares branch, product, branch-stock, movement, product-summary, and session-finalization statements once per request instead of preparing lookups inside each confirmed product row. | Inline the RFID apply db.prepare calls inside the product loop again; RFID confirmed quantity, movement, audit, and session status behavior remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\rfidRoutes.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
 | `backend/src/routes/portal.js` | yes | Portal catalog products now share one image and branch-stock materialization helper plus one payload decorator across full catalog and paged search responses. | Inline the image-map, branch-stock-map, gallery, and badge decoration blocks separately in getPortalProducts and getPortalCatalogProductPage again; public catalog response fields remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\portalInventoryRegression.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
-| `backend/src/routes/products.js` | yes | Image-only bulk import now builds one normalized product-name map before processing uploaded image filenames, replacing a full active-product scan for every image. | Remove productsByImageBaseName and return to allProducts.find inside the image loop; image matching behavior remains name-based. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\productSearchPagination.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
+| `backend/src/routes/products.js` | yes | Image-only bulk import now builds one normalized product-name map before processing uploaded image filenames, replacing a full active-product scan for every image. | Remove productsByImageBaseName and return to allProducts.find inside the image loop; image matching behavior remains name-based. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\productSearchPagination.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
 | `backend/src/routes/sales.js` | yes | Sale creation now prepares the inventory movement insert and optional movement timestamp update once per transaction instead of rebuilding those statements for every sold item. | Move insertSaleMovement and updateSaleMovementCreatedAt back into the per-item allocation block; sale item, batch allocation, movement, and imported timestamp behavior remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\productBatchHierarchy.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
 | `backend/src/routes/system/index.js` | yes | System settings writes now prepare the delete statement once beside the upsert statement, avoiding repeated statement creation when null-valued settings are removed inside the transaction. | Remove deleteSetting and inline db.prepare("DELETE FROM settings WHERE key = ?") in the null-value branch; settings write behavior remains unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\routeContracts.test.js`<br>`node ops\scripts\backend\schema-audit.ts` |
 

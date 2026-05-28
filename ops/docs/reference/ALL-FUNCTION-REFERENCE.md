@@ -95,10 +95,10 @@ Code files scanned: **506**
 | 83 | `backend/src/workers/importWorker.js` | 2 |
 | 84 | `backend/src/workers/mediaWorker.js` | 2 |
 | 85 | `backend/test/accessControl.test.js` | 2 |
-| 86 | `backend/test/analyticsRuntime.test.js` | 1 |
+| 86 | `backend/test/analyticsRuntime.test.ts` | 1 |
 | 87 | `backend/test/authOtpGuards.test.js` | 1 |
 | 88 | `backend/test/authSecurityFlow.test.js` | 14 |
-| 89 | `backend/test/backupDefaultDestination.test.js` | 0 |
+| 89 | `backend/test/backupDefaultDestination.test.ts` | 0 |
 | 90 | `backend/test/backupPerformanceHardening.test.js` | 1 |
 | 91 | `backend/test/backupRetention.test.js` | 1 |
 | 92 | `backend/test/backupSchema.test.js` | 1 |
@@ -111,30 +111,30 @@ Code files scanned: **506**
 | 99 | `backend/test/fileRouteSecurityFlow.test.js` | 9 |
 | 100 | `backend/test/fullAutomation.test.js` | 2 |
 | 101 | `backend/test/googleDriveSyncVersioning.test.js` | 1 |
-| 102 | `backend/test/idempotency.test.js` | 1 |
+| 102 | `backend/test/idempotency.test.ts` | 1 |
 | 103 | `backend/test/importCsv.test.js` | 2 |
 | 104 | `backend/test/importDecisionIntegrity.test.js` | 0 |
-| 105 | `backend/test/importJobPerformanceHardening.test.js` | 1 |
+| 105 | `backend/test/importJobPerformanceHardening.test.ts` | 1 |
 | 106 | `backend/test/importJobStateMachine.test.js` | 4 |
 | 107 | `backend/test/importScaleSmoke.test.js` | 3 |
-| 108 | `backend/test/initials.test.js` | 0 |
-| 109 | `backend/test/integrationDoctor.test.js` | 1 |
+| 108 | `backend/test/initials.test.ts` | 0 |
+| 109 | `backend/test/integrationDoctor.test.ts` | 1 |
 | 110 | `backend/test/inventorySettingsMediaContracts.test.js` | 2 |
 | 111 | `backend/test/mediaOptimization.test.js` | 3 |
-| 112 | `backend/test/netSecurity.test.js` | 1 |
+| 112 | `backend/test/netSecurity.test.ts` | 1 |
 | 113 | `backend/test/notificationSummaryCache.test.js` | 1 |
 | 114 | `backend/test/offlineSecurity.test.js` | 2 |
 | 115 | `backend/test/ownedGoogleAuth.test.js` | 2 |
-| 116 | `backend/test/permissionPolicy.test.js` | 0 |
+| 116 | `backend/test/permissionPolicy.test.ts` | 0 |
 | 117 | `backend/test/portalInventoryRegression.test.js` | 2 |
-| 118 | `backend/test/portalUtils.test.js` | 1 |
+| 118 | `backend/test/portalUtils.test.ts` | 1 |
 | 119 | `backend/test/postgresCutoverReadiness.test.js` | 1 |
 | 120 | `backend/test/postgresDatabase.test.js` | 3 |
 | 121 | `backend/test/postgresQueryCompat.test.js` | 1 |
 | 122 | `backend/test/productBatchHierarchy.test.js` | 2 |
 | 123 | `backend/test/productExpiry.test.js` | 1 |
 | 124 | `backend/test/productImportPolicies.test.js` | 1 |
-| 125 | `backend/test/productSearchPagination.test.js` | 0 |
+| 125 | `backend/test/productSearchPagination.test.ts` | 0 |
 | 126 | `backend/test/rfidRoutes.test.js` | 1 |
 | 127 | `backend/test/routeContracts.test.js` | 2 |
 | 128 | `backend/test/runtimeCache.test.js` | 2 |
@@ -2412,7 +2412,7 @@ Code files scanned: **506**
 | 1 | `runTest` | function | 11 |
 | 2 | `makeReq` | function | 22 |
 
-### 3.86 `backend/test/analyticsRuntime.test.js`
+### 3.86 `backend/test/analyticsRuntime.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2443,7 +2443,7 @@ Code files scanned: **506**
 | 13 | `extractSessionCookie` | function | 171 |
 | 14 | `login` | function | 178 |
 
-### 3.89 `backend/test/backupDefaultDestination.test.js`
+### 3.89 `backend/test/backupDefaultDestination.test.ts`
 
 - No top-level named symbols detected.
 
@@ -2545,7 +2545,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.102 `backend/test/idempotency.test.js`
+### 3.102 `backend/test/idempotency.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2562,7 +2562,7 @@ Code files scanned: **506**
 
 - No top-level named symbols detected.
 
-### 3.105 `backend/test/importJobPerformanceHardening.test.js`
+### 3.105 `backend/test/importJobPerformanceHardening.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2585,11 +2585,11 @@ Code files scanned: **506**
 | 2 | `makeLargeCsv` | function | 23 |
 | 3 | `assertLargeCsvSmoke` | function | 38 |
 
-### 3.108 `backend/test/initials.test.js`
+### 3.108 `backend/test/initials.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.109 `backend/test/integrationDoctor.test.js`
+### 3.109 `backend/test/integrationDoctor.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2610,7 +2610,7 @@ Code files scanned: **506**
 | 2 | `buildDeterministicPixels` | function | 34 |
 | 3 | `buildLogoPixels` | function | 44 |
 
-### 3.112 `backend/test/netSecurity.test.js`
+### 3.112 `backend/test/netSecurity.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2636,7 +2636,7 @@ Code files scanned: **506**
 | 1 | `read` | function | 9 |
 | 2 | `runTest` | function | 13 |
 
-### 3.116 `backend/test/permissionPolicy.test.js`
+### 3.116 `backend/test/permissionPolicy.test.ts`
 
 - No top-level named symbols detected.
 
@@ -2647,7 +2647,7 @@ Code files scanned: **506**
 | 1 | `runTest` | function | 9 |
 | 2 | `readSource` | function | 20 |
 
-### 3.118 `backend/test/portalUtils.test.js`
+### 3.118 `backend/test/portalUtils.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2692,7 +2692,7 @@ Code files scanned: **506**
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.125 `backend/test/productSearchPagination.test.js`
+### 3.125 `backend/test/productSearchPagination.test.ts`
 
 - No top-level named symbols detected.
 

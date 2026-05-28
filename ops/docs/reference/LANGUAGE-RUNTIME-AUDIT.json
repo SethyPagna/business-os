@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T03:05:39.650Z",
+  "generatedAt": "2026-05-28T03:09:56.701Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,11 +21,11 @@
   "languageCounts": [
     [
       "TypeScript",
-      180
+      190
     ],
     [
       "JavaScript",
-      168
+      158
     ],
     [
       "React JSX",
@@ -59,11 +59,11 @@
   "extensionCounts": [
     [
       ".ts",
-      180
+      190
     ],
     [
       ".js",
-      168
+      158
     ],
     [
       ".jsx",
@@ -1679,7 +1679,7 @@
       ],
       "tests": [
         "backend/test/portalInventoryRegression.test.js",
-        "backend/test/portalUtils.test.js",
+        "backend/test/portalUtils.test.ts",
         "backend/test/routeContracts.test.js"
       ],
       "targetExists": true,
@@ -1689,7 +1689,7 @@
           "exists": true
         },
         {
-          "path": "backend/test/portalUtils.test.js",
+          "path": "backend/test/portalUtils.test.ts",
           "exists": true
         },
         {
@@ -1705,18 +1705,18 @@
       "rollback": "Remove productsByImageBaseName and return to allProducts.find inside the image loop; image matching behavior remains name-based.",
       "proof": [
         "npm.cmd --prefix backend run test:utils",
-        "node backend\\test\\productSearchPagination.test.js",
+        "node backend\\test\\productSearchPagination.test.ts",
         "node ops\\scripts\\backend\\schema-audit.ts"
       ],
       "tests": [
-        "backend/test/productSearchPagination.test.js",
+        "backend/test/productSearchPagination.test.ts",
         "backend/test/importDecisionIntegrity.test.js",
         "backend/test/routeContracts.test.js"
       ],
       "targetExists": true,
       "testCoverage": [
         {
-          "path": "backend/test/productSearchPagination.test.js",
+          "path": "backend/test/productSearchPagination.test.ts",
           "exists": true
         },
         {

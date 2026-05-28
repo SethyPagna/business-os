@@ -1,6 +1,6 @@
 # Generated Schema Audit
 
-Generated: 2026-05-28T03:05:39.305Z
+Generated: 2026-05-28T03:09:56.357Z
 
 Source position: Session 2 / Phase 6 schema map expanded; Phase 8.4 loader recovery remains active.
 

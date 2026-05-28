@@ -95,10 +95,10 @@ Code files documented: **506**
 | 83 | `backend/src/workers/importWorker.js` | 2 | 1 | 2 | 1 |
 | 84 | `backend/src/workers/mediaWorker.js` | 2 | 1 | 2 | 1 |
 | 85 | `backend/test/accessControl.test.js` | 2 | 0 | 1 | 0 |
-| 86 | `backend/test/analyticsRuntime.test.js` | 2 | 0 | 1 | 0 |
+| 86 | `backend/test/analyticsRuntime.test.ts` | 2 | 0 | 1 | 0 |
 | 87 | `backend/test/authOtpGuards.test.js` | 2 | 0 | 1 | 0 |
 | 88 | `backend/test/authSecurityFlow.test.js` | 8 | 0 | 1 | 0 |
-| 89 | `backend/test/backupDefaultDestination.test.js` | 3 | 0 | 0 | 0 |
+| 89 | `backend/test/backupDefaultDestination.test.ts` | 3 | 0 | 0 | 0 |
 | 90 | `backend/test/backupPerformanceHardening.test.js` | 3 | 0 | 0 | 0 |
 | 91 | `backend/test/backupRetention.test.js` | 5 | 0 | 1 | 0 |
 | 92 | `backend/test/backupSchema.test.js` | 4 | 0 | 1 | 0 |
@@ -111,30 +111,30 @@ Code files documented: **506**
 | 99 | `backend/test/fileRouteSecurityFlow.test.js` | 6 | 0 | 0 | 0 |
 | 100 | `backend/test/fullAutomation.test.js` | 3 | 0 | 0 | 0 |
 | 101 | `backend/test/googleDriveSyncVersioning.test.js` | 4 | 0 | 1 | 0 |
-| 102 | `backend/test/idempotency.test.js` | 2 | 0 | 1 | 0 |
+| 102 | `backend/test/idempotency.test.ts` | 2 | 0 | 1 | 0 |
 | 103 | `backend/test/importCsv.test.js` | 6 | 0 | 2 | 0 |
 | 104 | `backend/test/importDecisionIntegrity.test.js` | 3 | 0 | 0 | 0 |
-| 105 | `backend/test/importJobPerformanceHardening.test.js` | 3 | 0 | 0 | 0 |
+| 105 | `backend/test/importJobPerformanceHardening.test.ts` | 3 | 0 | 0 | 0 |
 | 106 | `backend/test/importJobStateMachine.test.js` | 8 | 0 | 4 | 0 |
 | 107 | `backend/test/importScaleSmoke.test.js` | 6 | 0 | 2 | 0 |
-| 108 | `backend/test/initials.test.js` | 2 | 0 | 1 | 0 |
-| 109 | `backend/test/integrationDoctor.test.js` | 2 | 0 | 1 | 0 |
+| 108 | `backend/test/initials.test.ts` | 2 | 0 | 1 | 0 |
+| 109 | `backend/test/integrationDoctor.test.ts` | 2 | 0 | 1 | 0 |
 | 110 | `backend/test/inventorySettingsMediaContracts.test.js` | 3 | 0 | 0 | 0 |
 | 111 | `backend/test/mediaOptimization.test.js` | 3 | 0 | 1 | 0 |
-| 112 | `backend/test/netSecurity.test.js` | 2 | 0 | 1 | 0 |
+| 112 | `backend/test/netSecurity.test.ts` | 2 | 0 | 1 | 0 |
 | 113 | `backend/test/notificationSummaryCache.test.js` | 2 | 0 | 1 | 0 |
 | 114 | `backend/test/offlineSecurity.test.js` | 3 | 0 | 0 | 0 |
 | 115 | `backend/test/ownedGoogleAuth.test.js` | 4 | 0 | 1 | 0 |
-| 116 | `backend/test/permissionPolicy.test.js` | 2 | 0 | 1 | 0 |
+| 116 | `backend/test/permissionPolicy.test.ts` | 2 | 0 | 1 | 0 |
 | 117 | `backend/test/portalInventoryRegression.test.js` | 3 | 0 | 0 | 0 |
-| 118 | `backend/test/portalUtils.test.js` | 2 | 0 | 1 | 0 |
+| 118 | `backend/test/portalUtils.test.ts` | 2 | 0 | 1 | 0 |
 | 119 | `backend/test/postgresCutoverReadiness.test.js` | 3 | 0 | 1 | 0 |
 | 120 | `backend/test/postgresDatabase.test.js` | 4 | 0 | 1 | 0 |
 | 121 | `backend/test/postgresQueryCompat.test.js` | 2 | 0 | 1 | 0 |
 | 122 | `backend/test/productBatchHierarchy.test.js` | 3 | 0 | 0 | 0 |
 | 123 | `backend/test/productExpiry.test.js` | 3 | 0 | 0 | 0 |
 | 124 | `backend/test/productImportPolicies.test.js` | 2 | 0 | 1 | 0 |
-| 125 | `backend/test/productSearchPagination.test.js` | 3 | 0 | 0 | 0 |
+| 125 | `backend/test/productSearchPagination.test.ts` | 3 | 0 | 0 | 0 |
 | 126 | `backend/test/rfidRoutes.test.js` | 3 | 0 | 0 | 0 |
 | 127 | `backend/test/routeContracts.test.js` | 10 | 0 | 5 | 0 |
 | 128 | `backend/test/runtimeCache.test.js` | 5 | 0 | 1 | 0 |
@@ -641,7 +641,7 @@ Code files documented: **506**
   - `backend/server.js`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/integrationDoctor.js`
-  - `backend/test/analyticsRuntime.test.js`
+  - `backend/test/analyticsRuntime.test.ts`
 
 ### 3.4 `backend/src/authOtpGuards.js`
 
@@ -944,7 +944,7 @@ Code files documented: **506**
   - `backend/src/routes/products.js`
   - `backend/src/routes/returns.js`
   - `backend/src/routes/sales.js`
-  - `backend/test/idempotency.test.js`
+  - `backend/test/idempotency.test.ts`
 
 ### 3.18 `backend/src/importCsv.js`
 
@@ -981,7 +981,7 @@ Code files documented: **506**
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
-  - `backend/test/initials.test.js`
+  - `backend/test/initials.test.ts`
 
 ### 3.21 `backend/src/maintenanceLock.js`
 
@@ -1069,7 +1069,7 @@ Code files documented: **506**
   - `backend/src/routes/products.js`
   - `backend/src/services/aiGateway.js`
   - `backend/src/services/importJobs.js`
-  - `backend/test/netSecurity.test.js`
+  - `backend/test/netSecurity.test.ts`
 
 ### 3.25 `backend/src/objectStore.js`
 
@@ -1138,7 +1138,7 @@ Code files documented: **506**
   - `backend/src/middleware.js`
   - `backend/src/postgresDatabase.js`
   - `backend/src/routes/actionHistory.js`
-  - `backend/test/permissionPolicy.test.js`
+  - `backend/test/permissionPolicy.test.ts`
 
 ### 3.29 `backend/src/portalUtils.js`
 
@@ -1149,7 +1149,7 @@ Code files documented: **506**
   - none
 - Referenced by (2)
   - `backend/src/routes/portal.js`
-  - `backend/test/portalUtils.test.js`
+  - `backend/test/portalUtils.test.ts`
 
 ### 3.30 `backend/src/postgresDatabase.js`
 
@@ -2052,7 +2052,7 @@ Code files documented: **506**
   - `backend/src/services/importJobs.js`
 - Referenced by (2)
   - `backend/src/routes/system/index.js`
-  - `backend/test/integrationDoctor.test.js`
+  - `backend/test/integrationDoctor.test.ts`
 
 ### 3.72 `backend/src/services/mediaQueue.js`
 
@@ -2245,7 +2245,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.86 `backend/test/analyticsRuntime.test.js`
+### 3.86 `backend/test/analyticsRuntime.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2284,7 +2284,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.89 `backend/test/backupDefaultDestination.test.js`
+### 3.89 `backend/test/backupDefaultDestination.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2454,7 +2454,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.102 `backend/test/idempotency.test.js`
+### 3.102 `backend/test/idempotency.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2493,7 +2493,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.105 `backend/test/importJobPerformanceHardening.test.js`
+### 3.105 `backend/test/importJobPerformanceHardening.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2541,7 +2541,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.108 `backend/test/initials.test.js`
+### 3.108 `backend/test/initials.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2552,7 +2552,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.109 `backend/test/integrationDoctor.test.js`
+### 3.109 `backend/test/integrationDoctor.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2587,7 +2587,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.112 `backend/test/netSecurity.test.js`
+### 3.112 `backend/test/netSecurity.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2634,7 +2634,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.116 `backend/test/permissionPolicy.test.js`
+### 3.116 `backend/test/permissionPolicy.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2657,7 +2657,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.118 `backend/test/portalUtils.test.js`
+### 3.118 `backend/test/portalUtils.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2739,7 +2739,7 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.125 `backend/test/productSearchPagination.test.js`
+### 3.125 `backend/test/productSearchPagination.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
