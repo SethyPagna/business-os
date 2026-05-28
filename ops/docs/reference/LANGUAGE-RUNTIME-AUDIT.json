@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T00:46:13.451Z",
+  "generatedAt": "2026-05-28T00:50:20.681Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -25,7 +25,7 @@
     ],
     [
       "TypeScript",
-      159
+      160
     ],
     [
       "React JSX",
@@ -41,7 +41,7 @@
     ],
     [
       "JavaScript modules",
-      5
+      4
     ],
     [
       "Shell",
@@ -67,7 +67,7 @@
     ],
     [
       ".ts",
-      159
+      160
     ],
     [
       ".jsx",
@@ -83,7 +83,7 @@
     ],
     [
       ".mjs",
-      5
+      4
     ],
     [
       ".sh",
@@ -1562,7 +1562,7 @@
       "covered": true
     },
     {
-      "target": "ops/scripts/backend/schema-primary-key-preflight.mjs",
+      "target": "ops/scripts/backend/schema-primary-key-preflight.ts",
       "optimization": "Primary-key preflight now materializes table row/null metrics, duplicate-key counts, and unique-index names once in shared CTEs, then reuses those values in the read-only JSON report.",
       "rollback": "Restore the per-field COUNT and pg_index subqueries inside each json_build_object table block; the output schema remains unchanged.",
       "proof": [

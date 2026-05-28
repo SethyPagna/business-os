@@ -464,7 +464,7 @@ Code files documented: **506**
 | 452 | `ops/scripts/architecture/organization-audit.mjs` | 6 | 0 | 2 | 0 |
 | 453 | `ops/scripts/architecture/phase29-audit.mjs` | 7 | 0 | 2 | 0 |
 | 454 | `ops/scripts/backend/schema-audit.js` | 2 | 0 | 0 | 0 |
-| 455 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | 4 | 0 | 0 | 0 |
+| 455 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
 | 456 | `ops/scripts/backend/verify-data-integrity.js` | 3 | 0 | 0 | 0 |
 | 457 | `ops/scripts/frontend/verify-i18n.js` | 2 | 0 | 1 | 0 |
 | 458 | `ops/scripts/frontend/verify-performance.js` | 3 | 0 | 0 | 0 |
@@ -7571,14 +7571,13 @@ Code files documented: **506**
 - Referenced by (0)
   - none
 
-### 3.455 `ops/scripts/backend/schema-primary-key-preflight.mjs`
+### 3.455 `ops/scripts/backend/schema-primary-key-preflight.ts`
 
 - Declared exports: none detected
-- Imports (4)
+- Imports (3)
   - `node:child_process`
   - `node:fs`
   - `node:path`
-  - `node:url`
 - Internal dependencies (0)
   - none
 - Referenced by (0)

@@ -464,7 +464,7 @@ Code files scanned: **506**
 | 452 | `ops/scripts/architecture/organization-audit.mjs` | 15 |
 | 453 | `ops/scripts/architecture/phase29-audit.mjs` | 13 |
 | 454 | `ops/scripts/backend/schema-audit.js` | 25 |
-| 455 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | 5 |
+| 455 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 5 |
 | 456 | `ops/scripts/backend/verify-data-integrity.js` | 27 |
 | 457 | `ops/scripts/frontend/verify-i18n.js` | 6 |
 | 458 | `ops/scripts/frontend/verify-performance.js` | 4 |
@@ -6367,15 +6367,15 @@ Code files scanned: **506**
 | 24 | `buildSummary` | function | 398 |
 | 25 | `main` | function | 430 |
 
-### 3.455 `ops/scripts/backend/schema-primary-key-preflight.mjs`
+### 3.455 `ops/scripts/backend/schema-primary-key-preflight.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 10 |
-| 2 | `assertInsideWorkspace` | function | 33 |
-| 3 | `runPsql` | function | 39 |
-| 4 | `buildPreflightSql` | function | 50 |
-| 5 | `summarize` | function | 158 |
+| 1 | `parseArgs` | function | 30 |
+| 2 | `assertInsideWorkspace` | function | 53 |
+| 3 | `runPsql` | function | 59 |
+| 4 | `buildPreflightSql` | function | 70 |
+| 5 | `summarize` | function | 178 |
 
 ### 3.456 `ops/scripts/backend/verify-data-integrity.js`
 

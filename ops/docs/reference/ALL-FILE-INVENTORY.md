@@ -494,7 +494,7 @@ Total files documented: **569**
 | 482 | `ops/scripts/architecture/organization-audit.mjs` | project-scripts | 385 | 17.1 | Project source/support file |
 | 483 | `ops/scripts/architecture/phase29-audit.mjs` | project-scripts | 576 | 20.1 | Project source/support file |
 | 484 | `ops/scripts/backend/schema-audit.js` | project-scripts | 496 | 16.9 | Project source/support file |
-| 485 | `ops/scripts/backend/schema-primary-key-preflight.mjs` | project-scripts | 196 | 7.8 | Project source/support file |
+| 485 | `ops/scripts/backend/schema-primary-key-preflight.ts` | project-scripts | 216 | 8.3 | Project source/support file |
 | 486 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |
 | 487 | `ops/scripts/backend/verify-data-integrity.js` | project-scripts | 689 | 29.0 | Project source/support file |
 | 488 | `ops/scripts/frontend/verify-i18n.js` | project-scripts | 145 | 4.3 | Project source/support file |

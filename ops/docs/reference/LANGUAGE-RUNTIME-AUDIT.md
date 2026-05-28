@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T00:46:13.451Z
+Generated: 2026-05-28T00:50:20.681Z
 
 ## Summary
 
@@ -23,11 +23,11 @@ Generated: 2026-05-28T00:46:13.451Z
 | Language | Files |
 | --- | --- |
 | JavaScript | 184 |
-| TypeScript | 159 |
+| TypeScript | 160 |
 | React JSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
-| JavaScript modules | 5 |
+| JavaScript modules | 4 |
 | Shell | 3 |
 | JSON | 2 |
 | SQL | 2 |
@@ -156,7 +156,7 @@ Generated: 2026-05-28T00:46:13.451Z
 | `backend/src/services/backupPackages.js` | yes | Backup table streaming now prefers keyset pagination on id and keeps LIMIT/OFFSET as the compatibility fallback. | Revert readTableRows to OFFSET-only paging; streamed checksum/package format remains unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.js`<br>`backend/test/backupPerformanceHardening.test.js keyset guard` |
 | `backend/src/services/importJobs.js` | yes | Product import apply now caches same-name product lookups and supplier lookups per job, then updates the in-memory product cache when rows create or update products. | Remove getProductsByNameForImport, rememberProductForImport, supplierMap, and return to per-row database lookups; import job schema and row decisions remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.js`<br>`backend/test/importDecisionIntegrity.test.js cache guards` |
 | `ops/scripts/backend/schema-audit.js` | yes | Schema audit now parses ALTER TABLE primary-key constraints in a single pre-pass map before walking CREATE TABLE bodies, avoiding one whole-schema regex scan per table. | Restore parsePrimaryKey to run a table-specific ALTER TABLE regex against the full schema text for every parsed table; generated report fields remain unchanged. | `node ops\scripts\backend\schema-audit.js`<br>`Measure-Command { node ops\scripts\backend\schema-audit.js | Out-Null }`<br>`npm.cmd --prefix ops run phase29:audit:repeat` |
-| `ops/scripts/backend/schema-primary-key-preflight.mjs` | yes | Primary-key preflight now materializes table row/null metrics, duplicate-key counts, and unique-index names once in shared CTEs, then reuses those values in the read-only JSON report. | Restore the per-field COUNT and pg_index subqueries inside each json_build_object table block; the output schema remains unchanged. | `npm.cmd --prefix ops run schema-pk-preflight`<br>`node ops\scripts\backend\schema-audit.js`<br>`npm.cmd --prefix backend run test:utils`<br>`npm.cmd --prefix ops run phase29:audit:repeat` |
+| `ops/scripts/backend/schema-primary-key-preflight.ts` | yes | Primary-key preflight now materializes table row/null metrics, duplicate-key counts, and unique-index names once in shared CTEs, then reuses those values in the read-only JSON report. | Restore the per-field COUNT and pg_index subqueries inside each json_build_object table block; the output schema remains unchanged. | `npm.cmd --prefix ops run schema-pk-preflight`<br>`node ops\scripts\backend\schema-audit.js`<br>`npm.cmd --prefix backend run test:utils`<br>`npm.cmd --prefix ops run phase29:audit:repeat` |
 | `backend/src/routes/importJobs.js` | yes | Import-job listing now derives permitted import types from the current user and passes them into listImportJobs so the service can filter by type in SQL before decoration. | Remove getPermittedImportTypes, call listImportJobs with only the limit, and restore the route-level JavaScript permission filter. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\importDecisionIntegrity.test.js`<br>`node ops\scripts\backend\schema-audit.js` |
 | `ops/scripts/verification/verify-backup-reliability.js` | yes | Backup reliability verification now uses a source manifest and grouped required/forbidden text checks, replacing repeated one-off assertions across the same backup, Drive, UI, offline, and automation files. | Inline the individual requireText/forbidText calls again; the checked guard strings and failure messages remain equivalent. | `node ops\scripts\verification\verify-backup-reliability.js`<br>`npm.cmd --prefix backend run test:utils`<br>`npm.cmd --prefix ops run phase29:audit:repeat` |
 | `backend/src/routes/inventory.js` | yes | RFID session apply now prepares branch, product, branch-stock, movement, product-summary, and session-finalization statements once per request instead of preparing lookups inside each confirmed product row. | Inline the RFID apply db.prepare calls inside the product loop again; RFID confirmed quantity, movement, audit, and session status behavior remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\rfidRoutes.test.js`<br>`node ops\scripts\backend\schema-audit.js` |
