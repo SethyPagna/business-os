@@ -257,7 +257,7 @@ Total files documented: **529**
 | 245 | `frontend/src/components/products/import/BulkImportModal.jsx` | frontend-ui | 1907 | 91.8 | UI component/page |
 | 246 | `frontend/src/components/products/import/productImportPlanner.ts` | frontend-ui | 634 | 25.3 | UI component/page |
 | 247 | `frontend/src/components/products/import/productImportWorker.ts` | frontend-ui | 68 | 1.9 | UI component/page |
-| 248 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | frontend-ui | 680 | 28.5 | UI component/page |
+| 248 | `frontend/src/components/products/lookups/ManageBrandsModal.jsx` | frontend-ui | 680 | 28.4 | UI component/page |
 | 249 | `frontend/src/components/products/lookups/ManageCategoriesModal.jsx` | frontend-ui | 502 | 21.7 | UI component/page |
 | 250 | `frontend/src/components/products/lookups/ManageUnitsModal.jsx` | frontend-ui | 494 | 21.0 | UI component/page |
 | 251 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
@@ -295,10 +295,10 @@ Total files documented: **529**
 | 283 | `frontend/src/components/sales/SalesListSurface.jsx` | frontend-ui | 318 | 19.2 | UI component/page |
 | 284 | `frontend/src/components/sales/StatusBadge.tsx` | frontend-ui | 58 | 2.1 | UI component/page |
 | 285 | `frontend/src/components/server/ServerPage.jsx` | frontend-ui | 781 | 38.6 | UI component/page |
-| 286 | `frontend/src/components/shared/ActionHistoryBar.jsx` | frontend-ui | 151 | 8.1 | UI component/page |
+| 286 | `frontend/src/components/shared/ActionHistoryBar.tsx` | frontend-ui | 195 | 9.2 | UI component/page |
 | 287 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | frontend-ui | 546 | 24.4 | UI component/page |
-| 288 | `frontend/src/components/shared/ExportMenu.tsx` | frontend-ui | 56 | 1.9 | UI component/page |
-| 289 | `frontend/src/components/shared/FilterMenu.tsx` | frontend-ui | 153 | 5.9 | UI component/page |
+| 288 | `frontend/src/components/shared/ExportMenu.tsx` | frontend-ui | 47 | 1.7 | UI component/page |
+| 289 | `frontend/src/components/shared/FilterMenu.tsx` | frontend-ui | 143 | 5.6 | UI component/page |
 | 290 | `frontend/src/components/shared/globalScroll.ts` | frontend-ui | 72 | 2.7 | UI component/page |
 | 291 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | frontend-ui | 140 | 5.5 | UI component/page |
 | 292 | `frontend/src/components/shared/LoadingWatchdog.tsx` | frontend-ui | 74 | 2.2 | UI component/page |
@@ -308,12 +308,12 @@ Total files documented: **529**
 | 296 | `frontend/src/components/shared/pageActivity.ts` | frontend-ui | 9 | 0.3 | UI component/page |
 | 297 | `frontend/src/components/shared/PageHeader.tsx` | frontend-ui | 72 | 2.5 | UI component/page |
 | 298 | `frontend/src/components/shared/PaginationControls.jsx` | frontend-ui | 202 | 9.6 | UI component/page |
-| 299 | `frontend/src/components/shared/PortalMenu.jsx` | frontend-ui | 221 | 7.3 | UI component/page |
+| 299 | `frontend/src/components/shared/PortalMenu.tsx` | frontend-ui | 271 | 8.9 | UI component/page |
 | 300 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | frontend-ui | 77 | 2.5 | UI component/page |
 | 301 | `frontend/src/components/shared/SectionSwitcher.tsx` | frontend-ui | 88 | 3.2 | UI component/page |
 | 302 | `frontend/src/components/shared/WriteConflictModal.jsx` | frontend-ui | 266 | 11.0 | UI component/page |
 | 303 | `frontend/src/components/users/PermissionEditor.jsx` | frontend-ui | 152 | 7.3 | UI component/page |
-| 304 | `frontend/src/components/users/UserDetailSheet.jsx` | frontend-ui | 103 | 5.0 | UI component/page |
+| 304 | `frontend/src/components/users/UserDetailSheet.tsx` | frontend-ui | 145 | 6.0 | UI component/page |
 | 305 | `frontend/src/components/users/UserProfileModal.jsx` | frontend-ui | 1158 | 62.4 | UI component/page |
 | 306 | `frontend/src/components/users/Users.jsx` | frontend-ui | 1036 | 50.4 | UI component/page |
 | 307 | `frontend/src/components/utils-settings/AuditLog.jsx` | frontend-ui | 1198 | 56.2 | UI component/page |
@@ -333,7 +333,7 @@ Total files documented: **529**
 | 321 | `frontend/src/README.md` | frontend-core | 37 | 1.5 | Documentation |
 | 322 | `frontend/src/runtime/runtimeErrorClassifier.ts` | frontend-core | 154 | 5.4 | Project source/support file |
 | 323 | `frontend/src/styles/main.css` | frontend-style | 741 | 29.9 | Project source/support file |
-| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 10 | 0.3 | Project source/support file |
+| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 11 | 0.3 | Project source/support file |
 | 325 | `frontend/src/types/receiptContracts.ts` | frontend-core | 67 | 1.6 | Project source/support file |
 | 326 | `frontend/src/types/settingsContracts.ts` | frontend-core | 27 | 0.5 | Project source/support file |
 | 327 | `frontend/src/utils/actionGuards.ts` | frontend-utils | 76 | 2.2 | Utility helper |
@@ -516,7 +516,7 @@ Total files documented: **529**
 | 504 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
 | 505 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
 | 506 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
-| 507 | `README.md` | project-root | 159 | 11.7 | Project documentation entrypoint |
+| 507 | `README.md` | project-root | 159 | 11.6 | Project documentation entrypoint |
 | 508 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
 | 509 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
 | 510 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |

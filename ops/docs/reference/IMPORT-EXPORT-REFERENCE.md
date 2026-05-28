@@ -271,7 +271,7 @@ Code files documented: **466**
 | 259 | `frontend/src/components/sales/SalesListSurface.jsx` | 3 | 1 | 1 | 1 |
 | 260 | `frontend/src/components/sales/StatusBadge.tsx` | 0 | 5 | 0 | 6 |
 | 261 | `frontend/src/components/server/ServerPage.jsx` | 5 | 1 | 4 | 1 |
-| 262 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 3 | 1 | 1 | 17 |
+| 262 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 | 1 | 1 | 17 |
 | 263 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 7 | 1 | 5 | 1 |
 | 264 | `frontend/src/components/shared/ExportMenu.tsx` | 3 | 1 | 1 | 7 |
 | 265 | `frontend/src/components/shared/FilterMenu.tsx` | 3 | 1 | 1 | 8 |
@@ -284,12 +284,12 @@ Code files documented: **466**
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
 | 273 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
 | 274 | `frontend/src/components/shared/PaginationControls.jsx` | 2 | 4 | 0 | 8 |
-| 275 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 7 |
+| 275 | `frontend/src/components/shared/PortalMenu.tsx` | 3 | 2 | 0 | 7 |
 | 276 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 | 1 | 1 | 3 |
 | 277 | `frontend/src/components/shared/SectionSwitcher.tsx` | 1 | 1 | 0 | 4 |
 | 278 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
 | 279 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 3 | 0 | 2 |
-| 280 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
+| 280 | `frontend/src/components/users/UserDetailSheet.tsx` | 2 | 1 | 2 | 1 |
 | 281 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
 | 282 | `frontend/src/components/users/Users.jsx` | 14 | 1 | 12 | 1 |
 | 283 | `frontend/src/components/utils-settings/AuditLog.jsx` | 10 | 1 | 8 | 1 |
@@ -305,7 +305,7 @@ Code files documented: **466**
 | 293 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 2 |
 | 294 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
 | 295 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
-| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 6 | 0 | 0 |
+| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 7 | 0 | 0 |
 | 297 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 2 |
 | 298 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
 | 299 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
@@ -3156,7 +3156,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/sales/SalesImportModal.jsx`
   - `frontend/src/components/server/ServerPage.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/BackgroundImportTracker.jsx`
   - `frontend/src/components/shared/NotificationCenter.jsx`
   - `frontend/src/components/shared/pageActivity.ts`
@@ -3197,7 +3197,7 @@ Code files documented: **466**
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
   - `../../utils/historyHelpers.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/Modal`
   - `../shared/PageHeader`
   - `../shared/pageActivity`
@@ -3209,7 +3209,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/branches/BranchForm.jsx`
   - `frontend/src/components/branches/TransferModal.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
@@ -3328,7 +3328,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/products/shared/primitives.jsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
-  - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
@@ -3541,7 +3541,7 @@ Code files documented: **466**
   - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.ts`
   - `../../utils/loaders.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/FilterMenu`
   - `./ContactImportModal.jsx`
   - `./CustomerFormModal.jsx`
@@ -3555,7 +3555,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/CustomerFormModal.jsx`
   - `frontend/src/components/contacts/customerMembershipNumber.ts`
   - `frontend/src/components/contacts/shared.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -3582,7 +3582,7 @@ Code files documented: **466**
   - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.ts`
   - `../../utils/loaders.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/FilterMenu`
   - `../shared/Modal`
   - `./ContactImportModal.jsx`
@@ -3593,7 +3593,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/contacts/shared.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
@@ -3623,7 +3623,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
-  - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (3)
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
@@ -3642,7 +3642,7 @@ Code files documented: **466**
   - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.ts`
   - `../../utils/loaders.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/FilterMenu`
   - `../shared/Modal`
   - `./ContactImportModal.jsx`
@@ -3653,7 +3653,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/contacts/shared.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
@@ -3675,11 +3675,11 @@ Code files documented: **466**
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/historyHelpers.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `react`
 - Internal dependencies (5)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/historyHelpers.ts`
@@ -3824,7 +3824,7 @@ Code files documented: **466**
   - `../../utils/actionHistory.ts`
   - `../../utils/historyHelpers.ts`
   - `../../utils/publicAssetUrls.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/PageHeader`
   - `../shared/pageActivity`
   - `./FilesProvidersTab.jsx`
@@ -3834,7 +3834,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/files/FilesProvidersTab.jsx`
   - `frontend/src/components/files/FilesResponsesTab.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
@@ -3893,7 +3893,7 @@ Code files documented: **466**
   - `../../utils/pricing.ts`
   - `../../utils/productBatches.ts`
   - `../../utils/productGrouping.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
   - `../shared/LoadingWatchdog`
@@ -3917,7 +3917,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/InventoryRfidSurface.jsx`
   - `frontend/src/components/inventory/ProductDetailModal.jsx`
   - `frontend/src/components/inventory/movementGroups.ts`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
@@ -3976,7 +3976,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (2)
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
@@ -4393,12 +4393,12 @@ Code files documented: **466**
   - `../../../AppContext`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/actionHistory.ts`
-  - `../../shared/ActionHistoryBar.jsx`
+  - `../../shared/ActionHistoryBar`
   - `../../shared/Modal`
   - `react`
 - Internal dependencies (5)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -4412,12 +4412,12 @@ Code files documented: **466**
   - `../../../AppContext`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/actionHistory.ts`
-  - `../../shared/ActionHistoryBar.jsx`
+  - `../../shared/ActionHistoryBar`
   - `../../shared/Modal`
   - `react`
 - Internal dependencies (5)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -4431,12 +4431,12 @@ Code files documented: **466**
   - `../../../AppContext`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/actionHistory.ts`
-  - `../../shared/ActionHistoryBar.jsx`
+  - `../../shared/ActionHistoryBar`
   - `../../shared/Modal`
   - `react`
 - Internal dependencies (5)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -4469,7 +4469,7 @@ Code files documented: **466**
   - `../../utils/initials.ts`
   - `../../utils/productGrouping.ts`
   - `../../utils/scriptTypography.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/FilterMenu`
   - `../shared/ImageGalleryLightbox`
   - `../shared/Modal`
@@ -4504,7 +4504,7 @@ Code files documented: **466**
   - `frontend/src/components/products/surfaces/HeaderActions.jsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.jsx`
   - `frontend/src/components/products/surfaces/ProductsListSurface.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/Modal.tsx`
@@ -4604,7 +4604,7 @@ Code files documented: **466**
   - `lucide-react`
 - Internal dependencies (2)
   - `frontend/src/components/shared/ExportMenu.tsx`
-  - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
@@ -4633,7 +4633,7 @@ Code files documented: **466**
   - `../../../utils/productBatches.ts`
   - `../../shared/PortalMenu`
 - Internal dependencies (3)
-  - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
   - `frontend/src/utils/pricing.ts`
   - `frontend/src/utils/productBatches.ts`
 - Referenced by (0)
@@ -4852,7 +4852,7 @@ Code files documented: **466**
   - `../../utils/formatters`
   - `../../utils/groupedRecords.ts`
   - `../../utils/historyHelpers.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
   - `../shared/PaginationControls.jsx`
@@ -4871,7 +4871,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
   - `frontend/src/components/returns/ReturnDetailModal.jsx`
   - `frontend/src/components/returns/ReturnsListSurface.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
@@ -4938,7 +4938,7 @@ Code files documented: **466**
   - `../../utils/formatters`
   - `../../utils/groupedRecords.ts`
   - `../receipt/Receipt`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
   - `../shared/PaginationControls.jsx`
@@ -4958,7 +4958,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/SalesImportModal.jsx`
   - `frontend/src/components/sales/SalesListSurface.jsx`
   - `frontend/src/components/sales/StatusBadge.tsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
@@ -5044,7 +5044,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.262 `frontend/src/components/shared/ActionHistoryBar.jsx`
+### 3.262 `frontend/src/components/shared/ActionHistoryBar.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5096,11 +5096,11 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (3)
-  - `./PortalMenu.jsx`
+  - `./PortalMenu`
   - `lucide-react`
   - `react`
 - Internal dependencies (1)
-  - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (7)
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
@@ -5114,11 +5114,11 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (3)
-  - `./PortalMenu.jsx`
+  - `./PortalMenu`
   - `lucide-react`
   - `react`
 - Internal dependencies (1)
-  - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (8)
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
@@ -5283,7 +5283,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.275 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.275 `frontend/src/components/shared/PortalMenu.tsx`
 
 - Declared exports: `ThreeDotPortal`, `function`
 - Imports (3)
@@ -5346,15 +5346,15 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/components/users/UserDetailSheet.jsx`
+  - `frontend/src/components/users/UserDetailSheet.tsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.280 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.280 `frontend/src/components/users/UserDetailSheet.tsx`
 
 - Declared exports: `function`
 - Imports (2)
   - `../../utils/formatters`
-  - `./PermissionEditor`
+  - `./PermissionEditor.jsx`
 - Internal dependencies (2)
   - `frontend/src/components/users/PermissionEditor.jsx`
   - `frontend/src/utils/formatters.ts`
@@ -5378,7 +5378,7 @@ Code files documented: **466**
 - Internal dependencies (8)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/files/FilePickerModal.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/utils-settings/OtpModal.jsx`
   - `frontend/src/constants.ts`
@@ -5397,7 +5397,7 @@ Code files documented: **466**
   - `../../utils/actionHistory.ts`
   - `../../utils/formatters`
   - `../../utils/historyHelpers.ts`
-  - `../shared/ActionHistoryBar.jsx`
+  - `../shared/ActionHistoryBar`
   - `../shared/Modal`
   - `../shared/PortalMenu`
   - `../shared/pageActivity`
@@ -5408,12 +5408,12 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (12)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
-  - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/components/users/PermissionEditor.jsx`
-  - `frontend/src/components/users/UserDetailSheet.jsx`
+  - `frontend/src/components/users/UserDetailSheet.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -5464,7 +5464,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (8)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/SectionSwitcher.tsx`
@@ -5642,7 +5642,7 @@ Code files documented: **466**
 
 ### 3.296 `frontend/src/types/jsx-modules.d.ts`
 
-- Declared exports: `FactoryReset`, `ProductImagePlaceholder`, `ProductImg`, `ResetData`, `component`, `useApp`
+- Declared exports: `FactoryReset`, `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `ResetData`, `component`, `useApp`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -5930,7 +5930,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/SaleDetailModal.jsx`
   - `frontend/src/components/sales/Sales.jsx`
-  - `frontend/src/components/users/UserDetailSheet.jsx`
+  - `frontend/src/components/users/UserDetailSheet.tsx`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/utils/exportReports.jsx`
   - `frontend/tests/formatters.test.ts`

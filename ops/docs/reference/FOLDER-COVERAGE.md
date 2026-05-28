@@ -1159,7 +1159,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `ActionHistoryBar.jsx` | UI component/page |
+| 1 | `ActionHistoryBar.tsx` | UI component/page |
 | 2 | `BackgroundImportTracker.jsx` | UI component/page |
 | 3 | `ExportMenu.tsx` | UI component/page |
 | 4 | `FilterMenu.tsx` | UI component/page |
@@ -1172,7 +1172,7 @@ Total folders documented: **81**
 | 11 | `pageActivity.ts` | UI component/page |
 | 12 | `PageHeader.tsx` | UI component/page |
 | 13 | `PaginationControls.jsx` | UI component/page |
-| 14 | `PortalMenu.jsx` | UI component/page |
+| 14 | `PortalMenu.tsx` | UI component/page |
 | 15 | `QuickPreferenceToggles.tsx` | UI component/page |
 | 16 | `SectionSwitcher.tsx` | UI component/page |
 | 17 | `WriteConflictModal.jsx` | UI component/page |
@@ -1189,7 +1189,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `PermissionEditor.jsx` | UI component/page |
-| 2 | `UserDetailSheet.jsx` | UI component/page |
+| 2 | `UserDetailSheet.tsx` | UI component/page |
 | 3 | `UserProfileModal.jsx` | UI component/page |
 | 4 | `Users.jsx` | UI component/page |
 

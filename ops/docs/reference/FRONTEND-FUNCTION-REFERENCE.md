@@ -128,7 +128,7 @@ Total files documented: **193**
 | 116 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
 | 117 | `frontend/src/components/sales/StatusBadge.tsx` | 2 |
 | 118 | `frontend/src/components/server/ServerPage.jsx` | 16 |
-| 119 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 4 |
+| 119 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
 | 120 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 19 |
 | 121 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
 | 122 | `frontend/src/components/shared/FilterMenu.tsx` | 2 |
@@ -141,12 +141,12 @@ Total files documented: **193**
 | 129 | `frontend/src/components/shared/pageActivity.ts` | 0 |
 | 130 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
 | 131 | `frontend/src/components/shared/PaginationControls.jsx` | 3 |
-| 132 | `frontend/src/components/shared/PortalMenu.jsx` | 5 |
+| 132 | `frontend/src/components/shared/PortalMenu.tsx` | 6 |
 | 133 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 |
 | 134 | `frontend/src/components/shared/SectionSwitcher.tsx` | 3 |
 | 135 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
 | 136 | `frontend/src/components/users/PermissionEditor.jsx` | 5 |
-| 137 | `frontend/src/components/users/UserDetailSheet.jsx` | 3 |
+| 137 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
 | 138 | `frontend/src/components/users/UserProfileModal.jsx` | 21 |
 | 139 | `frontend/src/components/users/Users.jsx` | 18 |
 | 140 | `frontend/src/components/utils-settings/AuditLog.jsx` | 16 |
@@ -1897,14 +1897,13 @@ Total files documented: **193**
 | 15 | `handleSave` | function | 606 |
 | 16 | `handleDisconnect` | function | 613 |
 
-### 3.119 `frontend/src/components/shared/ActionHistoryBar.jsx`
+### 3.119 `frontend/src/components/shared/ActionHistoryBar.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `formatHistoryList` | function | 5 |
-| 2 | `formatServerStatus` | function | 9 |
-| 3 | `ActionHistoryBar` | component/function | 16 |
-| 4 | `T` | const arrow | 27 |
+| 1 | `formatHistoryList` | function | 48 |
+| 2 | `formatServerStatus` | function | 52 |
+| 3 | `ActionHistoryBar` | component/function | 59 |
 
 ### 3.120 `frontend/src/components/shared/BackgroundImportTracker.jsx`
 
@@ -1934,14 +1933,14 @@ Total files documented: **193**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ExportMenu` | component/function | 24 |
+| 1 | `ExportMenu` | component/function | 15 |
 
 ### 3.122 `frontend/src/components/shared/FilterMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `sectionButtonClass` | function | 44 |
-| 2 | `FilterMenu` | component/function | 50 |
+| 1 | `sectionButtonClass` | function | 34 |
+| 2 | `FilterMenu` | component/function | 40 |
 
 ### 3.123 `frontend/src/components/shared/globalScroll.ts`
 
@@ -2007,15 +2006,16 @@ Total files documented: **193**
 | 2 | `commitPageDraft` | const arrow | 50 |
 | 3 | `handlePageInputKeyDown` | const arrow | 61 |
 
-### 3.132 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.132 `frontend/src/components/shared/PortalMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `PortalMenu` | component/function | 11 |
-| 2 | `closeIfClickedOutside` | const arrow | 69 |
-| 3 | `closeMenu` | const arrow | 76 |
-| 4 | `scheduleReposition` | const arrow | 77 |
-| 5 | `closeIfEscape` | const arrow | 84 |
+| 1 | `isPortalMenuItem` | function | 49 |
+| 2 | `PortalMenu` | component/function | 59 |
+| 3 | `closeIfClickedOutside` | const arrow | 117 |
+| 4 | `closeMenu` | const arrow | 125 |
+| 5 | `scheduleReposition` | const arrow | 126 |
+| 6 | `closeIfEscape` | const arrow | 133 |
 
 ### 3.133 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
 
@@ -2053,13 +2053,14 @@ Total files documented: **193**
 | 4 | `sensitivityLabel` | const arrow | 57 |
 | 5 | `toggle` | const arrow | 64 |
 
-### 3.137 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.137 `frontend/src/components/users/UserDetailSheet.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `translateLabel` | function | 4 |
-| 2 | `buildRowData` | function | 9 |
-| 3 | `UserDetailSheet` | component/function | 21 |
+| 1 | `translateLabel` | function | 43 |
+| 2 | `buildRowData` | function | 48 |
+| 3 | `parsePermissions` | function | 60 |
+| 4 | `UserDetailSheet` | component/function | 71 |
 
 ### 3.138 `frontend/src/components/users/UserProfileModal.jsx`
 
