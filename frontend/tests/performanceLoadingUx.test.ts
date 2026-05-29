@@ -45,7 +45,7 @@ const manageBrandsModal = fs.readFileSync(new URL('../src/components/products/lo
 const productLookupSnapshots = fs.readFileSync(new URL('../src/components/products/lookups/productLookupSnapshots.ts', import.meta.url), 'utf8')
 const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.jsx', import.meta.url), 'utf8')
 const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePickerModal.tsx', import.meta.url), 'utf8')
-const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.jsx', import.meta.url), 'utf8')
+const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.tsx', import.meta.url), 'utf8')
 const usersPage = fs.readFileSync(new URL('../src/components/users/Users.jsx', import.meta.url), 'utf8')
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
@@ -885,12 +885,12 @@ assert.match(
 )
 assert.match(
   loyaltyPointsPage,
-  /withLoaderTimeout\(\(\) => window\.api\.getCustomers\(\), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => (?:window\.api|getLoyaltyApi\(\))\.getCustomers\(\), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS\)/,
   'loyalty customer points should timeout slow customer reads',
 )
 assert.match(
   loyaltyPointsPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.lookupPortalMembership\(value\),\s*'Loyalty membership lookup',\s*LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getLoyaltyApi\(\))\.lookupPortalMembership\(value\),\s*'Loyalty membership lookup',\s*LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
   'loyalty membership lookup should timeout slow membership reads',
 )
 assert.doesNotMatch(

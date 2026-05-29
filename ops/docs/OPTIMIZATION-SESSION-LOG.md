@@ -501,3 +501,33 @@ Use this shape for future entries:
 - follow-up insight: movement grouping now has a typed UI boundary around the
   section/action/group nesting, which reduces risk before converting the large
   Inventory shell that assembles those structures.
+
+- change: converted the loyalty points page to TSX with typed loyalty settings
+  form state, USD/KHR basis state, section ids, app-context save/notify/format
+  callbacks, local loyalty API access, customer point rows, membership lookup
+  result totals, error messages, and numeric policy coercion helpers
+- affected files:
+  `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`,
+  `frontend/src/types/jsx-modules.d.ts`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/sectionNavigation.test.ts`
+- route or API target: Loyalty Points page, point-rule save, customer point
+  leaderboard, membership lookup, policy preview, section persistence, loading
+  watchdog retry path
+- keeper or rollback: keeper if action stability, performance loading UX,
+  section navigation, typecheck, JSX, frontend/backend utility, build, Phase 29
+  audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 528 action stability, performance loading
+  UX, section navigation, UI verifier, typecheck, JSX, frontend/backend
+  utility, build, Phase 29, organization, schema, and reference checks
+- warm whole-app result: passed in Move 528 Phase 8.4 live UI suite with 72
+  checked UI signals and zero relevant console messages; public Cloudflare
+  remained skipped for the known tunnel failure
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed 220,067
+  bytes from one old Phase 8.4 runtime report, kept latest local backups and
+  latest R2 backup metadata, pruned no Docker containers/cache bytes, and the
+  post-prune Phase 29 repeat audit passed
+- follow-up insight: the loyalty page now has a typed boundary around settings,
+  customer lookup, and point-balance display before the broader AppContext and
+  remaining route shells are converted.

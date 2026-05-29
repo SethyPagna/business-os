@@ -350,7 +350,7 @@ await runTest('OTP confirm and disable use the shared single-action guard', () =
 })
 
 await runTest('loyalty point rule save uses the shared single-action guard', () => {
-  const source = readFrontend('src/components/loyalty-points/LoyaltyPointsPage.jsx')
+  const source = readFrontend('src/components/loyalty-points/LoyaltyPointsPage.tsx')
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)

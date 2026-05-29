@@ -5,6 +5,7 @@ declare module '*.jsx' {
   export const ProductImagePlaceholder: unknown
   export const PERMISSION_DEFS: unknown
   export const AppProvider: unknown
+  export const isBrokenLocalizedString: unknown
   export const useApp: unknown
   export const useSync: unknown
   export const CustomersTab: unknown

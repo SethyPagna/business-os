@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 499.
+- Latest completed implementation move in this roadmap: Move 528.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -5721,4 +5721,17 @@ Move 527 status:
   controls. The move keeps Inventory's extensionless lazy import, mobile
   movement cards, desktop grouped movement table, date range controls,
   selection/export actions, product detail links, and RFID movement guard
+  behavior unchanged.
+
+Move 528 status:
+- Move 528 converts the loyalty points page to
+  `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`. The typed
+  boundary now covers loyalty settings form state, USD/KHR basis ids, section
+  ids, app-context settings/save/notify/format callbacks, local `window.api`
+  customer and membership lookup calls, customer point rows, membership lookup
+  result totals, copy fallback helpers, error handling, and numeric policy
+  coercion helpers. The move keeps the extensionless app lazy import, section
+  switcher persistence, loading watchdog retry behavior, bounded customer
+  reads, bounded membership lookup, same-tick point-rule save guard, customer
+  leaderboard, policy preview, and loading/action/navigation source guards
   behavior unchanged.

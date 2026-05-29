@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import { BadgeDollarSign, Gift, Save, Search, Ticket } from 'lucide-react'
-import { isBrokenLocalizedString, useApp } from '../../AppContext'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
@@ -12,7 +13,72 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
-const COPY = {
+type LocaleCopy = Record<string, string>
+
+type LoyaltyBasis = 'usd' | 'khr'
+type LoyaltySection = 'all' | 'rules' | 'behavior' | 'lookup' | 'leaders'
+
+type LoyaltySettingsForm = {
+  customer_portal_points_basis: LoyaltyBasis
+  customer_portal_points_per_usd: string
+  customer_portal_points_per_khr: string
+  customer_portal_redeem_points: string
+  customer_portal_redeem_value_usd: string
+  customer_portal_redeem_value_khr: string
+  customer_portal_show_point_value: boolean
+  customer_portal_membership_info_text: string
+  customer_portal_submission_reward_points: string
+}
+
+type CustomerPointRow = {
+  id?: number | string
+  name?: string | null
+  membership_number?: string | null
+  points_balance?: number | string | null
+}
+
+type MembershipLookupData = {
+  customer?: {
+    name?: string | null
+    membership_number?: string | null
+  } | null
+  points?: {
+    balance?: number | string | null
+    earned?: number | string | null
+    deducted?: number | string | null
+    redeemed?: number | string | null
+    rewarded?: number | string | null
+    redeemableUnits?: number | string | null
+  } | null
+  totals?: MembershipLookupTotals | null
+  summary?: MembershipLookupTotals | null
+}
+
+type MembershipLookupTotals = {
+  totalSalesUsd?: number | string | null
+  totalReturnsUsd?: number | string | null
+  membershipDiscountUsd?: number | string | null
+}
+
+type LoyaltyApi = {
+  getCustomers: () => Promise<unknown>
+  lookupPortalMembership: (membershipNumber: string) => Promise<unknown>
+}
+
+type AppContextValue = {
+  settings: Record<string, unknown>
+  saveSettings: (newSettings: Record<string, string>, options?: Record<string, unknown>) => Promise<unknown>
+  notify: (message: string, type?: string) => void
+  t: (key: string) => string
+  language: string
+  fmtUSD: (value: number | string | null | undefined) => string
+  fmtKHR: (value: number | string | null | undefined) => string
+}
+
+const useApp = useAppHook as () => AppContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+const COPY: Record<'en' | 'km', LocaleCopy> = {
   en: {
     pageTitle: 'Loyalty Points',
     pageSubtitle: 'Manage point earning rules, redemption values, and customer point visibility separately from the public portal layout.',
@@ -118,26 +184,42 @@ const LOYALTY_SECTION_OPTIONS = [
 const LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS = 12000
 const LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 
-function sanitizeInteger(value, fallback, min = 0) {
+function getLoyaltyApi(): LoyaltyApi {
+  return (window as unknown as { api: LoyaltyApi }).api
+}
+
+function toCustomerPointRows(rows: unknown): CustomerPointRow[] {
+  return Array.isArray(rows) ? rows.filter((row): row is CustomerPointRow => typeof row === 'object' && row !== null) : []
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+function sanitizeInteger(value: unknown, fallback: number, min = 0): number {
   const num = Math.floor(Number(value))
   return Number.isFinite(num) ? Math.max(min, num) : fallback
 }
 
-function sanitizeKhr(value, fallback) {
+function sanitizeKhr(value: unknown, fallback: number): number {
   const raw = sanitizeInteger(value, fallback, 0)
   if (raw === 0) return 0
   return Math.max(1000, Math.ceil(raw / 1000) * 1000)
 }
 
-function formatLookupValue(number) {
-  return Number(number || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })
+function formatLookupValue(value: number | string | null | undefined): string {
+  return Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })
+}
+
+function normalizeLoyaltySection(value: string): LoyaltySection {
+  return ['all', 'rules', 'behavior', 'lookup', 'leaders'].includes(value) ? value as LoyaltySection : 'all'
 }
 
 export default function LoyaltyPointsPage() {
   const { settings, saveSettings, notify, t, language, fmtUSD, fmtKHR } = useApp()
   const isActive = useIsPageActive('loyalty_points')
   const isKhmer = language === 'km'
-  const copy = (key, fallback) => {
+  const copy = (key: string, fallback?: string): string => {
     const translated = t?.(key)
     if (translated && translated !== key) return translated
     const localized = COPY[isKhmer ? 'km' : 'en'][key]
@@ -145,45 +227,55 @@ export default function LoyaltyPointsPage() {
     return COPY.en[key] || fallback || key
   }
 
-  const [form, setForm] = useState({})
+  const [form, setForm] = useState<LoyaltySettingsForm>({
+    customer_portal_points_basis: 'usd',
+    customer_portal_points_per_usd: '1',
+    customer_portal_points_per_khr: '0',
+    customer_portal_redeem_points: '100',
+    customer_portal_redeem_value_usd: '1',
+    customer_portal_redeem_value_khr: '4100',
+    customer_portal_show_point_value: true,
+    customer_portal_membership_info_text: '',
+    customer_portal_submission_reward_points: '5',
+  })
   const [saving, setSaving] = useState(false)
   const [membershipNumber, setMembershipNumber] = useState('')
   const [lookupLoading, setLookupLoading] = useState(false)
   const [lookupError, setLookupError] = useState('')
-  const [lookupData, setLookupData] = useState(null)
-  const [customerPoints, setCustomerPoints] = useState([])
+  const [lookupData, setLookupData] = useState<MembershipLookupData | null>(null)
+  const [customerPoints, setCustomerPoints] = useState<CustomerPointRow[]>([])
   const [customerPointsLoading, setCustomerPointsLoading] = useState(true)
-  const [loyaltySection, setLoyaltySection] = useState('all')
+  const [loyaltySection, setLoyaltySection] = useState<LoyaltySection>('all')
   const lookupRequestRef = useRef(0)
   const customerPointsRequestRef = useRef(0)
   const saveInFlightRef = useRef(false)
   const sectionStorageKey = 'business-os:loyalty:section'
-  const showLoyaltySection = (sectionId) => loyaltySection === 'all' || loyaltySection === sectionId
+  const showLoyaltySection = (sectionId: Exclude<LoyaltySection, 'all'>): boolean => loyaltySection === 'all' || loyaltySection === sectionId
 
   useEffect(() => {
     setForm({
-      customer_portal_points_basis: settings.customer_portal_points_basis || 'usd',
-      customer_portal_points_per_usd: settings.customer_portal_points_per_usd || '1',
-      customer_portal_points_per_khr: settings.customer_portal_points_per_khr || '0',
-      customer_portal_redeem_points: settings.customer_portal_redeem_points || '100',
-      customer_portal_redeem_value_usd: settings.customer_portal_redeem_value_usd || '1',
-      customer_portal_redeem_value_khr: settings.customer_portal_redeem_value_khr || '4100',
+      customer_portal_points_basis: settings.customer_portal_points_basis === 'khr' ? 'khr' : 'usd',
+      customer_portal_points_per_usd: String(settings.customer_portal_points_per_usd || '1'),
+      customer_portal_points_per_khr: String(settings.customer_portal_points_per_khr || '0'),
+      customer_portal_redeem_points: String(settings.customer_portal_redeem_points || '100'),
+      customer_portal_redeem_value_usd: String(settings.customer_portal_redeem_value_usd || '1'),
+      customer_portal_redeem_value_khr: String(settings.customer_portal_redeem_value_khr || '4100'),
       customer_portal_show_point_value: String(settings.customer_portal_show_point_value ?? 'true') === 'true',
-      customer_portal_membership_info_text: settings.customer_portal_membership_info_text || '',
-      customer_portal_submission_reward_points: settings.customer_portal_submission_reward_points || '5',
+      customer_portal_membership_info_text: String(settings.customer_portal_membership_info_text || ''),
+      customer_portal_submission_reward_points: String(settings.customer_portal_submission_reward_points || '5'),
     })
   }, [settings])
 
-  const loadCustomerPoints = useCallback(async (label = 'Loyalty customer points') => {
+  const loadCustomerPoints = useCallback(async (label = 'Loyalty customer points'): Promise<CustomerPointRow[] | null> => {
     const requestId = beginTrackedRequest(customerPointsRequestRef)
     setCustomerPointsLoading(true)
     try {
-      const rows = await withLoaderTimeout(() => window.api.getCustomers(), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
+      const rows = await withLoaderTimeout(() => getLoyaltyApi().getCustomers(), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
-      const nextRows = Array.isArray(rows) ? rows : []
+      const nextRows = toCustomerPointRows(rows)
       setCustomerPoints(nextRows)
       return nextRows
-    } catch (_) {
+    } catch {
       if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
       return null
     } finally {
@@ -228,7 +320,7 @@ export default function LoyaltyPointsPage() {
       .slice(0, 10)
   ), [customerPoints])
 
-  function setValue(key, value) {
+  function setValue<K extends keyof LoyaltySettingsForm>(key: K, value: LoyaltySettingsForm[K]): void {
     setForm((current) => ({ ...current, [key]: value }))
   }
 
@@ -249,14 +341,14 @@ export default function LoyaltyPointsPage() {
       })
       notify(copy('saved', 'Point rules saved.'))
     } catch (error) {
-      notify(error?.message || 'Failed to save point rules', 'error')
+      notify(getErrorMessage(error, 'Failed to save point rules'), 'error')
     } finally {
       finishSingleAction(saveInFlightRef)
       setSaving(false)
     }
   }
 
-  async function handleLookup() {
+  async function handleLookup(): Promise<void> {
     const value = membershipNumber.trim()
     if (!value) {
       setLookupError(copy('lookupRequired', 'Enter a membership number first.'))
@@ -269,7 +361,7 @@ export default function LoyaltyPointsPage() {
       setLookupLoading(true)
       setLookupError('')
       const result = await withLoaderTimeout(
-        () => window.api.lookupPortalMembership(value),
+        () => getLoyaltyApi().lookupPortalMembership(value),
         'Loyalty membership lookup',
         LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )
@@ -279,11 +371,11 @@ export default function LoyaltyPointsPage() {
         setLookupError(copy('customerNotFound', 'Membership number not found.'))
         return
       }
-      setLookupData(result)
+      setLookupData(result as MembershipLookupData)
     } catch (error) {
       if (!isTrackedRequestCurrent(lookupRequestRef, requestId)) return
       setLookupData(null)
-      setLookupError(error?.message || copy('customerNotFound', 'Membership number not found.'))
+      setLookupError(getErrorMessage(error, copy('customerNotFound', 'Membership number not found.')))
     } finally {
       if (isTrackedRequestCurrent(lookupRequestRef, requestId)) {
         setLookupLoading(false)
@@ -298,7 +390,7 @@ export default function LoyaltyPointsPage() {
           label="Loyalty"
           options={LOYALTY_SECTION_OPTIONS}
           value={loyaltySection}
-          onChange={setLoyaltySection}
+          onChange={(value) => setLoyaltySection(normalizeLoyaltySection(value))}
           storageKey={sectionStorageKey}
         />
         <LoadingWatchdog
@@ -348,7 +440,7 @@ export default function LoyaltyPointsPage() {
                     name="customer_portal_points_basis"
                     className="input mt-1"
                     value={basis}
-                    onChange={(event) => setValue('customer_portal_points_basis', event.target.value)}
+                    onChange={(event: ChangeEvent<HTMLSelectElement>) => setValue('customer_portal_points_basis', event.target.value === 'khr' ? 'khr' : 'usd')}
                   >
                     <option value="usd">{copy('basisUsd', 'Based on USD sales')}</option>
                     <option value="khr">{copy('basisKhr', 'Based on KHR sales')}</option>
@@ -366,7 +458,7 @@ export default function LoyaltyPointsPage() {
                       min="0"
                       step="0.01"
                       value={form.customer_portal_points_per_usd || '1'}
-                      onChange={(event) => setValue('customer_portal_points_per_usd', event.target.value)}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('customer_portal_points_per_usd', event.target.value)}
                     />
                   </div>
                 ) : (
@@ -380,7 +472,7 @@ export default function LoyaltyPointsPage() {
                       min="0"
                       step="0.0001"
                       value={form.customer_portal_points_per_khr || '0'}
-                      onChange={(event) => setValue('customer_portal_points_per_khr', event.target.value)}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('customer_portal_points_per_khr', event.target.value)}
                     />
                   </div>
                 )}
@@ -395,7 +487,7 @@ export default function LoyaltyPointsPage() {
                     min="1"
                     step="1"
                     value={form.customer_portal_redeem_points || '100'}
-                    onChange={(event) => setValue('customer_portal_redeem_points', event.target.value)}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('customer_portal_redeem_points', event.target.value)}
                   />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{copy('validationRedeem', 'Minimum redemption points must be a whole number of at least 1.')}</p>
                 </div>
@@ -410,7 +502,7 @@ export default function LoyaltyPointsPage() {
                     min="0"
                     step="1"
                     value={form.customer_portal_redeem_value_usd || '1'}
-                    onChange={(event) => setValue('customer_portal_redeem_value_usd', event.target.value)}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('customer_portal_redeem_value_usd', event.target.value)}
                   />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{copy('validationUsd', 'USD redemption value uses whole numbers only.')}</p>
                 </div>
@@ -425,7 +517,7 @@ export default function LoyaltyPointsPage() {
                     min="0"
                     step="1000"
                     value={form.customer_portal_redeem_value_khr || '4100'}
-                    onChange={(event) => setValue('customer_portal_redeem_value_khr', event.target.value)}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('customer_portal_redeem_value_khr', event.target.value)}
                   />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{copy('validationKhr', 'KHR redemption value uses whole 1000 riel units and cannot be below 1000 when enabled.')}</p>
                 </div>
@@ -440,7 +532,7 @@ export default function LoyaltyPointsPage() {
                     min="0"
                     step="1"
                     value={form.customer_portal_submission_reward_points || '5'}
-                    onChange={(event) => setValue('customer_portal_submission_reward_points', event.target.value)}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('customer_portal_submission_reward_points', event.target.value)}
                   />
                 </div>
               </div>
@@ -455,7 +547,7 @@ export default function LoyaltyPointsPage() {
                   name="customer_portal_show_point_value"
                   type="checkbox"
                   checked={!!form.customer_portal_show_point_value}
-                  onChange={(event) => setValue('customer_portal_show_point_value', event.target.checked)}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('customer_portal_show_point_value', event.target.checked)}
                 />
               </label>
 
@@ -467,7 +559,7 @@ export default function LoyaltyPointsPage() {
                   className="input mt-1 resize-none"
                   rows={4}
                   value={form.customer_portal_membership_info_text || ''}
-                  onChange={(event) => setValue('customer_portal_membership_info_text', event.target.value)}
+                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setValue('customer_portal_membership_info_text', event.target.value)}
                 />
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{copy('infoTextHint', 'This note appears in the customer portal membership panel under the point summary and redemption rules.')}</p>
               </div>
@@ -533,7 +625,7 @@ export default function LoyaltyPointsPage() {
                   name="membership_lookup"
                   className="input flex-1"
                   value={membershipNumber}
-                  onChange={(event) => setMembershipNumber(event.target.value)}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMembershipNumber(event.target.value)}
                   placeholder={copy('membershipNumber', 'Membership number')}
                 />
                 <button type="button" className="btn-secondary" disabled={lookupLoading} onClick={handleLookup}>

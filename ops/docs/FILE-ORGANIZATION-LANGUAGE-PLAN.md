@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 505 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 528 in this file.
 
 ## Goal
 
@@ -4137,6 +4137,16 @@ Decision rule:
     Inventory page extensionless lazy import, mobile movement cards, desktop
     grouped movement table, custom date range controls, selection/export
     actions, product detail callbacks, and RFID movement-source guard intact.
+528. Convert the loyalty points page to TSX. Done:
+    `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` now types
+    loyalty settings form state, basis/section ids, app-context callbacks,
+    `window.api` customer and membership lookup calls, customer point rows,
+    lookup result totals, copy fallbacks, error handling, and numeric policy
+    coercion helpers. The conversion keeps the app extensionless lazy import,
+    section switcher persistence, loading watchdog retry path, bounded customer
+    reads, bounded membership lookup, same-tick point-rule save guard,
+    customer leaderboard, policy preview, and route guard tests intact while
+    moving exact source-path guards to TSX.
 
 ## Safety Gates
 
