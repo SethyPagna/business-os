@@ -570,7 +570,7 @@ Decision rule:
 50. Harden Returns write pathways. Done:
     `frontend/src/components/returns/NewReturnModal.jsx`,
     `frontend/src/components/returns/EditReturnModal.tsx`, and
-    `frontend/src/components/returns/NewSupplierReturnModal.jsx` now wrap
+    `frontend/src/components/returns/NewSupplierReturnModal.tsx` now wrap
     customer return create, customer return update, and supplier return create
     writes in explicit timeout contracts while preserving same-tick submit
     guards, conflict handling, backend idempotency coverage, and
@@ -4067,6 +4067,14 @@ Decision rule:
     callbacks. The conversion keeps the desktop table, mobile cards,
     collapse/group selection controls, revenue footer, and extensionless sales
     page import intact.
+520. Convert the supplier return modal to TSX. Done:
+    `frontend/src/components/returns/NewSupplierReturnModal.tsx` now types
+    branch rows, supplier rows, inventory product rows, settlement methods,
+    selected supplier-return items, app user context, notification callbacks,
+    formatter callbacks, and supplier-return API calls. The conversion keeps
+    setup/inventory/create timeouts, same-tick submit guards, stale request
+    invalidation, branch-stock quantity clamps, compensation/loss math, and
+    returns/inventory/products sync updates intact.
 
 ## Safety Gates
 

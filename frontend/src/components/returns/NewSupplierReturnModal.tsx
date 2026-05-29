@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import {
   beginTrackedRequest,
+  getLoaderErrorMessage,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
@@ -12,9 +13,92 @@ const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000
 
-export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmtUSD, fmtKHR }) {
+type NoticeKind = 'success' | 'error' | 'info' | 'warning' | string
+type MoneyFormatter = (value: number | string) => string
+type SettlementMethod = 'refund' | 'credit' | 'replacement' | 'writeoff'
+
+interface AppUser {
+  id?: number | string
+  name?: string | null
+  username?: string | null
+}
+
+interface BranchRow {
+  id: number | string
+  name?: string
+  is_active?: boolean
+  is_default?: boolean
+}
+
+interface SupplierRow {
+  id: number | string
+  name?: string
+}
+
+interface InventoryProductRow {
+  id: number | string
+  name?: string
+  sku?: string
+  category?: string
+  brand?: string
+  display_quantity?: number | string
+  purchase_price_usd?: number | string
+  cost_price_usd?: number | string
+  purchase_price_khr?: number | string
+  cost_price_khr?: number | string
+}
+
+interface SupplierReturnItem {
+  product_id: number | string
+  product_name: string | null
+  quantity: number
+  cost_price_usd: number
+  cost_price_khr: number
+}
+
+interface SupplierReturnApi {
+  getBranches?: () => Promise<BranchRow[]>
+  getSuppliers?: () => Promise<SupplierRow[]>
+  getInventorySummary?: (options: { branchId: number }) => Promise<InventoryProductRow[]>
+  createSupplierReturn?: (payload: {
+    cashier_id: number | string | null
+    cashier_name: string | null
+    branch_id: number
+    supplier_id: number
+    supplier_name: string | null
+    reason: string
+    notes: string | null
+    settlement: SettlementMethod
+    supplier_compensation_usd: number
+    supplier_compensation_khr: number
+    items: SupplierReturnItem[]
+  }) => Promise<unknown>
+}
+
+interface NewSupplierReturnModalProps {
+  onClose: () => void
+  onSuccess?: (result: unknown) => void | Promise<void>
+  notify: (message: string, kind?: NoticeKind) => void
+  fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
+}
+
+function isSupplierReturnItem(item: SupplierReturnItem | null): item is SupplierReturnItem {
+  return item != null
+}
+
+function getSupplierReturnApi(): SupplierReturnApi {
+  return typeof window === 'undefined' ? {} : (window as Window & { api?: SupplierReturnApi }).api || {}
+}
+
+const useApp = useAppHook as () => {
+  user?: AppUser | null
+  t?: (key: string) => string
+}
+
+export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmtUSD, fmtKHR }: NewSupplierReturnModalProps) {
   const { user, t } = useApp()
-  const tr = (key, fallback) => {
+  const tr = (key: string, fallback: string): string => {
     const value = t?.(key)
     return value && value !== key ? value : fallback
   }
@@ -22,16 +106,16 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const [loading, setLoading] = useState(true)
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [branches, setBranches] = useState([])
-  const [suppliers, setSuppliers] = useState([])
-  const [products, setProducts] = useState([])
+  const [branches, setBranches] = useState<BranchRow[]>([])
+  const [suppliers, setSuppliers] = useState<SupplierRow[]>([])
+  const [products, setProducts] = useState<InventoryProductRow[]>([])
   const [branchId, setBranchId] = useState('')
   const [supplierId, setSupplierId] = useState('')
   const [reason, setReason] = useState('')
-  const [settlement, setSettlement] = useState('refund')
+  const [settlement, setSettlement] = useState<SettlementMethod>('refund')
   const [notes, setNotes] = useState('')
   const [search, setSearch] = useState('')
-  const [quantities, setQuantities] = useState({})
+  const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [compensationUsd, setCompensationUsd] = useState('')
   const [compensationKhr, setCompensationKhr] = useState('')
   const bootstrapRequestRef = useRef(0)
@@ -52,17 +136,21 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     async function loadSetup() {
       try {
         const [branchRows, supplierRows] = await withLoaderTimeout(
-          () => Promise.all([
-            window.api.getBranches(),
-            window.api.getSuppliers(),
-          ]),
+          () => {
+            const api = getSupplierReturnApi()
+            if (!api.getBranches || !api.getSuppliers) throw new Error(tr('failed_to_load_data', 'Failed to load data'))
+            return Promise.all([
+              api.getBranches(),
+              api.getSuppliers(),
+            ])
+          },
           'Supplier return setup',
           SUPPLIER_RETURN_SETUP_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
-        const activeBranches = (branchRows || []).filter((branch) => branch.is_active)
+        const activeBranches = ((branchRows || []) as BranchRow[]).filter((branch) => branch.is_active)
         setBranches(activeBranches)
-        setSuppliers(supplierRows || [])
+        setSuppliers((supplierRows || []) as SupplierRow[])
         setBranchId((current) => {
           if (current && activeBranches.some((branch) => String(branch.id) === String(current))) return current
           const defaultBranchId = activeBranches.find((branch) => branch.is_default)?.id || activeBranches[0]?.id || ''
@@ -70,14 +158,16 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
         })
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
-        notify(error?.message || tr('failed_to_load_data', 'Failed to load data'), 'error')
+        notify(getLoaderErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'error')
       } finally {
         if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         setLoading(false)
       }
     }
     loadSetup()
-    return () => invalidateTrackedRequest(bootstrapRequestRef)
+    return () => {
+      invalidateTrackedRequest(bootstrapRequestRef)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -97,24 +187,30 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     async function loadInventory() {
       try {
         const rows = await withLoaderTimeout(
-          () => window.api.getInventorySummary({ branchId: Number(branchId) }),
+          () => {
+            const api = getSupplierReturnApi()
+            if (!api.getInventorySummary) throw new Error(tr('failed_to_load_data', 'Failed to load data'))
+            return api.getInventorySummary({ branchId: Number(branchId) })
+          },
           'Supplier return inventory',
           SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
-        const next = (rows || []).filter((product) => (product.display_quantity || 0) > 0)
+        const next = ((rows || []) as InventoryProductRow[]).filter((product) => Number(product.display_quantity || 0) > 0)
         productsBranchRef.current = String(branchId)
         setProducts(next)
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
-        notify(error?.message || tr('failed_to_load_data', 'Failed to load data'), 'error')
+        notify(getLoaderErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'error')
       } finally {
         if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         setLoadingProducts(false)
       }
     }
     loadInventory()
-    return () => invalidateTrackedRequest(inventoryRequestRef)
+    return () => {
+      invalidateTrackedRequest(inventoryRequestRef)
+    }
   }, [branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredProducts = useMemo(() => {
@@ -126,10 +222,10 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     })
   }, [products, search])
 
-  const selectedItems = useMemo(() => {
+  const selectedItems = useMemo<SupplierReturnItem[]>(() => {
     return products
       .map((product) => {
-        const rawQty = quantities[product.id]
+        const rawQty = quantities[String(product.id)]
         const qty = Math.max(0, Math.min(Number(rawQty || 0), Number(product.display_quantity || 0)))
         if (!qty) return null
         const unitCostUsd = Number(product.purchase_price_usd || product.cost_price_usd || 0)
@@ -142,7 +238,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           cost_price_khr: unitCostKhr,
         }
       })
-      .filter(Boolean)
+      .filter(isSupplierReturnItem)
   }, [products, quantities])
 
   const totals = useMemo(() => {
@@ -159,10 +255,10 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const lossUsd = Math.max(0, totals.totalUsd - effectiveCompensationUsd)
   const lossKhr = Math.max(0, totals.totalKhr - effectiveCompensationKhr)
 
-  const updateQty = (productId, nextValue, max) => {
+  const updateQty = (productId: number | string, nextValue: string, max: number) => {
     const parsed = Number(nextValue || 0)
     const normalized = Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, max)) : 0
-    setQuantities((prev) => ({ ...prev, [productId]: normalized }))
+    setQuantities((prev) => ({ ...prev, [String(productId)]: normalized }))
   }
 
   const submit = async () => {
@@ -175,19 +271,23 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     setSubmitting(true)
     try {
       const result = await withLoaderTimeout(
-        () => window.api.createSupplierReturn({
-          cashier_id: user?.id || null,
-          cashier_name: user?.name || user?.username || null,
-          branch_id: Number(branchId),
-          supplier_id: Number(supplierId),
-          supplier_name: supplier?.name || null,
-          reason: reason.trim(),
-          notes: notes.trim() || null,
-          settlement,
-          supplier_compensation_usd: effectiveCompensationUsd,
-          supplier_compensation_khr: effectiveCompensationKhr,
-          items: selectedItems,
-        }),
+        () => {
+          const api = getSupplierReturnApi()
+          if (!api.createSupplierReturn) throw new Error(tr('error', 'Error'))
+          return api.createSupplierReturn({
+            cashier_id: user?.id || null,
+            cashier_name: user?.name || user?.username || null,
+            branch_id: Number(branchId),
+            supplier_id: Number(supplierId),
+            supplier_name: supplier?.name || null,
+            reason: reason.trim(),
+            notes: notes.trim() || null,
+            settlement,
+            supplier_compensation_usd: effectiveCompensationUsd,
+            supplier_compensation_khr: effectiveCompensationKhr,
+            items: selectedItems,
+          })
+        },
         'Create supplier return',
         SUPPLIER_RETURN_CREATE_TIMEOUT_MS,
       )
@@ -198,7 +298,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
       await Promise.resolve(onSuccess?.(result))
       onClose?.()
     } catch (error) {
-      notify(error?.message || tr('error', 'Error'), 'error')
+      notify(getLoaderErrorMessage(error, tr('error', 'Error')), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       setSubmitting(false)
@@ -241,7 +341,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
               </div>
               <div>
                 <label htmlFor="supplier-return-settlement" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('settlement_method', 'Settlement')}</label>
-                <select id="supplier-return-settlement" className="input text-sm" value={settlement} onChange={(event) => setSettlement(event.target.value)}>
+                <select id="supplier-return-settlement" className="input text-sm" value={settlement} onChange={(event) => setSettlement(event.target.value as SettlementMethod)}>
                   <option value="refund">{tr('settlement_refund', 'Refund')}</option>
                   <option value="credit">{tr('settlement_credit', 'Store credit')}</option>
                   <option value="replacement">{tr('settlement_replacement', 'Replacement')}</option>
@@ -292,7 +392,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
                       </tr>
                     ) : filteredProducts.map((product) => {
                       const maxQty = Number(product.display_quantity || 0)
-                      const qty = Number(quantities[product.id] || 0)
+                      const qty = Number(quantities[String(product.id)] || 0)
                       const unitCostUsd = Number(product.purchase_price_usd || product.cost_price_usd || 0)
                       const unitCostKhr = Number(product.purchase_price_khr || product.cost_price_khr || 0)
                       return (

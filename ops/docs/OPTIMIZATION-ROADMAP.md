@@ -5634,3 +5634,13 @@ Move 519 status:
   detail callbacks, and reprint callbacks. The move keeps desktop table rows,
   mobile cards, collapse toggles, group selection, revenue footer, and the
   sales page's extensionless import unchanged.
+
+Move 520 status:
+- Move 520 converts the supplier return modal to
+  `frontend/src/components/returns/NewSupplierReturnModal.tsx`. The typed
+  boundary now covers branch rows, supplier rows, inventory product rows,
+  settlement methods, selected supplier-return items, app user context,
+  notification callbacks, money formatters, and supplier-return API methods.
+  The move keeps setup/inventory/create timeouts, stale request invalidation,
+  same-tick submit guards, branch-stock quantity clamps, compensation/loss
+  calculations, and returns/inventory/products sync events unchanged.

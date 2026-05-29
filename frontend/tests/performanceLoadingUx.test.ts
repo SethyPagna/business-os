@@ -30,7 +30,7 @@ const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesI
 const returns = fs.readFileSync(new URL('../src/components/returns/Returns.jsx', import.meta.url), 'utf8')
 const newReturnModal = fs.readFileSync(new URL('../src/components/returns/NewReturnModal.jsx', import.meta.url), 'utf8')
 const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
-const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.jsx', import.meta.url), 'utf8')
+const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.tsx', import.meta.url), 'utf8')
 const branches = fs.readFileSync(new URL('../src/components/branches/Branches.jsx', import.meta.url), 'utf8')
 const transferModal = fs.readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 const catalogPage = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
@@ -1605,7 +1605,7 @@ assert.match(
 )
 assert.match(
   newSupplierReturnModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.createSupplierReturn\(\{[\s\S]*\}\),\s*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\)/,
+  /const api = getSupplierReturnApi\(\)[\s\S]*api\.createSupplierReturn\(\{[\s\S]*\}\)[\s\S]*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\)/,
   'supplier return create should timeout slow supplier-return writes',
 )
 assert.doesNotMatch(

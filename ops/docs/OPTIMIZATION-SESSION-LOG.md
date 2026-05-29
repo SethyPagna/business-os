@@ -312,3 +312,24 @@ Use this shape for future entries:
   tunnel failure
 - follow-up insight: sales grouping now has the same typed list boundary as
   returns, which reduces risk before converting the larger Sales route shell.
+
+- change: converted the supplier return modal to TSX with typed branch,
+  supplier, inventory product, settlement, selected item, app user, formatter,
+  notification, and API boundaries
+- affected files: `frontend/src/components/returns/NewSupplierReturnModal.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/whole-app-hardening.md`
+- route or API target: Supplier return modal, setup/inventory reads, supplier
+  return create write, returns/inventory/products sync events
+- keeper or rollback: keeper if action stability, performance loading UX,
+  typecheck, JSX, frontend/backend utility, build, Phase 29 audit, and Phase
+  8.4 live suite pass
+- route-scoped result: passed in Move 520 action stability, performance
+  loading UX, typecheck, JSX, frontend/backend utility, build, Phase 29, and
+  schema/reference checks
+- warm whole-app result: passed in Move 520 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: supplier-return payload construction now goes through a
+  typed API helper, making future Returns route conversion safer.

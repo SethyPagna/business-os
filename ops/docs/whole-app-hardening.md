@@ -721,7 +721,7 @@ Last updated: 2026-05-18
     explicit timeout contracts in
     `frontend/src/components/returns/NewReturnModal.jsx`,
     `frontend/src/components/returns/EditReturnModal.tsx`, and
-    `frontend/src/components/returns/NewSupplierReturnModal.jsx`.
+    `frontend/src/components/returns/NewSupplierReturnModal.tsx`.
     Remote public portal Cloudflare verification now lives in
     `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`.
     Returns action-history undo/redo restore writes now have explicit timeout
