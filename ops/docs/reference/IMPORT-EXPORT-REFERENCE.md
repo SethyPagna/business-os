@@ -208,7 +208,7 @@ Code files documented: **466**
 | 196 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 4 | 1 | 2 | 1 |
 | 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 | 1 | 0 | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 2 |
-| 199 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 | 1 | 2 | 1 |
+| 199 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 | 1 | 2 | 1 |
 | 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 7 | 1 | 5 | 1 |
 | 201 | `frontend/src/components/navigation/Sidebar.jsx` | 7 | 1 | 6 | 1 |
 | 202 | `frontend/src/components/pos/CartItem.tsx` | 2 | 1 | 2 | 1 |
@@ -3917,7 +3917,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
   - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
   - `frontend/src/components/inventory/InventoryRfidSurface.tsx`
-  - `frontend/src/components/inventory/ProductDetailModal.jsx`
+  - `frontend/src/components/inventory/ProductDetailModal.tsx`
   - `frontend/src/components/inventory/movementGroups.ts`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
@@ -4018,7 +4018,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/tests/inventoryMovementGroups.test.ts`
 
-### 3.199 `frontend/src/components/inventory/ProductDetailModal.jsx`
+### 3.199 `frontend/src/components/inventory/ProductDetailModal.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -6083,7 +6083,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/portalCatalogDisplay.ts`
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/inventory/ProductDetailModal.jsx`
+  - `frontend/src/components/inventory/ProductDetailModal.tsx`
   - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/pos/posCore.ts`
@@ -6117,7 +6117,7 @@ Code files documented: **466**
   - none
 - Referenced by (5)
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/inventory/ProductDetailModal.jsx`
+  - `frontend/src/components/inventory/ProductDetailModal.tsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
   - `frontend/src/components/products/surfaces/ProductRowParts.tsx`
   - `frontend/tests/productBatches.test.ts`

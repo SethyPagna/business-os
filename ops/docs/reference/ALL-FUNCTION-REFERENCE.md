@@ -208,7 +208,7 @@ Code files scanned: **466**
 | 196 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
 | 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
-| 199 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
+| 199 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
 | 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
 | 201 | `frontend/src/components/navigation/Sidebar.jsx` | 7 |
 | 202 | `frontend/src/components/pos/CartItem.tsx` | 2 |
@@ -3974,12 +3974,12 @@ Code files scanned: **466**
 | 14 | `getMovementGroupPage` | export function | 257 |
 | 15 | `movementGroupHaystack` | export function | 273 |
 
-### 3.199 `frontend/src/components/inventory/ProductDetailModal.jsx`
+### 3.199 `frontend/src/components/inventory/ProductDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductDetailModal` | export default function | 6 |
-| 2 | `T` | const arrow | 7 |
+| 1 | `getBranchStockKey` | function | 61 |
+| 2 | `ProductDetailModal` | export default function | 65 |
 
 ### 3.200 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
 

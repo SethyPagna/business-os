@@ -231,7 +231,7 @@ Total files documented: **529**
 | 219 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | frontend-ui | 467 | 31.6 | UI component/page |
 | 220 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | frontend-ui | 180 | 9.6 | UI component/page |
 | 221 | `frontend/src/components/inventory/movementGroups.ts` | frontend-ui | 287 | 12.9 | UI component/page |
-| 222 | `frontend/src/components/inventory/ProductDetailModal.jsx` | frontend-ui | 202 | 13.4 | UI component/page |
+| 222 | `frontend/src/components/inventory/ProductDetailModal.tsx` | frontend-ui | 267 | 15.0 | UI component/page |
 | 223 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | frontend-ui | 625 | 35.7 | UI component/page |
 | 224 | `frontend/src/components/navigation/Sidebar.jsx` | frontend-ui | 335 | 15.3 | UI component/page |
 | 225 | `frontend/src/components/pos/CartItem.tsx` | frontend-ui | 158 | 6.3 | UI component/page |

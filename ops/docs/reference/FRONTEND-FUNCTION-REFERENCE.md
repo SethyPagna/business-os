@@ -65,7 +65,7 @@ Total files documented: **193**
 | 53 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
 | 54 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 55 | `frontend/src/components/inventory/movementGroups.ts` | 11 |
-| 56 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 2 |
+| 56 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
 | 57 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
 | 58 | `frontend/src/components/navigation/Sidebar.jsx` | 7 |
 | 59 | `frontend/src/components/pos/CartItem.tsx` | 2 |
@@ -1188,12 +1188,12 @@ Total files documented: **193**
 | 10 | `movementAbsoluteValue` | function | 117 |
 | 11 | `parseMovementTime` | function | 123 |
 
-### 3.56 `frontend/src/components/inventory/ProductDetailModal.jsx`
+### 3.56 `frontend/src/components/inventory/ProductDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ProductDetailModal` | component/function | 6 |
-| 2 | `T` | const arrow | 7 |
+| 1 | `getBranchStockKey` | function | 61 |
+| 2 | `ProductDetailModal` | component/function | 65 |
 
 ### 3.57 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
 

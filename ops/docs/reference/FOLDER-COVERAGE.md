@@ -854,7 +854,7 @@ Total folders documented: **81**
 | 6 | `InventoryProductsSurface.jsx` | UI component/page |
 | 7 | `InventoryRfidSurface.tsx` | UI component/page |
 | 8 | `movementGroups.ts` | UI component/page |
-| 9 | `ProductDetailModal.jsx` | UI component/page |
+| 9 | `ProductDetailModal.tsx` | UI component/page |
 
 
 ### 3.36 Folder: `frontend/src/components/loyalty-points`
