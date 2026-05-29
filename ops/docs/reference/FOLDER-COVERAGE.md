@@ -780,7 +780,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `CustomTables.jsx` | UI component/page |
+| 1 | `CustomTables.tsx` | UI component/page |
 
 
 ### 3.32 Folder: `frontend/src/components/dashboard`

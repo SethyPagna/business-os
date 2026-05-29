@@ -188,7 +188,7 @@ Code files scanned: **466**
 | 176 | `frontend/src/components/contacts/DeliveryTab.jsx` | 23 |
 | 177 | `frontend/src/components/contacts/shared.tsx` | 6 |
 | 178 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
-| 179 | `frontend/src/components/custom-tables/CustomTables.jsx` | 11 |
+| 179 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
 | 180 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
 | 181 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 1 |
 | 182 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
@@ -3739,21 +3739,29 @@ Code files scanned: **466**
 | 15 | `handleDelete` | const arrow | 463 |
 | 16 | `handleBulkDelete` | const arrow | 502 |
 
-### 3.179 `frontend/src/components/custom-tables/CustomTables.jsx`
+### 3.179 `frontend/src/components/custom-tables/CustomTables.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeRowValue` | function | 19 |
-| 2 | `buildRowPayload` | function | 32 |
-| 3 | `CustomTables` | export default function | 41 |
-| 4 | `addColumn` | const arrow | 151 |
-| 5 | `updateColumn` | const arrow | 158 |
-| 6 | `removeColumn` | const arrow | 167 |
-| 7 | `handleCreateTable` | const arrow | 174 |
-| 8 | `handleSaveRow` | const arrow | 220 |
-| 9 | `handleDeleteRow` | const arrow | 317 |
-| 10 | `openAddRow` | const arrow | 369 |
-| 11 | `openEditRow` | const arrow | 376 |
+| 1 | `getCustomTablesApi` | function | 72 |
+| 2 | `getErrorMessage` | function | 76 |
+| 3 | `getHistoryResultId` | function | 80 |
+| 4 | `formatCellValue` | function | 84 |
+| 5 | `toInputValue` | function | 91 |
+| 6 | `normalizeRowValue` | function | 98 |
+| 7 | `normalizeCustomTable` | function | 111 |
+| 8 | `parseSchema` | function | 124 |
+| 9 | `normalizeRows` | function | 145 |
+| 10 | `buildRowPayload` | function | 151 |
+| 11 | `CustomTables` | export default function | 160 |
+| 12 | `addColumn` | const arrow | 275 |
+| 13 | `updateColumn` | const arrow | 282 |
+| 14 | `removeColumn` | const arrow | 291 |
+| 15 | `handleCreateTable` | const arrow | 298 |
+| 16 | `handleSaveRow` | const arrow | 345 |
+| 17 | `handleDeleteRow` | const arrow | 443 |
+| 18 | `openAddRow` | const arrow | 495 |
+| 19 | `openEditRow` | const arrow | 502 |
 
 ### 3.180 `frontend/src/components/dashboard/charts/BarChart.tsx`
 

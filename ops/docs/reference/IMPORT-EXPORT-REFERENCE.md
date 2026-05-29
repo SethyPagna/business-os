@@ -188,7 +188,7 @@ Code files documented: **466**
 | 176 | `frontend/src/components/contacts/DeliveryTab.jsx` | 16 | 2 | 14 | 1 |
 | 177 | `frontend/src/components/contacts/shared.tsx` | 7 | 6 | 5 | 3 |
 | 178 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 | 0 | 14 | 1 |
-| 179 | `frontend/src/components/custom-tables/CustomTables.jsx` | 6 | 1 | 5 | 0 |
+| 179 | `frontend/src/components/custom-tables/CustomTables.tsx` | 6 | 1 | 5 | 0 |
 | 180 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 3 | 1 | 2 | 0 |
 | 181 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 3 | 1 | 2 | 0 |
 | 182 | `frontend/src/components/dashboard/charts/index.ts` | 0 | 0 | 0 | 2 |
@@ -3130,7 +3130,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
-  - `frontend/src/components/custom-tables/CustomTables.jsx`
+  - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/dashboard/charts/NoData.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
@@ -3669,11 +3669,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/contacts/Contacts.tsx`
 
-### 3.179 `frontend/src/components/custom-tables/CustomTables.jsx`
+### 3.179 `frontend/src/components/custom-tables/CustomTables.tsx`
 
 - Declared exports: `function`
 - Imports (6)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/historyHelpers.ts`
@@ -5067,7 +5067,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
-  - `frontend/src/components/custom-tables/CustomTables.jsx`
+  - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
@@ -5698,7 +5698,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
-  - `frontend/src/components/custom-tables/CustomTables.jsx`
+  - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
@@ -5738,7 +5738,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
-  - `frontend/src/components/custom-tables/CustomTables.jsx`
+  - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
@@ -5979,7 +5979,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
-  - `frontend/src/components/custom-tables/CustomTables.jsx`
+  - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`

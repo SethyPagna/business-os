@@ -211,7 +211,7 @@ Total files documented: **529**
 | 199 | `frontend/src/components/contacts/DeliveryTab.jsx` | frontend-ui | 819 | 42.8 | UI component/page |
 | 200 | `frontend/src/components/contacts/shared.tsx` | frontend-ui | 435 | 15.8 | UI component/page |
 | 201 | `frontend/src/components/contacts/SuppliersTab.jsx` | frontend-ui | 836 | 43.1 | UI component/page |
-| 202 | `frontend/src/components/custom-tables/CustomTables.jsx` | frontend-ui | 589 | 26.5 | UI component/page |
+| 202 | `frontend/src/components/custom-tables/CustomTables.tsx` | frontend-ui | 715 | 31.3 | UI component/page |
 | 203 | `frontend/src/components/dashboard/charts/BarChart.tsx` | frontend-ui | 178 | 6.3 | UI component/page |
 | 204 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | frontend-ui | 120 | 4.3 | UI component/page |
 | 205 | `frontend/src/components/dashboard/charts/index.ts` | frontend-ui | 5 | 0.2 | UI component/page |
@@ -372,7 +372,7 @@ Total files documented: **529**
 | 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 733 | 59.5 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 733 | 59.6 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
