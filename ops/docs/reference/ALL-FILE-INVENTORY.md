@@ -210,7 +210,7 @@ Total files documented: **529**
 | 198 | `frontend/src/components/contacts/CustomersTab.tsx` | frontend-ui | 920 | 44.0 | UI component/page |
 | 199 | `frontend/src/components/contacts/DeliveryTab.tsx` | frontend-ui | 952 | 47.4 | UI component/page |
 | 200 | `frontend/src/components/contacts/shared.tsx` | frontend-ui | 435 | 15.8 | UI component/page |
-| 201 | `frontend/src/components/contacts/SuppliersTab.jsx` | frontend-ui | 836 | 43.1 | UI component/page |
+| 201 | `frontend/src/components/contacts/SuppliersTab.tsx` | frontend-ui | 958 | 47.3 | UI component/page |
 | 202 | `frontend/src/components/custom-tables/CustomTables.tsx` | frontend-ui | 715 | 31.3 | UI component/page |
 | 203 | `frontend/src/components/dashboard/charts/BarChart.tsx` | frontend-ui | 178 | 6.3 | UI component/page |
 | 204 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | frontend-ui | 120 | 4.3 | UI component/page |
@@ -372,7 +372,7 @@ Total files documented: **529**
 | 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 738 | 59.9 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 740 | 60.0 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.4 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.3 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |

@@ -767,7 +767,7 @@ Total folders documented: **81**
 | 7 | `CustomersTab.tsx` | UI component/page |
 | 8 | `DeliveryTab.tsx` | UI component/page |
 | 9 | `shared.tsx` | UI component/page |
-| 10 | `SuppliersTab.jsx` | UI component/page |
+| 10 | `SuppliersTab.tsx` | UI component/page |
 
 
 ### 3.31 Folder: `frontend/src/components/custom-tables`

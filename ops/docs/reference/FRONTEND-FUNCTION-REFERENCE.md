@@ -44,7 +44,7 @@ Total files documented: **193**
 | 32 | `frontend/src/components/contacts/CustomersTab.tsx` | 16 |
 | 33 | `frontend/src/components/contacts/DeliveryTab.tsx` | 25 |
 | 34 | `frontend/src/components/contacts/shared.tsx` | 3 |
-| 35 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
+| 35 | `frontend/src/components/contacts/SuppliersTab.tsx` | 20 |
 | 36 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
 | 37 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
 | 38 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 1 |
@@ -946,26 +946,30 @@ Total files documented: **193**
 | 2 | `clearSelection` | const arrow | 110 |
 | 3 | `menuContent` | const arrow | 164 |
 
-### 3.35 `frontend/src/components/contacts/SuppliersTab.jsx`
+### 3.35 `frontend/src/components/contacts/SuppliersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `SupplierForm` | function | 34 |
-| 2 | `set` | const arrow | 50 |
-| 3 | `addOption` | const arrow | 51 |
-| 4 | `updateOption` | const arrow | 55 |
-| 5 | `removeOption` | const arrow | 56 |
-| 6 | `handleSubmit` | const arrow | 57 |
-| 7 | `fieldId` | const arrow | 105 |
-| 8 | `SuppliersTab` | function | 151 |
-| 9 | `toggleSectionCollapsed` | const arrow | 295 |
-| 10 | `isSectionFullySelected` | const arrow | 301 |
-| 11 | `isSectionPartiallySelected` | const arrow | 302 |
-| 12 | `toggleSectionSelection` | const arrow | 303 |
-| 13 | `promise` | const arrow | 330 |
-| 14 | `handleSave` | const arrow | 393 |
-| 15 | `handleDelete` | const arrow | 463 |
-| 16 | `handleBulkDelete` | const arrow | 502 |
+| 1 | `getSupplierApi` | function | 115 |
+| 2 | `normalizeSupplierRows` | function | 120 |
+| 3 | `isSectionRow` | function | 128 |
+| 4 | `getErrorMessage` | function | 132 |
+| 5 | `SupplierForm` | function | 143 |
+| 6 | `set` | const arrow | 159 |
+| 7 | `addOption` | const arrow | 160 |
+| 8 | `updateOption` | const arrow | 164 |
+| 9 | `removeOption` | const arrow | 165 |
+| 10 | `handleSubmit` | const arrow | 166 |
+| 11 | `fieldId` | const arrow | 214 |
+| 12 | `SuppliersTab` | function | 260 |
+| 13 | `toggleSectionCollapsed` | const arrow | 407 |
+| 14 | `isSectionFullySelected` | const arrow | 413 |
+| 15 | `isSectionPartiallySelected` | const arrow | 414 |
+| 16 | `toggleSectionSelection` | const arrow | 415 |
+| 17 | `promise` | const arrow | 449 |
+| 18 | `handleSave` | const arrow | 512 |
+| 19 | `handleDelete` | const arrow | 582 |
+| 20 | `handleBulkDelete` | const arrow | 621 |
 
 ### 3.36 `frontend/src/components/custom-tables/CustomTables.tsx`
 

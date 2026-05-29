@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-29T23:16:33.105Z
+Generated: 2026-05-29T23:33:27.380Z
 
 ## Summary
 
@@ -15,10 +15,10 @@ Generated: 2026-05-29T23:16:33.105Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 89 |
+| .tsx | 90 |
 | .js | 84 |
 | .md | 44 |
-| .jsx | 18 |
+| .jsx | 17 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -65,17 +65,17 @@ Generated: 2026-05-29T23:16:33.105Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 12151 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7920 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6878 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5795 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4218 | ops/docs |
+| ops/docs/reference/PHASE29-AUDIT.json | 12154 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7923 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6882 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5806 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4227 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2645 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2649 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
@@ -112,7 +112,7 @@ Generated: 2026-05-29T23:16:33.105Z
 | frontend/src/components/returns/Returns.tsx | 18 | frontend/components/returns |
 | backend/src/routes/products.js | 17 | backend/routes |
 | frontend/src/components/contacts/DeliveryTab.tsx | 17 | frontend/components/contacts |
-| frontend/src/components/contacts/SuppliersTab.jsx | 16 | frontend/components/contacts |
+| frontend/src/components/contacts/SuppliersTab.tsx | 17 | frontend/components/contacts |
 | backend/src/services/importJobs.js | 14 | backend/services |
 | backend/src/routes/auth.js | 13 | backend/routes |
 | frontend/src/AppContext.jsx | 13 | frontend/src/AppContext.jsx |
