@@ -261,3 +261,21 @@ Use this shape for future entries:
   tunnel failure
 - follow-up insight: line item math is now normalized through a single number
   coercion helper, which is safer for mixed string/number API payloads.
+
+- change: converted the files AI providers tab to TSX with typed provider
+  rows, provider metadata, form state, label text, and provider action
+  callbacks
+- affected files: `frontend/src/components/files/FilesProvidersTab.tsx`,
+  `frontend/src/components/files/FilesPage.jsx`,
+  `frontend/tests/actionStability.test.ts`
+- route or API target: Library AI providers tab, provider create/update/test
+  and delete controls
+- keeper or rollback: keeper if action stability, typecheck, JSX,
+  frontend/backend utility, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 517 action stability, typecheck, JSX,
+  frontend/backend utility, build, Phase 29, and schema/reference checks
+- warm whole-app result: passed in Move 517 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: this tab is now a typed boundary for provider metadata
+  defaults before the larger library page shell is converted.

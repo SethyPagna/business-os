@@ -26,7 +26,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 
-const loadFilesProvidersTab = () => import('./FilesProvidersTab.jsx')
+const loadFilesProvidersTab = () => import('./FilesProvidersTab.tsx')
 const loadFilesResponsesTab = () => import('./FilesResponsesTab')
 const FilesProvidersTab = lazy(loadFilesProvidersTab)
 const FilesResponsesTab = lazy(loadFilesResponsesTab)

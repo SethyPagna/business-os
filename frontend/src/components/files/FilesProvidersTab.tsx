@@ -6,8 +6,121 @@ import {
   TestTube2,
   Trash2,
 } from 'lucide-react'
+import type { Dispatch, SetStateAction } from 'react'
 
-function ProviderStatus({ provider }) {
+type TranslateFn = (key: string, fallbackEn?: string, fallbackKm?: string) => string
+
+type ProviderStatusValue = 'ok' | 'error' | 'untested' | string
+
+interface AiProvider {
+  id: number | string
+  name: string
+  provider: string
+  provider_label?: string
+  provider_type?: string
+  default_model?: string
+  account_email?: string
+  project_name?: string
+  key_masked?: string
+  priority?: number | string
+  requests_per_minute?: number | string
+  max_input_chars?: number | string
+  timeout_ms?: number | string
+  last_status?: ProviderStatusValue
+  last_error?: string
+  notes?: string
+  updated_at?: string
+}
+
+interface ProviderMeta {
+  label?: string
+  supportedTypes?: string[]
+  defaultModel?: string
+  defaultEndpoint?: string
+  defaultPriority?: number
+  safeRequestsPerMinute?: number
+  safeMaxInputChars?: number
+  safeMaxCompletionTokens?: number
+  safeTimeoutMs?: number
+  safeCooldownSeconds?: number
+}
+
+type ProviderMetaMap = Record<string, ProviderMeta>
+type ProviderOption = [string, ProviderMeta]
+
+interface ProviderFormState {
+  id: number | string | null
+  provider: string
+  provider_type: string
+  name: string
+  account_email: string
+  project_name: string
+  api_key: string
+  default_model: string
+  endpoint_override: string
+  priority: number | string
+  requests_per_minute: number | string
+  max_input_chars: number | string
+  max_completion_tokens: number | string
+  timeout_ms: number | string
+  cooldown_seconds: number | string
+  supported_models_text: string
+  notes: string
+  enabled: boolean
+  updated_at?: string
+}
+
+interface ProviderText {
+  entryName: string
+  type: string
+  accountEmail: string
+  projectWorkspace: string
+  apiKey: string
+  apiKeyHint: string
+  defaultModel: string
+  endpointOverride: string
+  priority: string
+  priorityHint: string
+  rpm: string
+  maxInput: string
+  maxOutput: string
+  timeout: string
+  cooldown: string
+  supportedModels: string
+  notes: string
+  enabled: string
+  saving: string
+  saveProvider: string
+  addProvider: string
+}
+
+interface ProviderStatusProps {
+  provider: AiProvider
+}
+
+interface FilesProvidersTabProps {
+  tr: TranslateFn
+  loadingProviders: boolean
+  providers: AiProvider[]
+  loadProviders: () => void
+  testingProviderId: number | string | null
+  deletingProviderId: number | string | null
+  startEditProvider: (provider: AiProvider) => void
+  testProvider: (providerId: AiProvider['id']) => void | Promise<void>
+  removeProvider: (provider: AiProvider) => void | Promise<void>
+  providerForm: ProviderFormState
+  providerMeta: ProviderMetaMap | null | undefined
+  providerOptions: ProviderOption[]
+  selectedProviderMeta: ProviderMeta | null | undefined
+  setProviderForm: Dispatch<SetStateAction<ProviderFormState>>
+  providerText: ProviderText
+  isKhmer: boolean
+  startCreateProvider: () => void
+  saveProvider: () => void | Promise<void>
+  savingProvider: boolean
+}
+
+function ProviderStatus({ provider }: ProviderStatusProps) {
   const status = provider?.last_status || 'untested'
   if (status === 'ok') {
     return <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"><ShieldCheck className="h-3.5 w-3.5" /> Ready</span>
@@ -38,7 +151,7 @@ export default function FilesProvidersTab({
   startCreateProvider,
   saveProvider,
   savingProvider,
-}) {
+}: FilesProvidersTabProps) {
   return (
     <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr] 2xl:grid-cols-[1.3fr,0.7fr]">
       <section className="card p-4 sm:p-5">

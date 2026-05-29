@@ -4046,6 +4046,13 @@ Decision rule:
     callbacks, translation fallbacks, and money/quantity normalization. The
     conversion keeps print/status/membership actions, totals, item breakdowns,
     Khmer fallback copy, and extensionless sales-page lazy imports intact.
+517. Convert the files AI providers tab to TSX. Done:
+    `frontend/src/components/files/FilesProvidersTab.tsx` now types provider
+    rows, provider metadata, provider form state, label text, save/test/delete
+    callbacks, and provider-form state updates. The conversion keeps the
+    provider refresh, edit, test, delete, create, save, and action guard
+    behavior unchanged while moving the library lazy import and action
+    stability source-path guard to the TSX file.
 
 ## Safety Gates
 

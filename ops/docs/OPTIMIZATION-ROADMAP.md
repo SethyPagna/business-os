@@ -5607,3 +5607,12 @@ Move 516 status:
   numeric coercion for totals and item quantities. The move keeps print,
   status update, membership attach, totals, item breakdown, and lazy sales-page
   loading behavior unchanged.
+
+Move 517 status:
+- Move 517 converts the files AI providers tab to
+  `frontend/src/components/files/FilesProvidersTab.tsx`. The typed boundary now
+  covers provider rows, provider status values, provider metadata, provider
+  form state, label text, save/test/delete callbacks, and provider-form state
+  updates. The move keeps library-provider lazy loading, refresh, edit, test,
+  delete, create, save, and bounded action-guard behavior unchanged while
+  moving source-path guards to the TSX file.

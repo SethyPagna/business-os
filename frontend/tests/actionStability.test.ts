@@ -665,7 +665,7 @@ await runTest('product stock helper modals use shared guards and bounded mutatio
 
 await runTest('files AI provider actions use shared guards and bounded mutations', () => {
   const page = readFrontend('src/components/files/FilesPage.jsx')
-  const tab = readFrontend('src/components/files/FilesProvidersTab.jsx')
+  const tab = readFrontend('src/components/files/FilesProvidersTab.tsx')
   const mutationLines = page
     .split('\n')
     .filter((line) => /window\.api\.(createAiProvider|updateAiProvider|deleteAiProvider|testAiProvider)\(/.test(line))
