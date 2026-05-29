@@ -867,7 +867,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `LoyaltyPointsPage.jsx` | UI component/page |
+| 1 | `LoyaltyPointsPage.tsx` | UI component/page |
 
 
 ### 3.37 Folder: `frontend/src/components/navigation`

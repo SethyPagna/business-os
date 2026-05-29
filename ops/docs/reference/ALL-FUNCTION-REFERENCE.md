@@ -209,7 +209,7 @@ Code files scanned: **466**
 | 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
 | 199 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
-| 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
+| 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 10 |
 | 201 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
 | 202 | `frontend/src/components/pos/CartItem.tsx` | 2 |
 | 203 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
@@ -3989,19 +3989,20 @@ Code files scanned: **466**
 | 1 | `getBranchStockKey` | function | 61 |
 | 2 | `ProductDetailModal` | export default function | 65 |
 
-### 3.200 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+### 3.200 `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `sanitizeInteger` | function | 121 |
-| 2 | `sanitizeKhr` | function | 126 |
-| 3 | `formatLookupValue` | function | 132 |
-| 4 | `LoyaltyPointsPage` | export default function | 136 |
-| 5 | `copy` | const arrow | 140 |
-| 6 | `showLoyaltySection` | const arrow | 161 |
-| 7 | `setValue` | function | 231 |
-| 8 | `handleSave` | function | 235 |
-| 9 | `handleLookup` | function | 259 |
+| 1 | `getLoyaltyApi` | function | 187 |
+| 2 | `toCustomerPointRows` | function | 191 |
+| 3 | `getErrorMessage` | function | 195 |
+| 4 | `sanitizeInteger` | function | 199 |
+| 5 | `sanitizeKhr` | function | 204 |
+| 6 | `formatLookupValue` | function | 210 |
+| 7 | `normalizeLoyaltySection` | function | 214 |
+| 8 | `LoyaltyPointsPage` | export default function | 218 |
+| 9 | `handleSave` | function | 327 |
+| 10 | `handleLookup` | function | 351 |
 
 ### 3.201 `frontend/src/components/navigation/Sidebar.tsx`
 

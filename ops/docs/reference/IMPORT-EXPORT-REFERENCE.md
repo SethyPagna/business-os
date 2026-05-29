@@ -209,7 +209,7 @@ Code files documented: **466**
 | 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 | 1 | 0 | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 2 |
 | 199 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 | 1 | 2 | 1 |
-| 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 7 | 1 | 5 | 1 |
+| 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 7 | 1 | 5 | 1 |
 | 201 | `frontend/src/components/navigation/Sidebar.tsx` | 8 | 1 | 6 | 1 |
 | 202 | `frontend/src/components/pos/CartItem.tsx` | 2 | 1 | 2 | 1 |
 | 203 | `frontend/src/components/pos/FilterPanel.tsx` | 2 | 1 | 0 | 1 |
@@ -305,7 +305,7 @@ Code files documented: **466**
 | 293 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 2 |
 | 294 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
 | 295 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
-| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 10 | 0 | 0 |
+| 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 11 | 0 | 0 |
 | 297 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 4 |
 | 298 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
 | 299 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
@@ -3039,7 +3039,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
@@ -3137,7 +3137,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
-  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
@@ -4034,11 +4034,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.200 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+### 3.200 `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
 
 - Declared exports: `function`
 - Imports (7)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../shared/LoadingWatchdog`
   - `../shared/SectionSwitcher`
@@ -5177,7 +5177,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
@@ -5253,7 +5253,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.jsx`
@@ -5339,7 +5339,7 @@ Code files documented: **466**
   - none
 - Referenced by (4)
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
@@ -5658,7 +5658,7 @@ Code files documented: **466**
 
 ### 3.296 `frontend/src/types/jsx-modules.d.ts`
 
-- Declared exports: `AppProvider`, `CustomersTab`, `DeliveryTab`, `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `SuppliersTab`, `component`, `useApp`, `useSync`
+- Declared exports: `AppProvider`, `CustomersTab`, `DeliveryTab`, `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `SuppliersTab`, `component`, `isBrokenLocalizedString`, `useApp`, `useSync`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -5708,7 +5708,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
-  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`

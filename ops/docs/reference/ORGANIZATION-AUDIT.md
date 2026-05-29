@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-29T21:10:52.315Z
+Generated: 2026-05-29T21:28:12.349Z
 
 ## Summary
 
@@ -16,9 +16,9 @@ Generated: 2026-05-29T21:10:52.315Z
 | --- | --- |
 | .ts | 266 |
 | .js | 84 |
-| .tsx | 83 |
+| .tsx | 84 |
 | .md | 44 |
-| .jsx | 24 |
+| .jsx | 23 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -65,17 +65,17 @@ Generated: 2026-05-29T21:10:52.315Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 12148 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7911 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6862 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5725 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4159 | ops/docs |
+| ops/docs/reference/PHASE29-AUDIT.json | 12109 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7922 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6868 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5738 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4169 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2629 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2630 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
@@ -88,7 +88,7 @@ Generated: 2026-05-29T21:10:52.315Z
 | frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1815 | ops/docs/reference |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1748 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1749 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1610 | frontend/src/AppContext.jsx |

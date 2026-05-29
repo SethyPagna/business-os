@@ -232,7 +232,7 @@ Total files documented: **529**
 | 220 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | frontend-ui | 180 | 9.6 | UI component/page |
 | 221 | `frontend/src/components/inventory/movementGroups.ts` | frontend-ui | 287 | 12.9 | UI component/page |
 | 222 | `frontend/src/components/inventory/ProductDetailModal.tsx` | frontend-ui | 267 | 15.0 | UI component/page |
-| 223 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | frontend-ui | 625 | 35.7 | UI component/page |
+| 223 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | frontend-ui | 717 | 39.5 | UI component/page |
 | 224 | `frontend/src/components/navigation/Sidebar.tsx` | frontend-ui | 386 | 17.1 | UI component/page |
 | 225 | `frontend/src/components/pos/CartItem.tsx` | frontend-ui | 158 | 6.3 | UI component/page |
 | 226 | `frontend/src/components/pos/FilterPanel.tsx` | frontend-ui | 289 | 9.3 | UI component/page |
@@ -333,7 +333,7 @@ Total files documented: **529**
 | 321 | `frontend/src/README.md` | frontend-core | 37 | 1.5 | Documentation |
 | 322 | `frontend/src/runtime/runtimeErrorClassifier.ts` | frontend-core | 154 | 5.4 | Project source/support file |
 | 323 | `frontend/src/styles/main.css` | frontend-style | 741 | 29.9 | Project source/support file |
-| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 14 | 0.4 | Project source/support file |
+| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 15 | 0.5 | Project source/support file |
 | 325 | `frontend/src/types/receiptContracts.ts` | frontend-core | 67 | 1.6 | Project source/support file |
 | 326 | `frontend/src/types/settingsContracts.ts` | frontend-core | 27 | 0.5 | Project source/support file |
 | 327 | `frontend/src/utils/actionGuards.ts` | frontend-utils | 76 | 2.2 | Utility helper |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.0 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.1 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |
