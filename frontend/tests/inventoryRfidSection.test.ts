@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const source = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
-const movementsSurface = fs.readFileSync(new URL('../src/components/inventory/InventoryMovementsSurface.jsx', import.meta.url), 'utf8')
+const movementsSurface = fs.readFileSync(new URL('../src/components/inventory/InventoryMovementsSurface.tsx', import.meta.url), 'utf8')
 
 assert.match(source, /RFID_INVENTORY_WORKFLOWS/)
 assert.match(source, /rfidGatewayStatus/)

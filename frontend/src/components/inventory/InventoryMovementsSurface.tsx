@@ -1,7 +1,141 @@
 ﻿import { Fragment } from 'react'
+import type { ComponentType, Dispatch, RefObject, SetStateAction } from 'react'
 import { ChevronDown, ChevronRight, Info, Package } from 'lucide-react'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import ExportMenu from '../shared/ExportMenu'
+import type { PaginationControlsProps } from '../shared/PaginationControls'
+import type { PortalMenuItem } from '../shared/PortalMenu'
+
+type Translator = (key: string) => string | undefined
+type TranslationWithFallback = (key: string, fallback?: string, altFallback?: string) => string
+type MoneyFormatter = (value: number) => string
+type TimeFormatter = (value: unknown) => string
+type MovementId = string
+
+type ActionHistoryItem = {
+  id?: string | number
+  label?: string
+  status?: string
+}
+
+type ActionHistoryState = {
+  undoItems?: ActionHistoryItem[]
+  redoItems?: ActionHistoryItem[]
+  serverItems?: ActionHistoryItem[]
+  isAdmin?: boolean
+  userFilter?: string
+  setUserFilter?: (userId: string) => void
+  userOptions?: Array<{ id: string | number; name?: string; username?: string }>
+  canUndo?: boolean
+  canRedo?: boolean
+  busy?: boolean
+  lastUndoLabel?: string
+  lastRedoLabel?: string
+  undo: (id?: string | number) => void
+  redo: (id?: string | number) => void
+}
+
+type MovementRecord = {
+  id: MovementId | number
+  product_name?: string
+  created_at?: string | null
+  branch_name?: string
+  user_name?: string
+  reason?: string
+  quantity?: number
+  total_cost_usd?: number
+}
+
+type MovementGroup = {
+  id: MovementId
+  movement_type: string
+  movementLabel: string
+  created_at?: string | null
+  latest_at?: string | null
+  reference_id?: unknown
+  productSummary?: string
+  branchSummary?: string
+  userSummary?: string
+  reasonSummary?: string
+  totalQuantity: number
+  totalCostUsd?: number
+  items: MovementRecord[]
+}
+
+type MovementActionGroup = {
+  id: string
+  label: string
+  ids: MovementId[]
+  items: MovementGroup[]
+}
+
+type MovementSection = {
+  id: string
+  label: string
+  ids: MovementId[]
+  groups: MovementActionGroup[]
+}
+
+type MovementMeta = {
+  page: number
+  pageSize: number
+  total: number
+}
+
+type MovementGroupPage = {
+  items: MovementRecord[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
+
+type InventoryMovementsSurfaceProps = {
+  MOV_COLORS: Record<string, string>
+  PaginationControls: ComponentType<PaginationControlsProps>
+  expandedMovementGroups: Set<MovementId>
+  expandedMovementPages: Record<string, number>
+  exportMovementGroups: (groupIds: MovementId[], exportName: string) => void
+  fmtTime: TimeFormatter
+  fmtUSD: MoneyFormatter
+  getMovementActionGroupRecordCount: (group: MovementActionGroup) => number
+  getMovementGroupPage: (group: MovementGroup, options: { page: number; pageSize: number }) => MovementGroupPage
+  getMovementRecordCount: (group: MovementGroup) => number
+  getMovementSectionRecordCount: (section: MovementSection) => number
+  inventoryExportItems: Array<PortalMenuItem | null | undefined | false>
+  isMovementScopeFullySelected: (ids: MovementId[]) => boolean
+  isMovementScopePartiallySelected: (ids: MovementId[]) => boolean
+  loading: boolean
+  movementDateRangeLabel: string
+  movementEndDate: string
+  movementMeta: MovementMeta
+  movementSections: MovementSection[]
+  movementSelectAllRef: RefObject<HTMLInputElement>
+  movementStartDate: string
+  openMovementProductDetail: (movement: MovementRecord) => void
+  selectedMovementGroups: MovementId[]
+  selectedMovementIds: Set<MovementId>
+  setSelectedMovementIds: Dispatch<SetStateAction<Set<MovementId>>>
+  setExpandedMovementGroupPage: (groupId: MovementId, page: number) => void
+  setMovementEndDate: (value: string) => void
+  setMovementMeta: Dispatch<SetStateAction<MovementMeta>>
+  setMovementStartDate: (value: string) => void
+  setShowMovementDateFilter: Dispatch<SetStateAction<boolean>>
+  showMovementActionGroups: boolean
+  showMovementDateFilter: boolean
+  t: Translator
+  toggleAllMovementSelection: (checked: boolean) => void
+  toggleMovementGroup: (groupId: MovementId) => void
+  toggleMovementScopeSelection: (ids: MovementId[], checked: boolean) => void
+  toggleMovementSectionCollapsed: (sectionId: string) => void
+  toggleMovementSelection: (groupId: MovementId) => void
+  tr: TranslationWithFallback
+  actionHistory?: ActionHistoryState | null
+  collapsedMovementSections: Set<string>
+  visibleMovementGroups: MovementGroup[]
+  visibleMovementQuantity: number
+  visibleMovementRecordCount: number
+}
 
 export default function InventoryMovementsSurface({
   MOV_COLORS,
@@ -48,7 +182,7 @@ export default function InventoryMovementsSurface({
   visibleMovementGroups,
   visibleMovementQuantity,
   visibleMovementRecordCount,
-}) {
+}: InventoryMovementsSurfaceProps) {
   const movementInfo = tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.')
 
   return (
@@ -466,7 +600,7 @@ export default function InventoryMovementsSurface({
                                         <div className="space-y-3">
                                           <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
                                             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('reference')}</div>
-                                            <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">{group.reference_id || 'N/A'}</div>
+                                            <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">{String(group.reference_id || 'N/A')}</div>
                                           </div>
                                           <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
                                             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('recorded_at')}</div>

@@ -4128,6 +4128,15 @@ Decision rule:
     table, mobile compact product cards, selection indeterminate states,
     low/out-of-stock badges, price/sales metrics, and inventory mobile-card
     layout guard intact.
+527. Convert the inventory movements surface to TSX. Done:
+    `frontend/src/components/inventory/InventoryMovementsSurface.tsx` now
+    types movement records, grouped movement sections, action groups, expanded
+    group page state, movement metadata, selected group ids, action history,
+    export menu items, date filters, selection scopes, movement detail
+    callbacks, and injected pagination controls. The conversion keeps the
+    Inventory page extensionless lazy import, mobile movement cards, desktop
+    grouped movement table, custom date range controls, selection/export
+    actions, product detail callbacks, and RFID movement-source guard intact.
 
 ## Safety Gates
 

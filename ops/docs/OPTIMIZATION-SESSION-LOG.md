@@ -474,3 +474,30 @@ Use this shape for future entries:
 - follow-up insight: the inventory product card/table boundary now documents
   the shared row shape before the larger Inventory shell conversion, reducing
   the risk of losing mobile compactness or branch-stock detail in later moves.
+
+- change: converted the inventory movements surface to TSX with typed movement
+  records, grouped movement sections, action groups, expanded page state,
+  movement metadata, selected ids, action history, export items, date filters,
+  selection scope callbacks, product detail callbacks, and injected pagination
+  controls
+- affected files:
+  `frontend/src/components/inventory/InventoryMovementsSurface.tsx`,
+  `frontend/tests/inventoryRfidSection.test.ts`
+- route or API target: Inventory movements section, grouped movement history,
+  movement selection/export, custom date range filter, movement product detail
+  links
+- keeper or rollback: keeper if inventory RFID section, inventory movement
+  groups, typecheck, JSX, frontend/backend utility, build, Phase 29 audit, and
+  Phase 8.4 live suite pass
+- route-scoped result: passed in Move 527 inventory RFID section, inventory
+  movement groups, UI verifier, typecheck, JSX, frontend/backend utility,
+  build, Phase 29, organization, schema, and reference checks
+- warm whole-app result: passed in Move 527 Phase 8.4 live UI suite with 72
+  checked UI signals and zero relevant console messages; public Cloudflare
+  remained skipped for the known tunnel failure
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed 220,307
+  bytes from one old Phase 8.4 runtime report, kept latest local backups and
+  latest R2 backup metadata, and pruned no Docker volumes or images
+- follow-up insight: movement grouping now has a typed UI boundary around the
+  section/action/group nesting, which reduces risk before converting the large
+  Inventory shell that assembles those structures.

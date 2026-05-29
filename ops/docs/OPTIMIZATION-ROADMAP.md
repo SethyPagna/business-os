@@ -5710,3 +5710,15 @@ Move 526 status:
   extensionless import, grouped desktop table, compact mobile cards,
   indeterminate selection states, stock status badges, price/sales metrics,
   and mobile-card layout guard behavior unchanged.
+
+Move 527 status:
+- Move 527 converts the inventory movements surface to
+  `frontend/src/components/inventory/InventoryMovementsSurface.tsx`. The typed
+  boundary now covers movement records, grouped movement sections, action
+  groups, expanded movement page state, movement metadata, action history,
+  export menu entries, date-filter callbacks, selection scope toggles,
+  selected movement ids, product detail callbacks, and injected pagination
+  controls. The move keeps Inventory's extensionless lazy import, mobile
+  movement cards, desktop grouped movement table, date range controls,
+  selection/export actions, product detail links, and RFID movement guard
+  behavior unchanged.
