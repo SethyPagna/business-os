@@ -3559,7 +3559,7 @@ Move 322 status:
 
 Move 323 status:
 - Move 323 reuses Sales selection and filter-count helpers:
-  `frontend/src/components/sales/Sales.jsx` now builds one memoized visible sale
+  `frontend/src/components/sales/Sales.tsx` now builds one memoized visible sale
   ID list for selection cleanup/select-all, normalizes grouped selection IDs
   through `normalizeFiniteIds()`, counts partial selection state through
   `countSelectedIds()`, and counts active filters through `countActiveFlags()`.
@@ -5768,4 +5768,15 @@ Move 531 status:
   the Contacts page import, POS `parseContactOptions` import contract,
   include-points customer loading, grouped selection helpers, same-tick
   save/delete/bulk guards, CSV export, and contact pricing/loading source
+  guard behavior unchanged.
+
+Move 532 status:
+- Move 532 converts the sales page shell to
+  `frontend/src/components/sales/Sales.tsx`. The typed boundary now covers sale
+  rows, sale line items, user filter options, app/sync context access, local
+  sales API calls, status and membership mutation payloads, grouped sale
+  sections, selection ids, export rows, loading watchdog timers, and
+  action-history payloads. The move keeps receipt/detail/export/import modal
+  lazy imports, same-tick status and bulk guards, bounded user filter reads,
+  grouped selection helpers, CSV export, and sales action/performance source
   guard behavior unchanged.

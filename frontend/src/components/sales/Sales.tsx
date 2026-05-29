@@ -1,9 +1,11 @@
 import { Suspense, lazy, useDeferredValue, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { ComponentProps } from 'react'
 import { Search as SearchIcon, ShoppingBag, Upload } from 'lucide-react'
-import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
+import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, paginateItems } from '../shared/PaginationControls'
@@ -30,31 +32,151 @@ const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
 const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000
 
-function multiMatch(text, terms) {
+type TranslateFn = (key: string) => string
+type NotifyFn = (message: string, tone?: string) => void
+type MoneyFormatter = (value: number | string) => string
+type SalesGroupMode = 'time' | 'time+action'
+type SortDirection = 'asc' | 'desc'
+
+interface SaleItemRecord {
+  id?: number | string
+  product_id?: number | string
+  branch_name?: string
+  quantity?: number | string
+}
+
+interface SaleRecord extends Record<string, unknown> {
+  id: number | string
+  receipt_number?: string
+  created_at?: string
+  sale_status?: string
+  cashier_name?: string
+  payment_method?: string
+  notes?: string
+  customer_name?: string
+  customer_membership_number?: string
+  customer_phone?: string
+  customer_address?: string
+  branch_name?: string
+  items?: SaleItemRecord[] | string | null
+  total_usd?: number
+  total?: number
+  total_khr?: number
+  net_total_usd?: number
+}
+
+interface UserOption {
+  id?: number | string | null
+  name?: string | null
+  username?: string | null
+}
+
+interface AppUser {
+  id?: number | string | null
+  name?: string | null
+  username?: string | null
+  role_code?: string | null
+  permissions?: unknown
+}
+
+interface AppContextValue {
+  t: TranslateFn
+  settings?: { language?: string | null; [key: string]: unknown } | null
+  fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
+  notify: NotifyFn
+  user?: AppUser | null
+}
+
+interface SyncContextValue {
+  syncChannel?: {
+    channel?: string | null
+    ts?: string | number | null
+  } | null
+}
+
+interface SaleMembershipPayload extends Record<string, unknown> {
+  membershipNumber?: string
+  clearAssignment?: boolean
+  userId?: number | string | null
+  userName?: string | null
+  device_name?: string
+  device_tz?: string
+}
+
+interface SaleStatusEntry {
+  id: number | string
+  status: string
+}
+
+interface SalesApi {
+  getSales: (params: Record<string, unknown>) => Promise<unknown>
+  getUsers: () => Promise<unknown>
+  updateSaleStatus: (saleId: number | string, status: string, notes?: string) => Promise<unknown>
+  attachSaleCustomer: (saleId: number | string, payload: SaleMembershipPayload) => Promise<unknown>
+}
+
+type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
+type SalesListSurfaceProps = ComponentProps<typeof SalesListSurface>
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+function getSalesApi(): SalesApi {
+  if (typeof window === 'undefined' || !window.api) throw new Error('Sales API is not available.')
+  return window.api as SalesApi
+}
+
+function normalizeSaleRows(value: unknown): SaleRecord[] {
+  if (Array.isArray(value)) return value as SaleRecord[]
+  if (value && typeof value === 'object' && Array.isArray((value as { items?: unknown }).items)) {
+    return (value as { items: SaleRecord[] }).items
+  }
+  return []
+}
+
+function normalizeUserOptions(value: unknown): UserOption[] {
+  if (Array.isArray(value)) return value as UserOption[]
+  return []
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function isWriteConflict(error: unknown): boolean {
+  return !!error && typeof error === 'object' && (
+    (error as { conflict?: unknown }).conflict === true ||
+    (error as { code?: unknown }).code === 'write_conflict'
+  )
+}
+
+function multiMatch(text: string, terms: string[]): boolean {
   return terms.every((term) => text.toLowerCase().includes(term.toLowerCase()))
 }
 
-function normalizeFiniteIdsFrom(items = [], getValue = (value) => value) {
-  return items.reduce((normalized, item) => {
+function normalizeFiniteIdsFrom<T = unknown>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
+  return items.reduce<number[]>((normalized, item) => {
     const id = Number(getValue(item))
     if (Number.isFinite(id)) normalized.push(id)
     return normalized
   }, [])
 }
 
-function normalizeFiniteIds(ids = []) {
+function normalizeFiniteIds(ids: Array<number | string> = []): number[] {
   return normalizeFiniteIdsFrom(ids)
 }
 
-function countSelectedIds(ids = [], selectedIds = new Set()) {
+function countSelectedIds(ids: Array<number | string> = [], selectedIds: Set<number> = new Set()): number {
   let count = 0
   for (const id of ids) {
-    if (selectedIds.has(id)) count += 1
+    if (selectedIds.has(Number(id))) count += 1
   }
   return count
 }
 
-function countActiveFlags(flags = []) {
+function countActiveFlags(flags: boolean[] = []): number {
   let count = 0
   for (const flag of flags) {
     if (flag) count += 1
@@ -62,9 +184,9 @@ function countActiveFlags(flags = []) {
   return count
 }
 
-function getSaleBranchLabel(sale) {
+function getSaleBranchLabel(sale: SaleRecord | null | undefined): string {
   if (sale?.branch_name) return sale.branch_name
-  const itemBranchNames = [...new Set((Array.isArray(sale?.items) ? sale.items : []).map((item) => item?.branch_name).filter(Boolean))]
+  const itemBranchNames = [...new Set((Array.isArray(sale?.items) ? sale.items : []).map((item) => String(item?.branch_name || '')).filter(Boolean))]
   if (itemBranchNames.length === 1) return itemBranchNames[0]
   if (itemBranchNames.length > 1) return 'Multiple branches'
   return ''
@@ -74,36 +196,36 @@ export default function Sales() {
   const { t, settings, fmtUSD, fmtKHR, notify, user } = useApp()
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('sales')
-  const [sales, setSales] = useState([])
+  const [sales, setSales] = useState<SaleRecord[]>([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [userFilter, setUserFilter] = useState('all')
-  const [userOptions, setUserOptions] = useState([])
+  const [userOptions, setUserOptions] = useState<UserOption[]>([])
   const [salesFiltersOpen, setSalesFiltersOpen] = useState(false)
   const [userOptionsLoaded, setUserOptionsLoaded] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
-  const [selectedIds, setSelectedIds] = useState(() => new Set())
-  const [selectedSale, setSelectedSale] = useState(null)
-  const [detailSale, setDetailSale] = useState(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null)
+  const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
   const [showExport, setShowExport] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [bulkStatusSaving, setBulkStatusSaving] = useState('')
-  const [salesGroupMode, setSalesGroupMode] = useState('time')
-  const [salesSortDirection, setSalesSortDirection] = useState('desc')
+  const [salesGroupMode, setSalesGroupMode] = useState<SalesGroupMode>('time')
+  const [salesSortDirection, setSalesSortDirection] = useState<SortDirection>('desc')
   const [salesPage, setSalesPage] = useState(1)
   const [salesPageSize, setSalesPageSize] = useState(50)
-  const [collapsedSalesSections, setCollapsedSalesSections] = useState(() => new Set())
-  const selectAllRef = useRef(null)
+  const [collapsedSalesSections, setCollapsedSalesSections] = useState<Set<string>>(() => new Set())
+  const selectAllRef = useRef<HTMLInputElement>(null)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
-  const loadPromiseRef = useRef(null)
-  const loadWatchdogRef = useRef(null)
-  const statusActionRef = useRef(new Set())
-  const membershipActionRef = useRef(new Set())
+  const loadPromiseRef = useRef<Promise<void> | null>(null)
+  const loadWatchdogRef = useRef<number | undefined>(undefined)
+  const statusActionRef = useRef<Set<string>>(new Set())
+  const membershipActionRef = useRef<Set<string>>(new Set())
   const bulkStatusInFlightRef = useRef(false)
   const aliveRef = useRef(true)
   const actionHistory = useActionHistory({ limit: 3, notify })
@@ -112,20 +234,22 @@ export default function Sales() {
   const isAdmin = useMemo(() => {
     const roleCode = String(user?.role_code || '').toLowerCase()
     const username = String(user?.username || '').toLowerCase()
-    let permissions = user?.permissions || {}
+    let permissions: Record<string, unknown> = {}
     try {
-      permissions = typeof permissions === 'string' ? JSON.parse(permissions || '{}') : permissions
+      permissions = typeof user?.permissions === 'string'
+        ? JSON.parse(user.permissions || '{}') as Record<string, unknown>
+        : (user?.permissions && typeof user.permissions === 'object' ? user.permissions as Record<string, unknown> : {})
     } catch {
       permissions = {}
     }
     return username === 'admin' || roleCode === 'admin' || !!permissions.all
   }, [user])
 
-  const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
+  const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string) => {
     const candidate = fallbackKm || fallbackEn
     return isBrokenLocalizedString(String(candidate || '')) ? fallbackEn : candidate
   }, [])
-  const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const translateOr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn) => {
     const value = t(key)
     if (value && value !== key) return value
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
@@ -150,14 +274,19 @@ export default function Sales() {
     }
   }, [monthFilter, yearFilter])
 
-  const loadSales = useCallback(async (silent = false) => {
+  const clearLoadWatchdog = useCallback(() => {
+    window.clearTimeout(loadWatchdogRef.current)
+    loadWatchdogRef.current = undefined
+  }, [])
+
+  const loadSales = useCallback(async (silent = false): Promise<void> => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       if (!silent && aliveRef.current) {
         setLoading(true)
         setLoadError(null)
-        window.clearTimeout(loadWatchdogRef.current)
+        clearLoadWatchdog()
         if (!loadedOnceRef.current) {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -173,23 +302,24 @@ export default function Sales() {
           ...(debouncedSearch ? { search: debouncedSearch } : {}),
           ...salesDateRange,
         }
-        const result = await withLoaderTimeout(() => window.api.getSales(params), 'Sales', 20000)
+        const result = await withLoaderTimeout(() => getSalesApi().getSales(params), 'Sales', 20000)
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        if (Array.isArray(result)) {
-          setSales(result)
+        const rows = normalizeSaleRows(result)
+        if (rows.length || Array.isArray(result)) {
+          setSales(rows)
           loadedOnceRef.current = true
           setLoadError(null)
         }
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        console.error('[Sales] load failed:', error.message)
+        console.error('[Sales] load failed:', getErrorMessage(error, 'Unknown sales load error'))
         if (!silent && !loadedOnceRef.current) {
-          setLoadError(error?.message || translateOr('sales_load_failed', 'Failed to load sales'))
+          setLoadError(getErrorMessage(error, translateOr('sales_load_failed', 'Failed to load sales')))
         } else if (!silent) {
           setLoadError(translateOr('sales_refresh_failed', 'Sales could not refresh right now. Showing the latest loaded data.'))
         }
       } finally {
-        window.clearTimeout(loadWatchdogRef.current)
+        clearLoadWatchdog()
         if (!silent && aliveRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
           setLoading(false)
         }
@@ -200,7 +330,7 @@ export default function Sales() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [debouncedSearch, isAdmin, salesDateRange, statusFilter, translateOr, userFilter])
+  }, [clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, statusFilter, translateOr, userFilter])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -211,7 +341,7 @@ export default function Sales() {
 
   useEffect(() => {
     if (!isActive) {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
       setLoading(false)
@@ -219,7 +349,7 @@ export default function Sales() {
     }
     aliveRef.current = true
     loadSales(loadedOnceRef.current)
-  }, [isActive, loadSales])
+  }, [clearLoadWatchdog, isActive, loadSales])
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
@@ -228,10 +358,10 @@ export default function Sales() {
   useEffect(() => {
     if (!isActive || !isAdmin || !salesFiltersOpen || userOptionsLoaded) return
     let cancelled = false
-    withLoaderTimeout(() => window.api.getUsers(), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS)
+    withLoaderTimeout(() => getSalesApi().getUsers(), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS)
       .then((rows) => {
         if (cancelled) return
-        setUserOptions(Array.isArray(rows) ? rows : [])
+        setUserOptions(normalizeUserOptions(rows))
         setUserOptionsLoaded(true)
       })
       .catch(() => {
@@ -244,28 +374,28 @@ export default function Sales() {
   }, [isActive, isAdmin, salesFiltersOpen, userOptionsLoaded])
   useEffect(() => () => {
     aliveRef.current = false
-    window.clearTimeout(loadWatchdogRef.current)
+    clearLoadWatchdog()
     invalidateTrackedRequest(loadRequestRef)
     loadPromiseRef.current = null
-  }, [])
+  }, [clearLoadWatchdog])
 
-  const runSaleStatusMutation = useCallback((saleId, nextStatus, notes) => (
+  const runSaleStatusMutation = useCallback((saleId: number | string, nextStatus: string, notes?: string) => (
     withLoaderTimeout(
-      () => window.api.updateSaleStatus(saleId, nextStatus, notes),
+      () => getSalesApi().updateSaleStatus(saleId, nextStatus, notes),
       'Update sale status',
       SALES_STATUS_MUTATION_TIMEOUT_MS,
     )
   ), [])
 
-  const runSaleMembershipMutation = useCallback((saleId, payload) => (
+  const runSaleMembershipMutation = useCallback((saleId: number | string, payload: SaleMembershipPayload) => (
     withLoaderTimeout(
-      () => window.api.attachSaleCustomer(saleId, payload),
+      () => getSalesApi().attachSaleCustomer(saleId, payload),
       'Attach sale membership',
       SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS,
     )
   ), [])
 
-  const handleStatusChange = async (saleId, newStatus, notes, recordHistory = true) => {
+  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true): Promise<boolean> => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
     const actionKey = String(numericId)
@@ -298,18 +428,18 @@ export default function Sales() {
       }
       return true
     } catch (error) {
-      if (error?.conflict || error?.code === 'write_conflict') {
+      if (isWriteConflict(error)) {
         await loadSales()
         return false
       }
-      notify(`Failed to update status: ${error.message || error}`, 'error')
+      notify(`Failed to update status: ${getErrorMessage(error, String(error || 'Unknown error'))}`, 'error')
       return false
     } finally {
       finishKeyedAction(statusActionRef, actionKey)
     }
   }
 
-  const handleAttachMembership = async (saleId, membershipNumber) => {
+  const handleAttachMembership = async (saleId: number | string, membershipNumber: string): Promise<boolean> => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
     const actionKey = String(numericId)
@@ -372,11 +502,11 @@ export default function Sales() {
       }
       return true
     } catch (error) {
-      if (error?.conflict || error?.code === 'write_conflict') {
+      if (isWriteConflict(error)) {
         await loadSales()
         return false
       }
-      notify(error?.message || translateOr('failed_to_attach_membership', 'Failed to link membership'), 'error')
+      notify(getErrorMessage(error, translateOr('failed_to_attach_membership', 'Failed to link membership')), 'error')
       return false
     } finally {
       finishKeyedAction(membershipActionRef, actionKey)
@@ -455,18 +585,18 @@ export default function Sales() {
   )
 
   useEffect(() => {
-    const validIds = new Set(filteredIds)
+    const validIds = new Set<number>(filteredIds)
     setSelectedIds((current) => {
       const nextIds = [...current].filter((id) => validIds.has(id))
       if (nextIds.length === current.size && nextIds.every((id) => current.has(id))) return current
-      return new Set(nextIds)
+      return new Set<number>(nextIds)
     })
   }, [filteredIds])
 
   useEffect(() => {
     setCollapsedSalesSections((current) => {
-      const validIds = new Set(salesSections.map((section) => section.id))
-      const next = new Set([...current].filter((id) => validIds.has(id)))
+      const validIds = new Set<string>(salesSections.map((section) => section.id))
+      const next = new Set<string>([...current].filter((id) => validIds.has(id)))
       return next.size === current.size ? current : next
     })
   }, [salesSections])
@@ -489,28 +619,28 @@ export default function Sales() {
     .filter((sale) => (sale.sale_status || 'completed') === 'awaiting_payment')
     .reduce((sum, sale) => sum + (sale.total_usd || 0), 0)
 
-  const toggleSelected = (saleId) => {
+  const toggleSelected = (saleId: number | string) => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return
     setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
   }
 
-  const toggleSelectAll = (checked) => {
+  const toggleSelectAll = (checked: boolean) => {
     if (!checked) {
-      setSelectedIds(new Set())
+      setSelectedIds(new Set<number>())
       return
     }
-    setSelectedIds(new Set(filteredIds))
+    setSelectedIds(new Set<number>(filteredIds))
   }
 
-  const toggleSelectionScope = useCallback((ids, checked) => {
+  const toggleSelectionScope = useCallback((ids: Array<number | string>, checked: boolean) => {
     const normalized = normalizeFiniteIds(ids)
     setSelectedIds((current) => toggleIdSet(current, normalized, checked))
   }, [])
 
-  const toggleSalesSection = useCallback((sectionId) => {
+  const toggleSalesSection = useCallback((sectionId: string) => {
     setCollapsedSalesSections((current) => {
-      const next = new Set(current)
+      const next = new Set<string>(current)
       if (next.has(sectionId)) next.delete(sectionId)
       else next.add(sectionId)
       return next
@@ -518,7 +648,7 @@ export default function Sales() {
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => {
+    (ids: Array<number | string> = []) => {
       const normalized = normalizeFiniteIds(ids)
       return normalized.length > 0 && countSelectedIds(normalized, selectedIds) === normalized.length
     },
@@ -526,7 +656,7 @@ export default function Sales() {
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => {
+    (ids: Array<number | string> = []) => {
       const normalized = normalizeFiniteIds(ids)
       const selectedCount = countSelectedIds(normalized, selectedIds)
       return selectedCount > 0 && selectedCount < normalized.length
@@ -553,8 +683,8 @@ export default function Sales() {
     notify(`Exported ${selectedSales.length} selected sale${selectedSales.length === 1 ? '' : 's'}.`)
   }
 
-  const applySaleStatusEntries = useCallback(async (entries = [], notes = '') => {
-    const statusRun = await runConcurrentTasks(entries, async (entry) => {
+  const applySaleStatusEntries = useCallback(async (entries: SaleStatusEntry[] = [], notes = '') => {
+    const statusRun = await runConcurrentTasks<SaleStatusEntry, number>(entries, async (entry: SaleStatusEntry) => {
       const saleId = Number(entry?.id || 0)
       const nextStatus = String(entry?.status || '').trim()
       if (!saleId || !nextStatus) throw new Error('Invalid sale status entry')
@@ -562,10 +692,10 @@ export default function Sales() {
       return saleId
     })
     const failedIds = statusRun.failures
-      .map((entry) => Number(entry.item?.id || 0))
+      .map((entry: { item?: SaleStatusEntry }) => Number(entry.item?.id || 0))
       .filter((id) => Number.isFinite(id) && id > 0)
     const updatedIds = statusRun.successes
-      .map((entry) => Number(entry.value || entry.item?.id || 0))
+      .map((entry: { value?: number; item?: SaleStatusEntry }) => Number(entry.value || entry.item?.id || 0))
       .filter((id) => Number.isFinite(id) && id > 0)
 
     await loadSales(true)
@@ -582,7 +712,7 @@ export default function Sales() {
     }
   }, [loadSales, runSaleStatusMutation])
 
-  const handleBulkStatusUpdate = async (nextStatus) => {
+  const handleBulkStatusUpdate = async (nextStatus: string) => {
     if (!selectedSales.length || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
     const previousStatuses = selectedSales.map((sale) => ({
       id: Number(sale.id),
@@ -592,7 +722,7 @@ export default function Sales() {
     try {
       const nextEntries = previousStatuses.map((entry) => ({ id: entry.id, status: nextStatus }))
       const { done, failed, failedIds, updatedIds } = await applySaleStatusEntries(nextEntries, '')
-      setSelectedIds(new Set(failedIds))
+      setSelectedIds(new Set<number>(failedIds))
       const undoEntries = previousStatuses.filter((entry) => updatedIds.includes(entry.id))
       if (done > 0 && undoEntries.length) {
         actionHistory.pushAction({
@@ -613,7 +743,7 @@ export default function Sales() {
     }
   }
 
-  const exportVisibleSales = useCallback((rows = filtered, filePrefix = 'sales-visible') => {
+  const exportVisibleSales = useCallback((rows: SaleRecord[] = filtered, filePrefix = 'sales-visible') => {
     const exportRows = rows.map((sale) => ({
       Receipt: sale.receipt_number || '',
       Date: sale.created_at || '',
@@ -630,14 +760,14 @@ export default function Sales() {
     downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)
   }, [filtered])
 
-  const salesExportItems = useMemo(() => ([
+  const salesExportItems = useMemo<Array<PortalMenuItem | null | false>>(() => ([
     { label: translateOr('export_visible_sales', 'Export visible sales', 'នាំចេញការលក់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
     selectedSales.length ? { label: translateOr('export_selected_sales', 'Export selected sales', 'នាំចេញការលក់ដែលបានជ្រើស'), onClick: handleExportSelected, color: 'blue' } : null,
     statusFilter !== 'all' ? { label: translateOr('export_filtered_status', `Export ${getStatusLabel(statusFilter, t)}`, `នាំចេញតាមស្ថានភាព ${getStatusLabel(statusFilter, t)}`), onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
     yearFilter !== 'all' || monthFilter !== 'all' ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
     'divider',
     { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'របាយការណ៍លម្អិតការលក់'), onClick: () => setShowExport(true), color: 'green' },
-  ].filter(Boolean)), [exportVisibleSales, filtered, handleExportSelected, monthFilter, selectedSales.length, statusFilter, t, translateOr, yearFilter])
+  ].filter(Boolean) as Array<PortalMenuItem | null | false>), [exportVisibleSales, filtered, handleExportSelected, monthFilter, selectedSales.length, statusFilter, t, translateOr, yearFilter])
 
   const salesFilterSections = useMemo(() => ([
     {
@@ -729,7 +859,7 @@ export default function Sales() {
   if (selectedSale) {
     return (
       <Suspense fallback={null}>
-        <Receipt sale={selectedSale} settings={settings} onClose={() => setSelectedSale(null)} />
+        <Receipt sale={selectedSale} settings={settings || undefined} onClose={() => setSelectedSale(null)} />
       </Suspense>
     )
   }
@@ -793,7 +923,7 @@ export default function Sales() {
         />
       </div>
 
-      <ActionHistoryBar history={actionHistory} className="mb-3" summaryMode="compact" />
+      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} className="mb-3" summaryMode="compact" />
 
       {selectedSales.length > 0 ? (
         <div className="sticky top-2 z-30 mb-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/95 px-2.5 py-2 text-sm shadow-sm backdrop-blur dark:border-blue-900/40 dark:bg-blue-900/30">
@@ -802,7 +932,7 @@ export default function Sales() {
           <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'completed' ? 'Saving...' : 'Done'}</button>
           <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'awaiting_delivery' ? 'Saving...' : 'Delivery'}</button>
           <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('cancelled')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'cancelled' ? 'Saving...' : 'Cancel'}</button>
-          <button type="button" className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white/70 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-700/60 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
+          <button type="button" className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white/70 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-700/60 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set<number>())}>
             Clear
           </button>
         </div>
@@ -851,16 +981,16 @@ export default function Sales() {
         fmtKHR={fmtKHR}
         fmtTime={fmtTime}
         fmtUSD={fmtUSD}
-        getSaleBranchLabel={getSaleBranchLabel}
+        getSaleBranchLabel={getSaleBranchLabel as SalesListSurfaceProps['getSaleBranchLabel']}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
         isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
         loading={loading}
         revenue={revenue}
-        salesSections={salesSections}
-        selectAllRef={selectAllRef}
+        salesSections={salesSections as SalesListSurfaceProps['salesSections']}
+        selectAllRef={selectAllRef as SalesListSurfaceProps['selectAllRef']}
         selectedIds={selectedIds}
-        setDetailSale={setDetailSale}
-        setSelectedSale={setSelectedSale}
+        setDetailSale={(sale) => setDetailSale(sale as SaleRecord)}
+        setSelectedSale={(sale) => setSelectedSale(sale as SaleRecord)}
         showSalesActionGroups={showSalesActionGroups}
         t={t}
         toggleSalesSection={toggleSalesSection}
@@ -877,7 +1007,7 @@ export default function Sales() {
             onClose={() => setDetailSale(null)}
             onStatusChange={handleStatusChange}
             onAttachMembership={handleAttachMembership}
-            onPrint={(sale) => setSelectedSale(sale)}
+            onPrint={(sale) => setSelectedSale(sale as SaleRecord)}
             t={t}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}

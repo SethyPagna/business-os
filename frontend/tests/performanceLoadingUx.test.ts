@@ -24,7 +24,7 @@ const suppliers = fs.readFileSync(new URL('../src/components/contacts/SuppliersT
 const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab.jsx', import.meta.url), 'utf8')
 const pos = fs.readFileSync(new URL('../src/components/pos/POS.jsx', import.meta.url), 'utf8')
 const posFilterPanel = fs.readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
-const sales = fs.readFileSync(new URL('../src/components/sales/Sales.jsx', import.meta.url), 'utf8')
+const sales = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
 const salesExportModal = fs.readFileSync(new URL('../src/components/sales/ExportModal.tsx', import.meta.url), 'utf8')
 const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
 const returns = fs.readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
@@ -440,17 +440,17 @@ assert.match(
 )
 assert.match(
   sales,
-  /withLoaderTimeout\(\(\) => window\.api\.getUsers\(\), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => getSalesApi\(\)\.getUsers\(\), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS\)/,
   'sales user filter options should timeout slow user reads',
 )
 assert.doesNotMatch(
   sales,
-  /withLoaderTimeout\(\(\) => window\.api\.getUsers\(\), 'Sales user filters'[\s\S]{0,260}catch\(\(\) => \{[\s\S]{0,180}setUserOptions\(\[\]\)/,
+  /withLoaderTimeout\(\(\) => getSalesApi\(\)\.getUsers\(\), 'Sales user filters'[\s\S]{0,260}catch\(\(\) => \{[\s\S]{0,180}setUserOptions\(\[\]\)/,
   'sales user filter options should keep previously loaded options on refresh failure',
 )
 assert.match(
   sales,
-  /function normalizeFiniteIdsFrom\(items = \[\],[\s\S]*items\.reduce/,
+  /function normalizeFiniteIdsFrom<T = unknown>\(items: T\[\] = \[\],[\s\S]*items\.reduce/,
   'sales selection ids should be normalized through a single helper pass',
 )
 assert.match(
@@ -460,7 +460,7 @@ assert.match(
 )
 assert.match(
   sales,
-  /const validIds = new Set\(filteredIds\)[\s\S]*setSelectedIds/,
+  /const validIds = new Set<number>\(filteredIds\)[\s\S]*setSelectedIds/,
   'sales selection cleanup should reuse the precomputed visible id list',
 )
 assert.match(
@@ -470,7 +470,7 @@ assert.match(
 )
 assert.match(
   sales,
-  /function countSelectedIds\(ids = \[\], selectedIds = new Set\(\)\) \{[\s\S]*for \(const id of ids\)/,
+  /function countSelectedIds\(ids: Array<number \| string> = \[\], selectedIds: Set<number> = new Set\(\)\): number \{[\s\S]*for \(const id of ids\)/,
   'sales partial selection counts should use one counter helper instead of filter allocations',
 )
 assert.match(
@@ -480,7 +480,7 @@ assert.match(
 )
 assert.match(
   sales,
-  /function countActiveFlags\(flags = \[\]\) \{[\s\S]*for \(const flag of flags\)/,
+  /function countActiveFlags\(flags: boolean\[] = \[\]\): number \{[\s\S]*for \(const flag of flags\)/,
   'sales filter badge counts should use one counter helper instead of filter allocations',
 )
 assert.match(

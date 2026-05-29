@@ -2709,7 +2709,7 @@ Decision rule:
     `backend/test/fullAutomation.test.ts` guards the behavior; no folder move
     or language conversion was needed.
 323. Reuse Sales selection and filter-count helpers. Done:
-    `frontend/src/components/sales/Sales.jsx` now precomputes visible sale IDs,
+    `frontend/src/components/sales/Sales.tsx` now precomputes visible sale IDs,
     normalizes grouped selection IDs through one helper, counts selected IDs
     with a direct loop, and counts active filters without a temporary boolean
     array. This is a local render/selection-path cleanup; no folder move or
@@ -4178,6 +4178,15 @@ Decision rule:
     `parseContactOptions` import contract, point-balance payload loading,
     grouped selection helpers, same-tick save/delete/bulk guards, CSV export,
     and contact pricing/loading source checks intact.
+532. Convert the sales page shell to TSX. Done:
+    `frontend/src/components/sales/Sales.tsx` now types sale rows, line items,
+    user filter options, app/sync context access, local sales API gateway
+    calls, status and membership mutation payloads, grouped sale sections,
+    selection ids, export rows, loading watchdog timers, and action-history
+    payloads. The conversion keeps the Sales page extensionless lazy import,
+    receipt/detail/export/import modal contracts, same-tick status and bulk
+    guards, bounded user filter reads, grouped selection helpers, CSV export,
+    and sales action/performance source checks intact.
 
 ## Safety Gates
 

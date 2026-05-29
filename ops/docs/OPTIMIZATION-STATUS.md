@@ -51,6 +51,9 @@ Recent route-level win:
   with typed customer rows, grouped sections, point-balance loading, contact
   option helper exports, local customer API calls, and history/bulk restore
   payloads.
+- Sales page is now `frontend/src/components/sales/Sales.tsx` with typed sale
+  rows, line items, user filters, grouped sections, local sales API calls,
+  status/membership mutations, selection ids, and export/history payloads.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary

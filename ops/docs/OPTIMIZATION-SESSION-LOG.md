@@ -625,3 +625,33 @@ Use this shape for future entries:
 - follow-up insight: customer contacts now have typed list/mutation/history
   boundaries, reducing risk before converting supplier and delivery contact
   tabs with the same pattern.
+
+- change: converted the sales page shell to TSX with typed sale rows, line
+  items, user filter options, app/sync context access, local sales API gateway
+  calls, status and membership mutation payloads, grouped sale sections,
+  selection ids, export rows, loading watchdog timers, and action-history
+  payloads
+- affected files:
+  `frontend/src/components/sales/Sales.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Sales page, sales list loading, user filter loading,
+  sale status updates, sale membership linking, grouped selection, receipt
+  print handoff, export/import modal handoff
+- keeper or rollback: keeper if action stability, performance loading UX,
+  typecheck, JSX, frontend/backend utility, build, Phase 29 audit, and Phase
+  8.4 live suite pass
+- route-scoped result: focused typecheck, JSX, action stability, and
+  performance loading UX checks passed; broad frontend/backend utility suites,
+  UI audit, production build, organization audit, schema audit, and Phase 29
+  repeat audit also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,086 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: Sales now has a typed local API and selection/mutation
+  boundary, reducing risk before converting supplier/delivery contacts and the
+  larger POS/Inventory shells.
