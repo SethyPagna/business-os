@@ -3998,6 +3998,12 @@ Decision rule:
     app-context notifications, and unknown-safe error handling. The conversion
     keeps worker-first row counting, loader timeouts, synchronous parser
     fallbacks, import-job queuing, and lazy route imports extensionless.
+510. Convert contact form and shared contact surfaces to TSX. Done:
+    `CustomerFormModal.tsx` now types customer form state, save payloads,
+    membership-number edits, and structured contact options. `shared.tsx`
+    now types contact row selection, selected-snapshot cloning, action menus,
+    detail fields, pagination props, select-all refs, and generic table/card
+    render callbacks used by customer, supplier, and delivery tabs.
 
 ## Safety Gates
 

@@ -3601,7 +3601,7 @@ Move 325 status:
 
 Move 326 status:
 - Move 326 shares Contacts bulk-selection helpers:
-  `frontend/src/components/contacts/shared.jsx` now exports
+  `frontend/src/components/contacts/shared.tsx` now exports
   `countActiveFlags()` and `buildSelectedSnapshots()`. Customer, supplier, and
   delivery contact tabs use those helpers to count active filters without
   allocating temporary boolean arrays and to build bulk-delete undo snapshots
@@ -5544,3 +5544,13 @@ Move 509 status:
   results, and app-context notification access. The conversion keeps the
   worker-first import row counting, loader timeouts, synchronous parser
   fallbacks, sales CSV export fallback, and lazy route imports unchanged.
+
+Move 510 status:
+- Move 510 converts the contact form and shared contacts surfaces:
+  `CustomerFormModal.tsx` and `shared.tsx`. The typed boundaries now cover
+  customer form records, structured contact options, save payloads, selection
+  sets, selected-snapshot cloning, row action menus, detail modal fields,
+  select-all checkbox refs, and generic table/card render callbacks. The
+  conversion removes stale exact `.jsx` lazy imports from the customer tab and
+  keeps contact pagination, selection cleanup, and mobile/desktop table
+  rendering unchanged.

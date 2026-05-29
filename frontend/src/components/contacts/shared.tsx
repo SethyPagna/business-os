@@ -1,18 +1,87 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { MoreHorizontal, X } from 'lucide-react'
 import Modal from '../shared/Modal'
 import PortalMenu from '../shared/PortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 
-/**
- * 1. useContactSelection
- * 1.1 Centralizes table/card multi-select behavior for all contacts tabs.
- * 1.2 Drops stale selections when a filtered dataset removes rows from view.
- */
-export function useContactSelection(rows = []) {
-  const [selectedIds, setSelectedIds] = useState(() => new Set())
+type TranslateFn = (key: string) => string | undefined
+
+interface AppContextValue {
+  t: TranslateFn
+}
+
+interface ContactRow {
+  id?: string | number | null
+  name?: string | null
+  [key: string]: unknown
+}
+
+interface SelectAllProps {
+  checked: boolean
+  indeterminate: boolean
+  onChange: (checked: boolean) => void
+}
+
+interface ContactSelection {
+  selectedIds: Set<number>
+  setSelectedIds: Dispatch<SetStateAction<Set<number>>>
+  toggleOne: (id: unknown) => void
+  clearSelection: () => void
+  selectAllProp: SelectAllProps
+}
+
+type MenuAction = {
+  label: ReactNode
+  onClick?: () => void
+  color?: 'red' | 'blue'
+}
+
+type ContactMenuItem = MenuAction | 'divider'
+
+interface ThreeDotMenuProps {
+  onDetails?: () => void
+  onEdit?: () => void
+  onDelete?: () => void
+}
+
+type DetailField = [ReactNode, ReactNode]
+
+interface DetailModalProps {
+  item?: ContactRow | null
+  fields?: DetailField[]
+  onEdit?: () => void
+  onDelete?: () => void
+  onClose: () => void
+  t?: TranslateFn
+}
+
+interface ContactTableProps<T extends ContactRow> {
+  loading?: boolean
+  rows?: T[]
+  emptyLabel?: string
+  compactEmptyState?: boolean
+  columns?: ReactNode[]
+  selectAll?: Partial<SelectAllProps>
+  renderRow?: (row: T) => ReactNode
+  renderCard?: (row: T) => ReactNode
+  totalCount?: number
+  page?: number
+  pageSize?: number
+  onPageChange?: (page: number) => void
+  onPageSizeChange?: (pageSize: number) => void
+  onRetry?: () => void
+  loadingLabel?: string
+  loadingDetails?: string
+  t?: TranslateFn
+}
+
+const useApp = useAppHook as () => AppContextValue
+
+export function useContactSelection<T extends ContactRow>(rows: T[] = []): ContactSelection {
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const rowIds = useMemo(
     () => rows.map((row) => Number(row?.id)).filter((id) => Number.isFinite(id)),
     [rows],
@@ -27,7 +96,7 @@ export function useContactSelection(rows = []) {
     })
   }, [rowIds])
 
-  const toggleOne = (id) => {
+  const toggleOne = (id: unknown) => {
     const numericId = Number(id)
     if (!Number.isFinite(numericId)) return
     setSelectedIds((previous) => {
@@ -43,7 +112,7 @@ export function useContactSelection(rows = []) {
   const selectAllProp = {
     checked: rowIds.length > 0 && selectedIds.size === rowIds.length,
     indeterminate: selectedIds.size > 0 && selectedIds.size < rowIds.length,
-    onChange: (checked) => {
+    onChange: (checked: boolean) => {
       if (!checked) {
         clearSelection()
         return
@@ -61,7 +130,7 @@ export function useContactSelection(rows = []) {
   }
 }
 
-export function countActiveFlags(flags = []) {
+export function countActiveFlags(flags: readonly unknown[] = []): number {
   let count = 0
   for (const flag of flags) {
     if (flag) count += 1
@@ -69,34 +138,30 @@ export function countActiveFlags(flags = []) {
   return count
 }
 
-export function buildSelectedSnapshots(rows = [], ids = []) {
-  const selectedIdSet = new Set()
+export function buildSelectedSnapshots<T extends ContactRow>(rows: T[] = [], ids: Iterable<unknown> = []): T[] {
+  const selectedIdSet = new Set<number>()
   for (const id of ids) {
     const numericId = Number(id)
     if (Number.isFinite(numericId)) selectedIdSet.add(numericId)
   }
-  return rows.reduce((snapshots, row) => {
+  return rows.reduce<T[]>((snapshots, row) => {
     if (selectedIdSet.has(Number(row?.id || 0))) {
-      snapshots.push(JSON.parse(JSON.stringify(row)))
+      snapshots.push(JSON.parse(JSON.stringify(row)) as T)
     }
     return snapshots
   }, [])
 }
 
-/**
- * 2. ThreeDotMenu
- * 2.1 Reusable row-action popup for customer/supplier/delivery lists.
- */
-export function ThreeDotMenu({ onDetails, onEdit, onDelete }) {
+export function ThreeDotMenu({ onDetails, onEdit, onDelete }: ThreeDotMenuProps) {
   const { t } = useApp()
   const items = [
     onDetails && { label: t('details') || 'Details', onClick: onDetails },
     onEdit && { label: t('edit') || 'Edit', onClick: onEdit, color: 'blue' },
     onDelete && 'divider',
     onDelete && { label: t('delete') || 'Delete', onClick: onDelete, color: 'red' },
-  ].filter(Boolean)
+  ].filter(Boolean) as ContactMenuItem[]
 
-  const menuContent = ({ closeMenu }) => (
+  const menuContent = ({ closeMenu }: { closeMenu: () => void }) => (
     <>
       <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
         <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t('actions') || 'Actions'}</div>
@@ -155,11 +220,7 @@ export function ThreeDotMenu({ onDetails, onEdit, onDelete }) {
   )
 }
 
-/**
- * 3. DetailModal
- * 3.1 Generic key-value detail viewer for all contacts entity types.
- */
-export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t }) {
+export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t }: DetailModalProps) {
   const title = item?.name || (typeof t === 'function' ? (t('details') || 'Details') : 'Details')
 
   return (
@@ -186,11 +247,7 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t })
   )
 }
 
-/**
- * 4. ContactTable
- * 4.1 Shared desktop table shell + mobile card container for contacts tabs.
- */
-export function ContactTable({
+export function ContactTable<T extends ContactRow>({
   loading,
   rows = [],
   emptyLabel = 'No records',
@@ -208,8 +265,8 @@ export function ContactTable({
   loadingLabel = 'Loading contacts...',
   loadingDetails = 'Fetching contact records and grouped filters.',
   t,
-}) {
-  const selectAllRef = useRef(null)
+}: ContactTableProps<T>) {
+  const selectAllRef = useRef<HTMLInputElement | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const usingControlledPagination = Number.isFinite(Number(controlledPage)) && Number.isFinite(Number(controlledPageSize))

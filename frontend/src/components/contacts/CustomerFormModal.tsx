@@ -6,20 +6,59 @@ import {
   parseStoredContactOptions,
   serializeContactOptions,
 } from './contactOptionUtils'
+import type { ContactOption } from './contactOptionUtils'
 import { generateCustomerMembershipNumber } from './customerMembershipNumber'
 
-function tr(t, key, fallback) {
+type TranslateFn = (key: string) => string | undefined
+
+interface CustomerRecord {
+  id?: string | number
+  name?: string | null
+  membership_number?: string | null
+  phone?: string | null
+  email?: string | null
+  company?: string | null
+  address?: string | null
+  notes?: string | null
+  [key: string]: unknown
+}
+
+interface CustomerFormState extends CustomerRecord {
+  name: string
+  membership_number: string
+  phone: string
+  email: string
+  company: string
+  notes: string
+}
+
+interface CustomerFormModalProps {
+  customer?: CustomerRecord | null
+  onSave: (payload: CustomerFormState & { address: string | null }) => void | Promise<void>
+  onClose: () => void
+  t?: TranslateFn
+}
+
+interface OptionEditorProps {
+  option: ContactOption
+  index: number
+  total: number
+  onChange: (option: ContactOption) => void
+  onRemove: () => void
+}
+
+function tr(t: TranslateFn | undefined, key: string, fallback: string): string {
   const value = typeof t === 'function' ? t(key) : null
   return value && value !== key ? value : fallback
 }
 
-function parseContactOptions(raw) {
+function parseContactOptions(raw: unknown): ContactOption[] {
   return parseStoredContactOptions(raw, { legacyField: 'address' })
 }
 
-function OptionEditor({ option, index, total, onChange, onRemove }) {
-  const setField = (key, value) => onChange({ ...option, [key]: value })
-  const fieldId = (suffix) => `customer-option-${index}-${suffix}`
+function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditorProps) {
+  const setField = (key: keyof ContactOption, value: string) => onChange({ ...option, [key]: value })
+  const fieldId = (suffix: string) => `customer-option-${index}-${suffix}`
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2 dark:border-zinc-600 dark:bg-zinc-800/60">
@@ -62,11 +101,19 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
   )
 }
 
-export default function CustomerFormModal({ customer, onSave, onClose, t }) {
+export default function CustomerFormModal({ customer, onSave, onClose, t }: CustomerFormModalProps) {
   const initial = customer
-    ? { ...customer }
+    ? {
+      ...customer,
+      name: String(customer.name || ''),
+      membership_number: String(customer.membership_number || ''),
+      phone: String(customer.phone || ''),
+      email: String(customer.email || ''),
+      company: String(customer.company || ''),
+      notes: String(customer.notes || ''),
+    }
     : { name: '', membership_number: generateCustomerMembershipNumber(), phone: '', email: '', company: '', notes: '' }
-  const [form, setForm] = useState(initial)
+  const [form, setForm] = useState<CustomerFormState>(initial)
   const [options, setOptions] = useState(() => {
     const parsed = parseContactOptions(initial.address)
     return parsed.length ? parsed : [createContactOption()]
@@ -74,13 +121,13 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }) {
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
 
-  const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
     if (current.length >= CONTACT_OPTION_LIMIT) return current
     return [...current, createContactOption()]
   })
-  const removeOption = (index) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
-  const updateOption = (index, nextOption) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item)))
+  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item)))
   const handleSubmit = async () => {
     if (saving) return
     const name = String(form.name || '').trim()
@@ -191,7 +238,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }) {
         ) : null}
 
         <div className="flex flex-col gap-3 pt-1 sm:flex-row">
-          <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving}>{saving ? (t('saving') || 'Saving...') : tr(t, 'save', 'Save')}</button>
+          <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving}>{saving ? tr(t, 'saving', 'Saving...') : tr(t, 'save', 'Save')}</button>
           <button className="btn-secondary" onClick={onClose} disabled={saving}>{tr(t, 'cancel', 'Cancel')}</button>
         </div>
       </div>

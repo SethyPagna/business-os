@@ -15,10 +15,10 @@ const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.
 const receiptSettingsPage = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.jsx', import.meta.url), 'utf8')
 const receiptPreview = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
 const contacts = fs.readFileSync(new URL('../src/components/contacts/Contacts.jsx', import.meta.url), 'utf8')
-const contactsShared = fs.readFileSync(new URL('../src/components/contacts/shared.jsx', import.meta.url), 'utf8')
+const contactsShared = fs.readFileSync(new URL('../src/components/contacts/shared.tsx', import.meta.url), 'utf8')
 const contactImportModal = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.jsx', import.meta.url), 'utf8')
 const customers = fs.readFileSync(new URL('../src/components/contacts/CustomersTab.jsx', import.meta.url), 'utf8')
-const customerFormModal = fs.readFileSync(new URL('../src/components/contacts/CustomerFormModal.jsx', import.meta.url), 'utf8')
+const customerFormModal = fs.readFileSync(new URL('../src/components/contacts/CustomerFormModal.tsx', import.meta.url), 'utf8')
 const customerMembershipNumber = fs.readFileSync(new URL('../src/components/contacts/customerMembershipNumber.ts', import.meta.url), 'utf8')
 const suppliers = fs.readFileSync(new URL('../src/components/contacts/SuppliersTab.jsx', import.meta.url), 'utf8')
 const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab.jsx', import.meta.url), 'utf8')
@@ -182,12 +182,12 @@ for (const [name, source] of [
 }
 assert.match(
   contactsShared,
-  /export function buildSelectedSnapshots\(rows = \[\], ids = \[\]\)[\s\S]*const selectedIdSet = new Set\(\)[\s\S]*selectedIdSet\.has\(Number\(row\?\.id \|\| 0\)\)/,
+  /export function buildSelectedSnapshots(?:<[^>]+>)?\(rows(?:: [^=]+)? = \[\], ids(?:: [^=]+)? = \[\]\)(?:: [^{]+)? \{[\s\S]*const selectedIdSet = new Set(?:<[^>]+>)?\(\)[\s\S]*selectedIdSet\.has\(Number\(row\?\.id \|\| 0\)\)/,
   'shared contact helpers should build selected snapshots through an indexed id set',
 )
 assert.match(
   contactsShared,
-  /export function countActiveFlags\(flags = \[\]\)[\s\S]*for \(const flag of flags\)/,
+  /export function countActiveFlags\(flags(?:: [^)]+)? = \[\]\)(?:: [^{]+)? \{[\s\S]*for \(const flag of flags\)/,
   'shared contact helpers should count active filter flags without allocation',
 )
 assert.match(

@@ -41,7 +41,7 @@ function tr(t, key, fallback) {
 }
 
 const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
-const CustomerFormModal = lazy(() => import('./CustomerFormModal.jsx'))
+const CustomerFormModal = lazy(() => import('./CustomerFormModal'))
 const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 
 function CustomersTab({ t, notify, active = true }) {

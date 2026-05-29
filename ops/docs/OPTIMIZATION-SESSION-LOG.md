@@ -140,3 +140,18 @@ Use this shape for future entries:
 - follow-up insight: this cluster is a good pattern for the remaining modal
   conversions because it keeps `window.api` access behind local typed accessors
   while preserving extensionless lazy imports.
+
+- change: converted the customer form and shared contact table/menu helpers to
+  TSX with typed form, option, selection, menu, and pagination boundaries
+- affected files: `frontend/src/components/contacts/CustomerFormModal.tsx`,
+  `frontend/src/components/contacts/shared.tsx`,
+  `frontend/src/components/contacts/CustomersTab.jsx`
+- route or API target: Contacts customer form, shared customer/supplier/delivery
+  table and row actions
+- keeper or rollback: keeper if contact pricing/loading tests, typecheck,
+  build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: pending verification in Move 510
+- warm whole-app result: pending verification in Move 510
+- follow-up insight: shared contact helpers are now ready for the larger
+  Customers/Suppliers/Delivery tab TSX conversions without exact `.jsx` modal
+  imports.
