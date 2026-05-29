@@ -7,4 +7,7 @@ declare module '*.jsx' {
   export const AppProvider: unknown
   export const useApp: unknown
   export const useSync: unknown
+  export const CustomersTab: unknown
+  export const SuppliersTab: unknown
+  export const DeliveryTab: unknown
 }

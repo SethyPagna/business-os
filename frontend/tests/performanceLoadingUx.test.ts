@@ -14,7 +14,7 @@ const resetData = fs.readFileSync(new URL('../src/components/utils-settings/Rese
 const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.jsx', import.meta.url), 'utf8')
 const receiptSettingsPage = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.jsx', import.meta.url), 'utf8')
 const receiptPreview = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
-const contacts = fs.readFileSync(new URL('../src/components/contacts/Contacts.jsx', import.meta.url), 'utf8')
+const contacts = fs.readFileSync(new URL('../src/components/contacts/Contacts.tsx', import.meta.url), 'utf8')
 const contactsShared = fs.readFileSync(new URL('../src/components/contacts/shared.tsx', import.meta.url), 'utf8')
 const contactImportModal = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.jsx', import.meta.url), 'utf8')
 const customers = fs.readFileSync(new URL('../src/components/contacts/CustomersTab.jsx', import.meta.url), 'utf8')
@@ -855,22 +855,22 @@ assert.match(
 )
 assert.match(
   contacts,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getCustomers\(\),\s*'Contacts export customers',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.getCustomers\(\),\s*'Contacts export customers',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
   'contacts all-export should timeout customer export reads',
 )
 assert.match(
   contacts,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getSuppliers\(\),\s*'Contacts export suppliers',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.getSuppliers\(\),\s*'Contacts export suppliers',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
   'contacts all-export should timeout supplier export reads',
 )
 assert.match(
   contacts,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getDeliveryContacts\(\),\s*'Contacts export delivery',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.getDeliveryContacts\(\),\s*'Contacts export delivery',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
   'contacts all-export should timeout delivery export reads',
 )
 assert.match(
   contacts,
-  /function normalizeContactExportRows\(value\)[\s\S]*Array\.isArray\(value\?\.items\)/,
+  /function normalizeContactExportRows\(value: unknown\): ContactExportRow\[\][\s\S]*Array\.isArray\(payload\?\.items\)/,
   'contacts all-export should accept paged API payloads before building the ZIP',
 )
 assert.match(

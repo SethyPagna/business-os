@@ -4004,6 +4004,13 @@ Decision rule:
     now types contact row selection, selected-snapshot cloning, action menus,
     detail fields, pagination props, select-all refs, and generic table/card
     render callbacks used by customer, supplier, and delivery tabs.
+511. Convert the contacts page shell to TSX. Done:
+    `Contacts.tsx` now types the tab ids, tab icons, import modal state,
+    contact import type picker, export rows, ZIP export files, app context
+    boundary, lazy supplier/delivery tab modules, and contact export API
+    boundary. The conversion keeps the customer tab eager, supplier/delivery
+    tabs lazy, export timeout guards, paged API normalization, and import
+    picker flow unchanged while removing one more route entry `.jsx` file.
 
 ## Safety Gates
 

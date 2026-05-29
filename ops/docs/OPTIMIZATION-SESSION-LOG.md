@@ -155,3 +155,19 @@ Use this shape for future entries:
 - follow-up insight: shared contact helpers are now ready for the larger
   Customers/Suppliers/Delivery tab TSX conversions without exact `.jsx` modal
   imports.
+
+- change: converted the Contacts route shell to TSX with typed tab, import,
+  lazy-module, app-context, and export API boundaries
+- affected files: `frontend/src/components/contacts/Contacts.tsx`,
+  `frontend/src/types/jsx-modules.d.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Contacts page shell, all-contact export, import picker,
+  customer/supplier/delivery tab loading
+- keeper or rollback: keeper if loading UX tests, contact pricing/action
+  stability tests, typecheck, build, Phase 29 audit, and Phase 8.4 live suite
+  pass
+- route-scoped result: pending verification in Move 511
+- warm whole-app result: pending verification in Move 511
+- follow-up insight: the remaining customer/supplier/delivery tab `.jsx`
+  conversions can now use the same explicit JSX-module seam instead of
+  widening global `any` types.

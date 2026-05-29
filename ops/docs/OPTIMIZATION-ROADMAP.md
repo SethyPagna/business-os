@@ -5554,3 +5554,11 @@ Move 510 status:
   conversion removes stale exact `.jsx` lazy imports from the customer tab and
   keeps contact pagination, selection cleanup, and mobile/desktop table
   rendering unchanged.
+
+Move 511 status:
+- Move 511 converts the contacts page shell to `Contacts.tsx`. The typed
+  boundary now covers tab ids/icons, import contact types, import picker state,
+  app-context access, lazy supplier/delivery tab modules, contact export API
+  calls, ZIP export rows, and paged export response normalization. The move
+  keeps customer/supplier/delivery tab behavior, export timeout guards, import
+  modal flow, and route-level lazy loading unchanged.

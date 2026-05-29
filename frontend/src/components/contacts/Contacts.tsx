@@ -1,11 +1,9 @@
-// Contacts
-// Main Contacts page. All-in-one export/import lives here at the page level.
-
+import type { ComponentType, SVGProps } from 'react'
 import { Suspense, lazy, useState } from 'react'
 import { BookUser, Download, Truck, Upload, Users, Warehouse } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import { downloadZipFilesAsync } from '../../utils/csv'
-import { CustomersTab } from './CustomersTab'
+import { CustomersTab as CustomersTabBase } from './CustomersTab.jsx'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -13,25 +11,119 @@ import { getFirstLoaderError, settleLoaderMap, withLoaderTimeout } from '../../u
 
 const CONTACTS_EXPORT_LOAD_TIMEOUT_MS = 12000
 
-function normalizeContactExportRows(value) {
+type TranslateFn = (key: string) => string | undefined
+type NotifyFn = (message: string, tone?: string) => void
+type ContactTabId = 'customers' | 'suppliers' | 'delivery'
+type ImportContactType = 'customer' | 'supplier' | 'deliveryContact'
+type ContactsModal = 'pickImportType' | 'import' | null
+type ContactTabIcon = ComponentType<SVGProps<SVGSVGElement>>
+
+interface AppContextValue {
+  t: TranslateFn
+  notify: NotifyFn
+}
+
+interface ContactTabDefinition {
+  id: ContactTabId
+  label: string
+  icon: ContactTabIcon
+}
+
+interface ContactExportRow {
+  name?: unknown
+  membership_number?: unknown
+  phone?: unknown
+  email?: unknown
+  company?: unknown
+  contact_person?: unknown
+  area?: unknown
+  address?: unknown
+  notes?: unknown
+  created_at?: unknown
+}
+
+interface ApiListResponse {
+  items?: unknown
+}
+
+interface ContactApi {
+  getCustomers: () => Promise<unknown>
+  getSuppliers: () => Promise<unknown>
+  getDeliveryContacts: () => Promise<unknown>
+}
+
+interface ContactTabProps {
+  t: TranslateFn
+  notify: NotifyFn
+  active?: boolean
+}
+
+interface ContactImportModalProps {
+  type: ImportContactType
+  onClose: () => void
+  onDone: () => void
+}
+
+interface ContactTabFallbackProps {
+  t: TranslateFn
+  label: string
+}
+
+interface ImportTypePickerProps {
+  onSelect: (type: ImportContactType) => void
+  onClose: () => void
+  t: TranslateFn
+}
+
+interface ExportZipFile {
+  filename: string
+  rows: Array<Record<string, unknown>>
+}
+
+const useApp = useAppHook as () => AppContextValue
+
+function getContactApi(): ContactApi {
+  if (!window.api) throw new Error('Contacts API is not available.')
+  return window.api as ContactApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function asExportValue(value: unknown): string {
+  return value == null ? '' : String(value)
+}
+
+function normalizeContactExportRows(value: unknown): ContactExportRow[] {
   if (Array.isArray(value)) return value
-  if (Array.isArray(value?.items)) return value.items
+  const payload = value as ApiListResponse | null | undefined
+  if (Array.isArray(payload?.items)) return payload.items as ContactExportRow[]
   return []
 }
 
-const TABS = (t) => [
+const TABS = (t: TranslateFn): ContactTabDefinition[] => [
   { id: 'customers', label: t('customers') || 'Customers', icon: Users },
   { id: 'suppliers', label: t('suppliers') || 'Suppliers', icon: Warehouse },
   { id: 'delivery', label: t('pos_delivery') || 'Delivery', icon: Truck },
 ]
 
-const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
-const loadSuppliersTab = () => import('./SuppliersTab.jsx')
-const loadDeliveryTab = () => import('./DeliveryTab.jsx')
+const CustomersTab = CustomersTabBase as ComponentType<ContactTabProps>
+const ContactImportModal = lazy(() => (
+  import('./ContactImportModal.jsx').then((module) => ({
+    default: module.default as ComponentType<ContactImportModalProps>,
+  }))
+))
+const loadSuppliersTab = async (): Promise<{ SuppliersTab: ComponentType<ContactTabProps> }> => (
+  await import('./SuppliersTab.jsx') as unknown as { SuppliersTab: ComponentType<ContactTabProps> }
+)
+const loadDeliveryTab = async (): Promise<{ DeliveryTab: ComponentType<ContactTabProps> }> => (
+  await import('./DeliveryTab.jsx') as unknown as { DeliveryTab: ComponentType<ContactTabProps> }
+)
 const SuppliersTab = lazy(() => loadSuppliersTab().then((module) => ({ default: module.SuppliersTab })))
 const DeliveryTab = lazy(() => loadDeliveryTab().then((module) => ({ default: module.DeliveryTab })))
 
-function ContactTabFallback({ t, label }) {
+function ContactTabFallback({ t, label }: ContactTabFallbackProps) {
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
@@ -80,8 +172,8 @@ function ContactTabFallback({ t, label }) {
   )
 }
 
-function ImportTypePicker({ onSelect, onClose, t }) {
-  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+function ImportTypePicker({ onSelect, onClose, t }: ImportTypePickerProps) {
+  const T = (key: string, fallback: string): string => t(key) || fallback
 
   return (
     <Modal
@@ -123,12 +215,12 @@ function ImportTypePicker({ onSelect, onClose, t }) {
 export default function Contacts() {
   const { t, notify } = useApp()
   const isActive = useIsPageActive('contacts')
-  const [tab, setTab] = useState('customers')
-  const [modal, setModal] = useState(null)
-  const [importType, setImportType] = useState(null)
+  const [tab, setTab] = useState<ContactTabId>('customers')
+  const [modal, setModal] = useState<ContactsModal>(null)
+  const [importType, setImportType] = useState<ImportContactType | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
-  const prefetchTab = (tabId) => {
+  const prefetchTab = (tabId: ContactTabId): void => {
     if (tabId === 'suppliers') {
       void loadSuppliersTab()
     } else if (tabId === 'delivery') {
@@ -138,19 +230,20 @@ export default function Contacts() {
 
   const handleExportAll = async () => {
     try {
+      const api = getContactApi()
       const result = await settleLoaderMap({
         customers: () => withLoaderTimeout(
-          () => window.api.getCustomers(),
+          () => api.getCustomers(),
           'Contacts export customers',
           CONTACTS_EXPORT_LOAD_TIMEOUT_MS,
         ),
         suppliers: () => withLoaderTimeout(
-          () => window.api.getSuppliers(),
+          () => api.getSuppliers(),
           'Contacts export suppliers',
           CONTACTS_EXPORT_LOAD_TIMEOUT_MS,
         ),
         delivery: () => withLoaderTimeout(
-          () => window.api.getDeliveryContacts(),
+          () => api.getDeliveryContacts(),
           'Contacts export delivery',
           CONTACTS_EXPORT_LOAD_TIMEOUT_MS,
         ),
@@ -160,20 +253,20 @@ export default function Contacts() {
       const delivery = normalizeContactExportRows(result.values.delivery)
       const today = new Date().toISOString().slice(0, 10)
 
-      const files = []
+      const files: ExportZipFile[] = []
 
       if (customers.length > 0) {
         files.push({
           filename: `contacts-customers-${today}.csv`,
           rows: customers.map((c) => ({
-          Name: c.name || '',
-          Membership_Number: c.membership_number || '',
-          Phone: c.phone || '',
-          Email: c.email || '',
-          Company: c.company || '',
-          Address: c.address || '',
-          Notes: c.notes || '',
-          Created: c.created_at || '',
+            Name: asExportValue(c.name),
+            Membership_Number: asExportValue(c.membership_number),
+            Phone: asExportValue(c.phone),
+            Email: asExportValue(c.email),
+            Company: asExportValue(c.company),
+            Address: asExportValue(c.address),
+            Notes: asExportValue(c.notes),
+            Created: asExportValue(c.created_at),
           })),
         })
       }
@@ -181,14 +274,14 @@ export default function Contacts() {
         files.push({
           filename: `contacts-suppliers-${today}.csv`,
           rows: suppliers.map((s) => ({
-          Name: s.name || '',
-          Phone: s.phone || '',
-          Email: s.email || '',
-          Company: s.company || '',
-          Contact_Person: s.contact_person || '',
-          Address: s.address || '',
-          Notes: s.notes || '',
-          Created: s.created_at || '',
+            Name: asExportValue(s.name),
+            Phone: asExportValue(s.phone),
+            Email: asExportValue(s.email),
+            Company: asExportValue(s.company),
+            Contact_Person: asExportValue(s.contact_person),
+            Address: asExportValue(s.address),
+            Notes: asExportValue(s.notes),
+            Created: asExportValue(s.created_at),
           })),
         })
       }
@@ -196,12 +289,12 @@ export default function Contacts() {
         files.push({
           filename: `contacts-delivery-${today}.csv`,
           rows: delivery.map((d) => ({
-          Name: d.name || '',
-          Phone: d.phone || '',
-          Area: d.area || '',
-          Address: d.address || '',
-          Notes: d.notes || '',
-          Created: d.created_at || '',
+            Name: asExportValue(d.name),
+            Phone: asExportValue(d.phone),
+            Area: asExportValue(d.area),
+            Address: asExportValue(d.address),
+            Notes: asExportValue(d.notes),
+            Created: asExportValue(d.created_at),
           })),
         })
       }
@@ -219,13 +312,13 @@ export default function Contacts() {
       }
       notify(`${t('all_contacts_exported') || 'All contacts exported'} (${total} ${t('entries') || 'records'})`)
     } catch (error) {
-      notify(`Export failed: ${error.message}`, 'error')
+      notify(`Export failed: ${getErrorMessage(error, 'Failed to export contacts')}`, 'error')
     }
   }
 
   const openImportPicker = () => setModal('pickImportType')
 
-  const handleTypeSelected = (type) => {
+  const handleTypeSelected = (type: ImportContactType) => {
     setImportType(type)
     setModal('import')
   }
