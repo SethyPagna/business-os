@@ -296,3 +296,19 @@ Use this shape for future entries:
   tunnel failure
 - follow-up insight: return row grouping now has an explicit typed boundary,
   which makes the larger Returns route conversion less risky.
+
+- change: converted the sales list surface to TSX with typed sale rows, item
+  arrays, grouped sections, selection scopes, checkbox refs, formatters, branch
+  labels, status rendering, detail callbacks, and reprint callbacks
+- affected files: `frontend/src/components/sales/SalesListSurface.tsx`
+- route or API target: Sales desktop table, mobile card list, grouped
+  selection and collapse controls, receipt reprint entry
+- keeper or rollback: keeper if action stability, typecheck, JSX,
+  frontend/backend utility, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 519 action stability, typecheck, JSX,
+  frontend/backend utility, build, Phase 29, and schema/reference checks
+- warm whole-app result: passed in Move 519 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: sales grouping now has the same typed list boundary as
+  returns, which reduces risk before converting the larger Sales route shell.

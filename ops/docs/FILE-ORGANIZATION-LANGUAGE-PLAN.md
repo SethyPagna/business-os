@@ -4060,6 +4060,13 @@ Decision rule:
     conversion keeps the desktop table, mobile cards, breakpoint-gated
     rendering, section collapse, group selection, and returns layout guard test
     intact.
+519. Convert the sales list surface to TSX. Done:
+    `frontend/src/components/sales/SalesListSurface.tsx` now types sale rows,
+    sale items, grouped sales sections, selection scopes, checkbox refs, money
+    formatters, status rendering, branch label callbacks, and detail/reprint
+    callbacks. The conversion keeps the desktop table, mobile cards,
+    collapse/group selection controls, revenue footer, and extensionless sales
+    page import intact.
 
 ## Safety Gates
 

@@ -5625,3 +5625,12 @@ Move 518 status:
   callbacks, and breakpoint-gated rendering state. The move keeps desktop
   table rows, mobile cards, collapse toggles, group selection, and returns
   layout guard behavior unchanged.
+
+Move 519 status:
+- Move 519 converts the sales list surface to
+  `frontend/src/components/sales/SalesListSurface.tsx`. The typed boundary now
+  covers sale rows, sale item arrays, grouped sales sections, selection scope
+  ids, checkbox refs, money/time formatters, status rendering, branch labels,
+  detail callbacks, and reprint callbacks. The move keeps desktop table rows,
+  mobile cards, collapse toggles, group selection, revenue footer, and the
+  sales page's extensionless import unchanged.

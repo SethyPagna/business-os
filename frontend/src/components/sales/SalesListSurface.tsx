@@ -1,6 +1,71 @@
-import { Fragment } from 'react'
+import { Fragment, type RefObject } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import StatusBadge from './StatusBadge'
+import StatusBadge from './StatusBadge.tsx'
+
+type TranslateFn = (key: string) => string
+type MoneyFormatter = (value: number | string) => string
+
+interface SaleItem {
+  id?: number | string
+  product_id?: number | string
+  quantity?: number | string
+}
+
+interface SaleRecord {
+  id: number | string
+  receipt_number?: string
+  created_at?: string
+  sale_status?: string
+  cashier_name?: string
+  payment_method?: string
+  total_usd?: number
+  total?: number
+  total_khr?: number
+  items?: SaleItem[] | string | null
+}
+
+interface SalesGroup {
+  id: string
+  label: string
+  ids: number[]
+  items: SaleRecord[]
+}
+
+interface SalesSection {
+  id: string
+  label: string
+  ids: number[]
+  groups: SalesGroup[]
+}
+
+interface SalesListSurfaceProps {
+  collapsedSalesSections: Set<string>
+  filtered: SaleRecord[]
+  filteredIds: number[]
+  fmtKHR: MoneyFormatter
+  fmtTime: (value?: string) => string
+  fmtUSD: MoneyFormatter
+  getSaleBranchLabel: (sale: SaleRecord) => string
+  isSelectionScopeFullySelected: (ids: number[]) => boolean
+  isSelectionScopePartiallySelected: (ids: number[]) => boolean
+  loading: boolean
+  revenue: number
+  salesSections: SalesSection[]
+  selectAllRef: RefObject<HTMLInputElement>
+  selectedIds: Set<number>
+  setDetailSale: (sale: SaleRecord) => void
+  setSelectedSale: (sale: SaleRecord) => void
+  showSalesActionGroups: boolean
+  t: TranslateFn
+  toggleSalesSection: (sectionId: string) => void
+  toggleSelected: (saleId: SaleRecord['id']) => void
+  toggleSelectAll: (checked: boolean) => void
+  toggleSelectionScope: (ids: number[], checked: boolean) => void
+}
+
+function getSaleItems(sale: SaleRecord): SaleItem[] {
+  return Array.isArray(sale.items) ? sale.items : []
+}
 
 export default function SalesListSurface({
   collapsedSalesSections,
@@ -25,7 +90,7 @@ export default function SalesListSurface({
   toggleSelected,
   toggleSelectAll,
   toggleSelectionScope,
-}) {
+}: SalesListSurfaceProps) {
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const mobileSkeletonCards = Array.from({ length: 4 }, (_, index) => index)
 
@@ -130,7 +195,7 @@ export default function SalesListSurface({
                           </tr>
                         ) : null}
                         {group.items.map((sale) => {
-                          const items = Array.isArray(sale.items) ? sale.items : []
+                          const items = getSaleItems(sale)
                           const totalUsd = sale.total_usd || sale.total || 0
                           const totalKhr = sale.total_khr || 0
                           const status = sale.sale_status || 'completed'
@@ -266,7 +331,7 @@ export default function SalesListSurface({
                     </div>
                   ) : null}
                   {group.items.map((sale) => {
-                    const items = Array.isArray(sale.items) ? sale.items : []
+                    const items = getSaleItems(sale)
                     const totalUsd = sale.total_usd || sale.total || 0
                     const totalKhr = sale.total_khr || 0
                     const status = sale.sale_status || 'completed'
