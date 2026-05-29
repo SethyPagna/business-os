@@ -256,7 +256,7 @@ Code files scanned: **466**
 | 244 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
 | 245 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
 | 246 | `frontend/src/components/receipt-settings/template.ts` | 4 |
-| 247 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
+| 247 | `frontend/src/components/receipt/Receipt.tsx` | 10 |
 | 248 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
 | 249 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
 | 250 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
@@ -4565,18 +4565,20 @@ Code files scanned: **466**
 | 3 | `parseReceiptTemplate` | export function | 19 |
 | 4 | `serializeReceiptTemplate` | export function | 30 |
 
-### 3.247 `frontend/src/components/receipt/Receipt.jsx`
+### 3.247 `frontend/src/components/receipt/Receipt.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `stripEmoji` | function | 9 |
-| 2 | `displayAddress` | function | 14 |
-| 3 | `parseItems` | function | 23 |
-| 4 | `labelFor` | function | 115 |
-| 5 | `Row` | function | 120 |
-| 6 | `Receipt` | export default function | 132 |
-| 7 | `em` | const arrow | 146 |
-| 8 | `exportReceiptPdf` | const arrow | 342 |
+| 1 | `toNumber` | function | 104 |
+| 2 | `stripEmoji` | function | 109 |
+| 3 | `stripEmoji` | function | 111 |
+| 4 | `displayAddress` | function | 116 |
+| 5 | `parseItems` | function | 125 |
+| 6 | `getErrorMessage` | function | 136 |
+| 7 | `labelFor` | function | 222 |
+| 8 | `Row` | function | 227 |
+| 9 | `Receipt` | export default function | 239 |
+| 10 | `exportReceiptPdf` | const arrow | 450 |
 
 ### 3.248 `frontend/src/components/returns/EditReturnModal.tsx`
 

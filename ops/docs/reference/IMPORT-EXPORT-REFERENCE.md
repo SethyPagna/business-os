@@ -256,7 +256,7 @@ Code files documented: **466**
 | 244 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 | 1 | 2 | 1 |
 | 245 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
 | 246 | `frontend/src/components/receipt-settings/template.ts` | 1 | 2 | 1 | 3 |
-| 247 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
+| 247 | `frontend/src/components/receipt/Receipt.tsx` | 7 | 1 | 5 | 3 |
 | 248 | `frontend/src/components/returns/EditReturnModal.tsx` | 4 | 1 | 3 | 1 |
 | 249 | `frontend/src/components/returns/NewReturnModal.tsx` | 4 | 1 | 3 | 1 |
 | 250 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 3 | 1 | 2 | 1 |
@@ -3147,7 +3147,7 @@ Code files documented: **466**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
-  - `frontend/src/components/receipt/Receipt.jsx`
+  - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.tsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
@@ -4124,7 +4124,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/FilterPanel.tsx`
   - `frontend/src/components/pos/ProductImage.tsx`
   - `frontend/src/components/pos/QuickAddModal.tsx`
-  - `frontend/src/components/receipt/Receipt.jsx`
+  - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/components/sales/StatusBadge.tsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/PaginationControls.tsx`
@@ -4721,10 +4721,10 @@ Code files documented: **466**
 - Declared exports: `function`
 - Imports (3)
   - `../../utils/receiptAppliedConfig.ts`
-  - `../receipt/Receipt.jsx`
+  - `../receipt/Receipt.tsx`
   - `react`
 - Internal dependencies (2)
-  - `frontend/src/components/receipt/Receipt.jsx`
+  - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/utils/receiptAppliedConfig.ts`
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
@@ -4768,14 +4768,14 @@ Code files documented: **466**
   - `frontend/src/components/receipt-settings/constants.ts`
 - Referenced by (3)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
-  - `frontend/src/components/receipt/Receipt.jsx`
+  - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/tests/receiptTemplate.test.ts`
 
-### 3.247 `frontend/src/components/receipt/Receipt.jsx`
+### 3.247 `frontend/src/components/receipt/Receipt.tsx`
 
 - Declared exports: `function`
 - Imports (7)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/printReceipt`
   - `../../utils/receiptAppliedConfig.ts`
   - `../receipt-settings/template`
@@ -4959,7 +4959,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (19)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/receipt/Receipt.jsx`
+  - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.tsx`
   - `frontend/src/components/sales/SalesImportModal.tsx`
@@ -5028,7 +5028,7 @@ Code files documented: **466**
   - none
 - Referenced by (6)
   - `frontend/src/components/pos/POS.jsx`
-  - `frontend/src/components/receipt/Receipt.jsx`
+  - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.tsx`
   - `frontend/src/components/sales/Sales.jsx`
@@ -6107,7 +6107,7 @@ Code files documented: **466**
   - `frontend/src/types/receiptContracts.ts`
 - Referenced by (2)
   - `frontend/src/components/receipt-settings/PrintSettings.tsx`
-  - `frontend/src/components/receipt/Receipt.jsx`
+  - `frontend/src/components/receipt/Receipt.tsx`
 
 ### 3.324 `frontend/src/utils/productBatches.ts`
 
@@ -6162,7 +6162,7 @@ Code files documented: **466**
 - Referenced by (3)
   - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
-  - `frontend/src/components/receipt/Receipt.jsx`
+  - `frontend/src/components/receipt/Receipt.tsx`
 
 ### 3.328 `frontend/src/utils/scriptTypography.ts`
 

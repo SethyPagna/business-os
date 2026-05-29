@@ -280,7 +280,7 @@ Total files documented: **529**
 | 268 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | frontend-ui | 130 | 4.2 | UI component/page |
 | 269 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | frontend-ui | 443 | 26.3 | UI component/page |
 | 270 | `frontend/src/components/receipt-settings/template.ts` | frontend-ui | 33 | 0.9 | UI component/page |
-| 271 | `frontend/src/components/receipt/Receipt.jsx` | frontend-ui | 470 | 22.3 | UI component/page |
+| 271 | `frontend/src/components/receipt/Receipt.tsx` | frontend-ui | 578 | 26.2 | UI component/page |
 | 272 | `frontend/src/components/returns/EditReturnModal.tsx` | frontend-ui | 349 | 16.3 | UI component/page |
 | 273 | `frontend/src/components/returns/NewReturnModal.tsx` | frontend-ui | 618 | 31.8 | UI component/page |
 | 274 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | frontend-ui | 494 | 23.8 | UI component/page |

@@ -1076,7 +1076,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `Receipt.jsx` | UI component/page |
+| 1 | `Receipt.tsx` | UI component/page |
 
 
 ### 3.50 Folder: `frontend/src/components/receipt-settings`

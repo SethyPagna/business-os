@@ -113,7 +113,7 @@ Total files documented: **193**
 | 101 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
 | 102 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
 | 103 | `frontend/src/components/receipt-settings/template.ts` | 2 |
-| 104 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
+| 104 | `frontend/src/components/receipt/Receipt.tsx` | 10 |
 | 105 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
 | 106 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
 | 107 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
@@ -1693,18 +1693,20 @@ Total files documented: **193**
 | 1 | `isRecord` | function | 6 |
 | 2 | `parseTemplateInput` | function | 10 |
 
-### 3.104 `frontend/src/components/receipt/Receipt.jsx`
+### 3.104 `frontend/src/components/receipt/Receipt.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `stripEmoji` | function | 9 |
-| 2 | `displayAddress` | function | 14 |
-| 3 | `parseItems` | function | 23 |
-| 4 | `labelFor` | function | 115 |
-| 5 | `Row` | function | 120 |
-| 6 | `Receipt` | component/function | 132 |
-| 7 | `em` | const arrow | 146 |
-| 8 | `exportReceiptPdf` | const arrow | 342 |
+| 1 | `toNumber` | function | 104 |
+| 2 | `stripEmoji` | function | 109 |
+| 3 | `stripEmoji` | function | 111 |
+| 4 | `displayAddress` | function | 116 |
+| 5 | `parseItems` | function | 125 |
+| 6 | `getErrorMessage` | function | 136 |
+| 7 | `labelFor` | function | 222 |
+| 8 | `Row` | function | 227 |
+| 9 | `Receipt` | component/function | 239 |
+| 10 | `exportReceiptPdf` | const arrow | 450 |
 
 ### 3.105 `frontend/src/components/returns/EditReturnModal.tsx`
 
