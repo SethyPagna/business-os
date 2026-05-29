@@ -262,7 +262,7 @@ Code files scanned: **466**
 | 250 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 6 |
 | 251 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
 | 252 | `frontend/src/components/returns/Returns.jsx` | 13 |
-| 253 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 5 |
+| 253 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
 | 254 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
 | 255 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
 | 256 | `frontend/src/components/sales/Sales.jsx` | 14 |
@@ -4643,15 +4643,15 @@ Code files scanned: **466**
 | 12 | `handleOpenEdit` | const arrow | 246 |
 | 13 | `renderAmount` | const arrow | 663 |
 
-### 3.253 `frontend/src/components/returns/ReturnsListSurface.jsx`
+### 3.253 `frontend/src/components/returns/ReturnsListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `detectMobileViewport` | function | 14 |
-| 2 | `ReturnsDesktopSkeletonRows` | function | 19 |
-| 3 | `ReturnsMobileSkeletonCards` | function | 36 |
-| 4 | `ReturnsListSurface` | export default function | 56 |
-| 5 | `apply` | const arrow | 87 |
+| 1 | `detectMobileViewport` | function | 70 |
+| 2 | `ReturnsDesktopSkeletonRows` | function | 75 |
+| 3 | `ReturnsMobileSkeletonCards` | function | 92 |
+| 4 | `ReturnsListSurface` | export default function | 112 |
+| 5 | `apply` | const arrow | 143 |
 
 ### 3.254 `frontend/src/components/sales/ExportModal.tsx`
 

@@ -286,7 +286,7 @@ Total files documented: **529**
 | 274 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | frontend-ui | 394 | 20.8 | UI component/page |
 | 275 | `frontend/src/components/returns/ReturnDetailModal.tsx` | frontend-ui | 186 | 8.5 | UI component/page |
 | 276 | `frontend/src/components/returns/Returns.jsx` | frontend-ui | 888 | 38.8 | UI component/page |
-| 277 | `frontend/src/components/returns/ReturnsListSurface.jsx` | frontend-ui | 328 | 17.6 | UI component/page |
+| 277 | `frontend/src/components/returns/ReturnsListSurface.tsx` | frontend-ui | 384 | 19.2 | UI component/page |
 | 278 | `frontend/src/components/sales/ExportModal.tsx` | frontend-ui | 318 | 13.2 | UI component/page |
 | 279 | `frontend/src/components/sales/SaleDetailModal.tsx` | frontend-ui | 408 | 18.4 | UI component/page |
 | 280 | `frontend/src/components/sales/Sales.jsx` | frontend-ui | 908 | 40.2 | UI component/page |

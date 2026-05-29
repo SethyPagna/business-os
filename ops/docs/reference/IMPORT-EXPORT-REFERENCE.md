@@ -262,7 +262,7 @@ Code files documented: **466**
 | 250 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 3 | 1 | 2 | 1 |
 | 251 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
 | 252 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
-| 253 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 2 | 1 | 0 | 1 |
+| 253 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 2 | 1 | 0 | 1 |
 | 254 | `frontend/src/components/sales/ExportModal.tsx` | 5 | 1 | 3 | 1 |
 | 255 | `frontend/src/components/sales/SaleDetailModal.tsx` | 3 | 1 | 2 | 1 |
 | 256 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
@@ -4877,7 +4877,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/NewReturnModal.jsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
-  - `frontend/src/components/returns/ReturnsListSurface.jsx`
+  - `frontend/src/components/returns/ReturnsListSurface.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
@@ -4892,7 +4892,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.253 `frontend/src/components/returns/ReturnsListSurface.jsx`
+### 3.253 `frontend/src/components/returns/ReturnsListSurface.tsx`
 
 - Declared exports: `function`
 - Imports (2)

@@ -1114,7 +1114,7 @@ Total folders documented: **81**
 | 3 | `NewSupplierReturnModal.jsx` | UI component/page |
 | 4 | `ReturnDetailModal.tsx` | UI component/page |
 | 5 | `Returns.jsx` | UI component/page |
-| 6 | `ReturnsListSurface.jsx` | UI component/page |
+| 6 | `ReturnsListSurface.tsx` | UI component/page |
 
 
 ### 3.52 Folder: `frontend/src/components/sales`
