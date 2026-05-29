@@ -205,7 +205,7 @@ Code files documented: **466**
 | 193 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 5 | 1 | 4 | 1 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 | 0 | 1 | 0 |
 | 195 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 4 | 1 | 2 | 1 |
-| 196 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 4 | 1 | 2 | 1 |
+| 196 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 4 | 1 | 2 | 1 |
 | 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 | 1 | 0 | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 2 |
 | 199 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 | 1 | 2 | 1 |
@@ -3874,7 +3874,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+  - `frontend/src/components/inventory/InventoryProductsSurface.tsx`
 
 ### 3.192 `frontend/src/components/inventory/Inventory.jsx`
 
@@ -3915,7 +3915,7 @@ Code files documented: **466**
   - `frontend/src/api/http.ts`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
-  - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+  - `frontend/src/components/inventory/InventoryProductsSurface.tsx`
   - `frontend/src/components/inventory/InventoryRfidSurface.tsx`
   - `frontend/src/components/inventory/ProductDetailModal.tsx`
   - `frontend/src/components/inventory/movementGroups.ts`
@@ -3983,7 +3983,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.196 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+### 3.196 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -6176,7 +6176,7 @@ Code files documented: **466**
   - none
 - Referenced by (6)
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
-  - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+  - `frontend/src/components/inventory/InventoryProductsSurface.tsx`
   - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`

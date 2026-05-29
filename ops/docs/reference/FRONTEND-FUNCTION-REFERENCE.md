@@ -62,7 +62,7 @@ Total files documented: **193**
 | 50 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
 | 51 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
 | 52 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
-| 53 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
+| 53 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 3 |
 | 54 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 55 | `frontend/src/components/inventory/movementGroups.ts` | 11 |
 | 56 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
@@ -1166,13 +1166,13 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `InventoryMovementsSurface` | component/function | 6 |
 
-### 3.53 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+### 3.53 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `InventoryProductsSurface` | component/function | 6 |
-| 2 | `renderDesktopTableHead` | const arrow | 45 |
-| 3 | `renderDesktopLoadingShell` | const arrow | 67 |
+| 1 | `InventoryProductsSurface` | component/function | 102 |
+| 2 | `renderDesktopTableHead` | const arrow | 141 |
+| 3 | `renderDesktopLoadingShell` | const arrow | 163 |
 
 ### 3.54 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
 

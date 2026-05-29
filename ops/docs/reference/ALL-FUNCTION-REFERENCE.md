@@ -205,7 +205,7 @@ Code files scanned: **466**
 | 193 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
 | 195 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
-| 196 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
+| 196 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 3 |
 | 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
 | 199 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
@@ -3948,13 +3948,13 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `InventoryMovementsSurface` | export default function | 6 |
 
-### 3.196 `frontend/src/components/inventory/InventoryProductsSurface.jsx`
+### 3.196 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `InventoryProductsSurface` | export default function | 6 |
-| 2 | `renderDesktopTableHead` | const arrow | 45 |
-| 3 | `renderDesktopLoadingShell` | const arrow | 67 |
+| 1 | `InventoryProductsSurface` | export default function | 102 |
+| 2 | `renderDesktopTableHead` | const arrow | 141 |
+| 3 | `renderDesktopLoadingShell` | const arrow | 163 |
 
 ### 3.197 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
 
