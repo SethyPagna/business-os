@@ -61,7 +61,7 @@ Total files documented: **193**
 | 49 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
 | 50 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
 | 51 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
-| 52 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
+| 52 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
 | 53 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 3 |
 | 54 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 55 | `frontend/src/components/inventory/movementGroups.ts` | 11 |
@@ -1160,11 +1160,11 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.52 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+### 3.52 `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `InventoryMovementsSurface` | component/function | 6 |
+| 1 | `InventoryMovementsSurface` | component/function | 140 |
 
 ### 3.53 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
 

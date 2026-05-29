@@ -204,7 +204,7 @@ Code files scanned: **466**
 | 192 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
 | 193 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
-| 195 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
+| 195 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
 | 196 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 3 |
 | 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
@@ -3942,11 +3942,11 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.195 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+### 3.195 `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `InventoryMovementsSurface` | export default function | 6 |
+| 1 | `InventoryMovementsSurface` | export default function | 140 |
 
 ### 3.196 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
 

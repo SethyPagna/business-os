@@ -204,7 +204,7 @@ Code files documented: **466**
 | 192 | `frontend/src/components/inventory/Inventory.jsx` | 30 | 1 | 28 | 1 |
 | 193 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 5 | 1 | 4 | 1 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 | 0 | 1 | 0 |
-| 195 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 4 | 1 | 2 | 1 |
+| 195 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 6 | 1 | 4 | 1 |
 | 196 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 4 | 1 | 2 | 1 |
 | 197 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 | 1 | 0 | 1 |
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 2 |
@@ -283,8 +283,8 @@ Code files documented: **466**
 | 271 | `frontend/src/components/shared/NotificationCenter.tsx` | 4 | 1 | 1 | 2 |
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
 | 273 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
-| 274 | `frontend/src/components/shared/PaginationControls.tsx` | 2 | 4 | 0 | 8 |
-| 275 | `frontend/src/components/shared/PortalMenu.tsx` | 3 | 2 | 0 | 7 |
+| 274 | `frontend/src/components/shared/PaginationControls.tsx` | 2 | 4 | 0 | 9 |
+| 275 | `frontend/src/components/shared/PortalMenu.tsx` | 3 | 2 | 0 | 8 |
 | 276 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 | 1 | 1 | 3 |
 | 277 | `frontend/src/components/shared/SectionSwitcher.tsx` | 1 | 1 | 0 | 4 |
 | 278 | `frontend/src/components/shared/WriteConflictModal.tsx` | 1 | 1 | 1 | 1 |
@@ -3914,7 +3914,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/api/http.ts`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
-  - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+  - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/inventory/InventoryProductsSurface.tsx`
   - `frontend/src/components/inventory/InventoryRfidSurface.tsx`
   - `frontend/src/components/inventory/ProductDetailModal.tsx`
@@ -3969,17 +3969,21 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.195 `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+### 3.195 `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
 
 - Declared exports: `function`
-- Imports (4)
+- Imports (6)
   - `../shared/ActionHistoryBar`
   - `../shared/ExportMenu`
+  - `../shared/PaginationControls`
+  - `../shared/PortalMenu`
   - `lucide-react`
   - `react`
-- Internal dependencies (2)
+- Internal dependencies (4)
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
+  - `frontend/src/components/shared/PaginationControls.tsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
@@ -5070,7 +5074,7 @@ Code files documented: **466**
   - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+  - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
@@ -5113,7 +5117,7 @@ Code files documented: **466**
 - Referenced by (7)
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
+  - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/products/surfaces/HeaderActions.tsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
@@ -5282,10 +5286,11 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (0)
   - none
-- Referenced by (8)
+- Referenced by (9)
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
+  - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.jsx`
@@ -5301,9 +5306,10 @@ Code files documented: **466**
   - `react-dom`
 - Internal dependencies (0)
   - none
-- Referenced by (7)
+- Referenced by (8)
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/contacts/shared.tsx`
+  - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/products/surfaces/HeaderActions.tsx`
   - `frontend/src/components/products/surfaces/ProductRowParts.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`

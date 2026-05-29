@@ -227,7 +227,7 @@ Total files documented: **529**
 | 215 | `frontend/src/components/inventory/Inventory.jsx` | frontend-ui | 4123 | 208.9 | UI component/page |
 | 216 | `frontend/src/components/inventory/InventoryImportModal.tsx` | frontend-ui | 299 | 13.0 | UI component/page |
 | 217 | `frontend/src/components/inventory/inventoryImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
-| 218 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | frontend-ui | 540 | 34.3 | UI component/page |
+| 218 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | frontend-ui | 674 | 38.5 | UI component/page |
 | 219 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | frontend-ui | 565 | 34.5 | UI component/page |
 | 220 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | frontend-ui | 180 | 9.6 | UI component/page |
 | 221 | `frontend/src/components/inventory/movementGroups.ts` | frontend-ui | 287 | 12.9 | UI component/page |
