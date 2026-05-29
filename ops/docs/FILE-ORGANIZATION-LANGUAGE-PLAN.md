@@ -4053,6 +4053,13 @@ Decision rule:
     provider refresh, edit, test, delete, create, save, and action guard
     behavior unchanged while moving the library lazy import and action
     stability source-path guard to the TSX file.
+518. Convert the returns list surface to TSX. Done:
+    `frontend/src/components/returns/ReturnsListSurface.tsx` now types return
+    records, grouped return sections, selection scopes, checkbox refs,
+    viewport-deferred styles, amount renderers, and detail callbacks. The
+    conversion keeps the desktop table, mobile cards, breakpoint-gated
+    rendering, section collapse, group selection, and returns layout guard test
+    intact.
 
 ## Safety Gates
 

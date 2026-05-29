@@ -5616,3 +5616,12 @@ Move 517 status:
   updates. The move keeps library-provider lazy loading, refresh, edit, test,
   delete, create, save, and bounded action-guard behavior unchanged while
   moving source-path guards to the TSX file.
+
+Move 518 status:
+- Move 518 converts the returns list surface to
+  `frontend/src/components/returns/ReturnsListSurface.tsx`. The typed boundary
+  now covers return records, grouped return sections, selection scope ids,
+  checkbox refs, viewport-deferred row/card styles, amount renderers, detail
+  callbacks, and breakpoint-gated rendering state. The move keeps desktop
+  table rows, mobile cards, collapse toggles, group selection, and returns
+  layout guard behavior unchanged.

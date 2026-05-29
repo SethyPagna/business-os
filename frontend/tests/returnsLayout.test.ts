@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const returnsSource = readFileSync(new URL('../src/components/returns/Returns.jsx', import.meta.url), 'utf8')
-const returnsSurfaceSource = readFileSync(new URL('../src/components/returns/ReturnsListSurface.jsx', import.meta.url), 'utf8')
+const returnsSurfaceSource = readFileSync(new URL('../src/components/returns/ReturnsListSurface.tsx', import.meta.url), 'utf8')
 const en = readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')
 const km = readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')
 

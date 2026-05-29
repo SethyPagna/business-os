@@ -1,14 +1,70 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
-const deferredMobileCardStyle = {
+const deferredMobileCardStyle: CSSProperties = {
   contentVisibility: 'auto',
   containIntrinsicSize: '128px',
 }
 
-const deferredDesktopRowStyle = {
+const deferredDesktopRowStyle: CSSProperties = {
   contentVisibility: 'auto',
   containIntrinsicSize: '56px',
+}
+
+type TranslateFn = (key: string, fallbackEn?: string, fallbackKm?: string) => string
+type BasicTranslateFn = (key: string) => string
+
+interface ReturnRecord {
+  id: number | string
+  return_number?: string
+  created_at?: string
+  receipt_number?: string
+  return_scope?: string
+  supplier_settlement?: string
+  return_type?: string
+  supplier_name?: string
+  customer_name?: string
+  reason?: string
+}
+
+interface ReturnGroup {
+  id: string
+  label: string
+  ids: number[]
+  items: ReturnRecord[]
+}
+
+interface ReturnSection {
+  id: string
+  label: string
+  ids: number[]
+  groups: ReturnGroup[]
+}
+
+interface ReturnsListSurfaceProps {
+  collapsedReturnSections: Set<string>
+  CUSTOMER_SCOPE: string
+  filtered: ReturnRecord[]
+  fmtTime: (value?: string) => string
+  isSelectionScopeFullySelected: (ids: number[]) => boolean
+  isSelectionScopePartiallySelected: (ids: number[]) => boolean
+  loading: boolean
+  normalizeScope: (scope?: string) => string
+  renderAmount: (ret: ReturnRecord) => ReactNode
+  returnSections: ReturnSection[]
+  scope: string
+  selectAllRef: RefObject<HTMLInputElement>
+  selectedIds: Set<number>
+  setDetailRet: (ret: ReturnRecord) => void
+  showReturnActionGroups: boolean
+  SUPPLIER_SCOPE: string
+  t: BasicTranslateFn
+  toggleReturnSection: (sectionId: string) => void
+  toggleSelected: (returnId: ReturnRecord['id']) => void
+  toggleSelectAll: (selected: boolean) => void
+  toggleSelectionScope: (ids: number[], selected: boolean) => void
+  tr: TranslateFn
+  visibleIds: number[]
 }
 
 function detectMobileViewport() {
@@ -77,7 +133,7 @@ export default function ReturnsListSurface({
   toggleSelectionScope,
   tr,
   visibleIds,
-}) {
+}: ReturnsListSurfaceProps) {
   let desktopRenderedRowCount = 0
   const [isMobileViewport, setIsMobileViewport] = useState(() => detectMobileViewport())
 

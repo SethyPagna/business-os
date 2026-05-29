@@ -65,7 +65,7 @@ This is a concise running log of what actually happened in recent sessions.
     Returns slower
 
 - Returns global mobile deferred-card threshold
-  - area: `frontend/src/components/returns/ReturnsListSurface.jsx`
+  - area: `frontend/src/components/returns/ReturnsListSurface.tsx`
   - result: rejected
   - note: making the mobile deferred-card threshold global across groups made
     both desktop and mobile Returns slower in the real route audit
@@ -279,3 +279,20 @@ Use this shape for future entries:
   tunnel failure
 - follow-up insight: this tab is now a typed boundary for provider metadata
   defaults before the larger library page shell is converted.
+
+- change: converted the returns list surface to TSX with typed return records,
+  grouped sections, selection scopes, checkbox refs, deferred styles, amount
+  rendering, and detail callbacks
+- affected files: `frontend/src/components/returns/ReturnsListSurface.tsx`,
+  `frontend/tests/returnsLayout.test.ts`
+- route or API target: Returns desktop table, mobile card list, grouped
+  selection and collapse controls
+- keeper or rollback: keeper if returns layout, typecheck, JSX,
+  frontend/backend utility, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 518 returns layout, typecheck, JSX,
+  frontend/backend utility, build, Phase 29, and schema/reference checks
+- warm whole-app result: passed in Move 518 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: return row grouping now has an explicit typed boundary,
+  which makes the larger Returns route conversion less risky.
