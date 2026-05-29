@@ -257,7 +257,7 @@ Code files scanned: **466**
 | 245 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
 | 246 | `frontend/src/components/receipt-settings/template.ts` | 4 |
 | 247 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
-| 248 | `frontend/src/components/returns/EditReturnModal.jsx` | 5 |
+| 248 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
 | 249 | `frontend/src/components/returns/NewReturnModal.jsx` | 10 |
 | 250 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 6 |
 | 251 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
@@ -4576,15 +4576,17 @@ Code files scanned: **466**
 | 7 | `em` | const arrow | 146 |
 | 8 | `exportReceiptPdf` | const arrow | 342 |
 
-### 3.248 `frontend/src/components/returns/EditReturnModal.jsx`
+### 3.248 `frontend/src/components/returns/EditReturnModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `EditReturnModal` | function | 10 |
-| 2 | `T` | const arrow | 12 |
-| 3 | `updateQty` | const arrow | 38 |
-| 4 | `updateRestock` | const arrow | 41 |
-| 5 | `handleSubmit` | const arrow | 49 |
+| 1 | `getReturnApi` | function | 90 |
+| 2 | `toNumber` | function | 95 |
+| 3 | `clampReturnQuantity` | function | 100 |
+| 4 | `isWriteConflict` | function | 106 |
+| 5 | `EditReturnModal` | export default function | 111 |
+| 6 | `updateQty` | const arrow | 144 |
+| 7 | `updateRestock` | const arrow | 147 |
 
 ### 3.249 `frontend/src/components/returns/NewReturnModal.jsx`
 

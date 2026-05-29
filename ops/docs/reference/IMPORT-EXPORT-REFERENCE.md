@@ -257,7 +257,7 @@ Code files documented: **466**
 | 245 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 12 | 1 | 10 | 1 |
 | 246 | `frontend/src/components/receipt-settings/template.ts` | 1 | 2 | 1 | 3 |
 | 247 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
-| 248 | `frontend/src/components/returns/EditReturnModal.jsx` | 4 | 1 | 3 | 1 |
+| 248 | `frontend/src/components/returns/EditReturnModal.tsx` | 4 | 1 | 3 | 1 |
 | 249 | `frontend/src/components/returns/NewReturnModal.jsx` | 4 | 1 | 3 | 1 |
 | 250 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 3 | 1 | 2 | 1 |
 | 251 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
@@ -3148,7 +3148,7 @@ Code files documented: **466**
   - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
-  - `frontend/src/components/returns/EditReturnModal.jsx`
+  - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
@@ -4792,11 +4792,11 @@ Code files documented: **466**
   - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.248 `frontend/src/components/returns/EditReturnModal.jsx`
+### 3.248 `frontend/src/components/returns/EditReturnModal.tsx`
 
 - Declared exports: `function`
 - Imports (4)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/loaders.ts`
   - `react`
@@ -4872,7 +4872,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (17)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/returns/EditReturnModal.jsx`
+  - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
@@ -5707,7 +5707,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/src/components/returns/EditReturnModal.jsx`
+  - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
   - `frontend/src/components/returns/Returns.jsx`
@@ -6041,7 +6041,7 @@ Code files documented: **466**
   - `frontend/src/components/products/import/BulkImportModal.tsx`
   - `frontend/src/components/products/lookups/productLookupSnapshots.ts`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
-  - `frontend/src/components/returns/EditReturnModal.jsx`
+  - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`

@@ -1109,7 +1109,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `EditReturnModal.jsx` | UI component/page |
+| 1 | `EditReturnModal.tsx` | UI component/page |
 | 2 | `NewReturnModal.jsx` | UI component/page |
 | 3 | `NewSupplierReturnModal.jsx` | UI component/page |
 | 4 | `ReturnDetailModal.tsx` | UI component/page |
