@@ -718,7 +718,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `Branches.jsx` | UI component/page |
+| 1 | `Branches.tsx` | UI component/page |
 | 2 | `BranchForm.tsx` | UI component/page |
 | 3 | `TransferModal.tsx` | UI component/page |
 

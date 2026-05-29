@@ -162,7 +162,7 @@ Code files documented: **466**
 | 150 | `frontend/src/app/publicErrorRecovery.ts` | 0 | 3 | 0 | 1 |
 | 151 | `frontend/src/AppContext.jsx` | 14 | 5 | 13 | 52 |
 | 152 | `frontend/src/components/auth/Login.jsx` | 5 | 1 | 4 | 1 |
-| 153 | `frontend/src/components/branches/Branches.jsx` | 13 | 1 | 11 | 1 |
+| 153 | `frontend/src/components/branches/Branches.tsx` | 13 | 1 | 11 | 1 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 | 1 | 1 | 1 |
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 3 | 1 | 2 | 1 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 5 | 1 | 4 | 1 |
@@ -3033,7 +3033,7 @@ Code files documented: **466**
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/app/publicErrorRecovery.ts`
   - `frontend/src/components/auth/Login.jsx`
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
@@ -3120,7 +3120,7 @@ Code files documented: **466**
 - Referenced by (52)
   - `frontend/src/App.jsx`
   - `frontend/src/components/auth/Login.jsx`
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/branches/BranchForm.tsx`
   - `frontend/src/components/branches/TransferModal.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
@@ -3188,11 +3188,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.153 `frontend/src/components/branches/Branches.jsx`
+### 3.153 `frontend/src/components/branches/Branches.tsx`
 
 - Declared exports: `function`
 - Imports (13)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
@@ -3229,7 +3229,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
 - Referenced by (1)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
 
 ### 3.155 `frontend/src/components/branches/TransferModal.tsx`
 
@@ -3242,7 +3242,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
 
 ### 3.156 `frontend/src/components/catalog/CatalogEditorSurface.jsx`
 
@@ -5078,7 +5078,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
 - Referenced by (17)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
@@ -5200,7 +5200,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (22)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomerFormModal.tsx`
@@ -5258,7 +5258,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
 - Referenced by (15)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
@@ -5282,7 +5282,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (6)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/server/ServerPage.tsx`
@@ -5709,7 +5709,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (33)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/branches/TransferModal.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
@@ -5752,7 +5752,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
 - Referenced by (16)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
@@ -5791,7 +5791,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (8)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
@@ -5993,7 +5993,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (11)
-  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`

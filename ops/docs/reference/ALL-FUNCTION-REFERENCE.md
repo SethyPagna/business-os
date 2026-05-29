@@ -162,7 +162,7 @@ Code files scanned: **466**
 | 150 | `frontend/src/app/publicErrorRecovery.ts` | 4 |
 | 151 | `frontend/src/AppContext.jsx` | 41 |
 | 152 | `frontend/src/components/auth/Login.jsx` | 23 |
-| 153 | `frontend/src/components/branches/Branches.jsx` | 11 |
+| 153 | `frontend/src/components/branches/Branches.tsx` | 15 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
@@ -3300,21 +3300,25 @@ Code files scanned: **466**
 | 22 | `handleStartOauth` | const arrow | 579 |
 | 23 | `closeAuxMode` | const arrow | 627 |
 
-### 3.153 `frontend/src/components/branches/Branches.jsx`
+### 3.153 `frontend/src/components/branches/Branches.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `BranchStatTile` | function | 36 |
-| 2 | `formatTransferDate` | function | 53 |
-| 3 | `Branches` | export default function | 70 |
-| 4 | `promise` | const arrow | 116 |
-| 5 | `loadBranchStock` | const arrow | 249 |
-| 6 | `loadMoreBranchStock` | const arrow | 270 |
-| 7 | `handleSaveBranch` | const arrow | 296 |
-| 8 | `handleDelete` | const arrow | 364 |
-| 9 | `handleBulkDelete` | const arrow | 412 |
-| 10 | `toggleSelect` | const arrow | 498 |
-| 11 | `toggleSelectAll` | const arrow | 507 |
+| 1 | `getBranchApi` | function | 179 |
+| 2 | `getErrorMessage` | function | 183 |
+| 3 | `isBranchRecord` | function | 187 |
+| 4 | `isTransferRecord` | function | 191 |
+| 5 | `BranchStatTile` | function | 195 |
+| 6 | `formatTransferDate` | function | 212 |
+| 7 | `Branches` | export default function | 229 |
+| 8 | `promise` | const arrow | 276 |
+| 9 | `loadBranchStock` | const arrow | 413 |
+| 10 | `loadMoreBranchStock` | const arrow | 434 |
+| 11 | `handleSaveBranch` | const arrow | 465 |
+| 12 | `handleDelete` | const arrow | 533 |
+| 13 | `handleBulkDelete` | const arrow | 581 |
+| 14 | `toggleSelect` | const arrow | 667 |
+| 15 | `toggleSelectAll` | const arrow | 676 |
 
 ### 3.154 `frontend/src/components/branches/BranchForm.tsx`
 
