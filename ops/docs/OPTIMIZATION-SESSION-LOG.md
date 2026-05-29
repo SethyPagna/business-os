@@ -245,3 +245,19 @@ Use this shape for future entries:
   tunnel failure
 - follow-up insight: the nav shell now has a typed icon fallback so future nav
   ids cannot render an undefined icon component during settings/order changes.
+
+- change: converted the sales detail modal to TSX with typed sale details,
+  parsed line items, status/membership callbacks, formatter callbacks, and
+  numeric total/quantity normalization
+- affected files: `frontend/src/components/sales/SaleDetailModal.tsx`
+- route or API target: Sales detail modal, print action, status update,
+  membership attach, totals and line-item rendering
+- keeper or rollback: keeper if performance loading UX, typecheck, JSX,
+  frontend/backend utility, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 516 performance loading UX, typecheck,
+  JSX, frontend/backend utility, build, Phase 29, and schema/reference checks
+- warm whole-app result: passed in Move 516 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: line item math is now normalized through a single number
+  coercion helper, which is safer for mixed string/number API payloads.

@@ -1,8 +1,81 @@
-import { useMemo, useState } from 'react'
-import { fmtTime } from '../../utils/formatters'
-import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge'
+import { useMemo, useState, type MouseEvent } from 'react'
+import { fmtTime } from '../../utils/formatters.ts'
+import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 
-function InfoBlock({ label, value, mono = false, badge = false }) {
+type TranslateFn = (key: string) => string
+type MoneyFormatter = (value: number | string) => string
+
+interface InfoBlockProps {
+  label: string
+  value?: string | number | null
+  mono?: boolean
+  badge?: boolean
+}
+
+interface SaleLineItem {
+  id?: string | number | null
+  product_id?: string | number | null
+  product_name?: string | null
+  name?: string | null
+  quantity?: number | string | null
+  qty?: number | string | null
+  applied_price_usd?: number | string | null
+  applied_price_khr?: number | string | null
+  price_usd?: number | string | null
+  price_khr?: number | string | null
+  price?: number | string | null
+  branch_name?: string | null
+}
+
+interface SaleDetail {
+  id: string | number
+  receipt_number?: string | null
+  created_at?: string | Date | null
+  sale_status?: string | null
+  customer_membership_number?: string | null
+  items?: SaleLineItem[] | string | null
+  total_usd?: number | string | null
+  total?: number | string | null
+  total_khr?: number | string | null
+  refund_usd?: number | string | null
+  refund_khr?: number | string | null
+  membership_discount_usd?: number | string | null
+  membership_discount_khr?: number | string | null
+  membership_points_redeemed?: number | string | null
+  discount_usd?: number | string | null
+  tax_usd?: number | string | null
+  subtotal_usd?: number | string | null
+  amount_paid_usd?: number | string | null
+  change_usd?: number | string | null
+  cashier_name?: string | null
+  payment_method?: string | null
+  branch_name?: string | null
+  device_tz?: string | null
+  device_name?: string | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  customer_address?: string | null
+  notes?: string | null
+}
+
+interface SaleDetailModalProps {
+  sale?: SaleDetail | null
+  settings?: unknown
+  onClose: () => void
+  onStatusChange?: (saleId: string | number, status: string, notes: string) => Promise<unknown> | unknown
+  onAttachMembership?: (saleId: string | number, membershipNumber: string) => Promise<boolean | unknown> | boolean | unknown
+  onPrint?: (sale: SaleDetail) => void
+  t: TranslateFn
+  fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
+}
+
+function toNumber(value: number | string | null | undefined): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function InfoBlock({ label, value, mono = false, badge = false }: InfoBlockProps) {
   if (value == null || value === '') return null
   return (
     <div>
@@ -18,11 +91,12 @@ function InfoBlock({ label, value, mono = false, badge = false }) {
   )
 }
 
-function parseItems(raw) {
+function parseItems(raw: SaleDetail['items']): SaleLineItem[] {
   if (Array.isArray(raw)) return raw
   if (typeof raw !== 'string') return []
   try {
-    return JSON.parse(raw)
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed.filter((item): item is SaleLineItem => !!item && typeof item === 'object') : []
   } catch {
     return []
   }
@@ -37,14 +111,14 @@ export default function SaleDetailModal({
   t,
   fmtUSD,
   fmtKHR,
-}) {
+}: SaleDetailModalProps) {
   const [newStatus, setNewStatus] = useState(sale?.sale_status || 'completed')
   const [statusNotes, setStatusNotes] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
   const [membershipNumber, setMembershipNumber] = useState(sale?.customer_membership_number || '')
   const [membershipSaving, setMembershipSaving] = useState(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const translateOr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const translateOr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
@@ -55,18 +129,20 @@ export default function SaleDetailModal({
   if (!sale) return null
 
   const currentStatus = sale.sale_status || 'completed'
-  const totalUsd = sale.total_usd || sale.total || 0
-  const totalKhr = sale.total_khr || 0
-  const refundUsd = sale.refund_usd || 0
-  const refundKhr = sale.refund_khr || 0
-  const membershipDiscountUsd = sale.membership_discount_usd || 0
-  const membershipDiscountKhr = sale.membership_discount_khr || 0
-  const membershipPointsRedeemed = sale.membership_points_redeemed || 0
-  const baseDiscountUsd = sale.discount_usd || 0
-  const taxUsd = sale.tax_usd || 0
-  const subtotalUsd = sale.subtotal_usd || 0
+  const totalUsd = toNumber(sale.total_usd || sale.total)
+  const totalKhr = toNumber(sale.total_khr)
+  const refundUsd = toNumber(sale.refund_usd)
+  const refundKhr = toNumber(sale.refund_khr)
+  const membershipDiscountUsd = toNumber(sale.membership_discount_usd)
+  const membershipDiscountKhr = toNumber(sale.membership_discount_khr)
+  const membershipPointsRedeemed = toNumber(sale.membership_points_redeemed)
+  const baseDiscountUsd = toNumber(sale.discount_usd)
+  const taxUsd = toNumber(sale.tax_usd)
+  const subtotalUsd = toNumber(sale.subtotal_usd)
+  const amountPaidUsd = toNumber(sale.amount_paid_usd)
+  const changeUsd = toNumber(sale.change_usd)
 
-  const handleStatusUpdate = async () => {
+  const handleStatusUpdate = async (): Promise<void> => {
     if (!onStatusChange || newStatus === currentStatus) return
     setStatusSaving(true)
     try {
@@ -77,7 +153,7 @@ export default function SaleDetailModal({
     }
   }
 
-  const handleMembershipAttach = async () => {
+  const handleMembershipAttach = async (): Promise<void> => {
     const value = String(membershipNumber || '').trim()
     if (!value || !onAttachMembership) return
     setMembershipSaving(true)
@@ -93,7 +169,7 @@ export default function SaleDetailModal({
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
         className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div>
@@ -120,7 +196,7 @@ export default function SaleDetailModal({
               className="flex h-8 w-8 items-center justify-center text-2xl leading-none text-gray-400 hover:text-gray-600"
               aria-label={t('close') || 'Close'}
             >
-              ×
+              x
             </button>
           </div>
         </div>
@@ -217,16 +293,16 @@ export default function SaleDetailModal({
                   <span>{fmtUSD(totalUsd)}</span>
                 </div>
                 {totalKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
-                {(sale.amount_paid_usd || 0) > 0 ? (
+                {amountPaidUsd > 0 ? (
                   <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
                     <span>{t('amount_paid') || 'Amount paid'}</span>
-                    <span>{fmtUSD(sale.amount_paid_usd || 0)}</span>
+                    <span>{fmtUSD(amountPaidUsd)}</span>
                   </div>
                 ) : null}
-                {(sale.change_usd || 0) > 0 ? (
+                {changeUsd > 0 ? (
                   <div className="flex justify-between text-xs text-blue-600 dark:text-blue-400">
                     <span>{t('change') || 'Change'}</span>
-                    <span>{fmtUSD(sale.change_usd || 0)}</span>
+                    <span>{fmtUSD(changeUsd)}</span>
                   </div>
                 ) : null}
               </div>
@@ -249,9 +325,9 @@ export default function SaleDetailModal({
             ) : (
               <div className="space-y-2">
                 {items.map((item, index) => {
-                  const qty = item.quantity || item.qty || 1
-                  const unitUsd = item.applied_price_usd ?? item.price_usd ?? item.price ?? 0
-                  const unitKhr = item.applied_price_khr ?? item.price_khr ?? 0
+                  const qty = toNumber(item.quantity || item.qty || 1) || 1
+                  const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
+                  const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
                   const lineUsd = unitUsd * qty
                   const lineKhr = unitKhr * qty
                   return (
@@ -259,7 +335,7 @@ export default function SaleDetailModal({
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {qty} × {fmtUSD(unitUsd)}
+                          {qty} x {fmtUSD(unitUsd)}
                         </div>
                         {item.branch_name ? (
                           <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">

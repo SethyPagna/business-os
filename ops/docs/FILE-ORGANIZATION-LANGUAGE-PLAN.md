@@ -4040,6 +4040,12 @@ Decision rule:
     intent events. The conversion keeps desktop/sidebar/mobile drawer layouts,
     route warmup pointer/touch/focus events, sync status dots, and profile
     modal entry intact while moving source-path performance guards to TSX.
+516. Convert the sales detail modal to TSX. Done:
+    `frontend/src/components/sales/SaleDetailModal.tsx` now types sale detail
+    rows, parsed sale line items, status and membership callbacks, formatter
+    callbacks, translation fallbacks, and money/quantity normalization. The
+    conversion keeps print/status/membership actions, totals, item breakdowns,
+    Khmer fallback copy, and extensionless sales-page lazy imports intact.
 
 ## Safety Gates
 

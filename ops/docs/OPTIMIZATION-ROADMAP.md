@@ -5598,3 +5598,12 @@ Move 515 status:
   icons, mobile pinned/drawer rows, and page-intent event sources. The move
   keeps desktop, mobile header, bottom bar, drawer, sync status, profile modal,
   and route warmup behavior unchanged while updating performance guards.
+
+Move 516 status:
+- Move 516 converts the sales detail modal to
+  `frontend/src/components/sales/SaleDetailModal.tsx`. The typed boundary now
+  covers sale detail rows, parsed line items, status/membership callbacks,
+  print callbacks, money formatters, translation fallback helpers, and
+  numeric coercion for totals and item quantities. The move keeps print,
+  status update, membership attach, totals, item breakdown, and lazy sales-page
+  loading behavior unchanged.
