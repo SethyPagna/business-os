@@ -5698,3 +5698,15 @@ Move 525 status:
   catalog-preview manual chunk grouping, portal UI verifier coverage,
   customer-safe rendering, promotion cards, and product-gallery entry points
   unchanged.
+
+Move 526 status:
+- Move 526 converts the inventory products surface to
+  `frontend/src/components/inventory/InventoryProductsSurface.tsx`. The typed
+  boundary now covers inventory product rows, branch stock chips, grouped
+  section data, group summary callbacks, stock quantity callbacks, selection
+  scope toggles, selected product ids, formatter/translator functions,
+  injected discount and batch preview components, product detail/adjust
+  callbacks, and desktop/mobile reveal gates. The move keeps Inventory's
+  extensionless import, grouped desktop table, compact mobile cards,
+  indeterminate selection states, stock status badges, price/sales metrics,
+  and mobile-card layout guard behavior unchanged.

@@ -448,3 +448,29 @@ Use this shape for future entries:
 - follow-up insight: the portal product list now has a typed boundary for both
   server-paged and local-paged modes, which reduces risk before converting the
   larger customer-facing catalog page shell.
+
+- change: converted the inventory products surface to TSX with typed product
+  rows, branch stock chips, grouped sections, group summary callbacks, stock
+  quantity callbacks, selection scopes, injected discount/batch preview
+  components, formatter/translator functions, detail/adjust callbacks, and
+  loading/reveal gates
+- affected files:
+  `frontend/src/components/inventory/InventoryProductsSurface.tsx`,
+  `frontend/tests/inventoryMobileCardLayout.test.ts`
+- route or API target: Inventory products section, grouped desktop inventory
+  table, compact mobile inventory product cards, selection and adjust actions
+- keeper or rollback: keeper if inventory mobile-card layout, inventory
+  movement groups, typecheck, JSX, frontend/backend utility, build, Phase 29
+  audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 526 inventory mobile-card layout,
+  inventory movement groups, UI verifier, typecheck, JSX, frontend/backend
+  utility, build, Phase 29, organization, schema, and reference checks
+- warm whole-app result: passed in Move 526 Phase 8.4 live UI suite with 72
+  checked UI signals and zero relevant console messages; public Cloudflare
+  remained skipped for the known tunnel failure
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed 220,179
+  bytes from one old Phase 8.4 runtime report, kept latest local backups and
+  latest R2 backup metadata, and pruned no Docker volumes or images
+- follow-up insight: the inventory product card/table boundary now documents
+  the shared row shape before the larger Inventory shell conversion, reducing
+  the risk of losing mobile compactness or branch-stock detail in later moves.

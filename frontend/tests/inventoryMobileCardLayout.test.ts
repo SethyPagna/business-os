@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const inventoryProductsSource = readFileSync(new URL('../src/components/inventory/InventoryProductsSurface.jsx', import.meta.url), 'utf8')
+const inventoryProductsSource = readFileSync(new URL('../src/components/inventory/InventoryProductsSurface.tsx', import.meta.url), 'utf8')
 
 assert.match(
   inventoryProductsSource,

@@ -4118,6 +4118,16 @@ Decision rule:
     CatalogPage extensionless lazy import, Vite catalog-preview chunk grouping,
     portal UI verifier coverage, server/local pagination, promotion cards,
     product gallery entry points, and customer-safe catalog rendering intact.
+526. Convert the inventory products surface to TSX. Done:
+    `frontend/src/components/inventory/InventoryProductsSurface.tsx` now types
+    inventory product rows, branch stock chips, grouped inventory sections,
+    group summary callbacks, stock quantity callbacks, selection scopes,
+    formatter/translator functions, product detail/adjust callbacks, injected
+    discount and batch preview components, and loading/reveal gates. The
+    conversion keeps the Inventory page extensionless import, desktop grouped
+    table, mobile compact product cards, selection indeterminate states,
+    low/out-of-stock badges, price/sales metrics, and inventory mobile-card
+    layout guard intact.
 
 ## Safety Gates
 

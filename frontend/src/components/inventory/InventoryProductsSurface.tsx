@@ -1,7 +1,103 @@
 import { Fragment } from 'react'
+import type { ComponentType } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import DualMoney from './DualMoney'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+
+type Translator = (key: string) => string | undefined
+type MoneyFormatter = (value: number) => string
+type IdValue = number | string
+
+type BranchStock = {
+  branch_id: IdValue
+  branch_name?: string
+  quantity?: number
+}
+
+export type InventoryProductRow = {
+  id: IdValue
+  name: string
+  unit?: string
+  brand?: string
+  category?: string
+  barcode?: string
+  low_stock_threshold?: number
+  out_of_stock_threshold?: number
+  qty_sold?: number
+  revenue_usd?: number
+  cogs_usd?: number
+  purchase_price_usd?: number
+  cost_price_usd?: number
+  purchase_price_khr?: number
+  selling_price_usd?: number
+  selling_price_khr?: number
+  special_price_usd?: number
+  special_price_khr?: number
+  stock_value_usd?: number
+  stock_value_khr?: number
+  branch_stock?: BranchStock[]
+}
+
+type InventoryGroup = {
+  key: string
+  name: string
+  ids: IdValue[]
+  items: InventoryProductRow[]
+  hasMultipleItems?: boolean
+  stockTotal?: number
+}
+
+type InventorySection = {
+  id: string
+  label: string
+  ids: IdValue[]
+  items: InventoryProductRow[]
+  groups: InventoryGroup[]
+}
+
+type InventoryBadgeProps = {
+  product: InventoryProductRow
+  fmtUSD: MoneyFormatter
+  t: Translator
+}
+
+type InventoryBatchPreviewProps = {
+  product: InventoryProductRow
+  branchId: IdValue | null | undefined
+  t: Translator
+  compact?: boolean
+}
+
+type InventoryProductsSurfaceProps = {
+  InventoryBatchPreview: ComponentType<InventoryBatchPreviewProps>
+  InventoryDiscountBadge: ComponentType<InventoryBadgeProps>
+  branchFilter?: IdValue | null
+  branches: Array<{ id: IdValue; name?: string }>
+  collapsedInventoryGroups: Set<string>
+  collapsedInventorySections: Set<string>
+  fmtKHR: MoneyFormatter
+  fmtUSD: MoneyFormatter
+  getInventoryGroupSummaryParts: (group: InventoryGroup, options?: { includeCount?: boolean }) => string[]
+  getStockQty: (product: InventoryProductRow) => number
+  initialDesktopRevealReady: boolean
+  initialMobileFullListReady: boolean
+  initialMobileRevealReady: boolean
+  initialMobileInventorySections?: InventorySection[]
+  inventoryProductSections: InventorySection[]
+  loading: boolean
+  openAdjust: (product: InventoryProductRow) => void
+  selectedProductIds: Set<number>
+  setDetailProduct: (product: InventoryProductRow) => void
+  showProductsSection?: boolean
+  t: Translator
+  toggleInventoryGroup: (groupKey: string) => void
+  toggleInventorySection: (sectionId: string) => void
+  toggleInventorySelectionScope: (ids: IdValue[], checked: boolean) => void
+  toggleSelectedProduct: (productId: IdValue) => void
+  visibleInventoryProducts: InventoryProductRow[]
+  isInventorySelectionScopeFullySelected: (ids: IdValue[]) => boolean
+  isInventorySelectionScopePartiallySelected: (ids: IdValue[]) => boolean
+}
 
 export default function InventoryProductsSurface({
   InventoryBatchPreview,
@@ -32,7 +128,7 @@ export default function InventoryProductsSurface({
   visibleInventoryProducts,
   isInventorySelectionScopeFullySelected,
   isInventorySelectionScopePartiallySelected,
-}) {
+}: InventoryProductsSurfaceProps) {
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const mobileSkeletonRows = Array.from({ length: 6 }, (_, index) => index)
   const showDesktopLoadingOverlay = !initialDesktopRevealReady
@@ -42,7 +138,7 @@ export default function InventoryProductsSurface({
     ? inventoryProductSections
     : (initialMobileInventorySections || inventoryProductSections)
 
-  const renderDesktopTableHead = (showSelectionControl) => (
+  const renderDesktopTableHead = (showSelectionControl: boolean) => (
     <thead className="bg-gray-50 dark:bg-gray-700/50 sticky top-0 z-10">
       <tr>
         <th className="px-3 py-1.5 text-left font-semibold text-gray-600 dark:text-gray-400">
@@ -201,7 +297,8 @@ export default function InventoryProductsSurface({
                     ) : null}
                     {!groupCollapsed ? group.items.map((p) => {
                       const qty = getStockQty(p)
-                      const isLow = qty > 0 && qty <= p.low_stock_threshold
+                      const lowStockThreshold = Number(p.low_stock_threshold || 0)
+                      const isLow = qty > 0 && qty <= lowStockThreshold
                       const isOut = qty <= (p.out_of_stock_threshold || 0)
                       const scls = isOut ? 'bg-red-100 dark:bg-red-900/30 text-red-600' : isLow ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700' : 'bg-green-100 dark:bg-green-900/30 text-green-700'
                       const slbl = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
@@ -377,7 +474,8 @@ export default function InventoryProductsSurface({
                           ) : null}
                           {!groupCollapsed ? group.items.map((p) => {
                             const qty = getStockQty(p)
-                            const isLow = qty > 0 && qty <= p.low_stock_threshold
+                            const lowStockThreshold = Number(p.low_stock_threshold || 0)
+                            const isLow = qty > 0 && qty <= lowStockThreshold
                             const isOut = qty <= (p.out_of_stock_threshold || 0)
                             const status = isOut ? { label:'Out', cls:'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-1.5 py-0.5 rounded-full' }
                                          : isLow ? { label:'Low', cls:'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 text-xs px-1.5 py-0.5 rounded-full' }
