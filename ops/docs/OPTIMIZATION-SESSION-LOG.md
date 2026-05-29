@@ -47,7 +47,7 @@ This is a concise running log of what actually happened in recent sessions.
 ### Rejected
 
 - Branches delayed action-history hydration
-  - area: `frontend/src/components/branches/Branches.jsx`
+  - area: `frontend/src/components/branches/Branches.tsx`
   - result: rejected
   - note: copied the delayed history pattern from Customers, but desktop
     Branches document time got much worse in the real route audit
@@ -716,3 +716,33 @@ Use this shape for future entries:
   Phase 29 repeat audit passed
 - follow-up insight: all Contacts secondary tabs are now TSX; the next useful
   conversion target is a larger route shell such as Branches, Files, or POS.
+
+- change: converted the branches page shell to TSX with typed branch rows,
+  summary payloads, branch stock pages, transfer history rows, tab/modal
+  state, app/sync context, local branch API gateway calls, mutation result
+  payloads, loading watchdog timers, stat detail payloads, and bulk restore
+  bookkeeping
+- affected files:
+  `frontend/src/components/branches/Branches.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Branches list, branch summary, branch stock expansion,
+  stock pagination, transfer history, branch create/update/delete, bulk
+  delete/restore, transfer modal handoff, grouped stat details
+- keeper or rollback: keeper if action stability, performance loading UX,
+  typecheck, JSX, frontend/backend utility, build, Phase 29 audit, and Phase
+  8.4 live suite pass
+- route-scoped result: focused typecheck, JSX, action stability, and
+  performance loading UX checks passed; broad frontend/backend utility suites,
+  UI audit, production build, organization audit, schema audit, and Phase 29
+  repeat audit also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 219,984 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: Branches now has a typed local API and stock/transfer
+  boundary; Files, Login, and Catalog secondary tabs remain the next smaller
+  JSX route candidates before POS/Products/Dashboard/Inventory.

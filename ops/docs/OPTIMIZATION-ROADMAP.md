@@ -5803,3 +5803,15 @@ Move 534 status:
   extensionless lazy import, supplier import modal handoff, grouped selection
   helpers, same-tick save/delete/bulk guards, CSV export, supplier contact
   option display, and action/performance source guard behavior unchanged.
+
+Move 535 status:
+- Move 535 converts the branches page shell to
+  `frontend/src/components/branches/Branches.tsx`. The typed boundary now
+  covers branch rows, branch summaries, branch stock page payloads, transfer
+  history rows, app/sync context access, the local branch API gateway,
+  mutation result payloads, selection ids, tab/modal state, watchdog timers,
+  stat detail payloads, and bulk restore bookkeeping. The move keeps the
+  extensionless app lazy import, branch list/summary/transfer/stock timeout
+  contracts, same-tick save/delete/bulk guards, transfer modal handoff,
+  compact three-per-row mobile branch stats, and action/performance source
+  guard behavior unchanged.

@@ -4205,6 +4205,17 @@ Decision rule:
     extensionless lazy import, supplier import modal contract, grouped
     selection helpers, same-tick save/delete/bulk guards, CSV export, supplier
     contact option display, and action/performance source checks intact.
+535. Convert the branches page shell to TSX. Done:
+    `frontend/src/components/branches/Branches.tsx` now types branch rows,
+    branch summaries, branch stock pages, transfer history rows, app/sync
+    context access, local branch API gateway calls, mutation result payloads,
+    selection ids, modal/tab state, loading watchdog timers, action-history
+    payloads, and bulk restore bookkeeping. The conversion keeps the
+    extensionless app lazy import, branch list/summary/transfer/stock timeout
+    contracts, same-tick save/delete/bulk guards, transfer modal handoff,
+    three-per-row mobile stat layout, and action/performance source checks
+    intact while removing the old direct `window.api` branch calls from the
+    page body.
 
 ## Safety Gates
 

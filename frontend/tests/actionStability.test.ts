@@ -459,7 +459,7 @@ await runTest('sales status and membership actions use shared guards and bounded
 })
 
 await runTest('branch CRUD and transfer actions use shared guards and bounded mutations', () => {
-  const branches = readFrontend('src/components/branches/Branches.jsx')
+  const branches = readFrontend('src/components/branches/Branches.tsx')
   const transfer = readFrontend('src/components/branches/TransferModal.tsx')
 
   assert.match(branches, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
@@ -470,14 +470,14 @@ await runTest('branch CRUD and transfer actions use shared guards and bounded mu
   assert.match(branches, /const bulkDeleteInFlightRef = useRef\(false\)/)
   assert.match(branches, /withLoaderTimeout\(loader, label, BRANCH_MUTATION_TIMEOUT_MS\)/)
   assert.match(branches, /if \(!beginSingleAction\(saveInFlightRef\)\) return/)
-  assert.match(branches, /await runBranchMutation\(\(\) => window\.api\.updateBranch\(selected\.id, payload\), 'Update branch'\)/)
-  assert.match(branches, /await runBranchMutation\(\(\) => window\.api\.createBranch\(payload\), 'Create branch'\)/)
+  assert.match(branches, /await runBranchMutation\(\(\) => branchApi\.updateBranch\(selected\.id, payload\), 'Update branch'\)/)
+  assert.match(branches, /await runBranchMutation\(\(\) => branchApi\.createBranch\(payload\), 'Create branch'\)/)
   assert.match(branches, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)/)
   assert.match(branches, /if \(!beginSingleAction\(deleteInFlightRef\)\) return/)
-  assert.match(branches, /await runBranchMutation\(\s*\(\) => window\.api\.deleteBranch\(branch\.id, user\?\.id, user\?\.name\),\s*'Delete branch',\s*\)/)
+  assert.match(branches, /await runBranchMutation\(\s*\(\) => branchApi\.deleteBranch\(branch\.id, user\?\.id, user\?\.name\),\s*'Delete branch',\s*\)/)
   assert.match(branches, /finally \{[\s\S]*finishSingleAction\(deleteInFlightRef\)/)
   assert.match(branches, /if \(!beginSingleAction\(bulkDeleteInFlightRef, \{ blocked: bulkDeleteBusy \}\)\) return/)
-  assert.match(branches, /await runBranchMutation\(\s*\(\) => window\.api\.deleteBranch\(branch\.id, user\?\.id, user\?\.name\),\s*'Bulk delete branches',\s*\)/)
+  assert.match(branches, /await runBranchMutation\(\s*\(\) => branchApi\.deleteBranch\(branch\.id, user\?\.id, user\?\.name\),\s*'Bulk delete branches',\s*\)/)
   assert.match(branches, /finally \{[\s\S]*finishSingleAction\(bulkDeleteInFlightRef\)[\s\S]*setBulkDeleteBusy\(false\)/)
   assert.match(branches, /disabled=\{bulkDeleteBusy\}/)
 

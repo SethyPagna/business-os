@@ -31,7 +31,7 @@ const returns = fs.readFileSync(new URL('../src/components/returns/Returns.tsx',
 const newReturnModal = fs.readFileSync(new URL('../src/components/returns/NewReturnModal.tsx', import.meta.url), 'utf8')
 const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
 const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.tsx', import.meta.url), 'utf8')
-const branches = fs.readFileSync(new URL('../src/components/branches/Branches.jsx', import.meta.url), 'utf8')
+const branches = fs.readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
 const transferModal = fs.readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 const catalogPage = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
 const products = fs.readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
@@ -380,17 +380,17 @@ assert.match(
 )
 assert.match(
   branches,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getBranches\(\),\s*'Branches list',\s*BRANCHES_LIST_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => branchApi\.getBranches\(\),\s*'Branches list',\s*BRANCHES_LIST_TIMEOUT_MS,\s*\)/,
   'branches list should timeout slow reads',
 )
 assert.match(
   branches,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getBranchSummary\?\.\(\),\s*'Branch summary',\s*BRANCHES_SUMMARY_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => branchApi\.getBranchSummary\?\.\(\),\s*'Branch summary',\s*BRANCHES_SUMMARY_TIMEOUT_MS,\s*\)/,
   'branches summary should timeout slow reads',
 )
 assert.match(
   branches,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getTransfers\(\{\}\),\s*'Branch transfers',\s*BRANCH_TRANSFERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => branchApi\.getTransfers\(\{\}\),\s*'Branch transfers',\s*BRANCH_TRANSFERS_TIMEOUT_MS,\s*\)/,
   'branch transfer history should timeout slow reads',
 )
 assert.match(
@@ -405,12 +405,12 @@ assert.match(
 )
 assert.match(
   branches,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getBranchStock\(branchId, \{ page: 1, pageSize: 20, stockState: 'positive' \}\),\s*'Branch stock',\s*12000,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => branchApi\.getBranchStock\(branchId, \{ page: 1, pageSize: 20, stockState: 'positive' \}\),\s*'Branch stock',\s*12000,\s*\)/,
   'branch stock expansion should timeout slow stock reads',
 )
 assert.match(
   branches,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getBranchStock\(branchId, \{ page: nextPage,[\s\S]*'More branch stock',\s*12000,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => branchApi\.getBranchStock\(branchId, \{[\s\S]*page: nextPage,[\s\S]*'More branch stock',\s*12000,\s*\)/,
   'branch stock pagination should timeout slow stock reads',
 )
 assert.match(
