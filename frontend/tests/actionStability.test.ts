@@ -322,7 +322,7 @@ await runTest('audit log retention cleanup uses a guarded bounded action', () =>
 
 await runTest('secondary import modals use the shared single-action guard', () => {
   const sources = [
-    ['contact', readFrontend('src/components/contacts/ContactImportModal.jsx')],
+    ['contact', readFrontend('src/components/contacts/ContactImportModal.tsx')],
     ['inventory', readFrontend('src/components/inventory/InventoryImportModal.tsx')],
     ['sales', readFrontend('src/components/sales/SalesImportModal.tsx')],
   ]
@@ -332,9 +332,9 @@ await runTest('secondary import modals use the shared single-action guard', () =
     assert.match(source, /const .*inFlightRef = useRef\(false\)|const importInFlightRef = useRef\(false\)/)
     assert.match(source, /if \(!beginSingleAction\((?:inFlightRef|importInFlightRef)\)\) return/)
     assert.match(source, /finally \{[\s\S]*finishSingleAction\((?:inFlightRef|importInFlightRef)\)/)
-    assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.createImportJob\(/, `${label} import job creation should be bounded`)
-    assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.uploadImportJobCsv\(/, `${label} import CSV upload should be bounded`)
-    assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.startImportJob\(job\.id/, `${label} import job start should be bounded`)
+    assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\)|api)\.createImportJob\(/, `${label} import job creation should be bounded`)
+    assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\)|api)\.uploadImportJobCsv\(/, `${label} import CSV upload should be bounded`)
+    assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\)|api)\.startImportJob\((?:job\.id|jobId)/, `${label} import job start should be bounded`)
   }
 })
 

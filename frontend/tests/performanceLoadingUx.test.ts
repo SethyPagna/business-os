@@ -16,7 +16,7 @@ const receiptSettingsPage = fs.readFileSync(new URL('../src/components/receipt-s
 const receiptPreview = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
 const contacts = fs.readFileSync(new URL('../src/components/contacts/Contacts.tsx', import.meta.url), 'utf8')
 const contactsShared = fs.readFileSync(new URL('../src/components/contacts/shared.tsx', import.meta.url), 'utf8')
-const contactImportModal = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.jsx', import.meta.url), 'utf8')
+const contactImportModal = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.tsx', import.meta.url), 'utf8')
 const customers = fs.readFileSync(new URL('../src/components/contacts/CustomersTab.jsx', import.meta.url), 'utf8')
 const customerFormModal = fs.readFileSync(new URL('../src/components/contacts/CustomerFormModal.tsx', import.meta.url), 'utf8')
 const customerMembershipNumber = fs.readFileSync(new URL('../src/components/contacts/customerMembershipNumber.ts', import.meta.url), 'utf8')
@@ -1744,17 +1744,17 @@ for (const [source, label, prefix, jobTypePattern] of importModalCases) {
   assert.match(source, jobTypePattern, `${label} import should keep the expected job type source`)
   assert.match(
     source,
-    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.createImportJob\(/,
+    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\)|api)\.createImportJob\(/,
     `${label} import should bound import job creation`,
   )
   assert.match(
     source,
-    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.uploadImportJobCsv\(/,
+    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\)|api)\.uploadImportJobCsv\(/,
     `${label} import should bound CSV upload`,
   )
   assert.match(
     source,
-    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.startImportJob\(job\.id/,
+    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\)|api)\.startImportJob\((?:job\.id|jobId)/,
     `${label} import should bound job start`,
   )
 }

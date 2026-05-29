@@ -70,7 +70,7 @@ await runTest('background import modals notify parent pages when a job is queued
   const files = [
     '../src/components/inventory/InventoryImportModal.tsx',
     '../src/components/sales/SalesImportModal.tsx',
-    '../src/components/contacts/ContactImportModal.jsx',
+    '../src/components/contacts/ContactImportModal.tsx',
     '../src/components/products/import/BulkImportModal.tsx',
   ]
   for (const file of files) {

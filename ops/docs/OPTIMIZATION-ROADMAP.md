@@ -2367,7 +2367,7 @@ Cleanup checkpoint:
 - The first Web Worker extraction slice is now complete:
   `frontend/src/components/contacts/contactImportWorker.ts` counts contact CSV
   rows off the modal render path, with `frontend/src/utils/csvRowCounter.ts`
-  kept as the synchronous fallback and correctness oracle. `ContactImportModal.jsx`
+  kept as the synchronous fallback and correctness oracle. `ContactImportModal.tsx`
   preserves the existing server-side background import job contract while adding
   a 5 second worker timeout and stale-result guard for rapid file changes.
 - The inventory import Web Worker slice is now complete:
@@ -5562,3 +5562,12 @@ Move 511 status:
   calls, ZIP export rows, and paged export response normalization. The move
   keeps customer/supplier/delivery tab behavior, export timeout guards, import
   modal flow, and route-level lazy loading unchanged.
+
+Move 512 status:
+- Move 512 converts the contact import modal to `ContactImportModal.tsx`. The
+  typed boundary now covers contact import kinds and job types, conflict modes,
+  field-rule presets, CSV dialog results, worker row-count messages, file
+  picker assets, import job responses, app-context notifications, and queued
+  import results. The move keeps the worker-first row counter, synchronous
+  parser fallback, stale row-count request guard, and bounded import-job
+  create/upload/start calls unchanged.

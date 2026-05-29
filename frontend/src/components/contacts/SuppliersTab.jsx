@@ -28,7 +28,7 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 
-const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
+const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
 function SupplierForm({ supplier, onSave, onClose, t }) {

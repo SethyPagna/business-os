@@ -171,3 +171,21 @@ Use this shape for future entries:
 - follow-up insight: the remaining customer/supplier/delivery tab `.jsx`
   conversions can now use the same explicit JSX-module seam instead of
   widening global `any` types.
+
+- change: converted the contact import modal to TSX with typed import config,
+  CSV worker, file-picker, API, and queued-result boundaries
+- affected files: `frontend/src/components/contacts/ContactImportModal.tsx`,
+  `frontend/src/components/contacts/Contacts.tsx`,
+  `frontend/src/components/contacts/CustomersTab.jsx`,
+  `frontend/src/components/contacts/SuppliersTab.jsx`,
+  `frontend/src/components/contacts/DeliveryTab.jsx`
+- route or API target: Contacts CSV import, background import jobs, worker row
+  counting, existing-file CSV selection
+- keeper or rollback: keeper if import worker tests, CSV import tests,
+  loading UX tests, action stability tests, typecheck, build, Phase 29 audit,
+  and Phase 8.4 live suite pass
+- route-scoped result: pending verification in Move 512
+- warm whole-app result: pending verification in Move 512
+- follow-up insight: the three remaining contact tab JSX files now import the
+  modal extensionlessly, so each tab can be converted independently without
+  exact `.jsx` modal coupling.

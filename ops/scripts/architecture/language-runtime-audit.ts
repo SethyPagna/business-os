@@ -182,7 +182,7 @@ const FOCUSED_TEST_COVERAGE = [
   },
   {
     track: 'Web Worker extraction',
-    candidate: 'frontend/src/components/contacts/ContactImportModal.jsx',
+    candidate: 'frontend/src/components/contacts/ContactImportModal.tsx',
     tests: [
       'frontend/tests/contactImportWorker.test.ts',
       'frontend/tests/actionStability.test.ts',
@@ -823,7 +823,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     ],
   },
   {
-    surface: 'frontend/src/components/contacts/ContactImportModal.jsx',
+    surface: 'frontend/src/components/contacts/ContactImportModal.tsx',
     worker: 'frontend/src/components/contacts/contactImportWorker.ts',
     compatibilityWrapper: 'frontend/src/components/contacts/contactImportWorker.mjs',
     fallback: 'frontend/src/utils/csvRowCounter.ts',

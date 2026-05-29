@@ -4011,6 +4011,14 @@ Decision rule:
     boundary. The conversion keeps the customer tab eager, supplier/delivery
     tabs lazy, export timeout guards, paged API normalization, and import
     picker flow unchanged while removing one more route entry `.jsx` file.
+512. Convert the contact import modal to TSX. Done:
+    `ContactImportModal.tsx` now types contact import kinds, job types,
+    conflict modes, field-rule presets, CSV dialog payloads, worker row-count
+    messages, file-picker asset inputs, import job responses, app-context
+    notifications, and queued result payloads. The conversion keeps worker
+    row counting, synchronous fallback parsing, stale row-count guards,
+    bounded create/upload/start import-job calls, and extensionless lazy modal
+    imports intact.
 
 ## Safety Gates
 

@@ -1,11 +1,89 @@
+import type { ComponentType, ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
-import Modal from '../shared/Modal'
+import ModalBase from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
+
+type ContactImportType = 'customer' | 'supplier' | 'deliveryContact'
+type ContactImportJobType = 'customers' | 'suppliers' | 'delivery_contacts'
+type ConflictMode = 'skip' | 'merge' | 'overwrite'
+type ContactRulePreset = 'merge_blank_only' | 'keep_existing' | 'use_imported'
+type ContactFieldRule = ContactRulePreset
+type NotifyFn = (message: string, tone?: string) => void
+
+interface ContactImportConfig {
+  label: string
+  jobType: ContactImportJobType
+  fields: string[]
+}
+
+interface ContactImportResult {
+  imported: number
+  updated: number
+  failed: number
+  queued: number
+  jobId: string | number
+  errors: string[]
+  conflictMode: ConflictMode
+}
+
+interface ContactImportModalProps {
+  type: ContactImportType
+  onClose: () => void
+  onDone?: (payload?: ContactImportResult) => void | Promise<void>
+}
+
+interface AppContextValue {
+  notify: NotifyFn
+}
+
+interface CsvDialogResult {
+  content?: string | null
+  name?: string | null
+}
+
+interface ImportJob {
+  id?: string | number | null
+}
+
+interface ImportJobResponse extends ImportJob {
+  job?: ImportJob | null
+}
+
+interface ContactImportApi {
+  openCSVDialog?: () => Promise<CsvDialogResult | null | undefined>
+  downloadImportTemplate: (type: ContactImportType) => void
+  createImportJob: (payload: {
+    type: ContactImportJobType
+    policy: {
+      source: 'contacts_modal'
+      conflictMode: ConflictMode
+      fieldRules: ContactFieldRules
+    }
+  }) => Promise<ImportJobResponse>
+  uploadImportJobCsv: (payload: { jobId: string | number; text: string; fileName: string }) => Promise<unknown>
+  startImportJob: (jobId: string | number) => Promise<unknown>
+}
+
+interface ContactImportWorkerMessage {
+  id?: string
+  type?: 'result' | 'error'
+  rowCount?: number | string
+  error?: string
+}
+
+interface FileAsset {
+  mime_type?: string
+  original_name?: string
+}
+
+type ContactFieldRules = {
+  __preset?: ContactRulePreset
+} & Record<string, ContactFieldRule | undefined>
 
 const CONTACT_IMPORT_CONFIG = {
   customer: {
@@ -23,19 +101,31 @@ const CONTACT_IMPORT_CONFIG = {
     jobType: 'delivery_contacts',
     fields: ['name', 'contact_options', 'phone', 'area', 'address', 'notes'],
   },
-}
+} satisfies Record<ContactImportType, ContactImportConfig>
 
 const CONTACT_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
 const CONTACT_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 30000
 const CONTACT_IMPORT_JOB_START_TIMEOUT_MS = 12000
 const CONTACT_IMPORT_ROW_COUNT_TIMEOUT_MS = 5000
 
-function countCsvDataRowsInWorker(text) {
+const Modal = ModalBase as ComponentType<{ title: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode }>
+const useApp = useAppHook as () => AppContextValue
+
+function getContactImportApi(): ContactImportApi {
+  if (!window.api) throw new Error('Contact import API is not available.')
+  return window.api as ContactImportApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function countCsvDataRowsInWorker(text: string): Promise<number> {
   if (typeof Worker === 'undefined') {
     return Promise.resolve(countCsvDataRows(text))
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise<number>((resolve, reject) => {
     const id = `contact-import-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const worker = new Worker(new URL('./contactImportWorker.ts', import.meta.url), { type: 'module' })
     const timeoutId = window.setTimeout(() => {
@@ -47,37 +137,37 @@ function countCsvDataRowsInWorker(text) {
       worker.terminate()
     }
 
-    worker.onmessage = (event) => {
+    worker.onmessage = (event: MessageEvent<ContactImportWorkerMessage>) => {
       const message = event.data || {}
       if (message.id !== id) return
       cleanup()
       if (message.type === 'result') resolve(Number(message.rowCount || 0))
       else reject(new Error(message.error || 'Contact import row count failed'))
     }
-    worker.onerror = (error) => {
+    worker.onerror = (error: ErrorEvent) => {
       cleanup()
-      reject(new Error(error?.message || 'Contact import worker failed'))
+      reject(new Error(error.message || 'Contact import worker failed'))
     }
     worker.postMessage({ id, text })
   })
 }
 
-export default function ContactImportModal({ type, onClose, onDone }) {
+export default function ContactImportModal({ type, onClose, onDone }: ContactImportModalProps) {
   const { notify } = useApp()
   const config = CONTACT_IMPORT_CONFIG[type]
   const [csvText, setCsvText] = useState('')
   const [fileName, setFileName] = useState('')
-  const [conflictMode, setConflictMode] = useState('merge')
-  const [fieldRules, setFieldRules] = useState({})
+  const [conflictMode, setConflictMode] = useState<ConflictMode>('merge')
+  const [fieldRules, setFieldRules] = useState<ContactFieldRules>({})
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState<ContactImportResult | null>(null)
   const [filesOpen, setFilesOpen] = useState(false)
   const [rowCount, setRowCount] = useState(0)
   const [analyzingCsv, setAnalyzingCsv] = useState(false)
   const aliveRef = useRef(true)
   const inFlightRef = useRef(false)
   const rowCountRequestRef = useRef(0)
-  const signalDone = async (payload) => {
+  const signalDone = async (payload: ContactImportResult): Promise<void> => {
     if (typeof onDone === 'function') {
       await Promise.resolve(onDone(payload))
     }
@@ -90,7 +180,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
     aliveRef.current = false
   }, [])
 
-  const loadCsvText = async (text, name) => {
+  const loadCsvText = async (text: unknown, name: unknown): Promise<void> => {
     const nextText = String(text || '')
     const requestId = rowCountRequestRef.current + 1
     rowCountRequestRef.current = requestId
@@ -111,13 +201,13 @@ export default function ContactImportModal({ type, onClose, onDone }) {
     if (!nextCount) notify('Choose a CSV with at least one data row.', 'error')
   }
 
-  const handlePickFile = async () => {
-    const picked = await window.api.openCSVDialog?.()
+  const handlePickFile = async (): Promise<void> => {
+    const picked = await getContactImportApi().openCSVDialog?.()
     if (!picked?.content) return
     await loadCsvText(picked.content, picked.name || 'contacts.csv')
   }
 
-  const handleChooseExistingFile = async (publicPath, asset) => {
+  const handleChooseExistingFile = async (publicPath: string, asset: FileAsset): Promise<void> => {
     const path = String(publicPath || '').trim()
     if (!path) return
     if (!/\.csv($|\?)/i.test(path) && asset?.mime_type !== 'text/csv') {
@@ -130,15 +220,15 @@ export default function ContactImportModal({ type, onClose, onDone }) {
       if (!response.ok) throw new Error(`Could not read ${asset?.original_name || path}`)
       await loadCsvText(await response.text(), asset?.original_name || path.split('/').pop() || 'contacts.csv')
     } catch (error) {
-      notify(error?.message || 'Failed to load CSV from Files', 'error')
+      notify(getErrorMessage(error, 'Failed to load CSV from Files'), 'error')
     }
   }
 
   const handleDownloadTemplate = () => {
-    window.api.downloadImportTemplate(type)
+    getContactImportApi().downloadImportTemplate(type)
   }
 
-  const applyContactRulePreset = (preset) => {
+  const applyContactRulePreset = (preset: ContactRulePreset) => {
     const rule = preset === 'use_imported'
       ? 'use_imported'
       : preset === 'keep_existing'
@@ -165,8 +255,9 @@ export default function ContactImportModal({ type, onClose, onDone }) {
 
     setLoading(true)
     try {
+      const api = getContactImportApi()
       const created = await withLoaderTimeout(
-        () => window.api.createImportJob({
+        () => api.createImportJob({
           type: config.jobType,
           policy: {
             source: 'contacts_modal',
@@ -179,9 +270,10 @@ export default function ContactImportModal({ type, onClose, onDone }) {
       )
       const job = created?.job || created
       if (!job?.id) throw new Error('Import job was not created')
+      const jobId = job.id
       await withLoaderTimeout(
-        () => window.api.uploadImportJobCsv({
-          jobId: job.id,
+        () => api.uploadImportJobCsv({
+          jobId,
           text: csvText,
           fileName: fileName || `${config.jobType}.csv`,
         }),
@@ -189,7 +281,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
         CONTACT_IMPORT_JOB_UPLOAD_TIMEOUT_MS,
       )
       await withLoaderTimeout(
-        () => window.api.startImportJob(job.id),
+        () => api.startImportJob(jobId),
         'Contact import start',
         CONTACT_IMPORT_JOB_START_TIMEOUT_MS,
       )
@@ -198,7 +290,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
         updated: 0,
         failed: 0,
         queued: rowCount,
-        jobId: job.id,
+        jobId,
         errors: [],
         conflictMode,
       }
@@ -208,7 +300,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
       notify(`Import analysis started: ${rowCount} row(s) queued. Review and approve it from the top progress bar.`, 'success')
     } catch (error) {
       if (!aliveRef.current) return
-      notify(error?.message || 'Import failed', 'error')
+      notify(getErrorMessage(error, 'Import failed'), 'error')
     } finally {
       finishSingleAction(inFlightRef)
       if (aliveRef.current) setLoading(false)
@@ -264,7 +356,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
               name="contacts_conflict_mode"
               className="input"
               value={conflictMode}
-              onChange={(event) => setConflictMode(event.target.value)}
+              onChange={(event) => setConflictMode(event.target.value as ConflictMode)}
             >
               <option value="skip">Skip existing records</option>
               <option value="merge">Merge into empty fields</option>
@@ -279,7 +371,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
               id="contacts-field-rule-preset"
               className="input"
               value={fieldRules.__preset || 'merge_blank_only'}
-              onChange={(event) => applyContactRulePreset(event.target.value)}
+              onChange={(event) => applyContactRulePreset(event.target.value as ContactRulePreset)}
             >
               <option value="merge_blank_only">Fill blanks only</option>
               <option value="keep_existing">Keep existing</option>

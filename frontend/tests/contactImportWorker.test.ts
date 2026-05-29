@@ -25,7 +25,7 @@ await runTest('contact import row counter handles quoted newlines and empty file
 })
 
 await runTest('contact import modal analyzes rows in a worker with a sync fallback', () => {
-  const source = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.tsx', import.meta.url), 'utf8')
   const worker = fs.readFileSync(new URL('../src/components/contacts/contactImportWorker.ts', import.meta.url), 'utf8')
   assert.match(source, /new Worker\(new URL\('\.\/contactImportWorker\.ts', import\.meta\.url\), \{ type: 'module' \}\)/)
   assert.match(source, /typeof Worker === 'undefined'[\s\S]*Promise\.resolve\(countCsvDataRows\(text\)\)/)

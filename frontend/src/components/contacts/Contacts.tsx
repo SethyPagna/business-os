@@ -110,7 +110,7 @@ const TABS = (t: TranslateFn): ContactTabDefinition[] => [
 
 const CustomersTab = CustomersTabBase as ComponentType<ContactTabProps>
 const ContactImportModal = lazy(() => (
-  import('./ContactImportModal.jsx').then((module) => ({
+  import('./ContactImportModal').then((module) => ({
     default: module.default as ComponentType<ContactImportModalProps>,
   }))
 ))

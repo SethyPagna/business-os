@@ -40,7 +40,7 @@ function tr(t, key, fallback) {
   return value && value !== key ? value : fallback
 }
 
-const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
+const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const CustomerFormModal = lazy(() => import('./CustomerFormModal'))
 const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 
