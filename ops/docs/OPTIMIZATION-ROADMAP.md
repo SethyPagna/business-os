@@ -5655,3 +5655,13 @@ Move 521 status:
   invalidation, same-tick search and submit guards, quantity clamps, refund
   totals, partial-return indicators, and returns/inventory/sales sync events
   unchanged.
+
+Move 522 status:
+- Move 522 converts the receipt overlay to
+  `frontend/src/components/receipt/Receipt.tsx`. The typed boundary now covers
+  receipt sale payloads, receipt line items, receipt settings, app-context
+  formatters/translations, language modes, export modes, row props, section
+  maps, numeric coercion, and export root refs. The move keeps POS/Sales
+  extensionless lazy imports, ReceiptPreview's bounded dynamic import,
+  PDF/print/image actions, receipt template application, Khmer/bilingual
+  labels, totals, and receipt settings sync contracts unchanged.

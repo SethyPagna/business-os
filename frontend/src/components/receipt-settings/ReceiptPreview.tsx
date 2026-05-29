@@ -49,7 +49,7 @@ export default function ReceiptPreview({ tpl, settings }: ReceiptPreviewProps) {
     async function loadPreview() {
       try {
         const mod = await withLoaderTimeout(
-          () => import('../receipt/Receipt.jsx'),
+          () => import('../receipt/Receipt.tsx'),
           'Receipt preview',
           RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS,
         )

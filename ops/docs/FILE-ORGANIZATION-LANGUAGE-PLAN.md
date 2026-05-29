@@ -4083,6 +4083,14 @@ Decision rule:
     sale search/history/create timeouts, same-tick search and submit guards,
     stale request invalidation, quantity clamps, refund totals, partial-return
     indicators, and returns/inventory/sales sync updates intact.
+522. Convert the receipt overlay to TSX. Done:
+    `frontend/src/components/receipt/Receipt.tsx` now types receipt sale
+    payloads, line items, settings, app-context formatters/translations,
+    language modes, export modes, row props, section maps, and receipt export
+    roots. The conversion keeps POS/Sales extensionless lazy imports,
+    ReceiptPreview's bounded dynamic import, PDF/print/image export actions,
+    receipt template application, numeric totals, Khmer/bilingual labels, and
+    receipt settings sync contracts intact.
 
 ## Safety Gates
 

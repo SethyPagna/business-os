@@ -1,33 +1,140 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ArrowLeft, FileText, ImageDown, Printer } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import { downloadReceiptImage, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { getStatusLabel } from '../sales/StatusBadge'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
-function stripEmoji(text) {
+type LanguageMode = 'en' | 'km' | 'both'
+type ReceiptExportMode = 'print' | 'open' | 'image'
+type ReceiptLabelKey = keyof typeof LABELS.en
+type TranslateFn = (key: string) => string | undefined
+type MoneyFormatter = (value: number | string) => string
+
+interface ReceiptItem {
+  id?: number | string | null
+  product_id?: number | string | null
+  product_name?: string | null
+  name?: string | null
+  sku?: string | null
+  quantity?: number | string | null
+  applied_price_usd?: number | string | null
+  applied_price_khr?: number | string | null
+  price_usd?: number | string | null
+  price_khr?: number | string | null
+  price?: number | string | null
+}
+
+interface ReceiptSale {
+  receiptNumber?: string | null
+  receipt_number?: string | null
+  created_at?: string | number | Date | null
+  items?: ReceiptItem[] | string | null
+  exchange_rate?: number | string | null
+  subtotal_usd?: number | string | null
+  subtotal?: number | string | null
+  discount_usd?: number | string | null
+  discount?: number | string | null
+  discount_khr?: number | string | null
+  membership_discount_usd?: number | string | null
+  membership_discount_khr?: number | string | null
+  membership_points_redeemed?: number | string | null
+  tax_usd?: number | string | null
+  tax?: number | string | null
+  tax_khr?: number | string | null
+  delivery_fee_usd?: number | string | null
+  delivery_fee_khr?: number | string | null
+  total_usd?: number | string | null
+  total?: number | string | null
+  total_khr?: number | string | null
+  amount_paid_usd?: number | string | null
+  amount_paid?: number | string | null
+  amount_paid_khr?: number | string | null
+  change_usd?: number | string | null
+  change_returned?: number | string | null
+  change_khr?: number | string | null
+  refund_usd?: number | string | null
+  refund_khr?: number | string | null
+  sale_status?: string | null
+  cashier_name?: string | null
+  payment_method?: string | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  customer_address?: string | null
+  customer_membership_number?: string | null
+  is_delivery?: boolean | number | string | null
+  delivery_contact_name?: string | null
+  delivery_contact_phone?: string | null
+  delivery_contact_address?: string | null
+}
+
+type ReceiptSettings = Record<string, unknown> & {
+  business_name?: string
+  business_address?: string
+  business_phone?: string
+  business_email?: string
+  tax_id?: string
+  receipt_footer?: string
+  exchange_rate?: number | string
+}
+
+interface ReceiptProps {
+  sale: ReceiptSale
+  settings?: ReceiptSettings
+  onClose: () => void
+  _previewMode?: boolean
+}
+
+interface RowProps {
+  label: ReactNode
+  value: ReactNode
+  subValue?: ReactNode
+  bold?: boolean
+  tone?: string
+}
+
+const useApp = useAppHook as () => {
+  fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
+  khrSymbol: string
+  t?: TranslateFn
+}
+
+function toNumber(value: number | string | null | undefined): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function stripEmoji(text: string): string
+function stripEmoji<T>(text: T): T
+function stripEmoji(text: unknown): unknown {
   if (typeof text !== 'string') return text
   return text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FEFF}]/gu, '').replace(/\s{2,}/g, ' ').trim()
 }
 
-function displayAddress(raw) {
+function displayAddress(raw: unknown): string {
   if (!raw) return ''
   try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed[0] || ''
+    const parsed = JSON.parse(String(raw))
+    if (Array.isArray(parsed)) return String(parsed[0] || '')
   } catch {}
-  return raw
+  return String(raw)
 }
 
-function parseItems(raw) {
+function parseItems(raw: ReceiptSale['items']): ReceiptItem[] {
   if (Array.isArray(raw)) return raw
   if (typeof raw !== 'string') return []
   try {
-    return JSON.parse(raw || '[]')
+    const parsed = JSON.parse(raw || '[]')
+    return Array.isArray(parsed) ? parsed : []
   } catch {
     return []
   }
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
 }
 
 const LABELS = {
@@ -112,12 +219,12 @@ const CLEAN_KHMER_LABELS = {
   qty: 'ចំនួន',
 }
 
-function labelFor(mode, key) {
+function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
   if (mode === 'both') return `${LABELS.en[key]} / ${CLEAN_KHMER_LABELS[key]}`
   return (mode === 'km' ? CLEAN_KHMER_LABELS : LABELS.en)[key]
 }
 
-function Row({ label, value, subValue, bold = false, tone = '' }) {
+function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
   return (
     <div className={`my-1 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 ${tone}`}>
       <span className={`min-w-0 break-words pr-2 ${bold ? 'font-semibold' : ''}`}>{label}</span>
@@ -129,45 +236,46 @@ function Row({ label, value, subValue, bold = false, tone = '' }) {
   )
 }
 
-export default function Receipt({ sale, settings, onClose, _previewMode }) {
+export default function Receipt({ sale, settings = {}, onClose, _previewMode }: ReceiptProps) {
   const { fmtUSD, fmtKHR, khrSymbol, t } = useApp()
-  const printRef = useRef(null)
+  const printRef = useRef<HTMLDivElement | null>(null)
   const appliedConfig = useMemo(() => buildAppliedReceiptConfig({ settings }), [settings])
   const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
   const appliedSettings = appliedConfig.settings
   const appliedPrintSettings = appliedConfig.printSettings
-  const [lang, setLang] = useState(tpl.receipt_language || 'en')
-  const [pdfBusy, setPdfBusy] = useState('')
+  const [lang, setLang] = useState<LanguageMode>((tpl.receipt_language as LanguageMode) || 'en')
+  const [pdfBusy, setPdfBusy] = useState<ReceiptExportMode | ''>('')
 
   useEffect(() => {
-    if (_previewMode) setLang(tpl.receipt_language || 'en')
+    if (_previewMode) setLang((tpl.receipt_language as LanguageMode) || 'en')
   }, [_previewMode, tpl.receipt_language])
 
-  const em = (text) => (tpl.show_emojis === false ? stripEmoji(text) : text)
+  const em = (text: string): string => (tpl.show_emojis === false ? stripEmoji(text) : text)
   const items = useMemo(() => parseItems(sale.items), [sale.items])
   const rNum = sale.receiptNumber || sale.receipt_number || 'Receipt'
   const createdAt = sale.created_at
-  const parsedDate = createdAt ? new Date(String(createdAt).includes('T') ? createdAt : `${createdAt}Z`) : new Date()
+  const createdAtText = createdAt instanceof Date ? createdAt.toISOString() : String(createdAt || '')
+  const parsedDate = createdAt ? new Date(createdAtText.includes('T') ? createdAtText : `${createdAtText}Z`) : new Date()
   const dateStr = Number.isNaN(parsedDate.getTime()) ? String(createdAt || '') : parsedDate.toLocaleString()
-  const exchangeRate = sale.exchange_rate || parseFloat(appliedSettings.exchange_rate || '4100') || 4100
-  const subtotalUsd = sale.subtotal_usd || sale.subtotal || 0
-  const discountUsd = sale.discount_usd || sale.discount || 0
-  const discountKhr = sale.discount_khr || discountUsd * exchangeRate
-  const membershipDiscountUsd = sale.membership_discount_usd || 0
-  const membershipDiscountKhr = sale.membership_discount_khr || membershipDiscountUsd * exchangeRate
-  const membershipPointsRedeemed = sale.membership_points_redeemed || 0
-  const taxUsd = sale.tax_usd || sale.tax || 0
-  const taxKhr = sale.tax_khr || taxUsd * exchangeRate
-  const deliveryFeeUsd = sale.delivery_fee_usd || 0
-  const deliveryFeeKhr = sale.delivery_fee_khr || deliveryFeeUsd * exchangeRate
-  const totalUsd = sale.total_usd || sale.total || 0
-  const totalKhr = sale.total_khr || totalUsd * exchangeRate
-  const paidUsd = sale.amount_paid_usd || sale.amount_paid || 0
-  const paidKhr = sale.amount_paid_khr || 0
-  const changeUsd = sale.change_usd || sale.change_returned || 0
-  const changeKhr = sale.change_khr || 0
-  const refundUsd = sale.refund_usd || 0
-  const refundKhr = sale.refund_khr || 0
+  const exchangeRate = toNumber(sale.exchange_rate) || toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100
+  const subtotalUsd = toNumber(sale.subtotal_usd ?? sale.subtotal)
+  const discountUsd = toNumber(sale.discount_usd ?? sale.discount)
+  const discountKhr = toNumber(sale.discount_khr) || discountUsd * exchangeRate
+  const membershipDiscountUsd = toNumber(sale.membership_discount_usd)
+  const membershipDiscountKhr = toNumber(sale.membership_discount_khr) || membershipDiscountUsd * exchangeRate
+  const membershipPointsRedeemed = toNumber(sale.membership_points_redeemed)
+  const taxUsd = toNumber(sale.tax_usd ?? sale.tax)
+  const taxKhr = toNumber(sale.tax_khr) || taxUsd * exchangeRate
+  const deliveryFeeUsd = toNumber(sale.delivery_fee_usd)
+  const deliveryFeeKhr = toNumber(sale.delivery_fee_khr) || deliveryFeeUsd * exchangeRate
+  const totalUsd = toNumber(sale.total_usd ?? sale.total)
+  const totalKhr = toNumber(sale.total_khr) || totalUsd * exchangeRate
+  const paidUsd = toNumber(sale.amount_paid_usd ?? sale.amount_paid)
+  const paidKhr = toNumber(sale.amount_paid_khr)
+  const changeUsd = toNumber(sale.change_usd ?? sale.change_returned)
+  const changeKhr = toNumber(sale.change_khr)
+  const refundUsd = toNumber(sale.refund_usd)
+  const refundKhr = toNumber(sale.refund_khr)
   const saleStatus = sale.sale_status || 'completed'
   const actualFont =
     lang === 'km' || lang === 'both'
@@ -189,7 +297,7 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
   const showDeliveryDriverPhone = showDeliveryContactSection && tpl.delivery_show_driver_phone !== false
 
-  const sectionMap = {
+  const sectionMap: Record<string, ReactNode> = {
     header: (
       <div key="header">
         {tpl.custom_header ? <div className={`${headerAlignClass} font-semibold`}>{em(tpl.custom_header)}</div> : null}
@@ -231,9 +339,9 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
     items: (
       <div key="items" className="mt-2 border-t border-dashed border-gray-300 pt-2">
         {items.map((item, index) => {
-          const qty = item.quantity || 1
-          const unitUsd = item.applied_price_usd ?? item.price_usd ?? item.price ?? 0
-          const unitKhr = item.applied_price_khr ?? item.price_khr ?? 0
+          const qty = toNumber(item.quantity) || 1
+          const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
+          const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
           const lineUsd = unitUsd * qty
           const lineKhr = unitKhr * qty
           return (
@@ -310,7 +418,7 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
     ? tpl.field_order
     : ['header', 'order_info', 'customer', 'delivery', 'items', 'subtotal', 'discount', 'tax', 'total', 'payment', 'change', 'footer']
 
-  const fieldOrder = []
+  const fieldOrder: string[] = []
   for (const key of fieldOrderBase) {
     if (key === 'discount') {
       fieldOrder.push('discount')
@@ -339,7 +447,7 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
     .filter(Boolean)
 
   const receiptTitle = `Receipt ${rNum}`
-  const exportReceiptPdf = async (mode) => {
+  const exportReceiptPdf = async (mode: ReceiptExportMode) => {
     if (!printRef.current) return
     setPdfBusy(mode)
     try {
@@ -364,13 +472,13 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
         })
       }
     } catch (error) {
-      window.alert(error?.message || (t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
+      window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
     } finally {
       setPdfBusy('')
     }
   }
 
-  const shellStyle = {
+  const shellStyle: CSSProperties = {
     fontFamily: actualFont,
     fontSize: fs,
     background: '#ffffff',
@@ -433,11 +541,11 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
           </span>
         </button>
         <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">
-          {[
+          {([
             ['en', 'EN'],
             ['km', 'KH'],
             ['both', 'EN/KH'],
-          ].map(([code, text]) => (
+          ] as Array<[LanguageMode, string]>).map(([code, text]) => (
             <button
               key={code}
               type="button"

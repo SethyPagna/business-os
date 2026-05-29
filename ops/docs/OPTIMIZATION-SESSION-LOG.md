@@ -355,3 +355,25 @@ Use this shape for future entries:
 - follow-up insight: the customer and supplier return create flows now both
   use explicit typed API helpers, reducing risk before the larger Returns page
   shell conversion.
+
+- change: converted the receipt overlay to TSX with typed sale payload, line
+  item, settings, language mode, export mode, row prop, section map,
+  app-context, and receipt export boundaries
+- affected files: `frontend/src/components/receipt/Receipt.tsx`,
+  `frontend/src/components/receipt-settings/ReceiptPreview.tsx`,
+  `frontend/tests/receiptTemplate.test.ts`,
+  `frontend/tests/receiptSettingsSync.test.ts`
+- route or API target: POS and Sales receipt overlays, Receipt Settings
+  preview, PDF/print/image receipt export actions
+- keeper or rollback: keeper if receipt template tests, receipt settings sync,
+  typecheck, JSX, frontend/backend utility, build, Phase 29 audit, and Phase
+  8.4 live suite pass
+- route-scoped result: passed in Move 522 receipt template, receipt settings
+  sync, performance loading UX, typecheck, JSX, frontend/backend utility,
+  build, Phase 29, and schema/reference checks
+- warm whole-app result: passed in Move 522 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: the receipt overlay no longer relies on implicit JSX
+  arithmetic for totals and export modes, reducing risk before converting the
+  larger Receipt Settings page shell.

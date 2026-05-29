@@ -57,7 +57,7 @@ await runTest('print export normalizes receipt root width inside paper frame', (
 
 await runTest('receipt export supports PNG image download from the same rendered receipt', () => {
   const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
-  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.jsx', import.meta.url), 'utf8')
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
   assert.match(utilSource, /export async function createReceiptImageBlob/)
   assert.match(utilSource, /type:\s*'image\/png'/)
   assert.match(utilSource, /export async function downloadReceiptImage/)
