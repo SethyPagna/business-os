@@ -99,7 +99,7 @@ await runTest('customer membership generation always uses the LCMN prefix', () =
 })
 
 await runTest('customers tab loads loyalty points from the main customer payload', () => {
-  const source = readFileSync(new URL('../src/components/contacts/CustomersTab.jsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/components/contacts/CustomersTab.tsx', import.meta.url), 'utf8')
   assert.match(source, /includePoints:\s*'1'/)
   assert.doesNotMatch(source, /getCustomerPointSummaries\(/)
 })

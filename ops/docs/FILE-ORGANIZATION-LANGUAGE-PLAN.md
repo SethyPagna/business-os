@@ -4168,6 +4168,16 @@ Decision rule:
     single-pass summary, grouped selection helpers, layout guard, and action
     stability source checks intact while moving exact source-path guards to
     TSX.
+531. Convert the customers contact tab to TSX. Done:
+    `frontend/src/components/contacts/CustomersTab.tsx` now types customer
+    rows, customer section rows, modal state, app/sync context access,
+    local customer API gateway calls, mutation result payloads, contact-option
+    helper exports, grouped customer filters, loading watchdog timers,
+    customer history undo/redo payloads, and bulk restore bookkeeping. The
+    conversion keeps the Contacts page extensionless import, POS
+    `parseContactOptions` import contract, point-balance payload loading,
+    grouped selection helpers, same-tick save/delete/bulk guards, CSV export,
+    and contact pricing/loading source checks intact.
 
 ## Safety Gates
 

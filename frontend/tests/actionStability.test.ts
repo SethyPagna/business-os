@@ -386,7 +386,7 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
   const targets = [
     {
       label: 'customers',
-      source: readFrontend('src/components/contacts/CustomersTab.jsx'),
+      source: readFrontend('src/components/contacts/CustomersTab.tsx'),
       constant: 'CUSTOMER_MUTATION_TIMEOUT_MS',
       create: 'createCustomer',
       update: 'updateCustomer',
@@ -420,9 +420,10 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
     assert.match(target.source, /if \(!beginSingleAction\(deleteInFlightRef\)\) return/, `${target.label} delete should block same-tick repeats`)
     assert.match(target.source, /beginSingleAction\(bulkDeleteInFlightRef, \{ blocked: bulkActionBusy \}\)/, `${target.label} bulk delete should block same-tick repeats`)
     assert.match(target.source, new RegExp(`withLoaderTimeout\\(loader, label, ${target.constant}\\)`), `${target.label} should route mutations through the timeout helper`)
-    assert.match(target.source, new RegExp(`window\\.api\\.${target.create}\\(`), `${target.label} should still create through window.api`)
-    assert.match(target.source, new RegExp(`window\\.api\\.${target.update}\\(`), `${target.label} should still update through window.api`)
-    assert.match(target.source, new RegExp(`window\\.api\\.${target.remove}\\(`), `${target.label} should still delete through window.api`)
+    const apiPattern = target.label === 'customers' ? 'getCustomerApi\\(\\)' : 'window\\.api'
+    assert.match(target.source, new RegExp(`${apiPattern}\\.${target.create}\\(`), `${target.label} should still create through the app API`)
+    assert.match(target.source, new RegExp(`${apiPattern}\\.${target.update}\\(`), `${target.label} should still update through the app API`)
+    assert.match(target.source, new RegExp(`${apiPattern}\\.${target.remove}\\(`), `${target.label} should still delete through the app API`)
     assert.match(target.source, /finally \{[\s\S]*finishSingleAction\(bulkDeleteInFlightRef\)[\s\S]*setBulkActionBusy\(false\)/, `${target.label} bulk guard should clear`)
   }
 })

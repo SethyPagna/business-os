@@ -47,6 +47,10 @@ Recent route-level win:
 - Returns page is now `frontend/src/components/returns/Returns.tsx` with typed
   return rows, snapshot/history restore payloads, grouped selection, local
   return API gateway calls, filter/group/sort state, and watchdog timers.
+- Customers contact tab is now `frontend/src/components/contacts/CustomersTab.tsx`
+  with typed customer rows, grouped sections, point-balance loading, contact
+  option helper exports, local customer API calls, and history/bulk restore
+  payloads.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary

@@ -1,10 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
-import { useDeferredValue } from 'react'
-import { useMemo } from 'react'
-import { useRef } from 'react'
-import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import FilterMenu from '../shared/FilterMenu'
@@ -25,17 +22,135 @@ import {
   parseStoredContactOptions,
   serializeContactOptions as serializeStoredContactOptions,
 } from './contactOptionUtils'
+import type { ContactOption } from './contactOptionUtils'
 import { generateCustomerMembershipNumber } from './customerMembershipNumber'
 
-export function parseContactOptions(raw) {
+type TranslateFn = (key: string) => string | undefined
+type NotifyFn = (message: string, tone?: string) => void
+type ContactModal = 'form' | 'import' | 'detail' | null
+type SortDirection = 'asc' | 'desc'
+type CustomerGroupMode = 'time' | 'alphabet'
+type CustomerPayload = Omit<CustomerRow, 'id' | 'points_balance' | 'points_earned' | 'points_redeemed' | 'points_rewarded' | 'points_deducted' | 'created_at'> & {
+  userId?: string | number | null
+  userName?: string | null
+}
+
+interface CustomerMutationResult {
+  success?: boolean
+  error?: string
+  id?: unknown
+  data?: { id?: unknown } | null
+}
+
+interface AppUser {
+  id?: string | number | null
+  name?: string | null
+}
+
+interface AppContextValue {
+  user?: AppUser | null
+}
+
+interface SyncContextValue {
+  syncChannel?: {
+    channel?: string | null
+    ts?: string | number | null
+  } | null
+}
+
+interface CustomersTabProps {
+  t: TranslateFn
+  notify: NotifyFn
+  active?: boolean
+}
+
+interface CustomerRow extends Record<string, unknown> {
+  id: number | string
+  name?: string | null
+  membership_number?: string | null
+  phone?: string | null
+  email?: string | null
+  address?: string | null
+  company?: string | null
+  notes?: string | null
+  created_at?: string | null
+  points_balance?: number | string | null
+  points_earned?: number | string | null
+  points_redeemed?: number | string | null
+  points_rewarded?: number | string | null
+  points_deducted?: number | string | null
+}
+
+interface SectionRow extends Record<string, unknown> {
+  __kind: 'section'
+  section: {
+    id: string
+    label: string
+    ids: Array<number | string>
+    items: CustomerRow[]
+  }
+  collapsed: boolean
+}
+
+type CustomerDisplayRow = CustomerRow | SectionRow
+
+interface CustomerApi {
+  getCustomers: (query: Record<string, unknown>) => Promise<unknown>
+  createCustomer: (payload: CustomerPayload) => Promise<unknown>
+  updateCustomer: (id: number | string, payload: CustomerPayload | CustomerRow) => Promise<unknown>
+  deleteCustomer: (id: number | string) => Promise<unknown>
+}
+
+interface ApiListResponse {
+  items?: unknown
+  total?: unknown
+  page?: unknown
+  pageSize?: unknown
+}
+
+type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+function getCustomerApi(): CustomerApi {
+  if (typeof window === 'undefined' || !window.api) throw new Error('Customer API is not available.')
+  return window.api as CustomerApi
+}
+
+function isSectionRow(row: CustomerDisplayRow | null | undefined): row is SectionRow {
+  return row?.__kind === 'section'
+}
+
+function normalizeCustomerRows(value: unknown): CustomerRow[] {
+  if (Array.isArray(value)) return value as CustomerRow[]
+  const payload = value as ApiListResponse | null | undefined
+  if (Array.isArray(payload?.items)) return payload.items as CustomerRow[]
+  return []
+}
+
+function getApiListPayload(value: unknown): ApiListResponse | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as ApiListResponse : null
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function formatPoints(value: number | string | null | undefined): string {
+  return Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })
+}
+
+export function parseContactOptions(raw: unknown): ContactOption[] {
   return parseStoredContactOptions(raw, { legacyField: 'address' })
 }
 
-export function serializeContactOptions(options) {
-  return serializeStoredContactOptions(options)
+export function serializeContactOptions(options: ContactOption[]): string {
+  return serializeStoredContactOptions(options) || ''
 }
 
-function tr(t, key, fallback) {
+function tr(t: TranslateFn, key: string, fallback: string): string {
   const value = typeof t === 'function' ? t(key) : null
   return value && value !== key ? value : fallback
 }
@@ -44,20 +159,20 @@ const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const CustomerFormModal = lazy(() => import('./CustomerFormModal'))
 const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 
-function CustomersTab({ t, notify, active = true }) {
+function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
-  const loadWatchdogRef = useRef(null)
-  const loadPromiseRef = useRef(null)
+  const loadWatchdogRef = useRef<number | null>(null)
+  const loadPromiseRef = useRef<Promise<void> | null>(null)
   const saveInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
-  const [customers, setCustomers] = useState([])
+  const [customers, setCustomers] = useState<CustomerRow[]>([])
   const [search, setSearch] = useState('')
-  const [modal, setModal] = useState(null)
-  const [selected, setSelected] = useState(null)
+  const [modal, setModal] = useState<ContactModal>(null)
+  const [selected, setSelected] = useState<CustomerRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
@@ -66,9 +181,9 @@ function CustomersTab({ t, notify, active = true }) {
   const [customerTotal, setCustomerTotal] = useState(0)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
-  const [sortDirection, setSortDirection] = useState('desc')
-  const [groupMode, setGroupMode] = useState('time')
-  const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [groupMode, setGroupMode] = useState<CustomerGroupMode>('time')
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
   const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
@@ -127,13 +242,13 @@ function CustomersTab({ t, notify, active = true }) {
     () => filteredSections.flatMap((section) => section.items),
     [filteredSections],
   )
-  const displayRows = useMemo(
+  const displayRows = useMemo<CustomerDisplayRow[]>(
     () => filteredSections.flatMap((section) => {
       const collapsed = collapsedSections.has(section.id)
       return [
         { __kind: 'section', section, collapsed },
         ...(!collapsed ? section.items : []),
-      ]
+      ] as CustomerDisplayRow[]
     }),
     [collapsedSections, filteredSections],
   )
@@ -207,15 +322,15 @@ function CustomersTab({ t, notify, active = true }) {
   ), [contactFilterSections, t])
   const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'])
   const hasActiveCustomerSearchOrFilters = deferredSearch.trim().length > 0 || activeFilterCount > 0
-  const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
+  const toggleSectionCollapsed = (sectionId: string) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
     else next.add(sectionId)
     return next
   })
-  const isSectionFullySelected = (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
-  const isSectionPartiallySelected = (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
-  const toggleSectionSelection = (ids, checked) => {
+  const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
+  const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
+  const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -223,7 +338,7 @@ function CustomersTab({ t, notify, active = true }) {
     })
   }
 
-  const buildCustomerPayload = useCallback((customer = {}) => ({
+  const buildCustomerPayload = useCallback((customer: Partial<CustomerRow> = {}): CustomerPayload => ({
     name: String(customer.name || '').trim(),
     membership_number: String(customer.membership_number || '').trim().toUpperCase(),
     phone: customer.phone || '',
@@ -235,15 +350,22 @@ function CustomersTab({ t, notify, active = true }) {
     userName: user?.name,
   }), [user?.id, user?.name])
 
-  const runCustomerMutation = useCallback((loader, label) => (
-    withLoaderTimeout(loader, label, CUSTOMER_MUTATION_TIMEOUT_MS)
+  const runCustomerMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<CustomerMutationResult> => (
+    await withLoaderTimeout(loader, label, CUSTOMER_MUTATION_TIMEOUT_MS) as CustomerMutationResult
   ), [])
 
-  const load = useCallback(async ({ silent = false, label = 'Customers' } = {}) => {
+  const clearLoadWatchdog = useCallback(() => {
+    if (loadWatchdogRef.current != null) {
+      window.clearTimeout(loadWatchdogRef.current)
+      loadWatchdogRef.current = null
+    }
+  }, [])
+
+  const load = useCallback(async ({ silent = false, label = 'Customers' }: { silent?: boolean, label?: string } = {}): Promise<void> => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       if (!silent || !loadedOnceRef.current) {
         setLoading(true)
         setLoadError('')
@@ -255,20 +377,21 @@ function CustomersTab({ t, notify, active = true }) {
       }
       try {
         const baseQuery = { ...customerQuery, includePoints: '1' }
-        const data = await withLoaderTimeout(() => window.api.getCustomers(baseQuery), label, 12000)
+        const data = await withLoaderTimeout(() => getCustomerApi().getCustomers(baseQuery), label, 12000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : [])
+        const items = normalizeCustomerRows(data)
         setCustomers(items)
-        setCustomerTotal(Number(data?.total || items.length || 0))
-        if (data && !Array.isArray(data)) {
-          setCustomerPage(Number(data.page || customerPage) || 1)
-          setCustomerPageSize(Number(data.pageSize || customerPageSize) || customerPageSize)
+        const payload = getApiListPayload(data)
+        setCustomerTotal(Number(payload?.total || items.length || 0))
+        if (payload) {
+          setCustomerPage(Number(payload.page || customerPage) || 1)
+          setCustomerPageSize(Number(payload.pageSize || customerPageSize) || customerPageSize)
         }
         loadedOnceRef.current = true
         setLoadError('')
-      } catch (error) {
+      } catch (error: unknown) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        const message = error?.message || 'Failed to load customers'
+        const message = getErrorMessage(error, 'Failed to load customers')
         if (!loadedOnceRef.current) {
           setLoadError(message)
           notify(message, 'error')
@@ -278,7 +401,7 @@ function CustomersTab({ t, notify, active = true }) {
           notify(refreshMessage, 'warning')
         }
       } finally {
-        window.clearTimeout(loadWatchdogRef.current)
+        clearLoadWatchdog()
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setLoading(false)
       }
@@ -290,7 +413,7 @@ function CustomersTab({ t, notify, active = true }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [customerPage, customerPageSize, customerQuery, notify, t])
+  }, [clearLoadWatchdog, customerPage, customerPageSize, customerQuery, notify, t])
 
   useEffect(() => {
     setCustomerPage(1)
@@ -310,7 +433,7 @@ function CustomersTab({ t, notify, active = true }) {
 
   useEffect(() => {
     if (!active) {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
       setLoading(false)
@@ -318,17 +441,17 @@ function CustomersTab({ t, notify, active = true }) {
     }
     load({ silent: loadedOnceRef.current })
     return () => {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
     }
-  }, [active, load])
+  }, [active, clearLoadWatchdog, load])
   useEffect(() => {
     if (!active || syncChannelName !== 'customers') return
     load({ silent: true, label: 'Customers refresh' })
   }, [active, load, syncChannelName, syncChannelTs])
 
-  const handleSave = async (form) => {
+  const handleSave = async (form: Partial<CustomerRow>) => {
     if (!beginSingleAction(saveInFlightRef)) return
     if (!String(form.name || '').trim()) {
       finishSingleAction(saveInFlightRef)
@@ -345,8 +468,8 @@ function CustomersTab({ t, notify, active = true }) {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const result = selected
-        ? await runCustomerMutation(() => window.api.updateCustomer(selected.id, payload), 'Update customer')
-        : await runCustomerMutation(() => window.api.createCustomer(payload), 'Create customer')
+        ? await runCustomerMutation(() => getCustomerApi().updateCustomer(selected.id, payload), 'Update customer')
+        : await runCustomerMutation(() => getCustomerApi().createCustomer(payload), 'Create customer')
       if (result?.success === false) {
         notify(result.error || 'Failed', 'error')
         return
@@ -357,7 +480,7 @@ function CustomersTab({ t, notify, active = true }) {
           label: `Edit customer ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
             const restoreResult = await runCustomerMutation(
-              () => window.api.updateCustomer(existingSnapshot.id, buildCustomerPayload(existingSnapshot)),
+              () => getCustomerApi().updateCustomer(existingSnapshot.id, buildCustomerPayload(existingSnapshot)),
               'Undo customer edit',
             )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore customer')
@@ -365,7 +488,7 @@ function CustomersTab({ t, notify, active = true }) {
           },
           redo: async () => {
             const redoResult = await runCustomerMutation(
-              () => window.api.updateCustomer(nextSnapshot.id, buildCustomerPayload(nextSnapshot)),
+              () => getCustomerApi().updateCustomer(nextSnapshot.id, buildCustomerPayload(nextSnapshot)),
               'Redo customer edit',
             )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply customer changes')
@@ -379,12 +502,12 @@ function CustomersTab({ t, notify, active = true }) {
           actionHistory.pushAction({
             label: `Add customer ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              await runCustomerMutation(() => window.api.deleteCustomer(createdCustomerId), 'Undo customer create')
+              await runCustomerMutation(() => getCustomerApi().deleteCustomer(createdCustomerId), 'Undo customer create')
               await load({ silent: true, label: 'Customers undo create' })
             },
             redo: async () => {
               const recreateResult = await runCustomerMutation(
-                () => window.api.createCustomer(buildCustomerPayload(createdSnapshot)),
+                () => getCustomerApi().createCustomer(buildCustomerPayload(createdSnapshot)),
                 'Redo customer create',
               )
               if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate customer')
@@ -398,14 +521,14 @@ function CustomersTab({ t, notify, active = true }) {
       setModal(null)
       setSelected(null)
       await load({ silent: true, label: 'Customers after save' })
-    } catch (error) {
-      notify(error.message || 'Failed', 'error')
+    } catch (error: unknown) {
+      notify(getErrorMessage(error, 'Failed'), 'error')
     } finally {
       finishSingleAction(saveInFlightRef)
     }
   }
 
-  const handleDelete = async (customer) => {
+  const handleDelete = async (customer: CustomerRow) => {
     if (!beginSingleAction(deleteInFlightRef)) return
     if (!confirm(`Delete customer "${customer.name}"?`)) {
       finishSingleAction(deleteInFlightRef)
@@ -413,13 +536,13 @@ function CustomersTab({ t, notify, active = true }) {
     }
     try {
       const snapshot = cloneHistorySnapshot(customer)
-      await runCustomerMutation(() => window.api.deleteCustomer(customer.id), 'Delete customer')
+      await runCustomerMutation(() => getCustomerApi().deleteCustomer(customer.id), 'Delete customer')
       let restoredCustomerId = 0
       actionHistory.pushAction({
         label: `Delete customer ${snapshot.name || ''}`.trim(),
         undo: async () => {
           const restoreResult = await runCustomerMutation(
-            () => window.api.createCustomer(buildCustomerPayload(snapshot)),
+            () => getCustomerApi().createCustomer(buildCustomerPayload(snapshot)),
             'Undo customer delete',
           )
           if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore customer')
@@ -429,7 +552,7 @@ function CustomersTab({ t, notify, active = true }) {
         redo: async () => {
           const targetId = restoredCustomerId || Number(snapshot.id || 0)
           if (!targetId) return
-          await runCustomerMutation(() => window.api.deleteCustomer(targetId), 'Redo customer delete')
+          await runCustomerMutation(() => getCustomerApi().deleteCustomer(targetId), 'Redo customer delete')
           await load({ silent: true, label: 'Customers redo delete' })
         },
       })
@@ -437,8 +560,8 @@ function CustomersTab({ t, notify, active = true }) {
       setModal(null)
       setSelected(null)
       await load({ silent: true, label: 'Customers after delete' })
-    } catch (error) {
-      notify(error.message || 'Failed', 'error')
+    } catch (error: unknown) {
+      notify(getErrorMessage(error, 'Failed'), 'error')
     } finally {
       finishSingleAction(deleteInFlightRef)
     }
@@ -455,8 +578,8 @@ function CustomersTab({ t, notify, active = true }) {
     const failedIds = []
     setBulkActionBusy(true)
     try {
-      const deleteRun = await runConcurrentTasks(ids, async (id) => {
-        await runCustomerMutation(() => window.api.deleteCustomer(id), 'Bulk delete customers')
+      const deleteRun = await runConcurrentTasks(ids, async (id: number) => {
+        await runCustomerMutation(() => getCustomerApi().deleteCustomer(id), 'Bulk delete customers')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length
@@ -466,12 +589,12 @@ function CustomersTab({ t, notify, active = true }) {
       const failedIdSet = new Set(failedIds)
       const deletedSnapshots = snapshots.filter((snapshot) => !failedIdSet.has(Number(snapshot?.id || 0)))
       if (deletedCount > 0 && deletedSnapshots.length) {
-        let restoredEntries = []
+        let restoredEntries: Array<{ restoredId: number }> = []
         actionHistory.pushAction({
           label: `Delete ${deletedCount} customer${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
-            const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot) => {
-              const result = await runCustomerMutation(() => window.api.createCustomer({
+            const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: CustomerRow) => {
+              const result = await runCustomerMutation(() => getCustomerApi().createCustomer({
                 name: snapshot.name || '',
                 membership_number: snapshot.membership_number || '',
                 phone: snapshot.phone || '',
@@ -485,13 +608,13 @@ function CustomersTab({ t, notify, active = true }) {
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
             if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore customer'))
-            restoredEntries = restoreRun.successes.map((entry) => entry.value)
+            restoredEntries = restoreRun.successes.map((entry) => entry.value as { restoredId: number })
             await load({ silent: true, label: 'Customers restore deleted' })
           },
           redo: async () => {
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => (
-              runCustomerMutation(() => window.api.deleteCustomer(id), 'Redo bulk customer delete')
+            const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
+              runCustomerMutation(() => getCustomerApi().deleteCustomer(id), 'Redo bulk customer delete')
             ))
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete customer'))
             await load({ silent: true, label: 'Customers redo delete' })
@@ -511,7 +634,7 @@ function CustomersTab({ t, notify, active = true }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <ActionHistoryBar history={actionHistory} summaryMode="compact" />
+      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" />
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <label htmlFor="customer-search" className="sr-only">{tr(t, 'search_customers_placeholder', 'Search customers')}</label>
@@ -609,7 +732,6 @@ function CustomersTab({ t, notify, active = true }) {
         compactEmptyState={hasActiveCustomerSearchOrFilters}
         columns={customerColumns}
         selectAll={selectAllProp}
-        selectedCount={selectedIds.size}
         totalCount={customerTotal || visibleCustomers.length}
         page={customerPage}
         pageSize={customerPageSize}
@@ -620,7 +742,7 @@ function CustomersTab({ t, notify, active = true }) {
         loadingDetails={tr(t, 'contacts_loading_details', 'Fetching customers, filters, and grouped sections.')}
         t={t}
         renderRow={(customer) => {
-          if (customer?.__kind === 'section') {
+          if (isSectionRow(customer)) {
             const section = customer.section
             return (
               <tr key={section.id} className="bg-slate-100/90 dark:bg-slate-800/80">
@@ -651,30 +773,31 @@ function CustomersTab({ t, notify, active = true }) {
               </tr>
             )
           }
-          const options = parseContactOptions(customer.address)
+          const customerRow = customer as CustomerRow
+          const options = parseContactOptions(customerRow.address)
           const primaryOption = getPrimaryContactOption(options, {
             fallback: {
-              name: customer.name || '',
-              phone: customer.phone || '',
-              email: customer.email || '',
+              name: customerRow.name || '',
+              phone: customerRow.phone || '',
+              email: customerRow.email || '',
               address: '',
             },
           })
           return (
-            <tr key={customer.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(customer.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+            <tr key={customerRow.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(customerRow.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
               <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
-                <label htmlFor={`customer-select-${customer.id}`} className="sr-only">{`Select ${customer.name}`}</label>
-                <input id={`customer-select-${customer.id}`} name={`customer_select_${customer.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(customer.id)} onChange={() => toggleOne(customer.id)} />
+                <label htmlFor={`customer-select-${customerRow.id}`} className="sr-only">{`Select ${customerRow.name}`}</label>
+                <input id={`customer-select-${customerRow.id}`} name={`customer_select_${customerRow.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(Number(customerRow.id))} onChange={() => toggleOne(customerRow.id)} />
               </td>
-              <td className="px-4 py-2 font-medium text-gray-900 cursor-pointer dark:text-white" onClick={() => { setSelected(customer); setModal('detail') }}>{customer.name}</td>
-              <td className="px-4 py-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{customer.membership_number || '--'}</td>
-              <td className="px-4 py-2 font-semibold text-blue-600 cursor-pointer dark:text-blue-300" onClick={() => { setSelected(customer); setModal('detail') }}>
-                {Number(customer.points_balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+              <td className="px-4 py-2 font-medium text-gray-900 cursor-pointer dark:text-white" onClick={() => { setSelected(customerRow); setModal('detail') }}>{customerRow.name}</td>
+              <td className="px-4 py-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{customerRow.membership_number || '--'}</td>
+              <td className="px-4 py-2 font-semibold text-blue-600 cursor-pointer dark:text-blue-300" onClick={() => { setSelected(customerRow); setModal('detail') }}>
+                {formatPoints(customerRow.points_balance)}
               </td>
-              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{primaryOption.phone || customer.phone || '-'}</td>
-              <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{primaryOption.email || customer.email || '-'}</td>
-              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{customer.company || '-'}</td>
-              <td className="px-4 py-2 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>
+              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{primaryOption.phone || customerRow.phone || '-'}</td>
+              <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{primaryOption.email || customerRow.email || '-'}</td>
+              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{customerRow.company || '-'}</td>
+              <td className="px-4 py-2 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>
                 {options.length === 0 ? (
                   <span className="text-xs text-gray-400">-</span>
                 ) : (
@@ -687,13 +810,13 @@ function CustomersTab({ t, notify, active = true }) {
                 )}
               </td>
               <td className="px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
-                <ThreeDotMenu onDetails={() => { setSelected(customer); setModal('detail') }} onEdit={() => { setSelected(customer); setModal('form') }} onDelete={() => handleDelete(customer)} />
+                <ThreeDotMenu onDetails={() => { setSelected(customerRow); setModal('detail') }} onEdit={() => { setSelected(customerRow); setModal('form') }} onDelete={() => handleDelete(customerRow)} />
               </td>
             </tr>
           )
         }}
         renderCard={(customer) => {
-          if (customer?.__kind === 'section') {
+          if (isSectionRow(customer)) {
             const section = customer.section
             return (
               <div key={section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
@@ -721,32 +844,33 @@ function CustomersTab({ t, notify, active = true }) {
               </div>
             )
           }
-          const options = parseContactOptions(customer.address)
+          const customerRow = customer as CustomerRow
+          const options = parseContactOptions(customerRow.address)
           const primaryOption = getPrimaryContactOption(options, {
             fallback: {
-              name: customer.name || '',
-              phone: customer.phone || '',
-              email: customer.email || '',
+              name: customerRow.name || '',
+              phone: customerRow.phone || '',
+              email: customerRow.email || '',
               address: '',
             },
           })
           return (
-            <div key={customer.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(customer.id) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
-              <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(customer.id) }}>
-                <label htmlFor={`customer-card-select-${customer.id}`} className="sr-only">{`Select ${customer.name}`}</label>
-                <input id={`customer-card-select-${customer.id}`} name={`customer_card_select_${customer.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(customer.id)} onChange={() => toggleOne(customer.id)} />
+            <div key={customerRow.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(Number(customerRow.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
+              <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(customerRow.id) }}>
+                <label htmlFor={`customer-card-select-${customerRow.id}`} className="sr-only">{`Select ${customerRow.name}`}</label>
+                <input id={`customer-card-select-${customerRow.id}`} name={`customer_card_select_${customerRow.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(Number(customerRow.id))} onChange={() => toggleOne(customerRow.id)} />
               </div>
-              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40">{customer.name?.[0]?.toUpperCase()}</div>
-              <div className="min-w-0 flex-1 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>
-                <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{customer.name}</div>
-                {customer.membership_number ? <div className="font-mono text-[11px] text-blue-500">{customer.membership_number}</div> : null}
-                <div className="text-xs font-semibold text-blue-600 dark:text-blue-300">{tr(t, 'loyalty_points', 'Points')}: {Number(customer.points_balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
-                {primaryOption.phone || customer.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || customer.phone}</div> : null}
-                {customer.company ? <div className="truncate text-xs text-gray-400">{customer.company}</div> : null}
+              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40">{customerRow.name?.[0]?.toUpperCase()}</div>
+              <div className="min-w-0 flex-1 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>
+                <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{customerRow.name}</div>
+                {customerRow.membership_number ? <div className="font-mono text-[11px] text-blue-500">{customerRow.membership_number}</div> : null}
+                <div className="text-xs font-semibold text-blue-600 dark:text-blue-300">{tr(t, 'loyalty_points', 'Points')}: {formatPoints(customerRow.points_balance)}</div>
+                {primaryOption.phone || customerRow.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || customerRow.phone}</div> : null}
+                {customerRow.company ? <div className="truncate text-xs text-gray-400">{customerRow.company}</div> : null}
                 {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
               </div>
               <div onClick={(event) => event.stopPropagation()}>
-                <ThreeDotMenu onDetails={() => { setSelected(customer); setModal('detail') }} onEdit={() => { setSelected(customer); setModal('form') }} onDelete={() => handleDelete(customer)} />
+                <ThreeDotMenu onDetails={() => { setSelected(customerRow); setModal('detail') }} onEdit={() => { setSelected(customerRow); setModal('form') }} onDelete={() => handleDelete(customerRow)} />
               </div>
             </div>
           )
@@ -760,7 +884,7 @@ function CustomersTab({ t, notify, active = true }) {
       ) : null}
       {modal === 'import' ? (
         <Suspense fallback={null}>
-          <ContactImportModal type="customer" onClose={() => setModal(null)} onDone={load} />
+          <ContactImportModal type="customer" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Customers after import' })} />
         </Suspense>
       ) : null}
       {modal === 'detail' && selected ? (

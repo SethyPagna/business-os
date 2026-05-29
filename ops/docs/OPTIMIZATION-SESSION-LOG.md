@@ -145,7 +145,7 @@ Use this shape for future entries:
   TSX with typed form, option, selection, menu, and pagination boundaries
 - affected files: `frontend/src/components/contacts/CustomerFormModal.tsx`,
   `frontend/src/components/contacts/shared.tsx`,
-  `frontend/src/components/contacts/CustomersTab.jsx`
+  `frontend/src/components/contacts/CustomersTab.tsx`
 - route or API target: Contacts customer form, shared customer/supplier/delivery
   table and row actions
 - keeper or rollback: keeper if contact pricing/loading tests, typecheck,
@@ -176,7 +176,7 @@ Use this shape for future entries:
   CSV worker, file-picker, API, and queued-result boundaries
 - affected files: `frontend/src/components/contacts/ContactImportModal.tsx`,
   `frontend/src/components/contacts/Contacts.tsx`,
-  `frontend/src/components/contacts/CustomersTab.jsx`,
+  `frontend/src/components/contacts/CustomersTab.tsx`,
   `frontend/src/components/contacts/SuppliersTab.jsx`,
   `frontend/src/components/contacts/DeliveryTab.jsx`
 - route or API target: Contacts CSV import, background import jobs, worker row
@@ -593,3 +593,35 @@ Use this shape for future entries:
 - follow-up insight: the Returns route shell now has a typed local API and
   snapshot-history boundary, reducing risk before converting the larger
   Dashboard, Inventory, and App/AppContext route shells.
+
+- change: converted the customers contact tab to TSX with typed customer rows,
+  section rows, modal state, app/sync context, local customer API gateway
+  calls, mutation result payloads, exported contact-option helpers, grouped
+  filters, loading watchdog timers, undo/redo history payloads, and bulk
+  restore bookkeeping
+- affected files:
+  `frontend/src/components/contacts/CustomersTab.tsx`,
+  `frontend/src/components/contacts/Contacts.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/pricingContacts.test.ts`
+- route or API target: Contacts customers tab, customer list with point
+  balances, customer create/update/delete, bulk delete/restore, contact option
+  parsing, POS contact option import contract
+- keeper or rollback: keeper if action stability, performance loading UX,
+  pricing/contact helpers, typecheck, JSX, frontend/backend utility, build,
+  Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: focused typecheck, JSX, action stability, performance
+  loading UX, and pricing/contact checks passed; broad frontend/backend utility
+  suites, UI audit, production build, organization audit, schema audit, and
+  Phase 29 repeat audit also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,046 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: customer contacts now have typed list/mutation/history
+  boundaries, reducing risk before converting supplier and delivery contact
+  tabs with the same pattern.

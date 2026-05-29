@@ -5757,3 +5757,15 @@ Move 530 status:
   timeouts, same-tick history restore guards, customer/supplier summary math,
   grouped selection helpers, the Returns list-surface lazy import, and layout
   guard behavior unchanged.
+
+Move 531 status:
+- Move 531 converts the customers contact tab to
+  `frontend/src/components/contacts/CustomersTab.tsx`. The typed boundary now
+  covers customer rows, grouped section rows, modal state, app/sync context
+  access, local customer API calls, mutation result payloads, exported
+  contact-option helpers, filter/group/sort state, watchdog timers,
+  undo/redo history payloads, and bulk restore bookkeeping. The move keeps
+  the Contacts page import, POS `parseContactOptions` import contract,
+  include-points customer loading, grouped selection helpers, same-tick
+  save/delete/bulk guards, CSV export, and contact pricing/loading source
+  guard behavior unchanged.
