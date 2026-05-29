@@ -264,7 +264,7 @@ Code files documented: **466**
 | 252 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
 | 253 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 2 | 1 | 0 | 1 |
 | 254 | `frontend/src/components/sales/ExportModal.tsx` | 5 | 1 | 3 | 1 |
-| 255 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
+| 255 | `frontend/src/components/sales/SaleDetailModal.tsx` | 3 | 1 | 2 | 1 |
 | 256 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
 | 257 | `frontend/src/components/sales/SalesImportModal.tsx` | 5 | 1 | 4 | 1 |
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 0 |
@@ -4919,12 +4919,12 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.255 `frontend/src/components/sales/SaleDetailModal.jsx`
+### 3.255 `frontend/src/components/sales/SaleDetailModal.tsx`
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../utils/formatters`
-  - `./StatusBadge`
+  - `../../utils/formatters.ts`
+  - `./StatusBadge.tsx`
   - `react`
 - Internal dependencies (2)
   - `frontend/src/components/sales/StatusBadge.tsx`
@@ -4961,7 +4961,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/src/components/sales/ExportModal.tsx`
-  - `frontend/src/components/sales/SaleDetailModal.jsx`
+  - `frontend/src/components/sales/SaleDetailModal.tsx`
   - `frontend/src/components/sales/SalesImportModal.tsx`
   - `frontend/src/components/sales/SalesListSurface.jsx`
   - `frontend/src/components/sales/StatusBadge.tsx`
@@ -5030,7 +5030,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/src/components/sales/ExportModal.tsx`
-  - `frontend/src/components/sales/SaleDetailModal.jsx`
+  - `frontend/src/components/sales/SaleDetailModal.tsx`
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/sales/SalesListSurface.jsx`
 
@@ -5938,7 +5938,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/NewReturnModal.jsx`
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/Returns.jsx`
-  - `frontend/src/components/sales/SaleDetailModal.jsx`
+  - `frontend/src/components/sales/SaleDetailModal.tsx`
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/users/UserDetailSheet.tsx`
   - `frontend/src/components/users/Users.jsx`

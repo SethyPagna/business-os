@@ -264,7 +264,7 @@ Code files scanned: **466**
 | 252 | `frontend/src/components/returns/Returns.jsx` | 13 |
 | 253 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 5 |
 | 254 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
-| 255 | `frontend/src/components/sales/SaleDetailModal.jsx` | 6 |
+| 255 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
 | 256 | `frontend/src/components/sales/Sales.jsx` | 14 |
 | 257 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
@@ -4663,16 +4663,14 @@ Code files scanned: **466**
 | 4 | `handlePreview` | const arrow | 151 |
 | 5 | `handleExportCSV` | const arrow | 169 |
 
-### 3.255 `frontend/src/components/sales/SaleDetailModal.jsx`
+### 3.255 `frontend/src/components/sales/SaleDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `InfoBlock` | function | 5 |
-| 2 | `parseItems` | function | 21 |
-| 3 | `SaleDetailModal` | export default function | 31 |
-| 4 | `translateOr` | const arrow | 47 |
-| 5 | `handleStatusUpdate` | const arrow | 69 |
-| 6 | `handleMembershipAttach` | const arrow | 80 |
+| 1 | `toNumber` | function | 73 |
+| 2 | `InfoBlock` | function | 78 |
+| 3 | `parseItems` | function | 94 |
+| 4 | `SaleDetailModal` | export default function | 105 |
 
 ### 3.256 `frontend/src/components/sales/Sales.jsx`
 
