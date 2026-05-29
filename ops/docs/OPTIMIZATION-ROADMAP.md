@@ -5580,3 +5580,12 @@ Move 513 status:
   The move keeps stock, price, promotion, performance, branch, and batch
   rendering unchanged while refreshing the Vite manual chunk rule to the
   current TSX product-detail paths.
+
+Move 514 status:
+- Move 514 converts the customer edit return modal to
+  `frontend/src/components/returns/EditReturnModal.tsx`. The typed boundary now
+  covers editable return rows, update payloads, API access, app user context,
+  notification callbacks, money coercion, bounded quantity edits, and
+  unknown-safe write-conflict handling. The move keeps submit guards, explicit
+  update timeout coverage, conflict recovery, and returns/inventory/sales
+  refresh events unchanged while updating source-path guard tests.

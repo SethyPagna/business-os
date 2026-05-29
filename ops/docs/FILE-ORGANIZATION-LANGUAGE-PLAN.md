@@ -569,7 +569,7 @@ Decision rule:
     passed on frontend hash `080d514c34776914`.
 50. Harden Returns write pathways. Done:
     `frontend/src/components/returns/NewReturnModal.jsx`,
-    `frontend/src/components/returns/EditReturnModal.jsx`, and
+    `frontend/src/components/returns/EditReturnModal.tsx`, and
     `frontend/src/components/returns/NewSupplierReturnModal.jsx` now wrap
     customer return create, customer return update, and supplier return create
     writes in explicit timeout contracts while preserving same-tick submit
@@ -4026,6 +4026,13 @@ Decision rule:
     stale display artifacts in the close control and margin separator, keeps
     stock/price/performance/branch/batch rendering unchanged, and updates the
     Vite manual chunk rule to the current TSX product-detail surfaces.
+514. Convert the customer edit return modal to TSX. Done:
+    `frontend/src/components/returns/EditReturnModal.tsx` now types editable
+    return rows, update payloads, return API access, app user context,
+    notification callbacks, and money/quantity normalization. The conversion
+    keeps same-tick submit guards, explicit update timeouts, conflict recovery,
+    and returns/inventory/sales refresh events intact while moving source-path
+    guard tests to the TSX file.
 
 ## Safety Gates
 

@@ -720,7 +720,7 @@ Last updated: 2026-05-18
     Return create, return update, and supplier return create writes now have
     explicit timeout contracts in
     `frontend/src/components/returns/NewReturnModal.jsx`,
-    `frontend/src/components/returns/EditReturnModal.jsx`, and
+    `frontend/src/components/returns/EditReturnModal.tsx`, and
     `frontend/src/components/returns/NewSupplierReturnModal.jsx`.
     Remote public portal Cloudflare verification now lives in
     `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`.

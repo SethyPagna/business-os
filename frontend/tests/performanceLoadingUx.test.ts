@@ -29,7 +29,7 @@ const salesExportModal = fs.readFileSync(new URL('../src/components/sales/Export
 const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
 const returns = fs.readFileSync(new URL('../src/components/returns/Returns.jsx', import.meta.url), 'utf8')
 const newReturnModal = fs.readFileSync(new URL('../src/components/returns/NewReturnModal.jsx', import.meta.url), 'utf8')
-const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.jsx', import.meta.url), 'utf8')
+const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
 const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.jsx', import.meta.url), 'utf8')
 const branches = fs.readFileSync(new URL('../src/components/branches/Branches.jsx', import.meta.url), 'utf8')
 const transferModal = fs.readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
@@ -840,7 +840,7 @@ assert.match(
 )
 assert.match(
   editReturnModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.updateReturn\(ret\.id, \{[\s\S]*\}\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
+  /const api = getReturnApi\(\)[\s\S]*const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => api\.updateReturn\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
   'customer return update should timeout slow return writes',
 )
 assert.doesNotMatch(

@@ -1,17 +1,121 @@
-// ── EditReturnModal ──────────────────────────────────────────────────────────
-import { useRef, useState } from 'react'
-import { useApp } from '../../AppContext'
+import { useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { withLoaderTimeout } from '../../utils/loaders.ts'
+import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
 
-export default
-function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
-  const { user, t } = useApp()
-  const T = (k, fb) => (typeof t === 'function' ? t(k) : fb)
+type TranslateFn = (key: string) => string | undefined
+type NotifyFn = (message: string, type?: string) => void
+type MoneyFormatter = (value: number | string) => string
+type ReturnType = 'restock' | 'writeoff' | 'refund' | string
 
-  const RETURN_REASONS = [
+interface AppUser {
+  id?: number | string | null
+  name?: string | null
+  username?: string | null
+}
+
+interface EditableReturnItem {
+  id?: number | string | null
+  sale_item_id?: number | string | null
+  product_id?: number | string | null
+  product_name?: string | null
+  quantity?: number | string | null
+  returnQty: number
+  applied_price_usd?: number | string | null
+  applied_price_khr?: number | string | null
+  cost_price_usd?: number | string | null
+  cost_price_khr?: number | string | null
+  return_to_stock?: boolean | null
+  branch_id?: number | string | null
+}
+
+interface ExistingReturnItem extends Omit<EditableReturnItem, 'returnQty'> {}
+
+interface ExistingReturn {
+  id: number | string
+  return_number?: string | null
+  reason?: string | null
+  return_type?: ReturnType | null
+  notes?: string | null
+  branch_id?: number | string | null
+  items?: ExistingReturnItem[] | null
+}
+
+interface ReturnUpdatePayload {
+  reason: string
+  return_type: ReturnType
+  notes: string | null
+  total_refund_usd: number
+  total_refund_khr: number
+  cashier_id?: number | string | null
+  cashier_name?: string | null
+  items: Array<{
+    sale_item_id: number | string | null
+    product_id: number | string | null | undefined
+    product_name: string | null | undefined
+    quantity: number
+    applied_price_usd: number
+    applied_price_khr: number
+    cost_price_usd: number
+    cost_price_khr: number
+    return_to_stock: boolean
+    branch_id: number | string | null
+  }>
+}
+
+interface ReturnApi {
+  updateReturn: (id: number | string, payload: ReturnUpdatePayload) => Promise<unknown>
+}
+
+interface EditReturnModalProps {
+  ret: ExistingReturn
+  onClose: () => void
+  onSuccess?: (result?: unknown) => void | Promise<void>
+  fmtUSD: MoneyFormatter
+  notify: NotifyFn
+}
+
+interface ConflictLikeError {
+  conflict?: boolean
+  code?: string
+}
+
+const useApp = useAppHook as () => {
+  user?: AppUser | null
+  t?: TranslateFn
+}
+
+function getReturnApi(): ReturnApi {
+  if (!window.api) throw new Error('Return API is not available.')
+  return window.api as ReturnApi
+}
+
+function toNumber(value: number | string | null | undefined): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function clampReturnQuantity(value: unknown, maxQuantity: number): number {
+  const parsed = typeof value === 'number' ? value : parseFloat(String(value || ''))
+  const safeQuantity = Number.isFinite(parsed) ? parsed : 0
+  return Math.max(0, Math.min(maxQuantity, safeQuantity))
+}
+
+function isWriteConflict(error: unknown): boolean {
+  const candidate = error as ConflictLikeError | null | undefined
+  return !!candidate?.conflict || candidate?.code === 'write_conflict'
+}
+
+export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }: EditReturnModalProps) {
+  const { user, t } = useApp()
+  const T = (key: string, fallback: string): string => {
+    const value = typeof t === 'function' ? t(key) : undefined
+    return value && value !== key ? value : fallback
+  }
+
+  const RETURN_REASONS: string[] = [
     T('reason_defective',    'Defective / damaged product'),
     T('reason_wrong_item',   'Wrong item delivered'),
     T('reason_changed_mind', 'Customer changed mind'),
@@ -24,55 +128,59 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
   const OTHER_LABEL = T('reason_other', 'Other')
 
   const existingItems = Array.isArray(ret.items) ? ret.items : []
-  const [reason,       setReason]       = useState(ret.reason || RETURN_REASONS[0])
-  const [customReason, setCustomReason] = useState(RETURN_REASONS.includes(ret.reason) ? '' : ret.reason || '')
-  const [returnType,   setReturnType]   = useState(ret.return_type || 'restock')
+  const [reason,       setReason]       = useState<string>(ret.reason || RETURN_REASONS[0])
+  const [customReason, setCustomReason] = useState(RETURN_REASONS.includes(ret.reason || '') ? '' : ret.reason || '')
+  const [returnType,   setReturnType]   = useState<ReturnType>(ret.return_type || 'restock')
   const [notes,        setNotes]        = useState(ret.notes || '')
-  const [items,        setItems]        = useState(existingItems.map(i => ({ ...i, returnQty: i.quantity })))
+  const [items,        setItems]        = useState<EditableReturnItem[]>(
+    existingItems.map((item) => ({ ...item, returnQty: toNumber(item.quantity) })),
+  )
   const [submitting,   setSubmitting]   = useState(false)
   const submitInFlightRef = useRef(false)
 
   const reasonValue = RETURN_REASONS.includes(reason) ? reason : OTHER_LABEL
   const finalReason = reasonValue === OTHER_LABEL ? customReason : reason
 
-  const updateQty     = (idx, qty) => setItems(prev => prev.map((it, i) =>
-    i === idx ? { ...it, returnQty: Math.max(0, Math.min(it.quantity, parseFloat(qty) || 0)) } : it
+  const updateQty     = (idx: number, qty: unknown) => setItems(prev => prev.map((it, i) =>
+    i === idx ? { ...it, returnQty: clampReturnQuantity(qty, toNumber(it.quantity)) } : it
   ))
-  const updateRestock = (idx, val) => setItems(prev => prev.map((it, i) =>
+  const updateRestock = (idx: number, val: boolean) => setItems(prev => prev.map((it, i) =>
     i === idx ? { ...it, return_to_stock: val } : it
   ))
 
   const activeItems    = items.filter(it => it.returnQty > 0)
-  const totalRefund    = activeItems.reduce((s, it) => s + (it.applied_price_usd || 0) * it.returnQty, 0)
-  const totalRefundKhr = activeItems.reduce((s, it) => s + (it.applied_price_khr || 0) * it.returnQty, 0)
+  const totalRefund    = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_usd) * it.returnQty, 0)
+  const totalRefundKhr = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_khr) * it.returnQty, 0)
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (): Promise<void> => {
     if (!finalReason.trim()) { notify(T('return_reason','Please provide a reason'), 'error'); return }
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
+      const api = getReturnApi()
+      const payload: ReturnUpdatePayload = {
+        reason:            finalReason,
+        return_type:       returnType,
+        notes:             notes || null,
+        total_refund_usd:  totalRefund,
+        total_refund_khr:  totalRefundKhr,
+        cashier_id:        user?.id,
+        cashier_name:      user?.name || user?.username || null,
+        items: activeItems.map(it => ({
+          sale_item_id:      it.sale_item_id || null,
+          product_id:        it.product_id,
+          product_name:      it.product_name,
+          quantity:          it.returnQty,
+          applied_price_usd: toNumber(it.applied_price_usd),
+          applied_price_khr: toNumber(it.applied_price_khr),
+          cost_price_usd:    toNumber(it.cost_price_usd),
+          cost_price_khr:    toNumber(it.cost_price_khr),
+          return_to_stock:   it.return_to_stock !== false,
+          branch_id:         it.branch_id || ret.branch_id || null,
+        })),
+      }
       const result = await withLoaderTimeout(
-        () => window.api.updateReturn(ret.id, {
-          reason:            finalReason,
-          return_type:       returnType,
-          notes:             notes || null,
-          total_refund_usd:  totalRefund,
-          total_refund_khr:  totalRefundKhr,
-          cashier_id:        user?.id,
-          cashier_name:      user?.name || user?.username,
-          items: activeItems.map(it => ({
-            sale_item_id:      it.sale_item_id || null,
-            product_id:        it.product_id,
-            product_name:      it.product_name,
-            quantity:          it.returnQty,
-            applied_price_usd: it.applied_price_usd || 0,
-            applied_price_khr: it.applied_price_khr || 0,
-            cost_price_usd:    it.cost_price_usd || 0,
-            cost_price_khr:    it.cost_price_khr || 0,
-            return_to_stock:   it.return_to_stock !== false,
-            branch_id:         it.branch_id || ret.branch_id || null,
-          })),
-        }),
+        () => api.updateReturn(ret.id, payload),
         'Update return',
         RETURN_UPDATE_TIMEOUT_MS,
       )
@@ -82,12 +190,12 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       await Promise.resolve(onSuccess?.(result))
       onClose()
-    } catch (e) {
-      if (e?.conflict || e?.code === 'write_conflict') {
+    } catch (error) {
+      if (isWriteConflict(error)) {
         onSuccess?.()
         return
       }
-      notify((T('error','Error') || 'Error') + ': ' + (e.message || e), 'error')
+      notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       setSubmitting(false)
@@ -96,7 +204,7 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] flex flex-col" onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
@@ -145,7 +253,7 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
                 {items.map((item, idx) => {
                   const isActive = item.returnQty > 0
                   return (
-                    <div key={idx} className={`border rounded-xl p-3 transition-colors ${
+                    <div key={`${item.id || item.sale_item_id || item.product_id || 'return-item'}-${idx}`} className={`border rounded-xl p-3 transition-colors ${
                       isActive ? 'border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-900/10' : 'border-gray-200 dark:border-gray-700'
                     }`}>
                       <div className="flex items-center gap-3">
@@ -156,10 +264,10 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <button onClick={() => updateQty(idx, (item.returnQty || 0) - 1)}
                             className="w-7 h-7 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">−</button>
-                          <input type="number" min="0" max={item.quantity} step="1"
+                          <input type="number" min="0" max={toNumber(item.quantity)} step="1"
                             className="input w-14 text-center text-sm py-1"
                             value={item.returnQty}
-                            onChange={e => updateQty(idx, e.target.value)} />
+                            onChange={(event: ChangeEvent<HTMLInputElement>) => updateQty(idx, event.target.value)} />
                           <button onClick={() => updateQty(idx, (item.returnQty || 0) + 1)}
                             className="w-7 h-7 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">+</button>
                           <span className="text-[10px] text-gray-400 ml-1 w-10">/ {item.quantity}</span>
@@ -170,7 +278,7 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
                           <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
                             <input type="checkbox"
                               checked={item.return_to_stock !== false}
-                              onChange={e => updateRestock(idx, e.target.checked)}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) => updateRestock(idx, event.target.checked)}
                               className="rounded accent-blue-600" />
                             <span className="text-gray-600 dark:text-gray-400">{T('return_type_restock','Return to stock')}</span>
                             {item.return_to_stock === false && (
@@ -178,7 +286,7 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
                             )}
                           </label>
                           <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
-                            {fmtUSD((item.applied_price_usd || 0) * item.returnQty)}
+                            {fmtUSD(toNumber(item.applied_price_usd) * item.returnQty)}
                           </span>
                         </div>
                       )}
@@ -194,14 +302,14 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
             <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">
               {T('return_reason','Reason')} *
             </label>
-            <select className="input text-sm mb-2" value={reasonValue} onChange={e => setReason(e.target.value)}>
+            <select className="input text-sm mb-2" value={reasonValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => setReason(event.target.value)}>
               {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
             {reasonValue === OTHER_LABEL && (
               <input className="input text-sm"
                 placeholder={T('reason_placeholder','Describe the reason…')}
                 value={customReason}
-                onChange={e => setCustomReason(e.target.value)} />
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setCustomReason(event.target.value)} />
             )}
           </div>
 
@@ -211,7 +319,7 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
               {T('return_notes','Notes')}
             </label>
             <textarea className="input text-sm resize-none" rows={2}
-              value={notes} onChange={e => setNotes(e.target.value)} />
+              value={notes} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)} />
           </div>
 
           {/* Summary */}

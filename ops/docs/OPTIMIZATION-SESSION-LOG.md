@@ -199,7 +199,29 @@ Use this shape for future entries:
   Vite product-detail manual chunking
 - keeper or rollback: keeper if product discount UX, inventory mobile layout,
   typecheck, build, Phase 29 audit, and Phase 8.4 live suite pass
-- route-scoped result: pending verification in Move 513
-- warm whole-app result: pending verification in Move 513
+- route-scoped result: passed in Move 513 focused product discount, inventory
+  mobile layout, typecheck, JSX, build, Phase 29, and schema/reference checks
+- warm whole-app result: passed in Move 513 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
 - follow-up insight: this was a compact modal conversion and a useful check
   that manual chunk rules do not retain obsolete exact `.jsx` paths.
+
+- change: converted the customer edit return modal to TSX with typed editable
+  return rows, update payloads, return API access, quantity normalization, and
+  unknown-safe conflict handling
+- affected files: `frontend/src/components/returns/EditReturnModal.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Returns customer edit modal, customer return update
+- keeper or rollback: keeper if action stability, performance loading UX,
+  typecheck, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 514 action stability, performance
+  loading UX, typecheck, JSX, frontend/backend utility, build, Phase 29, and
+  schema/reference checks
+- warm whole-app result: passed in Move 514 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: this modal now uses the same local typed API accessor
+  pattern as other converted write surfaces while preserving the synchronous
+  submit guard.
