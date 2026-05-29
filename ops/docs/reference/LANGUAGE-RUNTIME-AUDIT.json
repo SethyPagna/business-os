@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-29T16:46:41.633Z",
+  "generatedAt": "2026-05-29T16:58:21.254Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -29,11 +29,11 @@
     ],
     [
       "React TSX",
-      67
+      68
     ],
     [
       "React JSX",
-      40
+      39
     ],
     [
       "Windows batch",
@@ -71,11 +71,11 @@
     ],
     [
       ".tsx",
-      67
+      68
     ],
     [
       ".jsx",
-      40
+      39
     ],
     [
       ".bat",
@@ -407,7 +407,7 @@
     },
     {
       "track": "Web Worker extraction",
-      "candidate": "frontend/src/components/contacts/ContactImportModal.jsx",
+      "candidate": "frontend/src/components/contacts/ContactImportModal.tsx",
       "tests": [
         "frontend/tests/contactImportWorker.test.ts",
         "frontend/tests/actionStability.test.ts",
@@ -1395,7 +1395,7 @@
       "covered": true
     },
     {
-      "surface": "frontend/src/components/contacts/ContactImportModal.jsx",
+      "surface": "frontend/src/components/contacts/ContactImportModal.tsx",
       "worker": "frontend/src/components/contacts/contactImportWorker.ts",
       "compatibilityWrapper": "frontend/src/components/contacts/contactImportWorker.mjs",
       "fallback": "frontend/src/utils/csvRowCounter.ts",

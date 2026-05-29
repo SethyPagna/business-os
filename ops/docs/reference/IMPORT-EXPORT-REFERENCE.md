@@ -178,7 +178,7 @@ Code files documented: **466**
 | 166 | `frontend/src/components/catalog/portalEditorUtils.ts` | 0 | 9 | 0 | 0 |
 | 167 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 0 | 4 | 0 | 1 |
 | 168 | `frontend/src/components/catalog/portalTranslateController.ts` | 0 | 19 | 0 | 0 |
-| 169 | `frontend/src/components/contacts/ContactImportModal.jsx` | 8 | 1 | 7 | 4 |
+| 169 | `frontend/src/components/contacts/ContactImportModal.tsx` | 8 | 1 | 7 | 4 |
 | 170 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 | 0 | 1 | 0 |
 | 171 | `frontend/src/components/contacts/contactOptionUtils.ts` | 0 | 9 | 0 | 1 |
 | 172 | `frontend/src/components/contacts/Contacts.tsx` | 12 | 1 | 10 | 1 |
@@ -3124,7 +3124,7 @@ Code files documented: **466**
   - `frontend/src/components/branches/BranchForm.tsx`
   - `frontend/src/components/branches/TransferModal.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
@@ -3428,11 +3428,11 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.169 `frontend/src/components/contacts/ContactImportModal.jsx`
+### 3.169 `frontend/src/components/contacts/ContactImportModal.tsx`
 
 - Declared exports: `function`
 - Imports (8)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/csvRowCounter.ts`
   - `../../utils/loaders.ts`
@@ -3484,7 +3484,7 @@ Code files documented: **466**
   - `../shared/Modal`
   - `../shared/PageHeader`
   - `../shared/pageActivity`
-  - `./ContactImportModal.jsx`
+  - `./ContactImportModal`
   - `./CustomersTab.jsx`
   - `./DeliveryTab.jsx`
   - `./SuppliersTab.jsx`
@@ -3492,7 +3492,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (10)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
@@ -3545,7 +3545,7 @@ Code files documented: **466**
   - `../../utils/loaders.ts`
   - `../shared/ActionHistoryBar`
   - `../shared/FilterMenu`
-  - `./ContactImportModal.jsx`
+  - `./ContactImportModal`
   - `./CustomerFormModal`
   - `./customerMembershipNumber`
   - `./shared`
@@ -3553,7 +3553,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (15)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/CustomerFormModal.tsx`
   - `frontend/src/components/contacts/customerMembershipNumber.ts`
   - `frontend/src/components/contacts/shared.tsx`
@@ -3587,13 +3587,13 @@ Code files documented: **466**
   - `../shared/ActionHistoryBar`
   - `../shared/FilterMenu`
   - `../shared/Modal`
-  - `./ContactImportModal.jsx`
+  - `./ContactImportModal`
   - `./shared`
   - `lucide-react`
   - `react`
 - Internal dependencies (14)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
@@ -3647,13 +3647,13 @@ Code files documented: **466**
   - `../shared/ActionHistoryBar`
   - `../shared/FilterMenu`
   - `../shared/Modal`
-  - `./ContactImportModal.jsx`
+  - `./ContactImportModal`
   - `./shared`
   - `lucide-react`
   - `react`
 - Internal dependencies (14)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
@@ -3812,7 +3812,7 @@ Code files documented: **466**
   - `frontend/src/utils/publicAssetUrls.ts`
 - Referenced by (5)
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/import/BulkImportModal.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
@@ -5183,7 +5183,7 @@ Code files documented: **466**
   - none
 - Referenced by (22)
   - `frontend/src/components/branches/Branches.jsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomerFormModal.tsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
@@ -5690,7 +5690,7 @@ Code files documented: **466**
   - `frontend/src/components/branches/Branches.jsx`
   - `frontend/src/components/branches/TransferModal.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
@@ -5842,7 +5842,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (9)
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/contactImportWorker.ts`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/inventory/inventoryImportWorker.ts`
@@ -6029,7 +6029,7 @@ Code files documented: **466**
 - Referenced by (20)
   - `frontend/src/App.jsx`
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
@@ -6143,7 +6143,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/api/http.ts`
 - Referenced by (7)
-  - `frontend/src/components/contacts/ContactImportModal.jsx`
+  - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/pos/POS.jsx`

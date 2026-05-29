@@ -35,7 +35,7 @@ Total files documented: **193**
 | 23 | `frontend/src/components/catalog/portalEditorUtils.ts` | 2 |
 | 24 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 0 |
 | 25 | `frontend/src/components/catalog/portalTranslateController.ts` | 2 |
-| 26 | `frontend/src/components/contacts/ContactImportModal.jsx` | 10 |
+| 26 | `frontend/src/components/contacts/ContactImportModal.tsx` | 8 |
 | 27 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
 | 28 | `frontend/src/components/contacts/contactOptionUtils.ts` | 3 |
 | 29 | `frontend/src/components/contacts/Contacts.tsx` | 11 |
@@ -825,20 +825,18 @@ Total files documented: **193**
 | 1 | `normalizeLanguage` | function | 16 |
 | 2 | `ensureLinkHint` | function | 108 |
 
-### 3.26 `frontend/src/components/contacts/ContactImportModal.jsx`
+### 3.26 `frontend/src/components/contacts/ContactImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `countCsvDataRowsInWorker` | function | 33 |
-| 2 | `cleanup` | const arrow | 45 |
-| 3 | `ContactImportModal` | component/function | 65 |
-| 4 | `signalDone` | const arrow | 80 |
-| 5 | `loadCsvText` | const arrow | 93 |
-| 6 | `handlePickFile` | const arrow | 114 |
-| 7 | `handleChooseExistingFile` | const arrow | 120 |
-| 8 | `handleDownloadTemplate` | const arrow | 137 |
-| 9 | `applyContactRulePreset` | const arrow | 141 |
-| 10 | `handleImport` | const arrow | 151 |
+| 1 | `getContactImportApi` | function | 114 |
+| 2 | `getErrorMessage` | function | 119 |
+| 3 | `countCsvDataRowsInWorker` | function | 123 |
+| 4 | `cleanup` | const arrow | 135 |
+| 5 | `ContactImportModal` | component/function | 155 |
+| 6 | `handleDownloadTemplate` | const arrow | 227 |
+| 7 | `applyContactRulePreset` | const arrow | 231 |
+| 8 | `handleImport` | const arrow | 241 |
 
 ### 3.27 `frontend/src/components/contacts/contactImportWorker.ts`
 

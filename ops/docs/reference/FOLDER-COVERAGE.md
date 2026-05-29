@@ -758,7 +758,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `ContactImportModal.jsx` | UI component/page |
+| 1 | `ContactImportModal.tsx` | UI component/page |
 | 2 | `contactImportWorker.ts` | UI component/page |
 | 3 | `contactOptionUtils.ts` | UI component/page |
 | 4 | `Contacts.tsx` | UI component/page |

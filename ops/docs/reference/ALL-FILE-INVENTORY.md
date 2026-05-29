@@ -201,7 +201,7 @@ Total files documented: **529**
 | 189 | `frontend/src/components/catalog/portalEditorUtils.ts` | frontend-ui | 189 | 5.8 | UI component/page |
 | 190 | `frontend/src/components/catalog/portalLanguagePacks.ts` | frontend-ui | 1349 | 62.5 | UI component/page |
 | 191 | `frontend/src/components/catalog/portalTranslateController.ts` | frontend-ui | 224 | 9.0 | UI component/page |
-| 192 | `frontend/src/components/contacts/ContactImportModal.jsx` | frontend-ui | 326 | 13.0 | UI component/page |
+| 192 | `frontend/src/components/contacts/ContactImportModal.tsx` | frontend-ui | 418 | 15.8 | UI component/page |
 | 193 | `frontend/src/components/contacts/contactImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 194 | `frontend/src/components/contacts/contactOptionUtils.ts` | frontend-ui | 131 | 4.9 | UI component/page |
 | 195 | `frontend/src/components/contacts/Contacts.tsx` | frontend-ui | 415 | 15.9 | UI component/page |
