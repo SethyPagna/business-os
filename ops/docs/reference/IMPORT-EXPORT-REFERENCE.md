@@ -259,7 +259,7 @@ Code files documented: **466**
 | 247 | `frontend/src/components/receipt/Receipt.jsx` | 7 | 1 | 5 | 3 |
 | 248 | `frontend/src/components/returns/EditReturnModal.tsx` | 4 | 1 | 3 | 1 |
 | 249 | `frontend/src/components/returns/NewReturnModal.jsx` | 4 | 1 | 3 | 1 |
-| 250 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 3 | 1 | 2 | 1 |
+| 250 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 3 | 1 | 2 | 1 |
 | 251 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
 | 252 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
 | 253 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 2 | 1 | 0 | 1 |
@@ -3150,7 +3150,7 @@ Code files documented: **466**
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
-  - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+  - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
@@ -4823,11 +4823,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.250 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+### 3.250 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `react`
 - Internal dependencies (2)
@@ -4875,7 +4875,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
-  - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+  - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/ReturnsListSurface.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
@@ -5710,7 +5710,7 @@ Code files documented: **466**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
-  - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+  - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/sales/SalesImportModal.tsx`

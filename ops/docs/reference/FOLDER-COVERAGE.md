@@ -1111,7 +1111,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `EditReturnModal.tsx` | UI component/page |
 | 2 | `NewReturnModal.jsx` | UI component/page |
-| 3 | `NewSupplierReturnModal.jsx` | UI component/page |
+| 3 | `NewSupplierReturnModal.tsx` | UI component/page |
 | 4 | `ReturnDetailModal.tsx` | UI component/page |
 | 5 | `Returns.jsx` | UI component/page |
 | 6 | `ReturnsListSurface.tsx` | UI component/page |

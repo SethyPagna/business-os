@@ -116,7 +116,7 @@ Total files documented: **193**
 | 104 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
 | 105 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
 | 106 | `frontend/src/components/returns/NewReturnModal.jsx` | 10 |
-| 107 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 6 |
+| 107 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
 | 108 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
 | 109 | `frontend/src/components/returns/Returns.jsx` | 13 |
 | 110 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
@@ -1733,16 +1733,17 @@ Total files documented: **193**
 | 9 | `clearAll` | const arrow | 141 |
 | 10 | `handleSubmit` | const arrow | 148 |
 
-### 3.107 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+### 3.107 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `NewSupplierReturnModal` | component/function | 15 |
-| 2 | `tr` | const arrow | 17 |
-| 3 | `loadSetup` | function | 52 |
-| 4 | `loadInventory` | function | 97 |
-| 5 | `updateQty` | const arrow | 162 |
-| 6 | `submit` | const arrow | 168 |
+| 1 | `isSupplierReturnItem` | function | 86 |
+| 2 | `getSupplierReturnApi` | function | 90 |
+| 3 | `NewSupplierReturnModal` | component/function | 99 |
+| 4 | `loadSetup` | function | 136 |
+| 5 | `loadInventory` | function | 187 |
+| 6 | `updateQty` | const arrow | 258 |
+| 7 | `submit` | const arrow | 264 |
 
 ### 3.108 `frontend/src/components/returns/ReturnDetailModal.tsx`
 
