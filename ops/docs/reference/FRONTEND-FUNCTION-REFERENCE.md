@@ -115,7 +115,7 @@ Total files documented: **193**
 | 103 | `frontend/src/components/receipt-settings/template.ts` | 2 |
 | 104 | `frontend/src/components/receipt/Receipt.jsx` | 8 |
 | 105 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
-| 106 | `frontend/src/components/returns/NewReturnModal.jsx` | 10 |
+| 106 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
 | 107 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
 | 108 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
 | 109 | `frontend/src/components/returns/Returns.jsx` | 13 |
@@ -1718,20 +1718,23 @@ Total files documented: **193**
 | 6 | `updateQty` | const arrow | 144 |
 | 7 | `updateRestock` | const arrow | 147 |
 
-### 3.106 `frontend/src/components/returns/NewReturnModal.jsx`
+### 3.106 `frontend/src/components/returns/NewReturnModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `NewReturnModal` | function | 18 |
-| 2 | `T` | const arrow | 20 |
-| 3 | `handleSearch` | const arrow | 48 |
-| 4 | `handleReturnTypeChange` | const arrow | 113 |
-| 5 | `toggleIncluded` | const arrow | 118 |
-| 6 | `updateItemQty` | const arrow | 126 |
-| 7 | `updateItemRestock` | const arrow | 134 |
-| 8 | `selectAll` | const arrow | 138 |
-| 9 | `clearAll` | const arrow | 141 |
-| 10 | `handleSubmit` | const arrow | 148 |
+| 1 | `getReturnApi` | function | 119 |
+| 2 | `toNumber` | function | 124 |
+| 3 | `clampReturnQuantity` | function | 129 |
+| 4 | `getSaleItemKey` | function | 135 |
+| 5 | `NewReturnModal` | component/function | 139 |
+| 6 | `handleSearch` | const arrow | 172 |
+| 7 | `handleReturnTypeChange` | const arrow | 237 |
+| 8 | `toggleIncluded` | const arrow | 242 |
+| 9 | `updateItemQty` | const arrow | 250 |
+| 10 | `updateItemRestock` | const arrow | 258 |
+| 11 | `selectAll` | const arrow | 262 |
+| 12 | `clearAll` | const arrow | 265 |
+| 13 | `handleSubmit` | const arrow | 272 |
 
 ### 3.107 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 
