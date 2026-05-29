@@ -182,11 +182,11 @@ Code files scanned: **466**
 | 170 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
 | 171 | `frontend/src/components/contacts/contactOptionUtils.ts` | 10 |
 | 172 | `frontend/src/components/contacts/Contacts.jsx` | 13 |
-| 173 | `frontend/src/components/contacts/CustomerFormModal.jsx` | 11 |
+| 173 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 174 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
 | 175 | `frontend/src/components/contacts/CustomersTab.jsx` | 12 |
 | 176 | `frontend/src/components/contacts/DeliveryTab.jsx` | 23 |
-| 177 | `frontend/src/components/contacts/shared.jsx` | 9 |
+| 177 | `frontend/src/components/contacts/shared.tsx` | 6 |
 | 178 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
 | 179 | `frontend/src/components/custom-tables/CustomTables.jsx` | 11 |
 | 180 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
@@ -3645,21 +3645,20 @@ Code files scanned: **466**
 | 12 | `handleTypeSelected` | const arrow | 228 |
 | 13 | `handleImportDone` | const arrow | 233 |
 
-### 3.173 `frontend/src/components/contacts/CustomerFormModal.jsx`
+### 3.173 `frontend/src/components/contacts/CustomerFormModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `tr` | function | 11 |
-| 2 | `parseContactOptions` | function | 16 |
-| 3 | `OptionEditor` | function | 20 |
-| 4 | `setField` | const arrow | 21 |
-| 5 | `fieldId` | const arrow | 22 |
-| 6 | `CustomerFormModal` | export default function | 65 |
-| 7 | `setField` | const arrow | 77 |
-| 8 | `addOption` | const arrow | 78 |
-| 9 | `removeOption` | const arrow | 82 |
-| 10 | `updateOption` | const arrow | 83 |
-| 11 | `handleSubmit` | const arrow | 84 |
+| 1 | `tr` | function | 50 |
+| 2 | `parseContactOptions` | function | 55 |
+| 3 | `OptionEditor` | function | 59 |
+| 4 | `setField` | const arrow | 60 |
+| 5 | `fieldId` | const arrow | 61 |
+| 6 | `CustomerFormModal` | export default function | 104 |
+| 7 | `addOption` | const arrow | 125 |
+| 8 | `removeOption` | const arrow | 129 |
+| 9 | `updateOption` | const arrow | 130 |
+| 10 | `handleSubmit` | const arrow | 131 |
 
 ### 3.174 `frontend/src/components/contacts/customerMembershipNumber.ts`
 
@@ -3712,19 +3711,16 @@ Code files scanned: **466**
 | 22 | `handleDelete` | const arrow | 492 |
 | 23 | `handleBulkDelete` | const arrow | 529 |
 
-### 3.177 `frontend/src/components/contacts/shared.jsx`
+### 3.177 `frontend/src/components/contacts/shared.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `useContactSelection` | export function | 14 |
-| 2 | `toggleOne` | const arrow | 30 |
-| 3 | `clearSelection` | const arrow | 41 |
-| 4 | `countActiveFlags` | export function | 64 |
-| 5 | `buildSelectedSnapshots` | export function | 72 |
-| 6 | `ThreeDotMenu` | export function | 90 |
-| 7 | `menuContent` | const arrow | 99 |
-| 8 | `DetailModal` | export function | 162 |
-| 9 | `ContactTable` | export function | 193 |
+| 1 | `toggleOne` | const arrow | 99 |
+| 2 | `clearSelection` | const arrow | 110 |
+| 3 | `countActiveFlags` | export function | 133 |
+| 4 | `ThreeDotMenu` | export function | 155 |
+| 5 | `menuContent` | const arrow | 164 |
+| 6 | `DetailModal` | export function | 223 |
 
 ### 3.178 `frontend/src/components/contacts/SuppliersTab.jsx`
 

@@ -205,11 +205,11 @@ Total files documented: **529**
 | 193 | `frontend/src/components/contacts/contactImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 194 | `frontend/src/components/contacts/contactOptionUtils.ts` | frontend-ui | 131 | 4.9 | UI component/page |
 | 195 | `frontend/src/components/contacts/Contacts.jsx` | frontend-ui | 322 | 13.1 | UI component/page |
-| 196 | `frontend/src/components/contacts/CustomerFormModal.jsx` | frontend-ui | 201 | 9.7 | UI component/page |
+| 196 | `frontend/src/components/contacts/CustomerFormModal.tsx` | frontend-ui | 248 | 11.2 | UI component/page |
 | 197 | `frontend/src/components/contacts/customerMembershipNumber.ts` | frontend-ui | 11 | 0.4 | UI component/page |
-| 198 | `frontend/src/components/contacts/CustomersTab.jsx` | frontend-ui | 796 | 39.4 | UI component/page |
+| 198 | `frontend/src/components/contacts/CustomersTab.jsx` | frontend-ui | 796 | 39.3 | UI component/page |
 | 199 | `frontend/src/components/contacts/DeliveryTab.jsx` | frontend-ui | 819 | 42.8 | UI component/page |
-| 200 | `frontend/src/components/contacts/shared.jsx` | frontend-ui | 378 | 14.4 | UI component/page |
+| 200 | `frontend/src/components/contacts/shared.tsx` | frontend-ui | 435 | 15.8 | UI component/page |
 | 201 | `frontend/src/components/contacts/SuppliersTab.jsx` | frontend-ui | 836 | 43.1 | UI component/page |
 | 202 | `frontend/src/components/custom-tables/CustomTables.jsx` | frontend-ui | 589 | 26.5 | UI component/page |
 | 203 | `frontend/src/components/dashboard/charts/BarChart.tsx` | frontend-ui | 178 | 6.3 | UI component/page |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 92.8 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 92.9 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |

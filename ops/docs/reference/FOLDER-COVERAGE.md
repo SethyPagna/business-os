@@ -762,11 +762,11 @@ Total folders documented: **81**
 | 2 | `contactImportWorker.ts` | UI component/page |
 | 3 | `contactOptionUtils.ts` | UI component/page |
 | 4 | `Contacts.jsx` | UI component/page |
-| 5 | `CustomerFormModal.jsx` | UI component/page |
+| 5 | `CustomerFormModal.tsx` | UI component/page |
 | 6 | `customerMembershipNumber.ts` | UI component/page |
 | 7 | `CustomersTab.jsx` | UI component/page |
 | 8 | `DeliveryTab.jsx` | UI component/page |
-| 9 | `shared.jsx` | UI component/page |
+| 9 | `shared.tsx` | UI component/page |
 | 10 | `SuppliersTab.jsx` | UI component/page |
 
 

@@ -39,11 +39,11 @@ Total files documented: **193**
 | 27 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
 | 28 | `frontend/src/components/contacts/contactOptionUtils.ts` | 3 |
 | 29 | `frontend/src/components/contacts/Contacts.jsx` | 13 |
-| 30 | `frontend/src/components/contacts/CustomerFormModal.jsx` | 11 |
+| 30 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 31 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 |
 | 32 | `frontend/src/components/contacts/CustomersTab.jsx` | 10 |
 | 33 | `frontend/src/components/contacts/DeliveryTab.jsx` | 21 |
-| 34 | `frontend/src/components/contacts/shared.jsx` | 3 |
+| 34 | `frontend/src/components/contacts/shared.tsx` | 3 |
 | 35 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
 | 36 | `frontend/src/components/custom-tables/CustomTables.jsx` | 11 |
 | 37 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
@@ -872,21 +872,20 @@ Total files documented: **193**
 | 12 | `handleTypeSelected` | const arrow | 228 |
 | 13 | `handleImportDone` | const arrow | 233 |
 
-### 3.30 `frontend/src/components/contacts/CustomerFormModal.jsx`
+### 3.30 `frontend/src/components/contacts/CustomerFormModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `tr` | function | 11 |
-| 2 | `parseContactOptions` | function | 16 |
-| 3 | `OptionEditor` | function | 20 |
-| 4 | `setField` | const arrow | 21 |
-| 5 | `fieldId` | const arrow | 22 |
-| 6 | `CustomerFormModal` | component/function | 65 |
-| 7 | `setField` | const arrow | 77 |
-| 8 | `addOption` | const arrow | 78 |
-| 9 | `removeOption` | const arrow | 82 |
-| 10 | `updateOption` | const arrow | 83 |
-| 11 | `handleSubmit` | const arrow | 84 |
+| 1 | `tr` | function | 50 |
+| 2 | `parseContactOptions` | function | 55 |
+| 3 | `OptionEditor` | function | 59 |
+| 4 | `setField` | const arrow | 60 |
+| 5 | `fieldId` | const arrow | 61 |
+| 6 | `CustomerFormModal` | component/function | 104 |
+| 7 | `addOption` | const arrow | 125 |
+| 8 | `removeOption` | const arrow | 129 |
+| 9 | `updateOption` | const arrow | 130 |
+| 10 | `handleSubmit` | const arrow | 131 |
 
 ### 3.31 `frontend/src/components/contacts/customerMembershipNumber.ts`
 
@@ -933,13 +932,13 @@ Total files documented: **193**
 | 20 | `handleDelete` | const arrow | 492 |
 | 21 | `handleBulkDelete` | const arrow | 529 |
 
-### 3.34 `frontend/src/components/contacts/shared.jsx`
+### 3.34 `frontend/src/components/contacts/shared.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `toggleOne` | const arrow | 30 |
-| 2 | `clearSelection` | const arrow | 41 |
-| 3 | `menuContent` | const arrow | 99 |
+| 1 | `toggleOne` | const arrow | 99 |
+| 2 | `clearSelection` | const arrow | 110 |
+| 3 | `menuContent` | const arrow | 164 |
 
 ### 3.35 `frontend/src/components/contacts/SuppliersTab.jsx`
 
