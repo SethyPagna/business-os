@@ -880,7 +880,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `Sidebar.jsx` | UI component/page |
+| 1 | `Sidebar.tsx` | UI component/page |
 
 
 ### 3.38 Folder: `frontend/src/components/pos`

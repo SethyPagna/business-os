@@ -210,7 +210,7 @@ Code files documented: **466**
 | 198 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 2 |
 | 199 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 | 1 | 2 | 1 |
 | 200 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 7 | 1 | 5 | 1 |
-| 201 | `frontend/src/components/navigation/Sidebar.jsx` | 7 | 1 | 6 | 1 |
+| 201 | `frontend/src/components/navigation/Sidebar.tsx` | 8 | 1 | 6 | 1 |
 | 202 | `frontend/src/components/pos/CartItem.tsx` | 2 | 1 | 2 | 1 |
 | 203 | `frontend/src/components/pos/FilterPanel.tsx` | 2 | 1 | 0 | 1 |
 | 204 | `frontend/src/components/pos/POS.jsx` | 18 | 1 | 16 | 1 |
@@ -3040,7 +3040,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
-  - `frontend/src/components/navigation/Sidebar.jsx`
+  - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
@@ -3071,7 +3071,7 @@ Code files documented: **466**
 - Referenced by (5)
   - `frontend/src/App.jsx`
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/navigation/Sidebar.jsx`
+  - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/index.tsx`
   - `frontend/tests/appShellUtils.test.ts`
 
@@ -3138,7 +3138,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
-  - `frontend/src/components/navigation/Sidebar.jsx`
+  - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
@@ -4050,16 +4050,17 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.201 `frontend/src/components/navigation/Sidebar.jsx`
+### 3.201 `frontend/src/components/navigation/Sidebar.tsx`
 
 - Declared exports: `function`
-- Imports (7)
-  - `../../AppContext`
+- Imports (8)
+  - `../../AppContext.jsx`
   - `../../app/appShellUtils.ts`
   - `../shared/NotificationCenter`
   - `../shared/QuickPreferenceToggles`
   - `../shared/navigationConfig`
-  - `../users/UserProfileModal`
+  - `../users/UserProfileModal.jsx`
+  - `lucide-react`
   - `react`
 - Internal dependencies (6)
   - `frontend/src/AppContext.jsx`
@@ -5213,7 +5214,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (3)
-  - `frontend/src/components/navigation/Sidebar.jsx`
+  - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/tests/navigationConfig.test.ts`
 
@@ -5229,7 +5230,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
 - Referenced by (2)
   - `frontend/src/App.jsx`
-  - `frontend/src/components/navigation/Sidebar.jsx`
+  - `frontend/src/components/navigation/Sidebar.tsx`
 
 ### 3.272 `frontend/src/components/shared/pageActivity.ts`
 
@@ -5319,7 +5320,7 @@ Code files documented: **466**
 - Referenced by (3)
   - `frontend/src/App.jsx`
   - `frontend/src/components/auth/Login.jsx`
-  - `frontend/src/components/navigation/Sidebar.jsx`
+  - `frontend/src/components/navigation/Sidebar.tsx`
 
 ### 3.277 `frontend/src/components/shared/SectionSwitcher.tsx`
 
@@ -5391,7 +5392,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionHistory.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (2)
-  - `frontend/src/components/navigation/Sidebar.jsx`
+  - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/components/users/Users.jsx`
 
 ### 3.282 `frontend/src/components/users/Users.jsx`

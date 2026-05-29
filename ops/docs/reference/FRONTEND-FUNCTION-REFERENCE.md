@@ -67,7 +67,7 @@ Total files documented: **193**
 | 55 | `frontend/src/components/inventory/movementGroups.ts` | 11 |
 | 56 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
 | 57 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 9 |
-| 58 | `frontend/src/components/navigation/Sidebar.jsx` | 7 |
+| 58 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
 | 59 | `frontend/src/components/pos/CartItem.tsx` | 2 |
 | 60 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
 | 61 | `frontend/src/components/pos/POS.jsx` | 22 |
@@ -1209,17 +1209,19 @@ Total files documented: **193**
 | 8 | `handleSave` | function | 235 |
 | 9 | `handleLookup` | function | 259 |
 
-### 3.58 `frontend/src/components/navigation/Sidebar.jsx`
+### 3.58 `frontend/src/components/navigation/Sidebar.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getFallbackLabel` | function | 50 |
-| 2 | `getNavLabel` | function | 58 |
-| 3 | `isDarkColor` | function | 74 |
-| 4 | `withAlpha` | function | 84 |
-| 5 | `mergeStyles` | function | 90 |
-| 6 | `announcePageIntent` | function | 94 |
-| 7 | `Sidebar` | component/function | 101 |
+| 1 | `getFallbackLabel` | function | 93 |
+| 2 | `getNavLabel` | function | 101 |
+| 3 | `isDarkColor` | function | 117 |
+| 4 | `withAlpha` | function | 127 |
+| 5 | `mergeStyles` | function | 133 |
+| 6 | `announcePageIntent` | function | 137 |
+| 7 | `getIconForItem` | function | 144 |
+| 8 | `isNavigationItemWithIcon` | function | 148 |
+| 9 | `Sidebar` | component/function | 152 |
 
 ### 3.59 `frontend/src/components/pos/CartItem.tsx`
 
