@@ -184,7 +184,7 @@ Code files scanned: **466**
 | 172 | `frontend/src/components/contacts/Contacts.tsx` | 11 |
 | 173 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 174 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
-| 175 | `frontend/src/components/contacts/CustomersTab.jsx` | 12 |
+| 175 | `frontend/src/components/contacts/CustomersTab.tsx` | 18 |
 | 176 | `frontend/src/components/contacts/DeliveryTab.jsx` | 23 |
 | 177 | `frontend/src/components/contacts/shared.tsx` | 6 |
 | 178 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
@@ -3662,22 +3662,28 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `generateCustomerMembershipNumber` | export function | 4 |
 
-### 3.175 `frontend/src/components/contacts/CustomersTab.jsx`
+### 3.175 `frontend/src/components/contacts/CustomersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseContactOptions` | export function | 30 |
-| 2 | `serializeContactOptions` | export function | 34 |
-| 3 | `tr` | function | 38 |
-| 4 | `CustomersTab` | function | 47 |
-| 5 | `toggleSectionCollapsed` | const arrow | 210 |
-| 6 | `isSectionFullySelected` | const arrow | 216 |
-| 7 | `isSectionPartiallySelected` | const arrow | 217 |
-| 8 | `toggleSectionSelection` | const arrow | 218 |
-| 9 | `promise` | const arrow | 245 |
-| 10 | `handleSave` | const arrow | 331 |
-| 11 | `handleDelete` | const arrow | 408 |
-| 12 | `handleBulkDelete` | const arrow | 447 |
+| 1 | `getCustomerApi` | function | 118 |
+| 2 | `isSectionRow` | function | 123 |
+| 3 | `normalizeCustomerRows` | function | 127 |
+| 4 | `getApiListPayload` | function | 134 |
+| 5 | `getErrorMessage` | function | 138 |
+| 6 | `formatPoints` | function | 142 |
+| 7 | `parseContactOptions` | export function | 146 |
+| 8 | `serializeContactOptions` | export function | 150 |
+| 9 | `tr` | function | 154 |
+| 10 | `CustomersTab` | function | 163 |
+| 11 | `toggleSectionCollapsed` | const arrow | 326 |
+| 12 | `isSectionFullySelected` | const arrow | 332 |
+| 13 | `isSectionPartiallySelected` | const arrow | 333 |
+| 14 | `toggleSectionSelection` | const arrow | 334 |
+| 15 | `promise` | const arrow | 368 |
+| 16 | `handleSave` | const arrow | 455 |
+| 17 | `handleDelete` | const arrow | 532 |
+| 18 | `handleBulkDelete` | const arrow | 571 |
 
 ### 3.176 `frontend/src/components/contacts/DeliveryTab.jsx`
 

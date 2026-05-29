@@ -178,7 +178,7 @@
     "frontend/src/components/catalog/CatalogSecondaryTabs.jsx",
     "frontend/src/components/catalog/portalContentI18n.ts",
     "frontend/src/components/catalog/portalLanguagePacks.ts",
-    "frontend/src/components/contacts/CustomersTab.jsx",
+    "frontend/src/components/contacts/CustomersTab.tsx",
     "frontend/src/components/contacts/DeliveryTab.jsx",
     "frontend/src/components/contacts/SuppliersTab.jsx",
     "frontend/src/components/custom-tables/CustomTables.tsx",

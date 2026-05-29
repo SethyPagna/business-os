@@ -41,7 +41,7 @@ Total files documented: **193**
 | 29 | `frontend/src/components/contacts/Contacts.tsx` | 11 |
 | 30 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 31 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 |
-| 32 | `frontend/src/components/contacts/CustomersTab.jsx` | 10 |
+| 32 | `frontend/src/components/contacts/CustomersTab.tsx` | 16 |
 | 33 | `frontend/src/components/contacts/DeliveryTab.jsx` | 21 |
 | 34 | `frontend/src/components/contacts/shared.tsx` | 3 |
 | 35 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
@@ -887,20 +887,26 @@ Total files documented: **193**
 
 - No top-level named function/class symbols detected.
 
-### 3.32 `frontend/src/components/contacts/CustomersTab.jsx`
+### 3.32 `frontend/src/components/contacts/CustomersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `tr` | function | 38 |
-| 2 | `CustomersTab` | function | 47 |
-| 3 | `toggleSectionCollapsed` | const arrow | 210 |
-| 4 | `isSectionFullySelected` | const arrow | 216 |
-| 5 | `isSectionPartiallySelected` | const arrow | 217 |
-| 6 | `toggleSectionSelection` | const arrow | 218 |
-| 7 | `promise` | const arrow | 245 |
-| 8 | `handleSave` | const arrow | 331 |
-| 9 | `handleDelete` | const arrow | 408 |
-| 10 | `handleBulkDelete` | const arrow | 447 |
+| 1 | `getCustomerApi` | function | 118 |
+| 2 | `isSectionRow` | function | 123 |
+| 3 | `normalizeCustomerRows` | function | 127 |
+| 4 | `getApiListPayload` | function | 134 |
+| 5 | `getErrorMessage` | function | 138 |
+| 6 | `formatPoints` | function | 142 |
+| 7 | `tr` | function | 154 |
+| 8 | `CustomersTab` | function | 163 |
+| 9 | `toggleSectionCollapsed` | const arrow | 326 |
+| 10 | `isSectionFullySelected` | const arrow | 332 |
+| 11 | `isSectionPartiallySelected` | const arrow | 333 |
+| 12 | `toggleSectionSelection` | const arrow | 334 |
+| 13 | `promise` | const arrow | 368 |
+| 14 | `handleSave` | const arrow | 455 |
+| 15 | `handleDelete` | const arrow | 532 |
+| 16 | `handleBulkDelete` | const arrow | 571 |
 
 ### 3.33 `frontend/src/components/contacts/DeliveryTab.jsx`
 
