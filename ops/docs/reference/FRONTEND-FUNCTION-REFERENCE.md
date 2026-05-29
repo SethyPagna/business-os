@@ -42,7 +42,7 @@ Total files documented: **193**
 | 30 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 31 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 |
 | 32 | `frontend/src/components/contacts/CustomersTab.tsx` | 16 |
-| 33 | `frontend/src/components/contacts/DeliveryTab.jsx` | 21 |
+| 33 | `frontend/src/components/contacts/DeliveryTab.tsx` | 25 |
 | 34 | `frontend/src/components/contacts/shared.tsx` | 3 |
 | 35 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
 | 36 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
@@ -908,31 +908,35 @@ Total files documented: **193**
 | 15 | `handleDelete` | const arrow | 531 |
 | 16 | `handleBulkDelete` | const arrow | 570 |
 
-### 3.33 `frontend/src/components/contacts/DeliveryTab.jsx`
+### 3.33 `frontend/src/components/contacts/DeliveryTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `BLANK_OPTION` | const arrow | 46 |
-| 2 | `OptionEditor` | function | 49 |
-| 3 | `set` | const arrow | 50 |
-| 4 | `fieldId` | const arrow | 51 |
-| 5 | `DeliveryForm` | function | 89 |
-| 6 | `set` | const arrow | 98 |
-| 7 | `addOption` | const arrow | 99 |
-| 8 | `updateOption` | const arrow | 103 |
-| 9 | `removeOption` | const arrow | 104 |
-| 10 | `handleSave` | const arrow | 105 |
-| 11 | `OptionsDisplay` | function | 175 |
-| 12 | `OptionsBadge` | function | 192 |
-| 13 | `DeliveryTab` | function | 203 |
-| 14 | `toggleSectionCollapsed` | const arrow | 335 |
-| 15 | `isSectionFullySelected` | const arrow | 341 |
-| 16 | `isSectionPartiallySelected` | const arrow | 342 |
-| 17 | `toggleSectionSelection` | const arrow | 343 |
-| 18 | `promise` | const arrow | 368 |
-| 19 | `handleSave` | const arrow | 430 |
-| 20 | `handleDelete` | const arrow | 492 |
-| 21 | `handleBulkDelete` | const arrow | 529 |
+| 1 | `getDeliveryApi` | function | 112 |
+| 2 | `normalizeDeliveryRows` | function | 117 |
+| 3 | `isSectionRow` | function | 125 |
+| 4 | `getErrorMessage` | function | 129 |
+| 5 | `BLANK_OPTION` | const arrow | 146 |
+| 6 | `OptionEditor` | function | 157 |
+| 7 | `set` | const arrow | 158 |
+| 8 | `fieldId` | const arrow | 159 |
+| 9 | `DeliveryForm` | function | 204 |
+| 10 | `set` | const arrow | 213 |
+| 11 | `addOption` | const arrow | 214 |
+| 12 | `updateOption` | const arrow | 218 |
+| 13 | `removeOption` | const arrow | 219 |
+| 14 | `handleSave` | const arrow | 220 |
+| 15 | `OptionsDisplay` | function | 290 |
+| 16 | `OptionsBadge` | function | 307 |
+| 17 | `DeliveryTab` | function | 318 |
+| 18 | `toggleSectionCollapsed` | const arrow | 458 |
+| 19 | `isSectionFullySelected` | const arrow | 464 |
+| 20 | `isSectionPartiallySelected` | const arrow | 465 |
+| 21 | `toggleSectionSelection` | const arrow | 466 |
+| 22 | `promise` | const arrow | 498 |
+| 23 | `handleSave` | const arrow | 560 |
+| 24 | `handleDelete` | const arrow | 622 |
+| 25 | `handleBulkDelete` | const arrow | 659 |
 
 ### 3.34 `frontend/src/components/contacts/shared.tsx`
 

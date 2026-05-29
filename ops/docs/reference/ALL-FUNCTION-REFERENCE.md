@@ -185,7 +185,7 @@ Code files scanned: **466**
 | 173 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 174 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
 | 175 | `frontend/src/components/contacts/CustomersTab.tsx` | 18 |
-| 176 | `frontend/src/components/contacts/DeliveryTab.jsx` | 23 |
+| 176 | `frontend/src/components/contacts/DeliveryTab.tsx` | 27 |
 | 177 | `frontend/src/components/contacts/shared.tsx` | 6 |
 | 178 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 |
 | 179 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
@@ -3685,33 +3685,37 @@ Code files scanned: **466**
 | 17 | `handleDelete` | const arrow | 531 |
 | 18 | `handleBulkDelete` | const arrow | 570 |
 
-### 3.176 `frontend/src/components/contacts/DeliveryTab.jsx`
+### 3.176 `frontend/src/components/contacts/DeliveryTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseDeliveryOptions` | export function | 38 |
-| 2 | `serializeDeliveryOptions` | export function | 42 |
-| 3 | `BLANK_OPTION` | const arrow | 46 |
-| 4 | `OptionEditor` | function | 49 |
-| 5 | `set` | const arrow | 50 |
-| 6 | `fieldId` | const arrow | 51 |
-| 7 | `DeliveryForm` | function | 89 |
-| 8 | `set` | const arrow | 98 |
-| 9 | `addOption` | const arrow | 99 |
-| 10 | `updateOption` | const arrow | 103 |
-| 11 | `removeOption` | const arrow | 104 |
-| 12 | `handleSave` | const arrow | 105 |
-| 13 | `OptionsDisplay` | function | 175 |
-| 14 | `OptionsBadge` | function | 192 |
-| 15 | `DeliveryTab` | function | 203 |
-| 16 | `toggleSectionCollapsed` | const arrow | 335 |
-| 17 | `isSectionFullySelected` | const arrow | 341 |
-| 18 | `isSectionPartiallySelected` | const arrow | 342 |
-| 19 | `toggleSectionSelection` | const arrow | 343 |
-| 20 | `promise` | const arrow | 368 |
-| 21 | `handleSave` | const arrow | 430 |
-| 22 | `handleDelete` | const arrow | 492 |
-| 23 | `handleBulkDelete` | const arrow | 529 |
+| 1 | `getDeliveryApi` | function | 112 |
+| 2 | `normalizeDeliveryRows` | function | 117 |
+| 3 | `isSectionRow` | function | 125 |
+| 4 | `getErrorMessage` | function | 129 |
+| 5 | `parseDeliveryOptions` | export function | 138 |
+| 6 | `serializeDeliveryOptions` | export function | 142 |
+| 7 | `BLANK_OPTION` | const arrow | 146 |
+| 8 | `OptionEditor` | function | 157 |
+| 9 | `set` | const arrow | 158 |
+| 10 | `fieldId` | const arrow | 159 |
+| 11 | `DeliveryForm` | function | 204 |
+| 12 | `set` | const arrow | 213 |
+| 13 | `addOption` | const arrow | 214 |
+| 14 | `updateOption` | const arrow | 218 |
+| 15 | `removeOption` | const arrow | 219 |
+| 16 | `handleSave` | const arrow | 220 |
+| 17 | `OptionsDisplay` | function | 290 |
+| 18 | `OptionsBadge` | function | 307 |
+| 19 | `DeliveryTab` | function | 318 |
+| 20 | `toggleSectionCollapsed` | const arrow | 458 |
+| 21 | `isSectionFullySelected` | const arrow | 464 |
+| 22 | `isSectionPartiallySelected` | const arrow | 465 |
+| 23 | `toggleSectionSelection` | const arrow | 466 |
+| 24 | `promise` | const arrow | 498 |
+| 25 | `handleSave` | const arrow | 560 |
+| 26 | `handleDelete` | const arrow | 622 |
+| 27 | `handleBulkDelete` | const arrow | 659 |
 
 ### 3.177 `frontend/src/components/contacts/shared.tsx`
 

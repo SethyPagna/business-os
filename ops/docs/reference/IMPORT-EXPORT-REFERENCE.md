@@ -180,12 +180,12 @@ Code files documented: **466**
 | 168 | `frontend/src/components/catalog/portalTranslateController.ts` | 0 | 19 | 0 | 0 |
 | 169 | `frontend/src/components/contacts/ContactImportModal.tsx` | 8 | 1 | 7 | 4 |
 | 170 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 | 0 | 1 | 0 |
-| 171 | `frontend/src/components/contacts/contactOptionUtils.ts` | 0 | 9 | 0 | 2 |
+| 171 | `frontend/src/components/contacts/contactOptionUtils.ts` | 0 | 9 | 0 | 3 |
 | 172 | `frontend/src/components/contacts/Contacts.tsx` | 12 | 1 | 10 | 1 |
 | 173 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 4 | 1 | 3 | 1 |
 | 174 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 | 1 | 0 | 2 |
 | 175 | `frontend/src/components/contacts/CustomersTab.tsx` | 18 | 2 | 16 | 2 |
-| 176 | `frontend/src/components/contacts/DeliveryTab.jsx` | 16 | 2 | 14 | 1 |
+| 176 | `frontend/src/components/contacts/DeliveryTab.tsx` | 17 | 2 | 15 | 1 |
 | 177 | `frontend/src/components/contacts/shared.tsx` | 7 | 6 | 5 | 3 |
 | 178 | `frontend/src/components/contacts/SuppliersTab.jsx` | 16 | 0 | 14 | 1 |
 | 179 | `frontend/src/components/custom-tables/CustomTables.tsx` | 6 | 1 | 5 | 0 |
@@ -3127,7 +3127,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
@@ -3451,7 +3451,7 @@ Code files documented: **466**
 - Referenced by (4)
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
 
 ### 3.170 `frontend/src/components/contacts/contactImportWorker.ts`
@@ -3471,9 +3471,10 @@ Code files documented: **466**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (2)
+- Referenced by (3)
   - `frontend/src/components/contacts/CustomerFormModal.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
 
 ### 3.172 `frontend/src/components/contacts/Contacts.tsx`
 
@@ -3487,7 +3488,7 @@ Code files documented: **466**
   - `../shared/pageActivity`
   - `./ContactImportModal`
   - `./CustomersTab`
-  - `./DeliveryTab.jsx`
+  - `./DeliveryTab`
   - `./SuppliersTab.jsx`
   - `lucide-react`
   - `react`
@@ -3495,7 +3496,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
@@ -3574,11 +3575,11 @@ Code files documented: **466**
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.176 `frontend/src/components/contacts/DeliveryTab.jsx`
+### 3.176 `frontend/src/components/contacts/DeliveryTab.tsx`
 
 - Declared exports: `parseDeliveryOptions`, `serializeDeliveryOptions`
-- Imports (16)
-  - `../../AppContext`
+- Imports (17)
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
@@ -3591,12 +3592,14 @@ Code files documented: **466**
   - `../shared/FilterMenu`
   - `../shared/Modal`
   - `./ContactImportModal`
+  - `./contactOptionUtils`
   - `./shared`
   - `lucide-react`
   - `react`
-- Internal dependencies (14)
+- Internal dependencies (15)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
+  - `frontend/src/components/contacts/contactOptionUtils.ts`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
@@ -3631,7 +3634,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (3)
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
 
 ### 3.178 `frontend/src/components/contacts/SuppliersTab.jsx`
@@ -5074,7 +5077,7 @@ Code files documented: **466**
 - Referenced by (17)
   - `frontend/src/components/branches/Branches.jsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
@@ -5139,7 +5142,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (8)
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/Products.jsx`
@@ -5198,7 +5201,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomerFormModal.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
@@ -5708,7 +5711,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
@@ -5748,7 +5751,7 @@ Code files documented: **466**
 - Referenced by (16)
   - `frontend/src/components/branches/Branches.jsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
@@ -5787,7 +5790,7 @@ Code files documented: **466**
 - Referenced by (8)
   - `frontend/src/components/branches/Branches.jsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/Products.jsx`
@@ -5816,7 +5819,7 @@ Code files documented: **466**
   - `frontend/src/api/localDb.ts`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
@@ -5943,7 +5946,7 @@ Code files documented: **466**
   - none
 - Referenced by (17)
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/dashboard/charts/BarChart.tsx`
   - `frontend/src/components/dashboard/charts/DonutChart.tsx`
@@ -5969,7 +5972,7 @@ Code files documented: **466**
   - `frontend/src/utils/initials.ts`
 - Referenced by (10)
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/helpers/productFilterHelpers.ts`
@@ -5989,7 +5992,7 @@ Code files documented: **466**
 - Referenced by (11)
   - `frontend/src/components/branches/Branches.jsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
@@ -6048,7 +6051,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
-  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
