@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import { Download, RotateCcw, Search, Undo2 } from 'lucide-react'
-import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
@@ -24,6 +25,9 @@ const NewReturnModal = lazy(() => import('./NewReturnModal'))
 const NewSupplierReturnModal = lazy(() => import('./NewSupplierReturnModal'))
 const ReturnsListSurface = lazy(() => import('./ReturnsListSurface'))
 
+type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
+type ReturnsListSurfaceProps = ComponentProps<typeof ReturnsListSurface>
+
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 const RETURNS_LOAD_TIMEOUT_MS = 20000
@@ -31,17 +35,132 @@ const RETURNS_DETAIL_TIMEOUT_MS = 10000
 const RETURNS_SNAPSHOT_TIMEOUT_MS = 10000
 const RETURNS_HISTORY_RESTORE_TIMEOUT_MS = 15000
 
-function normalizeScope(value) {
+type ReturnScope = typeof CUSTOMER_SCOPE | typeof SUPPLIER_SCOPE
+type ReturnGroupMode = 'time' | 'time+action'
+type SortDirection = 'asc' | 'desc'
+
+type TranslateFn = (key: string, fallbackEn?: string, fallbackKm?: string) => string
+
+interface ReturnItem {
+  sale_item_id?: number | string | null
+  product_id?: number | string | null
+  product_name?: string | null
+  quantity?: number | string | null
+  applied_price_usd?: number | string | null
+  applied_price_khr?: number | string | null
+  cost_price_usd?: number | string | null
+  cost_price_khr?: number | string | null
+  return_to_stock?: boolean | null
+  branch_id?: number | string | null
+}
+
+interface ReturnRow extends Record<string, unknown> {
+  id: number | string
+  return_number?: string | null
+  return_scope?: string | null
+  supplier_settlement?: string | null
+  return_type?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  receipt_number?: string | null
+  cashier_name?: string | null
+  customer_name?: string | null
+  supplier_name?: string | null
+  reason?: string | null
+  notes?: string | null
+  total_refund_usd?: number | string | null
+  total_refund_khr?: number | string | null
+  supplier_compensation_usd?: number | string | null
+  supplier_loss_usd?: number | string | null
+  status?: string | null
+  branch_id?: number | string | null
+  items?: ReturnItem[] | null
+}
+
+interface ReturnHistoryPayload {
+  reason: string
+  return_type: string
+  notes: string
+  total_refund_usd: number | string
+  total_refund_khr: number | string
+  branch_id: number | string | null
+  updated_at: string | null
+  items: Array<{
+    sale_item_id: number | string | null
+    product_id: number | string | null
+    product_name: string | null
+    quantity: number | string
+    applied_price_usd: number | string
+    applied_price_khr: number | string
+    cost_price_usd: number | string
+    cost_price_khr: number | string
+    return_to_stock: boolean
+    branch_id: number | string | null
+  }>
+}
+
+interface ReturnMutation {
+  kind?: string
+  result?: ReturnRow | null
+  previousSnapshot?: ReturnRow | null
+  snapshot?: ReturnRow | null
+  id?: number | string | null
+}
+
+interface ReturnGroup {
+  id: string
+  label: string
+  ids: number[]
+  items: ReturnRow[]
+}
+
+interface ReturnSection {
+  id: string
+  label: string
+  ids: number[]
+  groups: ReturnGroup[]
+}
+
+interface ReturnApi {
+  getReturns: (params: Record<string, unknown>) => Promise<unknown>
+  getReturn: (id: number | string | null | undefined) => Promise<unknown>
+  updateReturn: (id: number | string, payload: ReturnHistoryPayload) => Promise<unknown>
+}
+
+interface AppContextValue {
+  t: (key: string) => string
+  fmtUSD: (value: number | string | null | undefined) => string
+  fmtKHR: (value: number | string | null | undefined) => string
+  notify: (message: string, type?: string) => void
+}
+
+interface SyncContextValue {
+  syncChannel?: {
+    channel?: string
+    ts?: number | string
+  } | null
+}
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+function getReturnApi(): ReturnApi {
+  if (typeof window === 'undefined' || !window.api) throw new Error('Return API is not available.')
+  return window.api as ReturnApi
+}
+
+function normalizeScope(value: unknown): ReturnScope {
   return value === SUPPLIER_SCOPE ? SUPPLIER_SCOPE : CUSTOMER_SCOPE
 }
 
-function getReturnTypeKey(ret) {
+function getReturnTypeKey(ret?: ReturnRow | null): string {
   const scope = normalizeScope(ret?.return_scope)
   if (scope === SUPPLIER_SCOPE) return String(ret?.supplier_settlement || 'refund').trim().toLowerCase() || 'refund'
   return String(ret?.return_type || 'manual').trim().toLowerCase() || 'manual'
 }
 
-function getReturnTypeLabel(ret, tr) {
+function getReturnTypeLabel(ret: ReturnRow | null | undefined, tr: TranslateFn): string {
   const scope = normalizeScope(ret?.return_scope)
   if (scope === SUPPLIER_SCOPE) {
     return ret?.supplier_settlement || tr('settlement_refund', 'refund')
@@ -49,19 +168,19 @@ function getReturnTypeLabel(ret, tr) {
   return ret?.return_type || tr('manual_return', 'manual')
 }
 
-function normalizeFiniteIdsFrom(items = [], getValue = (value) => value) {
-  return items.reduce((normalized, item) => {
+function normalizeFiniteIdsFrom<T>(items: T[] = [], getValue: (value: T) => unknown = (value: T) => value): number[] {
+  return items.reduce<number[]>((normalized, item) => {
     const id = Number(getValue(item))
     if (Number.isFinite(id)) normalized.push(id)
     return normalized
   }, [])
 }
 
-function normalizeFiniteIds(ids = []) {
+function normalizeFiniteIds(ids: unknown[] = []): number[] {
   return normalizeFiniteIdsFrom(ids)
 }
 
-function countSelectedIds(ids = [], selectedIds = new Set()) {
+function countSelectedIds(ids: number[] = [], selectedIds: Set<number> = new Set()): number {
   let count = 0
   for (const id of ids) {
     if (selectedIds.has(id)) count += 1
@@ -69,7 +188,7 @@ function countSelectedIds(ids = [], selectedIds = new Set()) {
   return count
 }
 
-function countActiveFlags(flags = []) {
+function countActiveFlags(flags: boolean[] = []): number {
   let count = 0
   for (const flag of flags) {
     if (flag) count += 1
@@ -77,7 +196,12 @@ function countActiveFlags(flags = []) {
   return count
 }
 
-function exportReturnRows(rows = [], tr) {
+function toNumericAmount(value: number | string | null | undefined): number {
+  const numericValue = Number(value || 0)
+  return Number.isFinite(numericValue) ? numericValue : 0
+}
+
+function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record<string, unknown>> {
   return rows.map((ret) => ({
     Return_Number: ret.return_number || '',
     Scope: normalizeScope(ret.return_scope),
@@ -95,7 +219,7 @@ function exportReturnRows(rows = [], tr) {
   }))
 }
 
-function getInitialReturnPageSize() {
+function getInitialReturnPageSize(): number {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 50
   return window.matchMedia('(min-width: 1024px)').matches ? 32 : 50
 }
@@ -103,44 +227,44 @@ function getInitialReturnPageSize() {
 export default function Returns() {
   const { t, fmtUSD, fmtKHR, notify } = useApp()
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
+  const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string): string => {
     const candidate = fallbackKm || fallbackEn
     return isBrokenLocalizedString(String(candidate || '')) ? fallbackEn : candidate
   }, [])
-  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback<TranslateFn>((key, fallbackEn = key, fallbackKm = fallbackEn) => {
     const value = t(key)
     if (value && value !== key) return value
     return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, isKhmer, t])
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('returns')
-  const [scope, setScope] = useState(CUSTOMER_SCOPE)
-  const [rows, setRows] = useState([])
+  const [scope, setScope] = useState<ReturnScope>(CUSTOMER_SCOPE)
+  const [rows, setRows] = useState<ReturnRow[]>([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [selectedIds, setSelectedIds] = useState(() => new Set())
-  const [detailRet, setDetailRet] = useState(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const [detailRet, setDetailRet] = useState<ReturnRow | null>(null)
   const [showCustomerForm, setShowCustomerForm] = useState(false)
   const [showSupplierForm, setShowSupplierForm] = useState(false)
-  const [editRet, setEditRet] = useState(null)
+  const [editRet, setEditRet] = useState<ReturnRow | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(null)
-  const [returnGroupMode, setReturnGroupMode] = useState('time')
-  const [returnSortDirection, setReturnSortDirection] = useState('desc')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [returnGroupMode, setReturnGroupMode] = useState<ReturnGroupMode>('time')
+  const [returnSortDirection, setReturnSortDirection] = useState<SortDirection>('desc')
   const [returnPage, setReturnPage] = useState(1)
   const [returnPageSize, setReturnPageSize] = useState(() => getInitialReturnPageSize())
-  const [collapsedReturnSections, setCollapsedReturnSections] = useState(() => new Set())
+  const [collapsedReturnSections, setCollapsedReturnSections] = useState<Set<string>>(() => new Set())
   const [isReturnsFilterMenuOpen, setIsReturnsFilterMenuOpen] = useState(false)
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
   const historyRestoreInFlightRef = useRef(false)
-  const loadPromiseRef = useRef(null)
-  const loadWatchdogRef = useRef(null)
-  const selectAllRef = useRef(null)
+  const loadPromiseRef = useRef<Promise<void> | null>(null)
+  const loadWatchdogRef = useRef<number | null>(null)
+  const selectAllRef = useRef<HTMLInputElement | null>(null)
   const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns' })
   const deferredSearch = useDeferredValue(search)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
@@ -163,14 +287,21 @@ export default function Returns() {
     }
   }, [monthFilter, yearFilter])
 
-  const loadReturns = useCallback(async (silent = false) => {
+  const clearLoadWatchdog = useCallback(() => {
+    if (loadWatchdogRef.current != null) {
+      clearLoadWatchdog()
+      loadWatchdogRef.current = null
+    }
+  }, [])
+
+  const loadReturns = useCallback(async (silent = false): Promise<void> => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(returnsRequestRef)
     const promise = (async () => {
       if (!silent) {
         setLoading(true)
         setLoadError(null)
-        window.clearTimeout(loadWatchdogRef.current)
+        clearLoadWatchdog()
         if (!loadedOnceRef.current) {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
@@ -186,21 +317,22 @@ export default function Returns() {
           ...(typeFilter !== 'all' ? { type: typeFilter } : {}),
           ...returnsDateRange,
         }
-        const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns', RETURNS_LOAD_TIMEOUT_MS)
+        const result = await withLoaderTimeout(() => getReturnApi().getReturns(params), 'Returns', RETURNS_LOAD_TIMEOUT_MS)
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
-        setRows(Array.isArray(result) ? result : [])
+        setRows(Array.isArray(result) ? result as ReturnRow[] : [])
         loadedOnceRef.current = true
         setLoadError(null)
-      } catch (error) {
+      } catch (error: unknown) {
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
-        console.error('[Returns] load failed:', error?.message)
+        const errorMessage = error instanceof Error ? error.message : ''
+        console.error('[Returns] load failed:', errorMessage || error)
         if (!silent && !loadedOnceRef.current) {
-          setLoadError(error?.message || tr('returns_load_failed', 'Failed to load returns', 'មិនអាចផ្ទុកការបង្វិលត្រឡប់បានទេ'))
+          setLoadError(errorMessage || tr('returns_load_failed', 'Failed to load returns', 'មិនអាចផ្ទុកការបង្វិលត្រឡប់បានទេ'))
         } else if (!silent) {
           setLoadError(tr('returns_refresh_failed', 'Returns could not refresh right now. Showing the latest loaded data.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពការបង្វិលត្រឡប់បានទេ។ កំពុងបង្ហាញទិន្នន័យចុងក្រោយដែលបានផ្ទុក។'))
         }
       } finally {
-        window.clearTimeout(loadWatchdogRef.current)
+        clearLoadWatchdog()
         if (isTrackedRequestCurrent(returnsRequestRef, requestId) && !silent) {
           setLoading(false)
         }
@@ -211,7 +343,7 @@ export default function Returns() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [debouncedSearch, returnsDateRange, scope, tr, typeFilter])
+  }, [clearLoadWatchdog, debouncedSearch, returnsDateRange, scope, tr, typeFilter])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -222,7 +354,7 @@ export default function Returns() {
 
   useEffect(() => {
     if (!isActive) {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(returnsRequestRef)
       loadPromiseRef.current = null
       setLoading(false)
@@ -230,11 +362,11 @@ export default function Returns() {
     }
     loadReturns(loadedOnceRef.current)
     return () => {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(returnsRequestRef)
       loadPromiseRef.current = null
     }
-  }, [isActive, loadReturns])
+  }, [clearLoadWatchdog, isActive, loadReturns])
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
@@ -243,7 +375,7 @@ export default function Returns() {
     }
   }, [isActive, loadReturns, syncChannel?.channel, syncChannel?.ts])
 
-  const handleOpenEdit = async (ret) => {
+  const handleOpenEdit = async (ret: ReturnRow): Promise<void> => {
     const requestId = beginTrackedRequest(editRequestRef)
     const retScope = normalizeScope(ret?.return_scope)
     if (retScope !== CUSTOMER_SCOPE) {
@@ -253,19 +385,19 @@ export default function Returns() {
     setDetailRet(null)
     try {
       const fresh = await withLoaderTimeout(
-        () => window.api.getReturn(ret.id),
+        () => getReturnApi().getReturn(ret.id),
         'Return details',
         RETURNS_DETAIL_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(editRequestRef, requestId)) return
-      setEditRet(fresh || ret)
+      setEditRet((fresh || ret) as ReturnRow)
     } catch {
       if (!isTrackedRequestCurrent(editRequestRef, requestId)) return
       setEditRet(ret)
     }
   }
 
-  const buildReturnHistoryPayload = useCallback((snapshot) => {
+  const buildReturnHistoryPayload = useCallback((snapshot: ReturnRow): ReturnHistoryPayload => {
     if (!snapshot?.id) throw new Error('Return snapshot is missing an id')
     return {
       reason: snapshot.reason || '',
@@ -290,27 +422,27 @@ export default function Returns() {
     }
   }, [])
 
-  const fetchReturnSnapshot = useCallback(async (returnId, fallback = null) => {
+  const fetchReturnSnapshot = useCallback(async (returnId: number | string | null | undefined, fallback: ReturnRow | null = null): Promise<ReturnRow | null> => {
     const numericId = Number(returnId || 0)
-    if (!numericId) return cloneHistorySnapshot(fallback || null)
+    if (!numericId) return cloneHistorySnapshot(fallback || null) as ReturnRow | null
     try {
       const latest = await withLoaderTimeout(
-        () => window.api.getReturn(numericId),
+        () => getReturnApi().getReturn(numericId),
         'Return snapshot',
         RETURNS_SNAPSHOT_TIMEOUT_MS,
       )
-      return cloneHistorySnapshot(latest || fallback || null)
+      return cloneHistorySnapshot((latest as ReturnRow | null) || fallback || null) as ReturnRow | null
     } catch {
-      return cloneHistorySnapshot(fallback || null)
+      return cloneHistorySnapshot(fallback || null) as ReturnRow | null
     }
   }, [])
 
-  const restoreReturnSnapshot = useCallback(async (snapshot, historyReason) => {
+  const restoreReturnSnapshot = useCallback(async (snapshot: ReturnRow, historyReason?: string): Promise<void> => {
     if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
     if (!beginSingleAction(historyRestoreInFlightRef)) return
     try {
       await withLoaderTimeout(
-        () => window.api.updateReturn(snapshot.id, {
+        () => getReturnApi().updateReturn(snapshot.id as number | string, {
           ...buildReturnHistoryPayload(snapshot),
           notes: historyReason || snapshot.notes || '',
         }),
@@ -323,10 +455,10 @@ export default function Returns() {
     }
   }, [buildReturnHistoryPayload, loadReturns])
 
-  const handleReturnMutationSuccess = useCallback(async (mutation) => {
+  const handleReturnMutationSuccess = useCallback(async (mutation: ReturnMutation): Promise<void> => {
     const kind = String(mutation?.kind || '')
     const result = mutation?.result || null
-    const previousSnapshot = cloneHistorySnapshot(mutation?.previousSnapshot || null)
+    const previousSnapshot = cloneHistorySnapshot(mutation?.previousSnapshot || null) as ReturnRow | null
     const createdId = Number(result?.id || mutation?.id || 0)
     const effectiveId = createdId || Number(previousSnapshot?.id || 0)
     const latestSnapshot = effectiveId
@@ -367,7 +499,7 @@ export default function Returns() {
   )
 
   const typeOptions = useMemo(() => {
-    const options = new Map()
+    const options = new Map<string, string>()
     rows.forEach((ret) => {
       const key = getReturnTypeKey(ret)
       if (!key) return
@@ -396,7 +528,7 @@ export default function Returns() {
     return searchTerms.every((term) => hay.includes(term))
   }), [rows, searchTerms, typeFilter])
 
-  const allReturnSections = useMemo(() => buildTimeActionSections(filtered, {
+  const allReturnSections = useMemo<ReturnSection[]>(() => buildTimeActionSections(filtered, {
     getDate: (ret) => ret?.created_at,
     getItemId: (ret) => Number(ret?.id),
     getActionKey: (ret) => getReturnTypeKey(ret),
@@ -422,7 +554,7 @@ export default function Returns() {
     [allVisibleReturns, returnPage, returnPageSize],
   )
 
-  const returnSections = useMemo(() => buildTimeActionSections(pagedReturns, {
+  const returnSections = useMemo<ReturnSection[]>(() => buildTimeActionSections(pagedReturns, {
     getDate: (ret) => ret?.created_at,
     getItemId: (ret) => Number(ret?.id),
     getActionKey: (ret) => getReturnTypeKey(ret),
@@ -448,7 +580,7 @@ export default function Returns() {
     const validIds = new Set(visibleIds)
     setSelectedIds((current) => {
       let changed = false
-      const next = new Set()
+      const next = new Set<number>()
       current.forEach((id) => {
         if (validIds.has(id)) {
           next.add(id)
@@ -478,13 +610,13 @@ export default function Returns() {
     selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
   }, [selectedIds.size, visibleIds.length])
 
-  const toggleSelected = useCallback((returnId) => {
+  const toggleSelected = useCallback((returnId: ReturnRow['id']) => {
     const numericId = Number(returnId)
     if (!Number.isFinite(numericId)) return
     setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
   }, [])
 
-  const toggleSelectAll = useCallback((checked) => {
+  const toggleSelectAll = useCallback((checked: boolean) => {
     if (!checked) {
       setSelectedIds(new Set())
       return
@@ -492,12 +624,12 @@ export default function Returns() {
     setSelectedIds(new Set(visibleIds))
   }, [visibleIds])
 
-  const toggleSelectionScope = useCallback((ids, checked) => {
+  const toggleSelectionScope = useCallback((ids: unknown[], checked: boolean) => {
     const normalized = normalizeFiniteIds(ids)
     setSelectedIds((current) => toggleIdSet(current, normalized, checked))
   }, [])
 
-  const toggleReturnSection = useCallback((sectionId) => {
+  const toggleReturnSection = useCallback((sectionId: string) => {
     setCollapsedReturnSections((current) => {
       const next = new Set(current)
       if (next.has(sectionId)) next.delete(sectionId)
@@ -507,7 +639,7 @@ export default function Returns() {
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => {
+    (ids: number[] = []) => {
       const normalized = normalizeFiniteIds(ids)
       return normalized.length > 0 && countSelectedIds(normalized, selectedIds) === normalized.length
     },
@@ -515,7 +647,7 @@ export default function Returns() {
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => {
+    (ids: number[] = []) => {
       const normalized = normalizeFiniteIds(ids)
       const selectedCount = countSelectedIds(normalized, selectedIds)
       return selectedCount > 0 && selectedCount < normalized.length
@@ -524,7 +656,21 @@ export default function Returns() {
   )
 
   const returnScopeSummary = useMemo(() => {
-    const summary = {
+    const summary: {
+      customerRows: ReturnRow[]
+      supplierRows: ReturnRow[]
+      customerStats: {
+        refundedUsd: number
+        restockCount: number
+        writeoffCount: number
+        refundOnlyCount: number
+      }
+      supplierStats: {
+        count: number
+        compensationUsd: number
+        lossUsd: number
+      }
+    } = {
       customerRows: [],
       supplierRows: [],
       customerStats: {
@@ -543,12 +689,12 @@ export default function Returns() {
       if (normalizeScope(ret.return_scope) === SUPPLIER_SCOPE) {
         summary.supplierRows.push(ret)
         summary.supplierStats.count += 1
-        summary.supplierStats.compensationUsd += ret.supplier_compensation_usd || 0
-        summary.supplierStats.lossUsd += ret.supplier_loss_usd || 0
+        summary.supplierStats.compensationUsd += toNumericAmount(ret.supplier_compensation_usd)
+        summary.supplierStats.lossUsd += toNumericAmount(ret.supplier_loss_usd)
         continue
       }
       summary.customerRows.push(ret)
-      summary.customerStats.refundedUsd += ret.total_refund_usd || 0
+      summary.customerStats.refundedUsd += toNumericAmount(ret.total_refund_usd)
       if (ret.return_type === 'restock') summary.customerStats.restockCount += 1
       else if (ret.return_type === 'writeoff') summary.customerStats.writeoffCount += 1
       else if (ret.return_type === 'refund') summary.customerStats.refundOnlyCount += 1
@@ -558,7 +704,7 @@ export default function Returns() {
 
   const { customerRows, supplierRows, customerStats, supplierStats } = returnScopeSummary
 
-  const exportVisible = useCallback((rowsToExport = visibleReturns, prefix = 'returns-visible') => {
+  const exportVisible = useCallback((rowsToExport: ReturnRow[] = visibleReturns, prefix = 'returns-visible') => {
     downloadCSV(`${prefix}-${new Date().toISOString().slice(0, 10)}.csv`, exportReturnRows(rowsToExport, tr))
   }, [tr, visibleReturns])
 
@@ -660,7 +806,7 @@ export default function Returns() {
   )
   const showReturnActionGroups = returnGroupMode === 'time+action'
 
-  const renderAmount = (ret) => {
+  const renderAmount = (ret: ReturnRow): ReactNode => {
     const retScope = normalizeScope(ret.return_scope)
     if (retScope === SUPPLIER_SCOPE) {
       return (
@@ -721,7 +867,7 @@ export default function Returns() {
       ) : null}
 
       <div className="mb-3 overflow-x-auto pb-1">
-        <ActionHistoryBar history={actionHistory} className="min-w-max" t={t} />
+        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} className="min-w-max" t={t} />
       </div>
 
       {scope === CUSTOMER_SCOPE ? (
@@ -808,18 +954,18 @@ export default function Returns() {
         <ReturnsListSurface
           collapsedReturnSections={collapsedReturnSections}
           CUSTOMER_SCOPE={CUSTOMER_SCOPE}
-          filtered={filtered}
+          filtered={filtered as ReturnsListSurfaceProps['filtered']}
           fmtTime={fmtTime}
           isSelectionScopeFullySelected={isSelectionScopeFullySelected}
           isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
           loading={loading}
           normalizeScope={normalizeScope}
-          renderAmount={renderAmount}
-          returnSections={returnSections}
+          renderAmount={renderAmount as ReturnsListSurfaceProps['renderAmount']}
+          returnSections={returnSections as ReturnsListSurfaceProps['returnSections']}
           scope={scope}
-          selectAllRef={selectAllRef}
+          selectAllRef={selectAllRef as ReturnsListSurfaceProps['selectAllRef']}
           selectedIds={selectedIds}
-          setDetailRet={setDetailRet}
+          setDetailRet={(ret) => setDetailRet(ret as ReturnRow)}
           showReturnActionGroups={showReturnActionGroups}
           SUPPLIER_SCOPE={SUPPLIER_SCOPE}
           t={t}
@@ -837,7 +983,7 @@ export default function Returns() {
           <ReturnDetailModal
             ret={detailRet}
             onClose={() => setDetailRet(null)}
-            onEdit={normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : null}
+            onEdit={normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
           />
@@ -851,7 +997,7 @@ export default function Returns() {
             onClose={() => setEditRet(null)}
             onSuccess={(result) => handleReturnMutationSuccess({
               kind: 'edit',
-              result,
+              result: result as ReturnRow,
               previousSnapshot: editRet,
             })}
             fmtUSD={fmtUSD}
@@ -864,7 +1010,7 @@ export default function Returns() {
         <Suspense fallback={null}>
           <NewReturnModal
             onClose={() => setShowCustomerForm(false)}
-            onSuccess={(result) => handleReturnMutationSuccess({ kind: 'create', result })}
+            onSuccess={(result) => handleReturnMutationSuccess({ kind: 'create', result: result as ReturnRow })}
             fmtUSD={fmtUSD}
             notify={notify}
           />
@@ -875,7 +1021,7 @@ export default function Returns() {
         <Suspense fallback={null}>
           <NewSupplierReturnModal
             onClose={() => setShowSupplierForm(false)}
-            onSuccess={(result) => handleReturnMutationSuccess({ kind: 'supplier-create', result })}
+            onSuccess={(result) => handleReturnMutationSuccess({ kind: 'supplier-create', result: result as ReturnRow })}
             notify={notify}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}

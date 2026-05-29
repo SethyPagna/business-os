@@ -95,7 +95,7 @@ Priority surfaces:
 - `Settings.jsx`
 - `Backup.jsx`
 - `FilesPage.jsx`
-- `Returns.jsx`
+- `Returns.tsx`
 
 Preferred tactics:
 

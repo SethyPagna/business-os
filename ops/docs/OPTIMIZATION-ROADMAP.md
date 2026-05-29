@@ -3569,7 +3569,7 @@ Move 323 status:
 
 Move 324 status:
 - Move 324 reuses Returns selection helpers and makes return stats single-pass:
-  `frontend/src/components/returns/Returns.jsx` now builds one memoized visible
+  `frontend/src/components/returns/Returns.tsx` now builds one memoized visible
   return ID list for selection cleanup/select-all, normalizes grouped selection
   IDs through `normalizeFiniteIds()`, counts partial selection state through
   `countSelectedIds()`, counts active filters through `countActiveFlags()`, and
@@ -5746,3 +5746,14 @@ Move 529 status:
   app lazy import, queue retry/discard same-tick guards, timeout-bounded
   pending queue/config/debug/test calls, sync-center copy, offline-security
   guard coverage, and pending offline-work diagnostics behavior unchanged.
+
+Move 530 status:
+- Move 530 converts the returns page shell to
+  `frontend/src/components/returns/Returns.tsx`. The typed boundary now covers
+  return rows, line-item snapshots, history restore payloads, mutation result
+  payloads, app/sync context access, the local return API gateway, selection
+  ids, grouped return sections, filter/group/sort state, watchdog timers, and
+  export/stat calculations. The move keeps return list/detail/snapshot/restore
+  timeouts, same-tick history restore guards, customer/supplier summary math,
+  grouped selection helpers, the Returns list-surface lazy import, and layout
+  guard behavior unchanged.

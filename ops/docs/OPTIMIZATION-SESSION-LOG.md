@@ -59,7 +59,7 @@ This is a concise running log of what actually happened in recent sessions.
     regressed once it was validated live
 
 - Returns cached display-field reuse
-  - area: `frontend/src/components/returns/Returns.jsx`
+  - area: `frontend/src/components/returns/Returns.tsx`
   - result: rejected
   - note: precomputing row display fields did not survive warm reruns and made
     Returns slower
@@ -563,3 +563,33 @@ Use this shape for future entries:
 - follow-up insight: sync-server connection and queue diagnostics now have a
   typed UI boundary, which reduces risk before larger App/AppContext conversion
   slices touch the same websocket and offline-write pathways.
+
+- change: converted the returns page shell to TSX with typed return rows,
+  return line-item snapshots, history restore payloads, mutation result
+  payloads, app/sync context access, local return API gateway calls, selection
+  ids, grouped return sections, filter/group/sort state, watchdog timers, and
+  export/stat calculations
+- affected files:
+  `frontend/src/components/returns/Returns.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/returnsLayout.test.ts`
+- route or API target: Returns page, return list/detail/snapshot/restore
+  reads/writes, customer/supplier summary stats, grouped selection, export
+  menu, history undo/redo restore
+- keeper or rollback: keeper if action stability, performance loading UX,
+  returns layout, typecheck, JSX, frontend/backend utility, build, Phase 29
+  audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 530 returns layout, action stability,
+  performance loading UX, UI verifier, typecheck, JSX, frontend/backend
+  utility, build, Phase 29, organization, schema, and reference checks
+- warm whole-app result: passed in Move 530 Phase 8.4 live UI suite with 72
+  checked UI signals, zero relevant console messages, and no framework overlay;
+  public Cloudflare remained skipped for the known tunnel failure
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed 219,973
+  bytes from one old Phase 8.4 runtime report, kept latest local backups and
+  latest R2 backup metadata, pruned no Docker containers/cache bytes, and the
+  post-prune Phase 29 repeat audit passed
+- follow-up insight: the Returns route shell now has a typed local API and
+  snapshot-history boundary, reducing risk before converting the larger
+  Dashboard, Inventory, and App/AppContext route shells.

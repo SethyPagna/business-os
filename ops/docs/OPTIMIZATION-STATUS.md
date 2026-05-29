@@ -44,6 +44,9 @@ Recent route-level win:
 - Sync Server page is now `frontend/src/components/server/ServerPage.tsx` with
   typed diagnostics tabs, pending sync queue state, call logs, system debug
   payloads, security config, connection tests, and queue action guards.
+- Returns page is now `frontend/src/components/returns/Returns.tsx` with typed
+  return rows, snapshot/history restore payloads, grouped selection, local
+  return API gateway calls, filter/group/sort state, and watchdog timers.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary

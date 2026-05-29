@@ -27,7 +27,7 @@ const posFilterPanel = fs.readFileSync(new URL('../src/components/pos/FilterPane
 const sales = fs.readFileSync(new URL('../src/components/sales/Sales.jsx', import.meta.url), 'utf8')
 const salesExportModal = fs.readFileSync(new URL('../src/components/sales/ExportModal.tsx', import.meta.url), 'utf8')
 const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
-const returns = fs.readFileSync(new URL('../src/components/returns/Returns.jsx', import.meta.url), 'utf8')
+const returns = fs.readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
 const newReturnModal = fs.readFileSync(new URL('../src/components/returns/NewReturnModal.tsx', import.meta.url), 'utf8')
 const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
 const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.tsx', import.meta.url), 'utf8')
@@ -920,27 +920,27 @@ assert.match(
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\(\) => window\.api\.getReturns\(params\), 'Returns', RETURNS_LOAD_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => getReturnApi\(\)\.getReturns\(params\), 'Returns', RETURNS_LOAD_TIMEOUT_MS\)/,
   'returns list should timeout slow return reads with the explicit constant',
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getReturn\(ret\.id\),\s*'Return details',\s*RETURNS_DETAIL_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.getReturn\(ret\.id\),\s*'Return details',\s*RETURNS_DETAIL_TIMEOUT_MS,\s*\)/,
   'return details should timeout slow detail reads',
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getReturn\(numericId\),\s*'Return snapshot',\s*RETURNS_SNAPSHOT_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.getReturn\(numericId\),\s*'Return snapshot',\s*RETURNS_SNAPSHOT_TIMEOUT_MS,\s*\)/,
   'return snapshot should timeout slow history snapshot reads',
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.updateReturn\(snapshot\.id, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.updateReturn\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/,
   'return history undo/redo restore should timeout slow return writes',
 )
 assert.match(
   returns,
-  /function normalizeFiniteIdsFrom\(items = \[\], getValue = \(value\) => value\)/,
+  /function normalizeFiniteIdsFrom<T>\(items: T\[] = \[\], getValue: \(value: T\) => unknown = \(value: T\) => value\): number\[]/,
   'returns selection should share a finite-id normalization helper',
 )
 assert.match(
@@ -955,7 +955,7 @@ assert.match(
 )
 assert.match(
   returns,
-  /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]*for \(const ret of filtered\)[\s\S]*summary\.supplierStats\.lossUsd \+= ret\.supplier_loss_usd \|\| 0[\s\S]*summary\.customerStats\.refundedUsd \+= ret\.total_refund_usd \|\| 0/,
+  /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]*for \(const ret of filtered\)[\s\S]*summary\.supplierStats\.lossUsd \+= toNumericAmount\(ret\.supplier_loss_usd\)[\s\S]*summary\.customerStats\.refundedUsd \+= toNumericAmount\(ret\.total_refund_usd\)/,
   'returns stats should split customer/supplier rows and totals in one pass',
 )
 assert.match(

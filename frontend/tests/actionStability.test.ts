@@ -118,7 +118,7 @@ await runTest('backup export and restore keep local busy state plus backend job 
 })
 
 await runTest('return create, edit, and supplier flows keep synchronous submit guards', () => {
-  const returns = readFrontend('src/components/returns/Returns.jsx')
+  const returns = readFrontend('src/components/returns/Returns.tsx')
   const newReturn = readFrontend('src/components/returns/NewReturnModal.tsx')
   const editReturn = readFrontend('src/components/returns/EditReturnModal.tsx')
   const supplierReturn = readFrontend('src/components/returns/NewSupplierReturnModal.tsx')
@@ -147,7 +147,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(returns, /const RETURNS_HISTORY_RESTORE_TIMEOUT_MS = 15000/)
   assert.match(returns, /const historyRestoreInFlightRef = useRef\(false\)/)
   assert.match(returns, /if \(!beginSingleAction\(historyRestoreInFlightRef\)\) return/)
-  assert.match(returns, /withLoaderTimeout\(\s*\(\) => window\.api\.updateReturn\(snapshot\.id, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/)
+  assert.match(returns, /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.updateReturn\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/)
   assert.match(returns, /finally \{[\s\S]*finishSingleAction\(historyRestoreInFlightRef\)/)
 
   assert.match(methods, /export async function createReturn\(d\) \{[\s\S]*ensureClientRequestId\(\{ \.\.\.getDeviceInfo\(\), \.\.\.d \}, 'return'\)/)

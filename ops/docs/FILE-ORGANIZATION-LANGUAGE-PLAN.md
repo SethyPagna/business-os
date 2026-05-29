@@ -589,7 +589,7 @@ Decision rule:
     zero relevant console messages. Report:
     `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-05-18T13-29-11-716Z/report.json`.
 52. Harden Returns history restore writes. Done:
-    `frontend/src/components/returns/Returns.jsx` now wraps action-history
+    `frontend/src/components/returns/Returns.tsx` now wraps action-history
     undo/redo return restore `updateReturn(...)` calls in a 15s timeout contract
     and a same-tick restore guard. This prevents rapid repeated undo/redo clicks
     from stacking return rewrites that can affect sales, inventory, stock
@@ -4157,6 +4157,17 @@ Decision rule:
     timeout-bounded queue/config/debug/test calls, sync-center copy,
     offline-security guard coverage, and pending offline-work diagnostics
     intact while moving exact source-path guards to TSX.
+530. Convert the returns page shell to TSX. Done:
+    `frontend/src/components/returns/Returns.tsx` now types return rows,
+    return line-item snapshots, history restore payloads, mutation result
+    payloads, app/sync context access, local return API gateway calls,
+    selection ids, grouped return sections, filter/group/sort state, loading
+    watchdog timers, and export/stat calculations. The conversion keeps the
+    extensionless app lazy import, return list/detail/snapshot/restore timeout
+    contracts, same-tick history restore guard, customer/supplier stat
+    single-pass summary, grouped selection helpers, layout guard, and action
+    stability source checks intact while moving exact source-path guards to
+    TSX.
 
 ## Safety Gates
 

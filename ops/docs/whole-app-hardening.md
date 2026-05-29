@@ -726,7 +726,7 @@ Last updated: 2026-05-18
     `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`.
     Returns action-history undo/redo restore writes now have explicit timeout
     contracts and a same-tick guard in
-    `frontend/src/components/returns/Returns.jsx`.
+    `frontend/src/components/returns/Returns.tsx`.
     Destructive business-data reset and factory-reset actions now have explicit
     timeout contracts and same-tick guards in
     `frontend/src/components/utils-settings/ResetData.jsx`.
