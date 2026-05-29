@@ -270,7 +270,7 @@ Code files scanned: **466**
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
 | 259 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
 | 260 | `frontend/src/components/sales/StatusBadge.tsx` | 3 |
-| 261 | `frontend/src/components/server/ServerPage.jsx` | 16 |
+| 261 | `frontend/src/components/server/ServerPage.tsx` | 20 |
 | 262 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
 | 263 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 21 |
 | 264 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
@@ -4740,26 +4740,30 @@ Code files scanned: **466**
 | 2 | `getStatusLabel` | export function | 28 |
 | 3 | `StatusBadge` | export default function | 50 |
 
-### 3.261 `frontend/src/components/server/ServerPage.jsx`
+### 3.261 `frontend/src/components/server/ServerPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `useLocalCopy` | function | 29 |
-| 2 | `isAutoDetected` | function | 40 |
-| 3 | `StatusRow` | function | 47 |
-| 4 | `InfoTab` | function | 59 |
-| 5 | `fmt` | const arrow | 124 |
-| 6 | `DiagnosticsPanel` | function | 210 |
-| 7 | `onErr` | const arrow | 250 |
-| 8 | `onQueueChanged` | const arrow | 254 |
-| 9 | `handleRetryQueue` | function | 300 |
-| 10 | `handleDiscardQueue` | function | 317 |
-| 11 | `ServerPage` | export default function | 508 |
-| 12 | `check` | const arrow | 535 |
-| 13 | `loadSecurityConfig` | const arrow | 561 |
-| 14 | `handleTest` | function | 577 |
-| 15 | `handleSave` | function | 606 |
-| 16 | `handleDisconnect` | function | 613 |
+| 1 | `getServerApi` | function | 131 |
+| 2 | `getErrorMessage` | function | 135 |
+| 3 | `normalizePendingSyncState` | function | 139 |
+| 4 | `normalizeSystemDebugLog` | function | 150 |
+| 5 | `normalizeSystemConfig` | function | 159 |
+| 6 | `useLocalCopy` | function | 163 |
+| 7 | `isAutoDetected` | function | 174 |
+| 8 | `StatusRow` | function | 181 |
+| 9 | `InfoTab` | function | 193 |
+| 10 | `DiagnosticsPanel` | function | 346 |
+| 11 | `onErr` | const arrow | 386 |
+| 12 | `onQueueChanged` | const arrow | 391 |
+| 13 | `handleRetryQueue` | function | 438 |
+| 14 | `handleDiscardQueue` | function | 455 |
+| 15 | `ServerPage` | export default function | 646 |
+| 16 | `check` | const arrow | 673 |
+| 17 | `loadSecurityConfig` | const arrow | 701 |
+| 18 | `handleTest` | function | 719 |
+| 19 | `handleSave` | function | 748 |
+| 20 | `handleDisconnect` | function | 755 |
 
 ### 3.262 `frontend/src/components/shared/ActionHistoryBar.tsx`
 

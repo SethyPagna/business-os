@@ -193,7 +193,7 @@
     "frontend/src/components/products/lookups/ManageBrandsModal.tsx",
     "frontend/src/components/returns/Returns.jsx",
     "frontend/src/components/sales/Sales.jsx",
-    "frontend/src/components/server/ServerPage.jsx",
+    "frontend/src/components/server/ServerPage.tsx",
     "frontend/src/components/users/UserProfileModal.jsx",
     "frontend/src/components/users/Users.jsx",
     "frontend/src/components/utils-settings/AuditLog.jsx",

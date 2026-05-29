@@ -1146,7 +1146,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `ServerPage.jsx` | UI component/page |
+| 1 | `ServerPage.tsx` | UI component/page |
 
 
 ### 3.54 Folder: `frontend/src/components/shared`

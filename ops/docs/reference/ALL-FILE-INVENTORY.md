@@ -294,7 +294,7 @@ Total files documented: **529**
 | 282 | `frontend/src/components/sales/salesImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 283 | `frontend/src/components/sales/SalesListSurface.tsx` | frontend-ui | 383 | 20.8 | UI component/page |
 | 284 | `frontend/src/components/sales/StatusBadge.tsx` | frontend-ui | 58 | 2.1 | UI component/page |
-| 285 | `frontend/src/components/server/ServerPage.jsx` | frontend-ui | 781 | 38.6 | UI component/page |
+| 285 | `frontend/src/components/server/ServerPage.tsx` | frontend-ui | 923 | 42.9 | UI component/page |
 | 286 | `frontend/src/components/shared/ActionHistoryBar.tsx` | frontend-ui | 195 | 9.2 | UI component/page |
 | 287 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | frontend-ui | 652 | 27.6 | UI component/page |
 | 288 | `frontend/src/components/shared/ExportMenu.tsx` | frontend-ui | 47 | 1.7 | UI component/page |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.1 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.2 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |
