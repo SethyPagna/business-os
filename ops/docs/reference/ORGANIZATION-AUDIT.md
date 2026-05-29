@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-29T16:32:22.346Z
+Generated: 2026-05-29T16:46:56.080Z
 
 ## Summary
 
@@ -16,9 +16,9 @@ Generated: 2026-05-29T16:32:22.346Z
 | --- | --- |
 | .ts | 266 |
 | .js | 84 |
-| .tsx | 66 |
+| .tsx | 67 |
 | .md | 44 |
-| .jsx | 41 |
+| .jsx | 40 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -68,9 +68,9 @@ Generated: 2026-05-29T16:32:22.346Z
 | ops/docs/reference/PHASE29-AUDIT.json | 12103 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7901 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6849 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5557 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5565 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4026 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4033 | ops/docs |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
@@ -122,7 +122,7 @@ Generated: 2026-05-29T16:32:22.346Z
 | frontend/src/components/utils-settings/Settings.jsx | 12 | frontend/components/utils-settings |
 | backend/src/routes/inventory.js | 11 | backend/routes |
 | frontend/src/components/files/FilesPage.jsx | 11 | frontend/components/files |
-| frontend/src/components/contacts/Contacts.jsx | 10 | frontend/components/contacts |
+| frontend/src/components/contacts/Contacts.tsx | 10 | frontend/components/contacts |
 | frontend/src/components/receipt-settings/ReceiptSettings.jsx | 10 | frontend/components/receipt-settings |
 
 ## Compatibility Wrappers

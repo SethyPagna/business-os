@@ -38,7 +38,7 @@ Total files documented: **193**
 | 26 | `frontend/src/components/contacts/ContactImportModal.jsx` | 10 |
 | 27 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
 | 28 | `frontend/src/components/contacts/contactOptionUtils.ts` | 3 |
-| 29 | `frontend/src/components/contacts/Contacts.jsx` | 13 |
+| 29 | `frontend/src/components/contacts/Contacts.tsx` | 11 |
 | 30 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 31 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 |
 | 32 | `frontend/src/components/contacts/CustomersTab.jsx` | 10 |
@@ -854,23 +854,21 @@ Total files documented: **193**
 | 2 | `readStringField` | function | 28 |
 | 3 | `normalizeOption` | function | 45 |
 
-### 3.29 `frontend/src/components/contacts/Contacts.jsx`
+### 3.29 `frontend/src/components/contacts/Contacts.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizeContactExportRows` | function | 16 |
-| 2 | `TABS` | const arrow | 22 |
-| 3 | `loadSuppliersTab` | const arrow | 29 |
-| 4 | `loadDeliveryTab` | const arrow | 30 |
-| 5 | `ContactTabFallback` | function | 34 |
-| 6 | `ImportTypePicker` | function | 83 |
-| 7 | `T` | const arrow | 84 |
-| 8 | `Contacts` | component/function | 123 |
-| 9 | `prefetchTab` | const arrow | 131 |
-| 10 | `handleExportAll` | const arrow | 139 |
-| 11 | `openImportPicker` | const arrow | 226 |
-| 12 | `handleTypeSelected` | const arrow | 228 |
-| 13 | `handleImportDone` | const arrow | 233 |
+| 1 | `getContactApi` | function | 85 |
+| 2 | `getErrorMessage` | function | 90 |
+| 3 | `asExportValue` | function | 94 |
+| 4 | `normalizeContactExportRows` | function | 98 |
+| 5 | `ContactTabFallback` | function | 126 |
+| 6 | `ImportTypePicker` | function | 175 |
+| 7 | `Contacts` | component/function | 215 |
+| 8 | `handleExportAll` | const arrow | 231 |
+| 9 | `openImportPicker` | const arrow | 319 |
+| 10 | `handleTypeSelected` | const arrow | 321 |
+| 11 | `handleImportDone` | const arrow | 326 |
 
 ### 3.30 `frontend/src/components/contacts/CustomerFormModal.tsx`
 

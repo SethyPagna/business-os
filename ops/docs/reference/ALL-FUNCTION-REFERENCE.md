@@ -181,7 +181,7 @@ Code files scanned: **466**
 | 169 | `frontend/src/components/contacts/ContactImportModal.jsx` | 10 |
 | 170 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
 | 171 | `frontend/src/components/contacts/contactOptionUtils.ts` | 10 |
-| 172 | `frontend/src/components/contacts/Contacts.jsx` | 13 |
+| 172 | `frontend/src/components/contacts/Contacts.tsx` | 11 |
 | 173 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 174 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
 | 175 | `frontend/src/components/contacts/CustomersTab.jsx` | 12 |
@@ -3627,23 +3627,21 @@ Code files scanned: **466**
 | 9 | `parseContactOptionsFromImportRow` | export function | 110 |
 | 10 | `getPrimaryContactOption` | export function | 126 |
 
-### 3.172 `frontend/src/components/contacts/Contacts.jsx`
+### 3.172 `frontend/src/components/contacts/Contacts.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeContactExportRows` | function | 16 |
-| 2 | `TABS` | const arrow | 22 |
-| 3 | `loadSuppliersTab` | const arrow | 29 |
-| 4 | `loadDeliveryTab` | const arrow | 30 |
-| 5 | `ContactTabFallback` | function | 34 |
-| 6 | `ImportTypePicker` | function | 83 |
-| 7 | `T` | const arrow | 84 |
-| 8 | `Contacts` | export default function | 123 |
-| 9 | `prefetchTab` | const arrow | 131 |
-| 10 | `handleExportAll` | const arrow | 139 |
-| 11 | `openImportPicker` | const arrow | 226 |
-| 12 | `handleTypeSelected` | const arrow | 228 |
-| 13 | `handleImportDone` | const arrow | 233 |
+| 1 | `getContactApi` | function | 85 |
+| 2 | `getErrorMessage` | function | 90 |
+| 3 | `asExportValue` | function | 94 |
+| 4 | `normalizeContactExportRows` | function | 98 |
+| 5 | `ContactTabFallback` | function | 126 |
+| 6 | `ImportTypePicker` | function | 175 |
+| 7 | `Contacts` | export default function | 215 |
+| 8 | `handleExportAll` | const arrow | 231 |
+| 9 | `openImportPicker` | const arrow | 319 |
+| 10 | `handleTypeSelected` | const arrow | 321 |
+| 11 | `handleImportDone` | const arrow | 326 |
 
 ### 3.173 `frontend/src/components/contacts/CustomerFormModal.tsx`
 

@@ -204,7 +204,7 @@ Total files documented: **529**
 | 192 | `frontend/src/components/contacts/ContactImportModal.jsx` | frontend-ui | 326 | 13.0 | UI component/page |
 | 193 | `frontend/src/components/contacts/contactImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 194 | `frontend/src/components/contacts/contactOptionUtils.ts` | frontend-ui | 131 | 4.9 | UI component/page |
-| 195 | `frontend/src/components/contacts/Contacts.jsx` | frontend-ui | 322 | 13.1 | UI component/page |
+| 195 | `frontend/src/components/contacts/Contacts.tsx` | frontend-ui | 415 | 15.9 | UI component/page |
 | 196 | `frontend/src/components/contacts/CustomerFormModal.tsx` | frontend-ui | 248 | 11.2 | UI component/page |
 | 197 | `frontend/src/components/contacts/customerMembershipNumber.ts` | frontend-ui | 11 | 0.4 | UI component/page |
 | 198 | `frontend/src/components/contacts/CustomersTab.jsx` | frontend-ui | 796 | 39.3 | UI component/page |
@@ -333,7 +333,7 @@ Total files documented: **529**
 | 321 | `frontend/src/README.md` | frontend-core | 37 | 1.5 | Documentation |
 | 322 | `frontend/src/runtime/runtimeErrorClassifier.ts` | frontend-core | 154 | 5.4 | Project source/support file |
 | 323 | `frontend/src/styles/main.css` | frontend-style | 741 | 29.9 | Project source/support file |
-| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 11 | 0.3 | Project source/support file |
+| 324 | `frontend/src/types/jsx-modules.d.ts` | frontend-core | 14 | 0.4 | Project source/support file |
 | 325 | `frontend/src/types/receiptContracts.ts` | frontend-core | 67 | 1.6 | Project source/support file |
 | 326 | `frontend/src/types/settingsContracts.ts` | frontend-core | 27 | 0.5 | Project source/support file |
 | 327 | `frontend/src/utils/actionGuards.ts` | frontend-utils | 76 | 2.2 | Utility helper |
