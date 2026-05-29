@@ -403,3 +403,24 @@ Use this shape for future entries:
   backup metadata, and pruned no Docker volumes or images
 - follow-up insight: Receipt Settings now has typed save queue and preview
   boundaries, reducing risk before converting the remaining settings/ops pages.
+
+- change: converted the custom tables page to TSX with typed table metadata,
+  dynamic schemas, row payloads, app/sync context, custom-table API calls, row
+  modal state, delete ids, history result ids, and display/input coercion
+- affected files: `frontend/src/components/custom-tables/CustomTables.tsx`,
+  `frontend/tests/actionStability.test.ts`
+- route or API target: Custom Tables page, `/api/custom-tables`, custom table
+  row create/update/delete, row undo/redo history
+- keeper or rollback: keeper if action stability, typecheck, JSX,
+  frontend/backend utility, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 524 action stability, typecheck, JSX,
+  frontend/backend utility, build, Phase 29, and schema/reference checks
+- warm whole-app result: passed in Move 524 Phase 8.4 live UI suite with 72
+  checked UI signals and zero relevant console messages; public Cloudflare
+  remained skipped for the known tunnel failure
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed 220,327
+  bytes from one old Phase 8.4 runtime report, kept latest local backups and
+  latest R2 backup metadata, and pruned no Docker volumes or images
+- follow-up insight: arbitrary custom-table row data now crosses a typed
+  `Record<string, unknown>` boundary, which is the right shape for this dynamic
+  schema area without overpromising static knowledge of user-created columns.

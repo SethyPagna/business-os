@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useApp, useSync } from '../../AppContext'
+import type { ComponentProps } from 'react'
+import { useApp, useSync } from '../../AppContext.jsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
@@ -11,12 +12,90 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
-const COLUMN_TYPES = ['text', 'long_text', 'number', 'decimal', 'boolean', 'date', 'timestamp', 'dropdown']
+const COLUMN_TYPES = ['text', 'long_text', 'number', 'decimal', 'boolean', 'date', 'timestamp', 'dropdown'] as const
 const CUSTOM_TABLES_LOAD_TIMEOUT_MS = 8000
 const CUSTOM_TABLE_ROWS_LOAD_TIMEOUT_MS = 10000
 const CUSTOM_TABLE_MUTATION_TIMEOUT_MS = 12000
 
-function normalizeRowValue(column, value) {
+type ColumnType = typeof COLUMN_TYPES[number]
+type CustomColumn = {
+  name: string
+  type: ColumnType | string
+  required?: boolean
+}
+type CustomTable = {
+  id?: number | string
+  name: string
+  display_name?: string
+  schema?: string | CustomColumn[]
+}
+type CustomRow = Record<string, unknown> & {
+  id?: number | string
+  updated_at?: string
+}
+type RowModalState = 'create' | CustomRow | null
+type NewTableDraft = {
+  display_name: string
+  schema: CustomColumn[]
+}
+type Translate = (key: string, fallback?: string) => string
+type Notify = (message: string, type?: string) => void
+type AppContextValue = {
+  t?: Translate
+  notify?: Notify
+}
+type SyncContextValue = {
+  syncChannel?: {
+    channel?: string
+  } | null
+}
+type CustomTablesApi = {
+  getCustomTables?: () => Promise<unknown>
+  createCustomTable?: (payload: Record<string, unknown>) => Promise<unknown>
+  getCustomTableData?: (payload: { tableName: string }) => Promise<unknown>
+  insertCustomRow?: (payload: { tableName: string; data: Record<string, unknown> }) => Promise<unknown>
+  updateCustomRow?: (payload: {
+    tableName: string
+    id: string | number | undefined
+    data: Record<string, unknown>
+    expectedUpdatedAt?: string
+  }) => Promise<unknown>
+  deleteCustomRow?: (payload: {
+    tableName: string
+    id: string | number
+    payload: Record<string, unknown>
+  }) => Promise<unknown>
+}
+type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
+type HistoryResultInput = Parameters<typeof extractHistoryResultId>[0]
+
+function getCustomTablesApi(): CustomTablesApi {
+  return (window as Window & { api?: CustomTablesApi }).api || {}
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function getHistoryResultId(result: unknown): number {
+  return extractHistoryResultId(result as HistoryResultInput)
+}
+
+function formatCellValue(value: unknown): string | number {
+  if (value == null || value === '') return '-'
+  if (typeof value === 'string' || typeof value === 'number') return value
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return String(value)
+}
+
+function toInputValue(value: unknown): string | number {
+  if (value == null) return ''
+  if (typeof value === 'string' || typeof value === 'number') return value
+  if (typeof value === 'boolean') return value ? '1' : '0'
+  return String(value)
+}
+
+function normalizeRowValue(column: CustomColumn | undefined, value: unknown): unknown {
   if (column?.type === 'boolean') return value === '1' || value === 1 || value === true ? 1 : 0
   if (column?.type === 'number') {
     const parsed = Number.parseInt(String(value || '').trim(), 10)
@@ -29,8 +108,48 @@ function normalizeRowValue(column, value) {
   return value ?? ''
 }
 
-function buildRowPayload(schema = [], values = {}) {
-  return schema.reduce((payload, column) => {
+function normalizeCustomTable(value: unknown): CustomTable | null {
+  if (!value || typeof value !== 'object') return null
+  const table = value as Record<string, unknown>
+  const name = String(table.name || '').trim()
+  if (!name) return null
+  return {
+    id: typeof table.id === 'number' || typeof table.id === 'string' ? table.id : name,
+    name,
+    display_name: String(table.display_name || name),
+    schema: Array.isArray(table.schema) || typeof table.schema === 'string' ? table.schema : '[]',
+  }
+}
+
+function parseSchema(schema: unknown): CustomColumn[] {
+  try {
+    const parsed = typeof schema === 'string' ? JSON.parse(schema || '[]') : schema
+    if (!Array.isArray(parsed)) return []
+    return parsed.reduce<CustomColumn[]>((columns, column) => {
+      if (!column || typeof column !== 'object') return columns
+      const input = column as Record<string, unknown>
+      const name = String(input.name || '').trim()
+      if (!name) return columns
+      columns.push({
+        name,
+        type: String(input.type || 'text').trim() || 'text',
+        required: Boolean(input.required),
+      })
+      return columns
+    }, [])
+  } catch (_) {
+    return []
+  }
+}
+
+function normalizeRows(rows: unknown): CustomRow[] {
+  return Array.isArray(rows)
+    ? rows.filter((row): row is CustomRow => Boolean(row) && typeof row === 'object')
+    : []
+}
+
+function buildRowPayload(schema: CustomColumn[] = [], values: Record<string, unknown> = {}): Record<string, unknown> {
+  return schema.reduce<Record<string, unknown>>((payload, column) => {
     const key = String(column?.name || '').trim()
     if (!key) return payload
     payload[key] = normalizeRowValue(column, values?.[key])
@@ -39,35 +158,36 @@ function buildRowPayload(schema = [], values = {}) {
 }
 
 export default function CustomTables() {
-  const { t, notify } = useApp()
-  const { syncChannel } = useSync()
-  const [tables, setTables] = useState([])
-  const [activeTable, setActiveTable] = useState(null)
-  const [tableData, setTableData] = useState([])
+  const useCustomTablesApp = useApp as unknown as () => AppContextValue
+  const useCustomTablesSync = useSync as unknown as () => SyncContextValue
+  const app = useCustomTablesApp()
+  const { syncChannel } = useCustomTablesSync()
+  const t: Translate = typeof app?.t === 'function' ? app.t : ((key) => key)
+  const notify: Notify = typeof app?.notify === 'function' ? app.notify : (() => {})
+  const [tables, setTables] = useState<CustomTable[]>([])
+  const [activeTable, setActiveTable] = useState<CustomTable | null>(null)
+  const [tableData, setTableData] = useState<CustomRow[]>([])
   const [createModal, setCreateModal] = useState(false)
-  const [rowModal, setRowModal] = useState(null)
-  const [rowForm, setRowForm] = useState({})
-  const [newTable, setNewTable] = useState({ display_name: '', schema: [] })
+  const [rowModal, setRowModal] = useState<RowModalState>(null)
+  const [rowForm, setRowForm] = useState<Record<string, unknown>>({})
+  const [newTable, setNewTable] = useState<NewTableDraft>({ display_name: '', schema: [] })
   const [loadingTables, setLoadingTables] = useState(true)
   const [loadingRows, setLoadingRows] = useState(false)
   const [tablesError, setTablesError] = useState('')
   const [rowsError, setRowsError] = useState('')
   const [savingTable, setSavingTable] = useState(false)
   const [savingRow, setSavingRow] = useState(false)
-  const [deletingRowId, setDeletingRowId] = useState(null)
+  const [deletingRowId, setDeletingRowId] = useState<string | number | null>(null)
   const tablesRequestRef = useRef(0)
   const rowsRequestRef = useRef(0)
   const createTableInFlightRef = useRef(false)
   const saveRowInFlightRef = useRef(false)
   const deleteRowInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 3, notify })
+  const typedActionHistory = actionHistory as unknown as ActionHistoryBarHistory
 
   const activeSchema = useMemo(() => {
-    try {
-      return activeTable ? JSON.parse(activeTable.schema || '[]') : []
-    } catch (_) {
-      return []
-    }
+    return activeTable ? parseSchema(activeTable.schema) : []
   }, [activeTable])
 
   const loadTables = useCallback(async () => {
@@ -76,12 +196,14 @@ export default function CustomTables() {
     setTablesError('')
     try {
       const nextTables = await withLoaderTimeout(
-        () => window.api.getCustomTables(),
+        () => getCustomTablesApi().getCustomTables?.(),
         'Custom tables',
         CUSTOM_TABLES_LOAD_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(tablesRequestRef, requestId)) return
-      const normalized = Array.isArray(nextTables) ? nextTables : []
+      const normalized = Array.isArray(nextTables)
+        ? nextTables.map(normalizeCustomTable).filter((table): table is CustomTable => Boolean(table))
+        : []
       setTables(normalized)
       setActiveTable((current) => {
         if (!current?.name) return current
@@ -95,14 +217,15 @@ export default function CustomTables() {
       })
     } catch (error) {
       if (!isTrackedRequestCurrent(tablesRequestRef, requestId)) return
-      setTablesError(error?.message || 'Failed to load custom tables')
-      notify(error?.message || 'Failed to load custom tables', 'error')
+      const message = getErrorMessage(error, 'Failed to load custom tables')
+      setTablesError(message)
+      notify(message, 'error')
     } finally {
       if (isTrackedRequestCurrent(tablesRequestRef, requestId)) setLoadingTables(false)
     }
   }, [notify])
 
-  const loadTableData = useCallback(async (tableName) => {
+  const loadTableData = useCallback(async (tableName: string) => {
     if (!tableName) {
       setTableData([])
       setRowsError('')
@@ -114,16 +237,17 @@ export default function CustomTables() {
     setRowsError('')
     try {
       const rows = await withLoaderTimeout(
-        () => window.api.getCustomTableData({ tableName }),
+        () => getCustomTablesApi().getCustomTableData?.({ tableName }),
         `Custom table ${tableName}`,
         CUSTOM_TABLE_ROWS_LOAD_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(rowsRequestRef, requestId)) return
-      setTableData(Array.isArray(rows) ? rows : [])
+      setTableData(normalizeRows(rows))
     } catch (error) {
       if (!isTrackedRequestCurrent(rowsRequestRef, requestId)) return
-      setRowsError(error?.message || 'Failed to load table rows')
-      notify(error?.message || 'Failed to load table rows', 'error')
+      const message = getErrorMessage(error, 'Failed to load table rows')
+      setRowsError(message)
+      notify(message, 'error')
     } finally {
       if (isTrackedRequestCurrent(rowsRequestRef, requestId)) setLoadingRows(false)
     }
@@ -155,7 +279,7 @@ export default function CustomTables() {
     }))
   }
 
-  const updateColumn = (index, key, value) => {
+  const updateColumn = (index: number, key: keyof CustomColumn, value: unknown) => {
     setNewTable((current) => ({
       ...current,
       schema: current.schema.map((column, columnIndex) => (
@@ -164,7 +288,7 @@ export default function CustomTables() {
     }))
   }
 
-  const removeColumn = (index) => {
+  const removeColumn = (index: number) => {
     setNewTable((current) => ({
       ...current,
       schema: current.schema.filter((_, columnIndex) => columnIndex !== index),
@@ -200,17 +324,18 @@ export default function CustomTables() {
         })),
       }
       const result = await withLoaderTimeout(
-        () => window.api.createCustomTable(payload),
+        () => getCustomTablesApi().createCustomTable?.(payload),
         'Create custom table',
         CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
       )
       notify(t('table_created') || 'Table created')
       setCreateModal(false)
       setNewTable({ display_name: '', schema: [] })
-      if (result?.name) setActiveTable(result)
+      const createdTable = normalizeCustomTable(result)
+      if (createdTable) setActiveTable(createdTable)
       await loadTables()
     } catch (error) {
-      notify(error?.message || 'Failed to create table', 'error')
+      notify(getErrorMessage(error, 'Failed to create table'), 'error')
     } finally {
       finishSingleAction(createTableInFlightRef)
       setSavingTable(false)
@@ -220,24 +345,25 @@ export default function CustomTables() {
   const handleSaveRow = async () => {
     if (!activeTable?.name || !beginSingleAction(saveRowInFlightRef, { blocked: savingRow })) return
     const payload = buildRowPayload(activeSchema, rowForm)
-    const previousSnapshot = rowModal && rowModal !== 'create' ? cloneHistorySnapshot(rowModal) : null
+    const editingRow = rowModal && rowModal !== 'create' ? rowModal : null
+    const previousSnapshot = editingRow ? cloneHistorySnapshot(editingRow) as CustomRow | null : null
     setSavingRow(true)
     try {
-      let nextRow = null
+      let nextRow: unknown = null
       if (rowModal === 'create') {
         nextRow = await withLoaderTimeout(
-          () => window.api.insertCustomRow({ tableName: activeTable.name, data: payload }),
+          () => getCustomTablesApi().insertCustomRow?.({ tableName: activeTable.name, data: payload }),
           `Add row to ${activeTable.display_name || activeTable.name}`,
           CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
         )
         notify(t('row_added') || 'Row added')
       } else {
         nextRow = await withLoaderTimeout(
-          () => window.api.updateCustomRow({
+          () => getCustomTablesApi().updateCustomRow?.({
             tableName: activeTable.name,
-            id: rowModal.id,
+            id: editingRow?.id,
             data: payload,
-            expectedUpdatedAt: rowModal?.updated_at || undefined,
+            expectedUpdatedAt: editingRow?.updated_at || undefined,
           }),
           `Update row in ${activeTable.display_name || activeTable.name}`,
           CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
@@ -248,14 +374,14 @@ export default function CustomTables() {
       setRowForm({})
       await loadTableData(activeTable.name)
       if (rowModal === 'create') {
-        let createdRowId = extractHistoryResultId(nextRow)
-        const createdSnapshot = cloneHistorySnapshot(nextRow || { ...payload, id: createdRowId })
+        let createdRowId = getHistoryResultId(nextRow)
+        const createdSnapshot = cloneHistorySnapshot(nextRow || { ...payload, id: createdRowId }) as CustomRow
         if (createdRowId > 0) {
           actionHistory.pushAction({
             label: `Add row to ${activeTable.display_name || activeTable.name}`,
             undo: async () => {
               await withLoaderTimeout(
-                () => window.api.deleteCustomRow({
+                () => getCustomTablesApi().deleteCustomRow?.({
                   tableName: activeTable.name,
                   id: createdRowId,
                   payload: {},
@@ -267,22 +393,22 @@ export default function CustomTables() {
             },
             redo: async () => {
               const redoResult = await withLoaderTimeout(
-                () => window.api.insertCustomRow({ tableName: activeTable.name, data: buildRowPayload(activeSchema, createdSnapshot) }),
+                () => getCustomTablesApi().insertCustomRow?.({ tableName: activeTable.name, data: buildRowPayload(activeSchema, createdSnapshot) }),
                 `Redo add row in ${activeTable.display_name || activeTable.name}`,
                 CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
               )
-              createdRowId = extractHistoryResultId(redoResult)
+              createdRowId = getHistoryResultId(redoResult)
               await loadTableData(activeTable.name)
             },
           })
         }
       } else if (previousSnapshot) {
-        const nextSnapshot = cloneHistorySnapshot(nextRow || { ...previousSnapshot, ...payload, id: previousSnapshot.id })
+        const nextSnapshot = cloneHistorySnapshot(nextRow || { ...previousSnapshot, ...payload, id: previousSnapshot.id }) as CustomRow
         actionHistory.pushAction({
           label: `Edit row in ${activeTable.display_name || activeTable.name}`,
           undo: async () => {
             await withLoaderTimeout(
-              () => window.api.updateCustomRow({
+              () => getCustomTablesApi().updateCustomRow?.({
                 tableName: activeTable.name,
                 id: previousSnapshot.id,
                 data: buildRowPayload(activeSchema, previousSnapshot),
@@ -294,7 +420,7 @@ export default function CustomTables() {
           },
           redo: async () => {
             await withLoaderTimeout(
-              () => window.api.updateCustomRow({
+              () => getCustomTablesApi().updateCustomRow?.({
                 tableName: activeTable.name,
                 id: nextSnapshot.id,
                 data: buildRowPayload(activeSchema, nextSnapshot),
@@ -307,14 +433,14 @@ export default function CustomTables() {
         })
       }
     } catch (error) {
-      notify(error?.message || 'Failed to save row', 'error')
+      notify(getErrorMessage(error, 'Failed to save row'), 'error')
     } finally {
       finishSingleAction(saveRowInFlightRef)
       setSavingRow(false)
     }
   }
 
-  const handleDeleteRow = async (id) => {
+  const handleDeleteRow = async (id: string | number) => {
     if (!activeTable?.name || !beginSingleAction(deleteRowInFlightRef, { blocked: !!deletingRowId, value: id })) return
     if (!confirm(t('confirm_delete_row') || 'Delete this row?')) {
       finishSingleAction(deleteRowInFlightRef)
@@ -322,9 +448,9 @@ export default function CustomTables() {
     }
     setDeletingRowId(id)
     try {
-      const row = cloneHistorySnapshot(tableData.find((entry) => Number(entry.id) === Number(id)))
+      const row = cloneHistorySnapshot(tableData.find((entry) => Number(entry.id) === Number(id))) as CustomRow | null
       await withLoaderTimeout(
-        () => window.api.deleteCustomRow({
+        () => getCustomTablesApi().deleteCustomRow?.({
           tableName: activeTable.name,
           id,
           payload: { expectedUpdatedAt: row?.updated_at || undefined },
@@ -339,18 +465,18 @@ export default function CustomTables() {
           label: `Delete row from ${activeTable.display_name || activeTable.name}`,
           undo: async () => {
             const undoResult = await withLoaderTimeout(
-              () => window.api.insertCustomRow({ tableName: activeTable.name, data: buildRowPayload(activeSchema, row) }),
+              () => getCustomTablesApi().insertCustomRow?.({ tableName: activeTable.name, data: buildRowPayload(activeSchema, row) }),
               `Undo delete row from ${activeTable.display_name || activeTable.name}`,
               CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
             )
-            restoredRowId = extractHistoryResultId(undoResult)
+            restoredRowId = getHistoryResultId(undoResult)
             await loadTableData(activeTable.name)
           },
           redo: async () => {
             const targetId = restoredRowId || Number(row.id || 0)
             if (!targetId) return
             await withLoaderTimeout(
-              () => window.api.deleteCustomRow({ tableName: activeTable.name, id: targetId, payload: {} }),
+              () => getCustomTablesApi().deleteCustomRow?.({ tableName: activeTable.name, id: targetId, payload: {} }),
               `Redo delete row from ${activeTable.display_name || activeTable.name}`,
               CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
             )
@@ -359,7 +485,7 @@ export default function CustomTables() {
         })
       }
     } catch (error) {
-      notify(error?.message || 'Failed to delete row', 'error')
+      notify(getErrorMessage(error, 'Failed to delete row'), 'error')
     } finally {
       finishSingleAction(deleteRowInFlightRef)
       setDeletingRowId(null)
@@ -367,13 +493,13 @@ export default function CustomTables() {
   }
 
   const openAddRow = () => {
-    const initial = {}
+    const initial: Record<string, unknown> = {}
     activeSchema.forEach((column) => { initial[column.name] = column.type === 'boolean' ? '0' : '' })
     setRowForm(initial)
     setRowModal('create')
   }
 
-  const openEditRow = (row) => {
+  const openEditRow = (row: CustomRow) => {
     setRowForm(buildRowPayload(activeSchema, row))
     setRowModal(row)
   }
@@ -424,7 +550,7 @@ export default function CustomTables() {
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4">
-              <ActionHistoryBar history={actionHistory} className="mb-3" />
+              <ActionHistoryBar history={typedActionHistory} className="mb-3" />
               <div className="card overflow-hidden">
                 {rowsError ? <div className="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/20">{rowsError}</div> : null}
                 <div className="overflow-x-auto">
@@ -448,7 +574,7 @@ export default function CustomTables() {
                             <td key={column.name} className="max-w-xs truncate px-3 py-2 text-gray-700 dark:text-gray-300">
                               {column.type === 'boolean'
                                 ? (Number(row[column.name] || 0) ? (t('yes') || 'Yes') : (t('no') || 'No'))
-                                : (row[column.name] ?? '-')}
+                                : formatCellValue(row[column.name])}
                             </td>
                           ))}
                           <td className="px-3 py-2">
@@ -456,7 +582,7 @@ export default function CustomTables() {
                               <button onClick={() => openEditRow(row)} className="text-xs text-blue-500 hover:underline" disabled={savingRow || !!deletingRowId}>
                                 {t('edit') || 'Edit'}
                               </button>
-                              <button onClick={() => handleDeleteRow(row.id)} className="text-xs text-red-500 hover:underline" disabled={!!deletingRowId}>
+                              <button onClick={() => { if (row.id != null) handleDeleteRow(row.id) }} className="text-xs text-red-500 hover:underline" disabled={!!deletingRowId || row.id == null}>
                                 {deletingRowId === row.id ? (t('deleting') || 'Deleting...') : (t('delete') || 'Delete')}
                               </button>
                             </div>
@@ -546,7 +672,7 @@ export default function CustomTables() {
                       id={`custom-table-row-${column.name}`}
                       name={`custom_table_row_${column.name}`}
                       className="input"
-                      value={rowForm[column.name] || '0'}
+                      value={toInputValue(rowForm[column.name]) || '0'}
                       onChange={(event) => setRowForm((current) => ({ ...current, [column.name]: event.target.value }))}
                     >
                       <option value="0">{t('no') || 'No'}</option>
@@ -558,7 +684,7 @@ export default function CustomTables() {
                       name={`custom_table_row_${column.name}`}
                       className="input resize-none"
                       rows={3}
-                      value={rowForm[column.name] || ''}
+                      value={toInputValue(rowForm[column.name])}
                       onChange={(event) => setRowForm((current) => ({ ...current, [column.name]: event.target.value }))}
                     />
                   ) : (
@@ -567,7 +693,7 @@ export default function CustomTables() {
                       name={`custom_table_row_${column.name}`}
                       className="input"
                       type={column.type === 'number' || column.type === 'decimal' ? 'number' : column.type === 'date' ? 'date' : 'text'}
-                      value={rowForm[column.name] ?? ''}
+                      value={toInputValue(rowForm[column.name])}
                       onChange={(event) => setRowForm((current) => ({ ...current, [column.name]: event.target.value }))}
                     />
                   )}

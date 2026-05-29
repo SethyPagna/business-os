@@ -4100,6 +4100,15 @@ Decision rule:
     settings refresh, the field order manager, print settings panel, all-fields
     panel, preview drawer/sidebar, and receipt settings sync contracts intact
     while moving exact source-path guards to TSX.
+524. Convert the custom tables page to TSX. Done:
+    `frontend/src/components/custom-tables/CustomTables.tsx` now types custom
+    table metadata, dynamic column schemas, arbitrary row payloads, app/sync
+    context access, typed `window.api` custom-table calls, row modal state,
+    row-form values, delete ids, history result ids, and display/input value
+    coercion. The conversion keeps bounded table/row reads, same-tick create,
+    save, and delete guards, undo/redo row history, active-table refresh,
+    dynamic row forms, and horizontal table scrolling intact while moving the
+    action-stability source-path guard to TSX.
 
 ## Safety Gates
 

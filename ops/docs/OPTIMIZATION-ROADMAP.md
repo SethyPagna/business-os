@@ -5676,3 +5676,13 @@ Move 523 status:
   timeout-bounded refresh, field order management, print settings, all-fields
   controls, desktop/sidebar preview, mobile preview drawer, and receipt
   settings sync contracts unchanged.
+
+Move 524 status:
+- Move 524 converts the custom tables page to
+  `frontend/src/components/custom-tables/CustomTables.tsx`. The typed boundary
+  now covers custom table metadata, dynamic column schemas, arbitrary custom
+  row payloads, typed custom-table API calls, app/sync context access, row
+  modal state, row-form values, delete ids, history result extraction, and
+  display/input value coercion. The move keeps bounded reads, same-tick table
+  and row mutation guards, active-table refresh, dynamic row forms, undo/redo
+  row history, and horizontal table scrolling unchanged.

@@ -359,7 +359,7 @@ await runTest('loyalty point rule save uses the shared single-action guard', () 
 })
 
 await runTest('custom tables bound reads and same-tick row mutations', () => {
-  const source = readFrontend('src/components/custom-tables/CustomTables.jsx')
+  const source = readFrontend('src/components/custom-tables/CustomTables.tsx')
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const CUSTOM_TABLES_LOAD_TIMEOUT_MS = 8000/)
@@ -368,18 +368,18 @@ await runTest('custom tables bound reads and same-tick row mutations', () => {
   assert.match(source, /const createTableInFlightRef = useRef\(false\)/)
   assert.match(source, /const saveRowInFlightRef = useRef\(false\)/)
   assert.match(source, /const deleteRowInFlightRef = useRef\(false\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.getCustomTables\(\),\s*'Custom tables',\s*CUSTOM_TABLES_LOAD_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.getCustomTableData\(\{ tableName \}\),\s*`Custom table \$\{tableName\}`,\s*CUSTOM_TABLE_ROWS_LOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCustomTablesApi\(\)\.getCustomTables\?\.\(\),\s*'Custom tables',\s*CUSTOM_TABLES_LOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCustomTablesApi\(\)\.getCustomTableData\?\.\(\{ tableName \}\),\s*`Custom table \$\{tableName\}`,\s*CUSTOM_TABLE_ROWS_LOAD_TIMEOUT_MS,\s*\)/)
   assert.match(source, /if \(!beginSingleAction\(createTableInFlightRef, \{ blocked: savingTable \}\)\) return/)
   assert.match(source, /if \(!activeTable\?\.name \|\| !beginSingleAction\(saveRowInFlightRef, \{ blocked: savingRow \}\)\) return/)
   assert.match(source, /if \(!activeTable\?\.name \|\| !beginSingleAction\(deleteRowInFlightRef, \{ blocked: !!deletingRowId, value: id \}\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(createTableInFlightRef\)[\s\S]*setSavingTable\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveRowInFlightRef\)[\s\S]*setSavingRow\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(deleteRowInFlightRef\)[\s\S]*setDeletingRowId\(null\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.createCustomTable\(payload\),[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.insertCustomRow\(\{ tableName: activeTable\.name, data: payload \}\),[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.updateCustomRow\(\{[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.deleteCustomRow\(\{[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCustomTablesApi\(\)\.createCustomTable\?\.\(payload\),[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCustomTablesApi\(\)\.insertCustomRow\?\.\(\{ tableName: activeTable\.name, data: payload \}\),[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCustomTablesApi\(\)\.updateCustomRow\?\.\(\{[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCustomTablesApi\(\)\.deleteCustomRow\?\.\(\{[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
 })
 
 await runTest('contact tabs use same-tick guards and bounded mutations', () => {
