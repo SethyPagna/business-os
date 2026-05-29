@@ -122,7 +122,7 @@ Total files documented: **193**
 | 110 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
 | 111 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
 | 112 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
-| 113 | `frontend/src/components/sales/Sales.jsx` | 14 |
+| 113 | `frontend/src/components/sales/Sales.tsx` | 16 |
 | 114 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
 | 115 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
 | 116 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
@@ -891,22 +891,22 @@ Total files documented: **193**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getCustomerApi` | function | 118 |
-| 2 | `isSectionRow` | function | 123 |
-| 3 | `normalizeCustomerRows` | function | 127 |
-| 4 | `getApiListPayload` | function | 134 |
-| 5 | `getErrorMessage` | function | 138 |
-| 6 | `formatPoints` | function | 142 |
-| 7 | `tr` | function | 154 |
-| 8 | `CustomersTab` | function | 163 |
-| 9 | `toggleSectionCollapsed` | const arrow | 326 |
-| 10 | `isSectionFullySelected` | const arrow | 332 |
-| 11 | `isSectionPartiallySelected` | const arrow | 333 |
-| 12 | `toggleSectionSelection` | const arrow | 334 |
-| 13 | `promise` | const arrow | 368 |
-| 14 | `handleSave` | const arrow | 455 |
-| 15 | `handleDelete` | const arrow | 532 |
-| 16 | `handleBulkDelete` | const arrow | 571 |
+| 1 | `getCustomerApi` | function | 117 |
+| 2 | `isSectionRow` | function | 122 |
+| 3 | `normalizeCustomerRows` | function | 126 |
+| 4 | `getApiListPayload` | function | 133 |
+| 5 | `getErrorMessage` | function | 137 |
+| 6 | `formatPoints` | function | 141 |
+| 7 | `tr` | function | 153 |
+| 8 | `CustomersTab` | function | 162 |
+| 9 | `toggleSectionCollapsed` | const arrow | 325 |
+| 10 | `isSectionFullySelected` | const arrow | 331 |
+| 11 | `isSectionPartiallySelected` | const arrow | 332 |
+| 12 | `toggleSectionSelection` | const arrow | 333 |
+| 13 | `promise` | const arrow | 367 |
+| 14 | `handleSave` | const arrow | 454 |
+| 15 | `handleDelete` | const arrow | 531 |
+| 16 | `handleBulkDelete` | const arrow | 570 |
 
 ### 3.33 `frontend/src/components/contacts/DeliveryTab.jsx`
 
@@ -1820,24 +1820,26 @@ Total files documented: **193**
 | 3 | `parseItems` | function | 94 |
 | 4 | `SaleDetailModal` | component/function | 105 |
 
-### 3.113 `frontend/src/components/sales/Sales.jsx`
+### 3.113 `frontend/src/components/sales/Sales.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `multiMatch` | function | 33 |
-| 2 | `normalizeFiniteIdsFrom` | function | 37 |
-| 3 | `normalizeFiniteIds` | function | 45 |
-| 4 | `countSelectedIds` | function | 49 |
-| 5 | `countActiveFlags` | function | 57 |
-| 6 | `getSaleBranchLabel` | function | 65 |
-| 7 | `Sales` | component/function | 73 |
-| 8 | `promise` | const arrow | 156 |
-| 9 | `handleStatusChange` | const arrow | 268 |
-| 10 | `handleAttachMembership` | const arrow | 312 |
-| 11 | `toggleSelected` | const arrow | 492 |
-| 12 | `toggleSelectAll` | const arrow | 498 |
-| 13 | `handleExportSelected` | const arrow | 537 |
-| 14 | `handleBulkStatusUpdate` | const arrow | 585 |
+| 1 | `getSalesApi` | function | 126 |
+| 2 | `normalizeSaleRows` | function | 131 |
+| 3 | `normalizeUserOptions` | function | 139 |
+| 4 | `getErrorMessage` | function | 144 |
+| 5 | `isWriteConflict` | function | 148 |
+| 6 | `multiMatch` | function | 155 |
+| 7 | `normalizeFiniteIds` | function | 167 |
+| 8 | `countSelectedIds` | function | 171 |
+| 9 | `countActiveFlags` | function | 179 |
+| 10 | `getSaleBranchLabel` | function | 187 |
+| 11 | `Sales` | component/function | 195 |
+| 12 | `promise` | const arrow | 285 |
+| 13 | `toggleSelected` | const arrow | 622 |
+| 14 | `toggleSelectAll` | const arrow | 628 |
+| 15 | `handleExportSelected` | const arrow | 667 |
+| 16 | `handleBulkStatusUpdate` | const arrow | 715 |
 
 ### 3.114 `frontend/src/components/sales/SalesImportModal.tsx`
 

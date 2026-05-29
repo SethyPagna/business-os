@@ -207,7 +207,7 @@ Total files documented: **529**
 | 195 | `frontend/src/components/contacts/Contacts.tsx` | frontend-ui | 415 | 15.9 | UI component/page |
 | 196 | `frontend/src/components/contacts/CustomerFormModal.tsx` | frontend-ui | 248 | 11.2 | UI component/page |
 | 197 | `frontend/src/components/contacts/customerMembershipNumber.ts` | frontend-ui | 11 | 0.4 | UI component/page |
-| 198 | `frontend/src/components/contacts/CustomersTab.tsx` | frontend-ui | 921 | 44.1 | UI component/page |
+| 198 | `frontend/src/components/contacts/CustomersTab.tsx` | frontend-ui | 920 | 44.0 | UI component/page |
 | 199 | `frontend/src/components/contacts/DeliveryTab.jsx` | frontend-ui | 819 | 42.8 | UI component/page |
 | 200 | `frontend/src/components/contacts/shared.tsx` | frontend-ui | 435 | 15.8 | UI component/page |
 | 201 | `frontend/src/components/contacts/SuppliersTab.jsx` | frontend-ui | 836 | 43.1 | UI component/page |
@@ -289,7 +289,7 @@ Total files documented: **529**
 | 277 | `frontend/src/components/returns/ReturnsListSurface.tsx` | frontend-ui | 384 | 19.2 | UI component/page |
 | 278 | `frontend/src/components/sales/ExportModal.tsx` | frontend-ui | 318 | 13.2 | UI component/page |
 | 279 | `frontend/src/components/sales/SaleDetailModal.tsx` | frontend-ui | 408 | 18.4 | UI component/page |
-| 280 | `frontend/src/components/sales/Sales.jsx` | frontend-ui | 908 | 40.2 | UI component/page |
+| 280 | `frontend/src/components/sales/Sales.tsx` | frontend-ui | 1038 | 45.1 | UI component/page |
 | 281 | `frontend/src/components/sales/SalesImportModal.tsx` | frontend-ui | 288 | 12.2 | UI component/page |
 | 282 | `frontend/src/components/sales/salesImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 283 | `frontend/src/components/sales/SalesListSurface.tsx` | frontend-ui | 383 | 20.8 | UI component/page |
@@ -372,7 +372,7 @@ Total files documented: **529**
 | 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 734 | 59.7 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 734 | 59.8 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.3 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.4 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |

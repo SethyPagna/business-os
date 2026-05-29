@@ -192,7 +192,7 @@
     "frontend/src/components/products/import/BulkImportModal.tsx",
     "frontend/src/components/products/lookups/ManageBrandsModal.tsx",
     "frontend/src/components/returns/Returns.tsx",
-    "frontend/src/components/sales/Sales.jsx",
+    "frontend/src/components/sales/Sales.tsx",
     "frontend/src/components/server/ServerPage.tsx",
     "frontend/src/components/users/UserProfileModal.jsx",
     "frontend/src/components/users/Users.jsx",

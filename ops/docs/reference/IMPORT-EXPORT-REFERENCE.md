@@ -265,7 +265,7 @@ Code files documented: **466**
 | 253 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 2 | 1 | 0 | 1 |
 | 254 | `frontend/src/components/sales/ExportModal.tsx` | 5 | 1 | 3 | 1 |
 | 255 | `frontend/src/components/sales/SaleDetailModal.tsx` | 3 | 1 | 2 | 1 |
-| 256 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
+| 256 | `frontend/src/components/sales/Sales.tsx` | 22 | 1 | 20 | 1 |
 | 257 | `frontend/src/components/sales/SalesImportModal.tsx` | 5 | 1 | 4 | 1 |
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 0 |
 | 259 | `frontend/src/components/sales/SalesListSurface.tsx` | 3 | 1 | 1 | 1 |
@@ -284,7 +284,7 @@ Code files documented: **466**
 | 272 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
 | 273 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
 | 274 | `frontend/src/components/shared/PaginationControls.tsx` | 2 | 4 | 0 | 9 |
-| 275 | `frontend/src/components/shared/PortalMenu.tsx` | 3 | 2 | 0 | 8 |
+| 275 | `frontend/src/components/shared/PortalMenu.tsx` | 3 | 2 | 0 | 9 |
 | 276 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 | 1 | 1 | 3 |
 | 277 | `frontend/src/components/shared/SectionSwitcher.tsx` | 1 | 1 | 0 | 4 |
 | 278 | `frontend/src/components/shared/WriteConflictModal.tsx` | 1 | 1 | 1 | 1 |
@@ -3045,7 +3045,7 @@ Code files documented: **466**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/server/ServerPage.tsx`
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/components/shared/NotificationCenter.tsx`
@@ -3153,7 +3153,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/sales/SalesImportModal.tsx`
   - `frontend/src/components/server/ServerPage.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
@@ -4800,7 +4800,7 @@ Code files documented: **466**
 - Referenced by (3)
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
 
 ### 3.248 `frontend/src/components/returns/EditReturnModal.tsx`
 
@@ -4926,7 +4926,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
 
 ### 3.255 `frontend/src/components/sales/SaleDetailModal.tsx`
 
@@ -4939,13 +4939,13 @@ Code files documented: **466**
   - `frontend/src/components/sales/StatusBadge.tsx`
   - `frontend/src/utils/formatters.ts`
 - Referenced by (1)
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
 
-### 3.256 `frontend/src/components/sales/Sales.jsx`
+### 3.256 `frontend/src/components/sales/Sales.tsx`
 
 - Declared exports: `function`
-- Imports (21)
-  - `../../AppContext`
+- Imports (22)
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
@@ -4958,6 +4958,7 @@ Code files documented: **466**
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
   - `../shared/PaginationControls`
+  - `../shared/PortalMenu`
   - `../shared/pageActivity`
   - `./ExportModal`
   - `./SaleDetailModal`
@@ -4966,7 +4967,7 @@ Code files documented: **466**
   - `./StatusBadge`
   - `lucide-react`
   - `react`
-- Internal dependencies (19)
+- Internal dependencies (20)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/components/sales/ExportModal.tsx`
@@ -4978,6 +4979,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/PaginationControls.tsx`
+  - `frontend/src/components/shared/PortalMenu.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -5004,7 +5006,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/csvRowCounter.ts`
 - Referenced by (1)
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
 
 ### 3.258 `frontend/src/components/sales/salesImportWorker.ts`
 
@@ -5026,7 +5028,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/components/sales/StatusBadge.tsx`
 - Referenced by (1)
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
 
 ### 3.260 `frontend/src/components/sales/StatusBadge.tsx`
 
@@ -5040,7 +5042,7 @@ Code files documented: **466**
   - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/sales/SalesListSurface.tsx`
 
 ### 3.261 `frontend/src/components/server/ServerPage.tsx`
@@ -5083,7 +5085,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
@@ -5123,7 +5125,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/products/surfaces/HeaderActions.tsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
 ### 3.265 `frontend/src/components/shared/FilterMenu.tsx`
@@ -5142,7 +5144,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
 ### 3.266 `frontend/src/components/shared/globalScroll.ts`
@@ -5260,7 +5262,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/server/ServerPage.tsx`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
@@ -5297,7 +5299,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
 ### 3.275 `frontend/src/components/shared/PortalMenu.tsx`
@@ -5309,12 +5311,13 @@ Code files documented: **466**
   - `react-dom`
 - Internal dependencies (0)
   - none
-- Referenced by (8)
+- Referenced by (9)
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/products/surfaces/HeaderActions.tsx`
   - `frontend/src/components/products/surfaces/ProductRowParts.tsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/users/Users.jsx`
@@ -5724,7 +5727,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/NewReturnModal.tsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/sales/SalesImportModal.tsx`
   - `frontend/src/components/server/ServerPage.tsx`
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
@@ -5755,7 +5758,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
@@ -5788,7 +5791,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/Products.jsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/tests/bulkOps.test.ts`
 
 ### 3.303 `frontend/src/utils/color.ts`
@@ -5819,7 +5822,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/utils/csvExportWorker.ts`
   - `frontend/src/utils/exportPackage.ts`
@@ -5889,7 +5892,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/auth/Login.jsx`
   - `frontend/src/components/pos/POS.jsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/tests/deviceInfo.test.ts`
 
 ### 3.310 `frontend/src/utils/exportPackage.ts`
@@ -5951,7 +5954,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/SaleDetailModal.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/users/UserDetailSheet.tsx`
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/utils/exportReports.tsx`
@@ -5972,7 +5975,7 @@ Code files documented: **466**
   - `frontend/src/components/products/helpers/productFilterHelpers.ts`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
-  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/tests/groupedRecords.test.ts`
 

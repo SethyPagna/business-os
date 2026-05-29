@@ -265,7 +265,7 @@ Code files scanned: **466**
 | 253 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
 | 254 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
 | 255 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
-| 256 | `frontend/src/components/sales/Sales.jsx` | 14 |
+| 256 | `frontend/src/components/sales/Sales.tsx` | 16 |
 | 257 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
 | 259 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
@@ -3666,24 +3666,24 @@ Code files scanned: **466**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getCustomerApi` | function | 118 |
-| 2 | `isSectionRow` | function | 123 |
-| 3 | `normalizeCustomerRows` | function | 127 |
-| 4 | `getApiListPayload` | function | 134 |
-| 5 | `getErrorMessage` | function | 138 |
-| 6 | `formatPoints` | function | 142 |
-| 7 | `parseContactOptions` | export function | 146 |
-| 8 | `serializeContactOptions` | export function | 150 |
-| 9 | `tr` | function | 154 |
-| 10 | `CustomersTab` | function | 163 |
-| 11 | `toggleSectionCollapsed` | const arrow | 326 |
-| 12 | `isSectionFullySelected` | const arrow | 332 |
-| 13 | `isSectionPartiallySelected` | const arrow | 333 |
-| 14 | `toggleSectionSelection` | const arrow | 334 |
-| 15 | `promise` | const arrow | 368 |
-| 16 | `handleSave` | const arrow | 455 |
-| 17 | `handleDelete` | const arrow | 532 |
-| 18 | `handleBulkDelete` | const arrow | 571 |
+| 1 | `getCustomerApi` | function | 117 |
+| 2 | `isSectionRow` | function | 122 |
+| 3 | `normalizeCustomerRows` | function | 126 |
+| 4 | `getApiListPayload` | function | 133 |
+| 5 | `getErrorMessage` | function | 137 |
+| 6 | `formatPoints` | function | 141 |
+| 7 | `parseContactOptions` | export function | 145 |
+| 8 | `serializeContactOptions` | export function | 149 |
+| 9 | `tr` | function | 153 |
+| 10 | `CustomersTab` | function | 162 |
+| 11 | `toggleSectionCollapsed` | const arrow | 325 |
+| 12 | `isSectionFullySelected` | const arrow | 331 |
+| 13 | `isSectionPartiallySelected` | const arrow | 332 |
+| 14 | `toggleSectionSelection` | const arrow | 333 |
+| 15 | `promise` | const arrow | 367 |
+| 16 | `handleSave` | const arrow | 454 |
+| 17 | `handleDelete` | const arrow | 531 |
+| 18 | `handleBulkDelete` | const arrow | 570 |
 
 ### 3.176 `frontend/src/components/contacts/DeliveryTab.jsx`
 
@@ -4692,24 +4692,26 @@ Code files scanned: **466**
 | 3 | `parseItems` | function | 94 |
 | 4 | `SaleDetailModal` | export default function | 105 |
 
-### 3.256 `frontend/src/components/sales/Sales.jsx`
+### 3.256 `frontend/src/components/sales/Sales.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `multiMatch` | function | 33 |
-| 2 | `normalizeFiniteIdsFrom` | function | 37 |
-| 3 | `normalizeFiniteIds` | function | 45 |
-| 4 | `countSelectedIds` | function | 49 |
-| 5 | `countActiveFlags` | function | 57 |
-| 6 | `getSaleBranchLabel` | function | 65 |
-| 7 | `Sales` | export default function | 73 |
-| 8 | `promise` | const arrow | 156 |
-| 9 | `handleStatusChange` | const arrow | 268 |
-| 10 | `handleAttachMembership` | const arrow | 312 |
-| 11 | `toggleSelected` | const arrow | 492 |
-| 12 | `toggleSelectAll` | const arrow | 498 |
-| 13 | `handleExportSelected` | const arrow | 537 |
-| 14 | `handleBulkStatusUpdate` | const arrow | 585 |
+| 1 | `getSalesApi` | function | 126 |
+| 2 | `normalizeSaleRows` | function | 131 |
+| 3 | `normalizeUserOptions` | function | 139 |
+| 4 | `getErrorMessage` | function | 144 |
+| 5 | `isWriteConflict` | function | 148 |
+| 6 | `multiMatch` | function | 155 |
+| 7 | `normalizeFiniteIds` | function | 167 |
+| 8 | `countSelectedIds` | function | 171 |
+| 9 | `countActiveFlags` | function | 179 |
+| 10 | `getSaleBranchLabel` | function | 187 |
+| 11 | `Sales` | export default function | 195 |
+| 12 | `promise` | const arrow | 285 |
+| 13 | `toggleSelected` | const arrow | 622 |
+| 14 | `toggleSelectAll` | const arrow | 628 |
+| 15 | `handleExportSelected` | const arrow | 667 |
+| 16 | `handleBulkStatusUpdate` | const arrow | 715 |
 
 ### 3.257 `frontend/src/components/sales/SalesImportModal.tsx`
 

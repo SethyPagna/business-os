@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-29T22:29:32.667Z
+Generated: 2026-05-29T22:52:14.594Z
 
 ## Summary
 
@@ -15,10 +15,10 @@ Generated: 2026-05-29T22:29:32.667Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 87 |
+| .tsx | 88 |
 | .js | 84 |
 | .md | 44 |
-| .jsx | 20 |
+| .jsx | 19 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -66,16 +66,16 @@ Generated: 2026-05-29T22:29:32.667Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/PHASE29-AUDIT.json | 12109 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7914 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6872 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5772 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4200 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7917 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6874 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5783 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4209 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2639 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2641 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
@@ -103,8 +103,8 @@ Generated: 2026-05-29T22:29:32.667Z
 | frontend/src/components/products/Products.jsx | 41 | frontend/components/products |
 | frontend/src/App.jsx | 29 | frontend/src/App.jsx |
 | frontend/src/components/inventory/Inventory.jsx | 29 | frontend/components/inventory |
+| frontend/src/components/sales/Sales.tsx | 21 | frontend/components/sales |
 | backend/src/routes/system/index.js | 20 | backend/routes |
-| frontend/src/components/sales/Sales.jsx | 20 | frontend/components/sales |
 | frontend/src/components/pos/POS.jsx | 19 | frontend/components/pos |
 | frontend/src/components/catalog/CatalogPage.jsx | 18 | frontend/components/catalog |
 | frontend/src/components/contacts/CustomersTab.tsx | 18 | frontend/components/contacts |

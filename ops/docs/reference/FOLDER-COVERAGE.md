@@ -1129,7 +1129,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `ExportModal.tsx` | UI component/page |
 | 2 | `SaleDetailModal.tsx` | UI component/page |
-| 3 | `Sales.jsx` | UI component/page |
+| 3 | `Sales.tsx` | UI component/page |
 | 4 | `SalesImportModal.tsx` | UI component/page |
 | 5 | `salesImportWorker.ts` | UI component/page |
 | 6 | `SalesListSurface.tsx` | UI component/page |
