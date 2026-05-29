@@ -1095,7 +1095,7 @@ Total folders documented: **81**
 | 4 | `FieldOrderManager.tsx` | UI component/page |
 | 5 | `PrintSettings.tsx` | UI component/page |
 | 6 | `ReceiptPreview.tsx` | UI component/page |
-| 7 | `ReceiptSettings.jsx` | UI component/page |
+| 7 | `ReceiptSettings.tsx` | UI component/page |
 | 8 | `template.ts` | UI component/page |
 
 

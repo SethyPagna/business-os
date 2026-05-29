@@ -111,7 +111,7 @@ Total files documented: **193**
 | 99 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 9 |
 | 100 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 8 |
 | 101 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
-| 102 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 4 |
+| 102 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 4 |
 | 103 | `frontend/src/components/receipt-settings/template.ts` | 2 |
 | 104 | `frontend/src/components/receipt/Receipt.tsx` | 10 |
 | 105 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
@@ -1673,18 +1673,18 @@ Total files documented: **193**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `formatLoadError` | function | 33 |
-| 2 | `ReceiptPreview` | component/function | 38 |
-| 3 | `loadPreview` | function | 49 |
+| 1 | `formatLoadError` | function | 34 |
+| 2 | `ReceiptPreview` | component/function | 39 |
+| 3 | `loadPreview` | function | 50 |
 
-### 3.102 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
+### 3.102 `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `Section` | function | 19 |
-| 2 | `Toggle` | function | 30 |
-| 3 | `ReceiptSettings` | component/function | 45 |
-| 4 | `handleSave` | const arrow | 190 |
+| 1 | `getErrorMessage` | function | 71 |
+| 2 | `Section` | function | 76 |
+| 3 | `Toggle` | function | 87 |
+| 4 | `ReceiptSettings` | component/function | 102 |
 
 ### 3.103 `frontend/src/components/receipt-settings/template.ts`
 
