@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import { ArrowRight, BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Trophy } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { ProductImg } from '../products/shared/primitives'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import { SectionShell, StatusPill } from './catalogUi'
@@ -7,7 +9,107 @@ import { buildPortalHighlightBadges, buildPortalPricePresentation } from './port
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
-function getBadgeIcon(badge) {
+type CopyFn = (key: string, fallback?: string) => string
+type ReplaceVarsFn = (template: string, values: Record<string, string | number>) => string
+type StringListSetter = Dispatch<SetStateAction<string[]>>
+type InitialFilterSetter = Dispatch<SetStateAction<string>>
+type PortalBadge = ReturnType<typeof buildPortalHighlightBadges>[number]
+type PriceFormatter = Parameters<typeof buildPortalPricePresentation>[2]
+
+type CatalogOption = {
+  id: number | string
+  name: string
+}
+
+type InitialOption = ReturnType<typeof aggregateInitialOptions>[number]
+
+type PortalPreviewConfig = {
+  priceDisplay?: string
+  highlightRankLimit?: unknown
+  showRecommendedBadge?: boolean
+  showPromotionBadge?: boolean
+  showTopSellerBadge?: boolean
+  showTopProductBadge?: boolean
+  showNewArrivalBadge?: boolean
+  showPromotions?: boolean
+  showPrices?: boolean
+  showProductCategory?: boolean
+  showProductBrand?: boolean
+  showProductDescription?: boolean
+  showProductDiscount?: boolean
+}
+
+type CatalogProduct = Record<string, unknown> & {
+  id: number | string
+  name?: string
+  description?: string
+  category?: string
+  brand?: string
+  discount_label?: string
+}
+
+type PromotionItem = {
+  id: number | string
+  eyebrow?: string
+  title?: string
+  subtitle?: string
+  body?: string
+  mediaUrl?: string
+  linkUrl?: string
+  ctaLabel?: string
+}
+
+type CatalogProductsSectionProps = {
+  copy: CopyFn
+  filteredProducts?: CatalogProduct[]
+  serverPaged?: boolean
+  productTotal?: number | string | null
+  productPage?: number | string | null
+  productPageSize?: number | string | null
+  setProductPage?: (page: number) => void
+  setProductPageSize?: (pageSize: number) => void
+  initialOptions?: InitialOption[]
+  initialFilter?: string
+  setInitialFilter?: InitialFilterSetter
+  refreshingProducts?: boolean
+  loadingProducts?: boolean
+  categories?: CatalogOption[]
+  brands?: string[]
+  branches?: CatalogOption[]
+  search?: string
+  setSearch: (value: string) => void
+  filtersOpen: boolean
+  setFiltersOpen: Dispatch<SetStateAction<boolean>>
+  portalActiveFilterCount: number
+  clearPortalFilters: () => void
+  categoryFilter: string[]
+  setCategoryFilter: StringListSetter
+  brandFilter: string[]
+  setBrandFilter: StringListSetter
+  branchFilter: string[]
+  setBranchFilter: StringListSetter
+  stockFilter: string[]
+  setStockFilter: StringListSetter
+  toggleFilterValue: (currentValues: string[], setter: StringListSetter, value: string) => void
+  previewConfig: PortalPreviewConfig
+  portalError?: string | null
+  productGridClass: string
+  compactTwoColumnMobile?: boolean
+  compactCatalogCards?: boolean
+  promotionItems?: PromotionItem[]
+  promotionsTitle?: string
+  promotionsIntro?: string
+  selectedStockBranch?: unknown
+  getBranchQty: (product: CatalogProduct, selectedBranch: unknown) => number
+  getStockStatus: (product: CatalogProduct, quantity: number, config: PortalPreviewConfig) => string
+  normalizeProductGallery: (product: CatalogProduct) => string[]
+  openProductGallery: (product: CatalogProduct, startIndex: number) => void
+  openPortalImage?: (title: string, images: string[]) => void
+  formatPortalPrice: PriceFormatter
+  replaceVars: ReplaceVarsFn
+}
+
+function getBadgeIcon(badge: PortalBadge): LucideIcon {
   if (badge?.key === 'promotion') return BadgePercent
   if (badge?.key === 'recommended') return BadgeCheck
   if (badge?.key === 'top-seller') return Number(badge.rank) === 1 ? Trophy : Medal
@@ -15,7 +117,7 @@ function getBadgeIcon(badge) {
   return Sparkles
 }
 
-function getBadgeToneClass(badge) {
+function getBadgeToneClass(badge: PortalBadge): string {
   if (badge?.tone === 'amber') return 'bg-amber-400/95 text-slate-950 ring-1 ring-amber-200/80'
   if (badge?.tone === 'emerald') return 'bg-emerald-600/95 text-white ring-1 ring-emerald-200/40'
   if (badge?.tone === 'rose') return 'bg-rose-600/95 text-white ring-1 ring-rose-200/40'
@@ -24,7 +126,7 @@ function getBadgeToneClass(badge) {
   return 'bg-slate-900/90 text-white ring-1 ring-white/20'
 }
 
-function getProductInitial(product) {
+function getProductInitial(product: Pick<CatalogProduct, 'name'> | null | undefined): string {
   return getInitialKey(product?.name || '')
 }
 
@@ -32,10 +134,10 @@ function getProductInitial(product) {
  * Product-facing portal catalog view. Kept separate so the editor shell can
  * lazy-load the heavy customer-facing product list only when the tab is active.
  */
-export default function CatalogProductsSection(props) {
+export default function CatalogProductsSection(props: CatalogProductsSectionProps) {
   const {
     copy,
-    filteredProducts,
+    filteredProducts = [],
     serverPaged = false,
     productTotal,
     productPage,
@@ -47,10 +149,10 @@ export default function CatalogProductsSection(props) {
     setInitialFilter: setControlledInitialFilter,
     refreshingProducts = false,
     loadingProducts = false,
-    categories,
-    brands,
-    branches,
-    search,
+    categories = [],
+    brands = [],
+    branches = [],
+    search = '',
     setSearch,
     filtersOpen,
     setFiltersOpen,
@@ -97,8 +199,8 @@ export default function CatalogProductsSection(props) {
   }, [brandFilter, branchFilter, categoryFilter, localInitialFilter, search, serverPaged, stockFilter])
 
   const localInitialOptions = useMemo(() => {
-    const counts = new Map()
-    ;(filteredProducts || []).forEach((product) => {
+    const counts = new Map<string, number>()
+    filteredProducts.forEach((product) => {
       const key = getProductInitial(product)
       counts.set(key, (counts.get(key) || 0) + 1)
     })
@@ -273,7 +375,7 @@ export default function CatalogProductsSection(props) {
                     <button
                       type="button"
                       className="relative min-h-[220px] overflow-hidden bg-slate-100 dark:bg-slate-800"
-                      onClick={() => openPortalImage?.(item.title || promotionsTitle || copy('products', 'Products'), [item.mediaUrl])}
+                      onClick={() => openPortalImage?.(item.title || promotionsTitle || copy('products', 'Products'), [item.mediaUrl || ''])}
                     >
                       <img src={item.mediaUrl} alt={item.title || item.subtitle || promotionsTitle || copy('products', 'Products')} className="h-full w-full object-cover" />
                     </button>
@@ -358,7 +460,7 @@ export default function CatalogProductsSection(props) {
           const metadataChips = [
             previewConfig.showProductCategory !== false ? product.category : '',
             previewConfig.showProductBrand !== false ? product.brand : '',
-          ].filter(Boolean)
+          ].map((chip) => String(chip || '').trim()).filter(Boolean)
           const showDescription = previewConfig.showProductDescription !== false
           const showDiscountDetails = previewConfig.showProductDiscount !== false
           const promotion = pricePresentation?.promotion
@@ -372,7 +474,7 @@ export default function CatalogProductsSection(props) {
                 }}
               >
                 {primaryImage ? (
-                  <ProductImg src={primaryImage} alt={product.name} className="h-full w-full object-cover" />
+                  <ProductImg src={primaryImage} alt={product.name || copy('products', 'Products')} className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full items-center justify-center text-slate-300">
                     <ShoppingBag className="h-10 w-10" />
@@ -386,17 +488,18 @@ export default function CatalogProductsSection(props) {
                     {highlightBadges.map((badge) => (
                       (() => {
                         const BadgeIcon = getBadgeIcon(badge)
-                        const customStyle = badge.color && badge.key === 'promotion'
-                          ? { backgroundColor: badge.color, color: '#fff', boxShadow: '0 8px 20px rgba(15, 23, 42, 0.16)' }
+                        const badgeColor = typeof badge.color === 'string' ? badge.color : ''
+                        const customStyle = badgeColor && badge.key === 'promotion'
+                          ? { backgroundColor: badgeColor, color: '#fff', boxShadow: '0 8px 20px rgba(15, 23, 42, 0.16)' }
                           : undefined
                         return (
                           <span
-                            key={badge.key}
+                            key={String(badge.key || badge.label || 'badge')}
                             style={customStyle}
                             className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] shadow-sm backdrop-blur ${customStyle ? 'ring-1 ring-white/30' : getBadgeToneClass(badge)}`}
                           >
                             <BadgeIcon className="h-3.5 w-3.5" />
-                            {badge.label}
+                            {String(badge.label || '')}
                           </span>
                         )
                       })()

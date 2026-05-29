@@ -4109,6 +4109,15 @@ Decision rule:
     save, and delete guards, undo/redo row history, active-table refresh,
     dynamic row forms, and horizontal table scrolling intact while moving the
     action-stability source-path guard to TSX.
+525. Convert the catalog products section to TSX. Done:
+    `frontend/src/components/catalog/CatalogProductsSection.tsx` now types
+    portal copy helpers, paged/local product lists, initial filter options,
+    category/brand/branch/stock filters, preview config flags, promotion
+    cards, stock and price helpers, product metadata chips, gallery callbacks,
+    highlight badges, and pagination callbacks. The conversion keeps the
+    CatalogPage extensionless lazy import, Vite catalog-preview chunk grouping,
+    portal UI verifier coverage, server/local pagination, promotion cards,
+    product gallery entry points, and customer-safe catalog rendering intact.
 
 ## Safety Gates
 

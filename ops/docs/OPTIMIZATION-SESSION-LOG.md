@@ -424,3 +424,27 @@ Use this shape for future entries:
 - follow-up insight: arbitrary custom-table row data now crosses a typed
   `Record<string, unknown>` boundary, which is the right shape for this dynamic
   schema area without overpromising static knowledge of user-created columns.
+
+- change: converted the catalog products section to TSX with typed portal copy
+  helpers, local/server product paging, initial filter options,
+  category/brand/branch/stock filter state, preview config flags, promotion
+  cards, stock/price helpers, metadata chips, gallery callbacks, highlight
+  badges, and pagination callbacks
+- affected files: `frontend/src/components/catalog/CatalogProductsSection.tsx`,
+  `frontend/vite.config.ts`, `ops/scripts/frontend/verify-ui.ts`
+- route or API target: Customer Portal products tab, catalog-preview chunk,
+  customer-safe product cards, promotion cards, product gallery entry points
+- keeper or rollback: keeper if portal catalog display tests, typecheck, JSX,
+  frontend/backend utility, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 525 portal catalog display, UI verifier,
+  typecheck, JSX, frontend/backend utility, build, Phase 29, organization,
+  schema, and reference checks
+- warm whole-app result: passed in Move 525 Phase 8.4 live UI suite with 72
+  checked UI signals and zero relevant console messages; public Cloudflare
+  remained skipped for the known tunnel failure
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed 219,952
+  bytes from one old Phase 8.4 runtime report, kept latest local backups and
+  latest R2 backup metadata, and pruned no Docker volumes or images
+- follow-up insight: the portal product list now has a typed boundary for both
+  server-paged and local-paged modes, which reduces risk before converting the
+  larger customer-facing catalog page shell.

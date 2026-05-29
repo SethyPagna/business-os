@@ -5686,3 +5686,15 @@ Move 524 status:
   display/input value coercion. The move keeps bounded reads, same-tick table
   and row mutation guards, active-table refresh, dynamic row forms, undo/redo
   row history, and horizontal table scrolling unchanged.
+
+Move 525 status:
+- Move 525 converts the catalog products section to
+  `frontend/src/components/catalog/CatalogProductsSection.tsx`. The typed
+  boundary now covers customer-portal copy helpers, server/local product
+  paging, initial filter options, category/brand/branch/stock filters,
+  promotion cards, preview config flags, stock/price helper callbacks, gallery
+  callbacks, highlight badge rendering, metadata chips, and pagination
+  callbacks. The move keeps the CatalogPage extensionless lazy import, Vite
+  catalog-preview manual chunk grouping, portal UI verifier coverage,
+  customer-safe rendering, promotion cards, and product-gallery entry points
+  unchanged.
