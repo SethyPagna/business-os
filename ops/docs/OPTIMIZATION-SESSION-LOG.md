@@ -178,7 +178,7 @@ Use this shape for future entries:
   `frontend/src/components/contacts/Contacts.tsx`,
   `frontend/src/components/contacts/CustomersTab.tsx`,
   `frontend/src/components/contacts/SuppliersTab.jsx`,
-  `frontend/src/components/contacts/DeliveryTab.jsx`
+  `frontend/src/components/contacts/DeliveryTab.tsx`
 - route or API target: Contacts CSV import, background import jobs, worker row
   counting, existing-file CSV selection
 - keeper or rollback: keeper if import worker tests, CSV import tests,
@@ -655,3 +655,34 @@ Use this shape for future entries:
 - follow-up insight: Sales now has a typed local API and selection/mutation
   boundary, reducing risk before converting supplier/delivery contacts and the
   larger POS/Inventory shells.
+
+- change: converted the delivery contact tab to TSX with typed delivery rows,
+  section rows, modal state, contact-option form payloads, app/sync context,
+  local delivery API gateway calls, mutation result payloads, grouped filters,
+  loading watchdog timers, undo/redo history payloads, and bulk restore
+  bookkeeping
+- affected files:
+  `frontend/src/components/contacts/DeliveryTab.tsx`,
+  `frontend/src/components/contacts/Contacts.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Contacts delivery tab, delivery contact loading,
+  delivery create/update/delete, bulk delete/restore, delivery contact option
+  parsing, import modal refresh handoff, grouped selection
+- keeper or rollback: keeper if action stability, performance loading UX,
+  typecheck, JSX, frontend/backend utility, build, Phase 29 audit, and Phase
+  8.4 live suite pass
+- route-scoped result: focused typecheck, JSX, action stability, and
+  performance loading UX checks passed; broad frontend/backend utility suites,
+  UI audit, production build, organization audit, schema audit, and Phase 29
+  repeat audit also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,137 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: delivery contacts now have typed local API and
+  option/history boundaries, leaving supplier contacts as the next contact-tab
+  JSX conversion candidate.

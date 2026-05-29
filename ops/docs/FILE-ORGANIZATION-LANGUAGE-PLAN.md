@@ -4187,6 +4187,15 @@ Decision rule:
     receipt/detail/export/import modal contracts, same-tick status and bulk
     guards, bounded user filter reads, grouped selection helpers, CSV export,
     and sales action/performance source checks intact.
+533. Convert the delivery contact tab to TSX. Done:
+    `frontend/src/components/contacts/DeliveryTab.tsx` now types delivery
+    contact rows, section rows, modal state, contact-option form payloads,
+    app/sync context access, local delivery API gateway calls, mutation result
+    payloads, grouped filters, loading watchdog timers, undo/redo history
+    payloads, and bulk restore bookkeeping. The conversion keeps the Contacts
+    page extensionless lazy import, delivery import modal contract, grouped
+    selection helpers, same-tick save/delete/bulk guards, CSV export, contact
+    option display, and action/performance source checks intact.
 
 ## Safety Gates
 

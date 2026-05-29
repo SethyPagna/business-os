@@ -1,10 +1,8 @@
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentProps } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
-import { useDeferredValue } from 'react'
-import { useRef } from 'react'
-import { useApp, useSync } from '../../AppContext'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
@@ -26,29 +24,139 @@ import {
   parseStoredContactOptions,
   serializeContactOptions,
 } from './contactOptionUtils'
+import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const DELIVERY_CONTACT_MUTATION_TIMEOUT_MS = 12000
+
+type TranslateFn = (key: string) => string | undefined
+type NotifyFn = (message: string, tone?: string) => void
+type DeliveryModal = 'form' | 'import' | 'detail' | null
+type SortDirection = 'asc' | 'desc'
+type DeliveryGroupMode = 'time' | 'alphabet'
+
+interface AppUser {
+  id?: string | number | null
+  name?: string | null
+}
+
+interface AppContextValue {
+  user?: AppUser | null
+}
+
+interface SyncContextValue {
+  syncChannel?: {
+    channel?: string | null
+    ts?: string | number | null
+  } | null
+}
+
+interface DeliveryTabProps {
+  t: TranslateFn
+  notify: NotifyFn
+  active?: boolean
+}
+
+interface DeliveryContact extends Record<string, unknown> {
+  id: number | string
+  name?: string | null
+  phone?: string | null
+  area?: string | null
+  address?: string | null
+  notes?: string | null
+  created_at?: string | null
+}
+
+interface DeliveryPayload {
+  name?: string | null
+  phone?: string | null
+  area?: string | null
+  address?: string | null
+  notes?: string | null
+  userId?: string | number | null
+  userName?: string | null
+}
+
+interface DeliveryMutationResult {
+  success?: boolean
+  error?: string
+  id?: unknown
+  data?: { id?: unknown } | null
+}
+
+interface SectionRow extends Record<string, unknown> {
+  __kind: 'section'
+  section: {
+    id: string
+    label: string
+    ids: Array<number | string>
+    items: DeliveryContact[]
+  }
+  collapsed: boolean
+}
+
+type DeliveryDisplayRow = DeliveryContact | SectionRow
+
+interface DeliveryApi {
+  getDeliveryContacts: (query?: Record<string, unknown>) => Promise<unknown>
+  createDeliveryContact: (payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
+  updateDeliveryContact: (id: number | string, payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
+  deleteDeliveryContact: (id: number | string) => Promise<DeliveryMutationResult | unknown>
+}
+
+type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+
+function getDeliveryApi(): DeliveryApi {
+  if (typeof window === 'undefined' || !window.api) throw new Error('Delivery contact API is not available.')
+  return window.api as DeliveryApi
+}
+
+function normalizeDeliveryRows(value: unknown): DeliveryContact[] {
+  if (Array.isArray(value)) return value as DeliveryContact[]
+  if (value && typeof value === 'object' && Array.isArray((value as { items?: unknown }).items)) {
+    return (value as { items: DeliveryContact[] }).items
+  }
+  return []
+}
+
+function isSectionRow(row: DeliveryDisplayRow | null | undefined): row is SectionRow {
+  return row?.__kind === 'section'
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
 
 // ?€?€ Options helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // Options stored as JSON array in the 'address' TEXT column.
 // Each option: { label, name, phone, area }
 // Backward-compatible: old plain strings migrated to a single option.
 
-export function parseDeliveryOptions(raw) {
+export function parseDeliveryOptions(raw: unknown): ContactOption[] {
   return parseStoredContactOptions(raw, { legacyField: 'area' })
 }
 
-export function serializeDeliveryOptions(opts) {
-  return serializeContactOptions(opts)
+export function serializeDeliveryOptions(opts: ContactOption[]): string {
+  return serializeContactOptions(opts) || ''
 }
 
 const BLANK_OPTION = () => createContactOption({ label: '', name: '', phone: '', area: '' })
 
 // ?€?€ OptionEditor ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-function OptionEditor({ option, index, total, onChange, onRemove }) {
-  const set = (k, v) => onChange({ ...option, [k]: v })
-  const fieldId = (field) => `delivery-option-${index}-${field}`
+interface OptionEditorProps {
+  option: ContactOption
+  index: number
+  total: number
+  onChange: (option: ContactOption) => void
+  onRemove: () => void
+}
+
+function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditorProps) {
+  const set = (key: keyof ContactOption, value: string) => onChange({ ...option, [key]: value })
+  const fieldId = (field: string) => `delivery-option-${index}-${field}`
   return (
     <div className="border border-gray-200 dark:border-zinc-600 rounded-xl p-3 space-y-2 bg-gray-50 dark:bg-zinc-800/60">
       <div className="flex items-center gap-2">
@@ -86,22 +194,29 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
 }
 
 // ?€?€ DeliveryForm ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-function DeliveryForm({ contact, onSave, onClose, t }) {
-  const init = contact ? { ...contact } : { name: '', phone: '', area: '', notes: '' }
-  const [form, setForm] = useState(init)
+interface DeliveryFormProps {
+  contact?: DeliveryContact | null
+  onSave: (payload: DeliveryPayload) => Promise<unknown> | unknown
+  onClose: () => void
+  t: TranslateFn
+}
+
+function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
+  const init: DeliveryPayload = contact ? { ...contact } : { name: '', phone: '', area: '', address: '', notes: '' }
+  const [form, setForm] = useState<DeliveryPayload>(init)
   const [options, setOptions] = useState(() => {
     const parsed = parseDeliveryOptions(init.address)
     if (parsed.length) return parsed
     return [BLANK_OPTION()]
   })
   const [saving, setSaving] = useState(false)
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const set = (key: keyof DeliveryPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
     if (current.length >= CONTACT_OPTION_LIMIT) return current
     return [...current, BLANK_OPTION()]
   })
-  const updateOption = (index, nextOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
-  const removeOption = (index) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
+  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
   const handleSave = async () => {
     if (saving) return
     setSaving(true)
@@ -131,7 +246,7 @@ function DeliveryForm({ contact, onSave, onClose, t }) {
           <label htmlFor="delivery-form-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             {t('name')} <span className="text-xs font-normal text-gray-400">(driver / rider)</span>
           </label>
-          <input id="delivery-form-name" name="delivery_name" autoComplete="name" className="input" value={form.name} onChange={e => set('name', e.target.value)} autoFocus placeholder="Driver name" />
+          <input id="delivery-form-name" name="delivery_name" autoComplete="name" className="input" value={form.name || ''} onChange={e => set('name', e.target.value)} autoFocus placeholder="Driver name" />
         </div>
         <div>
           <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -172,7 +287,7 @@ function DeliveryForm({ contact, onSave, onClose, t }) {
 }
 
 // ?€?€ OptionsDisplay (detail view) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-function OptionsDisplay({ raw }) {
+function OptionsDisplay({ raw }: { raw: unknown }) {
   const opts = parseDeliveryOptions(raw)
   if (!opts.length) return <span className="text-gray-400">-</span>
   return (
@@ -189,7 +304,7 @@ function OptionsDisplay({ raw }) {
   )
 }
 
-function OptionsBadge({ raw }) {
+function OptionsBadge({ raw }: { raw: unknown }) {
   const count = parseDeliveryOptions(raw).length
   if (!count) return null
   return (
@@ -200,34 +315,34 @@ function OptionsBadge({ raw }) {
 }
 
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-function DeliveryTab({ t, notify, active = true }) {
+function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
-  const loadWatchdogRef = useRef(null)
-  const loadPromiseRef = useRef(null)
+  const loadWatchdogRef = useRef<number | null>(null)
+  const loadPromiseRef = useRef<Promise<void> | null>(null)
   const saveInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
-  const [contacts, setContacts] = useState([])
+  const [contacts, setContacts] = useState<DeliveryContact[]>([])
   const [search,   setSearch]   = useState('')
-  const [modal,    setModal]    = useState(null)
-  const [selected, setSelected] = useState(null)
+  const [modal,    setModal]    = useState<DeliveryModal>(null)
+  const [selected, setSelected] = useState<DeliveryContact | null>(null)
   const [loading,  setLoading]  = useState(true)
   const [loadError, setLoadError] = useState('')
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
-  const [sortDirection, setSortDirection] = useState('desc')
-  const [groupMode, setGroupMode] = useState('time')
-  const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [groupMode, setGroupMode] = useState<DeliveryGroupMode>('time')
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
   const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
@@ -238,10 +353,15 @@ function DeliveryTab({ t, notify, active = true }) {
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
   }), [deferredSearch, monthFilter, yearFilter])
 
-  const filteredBySearch = contacts.filter(c => {
-    const q = deferredSearch.toLowerCase()
-    return !q || c.name.toLowerCase().includes(q) || (c.phone||'').includes(q) || (c.area||'').toLowerCase().includes(q)
-  })
+  const filteredBySearch = useMemo(() => contacts.filter((contact) => {
+    const query = deferredSearch.toLowerCase().trim()
+    if (!query) return true
+    return (
+      String(contact.name || '').toLowerCase().includes(query) ||
+      String(contact.phone || '').includes(query) ||
+      String(contact.area || '').toLowerCase().includes(query)
+    )
+  }), [contacts, deferredSearch])
 
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const availableYears = useMemo(() => getAvailableYears(filteredBySearch, (contact) => contact?.created_at), [filteredBySearch])
@@ -269,16 +389,19 @@ function DeliveryTab({ t, notify, active = true }) {
     () => filteredSections.flatMap((section) => section.items),
     [filteredSections],
   )
-  const displayRows = useMemo(
+  const displayRows = useMemo<DeliveryDisplayRow[]>(
     () => filteredSections.flatMap((section) => {
       const collapsed = collapsedSections.has(section.id)
-      return [{ __kind: 'section', section, collapsed }, ...(!collapsed ? section.items : [])]
+      return [
+        { __kind: 'section', section, collapsed },
+        ...(!collapsed ? section.items : []),
+      ] as DeliveryDisplayRow[]
     }),
     [collapsedSections, filteredSections],
   )
 
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleContacts)
-  const deliveryColumns = [t('name'), t('phone'), t('area_zone')||'Area / Zone']
+  const deliveryColumns = [t('name') || 'Name', t('phone') || 'Phone', t('area_zone')||'Area / Zone']
   const contactFilterSections = useMemo(() => ([
     {
       id: 'sort',
@@ -332,15 +455,15 @@ function DeliveryTab({ t, notify, active = true }) {
 
   ]), [availableYears, groupMode, monthFilter, sortDirection, tr, yearFilter])
   const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'])
-  const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
+  const toggleSectionCollapsed = (sectionId: string) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
     else next.add(sectionId)
     return next
   })
-  const isSectionFullySelected = (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
-  const isSectionPartiallySelected = (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
-  const toggleSectionSelection = (ids, checked) => {
+  const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
+  const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
+  const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -348,7 +471,7 @@ function DeliveryTab({ t, notify, active = true }) {
     })
   }
 
-  const buildDeliveryPayload = useCallback((contact = {}) => ({
+  const buildDeliveryPayload = useCallback((contact: Partial<DeliveryContact> = {}): DeliveryPayload => ({
     name: contact.name || '',
     phone: contact.phone || '',
     area: contact.area || '',
@@ -358,15 +481,22 @@ function DeliveryTab({ t, notify, active = true }) {
     userName: user?.name,
   }), [user?.id, user?.name])
 
-  const runDeliveryMutation = useCallback((loader, label) => (
-    withLoaderTimeout(loader, label, DELIVERY_CONTACT_MUTATION_TIMEOUT_MS)
+  const runDeliveryMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<DeliveryMutationResult> => (
+    await withLoaderTimeout(loader, label, DELIVERY_CONTACT_MUTATION_TIMEOUT_MS) as DeliveryMutationResult
   ), [])
 
-  const load = useCallback(async ({ silent = false, label = 'Delivery contacts' } = {}) => {
+  const clearLoadWatchdog = useCallback(() => {
+    if (loadWatchdogRef.current != null) {
+      window.clearTimeout(loadWatchdogRef.current)
+      loadWatchdogRef.current = null
+    }
+  }, [])
+
+  const load = useCallback(async ({ silent = false, label = 'Delivery contacts' }: { silent?: boolean, label?: string } = {}): Promise<void> => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       if (!silent || !loadedOnceRef.current) {
         setLoading(true)
         setLoadError('')
@@ -377,14 +507,14 @@ function DeliveryTab({ t, notify, active = true }) {
         }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(deliveryQuery), label, 20000)
+        const data = await withLoaderTimeout(() => getDeliveryApi().getDeliveryContacts(deliveryQuery), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setContacts(Array.isArray(data) ? data : [])
+        setContacts(normalizeDeliveryRows(data))
         loadedOnceRef.current = true
         setLoadError('')
-      } catch (error) {
+      } catch (error: unknown) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        const message = error?.message || 'Failed to load delivery contacts'
+        const message = getErrorMessage(error, 'Failed to load delivery contacts')
         if (!loadedOnceRef.current) {
           setLoadError(message)
           notify(message, 'error')
@@ -394,7 +524,7 @@ function DeliveryTab({ t, notify, active = true }) {
           notify(refreshMessage, 'warning')
         }
       } finally {
-        window.clearTimeout(loadWatchdogRef.current)
+        clearLoadWatchdog()
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setLoading(false)
       }
@@ -406,10 +536,10 @@ function DeliveryTab({ t, notify, active = true }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [deliveryQuery, notify, t, tr])
+  }, [clearLoadWatchdog, deliveryQuery, notify, tr])
   useEffect(() => {
     if (!active) {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
       setLoading(false)
@@ -417,17 +547,17 @@ function DeliveryTab({ t, notify, active = true }) {
     }
     load({ silent: loadedOnceRef.current })
     return () => {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
     }
-  }, [active, load])
+  }, [active, clearLoadWatchdog, load])
   useEffect(() => {
     if (!active || syncChannelName !== 'deliveryContacts') return
     load({ silent: true, label: 'Delivery contacts refresh' })
   }, [active, load, syncChannelName, syncChannelTs])
 
-  const handleSave = async (form) => {
+  const handleSave = async (form: DeliveryPayload) => {
     if (!beginSingleAction(saveInFlightRef)) return
     if (!String(form.name || '').trim() && !String(form.phone || '').trim()) {
       finishSingleAction(saveInFlightRef)
@@ -437,8 +567,8 @@ function DeliveryTab({ t, notify, active = true }) {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const res = selected
-        ? await runDeliveryMutation(() => window.api.updateDeliveryContact(selected.id, payload), 'Update delivery contact')
-        : await runDeliveryMutation(() => window.api.createDeliveryContact(payload), 'Create delivery contact')
+        ? await runDeliveryMutation(() => getDeliveryApi().updateDeliveryContact(selected.id, payload), 'Update delivery contact')
+        : await runDeliveryMutation(() => getDeliveryApi().createDeliveryContact(payload), 'Create delivery contact')
       if (res?.success === false) { notify(res.error||'Failed', 'error'); return }
       if (selected && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
@@ -446,7 +576,7 @@ function DeliveryTab({ t, notify, active = true }) {
           label: `Edit delivery contact ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
             const restoreResult = await runDeliveryMutation(
-              () => window.api.updateDeliveryContact(existingSnapshot.id, buildDeliveryPayload(existingSnapshot)),
+              () => getDeliveryApi().updateDeliveryContact(existingSnapshot.id, buildDeliveryPayload(existingSnapshot)),
               'Undo delivery contact edit',
             )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore delivery contact')
@@ -454,7 +584,7 @@ function DeliveryTab({ t, notify, active = true }) {
           },
           redo: async () => {
             const redoResult = await runDeliveryMutation(
-              () => window.api.updateDeliveryContact(nextSnapshot.id, buildDeliveryPayload(nextSnapshot)),
+              () => getDeliveryApi().updateDeliveryContact(nextSnapshot.id, buildDeliveryPayload(nextSnapshot)),
               'Redo delivery contact edit',
             )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply delivery contact changes')
@@ -468,12 +598,12 @@ function DeliveryTab({ t, notify, active = true }) {
           actionHistory.pushAction({
             label: `Add delivery contact ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              await runDeliveryMutation(() => window.api.deleteDeliveryContact(createdContactId), 'Undo delivery contact create')
+              await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(createdContactId), 'Undo delivery contact create')
               await load({ silent: true, label: 'Delivery contacts undo create' })
             },
             redo: async () => {
               const recreateResult = await runDeliveryMutation(
-                () => window.api.createDeliveryContact(buildDeliveryPayload(createdSnapshot)),
+                () => getDeliveryApi().createDeliveryContact(buildDeliveryPayload(createdSnapshot)),
                 'Redo delivery contact create',
               )
               if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate delivery contact')
@@ -485,11 +615,11 @@ function DeliveryTab({ t, notify, active = true }) {
       }
       notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
       setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' })
-    } catch (e) { notify(e.message||'Failed', 'error') }
+    } catch (error: unknown) { notify(getErrorMessage(error, 'Failed'), 'error') }
     finally { finishSingleAction(saveInFlightRef) }
   }
 
-  const handleDelete = async (c) => {
+  const handleDelete = async (c: DeliveryContact) => {
     if (!beginSingleAction(deleteInFlightRef)) return
     if (!confirm(`Delete "${c.name}"?`)) {
       finishSingleAction(deleteInFlightRef)
@@ -497,13 +627,13 @@ function DeliveryTab({ t, notify, active = true }) {
     }
     try {
       const snapshot = cloneHistorySnapshot(c)
-      await runDeliveryMutation(() => window.api.deleteDeliveryContact(c.id), 'Delete delivery contact')
+      await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(c.id), 'Delete delivery contact')
       let restoredContactId = 0
       actionHistory.pushAction({
         label: `Delete delivery contact ${snapshot.name || ''}`.trim(),
         undo: async () => {
           const restoreResult = await runDeliveryMutation(
-            () => window.api.createDeliveryContact(buildDeliveryPayload(snapshot)),
+            () => getDeliveryApi().createDeliveryContact(buildDeliveryPayload(snapshot)),
             'Undo delivery contact delete',
           )
           if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore delivery contact')
@@ -513,7 +643,7 @@ function DeliveryTab({ t, notify, active = true }) {
         redo: async () => {
           const targetId = restoredContactId || Number(snapshot.id || 0)
           if (!targetId) return
-          await runDeliveryMutation(() => window.api.deleteDeliveryContact(targetId), 'Redo delivery contact delete')
+          await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(targetId), 'Redo delivery contact delete')
           await load({ silent: true, label: 'Delivery contacts redo delete' })
         },
       })
@@ -522,7 +652,7 @@ function DeliveryTab({ t, notify, active = true }) {
       setSelected(null)
       await load({ silent: true, label: 'Delivery contacts after delete' })
     }
-    catch (e) { notify(e.message||'Failed', 'error') }
+    catch (error: unknown) { notify(getErrorMessage(error, 'Failed'), 'error') }
     finally { finishSingleAction(deleteInFlightRef) }
   }
 
@@ -534,11 +664,11 @@ function DeliveryTab({ t, notify, active = true }) {
     }
     const ids = [...selectedIds]
     const snapshots = buildSelectedSnapshots(contacts, ids)
-    const failedIds = []
+    const failedIds: number[] = []
     setBulkActionBusy(true)
     try {
-      const deleteRun = await runConcurrentTasks(ids, async (id) => {
-        await runDeliveryMutation(() => window.api.deleteDeliveryContact(id), 'Bulk delete delivery contacts')
+      const deleteRun = await runConcurrentTasks(ids, async (id: number) => {
+        await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id), 'Bulk delete delivery contacts')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length
@@ -548,12 +678,12 @@ function DeliveryTab({ t, notify, active = true }) {
       const failedIdSet = new Set(failedIds)
       const deletedSnapshots = snapshots.filter((snapshot) => !failedIdSet.has(Number(snapshot?.id || 0)))
       if (deletedCount > 0 && deletedSnapshots.length) {
-        let restoredEntries = []
+        let restoredEntries: Array<{ restoredId: number }> = []
         actionHistory.pushAction({
           label: `Delete ${deletedCount} delivery contact${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
-            const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot) => {
-              const result = await runDeliveryMutation(() => window.api.createDeliveryContact({
+            const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: DeliveryContact) => {
+              const result = await runDeliveryMutation(() => getDeliveryApi().createDeliveryContact({
                 name: snapshot.name || '',
                 phone: snapshot.phone || '',
                 area: snapshot.area || '',
@@ -565,13 +695,13 @@ function DeliveryTab({ t, notify, active = true }) {
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
             if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore delivery contact'))
-            restoredEntries = restoreRun.successes.map((entry) => entry.value)
+            restoredEntries = restoreRun.successes.map((entry) => entry.value as { restoredId: number })
             await load({ silent: true, label: 'Delivery contacts restore deleted' })
           },
           redo: async () => {
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => (
-              runDeliveryMutation(() => window.api.deleteDeliveryContact(id), 'Redo bulk delivery contact delete')
+            const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
+              runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id), 'Redo bulk delivery contact delete')
             ))
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete delivery contact'))
             await load({ silent: true, label: 'Delivery contacts redo delete' })
@@ -591,7 +721,7 @@ function DeliveryTab({ t, notify, active = true }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <ActionHistoryBar history={actionHistory} />
+      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} />
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex gap-2 items-center flex-1 min-w-0">
           <label htmlFor="delivery-search" className="sr-only">{t('search_delivery_placeholder')||'Search delivery contacts'}</label>
@@ -674,123 +804,126 @@ function DeliveryTab({ t, notify, active = true }) {
         emptyLabel={t('no_delivery_contacts')||'No delivery contacts'}
         columns={deliveryColumns}
         selectAll={selectAllProp}
-        selectedCount={selectedIds.size}
         totalCount={visibleContacts.length}
         onRetry={() => load({ silent: false, label: 'Delivery contacts retry' })}
         loadingLabel={tr('loading_delivery_contacts', 'Loading delivery contacts...')}
         loadingDetails={tr('contacts_loading_details', 'Fetching delivery contacts, filters, and grouped sections.')}
         t={t}
-        renderRow={c => (
-          c?.__kind === 'section' ? (
-            <tr key={c.section.id} className="bg-slate-100/90 dark:bg-slate-800/80">
+        renderRow={(row) => {
+          if (isSectionRow(row)) {
+            const section = row.section
+            return (
+            <tr key={section.id} className="bg-slate-100/90 dark:bg-slate-800/80">
               <td colSpan={deliveryColumns.length + 2} className="px-4 py-2">
                 <div className="flex items-center justify-between gap-3">
                   <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded"
-                      checked={isSectionFullySelected(c.section.ids)}
+                      checked={isSectionFullySelected(section.ids)}
                       ref={(node) => {
-                        if (node) node.indeterminate = isSectionPartiallySelected(c.section.ids)
+                        if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                       }}
-                      onChange={(event) => toggleSectionSelection(c.section.ids, event.target.checked)}
-                      aria-label={`Select ${c.section.label}`}
+                      onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
+                      aria-label={`Select ${section.label}`}
                     />
-                    <span>{c.section.label}</span>
-                    <span className="normal-case tracking-normal text-slate-400">{c.section.items.length}</span>
+                    <span>{section.label}</span>
+                    <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
                   </label>
                   <div className="flex items-center gap-1">
-                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(c.section.id)}>
-                      {c.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                      {c.collapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                      {row.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {row.collapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
                     </button>
                   </div>
                 </div>
               </td>
             </tr>
-          ) : (
-          (() => {
-            const options = parseDeliveryOptions(c.address)
-            const primaryOption = getPrimaryContactOption(options, {
-              fallback: { name: c.name || '', phone: c.phone || '', area: c.area || '' },
-            })
-            return (
-          <tr key={c.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(c.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+            )
+          }
+          const contact = row as DeliveryContact
+          const options = parseDeliveryOptions(contact.address)
+          const primaryOption = getPrimaryContactOption(options, {
+            fallback: { name: contact.name || '', phone: contact.phone || '', area: contact.area || '' },
+          })
+          return (
+          <tr key={contact.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(contact.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <td className="px-3 py-2 w-10" onClick={e => e.stopPropagation()}>
-              <label htmlFor={`delivery-select-${c.id}`} className="sr-only">{`Select ${c.name}`}</label>
-              <input id={`delivery-select-${c.id}`} name={`delivery_select_${c.id}`} type="checkbox" className="w-4 h-4 cursor-pointer rounded" checked={selectedIds.has(c.id)} onChange={() => toggleOne(c.id)} />
+              <label htmlFor={`delivery-select-${contact.id}`} className="sr-only">{`Select ${contact.name}`}</label>
+              <input id={`delivery-select-${contact.id}`} name={`delivery_select_${contact.id}`} type="checkbox" className="w-4 h-4 cursor-pointer rounded" checked={selectedIds.has(Number(contact.id))} onChange={() => toggleOne(contact.id)} />
             </td>
-            <td className="px-4 py-2 font-medium text-gray-900 dark:text-white cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>{c.name}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>{primaryOption.phone || c.phone || '-'}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>{primaryOption.area || c.area || '-'}</td>
+            <td className="px-4 py-2 font-medium text-gray-900 dark:text-white cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{contact.name}</td>
+            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{primaryOption.phone || contact.phone || '-'}</td>
+            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{primaryOption.area || contact.area || '-'}</td>
             <td className="px-2 py-2 text-right" onClick={e => e.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(c); setModal('detail') }} onEdit={() => { setSelected(c); setModal('form') }} onDelete={() => handleDelete(c)} />
+              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={() => handleDelete(contact)} />
             </td>
           </tr>
-            )
-          })()
-        ))}
-        renderCard={c => (
-          c?.__kind === 'section' ? (
-            <div key={c.section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+          )
+        }}
+        renderCard={(row) => {
+          if (isSectionRow(row)) {
+            const section = row.section
+            return (
+            <div key={section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
               <div className="flex items-center justify-between gap-3">
                 <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded"
-                    checked={isSectionFullySelected(c.section.ids)}
+                    checked={isSectionFullySelected(section.ids)}
                     ref={(node) => {
-                      if (node) node.indeterminate = isSectionPartiallySelected(c.section.ids)
+                      if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                     }}
-                    onChange={(event) => toggleSectionSelection(c.section.ids, event.target.checked)}
-                    aria-label={`Select ${c.section.label}`}
+                    onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
+                    aria-label={`Select ${section.label}`}
                   />
-                  <span>{c.section.label}</span>
-                  <span className="normal-case tracking-normal text-slate-400">{c.section.items.length}</span>
+                  <span>{section.label}</span>
+                  <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
                 </label>
                 <div className="flex items-center gap-1">
-                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(c.section.id)}>
-                    {c.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                    {row.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                   </button>
                 </div>
               </div>
             </div>
-          ) : (
-          (() => {
-            const options = parseDeliveryOptions(c.address)
-            const primaryOption = getPrimaryContactOption(options, {
-              fallback: { name: c.name || '', phone: c.phone || '', area: c.area || '' },
-            })
-            return (
-          <div key={c.id} className={`card p-3 flex items-center gap-3 ${selectedIds.has(c.id) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}>
-            <div className="flex-shrink-0" onClick={e => { e.stopPropagation(); toggleOne(c.id) }}>
-              <label htmlFor={`delivery-card-select-${c.id}`} className="sr-only">{`Select ${c.name}`}</label>
-              <input id={`delivery-card-select-${c.id}`} name={`delivery_card_select_${c.id}`} type="checkbox" className="w-5 h-5 cursor-pointer rounded" checked={selectedIds.has(c.id)} onChange={() => toggleOne(c.id)} />
+            )
+          }
+          const contact = row as DeliveryContact
+          const options = parseDeliveryOptions(contact.address)
+          const primaryOption = getPrimaryContactOption(options, {
+            fallback: { name: contact.name || '', phone: contact.phone || '', area: contact.area || '' },
+          })
+          return (
+          <div key={contact.id} className={`card p-3 flex items-center gap-3 ${selectedIds.has(Number(contact.id)) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+            <div className="flex-shrink-0" onClick={e => { e.stopPropagation(); toggleOne(contact.id) }}>
+              <label htmlFor={`delivery-card-select-${contact.id}`} className="sr-only">{`Select ${contact.name}`}</label>
+              <input id={`delivery-card-select-${contact.id}`} name={`delivery_card_select_${contact.id}`} type="checkbox" className="w-5 h-5 cursor-pointer rounded" checked={selectedIds.has(Number(contact.id))} onChange={() => toggleOne(contact.id)} />
             </div>
             <div className="w-9 h-9 bg-green-100 dark:bg-green-900/40 rounded-full flex items-center justify-center text-green-600 font-bold text-sm flex-shrink-0">
-              {c.name?.[0]?.toUpperCase()}
+              {contact.name?.[0]?.toUpperCase()}
             </div>
-            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>
+            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>
               <div className="font-semibold text-gray-900 dark:text-white text-sm truncate flex items-center gap-1">
-                {c.name}
+                {contact.name}
               </div>
-              {primaryOption.phone || c.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || c.phone}</div> : null}
-              {primaryOption.area || c.area ? <div className="text-xs text-gray-400 truncate">{primaryOption.area || c.area}</div> : null}
+              {primaryOption.phone || contact.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || contact.phone}</div> : null}
+              {primaryOption.area || contact.area ? <div className="text-xs text-gray-400 truncate">{primaryOption.area || contact.area}</div> : null}
               {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
             </div>
             <div onClick={e => e.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(c); setModal('detail') }} onEdit={() => { setSelected(c); setModal('form') }} onDelete={() => handleDelete(c)} />
+              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={() => handleDelete(contact)} />
             </div>
           </div>
-            )
-          })()
-        ))}
+          )
+        }}
       />
 
       {modal === 'form'   && <DeliveryForm contact={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
       {modal === 'import' ? (
         <Suspense fallback={null}>
-          <ContactImportModal type="deliveryContact" onClose={() => setModal(null)} onDone={load} />
+          <ContactImportModal type="deliveryContact" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Delivery contacts after import' })} />
         </Suspense>
       ) : null}
       {modal === 'detail' && selected && (

@@ -402,7 +402,7 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
     },
     {
       label: 'delivery contacts',
-      source: readFrontend('src/components/contacts/DeliveryTab.jsx'),
+      source: readFrontend('src/components/contacts/DeliveryTab.tsx'),
       constant: 'DELIVERY_CONTACT_MUTATION_TIMEOUT_MS',
       create: 'createDeliveryContact',
       update: 'updateDeliveryContact',
@@ -420,7 +420,11 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
     assert.match(target.source, /if \(!beginSingleAction\(deleteInFlightRef\)\) return/, `${target.label} delete should block same-tick repeats`)
     assert.match(target.source, /beginSingleAction\(bulkDeleteInFlightRef, \{ blocked: bulkActionBusy \}\)/, `${target.label} bulk delete should block same-tick repeats`)
     assert.match(target.source, new RegExp(`withLoaderTimeout\\(loader, label, ${target.constant}\\)`), `${target.label} should route mutations through the timeout helper`)
-    const apiPattern = target.label === 'customers' ? 'getCustomerApi\\(\\)' : 'window\\.api'
+    const apiPattern = target.label === 'customers'
+      ? 'getCustomerApi\\(\\)'
+      : target.label === 'delivery contacts'
+        ? 'getDeliveryApi\\(\\)'
+        : 'window\\.api'
     assert.match(target.source, new RegExp(`${apiPattern}\\.${target.create}\\(`), `${target.label} should still create through the app API`)
     assert.match(target.source, new RegExp(`${apiPattern}\\.${target.update}\\(`), `${target.label} should still update through the app API`)
     assert.match(target.source, new RegExp(`${apiPattern}\\.${target.remove}\\(`), `${target.label} should still delete through the app API`)

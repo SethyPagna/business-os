@@ -5780,3 +5780,15 @@ Move 532 status:
   lazy imports, same-tick status and bulk guards, bounded user filter reads,
   grouped selection helpers, CSV export, and sales action/performance source
   guard behavior unchanged.
+
+Move 533 status:
+- Move 533 converts the delivery contact tab to
+  `frontend/src/components/contacts/DeliveryTab.tsx`. The typed boundary now
+  covers delivery contact rows, grouped section rows, modal state,
+  contact-option payloads, app/sync context access, the local delivery API
+  gateway, mutation result payloads, filter/group/sort state, watchdog timers,
+  undo/redo history payloads, and bulk restore bookkeeping. The move keeps the
+  Contacts page extensionless lazy import, delivery import modal handoff,
+  grouped selection helpers, same-tick save/delete/bulk guards, CSV export,
+  contact option display, and action/performance source guard behavior
+  unchanged.
