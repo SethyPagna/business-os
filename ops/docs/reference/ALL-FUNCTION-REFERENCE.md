@@ -268,7 +268,7 @@ Code files scanned: **466**
 | 256 | `frontend/src/components/sales/Sales.jsx` | 14 |
 | 257 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
-| 259 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
+| 259 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
 | 260 | `frontend/src/components/sales/StatusBadge.tsx` | 3 |
 | 261 | `frontend/src/components/server/ServerPage.jsx` | 16 |
 | 262 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
@@ -4710,11 +4710,12 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.259 `frontend/src/components/sales/SalesListSurface.jsx`
+### 3.259 `frontend/src/components/sales/SalesListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `SalesListSurface` | export default function | 5 |
+| 1 | `getSaleItems` | function | 66 |
+| 2 | `SalesListSurface` | export default function | 70 |
 
 ### 3.260 `frontend/src/components/sales/StatusBadge.tsx`
 

@@ -125,7 +125,7 @@ Total files documented: **193**
 | 113 | `frontend/src/components/sales/Sales.jsx` | 14 |
 | 114 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
 | 115 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
-| 116 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
+| 116 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
 | 117 | `frontend/src/components/sales/StatusBadge.tsx` | 2 |
 | 118 | `frontend/src/components/server/ServerPage.jsx` | 16 |
 | 119 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
@@ -1838,11 +1838,12 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.116 `frontend/src/components/sales/SalesListSurface.jsx`
+### 3.116 `frontend/src/components/sales/SalesListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `SalesListSurface` | component/function | 5 |
+| 1 | `getSaleItems` | function | 66 |
+| 2 | `SalesListSurface` | component/function | 70 |
 
 ### 3.117 `frontend/src/components/sales/StatusBadge.tsx`
 

@@ -292,7 +292,7 @@ Total files documented: **529**
 | 280 | `frontend/src/components/sales/Sales.jsx` | frontend-ui | 908 | 40.2 | UI component/page |
 | 281 | `frontend/src/components/sales/SalesImportModal.tsx` | frontend-ui | 288 | 12.2 | UI component/page |
 | 282 | `frontend/src/components/sales/salesImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
-| 283 | `frontend/src/components/sales/SalesListSurface.jsx` | frontend-ui | 318 | 19.2 | UI component/page |
+| 283 | `frontend/src/components/sales/SalesListSurface.tsx` | frontend-ui | 383 | 20.8 | UI component/page |
 | 284 | `frontend/src/components/sales/StatusBadge.tsx` | frontend-ui | 58 | 2.1 | UI component/page |
 | 285 | `frontend/src/components/server/ServerPage.jsx` | frontend-ui | 781 | 38.6 | UI component/page |
 | 286 | `frontend/src/components/shared/ActionHistoryBar.tsx` | frontend-ui | 195 | 9.2 | UI component/page |

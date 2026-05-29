@@ -268,7 +268,7 @@ Code files documented: **466**
 | 256 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
 | 257 | `frontend/src/components/sales/SalesImportModal.tsx` | 5 | 1 | 4 | 1 |
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 0 |
-| 259 | `frontend/src/components/sales/SalesListSurface.jsx` | 3 | 1 | 1 | 1 |
+| 259 | `frontend/src/components/sales/SalesListSurface.tsx` | 3 | 1 | 1 | 1 |
 | 260 | `frontend/src/components/sales/StatusBadge.tsx` | 0 | 5 | 0 | 6 |
 | 261 | `frontend/src/components/server/ServerPage.jsx` | 5 | 1 | 4 | 1 |
 | 262 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 | 1 | 1 | 17 |
@@ -4963,7 +4963,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.tsx`
   - `frontend/src/components/sales/SalesImportModal.tsx`
-  - `frontend/src/components/sales/SalesListSurface.jsx`
+  - `frontend/src/components/sales/SalesListSurface.tsx`
   - `frontend/src/components/sales/StatusBadge.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
@@ -5007,11 +5007,11 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.259 `frontend/src/components/sales/SalesListSurface.jsx`
+### 3.259 `frontend/src/components/sales/SalesListSurface.tsx`
 
 - Declared exports: `function`
 - Imports (3)
-  - `./StatusBadge`
+  - `./StatusBadge.tsx`
   - `lucide-react`
   - `react`
 - Internal dependencies (1)
@@ -5032,7 +5032,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.tsx`
   - `frontend/src/components/sales/Sales.jsx`
-  - `frontend/src/components/sales/SalesListSurface.jsx`
+  - `frontend/src/components/sales/SalesListSurface.tsx`
 
 ### 3.261 `frontend/src/components/server/ServerPage.jsx`
 

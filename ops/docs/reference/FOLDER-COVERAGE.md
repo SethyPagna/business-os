@@ -1132,7 +1132,7 @@ Total folders documented: **81**
 | 3 | `Sales.jsx` | UI component/page |
 | 4 | `SalesImportModal.tsx` | UI component/page |
 | 5 | `salesImportWorker.ts` | UI component/page |
-| 6 | `SalesListSurface.jsx` | UI component/page |
+| 6 | `SalesListSurface.tsx` | UI component/page |
 | 7 | `StatusBadge.tsx` | UI component/page |
 
 
