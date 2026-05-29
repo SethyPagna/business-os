@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-28T13:42:30.387Z",
+  "generatedAt": "2026-05-29T03:57:10.034Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -29,11 +29,11 @@
     ],
     [
       "React TSX",
-      61
+      64
     ],
     [
       "React JSX",
-      46
+      43
     ],
     [
       "Windows batch",
@@ -71,11 +71,11 @@
     ],
     [
       ".tsx",
-      61
+      64
     ],
     [
       ".jsx",
-      46
+      43
     ],
     [
       ".bat",
@@ -434,7 +434,7 @@
     },
     {
       "track": "Completed Web Worker extraction",
-      "candidate": "frontend/src/components/inventory/InventoryImportModal.jsx",
+      "candidate": "frontend/src/components/inventory/InventoryImportModal.tsx",
       "tests": [
         "frontend/tests/inventoryImportWorker.test.ts",
         "frontend/tests/actionStability.test.ts",
@@ -461,7 +461,7 @@
     },
     {
       "track": "Completed Web Worker extraction",
-      "candidate": "frontend/src/components/sales/SalesImportModal.jsx",
+      "candidate": "frontend/src/components/sales/SalesImportModal.tsx",
       "tests": [
         "frontend/tests/salesImportWorker.test.ts",
         "frontend/tests/actionStability.test.ts",
@@ -1416,7 +1416,7 @@
       "covered": true
     },
     {
-      "surface": "frontend/src/components/inventory/InventoryImportModal.jsx",
+      "surface": "frontend/src/components/inventory/InventoryImportModal.tsx",
       "worker": "frontend/src/components/inventory/inventoryImportWorker.ts",
       "compatibilityWrapper": "frontend/src/components/inventory/inventoryImportWorker.mjs",
       "fallback": "frontend/src/utils/csvRowCounter.ts",
@@ -1437,7 +1437,7 @@
       "covered": true
     },
     {
-      "surface": "frontend/src/components/sales/SalesImportModal.jsx",
+      "surface": "frontend/src/components/sales/SalesImportModal.tsx",
       "worker": "frontend/src/components/sales/salesImportWorker.ts",
       "compatibilityWrapper": "frontend/src/components/sales/salesImportWorker.mjs",
       "fallback": "frontend/src/utils/csvRowCounter.ts",

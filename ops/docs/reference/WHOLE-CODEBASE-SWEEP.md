@@ -559,9 +559,8 @@ Worker slice, so later worker candidates advance to the next import or media
 hot path.
 
 Move 164 completes the sales import Web Worker row-count slice.
-`SalesImportModal.jsx` now analyzes CSV row counts through
-`salesImportWorker.ts` when Worker support is available, uses
-`salesImportWorker.mjs` as the stable Vite wrapper, and falls back to the shared
+`SalesImportModal.tsx` now analyzes CSV row counts through
+`salesImportWorker.ts` when Worker support is available and falls back to the shared
 `csvRowCounter.ts` parser when the worker path fails. This keeps sales import
 preview counts consistent with inventory/contact quoted multiline CSV handling
 without changing the server-side import job pathway.

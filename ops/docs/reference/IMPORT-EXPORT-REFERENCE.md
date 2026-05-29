@@ -202,7 +202,7 @@ Code files documented: **466**
 | 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 0 | 1 | 0 | 1 |
 | 191 | `frontend/src/components/inventory/DualMoney.tsx` | 0 | 1 | 0 | 1 |
 | 192 | `frontend/src/components/inventory/Inventory.jsx` | 30 | 1 | 28 | 1 |
-| 193 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 5 | 1 | 4 | 1 |
+| 193 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 5 | 1 | 4 | 1 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 | 0 | 1 | 0 |
 | 195 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 4 | 1 | 2 | 1 |
 | 196 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 4 | 1 | 2 | 1 |
@@ -263,10 +263,10 @@ Code files documented: **466**
 | 251 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
 | 252 | `frontend/src/components/returns/Returns.jsx` | 19 | 1 | 17 | 1 |
 | 253 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 2 | 1 | 0 | 1 |
-| 254 | `frontend/src/components/sales/ExportModal.jsx` | 5 | 1 | 3 | 1 |
+| 254 | `frontend/src/components/sales/ExportModal.tsx` | 5 | 1 | 3 | 1 |
 | 255 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
 | 256 | `frontend/src/components/sales/Sales.jsx` | 21 | 1 | 19 | 1 |
-| 257 | `frontend/src/components/sales/SalesImportModal.jsx` | 5 | 1 | 4 | 1 |
+| 257 | `frontend/src/components/sales/SalesImportModal.tsx` | 5 | 1 | 4 | 1 |
 | 258 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 0 |
 | 259 | `frontend/src/components/sales/SalesListSurface.jsx` | 3 | 1 | 1 | 1 |
 | 260 | `frontend/src/components/sales/StatusBadge.tsx` | 0 | 5 | 0 | 6 |
@@ -3136,7 +3136,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/inventory/InventoryImportModal.jsx`
+  - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/pos/POS.jsx`
@@ -3154,7 +3154,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/ReturnDetailModal.tsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
-  - `frontend/src/components/sales/SalesImportModal.jsx`
+  - `frontend/src/components/sales/SalesImportModal.tsx`
   - `frontend/src/components/server/ServerPage.jsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
@@ -3911,7 +3911,7 @@ Code files documented: **466**
 - Internal dependencies (28)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/api/http.ts`
-  - `frontend/src/components/inventory/InventoryImportModal.jsx`
+  - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.jsx`
   - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
   - `frontend/src/components/inventory/InventoryRfidSurface.tsx`
@@ -3940,11 +3940,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.193 `frontend/src/components/inventory/InventoryImportModal.jsx`
+### 3.193 `frontend/src/components/inventory/InventoryImportModal.tsx`
 
 - Declared exports: `function`
 - Imports (5)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/csvRowCounter.ts`
   - `../shared/Modal`
@@ -4900,7 +4900,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.254 `frontend/src/components/sales/ExportModal.jsx`
+### 3.254 `frontend/src/components/sales/ExportModal.tsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -4957,9 +4957,9 @@ Code files documented: **466**
 - Internal dependencies (19)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
-  - `frontend/src/components/sales/ExportModal.jsx`
+  - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.jsx`
-  - `frontend/src/components/sales/SalesImportModal.jsx`
+  - `frontend/src/components/sales/SalesImportModal.tsx`
   - `frontend/src/components/sales/SalesListSurface.jsx`
   - `frontend/src/components/sales/StatusBadge.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
@@ -4977,11 +4977,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.257 `frontend/src/components/sales/SalesImportModal.jsx`
+### 3.257 `frontend/src/components/sales/SalesImportModal.tsx`
 
 - Declared exports: `function`
 - Imports (5)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/csvRowCounter.ts`
   - `../shared/Modal`
@@ -5026,7 +5026,7 @@ Code files documented: **466**
 - Referenced by (6)
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
-  - `frontend/src/components/sales/ExportModal.jsx`
+  - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.jsx`
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/sales/SalesListSurface.jsx`
@@ -5188,7 +5188,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/shared.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
-  - `frontend/src/components/inventory/InventoryImportModal.jsx`
+  - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/import/BulkImportModal.tsx`
@@ -5197,8 +5197,8 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
-  - `frontend/src/components/sales/ExportModal.jsx`
-  - `frontend/src/components/sales/SalesImportModal.jsx`
+  - `frontend/src/components/sales/ExportModal.tsx`
+  - `frontend/src/components/sales/SalesImportModal.tsx`
   - `frontend/src/components/shared/WriteConflictModal.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
@@ -5695,7 +5695,7 @@ Code files documented: **466**
   - `frontend/src/components/custom-tables/CustomTables.jsx`
   - `frontend/src/components/files/FilesPage.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/inventory/InventoryImportModal.jsx`
+  - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
   - `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
@@ -5710,7 +5710,7 @@ Code files documented: **466**
   - `frontend/src/components/returns/NewSupplierReturnModal.jsx`
   - `frontend/src/components/returns/Returns.jsx`
   - `frontend/src/components/sales/Sales.jsx`
-  - `frontend/src/components/sales/SalesImportModal.jsx`
+  - `frontend/src/components/sales/SalesImportModal.tsx`
   - `frontend/src/components/server/ServerPage.jsx`
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/components/users/Users.jsx`
@@ -5842,9 +5842,9 @@ Code files documented: **466**
 - Referenced by (9)
   - `frontend/src/components/contacts/ContactImportModal.jsx`
   - `frontend/src/components/contacts/contactImportWorker.ts`
-  - `frontend/src/components/inventory/InventoryImportModal.jsx`
+  - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/inventory/inventoryImportWorker.ts`
-  - `frontend/src/components/sales/SalesImportModal.jsx`
+  - `frontend/src/components/sales/SalesImportModal.tsx`
   - `frontend/src/components/sales/salesImportWorker.ts`
   - `frontend/tests/contactImportWorker.test.ts`
   - `frontend/tests/inventoryImportWorker.test.ts`
@@ -6040,7 +6040,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/productLookupSnapshots.ts`
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
   - `frontend/src/components/returns/EditReturnModal.jsx`
-  - `frontend/src/components/sales/ExportModal.jsx`
+  - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`

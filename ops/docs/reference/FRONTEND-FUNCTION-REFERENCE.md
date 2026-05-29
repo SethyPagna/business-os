@@ -59,7 +59,7 @@ Total files documented: **193**
 | 47 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
 | 48 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
 | 49 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
-| 50 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 10 |
+| 50 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
 | 51 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
 | 52 | `frontend/src/components/inventory/InventoryMovementsSurface.jsx` | 1 |
 | 53 | `frontend/src/components/inventory/InventoryProductsSurface.jsx` | 3 |
@@ -120,10 +120,10 @@ Total files documented: **193**
 | 108 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
 | 109 | `frontend/src/components/returns/Returns.jsx` | 13 |
 | 110 | `frontend/src/components/returns/ReturnsListSurface.jsx` | 5 |
-| 111 | `frontend/src/components/sales/ExportModal.jsx` | 9 |
+| 111 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
 | 112 | `frontend/src/components/sales/SaleDetailModal.jsx` | 6 |
 | 113 | `frontend/src/components/sales/Sales.jsx` | 14 |
-| 114 | `frontend/src/components/sales/SalesImportModal.jsx` | 10 |
+| 114 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
 | 115 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
 | 116 | `frontend/src/components/sales/SalesListSurface.jsx` | 1 |
 | 117 | `frontend/src/components/sales/StatusBadge.tsx` | 2 |
@@ -1137,20 +1137,19 @@ Total files documented: **193**
 | 26 | `statsValue` | const arrow | 1851 |
 | 27 | `selectInventorySection` | const arrow | 3072 |
 
-### 3.50 `frontend/src/components/inventory/InventoryImportModal.jsx`
+### 3.50 `frontend/src/components/inventory/InventoryImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `countInventoryCsvRowsInWorker` | function | 18 |
-| 2 | `cleanup` | const arrow | 30 |
-| 3 | `InventoryImportModal` | component/function | 50 |
-| 4 | `tr` | const arrow | 63 |
-| 5 | `signalDone` | const arrow | 69 |
-| 6 | `analyzeCsvText` | const arrow | 80 |
-| 7 | `setInventoryCsvText` | const arrow | 96 |
-| 8 | `handlePickFile` | const arrow | 104 |
-| 9 | `handleDownloadTemplate` | const arrow | 110 |
-| 10 | `handleImport` | const arrow | 114 |
+| 1 | `isBrokenLocalizedString` | function | 68 |
+| 2 | `getImportApi` | function | 80 |
+| 3 | `getErrorMessage` | function | 85 |
+| 4 | `countInventoryCsvRowsInWorker` | function | 89 |
+| 5 | `cleanup` | const arrow | 101 |
+| 6 | `InventoryImportModal` | component/function | 121 |
+| 7 | `handlePickFile` | const arrow | 175 |
+| 8 | `handleDownloadTemplate` | const arrow | 181 |
+| 9 | `handleImport` | const arrow | 185 |
 
 ### 3.51 `frontend/src/components/inventory/inventoryImportWorker.ts`
 
@@ -1783,19 +1782,15 @@ Total files documented: **193**
 | 4 | `ReturnsListSurface` | component/function | 56 |
 | 5 | `apply` | const arrow | 87 |
 
-### 3.111 `frontend/src/components/sales/ExportModal.jsx`
+### 3.111 `frontend/src/components/sales/ExportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ExportModal` | component/function | 10 |
-| 2 | `tr` | const arrow | 17 |
-| 3 | `computeDates` | const arrow | 22 |
-| 4 | `validateDates` | const arrow | 41 |
-| 5 | `downloadCsvBlob` | const arrow | 49 |
-| 6 | `buildCsvFallback` | const arrow | 59 |
-| 7 | `escape` | const arrow | 63 |
-| 8 | `handlePreview` | const arrow | 84 |
-| 9 | `handleExportCSV` | const arrow | 101 |
+| 1 | `getSalesExportApi` | function | 68 |
+| 2 | `getErrorMessage` | function | 73 |
+| 3 | `ExportModal` | component/function | 77 |
+| 4 | `handlePreview` | const arrow | 151 |
+| 5 | `handleExportCSV` | const arrow | 169 |
 
 ### 3.112 `frontend/src/components/sales/SaleDetailModal.jsx`
 
@@ -1827,20 +1822,18 @@ Total files documented: **193**
 | 13 | `handleExportSelected` | const arrow | 537 |
 | 14 | `handleBulkStatusUpdate` | const arrow | 585 |
 
-### 3.114 `frontend/src/components/sales/SalesImportModal.jsx`
+### 3.114 `frontend/src/components/sales/SalesImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `countSalesCsvRowsInWorker` | function | 18 |
-| 2 | `cleanup` | const arrow | 30 |
-| 3 | `SalesImportModal` | component/function | 50 |
-| 4 | `tr` | const arrow | 63 |
-| 5 | `signalDone` | const arrow | 68 |
-| 6 | `analyzeCsvText` | const arrow | 79 |
-| 7 | `setSalesCsvText` | const arrow | 95 |
-| 8 | `handlePickFile` | const arrow | 103 |
-| 9 | `handleDownloadTemplate` | const arrow | 109 |
-| 10 | `handleImport` | const arrow | 113 |
+| 1 | `getImportApi` | function | 69 |
+| 2 | `getErrorMessage` | function | 74 |
+| 3 | `countSalesCsvRowsInWorker` | function | 78 |
+| 4 | `cleanup` | const arrow | 90 |
+| 5 | `SalesImportModal` | component/function | 110 |
+| 6 | `handlePickFile` | const arrow | 163 |
+| 7 | `handleDownloadTemplate` | const arrow | 169 |
+| 8 | `handleImport` | const arrow | 173 |
 
 ### 3.115 `frontend/src/components/sales/salesImportWorker.ts`
 

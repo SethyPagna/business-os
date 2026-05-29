@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-28T13:42:30.387Z
+Generated: 2026-05-29T03:57:10.034Z
 
 ## Summary
 
@@ -24,8 +24,8 @@ Generated: 2026-05-28T13:42:30.387Z
 | --- | --- |
 | TypeScript | 225 |
 | JavaScript | 84 |
-| React TSX | 61 |
-| React JSX | 46 |
+| React TSX | 64 |
+| React JSX | 43 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |
@@ -78,8 +78,8 @@ Generated: 2026-05-28T13:42:30.387Z
 | --- | --- | --- | --- | --- | --- |
 | Completed TypeScript utility conversion | `frontend/src/utils/csvImport.ts` | yes | yes `frontend/tests/csvImport.test.ts`<br>yes `frontend/tests/productImportPlanner.test.ts` | yes | npm.cmd --prefix frontend run test:utils |
 | Web Worker extraction | `frontend/src/components/contacts/ContactImportModal.jsx` | yes | yes `frontend/tests/contactImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
-| Completed Web Worker extraction | `frontend/src/components/inventory/InventoryImportModal.jsx` | yes | yes `frontend/tests/inventoryImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
-| Completed Web Worker extraction | `frontend/src/components/sales/SalesImportModal.jsx` | yes | yes `frontend/tests/salesImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
+| Completed Web Worker extraction | `frontend/src/components/inventory/InventoryImportModal.tsx` | yes | yes `frontend/tests/inventoryImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
+| Completed Web Worker extraction | `frontend/src/components/sales/SalesImportModal.tsx` | yes | yes `frontend/tests/salesImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
 | SQL/DuckDB/data-path optimization | `backend/src/services/backupPackages.js` | yes | yes `backend/test/backupPerformanceHardening.test.ts`<br>yes `backend/test/backupRetention.test.ts`<br>yes `backend/test/backupSchema.test.ts` | yes | npm.cmd --prefix backend run test:utils |
 
 ## Converted TypeScript Slices
@@ -144,8 +144,8 @@ Generated: 2026-05-28T13:42:30.387Z
 | --- | --- | --- | --- | --- | --- | --- |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | yes | `frontend/src/components/products/import/productImportWorker.ts` | yes | `frontend/src/components/products/import/productImportPlanner.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\productImportWorkerFallback.test.ts`<br>`node frontend\tests\productImportPlanner.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright product import modal flow` |
 | `frontend/src/components/contacts/ContactImportModal.jsx` | yes | `frontend/src/components/contacts/contactImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\contactImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright contact import modal flow` |
-| `frontend/src/components/inventory/InventoryImportModal.jsx` | yes | `frontend/src/components/inventory/inventoryImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright inventory import modal flow` |
-| `frontend/src/components/sales/SalesImportModal.jsx` | yes | `frontend/src/components/sales/salesImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\salesImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright sales import modal flow` |
+| `frontend/src/components/inventory/InventoryImportModal.tsx` | yes | `frontend/src/components/inventory/inventoryImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\inventoryImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright inventory import modal flow` |
+| `frontend/src/components/sales/SalesImportModal.tsx` | yes | `frontend/src/components/sales/salesImportWorker.ts` | yes | `frontend/src/utils/csvRowCounter.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\salesImportWorker.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`node frontend\tests\actionStability.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright sales import modal flow` |
 | `frontend/src/utils/csv.ts` | yes | `frontend/src/utils/csvExportWorker.ts` | yes | `frontend/src/utils/csv.ts` | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\exportPackages.test.ts`<br>`node frontend\tests\performanceLoadingUx.test.ts`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright dashboard/inventory/contact export flow` |
 
 ## Completed Data-Path Optimizations

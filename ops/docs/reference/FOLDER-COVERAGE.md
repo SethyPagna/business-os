@@ -848,7 +848,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `DualMoney.tsx` | UI component/page |
 | 2 | `Inventory.jsx` | UI component/page |
-| 3 | `InventoryImportModal.jsx` | UI component/page |
+| 3 | `InventoryImportModal.tsx` | UI component/page |
 | 4 | `inventoryImportWorker.ts` | UI component/page |
 | 5 | `InventoryMovementsSurface.jsx` | UI component/page |
 | 6 | `InventoryProductsSurface.jsx` | UI component/page |
@@ -1127,10 +1127,10 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `ExportModal.jsx` | UI component/page |
+| 1 | `ExportModal.tsx` | UI component/page |
 | 2 | `SaleDetailModal.jsx` | UI component/page |
 | 3 | `Sales.jsx` | UI component/page |
-| 4 | `SalesImportModal.jsx` | UI component/page |
+| 4 | `SalesImportModal.tsx` | UI component/page |
 | 5 | `salesImportWorker.ts` | UI component/page |
 | 6 | `SalesListSurface.jsx` | UI component/page |
 | 7 | `StatusBadge.tsx` | UI component/page |
