@@ -1,9 +1,10 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
 import { useRef, useState } from 'react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import { fmtTime } from '../../utils/formatters'
 import {
   beginTrackedRequest,
+  getLoaderErrorMessage,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
@@ -14,10 +15,133 @@ const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 const RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 10000
 const RETURN_CREATE_TIMEOUT_MS = 15000
 
-export default
-function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
+type ModalStep = 'search' | 'items' | 'confirm'
+type NoticeKind = 'success' | 'error' | 'info' | 'warning' | string
+type MoneyFormatter = (value: number | string) => string
+type ReturnType = 'restock' | 'writeoff' | 'refund'
+type TranslateFn = (key: string) => string | undefined
+
+interface AppUser {
+  id?: number | string | null
+  name?: string | null
+  username?: string | null
+}
+
+interface SaleItemRow {
+  id?: number | string | null
+  product_id?: number | string | null
+  product_name?: string | null
+  name?: string | null
+  quantity?: number | string | null
+  applied_price_usd?: number | string | null
+  applied_price_khr?: number | string | null
+  cost_price_usd?: number | string | null
+  cost_price_khr?: number | string | null
+  purchase_price_khr?: number | string | null
+  branch_id?: number | string | null
+}
+
+interface SaleReturnItem extends SaleItemRow {
+  alreadyQty: number
+  remaining: number
+  returnQty: number
+  included: boolean
+  return_to_stock: boolean
+}
+
+interface SaleRow {
+  id?: number | string | null
+  receipt_number?: string | null
+  customer_name?: string | null
+  branch_id?: number | string | null
+  exchange_rate?: number | string | null
+  total_usd?: number | string | null
+  created_at?: string | number | Date | null
+  items?: SaleItemRow[] | null
+}
+
+interface ExistingReturnRow {
+  status?: string | null
+  items?: Array<{
+    sale_item_id?: number | string | null
+    product_id?: number | string | null
+    quantity?: number | string | null
+  }> | null
+}
+
+interface ReturnCreatePayload {
+  sale_id: number | string | null
+  receipt_number: string | null
+  cashier_id: number | string | null | undefined
+  cashier_name: string | null | undefined
+  customer_name: string | null
+  branch_id: number | string | null
+  reason: string
+  return_type: ReturnType
+  notes: string | null
+  total_refund_usd: number
+  total_refund_khr: number
+  exchange_rate: number
+  items: Array<{
+    sale_item_id: number | string | null
+    product_id: number | string | null | undefined
+    product_name: string | null | undefined
+    quantity: number
+    applied_price_usd: number
+    applied_price_khr: number
+    cost_price_usd: number
+    cost_price_khr: number
+    return_to_stock: boolean
+    branch_id: number | string | null
+  }>
+}
+
+interface ReturnApi {
+  getSales: (options: { limit: number }) => Promise<SaleRow[]>
+  getReturns: (options: { saleId: number | string | null | undefined }) => Promise<ExistingReturnRow[]>
+  createReturn: (payload: ReturnCreatePayload) => Promise<unknown>
+}
+
+interface NewReturnModalProps {
+  onClose: () => void
+  onSuccess?: (result?: unknown) => void | Promise<void>
+  fmtUSD: MoneyFormatter
+  notify: (message: string, kind?: NoticeKind) => void
+}
+
+type ReturnedQuantityMap = Record<string, number>
+
+const useApp = useAppHook as () => {
+  user?: AppUser | null
+  t?: TranslateFn
+}
+
+function getReturnApi(): ReturnApi {
+  if (!window.api) throw new Error('Return API is not available.')
+  return window.api as ReturnApi
+}
+
+function toNumber(value: number | string | null | undefined): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function clampReturnQuantity(value: unknown, maxQuantity: number): number {
+  const parsed = typeof value === 'number' ? value : parseFloat(String(value || ''))
+  const safeQuantity = Number.isFinite(parsed) ? parsed : 0
+  return Math.max(0, Math.min(maxQuantity, safeQuantity))
+}
+
+function getSaleItemKey(item: SaleItemRow): string {
+  return String(item.id || `p_${item.product_id}`)
+}
+
+export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: NewReturnModalProps) {
   const { user, t } = useApp()
-  const T = (k, fb) => (typeof t === 'function' ? t(k) : fb)
+  const T = (key: string, fallback: string): string => {
+    const value = typeof t === 'function' ? t(key) : undefined
+    return value && value !== key ? value : fallback
+  }
 
   const RETURN_REASONS = [
     T('reason_defective',   'Defective / damaged product'),
@@ -31,14 +155,14 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
   ]
   const OTHER_LABEL = T('reason_other', 'Other')
 
-  const [step,          setStep]          = useState('search')
+  const [step,          setStep]          = useState<ModalStep>('search')
   const [searchQuery,   setSearchQuery]   = useState('')
-  const [foundSale,     setFoundSale]     = useState(null)
+  const [foundSale,     setFoundSale]     = useState<SaleRow | null>(null)
   const [searching,     setSearching]     = useState(false)
-  const [selectedItems, setSelectedItems] = useState([])
+  const [selectedItems, setSelectedItems] = useState<SaleReturnItem[]>([])
   const [reason,        setReason]        = useState(RETURN_REASONS[0])
   const [customReason,  setCustomReason]  = useState('')
-  const [returnType,    setReturnType]    = useState('restock')
+  const [returnType,    setReturnType]    = useState<ReturnType>('restock')
   const [notes,         setNotes]         = useState('')
   const [submitting,    setSubmitting]    = useState(false)
   const searchRequestRef = useRef(0)
@@ -52,30 +176,30 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
     setSearching(true)
     try {
       const sales = await withLoaderTimeout(
-        () => window.api.getSales({ limit: 500 }),
+        () => getReturnApi().getSales({ limit: 500 }),
         'Return sale search',
         RETURN_SALE_SEARCH_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
       const q = searchQuery.trim().toLowerCase()
-      const found = sales.find(s =>
+      const found = sales.find((s) =>
         s.receipt_number?.toLowerCase().includes(q) || String(s.id) === q
       )
       if (found) {
         const items = Array.isArray(found.items) ? found.items : []
-        let alreadyReturned = {}
+        const alreadyReturned: ReturnedQuantityMap = {}
         try {
           const existingReturns = await withLoaderTimeout(
-            () => window.api.getReturns({ saleId: found.id }),
+            () => getReturnApi().getReturns({ saleId: found.id }),
             'Return history lookup',
             RETURN_HISTORY_LOOKUP_TIMEOUT_MS,
           )
           if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
-          ;(existingReturns || []).forEach(ret => {
+          ;(existingReturns || []).forEach((ret) => {
             if ((ret.status || 'completed') === 'cancelled') return
-            ;(ret.items || []).forEach(ri => {
+            ;(ret.items || []).forEach((ri) => {
               const key = ri.sale_item_id || `p_${ri.product_id}`
-              alreadyReturned[key] = (alreadyReturned[key] || 0) + (ri.quantity || 0)
+              alreadyReturned[key] = (alreadyReturned[key] || 0) + toNumber(ri.quantity)
             })
           })
         } catch (error) {
@@ -88,10 +212,10 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
         }
         if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
         setFoundSale(found)
-        setSelectedItems(items.map(item => {
-          const key = item.id || `p_${item.product_id}`
+        setSelectedItems(items.map((item) => {
+          const key = getSaleItemKey(item)
           const alreadyQty = alreadyReturned[key] || 0
-          const remaining  = Math.max(0, (item.quantity || 0) - alreadyQty)
+          const remaining = Math.max(0, toNumber(item.quantity) - alreadyQty)
           return { ...item, alreadyQty, remaining, returnQty: 0, included: remaining > 0, return_to_stock: true }
         }))
         setStep('items')
@@ -99,9 +223,9 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
         if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
         notify(T('sale_not_found', 'Sale not found. Try the receipt number or sale ID.'), 'error')
       }
-    } catch (e) {
+    } catch (error) {
       if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
-      notify((T('search_error','Search error') || T('error','Error')) + ': ' + (e.message || e), 'error')
+      notify((T('search_error','Search error') || T('error','Error')) + ': ' + getLoaderErrorMessage(error, T('error', 'Error')), 'error')
     } finally {
       if (isTrackedRequestCurrent(searchRequestRef, requestId)) {
         finishSingleAction(searchInFlightRef)
@@ -110,39 +234,39 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
     }
   }
 
-  const handleReturnTypeChange = (v) => {
+  const handleReturnTypeChange = (v: ReturnType) => {
     setReturnType(v)
-    setSelectedItems(prev => prev.map(it => ({ ...it, return_to_stock: v === 'restock' })))
+    setSelectedItems((prev) => prev.map((it) => ({ ...it, return_to_stock: v === 'restock' })))
   }
 
-  const toggleIncluded = (idx) => {
-    setSelectedItems(prev => prev.map((it, i) => {
+  const toggleIncluded = (idx: number) => {
+    setSelectedItems((prev) => prev.map((it, i) => {
       if (i !== idx) return it
       const nowIncluded = !it.included
       return { ...it, included: nowIncluded, returnQty: nowIncluded ? (it.remaining || 0) : 0 }
     }))
   }
 
-  const updateItemQty = (idx, val) => {
-    const max = selectedItems[idx]?.remaining ?? selectedItems[idx]?.quantity ?? Infinity
-    const qty = Math.max(0, Math.min(max, parseFloat(val) || 0))
-    setSelectedItems(prev => prev.map((it, i) =>
+  const updateItemQty = (idx: number, val: unknown) => {
+    const max = toNumber(selectedItems[idx]?.remaining ?? selectedItems[idx]?.quantity ?? Number.POSITIVE_INFINITY)
+    const qty = clampReturnQuantity(val, max)
+    setSelectedItems((prev) => prev.map((it, i) =>
       i === idx ? { ...it, returnQty: qty, included: qty > 0 } : it
     ))
   }
 
-  const updateItemRestock = (idx, val) => {
-    setSelectedItems(prev => prev.map((it, i) => i === idx ? { ...it, return_to_stock: !!val } : it))
+  const updateItemRestock = (idx: number, val: boolean) => {
+    setSelectedItems((prev) => prev.map((it, i) => i === idx ? { ...it, return_to_stock: !!val } : it))
   }
 
-  const selectAll = () => setSelectedItems(prev => prev.map(it =>
+  const selectAll = () => setSelectedItems((prev) => prev.map((it) =>
     it.remaining > 0 ? { ...it, included: true, returnQty: it.remaining, return_to_stock: returnType === 'restock' } : it
   ))
-  const clearAll  = () => setSelectedItems(prev => prev.map(it => ({ ...it, included: false, returnQty: 0 })))
+  const clearAll  = () => setSelectedItems((prev) => prev.map((it) => ({ ...it, included: false, returnQty: 0 })))
 
-  const activeItems    = selectedItems.filter(it => it.included && (it.returnQty || 0) > 0)
-  const totalRefund    = activeItems.reduce((s, it) => s + (it.applied_price_usd || 0) * it.returnQty, 0)
-  const totalRefundKhr = activeItems.reduce((s, it) => s + (it.applied_price_khr || 0) * it.returnQty, 0)
+  const activeItems    = selectedItems.filter((it) => it.included && (it.returnQty || 0) > 0)
+  const totalRefund    = activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
+  const totalRefundKhr = activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
 
   const handleSubmit = async () => {
@@ -151,8 +275,9 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
+      const api = getReturnApi()
       const result = await withLoaderTimeout(
-        () => window.api.createReturn({
+        () => api.createReturn({
           sale_id:          foundSale?.id   || null,
           receipt_number:   foundSale?.receipt_number || null,
           cashier_id:       user?.id,
@@ -164,16 +289,16 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
           notes:            notes || null,
           total_refund_usd: totalRefund,
           total_refund_khr: totalRefundKhr,
-          exchange_rate:    foundSale?.exchange_rate || 4100,
-          items: activeItems.map(it => ({
+          exchange_rate:    toNumber(foundSale?.exchange_rate) || 4100,
+          items: activeItems.map((it) => ({
             sale_item_id:      it.id || null,
             product_id:        it.product_id,
             product_name:      it.product_name || it.name,
             quantity:          it.returnQty,
-            applied_price_usd: it.applied_price_usd || 0,
-            applied_price_khr: it.applied_price_khr || 0,
-            cost_price_usd:    it.cost_price_usd || 0,
-            cost_price_khr:    it.cost_price_khr || it.purchase_price_khr || 0,
+            applied_price_usd: toNumber(it.applied_price_usd),
+            applied_price_khr: toNumber(it.applied_price_khr),
+            cost_price_usd:    toNumber(it.cost_price_usd),
+            cost_price_khr:    toNumber(it.cost_price_khr || it.purchase_price_khr),
             return_to_stock:   it.return_to_stock !== false,
             branch_id:         it.branch_id || foundSale?.branch_id || null,
           })),
@@ -187,15 +312,15 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       await Promise.resolve(onSuccess?.(result))
       onClose()
-    } catch (e) {
-      notify((T('error','Error') || 'Error') + ': ' + (e.message || e), 'error')
+    } catch (error) {
+      notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error, T('error', 'Error')), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       setSubmitting(false)
     }
   }
 
-  const STEPS = ['search', 'items', 'confirm']
+  const STEPS: ModalStep[] = ['search', 'items', 'confirm']
   const stepIdx = STEPS.indexOf(step)
 
   return (
@@ -272,11 +397,11 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                   {T('return_type_label','Handling Method')}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
-                  {[
+                  {([
                     ['restock',  T('return_type_restock','↩️ Restock'),       T('return_type_restock_desc','Items back to inventory')],
                     ['writeoff', T('return_type_writeoff','🗑 Write Off'),     T('return_type_writeoff_desc','Lost / damaged goods')],
                     ['refund',   T('return_type_refund','💰 Refund Only'),     T('return_type_refund_desc','Refund with no stock change')],
-                  ].map(([v, label, desc]) => (
+                  ] as Array<[ReturnType, string, string]>).map(([v, label, desc]) => (
                     <button key={v} onClick={() => handleReturnTypeChange(v)}
                       className={`p-2 rounded-xl border-2 text-left text-xs transition-colors ${returnType === v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>
                       <div className={`font-semibold ${returnType === v ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>{label}</div>
@@ -301,7 +426,8 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                   </div>
                   <div className="space-y-2">
                     {selectedItems.map((item, idx) => {
-                      const isFullyReturned = (item.remaining ?? item.quantity) <= 0
+                      const availableQuantity = item.remaining ?? toNumber(item.quantity)
+                      const isFullyReturned = availableQuantity <= 0
                       const isIncluded = item.included && !isFullyReturned
                       return (
                         <div key={idx} className={`border rounded-xl p-3 transition-colors ${
@@ -329,7 +455,7 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                                 {item.product_name || item.name}
                               </div>
                               <div className="text-xs text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                                <span>{T('qty_sold','Sold')}: {item.quantity} × {fmtUSD(item.applied_price_usd || 0)}</span>
+                                <span>{T('qty_sold','Sold')}: {toNumber(item.quantity)} × {fmtUSD(toNumber(item.applied_price_usd))}</span>
                                 {(item.alreadyQty || 0) > 0 && (
                                   <span className="text-orange-500 dark:text-orange-400">
                                     ↩ {item.alreadyQty} {T('already_returned','already returned')}
@@ -344,14 +470,14 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                               <div className="flex items-center gap-1 flex-shrink-0">
                                 <button onClick={() => updateItemQty(idx, Math.max(0, (item.returnQty||0) - 1))}
                                   className="w-7 h-7 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">−</button>
-                                <input type="number" min="0" max={item.remaining ?? item.quantity} step="1"
+                                <input type="number" min="0" max={availableQuantity} step="1"
                                   className="input w-14 text-center text-sm py-1"
                                   value={item.returnQty || 0}
                                   onChange={e => updateItemQty(idx, e.target.value)} />
-                                <button onClick={() => updateItemQty(idx, Math.min(item.remaining ?? item.quantity, (item.returnQty||0) + 1))}
+                                <button onClick={() => updateItemQty(idx, Math.min(availableQuantity, (item.returnQty||0) + 1))}
                                   className="w-7 h-7 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">+</button>
                                 <span className="text-[10px] text-gray-400 ml-1 w-12 text-left">
-                                  / {item.remaining ?? item.quantity}
+                                  / {availableQuantity}
                                 </span>
                               </div>
                             )}
@@ -369,7 +495,7 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                                 )}
                               </label>
                               <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
-                                {fmtUSD((item.applied_price_usd || 0) * (item.returnQty || 0))}
+                                {fmtUSD(toNumber(item.applied_price_usd) * (item.returnQty || 0))}
                               </span>
                             </div>
                           )}
@@ -380,7 +506,7 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                   {activeItems.length > 0 && (
                     <div className="mt-2 flex justify-between text-sm font-semibold text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2 border border-blue-200 dark:border-blue-800">
                       <span>{activeItems.length} {T('items','item(s)')} {T('return_type_restock','to return')}
-                        {activeItems.length < selectedItems.filter(it => !(it.remaining <= 0)).length
+                        {activeItems.length < selectedItems.filter((it) => it.remaining > 0).length
                           ? <span className="text-orange-500 ml-1 font-normal">({T('status_partial_return','partial')})</span>
                           : null}
                       </span>
@@ -426,7 +552,7 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                   setStep('confirm')
                 }} className="btn-primary text-sm flex-1">
                   {T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
-                  {activeItems.length < selectedItems.filter(it => (it.remaining ?? it.quantity) > 0).length
+                  {activeItems.length < selectedItems.filter((it) => (it.remaining ?? toNumber(it.quantity)) > 0).length
                     ? ` (${T('status_partial_return','partial')})` : ''}
                 </button>
               </div>
@@ -465,7 +591,7 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                       </span>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white flex-shrink-0">
-                      {fmtUSD((it.applied_price_usd || 0) * it.returnQty)}
+                      {fmtUSD(toNumber(it.applied_price_usd) * it.returnQty)}
                     </span>
                   </div>
                 ))}

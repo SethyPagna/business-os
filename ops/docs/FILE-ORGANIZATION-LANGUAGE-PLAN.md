@@ -568,7 +568,7 @@ Decision rule:
     verification, broad Phase 8.4 Playwright UI live check, and storage pruning
     passed on frontend hash `080d514c34776914`.
 50. Harden Returns write pathways. Done:
-    `frontend/src/components/returns/NewReturnModal.jsx`,
+    `frontend/src/components/returns/NewReturnModal.tsx`,
     `frontend/src/components/returns/EditReturnModal.tsx`, and
     `frontend/src/components/returns/NewSupplierReturnModal.tsx` now wrap
     customer return create, customer return update, and supplier return create
@@ -4075,6 +4075,14 @@ Decision rule:
     setup/inventory/create timeouts, same-tick submit guards, stale request
     invalidation, branch-stock quantity clamps, compensation/loss math, and
     returns/inventory/products sync updates intact.
+521. Convert the customer return modal to TSX. Done:
+    `frontend/src/components/returns/NewReturnModal.tsx` now types sale rows,
+    sale item rows, selected return items, previous-return rows, create-return
+    payloads, return handling methods, app user context, notification
+    callbacks, formatter callbacks, and return API calls. The conversion keeps
+    sale search/history/create timeouts, same-tick search and submit guards,
+    stale request invalidation, quantity clamps, refund totals, partial-return
+    indicators, and returns/inventory/sales sync updates intact.
 
 ## Safety Gates
 

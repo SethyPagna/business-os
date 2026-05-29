@@ -333,3 +333,25 @@ Use this shape for future entries:
   tunnel failure
 - follow-up insight: supplier-return payload construction now goes through a
   typed API helper, making future Returns route conversion safer.
+
+- change: converted the customer return modal to TSX with typed sale, sale
+  item, selected return item, previous-return, create payload, app user,
+  formatter, notification, and API boundaries
+- affected files: `frontend/src/components/returns/NewReturnModal.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/whole-app-hardening.md`
+- route or API target: Customer return modal, sale search, return history
+  lookup, return create write, returns/inventory/sales sync events
+- keeper or rollback: keeper if action stability, performance loading UX,
+  typecheck, JSX, frontend/backend utility, build, Phase 29 audit, and Phase
+  8.4 live suite pass
+- route-scoped result: passed in Move 521 action stability, performance
+  loading UX, typecheck, JSX, frontend/backend utility, build, Phase 29, and
+  schema/reference checks
+- warm whole-app result: passed in Move 521 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: the customer and supplier return create flows now both
+  use explicit typed API helpers, reducing risk before the larger Returns page
+  shell conversion.

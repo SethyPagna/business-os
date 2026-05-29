@@ -5644,3 +5644,14 @@ Move 520 status:
   The move keeps setup/inventory/create timeouts, stale request invalidation,
   same-tick submit guards, branch-stock quantity clamps, compensation/loss
   calculations, and returns/inventory/products sync events unchanged.
+
+Move 521 status:
+- Move 521 converts the customer return modal to
+  `frontend/src/components/returns/NewReturnModal.tsx`. The typed boundary now
+  covers sale rows, sale item rows, selected return items, previous-return
+  rows, create-return payloads, return handling methods, app user context,
+  notification callbacks, money formatting, numeric coercion, and return API
+  methods. The move keeps sale search/history/create timeouts, stale request
+  invalidation, same-tick search and submit guards, quantity clamps, refund
+  totals, partial-return indicators, and returns/inventory/sales sync events
+  unchanged.

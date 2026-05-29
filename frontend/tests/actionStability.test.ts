@@ -119,7 +119,7 @@ await runTest('backup export and restore keep local busy state plus backend job 
 
 await runTest('return create, edit, and supplier flows keep synchronous submit guards', () => {
   const returns = readFrontend('src/components/returns/Returns.jsx')
-  const newReturn = readFrontend('src/components/returns/NewReturnModal.jsx')
+  const newReturn = readFrontend('src/components/returns/NewReturnModal.tsx')
   const editReturn = readFrontend('src/components/returns/EditReturnModal.tsx')
   const supplierReturn = readFrontend('src/components/returns/NewSupplierReturnModal.tsx')
   const methods = readFrontend('src/api/methods.js')
@@ -134,7 +134,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   }
 
   assert.match(newReturn, /const RETURN_CREATE_TIMEOUT_MS = 15000/)
-  assert.match(newReturn, /withLoaderTimeout\(\s*\(\) => window\.api\.createReturn\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/)
+  assert.match(newReturn, /const api = getReturnApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.createReturn\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/)
   assert.match(editReturn, /const RETURN_UPDATE_TIMEOUT_MS = 15000/)
   assert.match(editReturn, /const api = getReturnApi\(\)[\s\S]*const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => api\.updateReturn\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/)
   assert.match(supplierReturn, /const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000/)

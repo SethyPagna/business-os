@@ -28,7 +28,7 @@ const sales = fs.readFileSync(new URL('../src/components/sales/Sales.jsx', impor
 const salesExportModal = fs.readFileSync(new URL('../src/components/sales/ExportModal.tsx', import.meta.url), 'utf8')
 const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
 const returns = fs.readFileSync(new URL('../src/components/returns/Returns.jsx', import.meta.url), 'utf8')
-const newReturnModal = fs.readFileSync(new URL('../src/components/returns/NewReturnModal.jsx', import.meta.url), 'utf8')
+const newReturnModal = fs.readFileSync(new URL('../src/components/returns/NewReturnModal.tsx', import.meta.url), 'utf8')
 const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
 const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.tsx', import.meta.url), 'utf8')
 const branches = fs.readFileSync(new URL('../src/components/branches/Branches.jsx', import.meta.url), 'utf8')
@@ -820,17 +820,17 @@ assert.match(
 )
 assert.match(
   newReturnModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getSales\(\{ limit: 500 \}\),\s*'Return sale search',\s*RETURN_SALE_SEARCH_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.getSales\(\{ limit: 500 \}\),\s*'Return sale search',\s*RETURN_SALE_SEARCH_TIMEOUT_MS,\s*\)/,
   'customer return sale search should timeout slow sales reads',
 )
 assert.match(
   newReturnModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getReturns\(\{ saleId: found\.id \}\),\s*'Return history lookup',\s*RETURN_HISTORY_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.getReturns\(\{ saleId: found\.id \}\),\s*'Return history lookup',\s*RETURN_HISTORY_LOOKUP_TIMEOUT_MS,\s*\)/,
   'customer return history lookup should timeout slow return history reads',
 )
 assert.match(
   newReturnModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.createReturn\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/,
+  /const api = getReturnApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.createReturn\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/,
   'customer return create should timeout slow return writes',
 )
 assert.match(
