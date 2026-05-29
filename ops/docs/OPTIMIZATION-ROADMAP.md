@@ -5589,3 +5589,12 @@ Move 514 status:
   unknown-safe write-conflict handling. The move keeps submit guards, explicit
   update timeout coverage, conflict recovery, and returns/inventory/sales
   refresh events unchanged while updating source-path guard tests.
+
+Move 515 status:
+- Move 515 converts the navigation sidebar shell to
+  `frontend/src/components/navigation/Sidebar.tsx`. The typed boundary now
+  covers app-context navigation state, user/profile fields, settings-driven
+  sidebar styles, navigation permission checks, navigation items plus Lucide
+  icons, mobile pinned/drawer rows, and page-intent event sources. The move
+  keeps desktop, mobile header, bottom bar, drawer, sync status, profile modal,
+  and route warmup behavior unchanged while updating performance guards.

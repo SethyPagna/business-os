@@ -225,3 +225,23 @@ Use this shape for future entries:
 - follow-up insight: this modal now uses the same local typed API accessor
   pattern as other converted write surfaces while preserving the synchronous
   submit guard.
+
+- change: converted the navigation sidebar shell to TSX with typed app
+  context, settings color/style overrides, user/profile fields, nav items,
+  Lucide icon mapping, and page intent events
+- affected files: `frontend/src/components/navigation/Sidebar.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/scripts/frontend/verify-performance.ts`
+- route or API target: app shell navigation, desktop sidebar, mobile header,
+  mobile bottom bar, more drawer, route chunk warmup
+- keeper or rollback: keeper if performance loading UX, frontend performance
+  verifier, typecheck, JSX, frontend/backend utility, build, Phase 29 audit,
+  and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 515 performance loading UX, frontend
+  performance verifier, typecheck, JSX, frontend/backend utility, build, Phase
+  29, and schema/reference checks
+- warm whole-app result: passed in Move 515 Phase 8.4 live UI suite with zero
+  relevant console messages; public Cloudflare remained skipped for the known
+  tunnel failure
+- follow-up insight: the nav shell now has a typed icon fallback so future nav
+  ids cannot render an undefined icon component during settings/order changes.

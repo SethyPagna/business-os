@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { type ComponentType, type CSSProperties, useMemo, useState } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import {
   BadgeDollarSign,
   BookUser,
@@ -20,14 +21,56 @@ import {
   Ticket,
   Users,
 } from 'lucide-react'
-import { useApp } from '../../AppContext'
-import UserProfileModal from '../users/UserProfileModal'
-import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
+import { useApp as useAppHook } from '../../AppContext.jsx'
+import UserProfileModalComponent from '../users/UserProfileModal.jsx'
+import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import NotificationCenter from '../shared/NotificationCenter'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 
-const ICONS_BY_ID = {
+type TranslateFn = (key: string) => string
+type IntentSource = 'focus' | 'pointer' | 'touch'
+
+interface SidebarUser {
+  name?: string | null
+  role_name?: string | null
+  avatar_path?: string | null
+}
+
+interface SidebarSettings {
+  ui_nav_order?: unknown
+  ui_mobile_pinned?: unknown
+  language?: string | null
+  customer_portal_logo_image?: string | null
+  business_name?: string | null
+  ui_sidebar_color?: string | null
+  ui_sidebar_text_color?: string | null
+}
+
+interface SidebarAppContext {
+  page: string
+  navigateTo: (pageId: string) => void
+  user?: SidebarUser | null
+  logout: () => void
+  t: TranslateFn
+  settings?: SidebarSettings | null
+  hasPermission: (permission: NavigationPermission) => boolean
+  syncUrl?: string | null
+  syncConnected?: boolean
+}
+
+type NavigationItemWithIcon = NavigationItem & {
+  icon: LucideIcon
+}
+
+type UserProfileModalProps = {
+  onClose: () => void
+}
+
+const useApp = useAppHook as () => SidebarAppContext
+const UserProfileModal = UserProfileModalComponent as ComponentType<UserProfileModalProps>
+
+const ICONS_BY_ID: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
   catalog: ShoppingBag,
   loyalty_points: Ticket,
@@ -47,7 +90,7 @@ const ICONS_BY_ID = {
   server: Server,
 }
 
-function getFallbackLabel(itemId, language) {
+function getFallbackLabel(itemId: string, language: string): string {
   void language
   if (itemId === 'server') return 'Sync Server'
   if (itemId === 'catalog') return 'Customer Portal'
@@ -55,7 +98,7 @@ function getFallbackLabel(itemId, language) {
   return ''
 }
 
-function getNavLabel(item, t, language) {
+function getNavLabel(item: NavigationItem, t: TranslateFn, language: string): string {
   if (item.id === 'server') {
     const label = t('sync_server_title')
     return label && label !== 'sync_server_title' ? label : getFallbackLabel(item.id, language)
@@ -71,7 +114,7 @@ function getNavLabel(item, t, language) {
   return t(item.key)
 }
 
-function isDarkColor(hex) {
+function isDarkColor(hex: string | null | undefined): boolean {
   if (!hex) return false
   const clean = hex.replace('#', '')
   if (!/^[0-9a-fA-F]{6}$/.test(clean)) return false
@@ -81,21 +124,29 @@ function isDarkColor(hex) {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.35
 }
 
-function withAlpha(hex, alpha) {
+function withAlpha(hex: string | null | undefined, alpha: string): string {
   if (!hex || !/^#?[0-9a-fA-F]{6}$/.test(hex)) return ''
   const clean = hex.startsWith('#') ? hex.slice(1) : hex
   return `#${clean}${alpha}`
 }
 
-function mergeStyles(...styles) {
+function mergeStyles(...styles: Array<CSSProperties | undefined>): CSSProperties {
   return Object.assign({}, ...styles.filter(Boolean))
 }
 
-function announcePageIntent(pageId, source = 'pointer') {
+function announcePageIntent(pageId: string, source: IntentSource = 'pointer'): void {
   if (typeof window === 'undefined' || !pageId) return
   window.dispatchEvent(new CustomEvent(APP_PAGE_INTENT_EVENT, {
     detail: { pageId, source },
   }))
+}
+
+function getIconForItem(itemId: string): LucideIcon {
+  return ICONS_BY_ID[itemId] || LayoutDashboard
+}
+
+function isNavigationItemWithIcon(item: NavigationItemWithIcon | undefined): item is NavigationItemWithIcon {
+  return !!item
 }
 
 export default function Sidebar() {
@@ -114,22 +165,22 @@ export default function Sidebar() {
   const [moreOpen, setMoreOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
 
-  const visibleItems = useMemo(() => {
+  const visibleItems = useMemo<NavigationItemWithIcon[]>(() => {
     const orderedIds = parseNavSetting(settings?.ui_nav_order, [])
     const allowedItems = NAV_CONFIG_ITEMS
       .filter((item) => item.permission === null || hasPermission(item.permission))
-      .map((item) => ({ ...item, icon: ICONS_BY_ID[item.id] }))
+      .map((item) => ({ ...item, icon: getIconForItem(item.id) }))
     return orderNavItems(allowedItems, orderedIds)
   }, [hasPermission, settings?.ui_nav_order])
 
-  const mobilePinnedIds = useMemo(() => {
+  const mobilePinnedIds = useMemo<string[]>(() => {
     const saved = parseNavSetting(settings?.ui_mobile_pinned, DEFAULT_MOBILE_PINNED)
     return saved.slice(0, 4)
   }, [settings?.ui_mobile_pinned])
 
-  const pinnedItems = useMemo(() => {
+  const pinnedItems = useMemo<NavigationItemWithIcon[]>(() => {
     const byId = new Map(visibleItems.map((item) => [item.id, item]))
-    return mobilePinnedIds.map((id) => byId.get(id)).filter(Boolean)
+    return mobilePinnedIds.map((id) => byId.get(id)).filter(isNavigationItemWithIcon)
   }, [visibleItems, mobilePinnedIds])
 
   const drawerItems = visibleItems.filter((item) => !mobilePinnedIds.includes(item.id))
@@ -153,15 +204,15 @@ export default function Sidebar() {
     : 'active'
   const hoverClass = sidebarBg ? (isDark ? 'hover:bg-white/10' : 'hover:bg-black/5') : ''
 
-  const textStyle = sidebarTextColor ? { color: sidebarTextColor } : undefined
-  const subduedTextStyle = sidebarTextColor ? { color: sidebarTextColor, opacity: 0.72 } : undefined
-  const activeStyle = sidebarTextColor
+  const textStyle: CSSProperties | undefined = sidebarTextColor ? { color: sidebarTextColor } : undefined
+  const subduedTextStyle: CSSProperties | undefined = sidebarTextColor ? { color: sidebarTextColor, opacity: 0.72 } : undefined
+  const activeStyle: CSSProperties | undefined = sidebarTextColor
     ? {
         color: sidebarTextColor,
         backgroundColor: withAlpha(sidebarTextColor, isDark ? '24' : '18') || undefined,
       }
     : undefined
-  const mobileInactiveStyle = sidebarTextColor ? { color: sidebarTextColor, opacity: 0.74 } : undefined
+  const mobileInactiveStyle: CSSProperties | undefined = sidebarTextColor ? { color: sidebarTextColor, opacity: 0.74 } : undefined
   const mobileActiveStyle = mergeStyles(
     sidebarTextColor ? { color: sidebarTextColor } : undefined,
     sidebarTextColor ? { backgroundColor: withAlpha(sidebarTextColor, isDark ? '24' : '18') || undefined } : undefined,

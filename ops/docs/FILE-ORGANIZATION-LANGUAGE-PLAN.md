@@ -2317,7 +2317,7 @@ Decision rule:
     The authenticated app shell now listens for `bos:page-intent` events and
     preloads only the exact route chunk the user is about to open, with an
     80 ms debounce, a 7 s chunk timeout, idle scheduling, visibility checks, and
-    slow/save-data connection guards. `Sidebar.jsx` publishes that event from
+    slow/save-data connection guards. `Sidebar.tsx` publishes that event from
     desktop pointer/focus intent and mobile touch intent before `navigateTo()`,
     improving second-page navigation without returning to broad startup
     prefetches. The frontend performance verifier and UX guard test now enforce
@@ -4033,6 +4033,13 @@ Decision rule:
     keeps same-tick submit guards, explicit update timeouts, conflict recovery,
     and returns/inventory/sales refresh events intact while moving source-path
     guard tests to the TSX file.
+515. Convert the navigation sidebar shell to TSX. Done:
+    `frontend/src/components/navigation/Sidebar.tsx` now types app-context
+    navigation state, settings-driven color/style overrides, user profile
+    fields, navigation permissions, nav items with icon components, and page
+    intent events. The conversion keeps desktop/sidebar/mobile drawer layouts,
+    route warmup pointer/touch/focus events, sync status dots, and profile
+    modal entry intact while moving source-path performance guards to TSX.
 
 ## Safety Gates
 
