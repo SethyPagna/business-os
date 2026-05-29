@@ -5665,3 +5665,14 @@ Move 522 status:
   extensionless lazy imports, ReceiptPreview's bounded dynamic import,
   PDF/print/image actions, receipt template application, Khmer/bilingual
   labels, totals, and receipt settings sync contracts unchanged.
+
+Move 523 status:
+- Move 523 converts the receipt settings page to
+  `frontend/src/components/receipt-settings/ReceiptSettings.tsx`. The typed
+  boundary now covers receipt template state, settings save/load callbacks,
+  notification callbacks, app-context settings, auto-save queue options,
+  section ids/icons, local section/toggle props, preview refs, and save option
+  payloads. The move keeps silent debounced auto-save, manual save feedback,
+  timeout-bounded refresh, field order management, print settings, all-fields
+  controls, desktop/sidebar preview, mobile preview drawer, and receipt
+  settings sync contracts unchanged.

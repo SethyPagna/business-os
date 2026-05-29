@@ -377,3 +377,29 @@ Use this shape for future entries:
 - follow-up insight: the receipt overlay no longer relies on implicit JSX
   arithmetic for totals and export modes, reducing risk before converting the
   larger Receipt Settings page shell.
+
+- change: converted the receipt settings page to TSX with typed template
+  state, app-context settings, save/load callbacks, notification callbacks,
+  auto-save queue options, section ids, preview refs, and local section/toggle
+  props
+- affected files:
+  `frontend/src/components/receipt-settings/ReceiptSettings.tsx`,
+  `frontend/src/components/receipt-settings/ReceiptPreview.tsx`,
+  `frontend/tests/receiptSettingsSync.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Receipt Settings page, settings save/load API,
+  receipt preview, print settings panel, field/order/all-fields controls
+- keeper or rollback: keeper if receipt settings sync, receipt template,
+  performance loading UX, typecheck, JSX, frontend/backend utility, build,
+  Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 523 receipt settings sync, receipt
+  template, performance loading UX, typecheck, JSX, frontend/backend utility,
+  build, Phase 29, and schema/reference checks
+- warm whole-app result: passed in Move 523 Phase 8.4 live UI suite with 72
+  checked UI signals and zero relevant console messages; public Cloudflare
+  remained skipped for the known tunnel failure
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed 13,201,004
+  bytes of old runtime reports, kept latest local backups, kept latest R2
+  backup metadata, and pruned no Docker volumes or images
+- follow-up insight: Receipt Settings now has typed save queue and preview
+  boundaries, reducing risk before converting the remaining settings/ops pages.

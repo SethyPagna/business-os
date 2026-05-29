@@ -4091,6 +4091,15 @@ Decision rule:
     ReceiptPreview's bounded dynamic import, PDF/print/image export actions,
     receipt template application, numeric totals, Khmer/bilingual labels, and
     receipt settings sync contracts intact.
+523. Convert the receipt settings page to TSX. Done:
+    `frontend/src/components/receipt-settings/ReceiptSettings.tsx` now types
+    receipt template state, app-context settings, save/load callbacks,
+    notification callbacks, auto-save queue options, section ids, local section
+    and toggle props, preview refs, and settings save options. The conversion
+    keeps silent debounced auto-save, manual save feedback, timeout-bounded
+    settings refresh, the field order manager, print settings panel, all-fields
+    panel, preview drawer/sidebar, and receipt settings sync contracts intact
+    while moving exact source-path guards to TSX.
 
 ## Safety Gates
 

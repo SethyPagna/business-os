@@ -7,12 +7,13 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
+import type { NormalizedReceiptTemplate } from '../../types/receiptContracts.ts'
 
 const RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS = 12000
 
-type ReceiptTemplate = Record<string, unknown> & {
+type ReceiptTemplate = NormalizedReceiptTemplate | (Record<string, unknown> & {
   receipt_language?: string
-}
+})
 
 type ReceiptSettings = Record<string, unknown> & {
   exchange_rate?: string | number

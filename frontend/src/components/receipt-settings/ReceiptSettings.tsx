@@ -1,9 +1,12 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { Eye, Globe, LayoutList, Palette, Printer, Save, Truck, Type } from 'lucide-react'
 import ErrorBoundary from './ErrorBoundary'
-import { useApp } from '../../AppContext'
+import { useApp } from '../../AppContext.jsx'
 import { DEFAULT_TEMPLATE } from './constants'
+import type { ReceiptTemplate } from './constants'
 import { parseReceiptTemplate, serializeReceiptTemplate } from './template'
 import FieldOrderManager from './FieldOrderManager'
 import AllFieldsPanel    from './AllFieldsPanel'
@@ -15,8 +18,62 @@ import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000
 const RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS = 10000
 
+type Translate = (key: string, fallback?: string) => string
+type AppSettings = Record<string, unknown> & {
+  receipt_footer?: string
+  receipt_template?: unknown
+}
+type SaveSettingsOptions = {
+  silentToast?: boolean
+  refreshChannels?: string[]
+  reason?: string
+  source?: string
+}
+type SaveSettingsResult = {
+  success?: boolean
+  conflict?: boolean
+  error?: unknown
+}
+type SaveSettings = (
+  settings: Record<string, unknown>,
+  options?: SaveSettingsOptions,
+) => Promise<SaveSettingsResult | void> | SaveSettingsResult | void
+type LoadSettings = () => Promise<Record<string, unknown> | void> | Record<string, unknown> | void
+type Notify = (message: string, type?: string) => void
+type ReceiptSettingsApp = {
+  t?: Translate
+  settings?: AppSettings
+  loadSettings?: LoadSettings
+  saveSettings?: SaveSettings
+  notify?: Notify
+}
+type SectionId = 'fields' | 'order' | 'delivery' | 'style' | 'language' | 'footer' | 'print'
+type SectionConfig = {
+  id: SectionId
+  label: string
+  icon: LucideIcon
+}
+type PersistOptions = {
+  silent?: boolean
+  showToast?: boolean
+}
+type SectionProps = {
+  title: string
+  children: ReactNode
+}
+type ToggleProps = {
+  label: string
+  desc?: string
+  value: boolean
+  onChange: (value: boolean) => void
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 // ----- Shared primitives (defined locally to avoid circular imports) ----------
-function Section({ title, children }) {
+function Section({ title, children }: SectionProps) {
   return (
     <div className="card p-4 mb-4">
       <h3 className="text-sm font-semibold text-gray-800 dark:text-white mb-3 pb-2 border-b border-gray-100 dark:border-gray-700">
@@ -27,7 +84,7 @@ function Section({ title, children }) {
   )
 }
 
-function Toggle({ label, desc, value, onChange }) {
+function Toggle({ label, desc, value, onChange }: ToggleProps) {
   return (
     <div className="flex items-center justify-between py-2 cursor-pointer select-none" onClick={() => onChange(!value)}>
       <div className="flex-1 min-w-0 mr-3">
@@ -44,28 +101,27 @@ function Toggle({ label, desc, value, onChange }) {
 
 export default function ReceiptSettings() {
   console.debug('[ReceiptSettings] render start')
-  const app = useApp()
-  const t = (typeof app?.t === 'function') ? app.t : (k => k)
-  const settings = app?.settings || {}
-  const loadSettings = app?.loadSettings || (async () => ({}))
-  const saveSettings = app?.saveSettings || (async () => ({ success: false, error: new Error('Settings save unavailable') }))
-  const notify = app?.notify || (() => {})
-  const fmtUSD = app?.fmtUSD || (n => String(n))
-  const fmtKHR = app?.fmtKHR || (n => String(n))
+  const useReceiptSettingsApp = useApp as unknown as () => ReceiptSettingsApp | null
+  const app = useReceiptSettingsApp()
+  const t: Translate = (typeof app?.t === 'function') ? app.t : ((key) => key)
+  const settings: AppSettings = app?.settings || {}
+  const loadSettings: LoadSettings = app?.loadSettings || (async () => ({}))
+  const saveSettings: SaveSettings = app?.saveSettings || (async () => ({ success: false, error: new Error('Settings save unavailable') }))
+  const notify: Notify = app?.notify || (() => {})
 
-  const [tpl, setTpl]               = useState(DEFAULT_TEMPLATE)
-  const [activeSection, setActiveSection] = useState('fields')
+  const [tpl, setTpl]               = useState<ReceiptTemplate>(DEFAULT_TEMPLATE)
+  const [activeSection, setActiveSection] = useState<SectionId>('fields')
   const [previewOpen, setPreviewOpen]     = useState(false)
   const [saving, setSaving]               = useState(false)
 
   // Refs for stable references inside effects (avoids stale closures)
-  const saveTimerRef     = useRef(null)
+  const saveTimerRef     = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const isMountedRef     = useRef(false)   // guard: skip auto-save on first render
-  const loadSettingsRef  = useRef(loadSettings)
+  const loadSettingsRef  = useRef<LoadSettings>(loadSettings)
   const saveInFlightRef  = useRef(false)
-  const queuedSaveRef    = useRef(null)
+  const queuedSaveRef    = useRef<PersistOptions | null>(null)
   const aliveRef         = useRef(true)
-  const previewTargetRef = useRef(null)
+  const previewTargetRef = useRef<HTMLDivElement | null>(null)
   const persistedTemplateRef = useRef('')
   const suppressNextAutoSaveRef = useRef(false)
 
@@ -87,9 +143,11 @@ export default function ReceiptSettings() {
   }, [settings.receipt_template])
 
   // Shallow field updater
-  const setT = useCallback((key, val) => setTpl(prev => ({ ...prev, [key]: val })), [])
+  const setT = useCallback((key: string, val: unknown) => {
+    setTpl((prev) => ({ ...prev, [key]: val }) as ReceiptTemplate)
+  }, [])
 
-  const persistTemplate = useCallback(async ({ silent = false, showToast = false } = {}) => {
+  const persistTemplate = useCallback(async ({ silent = false, showToast = false }: PersistOptions = {}) => {
     const options = { silent: !!silent, showToast: !!showToast }
     if (saveInFlightRef.current) {
       queuedSaveRef.current = {
@@ -139,7 +197,7 @@ export default function ReceiptSettings() {
       }
     } catch (error) {
       if (options.showToast) {
-        notify(error?.message || 'Save failed - check server connection', 'error')
+        notify(getErrorMessage(error, 'Save failed - check server connection'), 'error')
       }
     } finally {
       saveInFlightRef.current = false
@@ -187,12 +245,12 @@ export default function ReceiptSettings() {
   // Calls window.api.saveSettings directly (not AppContext.saveSettings) to avoid
   // the double-notification bug: AppContext.saveSettings calls notify() internally,
   // and the old code called notify() again after it returned, producing two toasts.
-  const handleSave = async () => {
+  const handleSave = async (): Promise<void> => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     await persistTemplate({ silent: false, showToast: true })
   }
 
-  const SECTIONS = [
+  const SECTIONS: SectionConfig[] = [
     { id: 'fields', label: t('receipt_fields') || 'All Fields', icon: LayoutList },
     { id: 'order', label: t('receipt_order') || 'Field Order', icon: LayoutList },
     { id: 'delivery', label: t('receipt_delivery') || 'Delivery', icon: Truck },
@@ -202,6 +260,7 @@ export default function ReceiptSettings() {
     { id: 'print', label: t('receipt_print') || 'Print', icon: Printer },
   ]
   const appliedReceiptConfig = useMemo(() => buildAppliedReceiptConfig({ settings, template: tpl }), [settings, tpl])
+  const typedPreviewTargetRef = previewTargetRef as RefObject<HTMLElement | null>
 
   return (
     <ErrorBoundary>
@@ -380,7 +439,7 @@ export default function ReceiptSettings() {
             </>
           )}
 
-          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={previewTargetRef} settings={settings} saveSettings={saveSettings} />}
+          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={typedPreviewTargetRef} settings={settings} saveSettings={saveSettings} />}
 
         </div>
       </div>
@@ -402,7 +461,7 @@ export default function ReceiptSettings() {
           </div>
         </div>
         <div ref={previewTargetRef} className="flex-1 overflow-auto min-h-0 p-4">
-          <ReceiptPreview tpl={appliedReceiptConfig.template} settings={appliedReceiptConfig.settings} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+          <ReceiptPreview tpl={appliedReceiptConfig.template} settings={appliedReceiptConfig.settings} />
         </div>
       </div>
 
@@ -427,7 +486,7 @@ export default function ReceiptSettings() {
               </div>
             </div>
             <div ref={previewTargetRef} className="flex-1 overflow-auto min-h-0 p-4">
-              <ReceiptPreview tpl={appliedReceiptConfig.template} settings={appliedReceiptConfig.settings} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+              <ReceiptPreview tpl={appliedReceiptConfig.template} settings={appliedReceiptConfig.settings} />
             </div>
           </div>
         </div>
