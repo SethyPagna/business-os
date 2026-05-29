@@ -531,3 +531,35 @@ Use this shape for future entries:
 - follow-up insight: the loyalty page now has a typed boundary around settings,
   customer lookup, and point-balance display before the broader AppContext and
   remaining route shells are converted.
+
+- change: converted the sync server page to TSX with typed app-context access,
+  local copy fallbacks, connection-info props, diagnostics tab ids, client and
+  server log rows, write-error events, pending sync queue state, system debug
+  payloads, security config, connection test results, and typed server API
+  gateway calls
+- affected files:
+  `frontend/src/components/server/ServerPage.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/offlineSalesQueue.test.ts`,
+  `frontend/tests/offlineSecurityHardening.test.ts`
+- route or API target: Sync Server page, diagnostics tabs, pending sync queue,
+  retry/discard queue actions, connection test, system config/debug reads,
+  offline security and sync-center messaging
+- keeper or rollback: keeper if action stability, performance loading UX,
+  offline sales queue, offline security hardening, typecheck, JSX,
+  frontend/backend utility, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: passed in Move 529 action stability, performance loading
+  UX, offline sales queue, offline security hardening, UI verifier, typecheck,
+  JSX, frontend/backend utility, build, Phase 29, organization, schema, and
+  reference checks
+- warm whole-app result: passed in Move 529 Phase 8.4 live UI suite with 72
+  checked UI signals and zero relevant console messages; public Cloudflare
+  remained skipped for the known tunnel failure
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed 219,923
+  bytes from one old Phase 8.4 runtime report, kept latest local backups and
+  latest R2 backup metadata, pruned no Docker containers/cache bytes, and the
+  post-prune Phase 29 repeat audit passed
+- follow-up insight: sync-server connection and queue diagnostics now have a
+  typed UI boundary, which reduces risk before larger App/AppContext conversion
+  slices touch the same websocket and offline-write pathways.

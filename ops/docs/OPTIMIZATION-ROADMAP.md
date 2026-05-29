@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 528.
+- Latest completed implementation move in this roadmap: Move 529.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -5735,3 +5735,14 @@ Move 528 status:
   reads, bounded membership lookup, same-tick point-rule save guard, customer
   leaderboard, policy preview, and loading/action/navigation source guards
   behavior unchanged.
+
+Move 529 status:
+- Move 529 converts the sync server page to
+  `frontend/src/components/server/ServerPage.tsx`. The typed boundary now
+  covers sync-server app context access, copy fallbacks, connection info props,
+  diagnostics tabs, client/server log rows, write-error events, pending sync
+  queue state, system debug payloads, security config, connection test
+  results, and the local server API gateway. The move keeps the extensionless
+  app lazy import, queue retry/discard same-tick guards, timeout-bounded
+  pending queue/config/debug/test calls, sync-center copy, offline-security
+  guard coverage, and pending offline-work diagnostics behavior unchanged.

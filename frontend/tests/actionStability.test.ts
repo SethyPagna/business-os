@@ -291,7 +291,7 @@ await runTest('reset data and factory reset use guarded bounded actions', () => 
 })
 
 await runTest('server queue and connection actions use guarded bounded actions', () => {
-  const source = readFrontend('src/components/server/ServerPage.jsx')
+  const source = readFrontend('src/components/server/ServerPage.tsx')
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS = 12000/)
@@ -299,11 +299,11 @@ await runTest('server queue and connection actions use guarded bounded actions',
   assert.match(source, /const queueActionInFlightRef = useRef\(false\)/)
   assert.match(source, /const testSyncInFlightRef = useRef\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(queueActionInFlightRef, \{ blocked: retryingQueue \}\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.retryPendingSyncNow\(\),\s*'Retry pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.discardPendingSyncQueue\(\),\s*'Discard pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.retryPendingSyncNow\?\.\(\),\s*'Retry pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.discardPendingSyncQueue\?\.\(\),\s*'Discard pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(queueActionInFlightRef\)[\s\S]*setRetryingQueue\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(testSyncInFlightRef, \{ blocked: testing \}\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(testSyncInFlightRef\)[\s\S]*setTesting\(false\)/)
 })
 

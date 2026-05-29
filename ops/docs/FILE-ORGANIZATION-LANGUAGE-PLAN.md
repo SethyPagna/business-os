@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 528 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 529 in this file.
 
 ## Goal
 
@@ -606,7 +606,7 @@ Decision rule:
     typecheck, production build, broad Phase 8.4 Playwright UI live check, and
     storage pruning passed on frontend hash `41ba19c6e7f1bb2d`.
 54. Harden Server queue and connection actions. Done:
-    `frontend/src/components/server/ServerPage.jsx` now wraps pending-sync queue
+    `frontend/src/components/server/ServerPage.tsx` now wraps pending-sync queue
     retry, pending-sync queue discard, and manual sync-server connection test
     actions in same-tick guards plus explicit 12s timeout contracts. This keeps
     repeated clicks from stacking server queue operations and prevents the
@@ -4147,6 +4147,16 @@ Decision rule:
     reads, bounded membership lookup, same-tick point-rule save guard,
     customer leaderboard, policy preview, and route guard tests intact while
     moving exact source-path guards to TSX.
+529. Convert the sync server page to TSX. Done:
+    `frontend/src/components/server/ServerPage.tsx` now types sync-server app
+    context access, copy fallback helpers, connection info props, diagnostics
+    tab ids, call-log rows, server-log rows, write-error events, pending sync
+    queue state, system debug payloads, security config, connection test
+    results, and the local `window.api` server boundary. The conversion keeps
+    the app extensionless lazy import, queue retry/discard same-tick guards,
+    timeout-bounded queue/config/debug/test calls, sync-center copy,
+    offline-security guard coverage, and pending offline-work diagnostics
+    intact while moving exact source-path guards to TSX.
 
 ## Safety Gates
 

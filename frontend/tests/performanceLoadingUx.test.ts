@@ -11,7 +11,7 @@ const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/Audit
 const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
 const otpModal = fs.readFileSync(new URL('../src/components/utils-settings/OtpModal.tsx', import.meta.url), 'utf8')
 const resetData = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
-const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.jsx', import.meta.url), 'utf8')
+const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
 const receiptSettingsPage = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
 const receiptPreview = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
 const contacts = fs.readFileSync(new URL('../src/components/contacts/Contacts.tsx', import.meta.url), 'utf8')
@@ -1305,32 +1305,32 @@ assert.match(
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\?\.getPendingSyncState\?\.\(\),\s*'Pending sync queue',\s*SERVER_PENDING_SYNC_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api\?|getServerApi\(\))\.getPendingSyncState\?\.\(\),\s*'Pending sync queue',\s*SERVER_PENDING_SYNC_TIMEOUT_MS,\s*\)/,
   'server pending sync state should timeout slow queue reads',
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getSystemDebugLog\(\),\s*'Server diagnostics',\s*SERVER_DIAGNOSTICS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.getSystemDebugLog\(\),\s*'Server diagnostics',\s*SERVER_DIAGNOSTICS_TIMEOUT_MS,\s*\)/,
   'server diagnostics should timeout slow debug log reads',
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getSystemConfig\?\.\(\),\s*'Sync settings',\s*SERVER_SECURITY_CONFIG_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.getSystemConfig\?\.\(\),\s*'Sync settings',\s*SERVER_SECURITY_CONFIG_TIMEOUT_MS,\s*\)/,
   'server sync settings should timeout slow config reads',
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.retryPendingSyncNow\(\),\s*'Retry pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.retryPendingSyncNow\?\.\(\),\s*'Retry pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/,
   'server queue retry should timeout slow queue actions',
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.discardPendingSyncQueue\(\),\s*'Discard pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.discardPendingSyncQueue\?\.\(\),\s*'Discard pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/,
   'server queue discard should timeout slow queue actions',
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/,
   'server connection test should timeout slow sync test actions',
 )
 assert.match(

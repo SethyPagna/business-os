@@ -19,7 +19,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
-const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.jsx', import.meta.url), 'utf8')
+const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
 
 await runTest('createSale queues retryable offline writes with an idempotency key', () => {
   assert.match(methodsSource, /export async function createSale/)

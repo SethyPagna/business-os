@@ -41,6 +41,9 @@ Recent route-level win:
 - Loyalty Points page is now `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   with typed settings form state, API lookup boundaries, point rows, lookup
   totals, section ids, and save/lookup loading guards.
+- Sync Server page is now `frontend/src/components/server/ServerPage.tsx` with
+  typed diagnostics tabs, pending sync queue state, call logs, system debug
+  payloads, security config, connection tests, and queue action guards.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary

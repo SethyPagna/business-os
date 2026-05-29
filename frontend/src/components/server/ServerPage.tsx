@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -9,7 +10,7 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import { isBrokenLocalizedString, useApp } from '../../AppContext'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.jsx'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -26,10 +27,143 @@ const SERVER_SECURITY_CONFIG_TIMEOUT_MS = 8000
 const SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS = 12000
 const SERVER_SYNC_TEST_TIMEOUT_MS = 12000
 
+type TranslationFn = (key: string) => string
+
+type AppContextValue = {
+  settings?: Record<string, unknown>
+  t: TranslationFn
+  notify: (message: string, type?: string) => void
+  syncConnected?: boolean
+  syncUrl?: string | null
+  updateSyncUrl: (url: string | null) => void
+  formatDateTime: (value: Date | string | number | null | undefined) => string
+  displayTimezone?: string
+  deviceTimezone?: string
+}
+
+type StatusRowProps = {
+  label: ReactNode
+  value: ReactNode
+  mono?: boolean
+  extra?: ReactNode
+}
+
+type InfoTabProps = {
+  syncUrl?: string | null
+  syncConnected?: boolean
+  active?: boolean
+}
+
+type DiagnosticsPanelProps = InfoTabProps
+type DiagnosticsTab = 'client' | 'server' | 'queue' | 'sync-center' | 'info'
+
+type CallLogEntry = {
+  ts?: string
+  source?: string
+  channel?: string
+  ms?: number | string
+  ok?: boolean
+}
+
+type ServerLogEntry = {
+  ts?: string
+  channel?: string
+  ms?: number | string
+  ok?: boolean
+}
+
+type WriteErrorEntry = {
+  _id: number
+  ts?: string
+  channel?: string
+  error?: string
+}
+
+type PendingSyncItem = {
+  _seq?: number | string
+  created_at?: string
+  updated_at?: string
+  retry_at?: string
+  retry_count?: number
+  status?: string
+  channel?: string
+  entity_name?: string
+  error?: string
+}
+
+type PendingSyncState = {
+  total: number
+  pending: number
+  syncing: number
+  failed: number
+  items: PendingSyncItem[]
+}
+
+type ServerInfo = {
+  clients?: number
+  uptime?: number
+}
+
+type SystemConfig = {
+  accessMode?: string
+}
+
+type SyncTestResult = {
+  ok: boolean
+  message?: string
+  clients?: number
+}
+
+type ServerApi = {
+  getPendingSyncState?: () => Promise<unknown>
+  getCallLog?: () => CallLogEntry[]
+  clearCallLog?: () => void
+  getSystemDebugLog: () => Promise<unknown>
+  retryPendingSyncNow?: () => Promise<unknown>
+  discardPendingSyncQueue?: () => Promise<unknown>
+  getSystemConfig?: () => Promise<unknown>
+  testSyncServer: (url: string) => Promise<SyncTestResult>
+}
+
+const useApp = useAppHook as () => AppContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+function getServerApi(): ServerApi {
+  return (window as unknown as { api: ServerApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+function normalizePendingSyncState(value: unknown): PendingSyncState {
+  const candidate = typeof value === 'object' && value !== null ? value as Partial<PendingSyncState> : {}
+  return {
+    total: Number(candidate.total || 0),
+    pending: Number(candidate.pending || 0),
+    syncing: Number(candidate.syncing || 0),
+    failed: Number(candidate.failed || 0),
+    items: Array.isArray(candidate.items) ? candidate.items : [],
+  }
+}
+
+function normalizeSystemDebugLog(value: unknown): { entries: ServerLogEntry[]; clients?: number; uptime?: number } {
+  const candidate = typeof value === 'object' && value !== null ? value as { entries?: unknown; clients?: unknown; uptime?: unknown } : {}
+  return {
+    entries: Array.isArray(candidate.entries) ? candidate.entries as ServerLogEntry[] : [],
+    clients: typeof candidate.clients === 'number' ? candidate.clients : undefined,
+    uptime: typeof candidate.uptime === 'number' ? candidate.uptime : undefined,
+  }
+}
+
+function normalizeSystemConfig(value: unknown): SystemConfig | null {
+  return typeof value === 'object' && value !== null ? value as SystemConfig : null
+}
+
 function useLocalCopy() {
   const { settings, t } = useApp()
   const isKhmer = settings?.language === 'km'
-  return (key, fallbackEn, fallbackKm = fallbackEn) => {
+  return (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const translated = t?.(key)
     if (translated && translated !== key && !isBrokenLocalizedString(translated)) return translated
     if (isKhmer && fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
@@ -37,14 +171,14 @@ function useLocalCopy() {
   }
 }
 
-function isAutoDetected(syncUrl) {
+function isAutoDetected(syncUrl?: string | null): boolean {
   if (!syncUrl || typeof window === 'undefined') return false
   const isViteDev = window.location.hostname === 'localhost' &&
     (window.location.port === '5173' || window.location.port === '5174')
   return !isViteDev && syncUrl === window.location.origin
 }
 
-function StatusRow({ label, value, mono = false, extra = null }) {
+function StatusRow({ label, value, mono = false, extra = null }: StatusRowProps) {
   return (
     <div className="flex gap-2 py-0.5">
       <span className="w-32 flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">{label}</span>
@@ -56,15 +190,15 @@ function StatusRow({ label, value, mono = false, extra = null }) {
   )
 }
 
-function InfoTab({ syncUrl, syncConnected, active = true }) {
+function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
   const { settings, t, formatDateTime, displayTimezone, deviceTimezone } = useApp()
   const copy = useLocalCopy()
-  const [clientTime, setClientTime] = useState(new Date())
-  const [serverTime, setServerTime] = useState(null)
-  const [serverErr, setServerErr] = useState(null)
-  const [drift, setDrift] = useState(null)
+  const [clientTime, setClientTime] = useState<Date>(new Date())
+  const [serverTime, setServerTime] = useState<Date | null>(null)
+  const [serverErr, setServerErr] = useState<string | null>(null)
+  const [drift, setDrift] = useState<number | null>(null)
   const [fetching, setFetching] = useState(false)
-  const [lastFetch, setLastFetch] = useState(null)
+  const [lastFetch, setLastFetch] = useState<Date | null>(null)
   const fetchRequestRef = useRef(0)
 
   useEffect(() => {
@@ -86,8 +220,8 @@ function InfoTab({ syncUrl, syncConnected, active = true }) {
       })
       const rtt = Date.now() - startedAt
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      const raw = data?.serverTime || res.headers.get('date')
+      const data = await res.json().catch(() => ({})) as { serverTime?: string }
+      const raw = data.serverTime || res.headers.get('date')
       if (!raw) {
         if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
         setServerTime(null)
@@ -101,7 +235,7 @@ function InfoTab({ syncUrl, syncConnected, active = true }) {
       }
     } catch (error) {
       if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
-      setServerErr(error?.message || 'Fetch failed')
+      setServerErr(getErrorMessage(error, 'Fetch failed'))
       setServerTime(null)
     }
     if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
@@ -119,10 +253,12 @@ function InfoTab({ syncUrl, syncConnected, active = true }) {
     const timer = setInterval(fetchServerTime, 15000)
     return () => clearInterval(timer)
   }, [active, fetchServerTime])
-  useEffect(() => () => invalidateTrackedRequest(fetchRequestRef), [])
+  useEffect(() => () => {
+    invalidateTrackedRequest(fetchRequestRef)
+  }, [])
 
-  const fmt = (value) => formatDateTime(value)
-  const appliedTimezone = settings?.display_timezone || displayTimezone
+  const fmt = (value: Date | string | number | null | undefined): string => formatDateTime(value)
+  const appliedTimezone = String(settings?.display_timezone || displayTimezone || '')
   const mode = syncUrl ? (isAutoDetected(syncUrl) ? copy('sync_auto_mode', 'Auto-detected (same origin)', 'រកឃើញស្វ័យប្រវត្តិ (ដែនដើមដូចគ្នា)') : copy('manual', 'Manual', 'កំណត់ដោយដៃ')) : copy('sync_local_only_mode', 'Local (IndexedDB only)', 'មូលដ្ឋានីយ៉ាងតែប៉ុណ្ណោះ (IndexedDB)')
   const ws = syncUrl ? (syncConnected ? copy('connected', 'Connected', 'បានភ្ជាប់') : copy('reconnecting', 'Reconnecting...', 'កំពុងភ្ជាប់ឡើងវិញ...')) : copy('sync_local_only_short', 'Local only', 'មូលដ្ឋានីយ៉ាងតែប៉ុណ្ណោះ')
 
@@ -207,15 +343,15 @@ function InfoTab({ syncUrl, syncConnected, active = true }) {
   )
 }
 
-function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
+function DiagnosticsPanel({ syncUrl, syncConnected, active = true }: DiagnosticsPanelProps) {
   const copy = useLocalCopy()
-  const [clientLog, setClientLog] = useState([])
-  const [serverLog, setServerLog] = useState([])
-  const [serverInfo, setServerInfo] = useState(null)
-  const [writeErrors, setWriteErrors] = useState([])
-  const [pendingSync, setPendingSync] = useState({ total: 0, pending: 0, syncing: 0, failed: 0, items: [] })
+  const [clientLog, setClientLog] = useState<CallLogEntry[]>([])
+  const [serverLog, setServerLog] = useState<ServerLogEntry[]>([])
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null)
+  const [writeErrors, setWriteErrors] = useState<WriteErrorEntry[]>([])
+  const [pendingSync, setPendingSync] = useState<PendingSyncState>({ total: 0, pending: 0, syncing: 0, failed: 0, items: [] })
   const [retryingQueue, setRetryingQueue] = useState(false)
-  const [tab, setTab] = useState('client')
+  const [tab, setTab] = useState<DiagnosticsTab>('client')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const mounted = useRef(true)
   const queueRequestRef = useRef(0)
@@ -227,14 +363,14 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
     const requestId = beginTrackedRequest(queueRequestRef)
     try {
       const state = await withLoaderTimeout(
-        () => window.api?.getPendingSyncState?.(),
+        () => getServerApi().getPendingSyncState?.(),
         'Pending sync queue',
         SERVER_PENDING_SYNC_TIMEOUT_MS,
       )
       if (mounted.current && isTrackedRequestCurrent(queueRequestRef, requestId) && state) {
-        setPendingSync(state)
+        setPendingSync(normalizePendingSyncState(state))
       }
-    } catch (_) {}
+    } catch {}
   }, [active])
 
   useEffect(() => {
@@ -245,11 +381,12 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
       return undefined
     }
     mounted.current = true
-    if (window.api?.getCallLog) setClientLog(window.api.getCallLog())
+    if (getServerApi().getCallLog) setClientLog(getServerApi().getCallLog?.() || [])
     loadQueueState()
-    const onErr = (event) => {
+    const onErr = (event: Event) => {
       if (!mounted.current) return
-      setWriteErrors((prev) => [{ ...event.detail, _id: Date.now() }, ...prev].slice(0, 20))
+      const detail = event instanceof CustomEvent && typeof event.detail === 'object' && event.detail !== null ? event.detail as Partial<WriteErrorEntry> : {}
+      setWriteErrors((prev) => [{ ...detail, _id: Date.now() }, ...prev].slice(0, 20))
     }
     const onQueueChanged = () => {
       loadQueueState()
@@ -272,13 +409,14 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
     const requestId = beginTrackedRequest(serverLogRequestRef)
     try {
       const data = await withLoaderTimeout(
-        () => window.api.getSystemDebugLog(),
+        () => getServerApi().getSystemDebugLog(),
         'Server diagnostics',
         SERVER_DIAGNOSTICS_TIMEOUT_MS,
       )
       if (mounted.current && isTrackedRequestCurrent(serverLogRequestRef, requestId)) {
-        setServerLog(data.entries || [])
-        setServerInfo({ clients: data.clients, uptime: data.uptime })
+        const normalized = normalizeSystemDebugLog(data)
+        setServerLog(normalized.entries)
+        setServerInfo({ clients: normalized.clients, uptime: normalized.uptime })
       }
     } catch {
       // keep previous diagnostics visible if the authenticated fetch fails once
@@ -298,12 +436,12 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
   }
 
   async function handleRetryQueue() {
-    if (!window.api?.retryPendingSyncNow) return
+    if (!getServerApi().retryPendingSyncNow) return
     if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
     setRetryingQueue(true)
     try {
       await withLoaderTimeout(
-        () => window.api.retryPendingSyncNow(),
+        () => getServerApi().retryPendingSyncNow?.(),
         'Retry pending sync queue',
         SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,
       )
@@ -315,12 +453,12 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
   }
 
   async function handleDiscardQueue() {
-    if (!window.api?.discardPendingSyncQueue) return
+    if (!getServerApi().discardPendingSyncQueue) return
     if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
     setRetryingQueue(true)
     try {
       await withLoaderTimeout(
-        () => window.api.discardPendingSyncQueue(),
+        () => getServerApi().discardPendingSyncQueue?.(),
         'Discard pending sync queue',
         SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,
       )
@@ -337,7 +475,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-gray-800 dark:text-white">{copy('diagnostics', 'Diagnostics', 'ការវិនិច្ឆ័យ')}</span>
           <span className={`h-2 w-2 rounded-full ${syncConnected ? 'bg-green-500' : syncUrl ? 'animate-pulse bg-yellow-400' : 'bg-gray-300'}`} />
-          {serverInfo ? <span className="text-xs text-gray-500">{serverInfo.clients} {copy('devices', 'device(s)', 'ឧបករណ៍')} | {Math.round(serverInfo.uptime)}s {copy('uptime', 'uptime', 'ពេលដំណើរការ')}</span> : null}
+          {serverInfo ? <span className="text-xs text-gray-500">{serverInfo.clients ?? 0} {copy('devices', 'device(s)', 'ឧបករណ៍')} | {Math.round(serverInfo.uptime ?? 0)}s {copy('uptime', 'uptime', 'ពេលដំណើរការ')}</span> : null}
           {pendingSync.total > 0 ? (
             <span className={`rounded-full px-2 py-0.5 text-xs ${pendingSync.failed > 0 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
               {pendingSync.pending} pending / {pendingSync.failed} failed
@@ -362,7 +500,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
             {copy('auto', 'Auto', 'ស្វ័យប្រវត្តិ')}
           </label>
           <button onClick={fetchServerLog} className="text-xs text-blue-600 hover:underline">{copy('refresh', 'Refresh', 'ស្រស់ថ្មី')}</button>
-          <button onClick={() => { window.api?.clearCallLog?.(); setClientLog([]) }} className="text-xs text-gray-400 hover:text-red-500">{copy('clear', 'Clear', 'សម្អាត')}</button>
+          <button onClick={() => { getServerApi().clearCallLog?.(); setClientLog([]) }} className="text-xs text-gray-400 hover:text-red-500">{copy('clear', 'Clear', 'សម្អាត')}</button>
         </div>
       </div>
 
@@ -389,7 +527,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
           <button
             key={id}
             disabled={!!disabled}
-            onClick={() => setTab(id)}
+            onClick={() => setTab(id as DiagnosticsTab)}
             className={`border-b-2 px-4 py-2 text-xs font-medium ${tab === id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'} ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
           >
             {label}
@@ -405,7 +543,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
             ) : clientLog.map((entry, index) => (
               <div key={index} className={`flex items-center gap-2 border-b border-gray-50 py-1 font-mono text-xs dark:border-gray-700/30 ${entry.ok === false ? 'bg-red-50 dark:bg-red-900/10' : ''}`}>
                 <span className="w-16 flex-shrink-0 text-gray-400">{entry.ts?.slice(11, 19)}</span>
-                <span className={`flex-shrink-0 rounded px-1 text-xs ${badge[entry.source] || badge.local}`}>{entry.source || 'local'}</span>
+                <span className={`flex-shrink-0 rounded px-1 text-xs ${badge[entry.source === 'server' ? 'server' : 'local']}`}>{entry.source || 'local'}</span>
                 <span className={`flex-1 truncate ${entry.ok === false ? 'text-red-600' : 'text-gray-800 dark:text-gray-200'}`}>{entry.channel}</span>
                 <span className="flex-shrink-0 text-gray-400">{entry.ms}ms</span>
                 <span className={entry.ok === false ? 'text-red-500' : 'text-green-500'}>{entry.ok === false ? 'x' : 'ok'}</span>
@@ -509,10 +647,10 @@ export default function ServerPage() {
   const { t, notify, syncConnected, syncUrl, updateSyncUrl } = useApp()
   const isActive = useIsPageActive('server')
   const [urlInput, setUrlInput] = useState('')
-  const [securityConfig, setSecurityConfig] = useState(null)
+  const [securityConfig, setSecurityConfig] = useState<SystemConfig | null>(null)
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState(null)
-  const [onlineCount, setOnlineCount] = useState(null)
+  const [testResult, setTestResult] = useState<SyncTestResult | null>(null)
+  const [onlineCount, setOnlineCount] = useState<number | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const onlineCheckRequestRef = useRef(0)
   const securityConfigRequestRef = useRef(0)
@@ -542,16 +680,18 @@ export default function ServerPage() {
         if (res.ok) {
           const data = await res.json().catch(() => ({}))
           if (!isTrackedRequestCurrent(onlineCheckRequestRef, requestId)) return
-          setOnlineCount(data?.clients ?? null)
+          setOnlineCount(typeof data?.clients === 'number' ? data.clients : null)
         }
-      } catch (_) {}
+      } catch {}
     }
 
     check()
     const timer = setInterval(check, 10000)
     return () => clearInterval(timer)
   }, [isActive, syncUrl, syncConnected])
-  useEffect(() => () => invalidateTrackedRequest(onlineCheckRequestRef), [])
+  useEffect(() => () => {
+    invalidateTrackedRequest(onlineCheckRequestRef)
+  }, [])
 
   useEffect(() => {
     if (!isActive) {
@@ -562,17 +702,19 @@ export default function ServerPage() {
       const requestId = beginTrackedRequest(securityConfigRequestRef)
       try {
         const config = await withLoaderTimeout(
-          () => window.api.getSystemConfig?.(),
+          () => getServerApi().getSystemConfig?.(),
           'Sync settings',
           SERVER_SECURITY_CONFIG_TIMEOUT_MS,
         )
         if (!isTrackedRequestCurrent(securityConfigRequestRef, requestId)) return
-        if (config) setSecurityConfig(config)
-      } catch (_) {}
+        if (config) setSecurityConfig(normalizeSystemConfig(config))
+      } catch {}
     }
     loadSecurityConfig()
   }, [isActive, syncUrl, syncConnected])
-  useEffect(() => () => invalidateTrackedRequest(securityConfigRequestRef), [])
+  useEffect(() => () => {
+    invalidateTrackedRequest(securityConfigRequestRef)
+  }, [])
 
   async function handleTest() {
     const url = urlInput.trim().replace(/\/$/, '')
@@ -586,7 +728,7 @@ export default function ServerPage() {
     setTesting(true)
     try {
       const result = await withLoaderTimeout(
-        () => window.api.testSyncServer(url),
+        () => getServerApi().testSyncServer(url),
         'Test sync server',
         SERVER_SYNC_TEST_TIMEOUT_MS,
       )
@@ -596,7 +738,7 @@ export default function ServerPage() {
         message: result.ok ? `Connected - ${result.clients ?? 0} device(s) online` : (result.message || 'Connection failed'),
       })
     } catch (error) {
-      setTestResult({ ok: false, message: error?.message || 'Connection failed' })
+      setTestResult({ ok: false, message: getErrorMessage(error, 'Connection failed') })
     } finally {
       finishSingleAction(testSyncInFlightRef)
       setTesting(false)
@@ -648,7 +790,7 @@ export default function ServerPage() {
               ) : null}
             </div>
             {hasServer ? <div className="mt-0.5 truncate font-mono text-xs text-gray-500 dark:text-gray-400">{syncUrl}</div> : null}
-            {onlineCount !== null ? <div className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">{(t('sync_online_devices') || '{n} device(s) currently online').replace('{n}', onlineCount)}</div> : null}
+            {onlineCount !== null ? <div className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">{(t('sync_online_devices') || '{n} device(s) currently online').replace('{n}', String(onlineCount))}</div> : null}
             {!hasServer ? <div className="mt-0.5 text-xs text-gray-400">{t('sync_local_only_desc') || 'Data stored locally on this device only.'}</div> : null}
           </div>
           {hasServer ? <button onClick={handleDisconnect} className="btn-danger flex-shrink-0 px-3 py-1 text-xs">{t('sync_disconnect') || 'Disconnect'}</button> : null}
@@ -732,7 +874,7 @@ export default function ServerPage() {
                   type="url"
                   autoComplete="url"
                   value={urlInput}
-                  onChange={(event) => { setUrlInput(event.target.value); setTestResult(null) }}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => { setUrlInput(event.target.value); setTestResult(null) }}
                   placeholder="https://leangcosmetics.dpdns.org"
                   className="input text-sm"
                 />

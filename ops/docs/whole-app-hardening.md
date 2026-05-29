@@ -732,7 +732,7 @@ Last updated: 2026-05-18
     `frontend/src/components/utils-settings/ResetData.jsx`.
     Server pending-sync queue retry/discard and manual sync-server test actions
     now have explicit timeout contracts and same-tick guards in
-    `frontend/src/components/server/ServerPage.jsx`.
+    `frontend/src/components/server/ServerPage.tsx`.
     Audit Log retention cleanup now has an explicit timeout contract and
     same-tick guard in
     `frontend/src/components/utils-settings/AuditLog.jsx`.
