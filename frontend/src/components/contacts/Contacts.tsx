@@ -115,7 +115,7 @@ const ContactImportModal = lazy(() => (
   }))
 ))
 const loadSuppliersTab = async (): Promise<{ SuppliersTab: ComponentType<ContactTabProps> }> => (
-  await import('./SuppliersTab.jsx') as unknown as { SuppliersTab: ComponentType<ContactTabProps> }
+  await import('./SuppliersTab') as unknown as { SuppliersTab: ComponentType<ContactTabProps> }
 )
 const loadDeliveryTab = async (): Promise<{ DeliveryTab: ComponentType<ContactTabProps> }> => (
   await import('./DeliveryTab') as unknown as { DeliveryTab: ComponentType<ContactTabProps> }

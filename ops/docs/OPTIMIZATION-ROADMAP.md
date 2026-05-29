@@ -5792,3 +5792,14 @@ Move 533 status:
   grouped selection helpers, same-tick save/delete/bulk guards, CSV export,
   contact option display, and action/performance source guard behavior
   unchanged.
+
+Move 534 status:
+- Move 534 converts the suppliers contact tab to
+  `frontend/src/components/contacts/SuppliersTab.tsx`. The typed boundary now
+  covers supplier rows, grouped section rows, modal state, contact-option
+  payloads, app/sync context access, the local supplier API gateway, mutation
+  result payloads, filter/group/sort state, watchdog timers, undo/redo history
+  payloads, and bulk restore bookkeeping. The move keeps the Contacts page
+  extensionless lazy import, supplier import modal handoff, grouped selection
+  helpers, same-tick save/delete/bulk guards, CSV export, supplier contact
+  option display, and action/performance source guard behavior unchanged.

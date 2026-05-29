@@ -1,10 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentProps } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
-import { useDeferredValue } from 'react'
-import { useMemo } from 'react'
-import { useRef } from 'react'
-import { useApp, useSync } from '../../AppContext'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
@@ -23,20 +20,132 @@ import {
   buildContactOptionSummary,
   createContactOption,
   getPrimaryContactOption,
-  parseContactOptionsFromImportRow,
   parseStoredContactOptions,
   serializeContactOptions,
 } from './contactOptionUtils'
+import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
-function SupplierForm({ supplier, onSave, onClose, t }) {
-  const init = supplier
+type TranslateFn = (key: string) => string | undefined
+type NotifyFn = (message: string, tone?: string) => void
+type ContactModal = 'form' | 'import' | 'detail' | null
+type SortDirection = 'asc' | 'desc'
+type SupplierGroupMode = 'time' | 'alphabet'
+
+interface AppUser {
+  id?: string | number | null
+  name?: string | null
+}
+
+interface AppContextValue {
+  user?: AppUser | null
+}
+
+interface SyncContextValue {
+  syncChannel?: {
+    channel?: string | null
+    ts?: string | number | null
+  } | null
+}
+
+interface SuppliersTabProps {
+  t: TranslateFn
+  notify: NotifyFn
+  active?: boolean
+}
+
+interface SupplierRow extends Record<string, unknown> {
+  id: number | string
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+  company?: string | null
+  contact_person?: string | null
+  address?: string | null
+  notes?: string | null
+  created_at?: string | null
+}
+
+interface SupplierPayload {
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+  company?: string | null
+  contact_person?: string | null
+  address?: string | null
+  notes?: string | null
+  userId?: string | number | null
+  userName?: string | null
+}
+
+interface SupplierMutationResult {
+  success?: boolean
+  error?: string
+  id?: unknown
+  data?: { id?: unknown } | null
+}
+
+interface SectionRow extends Record<string, unknown> {
+  __kind: 'section'
+  section: {
+    id: string
+    label: string
+    ids: Array<number | string>
+    items: SupplierRow[]
+  }
+  collapsed: boolean
+}
+
+type SupplierDisplayRow = SupplierRow | SectionRow
+
+interface SupplierApi {
+  getSuppliers: (query?: Record<string, unknown>) => Promise<unknown>
+  createSupplier: (payload: SupplierPayload) => Promise<SupplierMutationResult | unknown>
+  updateSupplier: (id: number | string, payload: SupplierPayload) => Promise<SupplierMutationResult | unknown>
+  deleteSupplier: (id: number | string) => Promise<SupplierMutationResult | unknown>
+}
+
+type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+
+function getSupplierApi(): SupplierApi {
+  if (typeof window === 'undefined' || !window.api) throw new Error('Supplier API is not available.')
+  return window.api as SupplierApi
+}
+
+function normalizeSupplierRows(value: unknown): SupplierRow[] {
+  if (Array.isArray(value)) return value as SupplierRow[]
+  if (value && typeof value === 'object' && Array.isArray((value as { items?: unknown }).items)) {
+    return (value as { items: SupplierRow[] }).items
+  }
+  return []
+}
+
+function isSectionRow(row: SupplierDisplayRow | null | undefined): row is SectionRow {
+  return row?.__kind === 'section'
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+interface SupplierFormProps {
+  supplier?: SupplierRow | null
+  onSave: (payload: SupplierPayload) => Promise<unknown> | unknown
+  onClose: () => void
+  t: TranslateFn
+}
+
+function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
+  const init: SupplierPayload = supplier
     ? { ...supplier }
     : { name: '', phone: '', email: '', company: '', contact_person: '', address: '', notes: '' }
-  const [form, setForm] = useState(init)
-  const [options, setOptions] = useState(() => {
+  const [form, setForm] = useState<SupplierPayload>(init)
+  const [options, setOptions] = useState<ContactOption[]>(() => {
     const parsed = parseStoredContactOptions(init.address, { legacyField: 'address' })
     if (parsed.length) return parsed
     return [createContactOption({
@@ -47,13 +156,13 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
     })]
   })
   const [saving, setSaving] = useState(false)
-  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const set = (key: keyof SupplierPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
     if (current.length >= CONTACT_OPTION_LIMIT) return current
     return [...current, createContactOption()]
   })
-  const updateOption = (index, nextOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
-  const removeOption = (index) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
+  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
   const handleSubmit = async () => {
     if (saving) return
     setSaving(true)
@@ -63,7 +172,7 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
         ...form,
         phone: primaryOption.phone || form.phone || '',
         email: primaryOption.email || form.email || '',
-        address: serializeContactOptions(options),
+        address: serializeContactOptions(options) || '',
         contact_person: primaryOption.name || form.contact_person || '',
       }))
     } finally {
@@ -72,11 +181,11 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
   }
 
   return (
-    <Modal title={supplier ? `✏️ ${t('edit_supplier') || 'Edit Supplier'}` : `➕ ${t('add_supplier') || 'Add Supplier'}`} onClose={onClose}>
+    <Modal title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')} onClose={onClose}>
       <div className="space-y-3">
         <div>
           <label htmlFor="supplier-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
-          <input id="supplier-form-name" name="supplier_name" autoComplete="organization" className="input" value={form.name} onChange={(event) => set('name', event.target.value)} autoFocus />
+          <input id="supplier-form-name" name="supplier_name" autoComplete="organization" className="input" value={form.name || ''} onChange={(event) => set('name', event.target.value)} autoFocus />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -102,7 +211,7 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
             {options.map((option, index) => (
               <div key={`supplier-option-${index}`} className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2 dark:border-zinc-600 dark:bg-zinc-800/60">
                 {(() => {
-                  const fieldId = (suffix) => `supplier-option-${index}-${suffix}`
+                  const fieldId = (suffix: string) => `supplier-option-${index}-${suffix}`
                   return (
                     <>
                 <div className="flex items-center gap-2">
@@ -148,34 +257,34 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
   )
 }
 
-function SuppliersTab({ t, notify, active = true }) {
+function SuppliersTab({ t, notify, active = true }: SuppliersTabProps) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
-  const loadWatchdogRef = useRef(null)
-  const loadPromiseRef = useRef(null)
+  const loadWatchdogRef = useRef<number | null>(null)
+  const loadPromiseRef = useRef<Promise<void> | null>(null)
   const saveInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
-  const [suppliers, setSuppliers] = useState([])
+  const [suppliers, setSuppliers] = useState<SupplierRow[]>([])
   const [search, setSearch] = useState('')
-  const [modal, setModal] = useState(null)
-  const [selected, setSelected] = useState(null)
+  const [modal, setModal] = useState<ContactModal>(null)
+  const [selected, setSelected] = useState<SupplierRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
-  const [sortDirection, setSortDirection] = useState('desc')
-  const [groupMode, setGroupMode] = useState('time')
-  const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [groupMode, setGroupMode] = useState<SupplierGroupMode>('time')
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
   const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
@@ -186,7 +295,7 @@ function SuppliersTab({ t, notify, active = true }) {
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
   }), [deferredSearch, monthFilter, yearFilter])
 
-  const filteredBySearch = suppliers.filter((supplier) => {
+  const filteredBySearch = useMemo(() => suppliers.filter((supplier) => {
     const query = deferredSearch.toLowerCase().trim()
     if (!query) return true
     return (
@@ -196,7 +305,7 @@ function SuppliersTab({ t, notify, active = true }) {
       || String(supplier.company || '').toLowerCase().includes(query)
       || String(supplier.contact_person || '').toLowerCase().includes(query)
     )
-  })
+  }), [deferredSearch, suppliers])
 
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const availableYears = useMemo(
@@ -229,16 +338,19 @@ function SuppliersTab({ t, notify, active = true }) {
     () => filteredSections.flatMap((section) => section.items),
     [filteredSections],
   )
-  const displayRows = useMemo(
+  const displayRows = useMemo<SupplierDisplayRow[]>(
     () => filteredSections.flatMap((section) => {
       const collapsed = collapsedSections.has(section.id)
-      return [{ __kind: 'section', section, collapsed }, ...(!collapsed ? section.items : [])]
+      return [
+        { __kind: 'section', section, collapsed },
+        ...(!collapsed ? section.items : []),
+      ] as SupplierDisplayRow[]
     }),
     [collapsedSections, filteredSections],
   )
 
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleSuppliers)
-  const supplierColumns = [t('name'), t('phone'), t('email'), t('company'), t('contact_person') || 'Contact']
+  const supplierColumns = [t('name') || 'Name', t('phone') || 'Phone', t('email') || 'Email', t('company') || 'Company', t('contact_person') || 'Contact']
   const contactFilterSections = useMemo(() => ([
     {
       id: 'sort',
@@ -292,15 +404,15 @@ function SuppliersTab({ t, notify, active = true }) {
 
   ]), [availableYears, groupMode, monthFilter, sortDirection, tr, yearFilter])
   const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'])
-  const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
+  const toggleSectionCollapsed = (sectionId: string) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
     else next.add(sectionId)
     return next
   })
-  const isSectionFullySelected = (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
-  const isSectionPartiallySelected = (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
-  const toggleSectionSelection = (ids, checked) => {
+  const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
+  const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
+  const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -308,7 +420,7 @@ function SuppliersTab({ t, notify, active = true }) {
     })
   }
 
-  const buildSupplierPayload = useCallback((supplier = {}) => ({
+  const buildSupplierPayload = useCallback((supplier: Partial<SupplierRow> = {}): SupplierPayload => ({
     name: supplier.name || '',
     phone: supplier.phone || '',
     email: supplier.email || '',
@@ -320,15 +432,22 @@ function SuppliersTab({ t, notify, active = true }) {
     userName: user?.name,
   }), [user?.id, user?.name])
 
-  const runSupplierMutation = useCallback((loader, label) => (
-    withLoaderTimeout(loader, label, SUPPLIER_MUTATION_TIMEOUT_MS)
+  const runSupplierMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<SupplierMutationResult> => (
+    await withLoaderTimeout(loader, label, SUPPLIER_MUTATION_TIMEOUT_MS) as SupplierMutationResult
   ), [])
 
-  const load = useCallback(async ({ silent = false, label = 'Suppliers' } = {}) => {
+  const clearLoadWatchdog = useCallback(() => {
+    if (loadWatchdogRef.current != null) {
+      window.clearTimeout(loadWatchdogRef.current)
+      loadWatchdogRef.current = null
+    }
+  }, [])
+
+  const load = useCallback(async ({ silent = false, label = 'Suppliers' }: { silent?: boolean, label?: string } = {}): Promise<void> => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       if (!silent || !loadedOnceRef.current) {
         setLoading(true)
         setLoadError('')
@@ -339,14 +458,14 @@ function SuppliersTab({ t, notify, active = true }) {
         }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getSuppliers(supplierQuery), label, 20000)
+        const data = await withLoaderTimeout(() => getSupplierApi().getSuppliers(supplierQuery), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setSuppliers(Array.isArray(data) ? data : [])
+        setSuppliers(normalizeSupplierRows(data))
         loadedOnceRef.current = true
         setLoadError('')
-      } catch (error) {
+      } catch (error: unknown) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        const message = error?.message || 'Failed to load suppliers'
+        const message = getErrorMessage(error, 'Failed to load suppliers')
         if (!loadedOnceRef.current) {
           setLoadError(message)
           notify(message, 'error')
@@ -356,7 +475,7 @@ function SuppliersTab({ t, notify, active = true }) {
           notify(refreshMessage, 'warning')
         }
       } finally {
-        window.clearTimeout(loadWatchdogRef.current)
+        clearLoadWatchdog()
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setLoading(false)
       }
@@ -368,11 +487,11 @@ function SuppliersTab({ t, notify, active = true }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [notify, supplierQuery, t, tr])
+  }, [clearLoadWatchdog, notify, supplierQuery, tr])
 
   useEffect(() => {
     if (!active) {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
       setLoading(false)
@@ -380,17 +499,17 @@ function SuppliersTab({ t, notify, active = true }) {
     }
     load({ silent: loadedOnceRef.current })
     return () => {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
     }
-  }, [active, load])
+  }, [active, clearLoadWatchdog, load])
   useEffect(() => {
     if (!active || syncChannelName !== 'suppliers') return
     load({ silent: true, label: 'Suppliers refresh' })
   }, [active, load, syncChannelName, syncChannelTs])
 
-  const handleSave = async (form) => {
+  const handleSave = async (form: SupplierPayload) => {
     if (!beginSingleAction(saveInFlightRef)) return
     if (!String(form.name || '').trim()) {
       finishSingleAction(saveInFlightRef)
@@ -400,8 +519,8 @@ function SuppliersTab({ t, notify, active = true }) {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const result = selected
-        ? await runSupplierMutation(() => window.api.updateSupplier(selected.id, payload), 'Update supplier')
-        : await runSupplierMutation(() => window.api.createSupplier(payload), 'Create supplier')
+        ? await runSupplierMutation(() => getSupplierApi().updateSupplier(selected.id, payload), 'Update supplier')
+        : await runSupplierMutation(() => getSupplierApi().createSupplier(payload), 'Create supplier')
       if (result?.success === false) {
         notify(result.error || 'Failed', 'error')
         return
@@ -412,7 +531,7 @@ function SuppliersTab({ t, notify, active = true }) {
           label: `Edit supplier ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
             const restoreResult = await runSupplierMutation(
-              () => window.api.updateSupplier(existingSnapshot.id, buildSupplierPayload(existingSnapshot)),
+              () => getSupplierApi().updateSupplier(existingSnapshot.id, buildSupplierPayload(existingSnapshot)),
               'Undo supplier edit',
             )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore supplier')
@@ -420,7 +539,7 @@ function SuppliersTab({ t, notify, active = true }) {
           },
           redo: async () => {
             const redoResult = await runSupplierMutation(
-              () => window.api.updateSupplier(nextSnapshot.id, buildSupplierPayload(nextSnapshot)),
+              () => getSupplierApi().updateSupplier(nextSnapshot.id, buildSupplierPayload(nextSnapshot)),
               'Redo supplier edit',
             )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply supplier changes')
@@ -434,12 +553,12 @@ function SuppliersTab({ t, notify, active = true }) {
           actionHistory.pushAction({
             label: `Add supplier ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              await runSupplierMutation(() => window.api.deleteSupplier(createdSupplierId), 'Undo supplier create')
+              await runSupplierMutation(() => getSupplierApi().deleteSupplier(createdSupplierId), 'Undo supplier create')
               await load({ silent: true, label: 'Suppliers undo create' })
             },
             redo: async () => {
               const recreateResult = await runSupplierMutation(
-                () => window.api.createSupplier(buildSupplierPayload(createdSnapshot)),
+                () => getSupplierApi().createSupplier(buildSupplierPayload(createdSnapshot)),
                 'Redo supplier create',
               )
               if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate supplier')
@@ -453,14 +572,14 @@ function SuppliersTab({ t, notify, active = true }) {
       setModal(null)
       setSelected(null)
       await load({ silent: true, label: 'Suppliers after save' })
-    } catch (error) {
-      notify(error?.message || 'Failed', 'error')
+    } catch (error: unknown) {
+      notify(getErrorMessage(error, 'Failed'), 'error')
     } finally {
       finishSingleAction(saveInFlightRef)
     }
   }
 
-  const handleDelete = async (supplier) => {
+  const handleDelete = async (supplier: SupplierRow) => {
     if (!beginSingleAction(deleteInFlightRef)) return
     if (!confirm(`Delete supplier "${supplier.name}"?`)) {
       finishSingleAction(deleteInFlightRef)
@@ -468,13 +587,13 @@ function SuppliersTab({ t, notify, active = true }) {
     }
     try {
       const snapshot = cloneHistorySnapshot(supplier)
-      await runSupplierMutation(() => window.api.deleteSupplier(supplier.id), 'Delete supplier')
+      await runSupplierMutation(() => getSupplierApi().deleteSupplier(supplier.id), 'Delete supplier')
       let restoredSupplierId = 0
       actionHistory.pushAction({
         label: `Delete supplier ${snapshot.name || ''}`.trim(),
         undo: async () => {
           const restoreResult = await runSupplierMutation(
-            () => window.api.createSupplier(buildSupplierPayload(snapshot)),
+            () => getSupplierApi().createSupplier(buildSupplierPayload(snapshot)),
             'Undo supplier delete',
           )
           if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore supplier')
@@ -484,7 +603,7 @@ function SuppliersTab({ t, notify, active = true }) {
         redo: async () => {
           const targetId = restoredSupplierId || Number(snapshot.id || 0)
           if (!targetId) return
-          await runSupplierMutation(() => window.api.deleteSupplier(targetId), 'Redo supplier delete')
+          await runSupplierMutation(() => getSupplierApi().deleteSupplier(targetId), 'Redo supplier delete')
           await load({ silent: true, label: 'Suppliers redo delete' })
         },
       })
@@ -492,8 +611,8 @@ function SuppliersTab({ t, notify, active = true }) {
       setModal(null)
       setSelected(null)
       await load({ silent: true, label: 'Suppliers after delete' })
-    } catch (error) {
-      notify(error?.message || 'Failed', 'error')
+    } catch (error: unknown) {
+      notify(getErrorMessage(error, 'Failed'), 'error')
     } finally {
       finishSingleAction(deleteInFlightRef)
     }
@@ -507,11 +626,11 @@ function SuppliersTab({ t, notify, active = true }) {
     }
     const ids = [...selectedIds]
     const snapshots = buildSelectedSnapshots(suppliers, ids)
-    const failedIds = []
+    const failedIds: number[] = []
     setBulkActionBusy(true)
     try {
-      const deleteRun = await runConcurrentTasks(ids, async (id) => {
-        await runSupplierMutation(() => window.api.deleteSupplier(id), 'Bulk delete suppliers')
+      const deleteRun = await runConcurrentTasks(ids, async (id: number) => {
+        await runSupplierMutation(() => getSupplierApi().deleteSupplier(id), 'Bulk delete suppliers')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length
@@ -521,12 +640,12 @@ function SuppliersTab({ t, notify, active = true }) {
       const failedIdSet = new Set(failedIds)
       const deletedSnapshots = snapshots.filter((snapshot) => !failedIdSet.has(Number(snapshot?.id || 0)))
       if (deletedCount > 0 && deletedSnapshots.length) {
-        let restoredEntries = []
+        let restoredEntries: Array<{ restoredId: number }> = []
         actionHistory.pushAction({
           label: `Delete ${deletedCount} supplier${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
-            const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot) => {
-              const result = await runSupplierMutation(() => window.api.createSupplier({
+            const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: SupplierRow) => {
+              const result = await runSupplierMutation(() => getSupplierApi().createSupplier({
                 name: snapshot.name || '',
                 phone: snapshot.phone || '',
                 email: snapshot.email || '',
@@ -540,13 +659,13 @@ function SuppliersTab({ t, notify, active = true }) {
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
             if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore supplier'))
-            restoredEntries = restoreRun.successes.map((entry) => entry.value)
+            restoredEntries = restoreRun.successes.map((entry) => entry.value as { restoredId: number })
             await load({ silent: true, label: 'Suppliers restore deleted' })
           },
           redo: async () => {
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => (
-              runSupplierMutation(() => window.api.deleteSupplier(id), 'Redo bulk supplier delete')
+            const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
+              runSupplierMutation(() => getSupplierApi().deleteSupplier(id), 'Redo bulk supplier delete')
             ))
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete supplier'))
             await load({ silent: true, label: 'Suppliers redo delete' })
@@ -566,7 +685,7 @@ function SuppliersTab({ t, notify, active = true }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <ActionHistoryBar history={actionHistory} />
+      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} />
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex flex-1 min-w-0 items-center gap-2">
           <input
@@ -668,56 +787,58 @@ function SuppliersTab({ t, notify, active = true }) {
         emptyLabel={t('no_suppliers') || 'No suppliers'}
         columns={supplierColumns}
         selectAll={selectAllProp}
-        selectedCount={selectedIds.size}
         totalCount={visibleSuppliers.length}
         onRetry={() => load({ silent: false, label: 'Suppliers retry' })}
         loadingLabel={tr('loading_suppliers', 'Loading suppliers...')}
         loadingDetails={tr('contacts_loading_details', 'Fetching suppliers, filters, and grouped sections.')}
         t={t}
-        renderRow={(supplier) => (
-          supplier?.__kind === 'section' ? (
-            <tr key={supplier.section.id} className="bg-slate-100/90 dark:bg-slate-800/80">
+        renderRow={(row) => {
+          if (isSectionRow(row)) {
+            const section = row.section
+            return (
+            <tr key={section.id} className="bg-slate-100/90 dark:bg-slate-800/80">
               <td colSpan={supplierColumns.length + 2} className="px-4 py-2">
                 <div className="flex items-center justify-between gap-3">
                   <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded"
-                      checked={isSectionFullySelected(supplier.section.ids)}
+                      checked={isSectionFullySelected(section.ids)}
                       ref={(node) => {
-                        if (node) node.indeterminate = isSectionPartiallySelected(supplier.section.ids)
+                        if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                       }}
-                      onChange={(event) => toggleSectionSelection(supplier.section.ids, event.target.checked)}
-                      aria-label={`Select ${supplier.section.label}`}
+                      onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
+                      aria-label={`Select ${section.label}`}
                     />
-                    <span>{supplier.section.label}</span>
-                    <span className="normal-case tracking-normal text-slate-400">{supplier.section.items.length}</span>
+                    <span>{section.label}</span>
+                    <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
                   </label>
                   <div className="flex items-center gap-1">
-                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(supplier.section.id)}>
-                      {supplier.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                      {supplier.collapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                      {row.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {row.collapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
                     </button>
                   </div>
                 </div>
               </td>
             </tr>
-          ) : (
-          (() => {
-            const options = parseStoredContactOptions(supplier.address, { legacyField: 'address' })
-            const primaryOption = getPrimaryContactOption(options, {
-              fallback: {
-                name: supplier.contact_person || '',
-                phone: supplier.phone || '',
-                email: supplier.email || '',
-                address: '',
-              },
-            })
-            return (
-          <tr key={supplier.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(supplier.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+            )
+          }
+          const supplier = row as SupplierRow
+          const options = parseStoredContactOptions(supplier.address, { legacyField: 'address' })
+          const primaryOption = getPrimaryContactOption(options, {
+            fallback: {
+              name: supplier.contact_person || '',
+              phone: supplier.phone || '',
+              email: supplier.email || '',
+              address: '',
+            },
+          })
+          return (
+          <tr key={supplier.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
               <label htmlFor={`supplier-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
-              <input id={`supplier-select-${supplier.id}`} name={`supplier_select_${supplier.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(supplier.id)} onChange={() => toggleOne(supplier.id)} />
+              <input id={`supplier-select-${supplier.id}`} name={`supplier_select_${supplier.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(Number(supplier.id))} onChange={() => toggleOne(supplier.id)} />
             </td>
             <td className="cursor-pointer px-4 py-2 font-medium text-gray-900 dark:text-white" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.name}</td>
             <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{primaryOption.phone || supplier.phone || '--'}</td>
@@ -728,50 +849,52 @@ function SuppliersTab({ t, notify, active = true }) {
               <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={() => handleDelete(supplier)} />
             </td>
           </tr>
-            )
-          })()
-        ))}
-        renderCard={(supplier) => (
-          supplier?.__kind === 'section' ? (
-            <div key={supplier.section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+          )
+        }}
+        renderCard={(row) => {
+          if (isSectionRow(row)) {
+            const section = row.section
+            return (
+            <div key={section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
               <div className="flex items-center justify-between gap-3">
                 <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded"
-                    checked={isSectionFullySelected(supplier.section.ids)}
+                    checked={isSectionFullySelected(section.ids)}
                     ref={(node) => {
-                      if (node) node.indeterminate = isSectionPartiallySelected(supplier.section.ids)
+                      if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                     }}
-                    onChange={(event) => toggleSectionSelection(supplier.section.ids, event.target.checked)}
-                    aria-label={`Select ${supplier.section.label}`}
+                    onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
+                    aria-label={`Select ${section.label}`}
                   />
-                  <span>{supplier.section.label}</span>
-                  <span className="normal-case tracking-normal text-slate-400">{supplier.section.items.length}</span>
+                  <span>{section.label}</span>
+                  <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
                 </label>
                 <div className="flex items-center gap-1">
-                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(supplier.section.id)}>
-                    {supplier.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                    {row.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                   </button>
                 </div>
               </div>
             </div>
-          ) : (
-          (() => {
-            const options = parseStoredContactOptions(supplier.address, { legacyField: 'address' })
-            const primaryOption = getPrimaryContactOption(options, {
-              fallback: {
-                name: supplier.contact_person || '',
-                phone: supplier.phone || '',
-                email: supplier.email || '',
-                address: '',
-              },
-            })
-            return (
-          <div key={supplier.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(supplier.id) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
+            )
+          }
+          const supplier = row as SupplierRow
+          const options = parseStoredContactOptions(supplier.address, { legacyField: 'address' })
+          const primaryOption = getPrimaryContactOption(options, {
+            fallback: {
+              name: supplier.contact_person || '',
+              phone: supplier.phone || '',
+              email: supplier.email || '',
+              address: '',
+            },
+          })
+          return (
+          <div key={supplier.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
             <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(supplier.id) }}>
               <label htmlFor={`supplier-card-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
-              <input id={`supplier-card-select-${supplier.id}`} name={`supplier_card_select_${supplier.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(supplier.id)} onChange={() => toggleOne(supplier.id)} />
+              <input id={`supplier-card-select-${supplier.id}`} name={`supplier_card_select_${supplier.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(Number(supplier.id))} onChange={() => toggleOne(supplier.id)} />
             </div>
             <div className="h-9 w-9 flex-shrink-0 rounded-full bg-orange-100 text-center text-sm font-bold leading-9 text-orange-600 dark:bg-orange-900/40">
               {supplier.name?.[0]?.toUpperCase()}
@@ -786,15 +909,14 @@ function SuppliersTab({ t, notify, active = true }) {
               <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={() => handleDelete(supplier)} />
             </div>
           </div>
-            )
-          })()
-        ))}
+          )
+        }}
       />
 
       {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
       {modal === 'import' ? (
         <Suspense fallback={null}>
-          <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={load} />
+          <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Suppliers after import' })} />
         </Suspense>
       ) : null}
       {modal === 'detail' && selected ? (

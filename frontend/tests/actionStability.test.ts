@@ -394,7 +394,7 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
     },
     {
       label: 'suppliers',
-      source: readFrontend('src/components/contacts/SuppliersTab.jsx'),
+      source: readFrontend('src/components/contacts/SuppliersTab.tsx'),
       constant: 'SUPPLIER_MUTATION_TIMEOUT_MS',
       create: 'createSupplier',
       update: 'updateSupplier',
@@ -424,6 +424,8 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
       ? 'getCustomerApi\\(\\)'
       : target.label === 'delivery contacts'
         ? 'getDeliveryApi\\(\\)'
+        : target.label === 'suppliers'
+          ? 'getSupplierApi\\(\\)'
         : 'window\\.api'
     assert.match(target.source, new RegExp(`${apiPattern}\\.${target.create}\\(`), `${target.label} should still create through the app API`)
     assert.match(target.source, new RegExp(`${apiPattern}\\.${target.update}\\(`), `${target.label} should still update through the app API`)

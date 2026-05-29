@@ -4196,6 +4196,15 @@ Decision rule:
     page extensionless lazy import, delivery import modal contract, grouped
     selection helpers, same-tick save/delete/bulk guards, CSV export, contact
     option display, and action/performance source checks intact.
+534. Convert the suppliers contact tab to TSX. Done:
+    `frontend/src/components/contacts/SuppliersTab.tsx` now types supplier
+    rows, section rows, modal state, contact-option form payloads, app/sync
+    context access, local supplier API gateway calls, mutation result payloads,
+    grouped filters, loading watchdog timers, undo/redo history payloads, and
+    bulk restore bookkeeping. The conversion keeps the Contacts page
+    extensionless lazy import, supplier import modal contract, grouped
+    selection helpers, same-tick save/delete/bulk guards, CSV export, supplier
+    contact option display, and action/performance source checks intact.
 
 ## Safety Gates
 

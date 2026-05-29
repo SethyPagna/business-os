@@ -19,7 +19,7 @@ Latest verified runtime health:
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-05-29T23-12-58-289Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-29T23-29-54-242Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -57,6 +57,10 @@ Recent route-level win:
 - Delivery contact tab is now `frontend/src/components/contacts/DeliveryTab.tsx`
   with typed delivery rows, grouped sections, contact-option form payloads,
   local delivery API calls, watchdog timers, same-tick mutation guards, and
+  history/bulk restore payloads.
+- Suppliers contact tab is now `frontend/src/components/contacts/SuppliersTab.tsx`
+  with typed supplier rows, grouped sections, contact-option form payloads,
+  local supplier API calls, watchdog timers, same-tick mutation guards, and
   history/bulk restore payloads.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
