@@ -5571,3 +5571,12 @@ Move 512 status:
   import results. The move keeps the worker-first row counter, synchronous
   parser fallback, stale row-count request guard, and bounded import-job
   create/upload/start calls unchanged.
+
+Move 513 status:
+- Move 513 converts the inventory product detail modal to
+  `frontend/src/components/inventory/ProductDetailModal.tsx`. The typed
+  boundary now covers inventory product rows, branch-stock rows, batch preview
+  rows, formatter callbacks, translation callbacks, and stock action callbacks.
+  The move keeps stock, price, promotion, performance, branch, and batch
+  rendering unchanged while refreshing the Vite manual chunk rule to the
+  current TSX product-detail paths.

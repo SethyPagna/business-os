@@ -189,3 +189,17 @@ Use this shape for future entries:
 - follow-up insight: the three remaining contact tab JSX files now import the
   modal extensionlessly, so each tab can be converted independently without
   exact `.jsx` modal coupling.
+
+- change: converted the inventory product detail modal to TSX with typed
+  product, branch stock, batch, formatter, translation, and stock-action
+  boundaries
+- affected files: `frontend/src/components/inventory/ProductDetailModal.tsx`,
+  `frontend/vite.config.ts`, `ops/docs/whole-app-hardening.md`
+- route or API target: Inventory product detail modal, stock action entrypoints,
+  Vite product-detail manual chunking
+- keeper or rollback: keeper if product discount UX, inventory mobile layout,
+  typecheck, build, Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: pending verification in Move 513
+- warm whole-app result: pending verification in Move 513
+- follow-up insight: this was a compact modal conversion and a useful check
+  that manual chunk rules do not retain obsolete exact `.jsx` paths.

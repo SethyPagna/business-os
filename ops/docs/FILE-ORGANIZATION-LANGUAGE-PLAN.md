@@ -4019,6 +4019,13 @@ Decision rule:
     row counting, synchronous fallback parsing, stale row-count guards,
     bounded create/upload/start import-job calls, and extensionless lazy modal
     imports intact.
+513. Convert the inventory product detail modal to TSX. Done:
+    `frontend/src/components/inventory/ProductDetailModal.tsx` now types
+    inventory product rows, branch stock, batch preview rows, money formatters,
+    translation callbacks, and stock action callbacks. The conversion removes
+    stale display artifacts in the close control and margin separator, keeps
+    stock/price/performance/branch/batch rendering unchanged, and updates the
+    Vite manual chunk rule to the current TSX product-detail surfaces.
 
 ## Safety Gates
 

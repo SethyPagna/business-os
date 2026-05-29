@@ -372,8 +372,8 @@ Last updated: 2026-05-18
     Product page action live check passed on frontend hash
     `db2bde8c13de0d64`.
   - Eighth Phase 26 physical move complete: Product presentation surfaces
-    `HeaderActions.jsx`, `ProductsListSurface.jsx`, and
-    `ProductDetailModal.jsx` now live in
+    `HeaderActions.tsx`, `ProductsListSurface.tsx`, and
+    `ProductDetailModal.tsx` now live in
     `frontend/src/components/products/surfaces`; product discount and product
     pagination source tests, source checks, typecheck, production build,
     runtime health, and the focused Product page action live check passed on

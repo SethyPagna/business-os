@@ -1,10 +1,69 @@
-// ProductDetailModal (Inventory)
-// Shows full stock details for a product across all branches.
 import { calculateProductDiscount } from '../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../utils/productBatches.ts'
 
-export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onMoveRow, fmtUSD, fmtKHR, t }) {
-  const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+type TranslateFn = (key: string) => string | undefined
+type MoneyFormatter = (value: number) => string
+type ProductAction = (product: InventoryProduct) => void
+
+interface BranchStockEntry {
+  branch_id?: string | number
+  branch_name?: string
+  quantity?: number
+}
+
+interface ProductBatchEntry {
+  id?: string | number
+  batch_id?: string | number
+  lot_code?: string
+  quantity?: number
+  expiry_date?: string
+  branch_stock?: Array<{ branch_id?: string | number; quantity?: number }>
+  [key: string]: unknown
+}
+
+interface InventoryProduct {
+  name?: string
+  sku?: string
+  barcode?: string
+  category?: string
+  brand?: string
+  supplier?: string
+  unit?: string
+  description?: string
+  stock_quantity?: number
+  low_stock_threshold?: number
+  purchase_price_usd?: number
+  cost_price_usd?: number
+  purchase_price_khr?: number
+  selling_price_usd?: number
+  selling_price_khr?: number
+  special_price_usd?: number
+  special_price_khr?: number
+  qty_sold?: number
+  revenue_usd?: number
+  cogs_usd?: number
+  branch_stock?: BranchStockEntry[]
+  batches?: ProductBatchEntry[]
+  [key: string]: unknown
+}
+
+interface ProductDetailModalProps {
+  product?: InventoryProduct | null
+  onClose: () => void
+  onAdjust: ProductAction
+  onTransfer?: ProductAction
+  onMoveRow?: ProductAction
+  fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
+  t?: TranslateFn
+}
+
+function getBranchStockKey(branchStock: BranchStockEntry, index: number): string {
+  return String(branchStock.branch_id ?? `${branchStock.branch_name || 'branch'}-${index}`)
+}
+
+export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onMoveRow, fmtUSD, fmtKHR, t }: ProductDetailModalProps) {
+  const T = (key: string, fallback: string): string => (typeof t === 'function' ? t(key) : fallback) || fallback
   if (!p) return null
 
   const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
@@ -16,22 +75,28 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const hasSpecialPrice = specialPriceUsd > 0 || specialPriceKhr > 0
   const activePriceUsd = hasSpecialPrice ? (specialPriceUsd || sellingPriceUsd) : sellingPriceUsd
   const activePriceKhr = hasSpecialPrice ? (specialPriceKhr || sellingPriceKhr) : sellingPriceKhr
-  const stockPct = p.low_stock_threshold > 0
-    ? Math.min(100, (p.stock_quantity / p.low_stock_threshold) * 100)
+  const stockQuantity = Number(p.stock_quantity || 0)
+  const lowStockThreshold = Number(p.low_stock_threshold || 0)
+  const stockPct = lowStockThreshold > 0
+    ? Math.min(100, (stockQuantity / lowStockThreshold) * 100)
     : 100
-  const stockColor = p.stock_quantity <= 0
+  const stockColor = stockQuantity <= 0
     ? 'text-red-600'
-    : p.stock_quantity <= p.low_stock_threshold
+    : stockQuantity <= lowStockThreshold
       ? 'text-yellow-600'
       : 'text-green-600'
   const profit = Math.max(0, p.revenue_usd || 0) - Math.max(0, p.cogs_usd || 0)
-  const stockValueUsd = Math.max(0, Number(p.stock_quantity || 0)) * costPriceUsd
+  const stockValueUsd = Math.max(0, stockQuantity) * costPriceUsd
   const marginUsd = Math.max(0, activePriceUsd - costPriceUsd)
   const marginPct = costPriceUsd > 0 ? ((marginUsd / costPriceUsd) * 100) : 0
-  const branchCount = Array.isArray(p.branch_stock) ? p.branch_stock.length : 0
+  const branchStock = Array.isArray(p.branch_stock) ? p.branch_stock : []
+  const branchCount = branchStock.length
   const promotion = calculateProductDiscount(p)
   const visibleBatches = getVisibleProductBatches(p)
-  const batchPreview = buildBatchPreview(p, 'all', { limit: 8 })
+  const batchPreview = buildBatchPreview(p, 'all', { limit: 8 }) as {
+    items: ProductBatchEntry[]
+    extraCount: number
+  }
   const batchCount = visibleBatches.length
 
   return (
@@ -46,24 +111,24 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
               {p.unit ? <span className="text-xs text-gray-400">/{p.unit}</span> : null}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-2xl text-gray-400 hover:text-gray-600" aria-label={T('close', 'Close')}>×</button>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-2xl text-gray-400 hover:text-gray-600" aria-label={T('close', 'Close')}>x</button>
         </div>
 
         <div className="modal-scroll space-y-3 p-4">
           <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-700/50">
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-sm font-semibold text-gray-600 dark:text-gray-400">{T('current_stock', 'Current Stock')}</span>
-              <span className={`text-2xl font-bold ${stockColor}`}>{p.stock_quantity} <span className="text-sm font-normal">{p.unit}</span></span>
+              <span className={`text-2xl font-bold ${stockColor}`}>{stockQuantity} <span className="text-sm font-normal">{p.unit}</span></span>
             </div>
             <div className="mb-1 h-2 w-full rounded-full bg-gray-200 dark:bg-gray-600">
               <div
-                className={`h-2 rounded-full transition-all ${p.stock_quantity <= 0 ? 'bg-red-500' : p.stock_quantity <= p.low_stock_threshold ? 'bg-yellow-500' : 'bg-green-500'}`}
+                className={`h-2 rounded-full transition-all ${stockQuantity <= 0 ? 'bg-red-500' : stockQuantity <= lowStockThreshold ? 'bg-yellow-500' : 'bg-green-500'}`}
                 style={{ width: `${Math.max(2, Math.min(100, stockPct))}%` }}
               />
             </div>
             <div className="grid grid-cols-3 gap-2 pt-1 text-center">
               {[
-                { label: T('low_stock_threshold', 'Low stock threshold'), value: `${p.low_stock_threshold} ${p.unit}` },
+                { label: T('low_stock_threshold', 'Low stock threshold'), value: `${lowStockThreshold} ${p.unit || ''}` },
                 { label: T('branches', 'Branches'), value: String(branchCount || 0) },
                 { label: T('batches', 'Batches'), value: String(batchCount || 0) },
               ].map((item) => (
@@ -99,7 +164,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
               {[
                 { label: T('stock_val', 'Stock Value'), value: fmtUSD(stockValueUsd), tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' },
                 { label: T('active_price', 'Active Price'), value: fmtUSD(activePriceUsd), tone: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-                { label: T('margin', 'Margin'), value: `${fmtUSD(marginUsd)}${costPriceUsd > 0 ? ` • ${Math.round(marginPct)}%` : ''}`, tone: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+                { label: T('margin', 'Margin'), value: `${fmtUSD(marginUsd)}${costPriceUsd > 0 ? ` - ${Math.round(marginPct)}%` : ''}`, tone: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
                 { label: T('branches', 'Branches'), value: String(branchCount || 0), tone: 'text-violet-700 dark:text-violet-300', bg: 'bg-violet-50 dark:bg-violet-900/20' },
               ].map((item) => (
                 <div key={item.label} className={`${item.bg} rounded-xl px-2.5 py-2`}>
@@ -133,7 +198,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             ))}
           </div>
 
-          {(p.qty_sold > 0 || p.revenue_usd > 0) ? (
+          {(Number(p.qty_sold || 0) > 0 || Number(p.revenue_usd || 0) > 0) ? (
             <div>
               <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('performance', 'Performance')} ({T('net_of_returns', 'net of returns')})</div>
               <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
@@ -152,14 +217,14 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             </div>
           ) : null}
 
-          {Array.isArray(p.branch_stock) && p.branch_stock.length > 0 ? (
+          {branchStock.length > 0 ? (
             <div>
               <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('branch_stock', 'Branch Stock')}</div>
               <div className="space-y-1">
-                {p.branch_stock.map((branchStock, index) => (
+                {branchStock.map((branchStock, index) => (
                   <div
-                    key={branchStock.branch_id}
-                    className={`flex justify-between py-1 text-sm ${index < p.branch_stock.length - 1 ? 'border-b border-gray-100 dark:border-gray-700' : ''}`}
+                    key={getBranchStockKey(branchStock, index)}
+                    className={`flex justify-between py-1 text-sm ${index < branchCount - 1 ? 'border-b border-gray-100 dark:border-gray-700' : ''}`}
                   >
                     <span className="text-gray-700 dark:text-gray-300">{branchStock.branch_name}</span>
                     <span className="font-medium text-gray-900 dark:text-white">{branchStock?.quantity ?? 0} {p.unit}</span>
@@ -173,8 +238,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('batches', 'Batches')}</div>
               <div className="space-y-2">
-                {batchPreview.items.map((batch) => (
-                  <div key={batch.id || batch.batch_id} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+                {batchPreview.items.map((batch, index) => (
+                  <div key={String(batch.id || batch.batch_id || `batch-${index}`)} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-semibold text-amber-700 dark:text-amber-200">{batch.lot_code || T('batch', 'Batch')}</span>
                       <span className="text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {p.unit}</span>

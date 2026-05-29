@@ -163,8 +163,8 @@ function manualChunks(id: string): string | undefined {
       return 'portal-tools'
     }
     if (
-      normalized.includes('/src/components/products/ProductDetailModal.jsx')
-      || normalized.includes('/src/components/inventory/ProductDetailModal.jsx')
+      normalized.includes('/src/components/products/surfaces/ProductDetailModal.tsx')
+      || normalized.includes('/src/components/inventory/ProductDetailModal.tsx')
       || normalized.includes('/src/utils/productBatches.ts')
     ) {
       return 'product-detail'
