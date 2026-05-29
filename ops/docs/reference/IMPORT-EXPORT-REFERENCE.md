@@ -198,7 +198,7 @@ Code files documented: **466**
 | 186 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 | 1 | 0 | 1 |
 | 187 | `frontend/src/components/files/FilePickerModal.tsx` | 4 | 1 | 3 | 5 |
 | 188 | `frontend/src/components/files/FilesPage.jsx` | 11 | 1 | 10 | 1 |
-| 189 | `frontend/src/components/files/FilesProvidersTab.jsx` | 0 | 1 | 0 | 1 |
+| 189 | `frontend/src/components/files/FilesProvidersTab.tsx` | 1 | 1 | 0 | 1 |
 | 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 0 | 1 | 0 | 1 |
 | 191 | `frontend/src/components/inventory/DualMoney.tsx` | 0 | 1 | 0 | 1 |
 | 192 | `frontend/src/components/inventory/Inventory.jsx` | 30 | 1 | 28 | 1 |
@@ -3829,12 +3829,12 @@ Code files documented: **466**
   - `../shared/ActionHistoryBar`
   - `../shared/PageHeader`
   - `../shared/pageActivity`
-  - `./FilesProvidersTab.jsx`
+  - `./FilesProvidersTab.tsx`
   - `./FilesResponsesTab`
   - `react`
 - Internal dependencies (10)
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/files/FilesProvidersTab.jsx`
+  - `frontend/src/components/files/FilesProvidersTab.tsx`
   - `frontend/src/components/files/FilesResponsesTab.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
@@ -3846,11 +3846,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.189 `frontend/src/components/files/FilesProvidersTab.jsx`
+### 3.189 `frontend/src/components/files/FilesProvidersTab.tsx`
 
 - Declared exports: `function`
-- Imports (0)
-  - none
+- Imports (1)
+  - `react`
 - Internal dependencies (0)
   - none
 - Referenced by (1)

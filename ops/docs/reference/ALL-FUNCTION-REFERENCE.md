@@ -198,7 +198,7 @@ Code files scanned: **466**
 | 186 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
 | 187 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
 | 188 | `frontend/src/components/files/FilesPage.jsx` | 25 |
-| 189 | `frontend/src/components/files/FilesProvidersTab.jsx` | 2 |
+| 189 | `frontend/src/components/files/FilesProvidersTab.tsx` | 2 |
 | 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
 | 191 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
 | 192 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
@@ -3863,12 +3863,12 @@ Code files scanned: **466**
 | 24 | `removeProvider` | function | 715 |
 | 25 | `tabButton` | const arrow | 736 |
 
-### 3.189 `frontend/src/components/files/FilesProvidersTab.jsx`
+### 3.189 `frontend/src/components/files/FilesProvidersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProviderStatus` | function | 10 |
-| 2 | `FilesProvidersTab` | export default function | 21 |
+| 1 | `ProviderStatus` | function | 123 |
+| 2 | `FilesProvidersTab` | export default function | 134 |
 
 ### 3.190 `frontend/src/components/files/FilesResponsesTab.tsx`
 

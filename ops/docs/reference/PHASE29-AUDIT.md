@@ -1,6 +1,6 @@
 # Phase 29 Audit
 
-Generated: 2026-05-29T17:54:32.933Z
+Generated: 2026-05-29T18:03:58.711Z
 
 Policy: `ops/automation/business-os-automation.json`
 
@@ -9,7 +9,7 @@ Policy: `ops/automation/business-os-automation.json`
 - Checks: 21
 - Failures: 0
 - Cycles: 3
-- Total child-check duration: 6237 ms
+- Total child-check duration: 7167 ms
 - Repeat consistency: stable
 - Execution mode: contention-safe-reference-writers-then-bounded-guardrails
 - Reference writer concurrency: 1
@@ -20,65 +20,65 @@ Policy: `ops/automation/business-os-automation.json`
 
 | Cycle | Check | Status | Duration | Command | Report output |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Generated bulk audit | passed | 991 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
-| 1 | Schema audit | passed | 134 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
-| 1 | Performance/code-flow scan | passed | 177 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
-| 1 | Language/runtime audit | passed | 230 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
-| 1 | Docker release guardrail | passed | 129 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
-| 1 | Runtime dependency guardrail | passed | 140 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
-| 1 | Organization audit | passed | 298 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
-| 2 | Generated bulk audit | passed | 945 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
-| 2 | Schema audit | passed | 142 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
-| 2 | Performance/code-flow scan | passed | 154 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
-| 2 | Language/runtime audit | passed | 254 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
-| 2 | Docker release guardrail | passed | 145 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
-| 2 | Runtime dependency guardrail | passed | 134 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
-| 2 | Organization audit | passed | 305 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
-| 3 | Generated bulk audit | passed | 926 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
-| 3 | Schema audit | passed | 134 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
-| 3 | Performance/code-flow scan | passed | 198 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
-| 3 | Language/runtime audit | passed | 231 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
-| 3 | Docker release guardrail | passed | 137 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
-| 3 | Runtime dependency guardrail | passed | 138 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
-| 3 | Organization audit | passed | 295 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
+| 1 | Generated bulk audit | passed | 1057 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
+| 1 | Schema audit | passed | 141 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
+| 1 | Performance/code-flow scan | passed | 189 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
+| 1 | Language/runtime audit | passed | 263 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
+| 1 | Docker release guardrail | passed | 165 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
+| 1 | Runtime dependency guardrail | passed | 154 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
+| 1 | Organization audit | passed | 364 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
+| 2 | Generated bulk audit | passed | 1094 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
+| 2 | Schema audit | passed | 189 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
+| 2 | Performance/code-flow scan | passed | 205 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
+| 2 | Language/runtime audit | passed | 257 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
+| 2 | Docker release guardrail | passed | 164 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
+| 2 | Runtime dependency guardrail | passed | 161 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
+| 2 | Organization audit | passed | 362 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
+| 3 | Generated bulk audit | passed | 1148 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
+| 3 | Schema audit | passed | 156 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
+| 3 | Performance/code-flow scan | passed | 175 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
+| 3 | Language/runtime audit | passed | 263 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
+| 3 | Docker release guardrail | passed | 156 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
+| 3 | Runtime dependency guardrail | passed | 146 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
+| 3 | Organization audit | passed | 358 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
 
 ## Duration Summary
 
 | Check | Runs | Total | Average | Max |
 | --- | --- | --- | --- | --- |
-| Generated bulk audit | 3 | 2862 ms | 954 ms | 991 ms |
-| Organization audit | 3 | 898 ms | 299 ms | 305 ms |
-| Language/runtime audit | 3 | 715 ms | 238 ms | 254 ms |
-| Performance/code-flow scan | 3 | 529 ms | 176 ms | 198 ms |
-| Runtime dependency guardrail | 3 | 412 ms | 137 ms | 140 ms |
-| Docker release guardrail | 3 | 411 ms | 137 ms | 145 ms |
-| Schema audit | 3 | 410 ms | 137 ms | 142 ms |
+| Generated bulk audit | 3 | 3299 ms | 1100 ms | 1148 ms |
+| Organization audit | 3 | 1084 ms | 361 ms | 364 ms |
+| Language/runtime audit | 3 | 783 ms | 261 ms | 263 ms |
+| Performance/code-flow scan | 3 | 569 ms | 190 ms | 205 ms |
+| Schema audit | 3 | 486 ms | 162 ms | 189 ms |
+| Docker release guardrail | 3 | 485 ms | 162 ms | 165 ms |
+| Runtime dependency guardrail | 3 | 461 ms | 154 ms | 161 ms |
 
 ## Slowest Runs
 
 | Cycle | Check | Duration |
 | --- | --- | --- |
-| 1 | Generated bulk audit | 991 ms |
-| 2 | Generated bulk audit | 945 ms |
-| 3 | Generated bulk audit | 926 ms |
-| 2 | Organization audit | 305 ms |
-| 1 | Organization audit | 298 ms |
+| 3 | Generated bulk audit | 1148 ms |
+| 2 | Generated bulk audit | 1094 ms |
+| 1 | Generated bulk audit | 1057 ms |
+| 1 | Organization audit | 364 ms |
+| 2 | Organization audit | 362 ms |
 
 ## Repeat Consistency
 
 | Check | Field | Status | Values |
 | --- | --- | --- | --- |
-| Generated bulk audit | totalBytes | stable | cycle 1: `551458864`<br>cycle 2: `551458864`<br>cycle 3: `551458864` |
-| Generated bulk audit | protectedBytes | stable | cycle 1: `227329496`<br>cycle 2: `227329496`<br>cycle 3: `227329496` |
-| Generated bulk audit | cleanupCandidateBytes | stable | cycle 1: `324129368`<br>cycle 2: `324129368`<br>cycle 3: `324129368` |
+| Generated bulk audit | totalBytes | stable | cycle 1: `551679035`<br>cycle 2: `551679035`<br>cycle 3: `551679035` |
+| Generated bulk audit | protectedBytes | stable | cycle 1: `227549563`<br>cycle 2: `227549563`<br>cycle 3: `227549563` |
+| Generated bulk audit | cleanupCandidateBytes | stable | cycle 1: `324129472`<br>cycle 2: `324129472`<br>cycle 3: `324129472` |
 | Generated bulk audit | nestedTargetOverlaps | stable | cycle 1: `items:2; sha256:042742607550; preview:[{"parent":"business-os-data","child":"business-os-data/organizations/org_leangcosmetics (Leang ...`<br>cycle 2: `items:2; sha256:042742607550; preview:[{"parent":"business-os-data","child":"business-os-data/organizations/org_leangcosmetics (Leang ...`<br>cycle 3: `items:2; sha256:042742607550; preview:[{"parent":"business-os-data","child":"business-os-data/organizations/org_leangcosmetics (Leang ...` |
 | Generated bulk audit | nestedOverlapBytes | stable | cycle 1: `15496556`<br>cycle 2: `15496556`<br>cycle 3: `15496556` |
-| Generated bulk audit | adjustedTotalBytes | stable | cycle 1: `535962308`<br>cycle 2: `535962308`<br>cycle 3: `535962308` |
-| Generated bulk audit | adjustedProtectedBytes | stable | cycle 1: `211832940`<br>cycle 2: `211832940`<br>cycle 3: `211832940` |
-| Generated bulk audit | adjustedCleanupCandidateBytes | stable | cycle 1: `324129368`<br>cycle 2: `324129368`<br>cycle 3: `324129368` |
-| Generated bulk audit | largestProtectedTargets | stable | cycle 1: `items:4; sha256:cb5f0b846d58; preview:[{"path":"business-os-data","bytes":163307370,"files":52,"folders":35,"category":"business data"...`<br>cycle 2: `items:4; sha256:cb5f0b846d58; preview:[{"path":"business-os-data","bytes":163307370,"files":52,"folders":35,"category":"business data"...`<br>cycle 3: `items:4; sha256:cb5f0b846d58; preview:[{"path":"business-os-data","bytes":163307370,"files":52,"folders":35,"category":"business data"...` |
-| Generated bulk audit | largestCleanupTargets | stable | cycle 1: `items:4; sha256:6a6ea1a42a46; preview:[{"path":"frontend/node_modules","bytes":158132222,"files":11264,"folders":986,"category":"depen...`<br>cycle 2: `items:4; sha256:6a6ea1a42a46; preview:[{"path":"frontend/node_modules","bytes":158132222,"files":11264,"folders":986,"category":"depen...`<br>cycle 3: `items:4; sha256:6a6ea1a42a46; preview:[{"path":"frontend/node_modules","bytes":158132222,"files":11264,"folders":986,"category":"depen...` |
-| Generated bulk audit | dispositionTotals | stable | cycle 1: `keys:5; sha256:7e3e98470bd8; preview:{"preserve":{"bytes":178803926,"files":68,"folders":37,"targets":3},"retention":{"bytes":4852557...`<br>cycle 2: `keys:5; sha256:7e3e98470bd8; preview:{"preserve":{"bytes":178803926,"files":68,"folders":37,"targets":3},"retention":{"bytes":4852557...`<br>cycle 3: `keys:5; sha256:7e3e98470bd8; preview:{"preserve":{"bytes":178803926,"files":68,"folders":37,"targets":3},"retention":{"bytes":4852557...` |
+| Generated bulk audit | adjustedTotalBytes | stable | cycle 1: `536182479`<br>cycle 2: `536182479`<br>cycle 3: `536182479` |
+| Generated bulk audit | adjustedProtectedBytes | stable | cycle 1: `212053007`<br>cycle 2: `212053007`<br>cycle 3: `212053007` |
+| Generated bulk audit | adjustedCleanupCandidateBytes | stable | cycle 1: `324129472`<br>cycle 2: `324129472`<br>cycle 3: `324129472` |
+| Generated bulk audit | largestProtectedTargets | stable | cycle 1: `items:4; sha256:945072a3cb12; preview:[{"path":"business-os-data","bytes":163307370,"files":52,"folders":35,"category":"business data"...`<br>cycle 2: `items:4; sha256:945072a3cb12; preview:[{"path":"business-os-data","bytes":163307370,"files":52,"folders":35,"category":"business data"...`<br>cycle 3: `items:4; sha256:945072a3cb12; preview:[{"path":"business-os-data","bytes":163307370,"files":52,"folders":35,"category":"business data"...` |
+| Generated bulk audit | largestCleanupTargets | stable | cycle 1: `items:4; sha256:2cd0c368b208; preview:[{"path":"frontend/node_modules","bytes":158132222,"files":11264,"folders":986,"category":"depen...`<br>cycle 2: `items:4; sha256:2cd0c368b208; preview:[{"path":"frontend/node_modules","bytes":158132222,"files":11264,"folders":986,"category":"depen...`<br>cycle 3: `items:4; sha256:2cd0c368b208; preview:[{"path":"frontend/node_modules","bytes":158132222,"files":11264,"folders":986,"category":"depen...` |
+| Generated bulk audit | dispositionTotals | stable | cycle 1: `keys:5; sha256:740b1df79ad8; preview:{"preserve":{"bytes":178803926,"files":68,"folders":37,"targets":3},"retention":{"bytes":4874563...`<br>cycle 2: `keys:5; sha256:740b1df79ad8; preview:{"preserve":{"bytes":178803926,"files":68,"folders":37,"targets":3},"retention":{"bytes":4874563...`<br>cycle 3: `keys:5; sha256:740b1df79ad8; preview:{"preserve":{"bytes":178803926,"files":68,"folders":37,"targets":3},"retention":{"bytes":4874563...` |
 | Generated bulk audit | generatedBulkCandidateMaxBytes | stable | cycle 1: `536870912`<br>cycle 2: `536870912`<br>cycle 3: `536870912` |
 | Generated bulk audit | thresholdExceeded | stable | cycle 1: `false`<br>cycle 2: `false`<br>cycle 3: `false` |
 | Generated bulk audit | measurementMode | stable | cycle 1: `bounded-parallel-targets`<br>cycle 2: `bounded-parallel-targets`<br>cycle 3: `bounded-parallel-targets` |
@@ -131,16 +131,16 @@ Policy: `ops/automation/business-os-automation.json`
 | Schema audit | latestDexieStoreNames | stable | cycle 1: `items:24; sha256:d4ee5c2f4737; preview:["audit_logs","branch_stock","branches","categories","custom_fields","custom_tables","customers"...`<br>cycle 2: `items:24; sha256:d4ee5c2f4737; preview:["audit_logs","branch_stock","branches","categories","custom_fields","custom_tables","customers"...`<br>cycle 3: `items:24; sha256:d4ee5c2f4737; preview:["audit_logs","branch_stock","branches","categories","custom_fields","custom_tables","customers"...` |
 | Performance/code-flow scan | sourceFiles | stable | cycle 1: `351`<br>cycle 2: `351`<br>cycle 3: `351` |
 | Performance/code-flow scan | distAssets | stable | cycle 1: `84`<br>cycle 2: `84`<br>cycle 3: `84` |
-| Performance/code-flow scan | totalSourceBytes | stable | cycle 1: `6237700`<br>cycle 2: `6237700`<br>cycle 3: `6237700` |
-| Performance/code-flow scan | totalSourceLines | stable | cycle 1: `139944`<br>cycle 2: `139944`<br>cycle 3: `139944` |
+| Performance/code-flow scan | totalSourceBytes | stable | cycle 1: `6240649`<br>cycle 2: `6240649`<br>cycle 3: `6240649` |
+| Performance/code-flow scan | totalSourceLines | stable | cycle 1: `140057`<br>cycle 2: `140057`<br>cycle 3: `140057` |
 | Performance/code-flow scan | largestSourceFile | stable | cycle 1: `frontend/src/lang/km.json`<br>cycle 2: `frontend/src/lang/km.json`<br>cycle 3: `frontend/src/lang/km.json` |
 | Performance/code-flow scan | largestSourceLinesFile | stable | cycle 1: `frontend/src/components/inventory/Inventory.jsx`<br>cycle 2: `frontend/src/components/inventory/Inventory.jsx`<br>cycle 3: `frontend/src/components/inventory/Inventory.jsx` |
 | Performance/code-flow scan | largestBuiltChunk | stable | cycle 1: `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js`<br>cycle 2: `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js`<br>cycle 3: `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` |
 | Performance/code-flow scan | oversizedSourceFiles | stable | cycle 1: `items:19; sha256:d1eba2bacc47; preview:["backend/src/routes/inventory.js","backend/src/routes/products.js","backend/src/routes/sales.js...`<br>cycle 2: `items:19; sha256:d1eba2bacc47; preview:["backend/src/routes/inventory.js","backend/src/routes/products.js","backend/src/routes/sales.js...`<br>cycle 3: `items:19; sha256:d1eba2bacc47; preview:["backend/src/routes/inventory.js","backend/src/routes/products.js","backend/src/routes/sales.js...` |
-| Performance/code-flow scan | oversizedBuiltChunks | stable | cycle 1: `items:5; sha256:e80787254a1e; preview:["frontend/dist/assets/catalog-D_Exlxdp.js","frontend/dist/assets/index-DQztsXP7.css","frontend/...`<br>cycle 2: `items:5; sha256:e80787254a1e; preview:["frontend/dist/assets/catalog-D_Exlxdp.js","frontend/dist/assets/index-DQztsXP7.css","frontend/...`<br>cycle 3: `items:5; sha256:e80787254a1e; preview:["frontend/dist/assets/catalog-D_Exlxdp.js","frontend/dist/assets/index-DQztsXP7.css","frontend/...` |
+| Performance/code-flow scan | oversizedBuiltChunks | stable | cycle 1: `items:5; sha256:1c357759ff8d; preview:["frontend/dist/assets/catalog-DeiqvgVs.js","frontend/dist/assets/index-DQztsXP7.css","frontend/...`<br>cycle 2: `items:5; sha256:1c357759ff8d; preview:["frontend/dist/assets/catalog-DeiqvgVs.js","frontend/dist/assets/index-DQztsXP7.css","frontend/...`<br>cycle 3: `items:5; sha256:1c357759ff8d; preview:["frontend/dist/assets/catalog-DeiqvgVs.js","frontend/dist/assets/index-DQztsXP7.css","frontend/...` |
 | Performance/code-flow scan | topSourceBySize | stable | cycle 1: `items:25; sha256:415c77ee5ece; preview:[{"file":"frontend/src/lang/km.json","size":252664,"lines":2730},{"file":"frontend/src/component...`<br>cycle 2: `items:25; sha256:415c77ee5ece; preview:[{"file":"frontend/src/lang/km.json","size":252664,"lines":2730},{"file":"frontend/src/component...`<br>cycle 3: `items:25; sha256:415c77ee5ece; preview:[{"file":"frontend/src/lang/km.json","size":252664,"lines":2730},{"file":"frontend/src/component...` |
 | Performance/code-flow scan | topSourceByLines | stable | cycle 1: `items:25; sha256:c4333873789b; preview:[{"file":"frontend/src/components/inventory/Inventory.jsx","size":213963,"lines":4123},{"file":"...`<br>cycle 2: `items:25; sha256:c4333873789b; preview:[{"file":"frontend/src/components/inventory/Inventory.jsx","size":213963,"lines":4123},{"file":"...`<br>cycle 3: `items:25; sha256:c4333873789b; preview:[{"file":"frontend/src/components/inventory/Inventory.jsx","size":213963,"lines":4123},{"file":"...` |
-| Performance/code-flow scan | topBuiltChunks | stable | cycle 1: `items:25; sha256:8712dc0bb13e; preview:[{"file":"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js","size":446639,"lines":0},{"file":"front...`<br>cycle 2: `items:25; sha256:8712dc0bb13e; preview:[{"file":"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js","size":446639,"lines":0},{"file":"front...`<br>cycle 3: `items:25; sha256:8712dc0bb13e; preview:[{"file":"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js","size":446639,"lines":0},{"file":"front...` |
+| Performance/code-flow scan | topBuiltChunks | stable | cycle 1: `items:25; sha256:c9f38c024c06; preview:[{"file":"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js","size":446639,"lines":0},{"file":"front...`<br>cycle 2: `items:25; sha256:c9f38c024c06; preview:[{"file":"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js","size":446639,"lines":0},{"file":"front...`<br>cycle 3: `items:25; sha256:c9f38c024c06; preview:[{"file":"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js","size":446639,"lines":0},{"file":"front...` |
 | Performance/code-flow scan | manualNotesPreserved | stable | cycle 1: `true`<br>cycle 2: `true`<br>cycle 3: `true` |
 | Performance/code-flow scan | manualNotesLines | stable | cycle 1: `966`<br>cycle 2: `966`<br>cycle 3: `966` |
 | Performance/code-flow scan | sourceReadMode | stable | cycle 1: `bounded-parallel`<br>cycle 2: `bounded-parallel`<br>cycle 3: `bounded-parallel` |
@@ -155,8 +155,8 @@ Policy: `ops/automation/business-os-automation.json`
 | Language/runtime audit | matrixCheckMode | stable | cycle 1: `bounded-parallel`<br>cycle 2: `bounded-parallel`<br>cycle 3: `bounded-parallel` |
 | Language/runtime audit | matrixCheckConcurrency | stable | cycle 1: `8`<br>cycle 2: `8`<br>cycle 3: `8` |
 | Language/runtime audit | fileReadConcurrency | stable | cycle 1: `24`<br>cycle 2: `24`<br>cycle 3: `24` |
-| Language/runtime audit | languageCounts | stable | cycle 1: `items:10; sha256:2af19c5604ac; preview:[["TypeScript",225],["JavaScript",84],["React TSX",72],["React JSX",35],["Windows batch",16],["P...`<br>cycle 2: `items:10; sha256:2af19c5604ac; preview:[["TypeScript",225],["JavaScript",84],["React TSX",72],["React JSX",35],["Windows batch",16],["P...`<br>cycle 3: `items:10; sha256:2af19c5604ac; preview:[["TypeScript",225],["JavaScript",84],["React TSX",72],["React JSX",35],["Windows batch",16],["P...` |
-| Language/runtime audit | extensionCounts | stable | cycle 1: `[[".ts",225],[".js",84],[".tsx",72],[".jsx",35],[".bat",16],[".ps1",8],[".sh",3],[".json",2],[".sql",2],[".css",1]]`<br>cycle 2: `[[".ts",225],[".js",84],[".tsx",72],[".jsx",35],[".bat",16],[".ps1",8],[".sh",3],[".json",2],[".sql",2],[".css",1]]`<br>cycle 3: `[[".ts",225],[".js",84],[".tsx",72],[".jsx",35],[".bat",16],[".ps1",8],[".sh",3],[".json",2],[".sql",2],[".css",1]]` |
+| Language/runtime audit | languageCounts | stable | cycle 1: `items:10; sha256:50e6b5d4f82b; preview:[["TypeScript",225],["JavaScript",84],["React TSX",73],["React JSX",34],["Windows batch",16],["P...`<br>cycle 2: `items:10; sha256:50e6b5d4f82b; preview:[["TypeScript",225],["JavaScript",84],["React TSX",73],["React JSX",34],["Windows batch",16],["P...`<br>cycle 3: `items:10; sha256:50e6b5d4f82b; preview:[["TypeScript",225],["JavaScript",84],["React TSX",73],["React JSX",34],["Windows batch",16],["P...` |
+| Language/runtime audit | extensionCounts | stable | cycle 1: `[[".ts",225],[".js",84],[".tsx",73],[".jsx",34],[".bat",16],[".ps1",8],[".sh",3],[".json",2],[".sql",2],[".css",1]]`<br>cycle 2: `[[".ts",225],[".js",84],[".tsx",73],[".jsx",34],[".bat",16],[".ps1",8],[".sh",3],[".json",2],[".sql",2],[".css",1]]`<br>cycle 3: `[[".ts",225],[".js",84],[".tsx",73],[".jsx",34],[".bat",16],[".ps1",8],[".sh",3],[".json",2],[".sql",2],[".css",1]]` |
 | Language/runtime audit | defaults | stable | cycle 1: `keys:5; sha256:23699dab93e2; preview:{"frontend":"React/JavaScript","backend":"Node.js","heavyData":"SQL/DuckDB before new general-pu...`<br>cycle 2: `keys:5; sha256:23699dab93e2; preview:{"frontend":"React/JavaScript","backend":"Node.js","heavyData":"SQL/DuckDB before new general-pu...`<br>cycle 3: `keys:5; sha256:23699dab93e2; preview:{"frontend":"React/JavaScript","backend":"Node.js","heavyData":"SQL/DuckDB before new general-pu...` |
 | Language/runtime audit | packagingGate | stable | cycle 1: `No backend language/runtime conversion without release packaging and rollback proof.`<br>cycle 2: `No backend language/runtime conversion without release packaging and rollback proof.`<br>cycle 3: `No backend language/runtime conversion without release packaging and rollback proof.` |
 | Language/runtime audit | runtimePolicy | stable | cycle 1: `items:5; sha256:fc7bab5f41f4; preview:[{"runtime":"TypeScript","decision":"target pure helpers first","evidenceRequired":"typecheck, f...`<br>cycle 2: `items:5; sha256:fc7bab5f41f4; preview:[{"runtime":"TypeScript","decision":"target pure helpers first","evidenceRequired":"typecheck, f...`<br>cycle 3: `items:5; sha256:fc7bab5f41f4; preview:[{"runtime":"TypeScript","decision":"target pure helpers first","evidenceRequired":"typecheck, f...` |

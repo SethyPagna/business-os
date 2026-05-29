@@ -832,7 +832,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `FilePickerModal.tsx` | UI component/page |
 | 2 | `FilesPage.jsx` | UI component/page |
-| 3 | `FilesProvidersTab.jsx` | UI component/page |
+| 3 | `FilesProvidersTab.tsx` | UI component/page |
 | 4 | `FilesResponsesTab.tsx` | UI component/page |
 
 
