@@ -118,7 +118,7 @@ Total files documented: **193**
 | 106 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
 | 107 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
 | 108 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
-| 109 | `frontend/src/components/returns/Returns.jsx` | 13 |
+| 109 | `frontend/src/components/returns/Returns.tsx` | 12 |
 | 110 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
 | 111 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
 | 112 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
@@ -1768,23 +1768,22 @@ Total files documented: **193**
 | 3 | `isPositiveMoney` | function | 60 |
 | 4 | `ReturnDetailModal` | component/function | 64 |
 
-### 3.109 `frontend/src/components/returns/Returns.jsx`
+### 3.109 `frontend/src/components/returns/Returns.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizeScope` | function | 34 |
-| 2 | `getReturnTypeKey` | function | 38 |
-| 3 | `getReturnTypeLabel` | function | 44 |
-| 4 | `normalizeFiniteIdsFrom` | function | 52 |
-| 5 | `normalizeFiniteIds` | function | 60 |
-| 6 | `countSelectedIds` | function | 64 |
-| 7 | `countActiveFlags` | function | 72 |
-| 8 | `exportReturnRows` | function | 80 |
-| 9 | `getInitialReturnPageSize` | function | 98 |
-| 10 | `Returns` | component/function | 103 |
-| 11 | `promise` | const arrow | 169 |
-| 12 | `handleOpenEdit` | const arrow | 246 |
-| 13 | `renderAmount` | const arrow | 663 |
+| 1 | `getReturnApi` | function | 148 |
+| 2 | `normalizeScope` | function | 153 |
+| 3 | `getReturnTypeKey` | function | 157 |
+| 4 | `getReturnTypeLabel` | function | 163 |
+| 5 | `normalizeFiniteIds` | function | 179 |
+| 6 | `countSelectedIds` | function | 183 |
+| 7 | `countActiveFlags` | function | 191 |
+| 8 | `toNumericAmount` | function | 199 |
+| 9 | `exportReturnRows` | function | 204 |
+| 10 | `getInitialReturnPageSize` | function | 222 |
+| 11 | `Returns` | component/function | 227 |
+| 12 | `promise` | const arrow | 300 |
 
 ### 3.110 `frontend/src/components/returns/ReturnsListSurface.tsx`
 
