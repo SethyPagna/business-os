@@ -170,7 +170,7 @@ Code files documented: **466**
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 12 | 1 | 11 | 1 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 | 2 | 0 | 2 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 6 | 1 | 4 | 1 |
-| 161 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 8 | 1 | 6 | 1 |
+| 161 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 8 | 1 | 6 | 1 |
 | 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 2 | 1 | 1 | 1 |
 | 163 | `frontend/src/components/catalog/catalogUi.tsx` | 1 | 3 | 0 | 4 |
 | 164 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 1 | 7 | 1 | 1 |
@@ -3293,7 +3293,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
-  - `frontend/src/components/catalog/CatalogProductsSection.jsx`
+  - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
   - `frontend/src/components/catalog/catalogUi.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
@@ -3332,7 +3332,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.161 `frontend/src/components/catalog/CatalogProductsSection.jsx`
+### 3.161 `frontend/src/components/catalog/CatalogProductsSection.tsx`
 
 - Declared exports: `function`
 - Imports (8)
@@ -3375,7 +3375,7 @@ Code files documented: **466**
 - Referenced by (4)
   - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
-  - `frontend/src/components/catalog/CatalogProductsSection.jsx`
+  - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
 
 ### 3.164 `frontend/src/components/catalog/portalCatalogDisplay.ts`
@@ -3386,7 +3386,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/utils/pricing.ts`
 - Referenced by (1)
-  - `frontend/src/components/catalog/CatalogProductsSection.jsx`
+  - `frontend/src/components/catalog/CatalogProductsSection.tsx`
 
 ### 3.165 `frontend/src/components/catalog/portalContentI18n.ts`
 
@@ -4591,7 +4591,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
-  - `frontend/src/components/catalog/CatalogProductsSection.jsx`
+  - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/pos/ProductImage.tsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
@@ -5283,7 +5283,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (8)
-  - `frontend/src/components/catalog/CatalogProductsSection.jsx`
+  - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/pos/POS.jsx`
@@ -6015,7 +6015,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (7)
-  - `frontend/src/components/catalog/CatalogProductsSection.jsx`
+  - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/pos/posCore.ts`
@@ -6175,7 +6175,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (6)
-  - `frontend/src/components/catalog/CatalogProductsSection.jsx`
+  - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/inventory/InventoryProductsSurface.jsx`
   - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/POS.jsx`

@@ -27,7 +27,7 @@ Total files documented: **193**
 | 15 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
 | 16 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
 | 17 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
-| 18 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 |
+| 18 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
 | 19 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
 | 20 | `frontend/src/components/catalog/catalogUi.tsx` | 1 |
 | 21 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 2 |
@@ -755,14 +755,14 @@ Total files documented: **193**
 | 1 | `CatalogPreviewSurface` | component/function | 109 |
 | 2 | `handlePortalTabClick` | const arrow | 147 |
 
-### 3.18 `frontend/src/components/catalog/CatalogProductsSection.jsx`
+### 3.18 `frontend/src/components/catalog/CatalogProductsSection.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getBadgeIcon` | function | 10 |
-| 2 | `getBadgeToneClass` | function | 18 |
-| 3 | `getProductInitial` | function | 27 |
-| 4 | `CatalogProductsSection` | component/function | 35 |
+| 1 | `getBadgeIcon` | function | 112 |
+| 2 | `getBadgeToneClass` | function | 120 |
+| 3 | `getProductInitial` | function | 129 |
+| 4 | `CatalogProductsSection` | component/function | 137 |
 
 ### 3.19 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
 

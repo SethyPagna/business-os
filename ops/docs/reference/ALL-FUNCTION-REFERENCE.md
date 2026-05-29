@@ -170,7 +170,7 @@ Code files scanned: **466**
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 2 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
-| 161 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 |
+| 161 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
 | 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
 | 163 | `frontend/src/components/catalog/catalogUi.tsx` | 4 |
 | 164 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 9 |
@@ -3480,14 +3480,14 @@ Code files scanned: **466**
 | 1 | `CatalogPreviewSurface` | export default function | 109 |
 | 2 | `handlePortalTabClick` | const arrow | 147 |
 
-### 3.161 `frontend/src/components/catalog/CatalogProductsSection.jsx`
+### 3.161 `frontend/src/components/catalog/CatalogProductsSection.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getBadgeIcon` | function | 10 |
-| 2 | `getBadgeToneClass` | function | 18 |
-| 3 | `getProductInitial` | function | 27 |
-| 4 | `CatalogProductsSection` | export default function | 35 |
+| 1 | `getBadgeIcon` | function | 112 |
+| 2 | `getBadgeToneClass` | function | 120 |
+| 3 | `getProductInitial` | function | 129 |
+| 4 | `CatalogProductsSection` | export default function | 137 |
 
 ### 3.162 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
 
