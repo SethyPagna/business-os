@@ -68,8 +68,8 @@ await runTest('decodeTextBuffer handles UTF-16LE spreadsheet exports', () => {
 
 await runTest('background import modals notify parent pages when a job is queued', () => {
   const files = [
-    '../src/components/inventory/InventoryImportModal.jsx',
-    '../src/components/sales/SalesImportModal.jsx',
+    '../src/components/inventory/InventoryImportModal.tsx',
+    '../src/components/sales/SalesImportModal.tsx',
     '../src/components/contacts/ContactImportModal.jsx',
     '../src/components/products/import/BulkImportModal.tsx',
   ]

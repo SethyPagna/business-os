@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -15,12 +15,72 @@ const SALES_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 30000
 const SALES_IMPORT_JOB_START_TIMEOUT_MS = 12000
 const SALES_IMPORT_ROW_COUNT_TIMEOUT_MS = 5000
 
-function countSalesCsvRowsInWorker(text) {
+type TranslateFn = (key: string) => string | undefined
+type NotifyFn = (message: string, tone?: string) => void
+
+interface AppContextValue {
+  notify: NotifyFn
+  t: TranslateFn
+}
+
+interface ImportModalProps {
+  onClose: () => void
+  onDone?: (payload: ImportResult) => void | Promise<void>
+}
+
+interface CsvDialogResult {
+  content?: string | null
+  name?: string | null
+}
+
+interface ImportJob {
+  id?: string | number | null
+}
+
+interface ImportJobResponse extends ImportJob {
+  job?: ImportJob | null
+}
+
+interface ImportResult {
+  imported: number
+  duplicates: number
+  queued?: number
+  jobId?: string | number | null
+  errors: string[]
+}
+
+interface ImportApi {
+  openCSVDialog?: () => Promise<CsvDialogResult | null | undefined>
+  downloadImportTemplate: (type: 'sales') => void
+  createImportJob: (payload: { type: 'sales'; policy: { source: string } }) => Promise<ImportJobResponse>
+  uploadImportJobCsv: (payload: { jobId: string | number; text: string; fileName: string }) => Promise<unknown>
+  startImportJob: (jobId: string | number) => Promise<unknown>
+}
+
+interface RowCountWorkerMessage {
+  id?: string
+  type?: 'result' | 'error'
+  rowCount?: number | string
+  error?: string
+}
+
+const useApp = useAppHook as () => AppContextValue
+
+function getImportApi(): ImportApi {
+  if (!window.api) throw new Error('Sales import API is not available.')
+  return window.api as ImportApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function countSalesCsvRowsInWorker(text: string): Promise<number> {
   if (typeof Worker === 'undefined') {
     return Promise.resolve(countCsvDataRows(text))
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise<number>((resolve, reject) => {
     const id = `sales-import-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const worker = new Worker(new URL('./salesImportWorker.ts', import.meta.url), { type: 'module' })
     const timeoutId = window.setTimeout(() => {
@@ -32,14 +92,14 @@ function countSalesCsvRowsInWorker(text) {
       worker.terminate()
     }
 
-    worker.onmessage = (event) => {
+    worker.onmessage = (event: MessageEvent<RowCountWorkerMessage>) => {
       const message = event.data || {}
       if (message.id !== id) return
       cleanup()
       if (message.type === 'result') resolve(Number(message.rowCount || 0))
       else reject(new Error(message.error || 'Sales import row count failed'))
     }
-    worker.onerror = (error) => {
+    worker.onerror = (error: ErrorEvent) => {
       cleanup()
       reject(new Error(error?.message || 'Sales import worker failed'))
     }
@@ -47,12 +107,12 @@ function countSalesCsvRowsInWorker(text) {
   })
 }
 
-export default function SalesImportModal({ onClose, onDone }) {
+export default function SalesImportModal({ onClose, onDone }: ImportModalProps) {
   const { notify, t } = useApp()
   const [csvText, setCsvText] = useState('')
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState<ImportResult | null>(null)
   const [previewRowCount, setPreviewRowCount] = useState(0)
   const [analyzingCsv, setAnalyzingCsv] = useState(false)
   const importRequestRef = useRef(0)
@@ -60,12 +120,12 @@ export default function SalesImportModal({ onClose, onDone }) {
   const rowCountRequestRef = useRef(0)
   const aliveRef = useRef(true)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
-  const signalDone = async (payload) => {
+  const signalDone = async (payload: ImportResult): Promise<void> => {
     if (typeof onDone === 'function') {
       await Promise.resolve(onDone(payload))
     }
@@ -76,7 +136,7 @@ export default function SalesImportModal({ onClose, onDone }) {
     invalidateTrackedRequest(importRequestRef)
   }, [])
 
-  const analyzeCsvText = async (text) => {
+  const analyzeCsvText = async (text: string): Promise<void> => {
     const nextText = String(text || '')
     const requestId = rowCountRequestRef.current + 1
     rowCountRequestRef.current = requestId
@@ -92,7 +152,7 @@ export default function SalesImportModal({ onClose, onDone }) {
     setAnalyzingCsv(false)
   }
 
-  const setSalesCsvText = (text, name = fileName) => {
+  const setSalesCsvText = (text: string, name = fileName): void => {
     const nextText = String(text || '')
     setCsvText(nextText)
     setFileName(String(name || 'sales.csv'))
@@ -101,13 +161,13 @@ export default function SalesImportModal({ onClose, onDone }) {
   }
 
   const handlePickFile = async () => {
-    const picked = await window.api.openCSVDialog?.()
+    const picked = await getImportApi().openCSVDialog?.()
     if (!picked?.content) return
     setSalesCsvText(picked.content, picked.name || 'sales.csv')
   }
 
   const handleDownloadTemplate = () => {
-    window.api.downloadImportTemplate('sales')
+    getImportApi().downloadImportTemplate('sales')
   }
 
   const handleImport = async () => {
@@ -128,7 +188,7 @@ export default function SalesImportModal({ onClose, onDone }) {
     setLoading(true)
     try {
       const created = await withLoaderTimeout(
-        () => window.api.createImportJob({ type: 'sales', policy: { source: 'sales_modal' } }),
+        () => getImportApi().createImportJob({ type: 'sales', policy: { source: 'sales_modal' } }),
         'Sales import job',
         SALES_IMPORT_JOB_CREATE_TIMEOUT_MS,
       )
@@ -136,12 +196,12 @@ export default function SalesImportModal({ onClose, onDone }) {
       const job = created?.job || created
       if (!job?.id) throw new Error('Import job was not created')
       await withLoaderTimeout(
-        () => window.api.uploadImportJobCsv({ jobId: job.id, text: csvText, fileName: fileName || 'sales.csv' }),
+        () => getImportApi().uploadImportJobCsv({ jobId: job.id as string | number, text: csvText, fileName: fileName || 'sales.csv' }),
         'Sales import CSV upload',
         SALES_IMPORT_JOB_UPLOAD_TIMEOUT_MS,
       )
       await withLoaderTimeout(
-        () => window.api.startImportJob(job.id),
+        () => getImportApi().startImportJob(job.id as string | number),
         'Sales import start',
         SALES_IMPORT_JOB_START_TIMEOUT_MS,
       )
@@ -149,13 +209,13 @@ export default function SalesImportModal({ onClose, onDone }) {
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
       setResult(queuedResult)
       await signalDone(queuedResult)
-      notify(tr('sales_import_started', 'Sales import analysis started: {count} row(s) queued. Review and approve it from the top progress bar.').replace('{count}', rowCount), 'success')
+      notify(tr('sales_import_started', 'Sales import analysis started: {count} row(s) queued. Review and approve it from the top progress bar.').replace('{count}', String(rowCount)), 'success')
       return
     } catch (error) {
-      const nextResult = { imported: 0, duplicates: 0, errors: [error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')] }
+      const nextResult = { imported: 0, duplicates: 0, errors: [getErrorMessage(error, tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'))] }
       if (isTrackedRequestCurrent(importRequestRef, requestId) && aliveRef.current) {
         setResult(nextResult)
-        notify(error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'), 'error')
+        notify(getErrorMessage(error, tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')), 'error')
       }
     } finally {
       finishSingleAction(importInFlightRef)
@@ -198,15 +258,15 @@ export default function SalesImportModal({ onClose, onDone }) {
         <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
           {analyzingCsv
             ? tr('sales_import_checking_rows', 'Checking rows...')
-            : tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', previewRowCount)}
+            : tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', String(previewRowCount))}
         </div>
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">
               {result.queued
-                ? tr('import_job_queued_count', '{count} row(s) queued for analysis. Review and approve it from the top progress bar.').replace('{count}', result.queued)
-                : tr('imported_sales_count', 'Imported {count} sale(s)', 'បាននាំចូលការលក់ {count}').replace('{count}', result.imported)}
-              {!result.queued && result.duplicates ? `, ${tr('duplicates_skipped_count', 'skipped {count} duplicate(s)', 'បានរំលងស្ទួន {count}').replace('{count}', result.duplicates)}` : ''}
+                ? tr('import_job_queued_count', '{count} row(s) queued for analysis. Review and approve it from the top progress bar.').replace('{count}', String(result.queued))
+                : tr('imported_sales_count', 'Imported {count} sale(s)', 'បាននាំចូលការលក់ {count}').replace('{count}', String(result.imported))}
+              {!result.queued && result.duplicates ? `, ${tr('duplicates_skipped_count', 'skipped {count} duplicate(s)', 'បានរំលងស្ទួន {count}').replace('{count}', String(result.duplicates))}` : ''}
             </div>
             {result.errors?.length ? (
               <div className="mt-2 space-y-1 text-xs text-red-600 dark:text-red-400">

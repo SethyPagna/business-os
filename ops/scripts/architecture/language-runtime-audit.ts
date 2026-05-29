@@ -193,7 +193,7 @@ const FOCUSED_TEST_COVERAGE = [
   },
   {
     track: 'Completed Web Worker extraction',
-    candidate: 'frontend/src/components/inventory/InventoryImportModal.jsx',
+    candidate: 'frontend/src/components/inventory/InventoryImportModal.tsx',
     tests: [
       'frontend/tests/inventoryImportWorker.test.ts',
       'frontend/tests/actionStability.test.ts',
@@ -204,7 +204,7 @@ const FOCUSED_TEST_COVERAGE = [
   },
   {
     track: 'Completed Web Worker extraction',
-    candidate: 'frontend/src/components/sales/SalesImportModal.jsx',
+    candidate: 'frontend/src/components/sales/SalesImportModal.tsx',
     tests: [
       'frontend/tests/salesImportWorker.test.ts',
       'frontend/tests/actionStability.test.ts',
@@ -837,7 +837,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     ],
   },
   {
-    surface: 'frontend/src/components/inventory/InventoryImportModal.jsx',
+    surface: 'frontend/src/components/inventory/InventoryImportModal.tsx',
     worker: 'frontend/src/components/inventory/inventoryImportWorker.ts',
     compatibilityWrapper: 'frontend/src/components/inventory/inventoryImportWorker.mjs',
     fallback: 'frontend/src/utils/csvRowCounter.ts',
@@ -851,7 +851,7 @@ const COMPLETED_WEB_WORKER_SLICES = [
     ],
   },
   {
-    surface: 'frontend/src/components/sales/SalesImportModal.jsx',
+    surface: 'frontend/src/components/sales/SalesImportModal.tsx',
     worker: 'frontend/src/components/sales/salesImportWorker.ts',
     compatibilityWrapper: 'frontend/src/components/sales/salesImportWorker.mjs',
     fallback: 'frontend/src/utils/csvRowCounter.ts',

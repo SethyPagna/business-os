@@ -1447,7 +1447,7 @@ Decision rule:
 164. Move sales import row counting into a Web Worker. Done:
     `frontend/src/components/sales/salesImportWorker.ts` now handles sales CSV
     row-count analysis, with `salesImportWorker.mjs` as the Vite worker
-    wrapper. `SalesImportModal.jsx` now uses the shared
+    wrapper. `SalesImportModal.tsx` now uses the shared
     `frontend/src/utils/csvRowCounter.ts` parser, so quoted multiline CSV
     records are counted consistently across sales, inventory, and contacts.
     The modal keeps the server-side background import job contract while
@@ -3990,6 +3990,14 @@ Decision rule:
     dictionaries, section/item payloads, summary state, copy renderers, app
     context access, and notification API calls. The conversion keeps the lazy
     app-shell imports extensionless while reducing dynamic shared-shell state.
+509. Convert sales export and import modals to TSX. Done:
+    `ExportModal.tsx` now types report periods, date ranges, export summaries,
+    status/product rows, CSV fallback rows, and the sales-export API boundary.
+    `SalesImportModal.tsx` and `InventoryImportModal.tsx` now type import job
+    payloads, CSV dialog results, worker row-count messages, queued results,
+    app-context notifications, and unknown-safe error handling. The conversion
+    keeps worker-first row counting, loader timeouts, synchronous parser
+    fallbacks, import-job queuing, and lazy route imports extensionless.
 
 ## Safety Gates
 

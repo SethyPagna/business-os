@@ -7,27 +7,94 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 const SALES_EXPORT_PREVIEW_TIMEOUT_MS = 20000
 const SALES_EXPORT_CSV_TIMEOUT_MS = 30000
 
-export default function ExportModal({ onClose, t, fmtUSD }) {
-  const [period, setPeriod] = useState('monthly')
+type TranslateFn = (key: string) => string
+type MoneyFormatter = (value: number) => string
+type ExportPeriod = 'daily' | 'monthly' | 'yearly' | 'custom'
+
+interface ExportModalProps {
+  onClose: () => void
+  t?: TranslateFn
+  fmtUSD: MoneyFormatter
+}
+
+interface ExportDates {
+  start: string
+  end: string
+}
+
+type CsvRow = Record<string, unknown>
+
+interface SalesExportSummary {
+  total_transactions?: number
+  completed_transactions?: number
+  revenue_usd?: number
+  cogs_usd?: number
+  gross_profit_usd?: number
+  gross_margin_pct?: number
+  total_discounts_usd?: number
+  total_tax_usd?: number
+  total_delivery_usd?: number
+  total_refunds_usd?: number
+  net_revenue_usd?: number
+  avg_order_usd?: number
+  [key: string]: unknown
+}
+
+interface SalesExportStatusRow {
+  status?: unknown
+  count?: number
+  revenue?: number
+}
+
+interface SalesExportProductRow {
+  product_id?: string | number | null
+  product_name?: string | null
+  qty_sold?: number
+  revenue_usd?: number
+}
+
+interface SalesExportData {
+  period?: Partial<ExportDates>
+  summary?: SalesExportSummary
+  by_status?: SalesExportStatusRow[]
+  by_product?: SalesExportProductRow[]
+  sales?: CsvRow[]
+}
+
+interface SalesExportApi {
+  getSalesExport: (params: { startDate: string; endDate: string; format?: 'csv' }) => Promise<SalesExportData | string>
+}
+
+function getSalesExportApi(): SalesExportApi {
+  if (!window.api) throw new Error('Sales export API is not available.')
+  return window.api as SalesExportApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
+  const [period, setPeriod] = useState<ExportPeriod>('monthly')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [loading, setLoading] = useState(false)
-  const [preview, setPreview] = useState(null)
+  const [preview, setPreview] = useState<SalesExportData | null>(null)
 
-  const tr = (key, fallback) => {
+  const tr = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
   }
 
-  const computeDates = (selectedPeriod) => {
+  const computeDates = (selectedPeriod: ExportPeriod): ExportDates => {
     const now = new Date()
     if (selectedPeriod === 'daily') {
-      const day = now.toISOString().split('T')[0]
+      const day = now.toISOString().split('T')[0] || ''
       return { start: day, end: day }
     }
     if (selectedPeriod === 'monthly') {
       const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0] || ''
       return { start, end }
     }
     if (selectedPeriod === 'yearly') {
@@ -38,7 +105,7 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
 
   const previewDates = useMemo(() => computeDates(period), [period, startDate, endDate])
 
-  const validateDates = () => {
+  const validateDates = (): ExportDates => {
     const dates = computeDates(period)
     if (!dates.start || !dates.end) {
       throw new Error(tr('please_select_start_end_dates', 'Please select start and end dates'))
@@ -46,7 +113,7 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
     return dates
   }
 
-  const downloadCsvBlob = (text, dates) => {
+  const downloadCsvBlob = (text: string, dates: ExportDates): void => {
     const blob = new Blob([text], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -56,11 +123,11 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
     URL.revokeObjectURL(url)
   }
 
-  const buildCsvFallback = (data, dates) => {
+  const buildCsvFallback = (data: SalesExportData, dates: ExportDates): string => {
     if (!data?.sales?.length) throw new Error(tr('no_data_to_export', 'No data to export'))
     const rows = data.sales
     const headers = Object.keys(rows[0] || {})
-    const escape = (value) => {
+    const escape = (value: unknown): string => {
       if (value == null) return ''
       const text = String(value)
       return text.includes(',') || text.includes('"') || text.includes('\n')
@@ -86,13 +153,14 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
       const dates = validateDates()
       setLoading(true)
       const data = await withLoaderTimeout(
-        () => window.api.getSalesExport({ startDate: dates.start, endDate: dates.end }),
+        () => getSalesExportApi().getSalesExport({ startDate: dates.start, endDate: dates.end }),
         'Sales export preview',
         SALES_EXPORT_PREVIEW_TIMEOUT_MS,
       )
+      if (typeof data === 'string') throw new Error(tr('error_loading_export', 'Error loading export'))
       setPreview(data)
     } catch (error) {
-      alert(error?.message || tr('error_loading_export', 'Error loading export'))
+      alert(getErrorMessage(error, tr('error_loading_export', 'Error loading export')))
     } finally {
       setLoading(false)
     }
@@ -103,14 +171,14 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
       const dates = validateDates()
       setLoading(true)
       const data = await withLoaderTimeout(
-        () => window.api.getSalesExport({ startDate: dates.start, endDate: dates.end, format: 'csv' }),
+        () => getSalesExportApi().getSalesExport({ startDate: dates.start, endDate: dates.end, format: 'csv' }),
         'Sales export CSV',
         SALES_EXPORT_CSV_TIMEOUT_MS,
       )
       const csvText = typeof data === 'string' ? data : buildCsvFallback(data, dates)
       downloadCsvBlob(csvText, dates)
     } catch (error) {
-      alert(error?.message || tr('export_error', 'Export error'))
+      alert(getErrorMessage(error, tr('export_error', 'Export error')))
     } finally {
       setLoading(false)
     }
@@ -134,12 +202,12 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
         <div>
           <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">{tr('report_period', 'Report Period')}</label>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[
+            {([
               ['daily', tr('period_daily', 'Daily')],
               ['monthly', tr('period_monthly', 'Monthly')],
               ['yearly', tr('period_yearly', 'Yearly')],
               ['custom', tr('period_custom', 'Custom')],
-            ].map(([value, label]) => (
+            ] satisfies Array<[ExportPeriod, string]>).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
@@ -192,7 +260,7 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
                 {tr('accounting_summary', 'Accounting Summary')} {preview.period?.start} to {preview.period?.end}
               </div>
               <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                {[
+                {([
                   ['Total Transactions', preview.summary?.total_transactions],
                   ['Completed Sales', preview.summary?.completed_transactions],
                   ['Revenue (USD)', fmtUSD(preview.summary?.revenue_usd || 0)],
@@ -205,7 +273,7 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
                   ['Total Refunds', fmtUSD(preview.summary?.total_refunds_usd || 0)],
                   ['Net Revenue', fmtUSD(preview.summary?.net_revenue_usd || 0)],
                   ['Avg Order', fmtUSD(preview.summary?.avg_order_usd || 0)],
-                ].map(([label, value]) => (
+                ] satisfies Array<[string, string | number | undefined]>).map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between gap-3">
                     <span className="text-gray-500 dark:text-gray-400">{label}</span>
                     <span className="font-medium text-gray-800 dark:text-gray-200">{value}</span>
@@ -219,7 +287,7 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">By Status</div>
                 <div className="space-y-1">
                   {preview.by_status.map((row) => (
-                    <div key={row.status} className="flex items-center justify-between border-b border-gray-100 py-1 text-sm dark:border-gray-700">
+                    <div key={String(row.status || 'status')} className="flex items-center justify-between border-b border-gray-100 py-1 text-sm dark:border-gray-700">
                       <StatusBadge status={row.status} t={t} />
                       <span className="text-gray-500">{row.count} sales · {fmtUSD(row.revenue || 0)}</span>
                     </div>

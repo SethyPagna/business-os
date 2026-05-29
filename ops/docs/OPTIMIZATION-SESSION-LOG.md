@@ -122,3 +122,21 @@ Use this shape for future entries:
 - route-scoped result:
 - warm whole-app result:
 - follow-up insight:
+
+## 2026-05-29
+
+### Accepted
+
+- change: converted sales export/import and inventory import modal cluster to
+  TSX with typed API, worker, queued-result, date, and CSV fallback boundaries
+- affected files: `frontend/src/components/sales/ExportModal.tsx`,
+  `frontend/src/components/sales/SalesImportModal.tsx`,
+  `frontend/src/components/inventory/InventoryImportModal.tsx`
+- route or API target: sales export, sales CSV import, inventory CSV import
+- keeper or rollback: keeper if typecheck, focused import/export tests, build,
+  Phase 29 audit, and Phase 8.4 live suite pass
+- route-scoped result: pending verification in Move 509
+- warm whole-app result: pending verification in Move 509
+- follow-up insight: this cluster is a good pattern for the remaining modal
+  conversions because it keeps `window.api` access behind local typed accessors
+  while preserving extensionless lazy imports.

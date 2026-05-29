@@ -2374,7 +2374,7 @@ Cleanup checkpoint:
   `frontend/src/components/inventory/inventoryImportWorker.ts` counts inventory
   CSV rows off the modal render path, while shared
   `frontend/src/utils/csvRowCounter.ts` keeps contact and inventory row counting
-  on one quoted-record-aware parser. `InventoryImportModal.jsx` preserves the
+  on one quoted-record-aware parser. `InventoryImportModal.tsx` preserves the
   existing background import job contract and blocks submit while a row check is
   still in flight.
 - The product import Web Worker path is now hardened:
@@ -2389,7 +2389,7 @@ Cleanup checkpoint:
   `frontend/src/components/sales/salesImportWorker.ts` counts sales CSV rows
   off the modal render path, while shared
   `frontend/src/utils/csvRowCounter.ts` keeps sales, inventory, and contact row
-  counting on one quoted-record-aware parser. `SalesImportModal.jsx` preserves
+  counting on one quoted-record-aware parser. `SalesImportModal.tsx` preserves
   the existing background import job contract and blocks submit while a row
   check is still in flight.
 - Move 165 rejects `frontend/src/components/shared/BackgroundImportTracker.tsx`
@@ -5534,3 +5534,13 @@ Move 508 status:
   import action guards, and API result normalization. The conversion preserves
   app-shell lazy imports and keeps shared background polling/refresh behavior
   unchanged.
+
+Move 509 status:
+- Move 509 converts the sales export and import modal cluster:
+  `ExportModal.tsx`, `SalesImportModal.tsx`, and `InventoryImportModal.tsx`.
+  The typed boundaries now cover export periods/date ranges, sales export
+  summaries, status/product breakdown rows, CSV fallback rows, import job
+  payloads, CSV dialog results, worker row-count messages, queued import
+  results, and app-context notification access. The conversion keeps the
+  worker-first import row counting, loader timeouts, synchronous parser
+  fallbacks, sales CSV export fallback, and lazy route imports unchanged.

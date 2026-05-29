@@ -25,8 +25,8 @@ const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab
 const pos = fs.readFileSync(new URL('../src/components/pos/POS.jsx', import.meta.url), 'utf8')
 const posFilterPanel = fs.readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
 const sales = fs.readFileSync(new URL('../src/components/sales/Sales.jsx', import.meta.url), 'utf8')
-const salesExportModal = fs.readFileSync(new URL('../src/components/sales/ExportModal.jsx', import.meta.url), 'utf8')
-const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.jsx', import.meta.url), 'utf8')
+const salesExportModal = fs.readFileSync(new URL('../src/components/sales/ExportModal.tsx', import.meta.url), 'utf8')
+const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
 const returns = fs.readFileSync(new URL('../src/components/returns/Returns.jsx', import.meta.url), 'utf8')
 const newReturnModal = fs.readFileSync(new URL('../src/components/returns/NewReturnModal.jsx', import.meta.url), 'utf8')
 const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.jsx', import.meta.url), 'utf8')
@@ -36,7 +36,7 @@ const transferModal = fs.readFileSync(new URL('../src/components/branches/Transf
 const catalogPage = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
 const products = fs.readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
 const productPageConfig = fs.readFileSync(new URL('../src/components/products/config/productPageConfig.ts', import.meta.url), 'utf8')
-const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.jsx', import.meta.url), 'utf8')
+const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.tsx', import.meta.url), 'utf8')
 const productForm = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
 const bulkImportModal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
 const manageCategoriesModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageCategoriesModal.tsx', import.meta.url), 'utf8')
@@ -510,12 +510,12 @@ assert.match(
 )
 assert.match(
   salesExportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end \}\),\s*'Sales export preview',\s*SALES_EXPORT_PREVIEW_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getSalesExportApi\(\)\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end \}\),\s*'Sales export preview',\s*SALES_EXPORT_PREVIEW_TIMEOUT_MS,\s*\)/,
   'sales export preview should timeout slow report reads',
 )
 assert.match(
   salesExportModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end, format: 'csv' \}\),\s*'Sales export CSV',\s*SALES_EXPORT_CSV_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getSalesExportApi\(\)\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end, format: 'csv' \}\),\s*'Sales export CSV',\s*SALES_EXPORT_CSV_TIMEOUT_MS,\s*\)/,
   'sales CSV export should timeout slow CSV reads',
 )
 assert.match(
@@ -1744,17 +1744,17 @@ for (const [source, label, prefix, jobTypePattern] of importModalCases) {
   assert.match(source, jobTypePattern, `${label} import should keep the expected job type source`)
   assert.match(
     source,
-    /withLoaderTimeout\(\s*\(\) => window\.api\.createImportJob\(/,
+    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.createImportJob\(/,
     `${label} import should bound import job creation`,
   )
   assert.match(
     source,
-    /withLoaderTimeout\(\s*\(\) => window\.api\.uploadImportJobCsv\(/,
+    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.uploadImportJobCsv\(/,
     `${label} import should bound CSV upload`,
   )
   assert.match(
     source,
-    /withLoaderTimeout\(\s*\(\) => window\.api\.startImportJob\(job\.id\)/,
+    /withLoaderTimeout\(\s*\(\) => (?:window\.api|getImportApi\(\))\.startImportJob\(job\.id/,
     `${label} import should bound job start`,
   )
 }

@@ -24,7 +24,7 @@ await runTest('shared CSV row counter handles inventory rows and quoted notes', 
 })
 
 await runTest('inventory import modal analyzes rows in a worker with a sync fallback', () => {
-  const source = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.tsx', import.meta.url), 'utf8')
   const worker = fs.readFileSync(new URL('../src/components/inventory/inventoryImportWorker.ts', import.meta.url), 'utf8')
   assert.match(source, /new Worker\(new URL\('\.\/inventoryImportWorker\.ts', import\.meta\.url\), \{ type: 'module' \}\)/)
   assert.match(source, /typeof Worker === 'undefined'[\s\S]*Promise\.resolve\(countCsvDataRows\(text\)\)/)
