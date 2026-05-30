@@ -40,7 +40,7 @@ Code files scanned: **468**
 | 28 | `backend/src/permissions.ts` | 7 |
 | 29 | `backend/src/portalUtils.ts` | 6 |
 | 30 | `backend/src/postgresDatabase.js` | 14 |
-| 31 | `backend/src/productBatches.js` | 34 |
+| 31 | `backend/src/productBatches.ts` | 34 |
 | 32 | `backend/src/productDiscounts.ts` | 9 |
 | 33 | `backend/src/productImportPolicies.ts` | 10 |
 | 34 | `backend/src/requestContext.ts` | 5 |
@@ -985,7 +985,7 @@ Code files scanned: **468**
 | 13 | `getDb` | function | 553 |
 | 14 | `closeDatabase` | function | 581 |
 
-### 3.31 `backend/src/productBatches.js`
+### 3.31 `backend/src/productBatches.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

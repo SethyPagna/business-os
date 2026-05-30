@@ -47,7 +47,7 @@ Total files documented: **531**
 | 35 | `backend/src/permissions.ts` | backend-core | 227 | 7.0 | Project source/support file |
 | 36 | `backend/src/portalUtils.ts` | backend-core | 122 | 3.1 | Project source/support file |
 | 37 | `backend/src/postgresDatabase.js` | backend-core | 596 | 25.4 | Project source/support file |
-| 38 | `backend/src/productBatches.js` | backend-core | 646 | 21.5 | Project source/support file |
+| 38 | `backend/src/productBatches.ts` | backend-core | 646 | 21.5 | Project source/support file |
 | 39 | `backend/src/productDiscounts.ts` | backend-core | 200 | 6.8 | Project source/support file |
 | 40 | `backend/src/productImportPolicies.ts` | backend-core | 174 | 5.4 | Project source/support file |
 | 41 | `backend/src/README.md` | backend-core | 12 | 0.7 | Documentation |

@@ -192,7 +192,7 @@ Total folders documented: **81**
 | 21 | `permissions.ts` | Project source/support file |
 | 22 | `portalUtils.ts` | Project source/support file |
 | 23 | `postgresDatabase.js` | Project source/support file |
-| 24 | `productBatches.js` | Project source/support file |
+| 24 | `productBatches.ts` | Project source/support file |
 | 25 | `productDiscounts.ts` | Project source/support file |
 | 26 | `productImportPolicies.ts` | Project source/support file |
 | 27 | `README.md` | Documentation |

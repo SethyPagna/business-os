@@ -40,7 +40,7 @@ Code files documented: **468**
 | 28 | `backend/src/permissions.ts` | 0 | 1 | 0 | 4 |
 | 29 | `backend/src/portalUtils.ts` | 0 | 1 | 0 | 2 |
 | 30 | `backend/src/postgresDatabase.js` | 7 | 1 | 3 | 2 |
-| 31 | `backend/src/productBatches.js` | 1 | 1 | 1 | 6 |
+| 31 | `backend/src/productBatches.ts` | 1 | 1 | 1 | 6 |
 | 32 | `backend/src/productDiscounts.ts` | 1 | 1 | 1 | 3 |
 | 33 | `backend/src/productImportPolicies.ts` | 1 | 1 | 1 | 3 |
 | 34 | `backend/src/requestContext.ts` | 1 | 1 | 0 | 2 |
@@ -494,7 +494,7 @@ Code files documented: **468**
   - `./src/middleware.ts`
   - `./src/objectStore.ts`
   - `./src/organizationContext/index.ts`
-  - `./src/productBatches`
+  - `./src/productBatches.ts`
   - `./src/requestContext.ts`
   - `./src/routes/actionHistory.ts`
   - `./src/routes/ai.ts`
@@ -542,7 +542,7 @@ Code files documented: **468**
   - `backend/src/middleware.ts`
   - `backend/src/objectStore.ts`
   - `backend/src/organizationContext/index.ts`
-  - `backend/src/productBatches.js`
+  - `backend/src/productBatches.ts`
   - `backend/src/requestContext.ts`
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
@@ -739,7 +739,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.ts`
   - `backend/src/organizationContext/index.ts`
-  - `backend/src/productBatches.js`
+  - `backend/src/productBatches.ts`
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
@@ -1130,7 +1130,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/test/postgresDatabase.test.ts`
 
-### 3.31 `backend/src/productBatches.js`
+### 3.31 `backend/src/productBatches.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1406,7 +1406,7 @@ Code files documented: **468**
   - `../initials.ts`
   - `../middleware.ts`
   - `../money.ts`
-  - `../productBatches`
+  - `../productBatches.ts`
   - `../productDiscounts.ts`
   - `../schemaMetadata.ts`
   - `express`
@@ -1419,7 +1419,7 @@ Code files documented: **468**
   - `backend/src/initials.ts`
   - `backend/src/middleware.ts`
   - `backend/src/money.ts`
-  - `backend/src/productBatches.js`
+  - `backend/src/productBatches.ts`
   - `backend/src/productDiscounts.ts`
   - `backend/src/schemaMetadata.ts`
 - Referenced by (2)
@@ -1509,7 +1509,7 @@ Code files documented: **468**
   - `../middleware.ts`
   - `../money.ts`
   - `../netSecurity.ts`
-  - `../productBatches`
+  - `../productBatches.ts`
   - `../productDiscounts.ts`
   - `../productImportPolicies.ts`
   - `../schemaMetadata.ts`
@@ -1530,7 +1530,7 @@ Code files documented: **468**
   - `backend/src/middleware.ts`
   - `backend/src/money.ts`
   - `backend/src/netSecurity.ts`
-  - `backend/src/productBatches.js`
+  - `backend/src/productBatches.ts`
   - `backend/src/productDiscounts.ts`
   - `backend/src/productImportPolicies.ts`
   - `backend/src/schemaMetadata.ts`
@@ -1548,7 +1548,7 @@ Code files documented: **468**
   - `../helpers.ts`
   - `../idempotency.ts`
   - `../middleware.ts`
-  - `../productBatches`
+  - `../productBatches.ts`
   - `express`
 - Internal dependencies (6)
   - `backend/src/conflictControl.ts`
@@ -1556,7 +1556,7 @@ Code files documented: **468**
   - `backend/src/helpers.ts`
   - `backend/src/idempotency.ts`
   - `backend/src/middleware.ts`
-  - `backend/src/productBatches.js`
+  - `backend/src/productBatches.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1596,7 +1596,7 @@ Code files documented: **468**
   - `../helpers.ts`
   - `../idempotency.ts`
   - `../middleware.ts`
-  - `../productBatches`
+  - `../productBatches.ts`
   - `express`
 - Internal dependencies (7)
   - `backend/src/businessMetrics.ts`
@@ -1605,7 +1605,7 @@ Code files documented: **468**
   - `backend/src/helpers.ts`
   - `backend/src/idempotency.ts`
   - `backend/src/middleware.ts`
-  - `backend/src/productBatches.js`
+  - `backend/src/productBatches.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1960,7 +1960,7 @@ Code files documented: **468**
   - `../importCsv.ts`
   - `../money.ts`
   - `../netSecurity.ts`
-  - `../productBatches`
+  - `../productBatches.ts`
   - `../productDiscounts.ts`
   - `../productImportPolicies.ts`
   - `../uploadSecurity.ts`
@@ -1981,7 +1981,7 @@ Code files documented: **468**
   - `backend/src/importCsv.ts`
   - `backend/src/money.ts`
   - `backend/src/netSecurity.ts`
-  - `backend/src/productBatches.js`
+  - `backend/src/productBatches.ts`
   - `backend/src/productDiscounts.ts`
   - `backend/src/productImportPolicies.ts`
   - `backend/src/services/mediaQueue.ts`
