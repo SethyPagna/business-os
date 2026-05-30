@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **72**
+Total files documented: **69**
 
 ## 2. Symbol Count by File
 
@@ -75,13 +75,10 @@ Total files documented: **72**
 | 63 | `backend/src/services/verification.js` | 21 | 0 |
 | 64 | `backend/src/sessionAuth.js` | 13 | 0 |
 | 65 | `backend/src/settingsSnapshot.js` | 12 | 0 |
-| 66 | `backend/src/systemFsWorker.js` | 7 | 0 |
-| 67 | `backend/src/systemJobs.js` | 28 | 0 |
-| 68 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
-| 69 | `backend/src/uploadSecurity.js` | 7 | 0 |
-| 70 | `backend/src/websocket.js` | 1 | 0 |
-| 71 | `backend/src/workers/importWorker.js` | 2 | 0 |
-| 72 | `backend/src/workers/mediaWorker.js` | 2 | 0 |
+| 66 | `backend/src/systemJobs.js` | 28 | 0 |
+| 67 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
+| 68 | `backend/src/uploadSecurity.js` | 7 | 0 |
+| 69 | `backend/src/websocket.js` | 1 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -2084,19 +2081,7 @@ Total files documented: **72**
 | 11 | `sanitizeSettingsSnapshot` | function | 104 |
 | 12 | `sanitizeSettingsSnapshotAsync` | function | 112 |
 
-### 3.66 `backend/src/systemFsWorker.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `formatBackupStamp` | function | 15 |
-| 2 | `pad` | const arrow | 17 |
-| 3 | `respond` | function | 21 |
-| 4 | `fail` | function | 25 |
-| 5 | `runExportFolder` | function | 30 |
-| 6 | `runRelocateDataRoot` | function | 70 |
-| 7 | `main` | function | 77 |
-
-### 3.67 `backend/src/systemJobs.js`
+### 3.66 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2129,7 +2114,7 @@ Total files documented: **72**
 | 27 | `getSystemJob` | function | 432 |
 | 28 | `listSystemJobs` | function | 444 |
 
-### 3.68 `backend/src/uploadReferenceCleanup.js`
+### 3.67 `backend/src/uploadReferenceCleanup.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2137,7 +2122,7 @@ Total files documented: **72**
 | 2 | `repairMissingUploadReferences` | function | 22 |
 | 3 | `repairMissingUploadReferencesAsync` | function | 134 |
 
-### 3.69 `backend/src/uploadSecurity.js`
+### 3.68 `backend/src/uploadSecurity.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2149,23 +2134,9 @@ Total files documented: **72**
 | 6 | `validateUploadedBuffer` | function | 69 |
 | 7 | `validateUploadedPath` | function | 80 |
 
-### 3.70 `backend/src/websocket.js`
+### 3.69 `backend/src/websocket.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `attachWss` | function | 24 |
-
-### 3.71 `backend/src/workers/importWorker.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `start` | function | 10 |
-| 2 | `shutdown` | function | 16 |
-
-### 3.72 `backend/src/workers/mediaWorker.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `start` | function | 10 |
-| 2 | `shutdown` | function | 15 |
 

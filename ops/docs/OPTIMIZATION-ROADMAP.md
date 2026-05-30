@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 558.
+- Latest completed implementation move in this roadmap: Move 559.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6129,3 +6129,20 @@ Move 558 status:
   package lane. The current source extension count is `.js: 82`, `.jsx: 0`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 281`, `.tsx: 107` outside generated/runtime
   folders.
+
+Move 559 status:
+- Move 559 converts `backend/src/workers/importWorker.ts`,
+  `backend/src/workers/mediaWorker.ts`, and `backend/src/systemFsWorker.ts` to
+  package-safe TypeScript paths. The dedicated import/media worker entrypoints
+  now carry JSDoc start/shutdown contracts, and the system filesystem worker now
+  carries payload/response contracts for child-process backup export and data
+  relocation work. Backend worker npm scripts, server worker-role dispatch, PM2
+  config, Docker scale health checks, Windows run scripts, PowerShell runtime
+  readiness checks, the system route worker spawn path, and performance
+  verification all use explicit `.ts` paths. Focused worker-entrypoint loading,
+  system filesystem export smoke, route/full-automation/performance checks, the
+  full backend utility suite, and Linux packaging proof passed. `pkg` continues
+  to warn for direct `.ts` scripts, so larger backend route/service conversion
+  still waits for a compile/staging package lane. The current source extension
+  count is `.js: 79`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 284`,
+  `.tsx: 107` outside generated/runtime folders.

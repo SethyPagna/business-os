@@ -170,33 +170,33 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `accessControl.js` | Project source/support file |
-| 2 | `authOtpGuards.js` | Project source/support file |
+| 2 | `authOtpGuards.ts` | Project source/support file |
 | 3 | `backupSchema.js` | Project source/support file |
 | 4 | `businessMetrics.js` | Project source/support file |
-| 5 | `catalogTextIntegrity.js` | Project source/support file |
-| 6 | `conflictControl.js` | Project source/support file |
+| 5 | `catalogTextIntegrity.ts` | Project source/support file |
+| 6 | `conflictControl.ts` | Project source/support file |
 | 7 | `contactOptions.js` | Project source/support file |
 | 8 | `database.js` | Schema/migrations and DB bootstrap |
 | 9 | `fileAssets.js` | Project source/support file |
 | 10 | `helpers.js` | Project source/support file |
-| 11 | `idempotency.js` | Project source/support file |
+| 11 | `idempotency.ts` | Project source/support file |
 | 12 | `importCsv.js` | Project source/support file |
 | 13 | `importParsing.js` | Project source/support file |
-| 14 | `initials.js` | Project source/support file |
-| 15 | `maintenanceLock.js` | Project source/support file |
+| 14 | `initials.ts` | Project source/support file |
+| 15 | `maintenanceLock.ts` | Project source/support file |
 | 16 | `middleware.js` | Project source/support file |
-| 17 | `money.js` | Project source/support file |
+| 17 | `money.ts` | Project source/support file |
 | 18 | `netSecurity.js` | Project source/support file |
 | 19 | `objectStore.js` | Project source/support file |
-| 20 | `optionalSharp.js` | Project source/support file |
+| 20 | `optionalSharp.ts` | Project source/support file |
 | 21 | `permissions.js` | Project source/support file |
-| 22 | `portalUtils.js` | Project source/support file |
+| 22 | `portalUtils.ts` | Project source/support file |
 | 23 | `postgresDatabase.js` | Project source/support file |
 | 24 | `productBatches.js` | Project source/support file |
 | 25 | `productDiscounts.js` | Project source/support file |
 | 26 | `productImportPolicies.js` | Project source/support file |
 | 27 | `README.md` | Documentation |
-| 28 | `requestContext.js` | Project source/support file |
+| 28 | `requestContext.ts` | Project source/support file |
 | 29 | `runtimeCache.js` | Project source/support file |
 | 30 | `runtimeVersion.js` | Project source/support file |
 | 31 | `schemaMetadata.js` | Project source/support file |
@@ -204,7 +204,7 @@ Total folders documented: **81**
 | 33 | `serverUtils.js` | Project source/support file |
 | 34 | `sessionAuth.js` | Project source/support file |
 | 35 | `settingsSnapshot.js` | Project source/support file |
-| 36 | `systemFsWorker.js` | Project source/support file |
+| 36 | `systemFsWorker.ts` | Project source/support file |
 | 37 | `systemJobs.js` | Project source/support file |
 | 38 | `uploadReferenceCleanup.js` | Project source/support file |
 | 39 | `uploadSecurity.js` | Project source/support file |
@@ -342,7 +342,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `index.js` | Project source/support file |
+| 1 | `index.ts` | Project source/support file |
 
 
 ### 3.12 Folder: `backend/src/services`
@@ -397,7 +397,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `organizationFolders.js` | Project source/support file |
+| 1 | `organizationFolders.ts` | Project source/support file |
 
 
 ### 3.15 Folder: `backend/src/workers`
@@ -410,8 +410,8 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `importWorker.js` | Project source/support file |
-| 2 | `mediaWorker.js` | Project source/support file |
+| 1 | `importWorker.ts` | Project source/support file |
+| 2 | `mediaWorker.ts` | Project source/support file |
 
 
 ### 3.16 Folder: `backend/test`

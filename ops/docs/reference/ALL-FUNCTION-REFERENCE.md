@@ -13,12 +13,12 @@ Code files scanned: **466**
 | 1 | `backend/server.js` | 23 |
 | 2 | `backend/src/accessControl.js` | 18 |
 | 3 | `backend/src/analytics/duckdbRuntime.js` | 3 |
-| 4 | `backend/src/authOtpGuards.js` | 3 |
+| 4 | `backend/src/authOtpGuards.ts` | 3 |
 | 5 | `backend/src/backupSchema.js` | 4 |
 | 6 | `backend/src/businessMetrics.js` | 9 |
-| 7 | `backend/src/catalogTextIntegrity.js` | 5 |
+| 7 | `backend/src/catalogTextIntegrity.ts` | 5 |
 | 8 | `backend/src/config/index.js` | 11 |
-| 9 | `backend/src/conflictControl.js` | 6 |
+| 9 | `backend/src/conflictControl.ts` | 6 |
 | 10 | `backend/src/contactOptions.js` | 10 |
 | 11 | `backend/src/database.js` | 0 |
 | 12 | `backend/src/dataPath/index.js` | 9 |
@@ -26,24 +26,24 @@ Code files scanned: **466**
 | 14 | `backend/src/db/postgresQueryCompat.js` | 12 |
 | 15 | `backend/src/fileAssets.js` | 61 |
 | 16 | `backend/src/helpers.js` | 30 |
-| 17 | `backend/src/idempotency.js` | 1 |
+| 17 | `backend/src/idempotency.ts` | 1 |
 | 18 | `backend/src/importCsv.js` | 17 |
 | 19 | `backend/src/importParsing.js` | 6 |
-| 20 | `backend/src/initials.js` | 7 |
-| 21 | `backend/src/maintenanceLock.js` | 9 |
+| 20 | `backend/src/initials.ts` | 7 |
+| 21 | `backend/src/maintenanceLock.ts` | 9 |
 | 22 | `backend/src/middleware.js` | 21 |
-| 23 | `backend/src/money.js` | 3 |
+| 23 | `backend/src/money.ts` | 3 |
 | 24 | `backend/src/netSecurity.js` | 7 |
 | 25 | `backend/src/objectStore.js` | 29 |
-| 26 | `backend/src/optionalSharp.js` | 1 |
+| 26 | `backend/src/optionalSharp.ts` | 1 |
 | 27 | `backend/src/organizationContext/index.js` | 14 |
 | 28 | `backend/src/permissions.js` | 7 |
-| 29 | `backend/src/portalUtils.js` | 6 |
+| 29 | `backend/src/portalUtils.ts` | 6 |
 | 30 | `backend/src/postgresDatabase.js` | 14 |
 | 31 | `backend/src/productBatches.js` | 34 |
 | 32 | `backend/src/productDiscounts.js` | 9 |
 | 33 | `backend/src/productImportPolicies.js` | 10 |
-| 34 | `backend/src/requestContext.js` | 5 |
+| 34 | `backend/src/requestContext.ts` | 5 |
 | 35 | `backend/src/routes/actionHistory.js` | 12 |
 | 36 | `backend/src/routes/ai.js` | 3 |
 | 37 | `backend/src/routes/auth.js` | 31 |
@@ -68,7 +68,7 @@ Code files scanned: **466**
 | 56 | `backend/src/routes/units.js` | 3 |
 | 57 | `backend/src/routes/users.js` | 26 |
 | 58 | `backend/src/runtimeCache.js` | 12 |
-| 59 | `backend/src/runtimeState/index.js` | 6 |
+| 59 | `backend/src/runtimeState/index.ts` | 6 |
 | 60 | `backend/src/runtimeVersion.js` | 8 |
 | 61 | `backend/src/schemaMetadata.js` | 9 |
 | 62 | `backend/src/security.js` | 14 |
@@ -86,14 +86,14 @@ Code files scanned: **466**
 | 74 | `backend/src/services/verification.js` | 21 |
 | 75 | `backend/src/sessionAuth.js` | 13 |
 | 76 | `backend/src/settingsSnapshot.js` | 12 |
-| 77 | `backend/src/storage/organizationFolders.js` | 5 |
-| 78 | `backend/src/systemFsWorker.js` | 7 |
+| 77 | `backend/src/storage/organizationFolders.ts` | 5 |
+| 78 | `backend/src/systemFsWorker.ts` | 7 |
 | 79 | `backend/src/systemJobs.js` | 28 |
 | 80 | `backend/src/uploadReferenceCleanup.js` | 3 |
 | 81 | `backend/src/uploadSecurity.js` | 7 |
 | 82 | `backend/src/websocket.js` | 1 |
-| 83 | `backend/src/workers/importWorker.js` | 2 |
-| 84 | `backend/src/workers/mediaWorker.js` | 2 |
+| 83 | `backend/src/workers/importWorker.ts` | 2 |
+| 84 | `backend/src/workers/mediaWorker.ts` | 2 |
 | 85 | `backend/test/accessControl.test.ts` | 2 |
 | 86 | `backend/test/analyticsRuntime.test.ts` | 1 |
 | 87 | `backend/test/authOtpGuards.test.ts` | 1 |
@@ -167,7 +167,7 @@ Code files scanned: **466**
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
-| 158 | `frontend/src/components/catalog/CatalogPage.tsx` | 115 |
+| 158 | `frontend/src/components/catalog/CatalogPage.tsx` | 117 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
@@ -201,7 +201,7 @@ Code files scanned: **466**
 | 189 | `frontend/src/components/files/FilesProvidersTab.tsx` | 2 |
 | 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
 | 191 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
-| 192 | `frontend/src/components/inventory/Inventory.tsx` | 27 |
+| 192 | `frontend/src/components/inventory/Inventory.tsx` | 23 |
 | 193 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
 | 195 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
@@ -238,7 +238,7 @@ Code files scanned: **466**
 | 226 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
 | 227 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
 | 228 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
-| 229 | `frontend/src/components/products/Products.tsx` | 15 |
+| 229 | `frontend/src/components/products/Products.tsx` | 24 |
 | 230 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
 | 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 7 |
 | 232 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
@@ -538,13 +538,13 @@ Code files scanned: **466**
 | 2 | `probeDuckDbPackage` | function | 27 |
 | 3 | `getDuckDbRuntimeStatus` | function | 56 |
 
-### 3.4 `backend/src/authOtpGuards.js`
+### 3.4 `backend/src/authOtpGuards.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeUserId` | function | 5 |
-| 2 | `canManageOtpTarget` | function | 10 |
-| 3 | `requiresSelfOtpDisablePassword` | function | 20 |
+| 1 | `normalizeUserId` | function | 6 |
+| 2 | `canManageOtpTarget` | function | 12 |
+| 3 | `requiresSelfOtpDisablePassword` | function | 23 |
 
 ### 3.5 `backend/src/backupSchema.js`
 
@@ -569,15 +569,15 @@ Code files scanned: **466**
 | 8 | `getStockAlertProducts` | function | 96 |
 | 9 | `getExpiringProducts` | function | 118 |
 
-### 3.7 `backend/src/catalogTextIntegrity.js`
+### 3.7 `backend/src/catalogTextIntegrity.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeCatalogText` | function | 7 |
-| 2 | `hasSuspiciousCatalogText` | function | 18 |
-| 3 | `listSuspiciousCatalogFields` | function | 28 |
-| 4 | `assertCatalogTextIntegrity` | function | 39 |
-| 5 | `normalizeOptionList` | function | 45 |
+| 1 | `normalizeCatalogText` | function | 16 |
+| 2 | `hasSuspiciousCatalogText` | function | 31 |
+| 3 | `listSuspiciousCatalogFields` | function | 46 |
+| 4 | `assertCatalogTextIntegrity` | function | 63 |
+| 5 | `normalizeOptionList` | function | 73 |
 
 ### 3.8 `backend/src/config/index.js`
 
@@ -595,16 +595,16 @@ Code files scanned: **466**
 | 10 | `normalizeOrganizationSeed` | function | 128 |
 | 11 | `STORAGE_ROOT` | const arrow | 135 |
 
-### 3.9 `backend/src/conflictControl.js`
+### 3.9 `backend/src/conflictControl.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `WriteConflictError` | class | 3 |
-| 2 | `normalizeUpdatedAt` | function | 17 |
-| 3 | `getExpectedUpdatedAt` | function | 22 |
-| 4 | `assertUpdatedAtMatch` | function | 31 |
-| 5 | `sendWriteConflict` | function | 43 |
-| 6 | `sendSettingsConflict` | function | 57 |
+| 1 | `WriteConflictError` | class | 8 |
+| 2 | `normalizeUpdatedAt` | function | 32 |
+| 3 | `getExpectedUpdatedAt` | function | 41 |
+| 4 | `assertUpdatedAtMatch` | function | 56 |
+| 5 | `sendWriteConflict` | function | 73 |
+| 6 | `sendSettingsConflict` | function | 93 |
 
 ### 3.10 `backend/src/contactOptions.js`
 
@@ -772,11 +772,11 @@ Code files scanned: **466**
 | 29 | `getSafeCostPrice` | function | 577 |
 | 30 | `calculateSaleProfit` | function | 588 |
 
-### 3.17 `backend/src/idempotency.js`
+### 3.17 `backend/src/idempotency.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeClientRequestId` | function | 3 |
+| 1 | `normalizeClientRequestId` | function | 4 |
 
 ### 3.18 `backend/src/importCsv.js`
 
@@ -811,31 +811,31 @@ Code files scanned: **466**
 | 5 | `parseImportNumericValue` | function | 65 |
 | 6 | `normalizeImportMoney` | function | 80 |
 
-### 3.20 `backend/src/initials.js`
+### 3.20 `backend/src/initials.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `buildKhmerOrder` | function | 13 |
-| 2 | `normalizeInitialText` | function | 24 |
-| 3 | `getInitialKey` | function | 28 |
-| 4 | `getInitialType` | function | 39 |
-| 5 | `compareInitialKeys` | function | 48 |
-| 6 | `rank` | const arrow | 52 |
-| 7 | `aggregateInitialRows` | function | 72 |
+| 1 | `buildKhmerOrder` | function | 21 |
+| 2 | `normalizeInitialText` | function | 34 |
+| 3 | `getInitialKey` | function | 39 |
+| 4 | `getInitialType` | function | 51 |
+| 5 | `compareInitialKeys` | function | 61 |
+| 6 | `rank` | const arrow | 66 |
+| 7 | `aggregateInitialRows` | function | 87 |
 
-### 3.21 `backend/src/maintenanceLock.js`
+### 3.21 `backend/src/maintenanceLock.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `nowIso` | function | 5 |
-| 2 | `getMaintenanceLock` | function | 9 |
-| 3 | `isMaintenanceLocked` | function | 13 |
-| 4 | `acquireMaintenanceLock` | function | 17 |
-| 5 | `releaseMaintenanceLock` | function | 29 |
-| 6 | `withMaintenanceLock` | function | 37 |
-| 7 | `isReadOnlyMethod` | function | 46 |
-| 8 | `isMaintenanceWriteAllowed` | function | 50 |
-| 9 | `maintenanceWriteGuard` | function | 66 |
+| 1 | `nowIso` | function | 15 |
+| 2 | `getMaintenanceLock` | function | 22 |
+| 3 | `isMaintenanceLocked` | function | 29 |
+| 4 | `acquireMaintenanceLock` | function | 37 |
+| 5 | `releaseMaintenanceLock` | function | 53 |
+| 6 | `withMaintenanceLock` | function | 66 |
+| 7 | `isReadOnlyMethod` | function | 79 |
+| 8 | `isMaintenanceWriteAllowed` | function | 87 |
+| 9 | `maintenanceWriteGuard` | function | 109 |
 
 ### 3.22 `backend/src/middleware.js`
 
@@ -863,13 +863,13 @@ Code files scanned: **466**
 | 20 | `validateUploadedFile` | function | 303 |
 | 21 | `validateUploadBufferPayload` | function | 314 |
 
-### 3.23 `backend/src/money.js`
+### 3.23 `backend/src/money.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toFiniteNumber` | function | 3 |
-| 2 | `roundUpToDecimals` | function | 8 |
-| 3 | `normalizePriceValue` | function | 17 |
+| 1 | `toFiniteNumber` | function | 4 |
+| 2 | `roundUpToDecimals` | function | 10 |
+| 3 | `normalizePriceValue` | function | 20 |
 
 ### 3.24 `backend/src/netSecurity.js`
 
@@ -917,11 +917,11 @@ Code files scanned: **466**
 | 28 | `testObjectStore` | function | 433 |
 | 29 | `bufferToStream` | function | 448 |
 
-### 3.26 `backend/src/optionalSharp.js`
+### 3.26 `backend/src/optionalSharp.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `loadSharp` | function | 7 |
+| 1 | `loadSharp` | function | 9 |
 
 ### 3.27 `backend/src/organizationContext/index.js`
 
@@ -954,16 +954,16 @@ Code files scanned: **466**
 | 6 | `isSensitiveActionHistory` | function | 162 |
 | 7 | `hasPermissionValue` | function | 177 |
 
-### 3.29 `backend/src/portalUtils.js`
+### 3.29 `backend/src/portalUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toTrimmedString` | function | 5 |
-| 2 | `safeJsonParse` | function | 9 |
-| 3 | `createAboutBlock` | function | 17 |
-| 4 | `normalizeAboutBlocks` | function | 28 |
-| 5 | `extractGoogleMapsEmbedUrl` | function | 51 |
-| 6 | `normalizeGoogleMapsEmbed` | function | 59 |
+| 1 | `toTrimmedString` | function | 14 |
+| 2 | `safeJsonParse` | function | 23 |
+| 3 | `createAboutBlock` | function | 36 |
+| 4 | `normalizeAboutBlocks` | function | 51 |
+| 5 | `extractGoogleMapsEmbedUrl` | function | 78 |
+| 6 | `normalizeGoogleMapsEmbed` | function | 90 |
 
 ### 3.30 `backend/src/postgresDatabase.js`
 
@@ -1052,15 +1052,15 @@ Code files scanned: **466**
 | 9 | `resolveImportValue` | function | 81 |
 | 10 | `normalizeImageConflictMode` | function | 95 |
 
-### 3.34 `backend/src/requestContext.js`
+### 3.34 `backend/src/requestContext.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `cleanText` | function | 7 |
-| 2 | `readHeader` | function | 13 |
-| 3 | `extractRequestMeta` | function | 19 |
-| 4 | `requestContextMiddleware` | function | 45 |
-| 5 | `getRequestMeta` | function | 50 |
+| 1 | `cleanText` | function | 10 |
+| 2 | `readHeader` | function | 17 |
+| 3 | `extractRequestMeta` | function | 24 |
+| 4 | `requestContextMiddleware` | function | 51 |
+| 5 | `getRequestMeta` | function | 57 |
 
 ### 3.35 `backend/src/routes/actionHistory.js`
 
@@ -1633,16 +1633,16 @@ Code files scanned: **466**
 | 11 | `pingRuntimeCache` | function | 155 |
 | 12 | `getRuntimeCacheStatus` | function | 166 |
 
-### 3.59 `backend/src/runtimeState/index.js`
+### 3.59 `backend/src/runtimeState/index.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ensureRuntimeMetaDir` | function | 11 |
-| 2 | `readRuntimeState` | function | 15 |
-| 3 | `writeRuntimeState` | function | 32 |
-| 4 | `getRuntimeState` | function | 38 |
-| 5 | `bumpStorageVersion` | function | 48 |
-| 6 | `buildRuntimeDescriptor` | function | 57 |
+| 1 | `ensureRuntimeMetaDir` | function | 16 |
+| 2 | `readRuntimeState` | function | 23 |
+| 3 | `writeRuntimeState` | function | 44 |
+| 4 | `getRuntimeState` | function | 53 |
+| 5 | `bumpStorageVersion` | function | 67 |
+| 6 | `buildRuntimeDescriptor` | function | 80 |
 
 ### 3.60 `backend/src/runtimeVersion.js`
 
@@ -2270,27 +2270,27 @@ Code files scanned: **466**
 | 11 | `sanitizeSettingsSnapshot` | function | 104 |
 | 12 | `sanitizeSettingsSnapshotAsync` | function | 112 |
 
-### 3.77 `backend/src/storage/organizationFolders.js`
+### 3.77 `backend/src/storage/organizationFolders.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `trim` | function | 6 |
-| 2 | `sanitizeOrganizationFolderLabel` | function | 10 |
-| 3 | `buildOrganizationFolderName` | function | 20 |
-| 4 | `extractOrganizationPublicId` | function | 26 |
-| 5 | `findOrganizationFolderByPublicId` | function | 33 |
+| 1 | `trim` | function | 7 |
+| 2 | `sanitizeOrganizationFolderLabel` | function | 12 |
+| 3 | `buildOrganizationFolderName` | function | 23 |
+| 4 | `extractOrganizationPublicId` | function | 30 |
+| 5 | `findOrganizationFolderByPublicId` | function | 38 |
 
-### 3.78 `backend/src/systemFsWorker.js`
+### 3.78 `backend/src/systemFsWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `formatBackupStamp` | function | 15 |
-| 2 | `pad` | const arrow | 17 |
-| 3 | `respond` | function | 21 |
-| 4 | `fail` | function | 25 |
-| 5 | `runExportFolder` | function | 30 |
-| 6 | `runRelocateDataRoot` | function | 70 |
-| 7 | `main` | function | 77 |
+| 1 | `formatBackupStamp` | function | 23 |
+| 2 | `pad` | const arrow | 25 |
+| 3 | `respond` | function | 33 |
+| 4 | `fail` | function | 41 |
+| 5 | `runExportFolder` | function | 50 |
+| 6 | `runRelocateDataRoot` | function | 94 |
+| 7 | `main` | function | 104 |
 
 ### 3.79 `backend/src/systemJobs.js`
 
@@ -2351,19 +2351,19 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `attachWss` | function | 24 |
 
-### 3.83 `backend/src/workers/importWorker.js`
+### 3.83 `backend/src/workers/importWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `start` | function | 10 |
-| 2 | `shutdown` | function | 16 |
+| 1 | `start` | function | 13 |
+| 2 | `shutdown` | function | 23 |
 
-### 3.84 `backend/src/workers/mediaWorker.js`
+### 3.84 `backend/src/workers/mediaWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `start` | function | 10 |
-| 2 | `shutdown` | function | 15 |
+| 1 | `start` | function | 13 |
+| 2 | `shutdown` | function | 22 |
 
 ### 3.85 `backend/test/accessControl.test.ts`
 
@@ -2885,239 +2885,239 @@ Code files scanned: **466**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getDeviceInfo` | function | 3 |
-| 2 | `getPortalBaseUrl` | function | 52 |
-| 3 | `buildQueryString` | function | 57 |
-| 4 | `appendQuery` | function | 68 |
-| 5 | `normalizePositiveUniqueIds` | function | 72 |
-| 6 | `buildAttemptedSettings` | function | 87 |
-| 7 | `buildAttemptedReturnItems` | function | 96 |
-| 8 | `getCurrentUserContext` | function | 108 |
-| 9 | `dispatchSyncUpdates` | function | 133 |
-| 10 | `registerOutboxBackgroundSync` | function | 143 |
-| 11 | `hasStoredUserSession` | function | 155 |
-| 12 | `emitSyncQueueChanged` | function | 164 |
-| 13 | `discardPendingSyncQueue` | export function | 171 |
-| 14 | `createClientRequestId` | function | 183 |
-| 15 | `ensureClientRequestId` | function | 190 |
-| 16 | `serializePendingSyncPreview` | function | 196 |
-| 17 | `getPendingSyncState` | export function | 219 |
-| 18 | `retryPendingSyncNow` | export function | 247 |
-| 19 | `canRefreshOfflineDeviceSnapshot` | function | 251 |
-| 20 | `readOfflineDeviceSnapshotMeta` | function | 258 |
-| 21 | `writeOfflineDeviceSnapshotMeta` | function | 266 |
-| 22 | `runOfflineSnapshotStep` | function | 283 |
-| 23 | `refreshOfflineDeviceSnapshot` | export function | 295 |
-| 24 | `previousMeta` | const arrow | 303 |
-| 25 | `invalidateClientRuntimeState` | function | 348 |
-| 26 | `withExpectedUpdatedAt` | function | 364 |
-| 27 | `withSettingsExpectedUpdatedAt` | function | 378 |
-| 28 | `appendActorQuery` | function | 388 |
-| 29 | `fetchJsonWithTimeout` | function | 403 |
-| 30 | `mirrorReadResult` | function | 421 |
-| 31 | `routeMirrored` | function | 430 |
-| 32 | `shouldPersistLocalMirror` | function | 436 |
-| 33 | `purgeSensitiveLiveServerMirrors` | function | 440 |
-| 34 | `mirrorTable` | function | 451 |
-| 35 | `buildQueryCacheStorageKey` | function | 468 |
-| 36 | `readCachedQueryResult` | function | 472 |
-| 37 | `writeCachedQueryResult` | function | 486 |
-| 38 | `clearCachedQueryResults` | function | 500 |
-| 39 | `getNotificationSummaryFallback` | function | 543 |
-| 40 | `getDriveSyncStatusFallback` | function | 552 |
-| 41 | `readNotificationSummaryMissingUntil` | function | 560 |
-| 42 | `markNotificationSummaryMissing` | function | 572 |
-| 43 | `clearNotificationSummaryMissing` | function | 587 |
-| 44 | `readStorageNumber` | function | 596 |
-| 45 | `writeStorageNumber` | function | 612 |
-| 46 | `clearStorageNumber` | function | 623 |
-| 47 | `login` | export function | 635 |
-| 48 | `logout` | export function | 647 |
-| 49 | `resetPasswordWithOtp` | export function | 650 |
-| 50 | `requestPasswordResetEmail` | export function | 653 |
-| 51 | `completePasswordReset` | export function | 656 |
-| 52 | `updateSessionDuration` | export function | 659 |
-| 53 | `getVerificationCapabilities` | export function | 662 |
-| 54 | `getSystemConfig` | export function | 665 |
-| 55 | `getNotificationSummary` | export function | 668 |
-| 56 | `getSystemDebugLog` | export function | 710 |
-| 57 | `startGoogleOauth` | export function | 713 |
-| 58 | `completeGoogleOauth` | export function | 716 |
-| 59 | `unlinkGoogleOauth` | export function | 719 |
-| 60 | `getAppBootstrap` | export function | 722 |
-| 61 | `buildLocalBootstrap` | const arrow | 723 |
-| 62 | `getOrganizationBootstrap` | export function | 780 |
-| 63 | `searchOrganizations` | export function | 783 |
-| 64 | `getCurrentOrganization` | export function | 787 |
-| 65 | `getSettings` | export function | 792 |
-| 66 | `saveSettings` | export function | 813 |
-| 67 | `runSave` | const arrow | 814 |
-| 68 | `getCategories` | const arrow | 872 |
-| 69 | `createCategory` | const arrow | 873 |
-| 70 | `updateCategory` | const arrow | 878 |
-| 71 | `deleteCategory` | const arrow | 883 |
-| 72 | `getUnits` | const arrow | 890 |
-| 73 | `createUnit` | const arrow | 891 |
-| 74 | `updateUnit` | const arrow | 896 |
-| 75 | `deleteUnit` | const arrow | 901 |
-| 76 | `getBranches` | const arrow | 908 |
-| 77 | `getBranchSummary` | const arrow | 909 |
-| 78 | `updateBranch` | const arrow | 911 |
-| 79 | `deleteBranch` | const arrow | 915 |
-| 80 | `getBranchStock` | const arrow | 919 |
-| 81 | `getTransfers` | const arrow | 923 |
-| 82 | `getBranchStockIntegrity` | const arrow | 925 |
-| 83 | `getProducts` | const arrow | 929 |
-| 84 | `searchProducts` | const arrow | 930 |
-| 85 | `getProductsByIds` | const arrow | 940 |
-| 86 | `getProductFilters` | const arrow | 951 |
-| 87 | `getProductLookupUsage` | const arrow | 961 |
-| 88 | `replaceProductLookupValues` | const arrow | 969 |
-| 89 | `getCatalogMeta` | export function | 982 |
-| 90 | `getCatalogProducts` | export function | 990 |
-| 91 | `getPortalConfig` | export function | 998 |
-| 92 | `getPortalBootstrap` | export function | 1006 |
-| 93 | `getPortalCatalogMeta` | export function | 1014 |
-| 94 | `getPortalCatalogProducts` | export function | 1022 |
-| 95 | `searchPortalCatalogProducts` | export function | 1030 |
-| 96 | `lookupPortalMembership` | export function | 1042 |
-| 97 | `createPortalSubmission` | export function | 1052 |
-| 98 | `getPortalAiStatus` | export function | 1066 |
-| 99 | `askPortalAi` | export function | 1074 |
-| 100 | `getPortalSubmissionsForReview` | const arrow | 1088 |
-| 101 | `reviewPortalSubmission` | const arrow | 1090 |
-| 102 | `getAiProviders` | const arrow | 1093 |
-| 103 | `createAiProvider` | const arrow | 1095 |
-| 104 | `updateAiProvider` | const arrow | 1097 |
-| 105 | `deleteAiProvider` | const arrow | 1099 |
-| 106 | `testAiProvider` | const arrow | 1101 |
-| 107 | `getAiResponses` | const arrow | 1103 |
-| 108 | `createProduct` | export function | 1105 |
-| 109 | `updateProduct` | export function | 1119 |
-| 110 | `deleteProduct` | const arrow | 1132 |
-| 111 | `buildMultipartHeaders` | function | 1149 |
-| 112 | `apiFormPost` | function | 1159 |
-| 113 | `withImportDeviceInfo` | const arrow | 1178 |
-| 114 | `listImportJobs` | const arrow | 1181 |
-| 115 | `getImportJobReview` | const arrow | 1190 |
-| 116 | `updateImportJobDecisions` | const arrow | 1194 |
-| 117 | `startImportJob` | const arrow | 1197 |
-| 118 | `approveImportJob` | const arrow | 1199 |
-| 119 | `cancelImportJob` | const arrow | 1201 |
-| 120 | `retryImportJob` | const arrow | 1203 |
-| 121 | `deleteImportJob` | const arrow | 1205 |
-| 122 | `getImportQueueStatus` | const arrow | 1224 |
-| 123 | `downloadImportJobErrors` | export function | 1226 |
-| 124 | `uploadImportJobCsv` | export function | 1246 |
-| 125 | `uploadImportJobZip` | export function | 1257 |
-| 126 | `uploadImportJobImages` | export function | 1268 |
-| 127 | `getFiles` | export function | 1298 |
-| 128 | `uploadFileAsset` | export function | 1314 |
-| 129 | `finish` | const arrow | 1341 |
-| 130 | `abortListener` | const arrow | 1348 |
-| 131 | `deleteFileAsset` | export function | 1396 |
-| 132 | `uploadProductImage` | export function | 1408 |
-| 133 | `uploadUserAvatar` | export function | 1442 |
-| 134 | `openCSVDialog` | export function | 1481 |
-| 135 | `openImageDialog` | export function | 1501 |
-| 136 | `getImageDataUrl` | export function | 1509 |
-| 137 | `getActionHistory` | const arrow | 1521 |
-| 138 | `updateActionHistory` | const arrow | 1527 |
-| 139 | `getInventorySummary` | const arrow | 1533 |
-| 140 | `getInventoryStats` | const arrow | 1534 |
-| 141 | `searchInventoryProducts` | const arrow | 1538 |
-| 142 | `getInventoryMovements` | const arrow | 1548 |
-| 143 | `getInventoryReasons` | const arrow | 1573 |
-| 144 | `saveInventoryReasons` | const arrow | 1575 |
-| 145 | `buildOfflineSaleReceiptNumber` | function | 1578 |
-| 146 | `isRetryableOfflineSaleError` | function | 1584 |
-| 147 | `findQueuedSale` | function | 1593 |
-| 148 | `putOfflineSaleMirror` | function | 1600 |
-| 149 | `queueOfflineSale` | function | 1625 |
-| 150 | `queuedSaleBackoffMs` | function | 1683 |
-| 151 | `updateQueuedRow` | function | 1688 |
-| 152 | `completeQueuedSale` | function | 1697 |
-| 153 | `failQueuedSale` | function | 1720 |
-| 154 | `markQueuedSaleConflict` | function | 1733 |
-| 155 | `syncPendingSalesQueue` | function | 1755 |
-| 156 | `getRfidStatus` | const arrow | 1798 |
-| 157 | `searchRfidTags` | const arrow | 1804 |
-| 158 | `recordRfidSessionEvents` | const arrow | 1810 |
-| 159 | `applyRfidSession` | const arrow | 1814 |
-| 160 | `createSale` | export function | 1818 |
-| 161 | `getSales` | const arrow | 1830 |
-| 162 | `getDashboard` | const arrow | 1837 |
-| 163 | `getAnalytics` | const arrow | 1838 |
-| 164 | `getCustomers` | const arrow | 1847 |
-| 165 | `getCustomerPointSummaries` | const arrow | 1868 |
-| 166 | `createCustomer` | export function | 1872 |
-| 167 | `updateCustomer` | const arrow | 1876 |
-| 168 | `deleteCustomer` | const arrow | 1880 |
-| 169 | `downloadCustomerTemplate` | const arrow | 1885 |
-| 170 | `getSuppliers` | const arrow | 1894 |
-| 171 | `createSupplier` | export function | 1899 |
-| 172 | `updateSupplier` | const arrow | 1903 |
-| 173 | `deleteSupplier` | const arrow | 1907 |
-| 174 | `downloadSupplierTemplate` | const arrow | 1912 |
-| 175 | `getDeliveryContacts` | const arrow | 1921 |
-| 176 | `createDeliveryContact` | export function | 1926 |
-| 177 | `updateDeliveryContact` | const arrow | 1930 |
-| 178 | `deleteDeliveryContact` | const arrow | 1934 |
-| 179 | `getUsers` | const arrow | 1941 |
-| 180 | `updateUser` | const arrow | 1943 |
-| 181 | `getUserProfile` | const arrow | 1944 |
-| 182 | `getUserAuthMethods` | const arrow | 1945 |
-| 183 | `updateUserProfile` | const arrow | 1947 |
-| 184 | `disconnectUserAuthProvider` | const arrow | 1949 |
-| 185 | `changeUserPassword` | const arrow | 1951 |
-| 186 | `resetPassword` | const arrow | 1953 |
-| 187 | `getRoles` | const arrow | 1956 |
-| 188 | `updateRole` | const arrow | 1958 |
-| 189 | `deleteRole` | const arrow | 1959 |
-| 190 | `getCustomTables` | const arrow | 1962 |
-| 191 | `getCustomTableData` | const arrow | 1964 |
-| 192 | `insertCustomRow` | const arrow | 1965 |
-| 193 | `updateCustomRow` | const arrow | 1966 |
-| 194 | `deleteCustomRow` | const arrow | 1967 |
-| 195 | `getAuditLogs` | const arrow | 1970 |
-| 196 | `deleteAuditLogsRetention` | const arrow | 1996 |
-| 197 | `wait` | function | 2000 |
-| 198 | `getSystemJob` | export function | 2004 |
-| 199 | `cancelSystemJob` | export function | 2009 |
-| 200 | `pollSystemJob` | export function | 2014 |
-| 201 | `waitForSystemJob` | function | 2040 |
-| 202 | `getIntegrationDoctor` | export function | 2048 |
-| 203 | `queueBackupFolderExport` | export function | 2059 |
-| 204 | `exportBackupFolder` | export function | 2068 |
-| 205 | `queueBackupFolderRestore` | export function | 2072 |
-| 206 | `importBackupFolder` | export function | 2079 |
-| 207 | `getGoogleDriveSyncStatus` | const arrow | 2087 |
-| 208 | `saveGoogleDriveSyncPreferences` | const arrow | 2121 |
-| 209 | `startGoogleDriveSyncOauth` | const arrow | 2124 |
-| 210 | `disconnectGoogleDriveSync` | const arrow | 2127 |
-| 211 | `forgetGoogleDriveSyncCredentials` | const arrow | 2130 |
-| 212 | `queueGoogleDriveSyncNow` | const arrow | 2133 |
-| 213 | `syncGoogleDriveNow` | const arrow | 2136 |
-| 214 | `resetData` | export function | 2141 |
-| 215 | `factoryReset` | export function | 2148 |
-| 216 | `downloadImportTemplate` | export function | 2156 |
-| 217 | `openPath` | export function | 2203 |
-| 218 | `getReturns` | const arrow | 2212 |
-| 219 | `createReturn` | export function | 2218 |
-| 220 | `createSupplierReturn` | export function | 2224 |
-| 221 | `updateSaleStatus` | const arrow | 2233 |
-| 222 | `attachSaleCustomer` | const arrow | 2249 |
-| 223 | `getSalesExport` | const arrow | 2273 |
-| 224 | `updateReturn` | const arrow | 2277 |
-| 225 | `testSyncServer` | export function | 2301 |
-| 226 | `openFolderDialog` | export function | 2320 |
-| 227 | `getDataPath` | const arrow | 2331 |
-| 228 | `getScaleMigrationStatus` | const arrow | 2332 |
-| 229 | `prepareScaleMigration` | const arrow | 2333 |
-| 230 | `runScaleMigration` | const arrow | 2334 |
-| 231 | `setDataPath` | export function | 2335 |
-| 232 | `resetDataPath` | export function | 2340 |
-| 233 | `browseDir` | const arrow | 2345 |
+| 1 | `getDeviceInfo` | function | 6 |
+| 2 | `getPortalBaseUrl` | function | 55 |
+| 3 | `buildQueryString` | function | 60 |
+| 4 | `appendQuery` | function | 71 |
+| 5 | `normalizePositiveUniqueIds` | function | 75 |
+| 6 | `buildAttemptedSettings` | function | 90 |
+| 7 | `buildAttemptedReturnItems` | function | 99 |
+| 8 | `getCurrentUserContext` | function | 111 |
+| 9 | `dispatchSyncUpdates` | function | 136 |
+| 10 | `registerOutboxBackgroundSync` | function | 146 |
+| 11 | `hasStoredUserSession` | function | 158 |
+| 12 | `emitSyncQueueChanged` | function | 167 |
+| 13 | `discardPendingSyncQueue` | export function | 174 |
+| 14 | `createClientRequestId` | function | 186 |
+| 15 | `ensureClientRequestId` | function | 193 |
+| 16 | `serializePendingSyncPreview` | function | 199 |
+| 17 | `getPendingSyncState` | export function | 222 |
+| 18 | `retryPendingSyncNow` | export function | 250 |
+| 19 | `canRefreshOfflineDeviceSnapshot` | function | 254 |
+| 20 | `readOfflineDeviceSnapshotMeta` | function | 261 |
+| 21 | `writeOfflineDeviceSnapshotMeta` | function | 269 |
+| 22 | `runOfflineSnapshotStep` | function | 286 |
+| 23 | `refreshOfflineDeviceSnapshot` | export function | 298 |
+| 24 | `previousMeta` | const arrow | 306 |
+| 25 | `invalidateClientRuntimeState` | function | 351 |
+| 26 | `withExpectedUpdatedAt` | function | 367 |
+| 27 | `withSettingsExpectedUpdatedAt` | function | 381 |
+| 28 | `appendActorQuery` | function | 391 |
+| 29 | `fetchJsonWithTimeout` | function | 406 |
+| 30 | `mirrorReadResult` | function | 424 |
+| 31 | `routeMirrored` | function | 433 |
+| 32 | `shouldPersistLocalMirror` | function | 439 |
+| 33 | `purgeSensitiveLiveServerMirrors` | function | 443 |
+| 34 | `mirrorTable` | function | 454 |
+| 35 | `buildQueryCacheStorageKey` | function | 471 |
+| 36 | `readCachedQueryResult` | function | 475 |
+| 37 | `writeCachedQueryResult` | function | 489 |
+| 38 | `clearCachedQueryResults` | function | 503 |
+| 39 | `getNotificationSummaryFallback` | function | 546 |
+| 40 | `getDriveSyncStatusFallback` | function | 555 |
+| 41 | `readNotificationSummaryMissingUntil` | function | 563 |
+| 42 | `markNotificationSummaryMissing` | function | 575 |
+| 43 | `clearNotificationSummaryMissing` | function | 590 |
+| 44 | `readStorageNumber` | function | 599 |
+| 45 | `writeStorageNumber` | function | 615 |
+| 46 | `clearStorageNumber` | function | 626 |
+| 47 | `login` | export function | 638 |
+| 48 | `logout` | export function | 650 |
+| 49 | `resetPasswordWithOtp` | export function | 653 |
+| 50 | `requestPasswordResetEmail` | export function | 656 |
+| 51 | `completePasswordReset` | export function | 659 |
+| 52 | `updateSessionDuration` | export function | 662 |
+| 53 | `getVerificationCapabilities` | export function | 665 |
+| 54 | `getSystemConfig` | export function | 668 |
+| 55 | `getNotificationSummary` | export function | 671 |
+| 56 | `getSystemDebugLog` | export function | 713 |
+| 57 | `startGoogleOauth` | export function | 716 |
+| 58 | `completeGoogleOauth` | export function | 719 |
+| 59 | `unlinkGoogleOauth` | export function | 722 |
+| 60 | `getAppBootstrap` | export function | 725 |
+| 61 | `buildLocalBootstrap` | const arrow | 726 |
+| 62 | `getOrganizationBootstrap` | export function | 783 |
+| 63 | `searchOrganizations` | export function | 786 |
+| 64 | `getCurrentOrganization` | export function | 790 |
+| 65 | `getSettings` | export function | 795 |
+| 66 | `saveSettings` | export function | 816 |
+| 67 | `runSave` | const arrow | 817 |
+| 68 | `getCategories` | const arrow | 875 |
+| 69 | `createCategory` | const arrow | 876 |
+| 70 | `updateCategory` | const arrow | 881 |
+| 71 | `deleteCategory` | const arrow | 886 |
+| 72 | `getUnits` | const arrow | 893 |
+| 73 | `createUnit` | const arrow | 894 |
+| 74 | `updateUnit` | const arrow | 899 |
+| 75 | `deleteUnit` | const arrow | 904 |
+| 76 | `getBranches` | const arrow | 911 |
+| 77 | `getBranchSummary` | const arrow | 912 |
+| 78 | `updateBranch` | const arrow | 914 |
+| 79 | `deleteBranch` | const arrow | 918 |
+| 80 | `getBranchStock` | const arrow | 922 |
+| 81 | `getTransfers` | const arrow | 926 |
+| 82 | `getBranchStockIntegrity` | const arrow | 928 |
+| 83 | `getProducts` | const arrow | 932 |
+| 84 | `searchProducts` | const arrow | 933 |
+| 85 | `getProductsByIds` | const arrow | 943 |
+| 86 | `getProductFilters` | const arrow | 954 |
+| 87 | `getProductLookupUsage` | const arrow | 964 |
+| 88 | `replaceProductLookupValues` | const arrow | 972 |
+| 89 | `getCatalogMeta` | export function | 985 |
+| 90 | `getCatalogProducts` | export function | 993 |
+| 91 | `getPortalConfig` | export function | 1001 |
+| 92 | `getPortalBootstrap` | export function | 1009 |
+| 93 | `getPortalCatalogMeta` | export function | 1017 |
+| 94 | `getPortalCatalogProducts` | export function | 1025 |
+| 95 | `searchPortalCatalogProducts` | export function | 1033 |
+| 96 | `lookupPortalMembership` | export function | 1045 |
+| 97 | `createPortalSubmission` | export function | 1055 |
+| 98 | `getPortalAiStatus` | export function | 1069 |
+| 99 | `askPortalAi` | export function | 1077 |
+| 100 | `getPortalSubmissionsForReview` | const arrow | 1091 |
+| 101 | `reviewPortalSubmission` | const arrow | 1093 |
+| 102 | `getAiProviders` | const arrow | 1096 |
+| 103 | `createAiProvider` | const arrow | 1098 |
+| 104 | `updateAiProvider` | const arrow | 1100 |
+| 105 | `deleteAiProvider` | const arrow | 1102 |
+| 106 | `testAiProvider` | const arrow | 1104 |
+| 107 | `getAiResponses` | const arrow | 1106 |
+| 108 | `createProduct` | export function | 1108 |
+| 109 | `updateProduct` | export function | 1122 |
+| 110 | `deleteProduct` | const arrow | 1135 |
+| 111 | `buildMultipartHeaders` | function | 1152 |
+| 112 | `apiFormPost` | function | 1162 |
+| 113 | `withImportDeviceInfo` | const arrow | 1181 |
+| 114 | `listImportJobs` | const arrow | 1184 |
+| 115 | `getImportJobReview` | const arrow | 1193 |
+| 116 | `updateImportJobDecisions` | const arrow | 1197 |
+| 117 | `startImportJob` | const arrow | 1200 |
+| 118 | `approveImportJob` | const arrow | 1202 |
+| 119 | `cancelImportJob` | const arrow | 1204 |
+| 120 | `retryImportJob` | const arrow | 1206 |
+| 121 | `deleteImportJob` | const arrow | 1208 |
+| 122 | `getImportQueueStatus` | const arrow | 1227 |
+| 123 | `downloadImportJobErrors` | export function | 1229 |
+| 124 | `uploadImportJobCsv` | export function | 1249 |
+| 125 | `uploadImportJobZip` | export function | 1260 |
+| 126 | `uploadImportJobImages` | export function | 1271 |
+| 127 | `getFiles` | export function | 1301 |
+| 128 | `uploadFileAsset` | export function | 1317 |
+| 129 | `finish` | const arrow | 1344 |
+| 130 | `abortListener` | const arrow | 1351 |
+| 131 | `deleteFileAsset` | export function | 1399 |
+| 132 | `uploadProductImage` | export function | 1411 |
+| 133 | `uploadUserAvatar` | export function | 1445 |
+| 134 | `openCSVDialog` | export function | 1484 |
+| 135 | `openImageDialog` | export function | 1504 |
+| 136 | `getImageDataUrl` | export function | 1512 |
+| 137 | `getActionHistory` | const arrow | 1524 |
+| 138 | `updateActionHistory` | const arrow | 1530 |
+| 139 | `getInventorySummary` | const arrow | 1536 |
+| 140 | `getInventoryStats` | const arrow | 1537 |
+| 141 | `searchInventoryProducts` | const arrow | 1541 |
+| 142 | `getInventoryMovements` | const arrow | 1551 |
+| 143 | `getInventoryReasons` | const arrow | 1576 |
+| 144 | `saveInventoryReasons` | const arrow | 1578 |
+| 145 | `buildOfflineSaleReceiptNumber` | function | 1581 |
+| 146 | `isRetryableOfflineSaleError` | function | 1587 |
+| 147 | `findQueuedSale` | function | 1596 |
+| 148 | `putOfflineSaleMirror` | function | 1603 |
+| 149 | `queueOfflineSale` | function | 1628 |
+| 150 | `queuedSaleBackoffMs` | function | 1686 |
+| 151 | `updateQueuedRow` | function | 1691 |
+| 152 | `completeQueuedSale` | function | 1700 |
+| 153 | `failQueuedSale` | function | 1723 |
+| 154 | `markQueuedSaleConflict` | function | 1736 |
+| 155 | `syncPendingSalesQueue` | function | 1758 |
+| 156 | `getRfidStatus` | const arrow | 1801 |
+| 157 | `searchRfidTags` | const arrow | 1807 |
+| 158 | `recordRfidSessionEvents` | const arrow | 1813 |
+| 159 | `applyRfidSession` | const arrow | 1817 |
+| 160 | `createSale` | export function | 1821 |
+| 161 | `getSales` | const arrow | 1833 |
+| 162 | `getDashboard` | const arrow | 1840 |
+| 163 | `getAnalytics` | const arrow | 1841 |
+| 164 | `getCustomers` | const arrow | 1850 |
+| 165 | `getCustomerPointSummaries` | const arrow | 1871 |
+| 166 | `createCustomer` | export function | 1875 |
+| 167 | `updateCustomer` | const arrow | 1879 |
+| 168 | `deleteCustomer` | const arrow | 1883 |
+| 169 | `downloadCustomerTemplate` | const arrow | 1888 |
+| 170 | `getSuppliers` | const arrow | 1897 |
+| 171 | `createSupplier` | export function | 1902 |
+| 172 | `updateSupplier` | const arrow | 1906 |
+| 173 | `deleteSupplier` | const arrow | 1910 |
+| 174 | `downloadSupplierTemplate` | const arrow | 1915 |
+| 175 | `getDeliveryContacts` | const arrow | 1924 |
+| 176 | `createDeliveryContact` | export function | 1929 |
+| 177 | `updateDeliveryContact` | const arrow | 1933 |
+| 178 | `deleteDeliveryContact` | const arrow | 1937 |
+| 179 | `getUsers` | const arrow | 1944 |
+| 180 | `updateUser` | const arrow | 1946 |
+| 181 | `getUserProfile` | const arrow | 1947 |
+| 182 | `getUserAuthMethods` | const arrow | 1948 |
+| 183 | `updateUserProfile` | const arrow | 1950 |
+| 184 | `disconnectUserAuthProvider` | const arrow | 1952 |
+| 185 | `changeUserPassword` | const arrow | 1954 |
+| 186 | `resetPassword` | const arrow | 1956 |
+| 187 | `getRoles` | const arrow | 1959 |
+| 188 | `updateRole` | const arrow | 1961 |
+| 189 | `deleteRole` | const arrow | 1962 |
+| 190 | `getCustomTables` | const arrow | 1965 |
+| 191 | `getCustomTableData` | const arrow | 1967 |
+| 192 | `insertCustomRow` | const arrow | 1968 |
+| 193 | `updateCustomRow` | const arrow | 1969 |
+| 194 | `deleteCustomRow` | const arrow | 1970 |
+| 195 | `getAuditLogs` | const arrow | 1973 |
+| 196 | `deleteAuditLogsRetention` | const arrow | 1999 |
+| 197 | `wait` | function | 2003 |
+| 198 | `getSystemJob` | export function | 2007 |
+| 199 | `cancelSystemJob` | export function | 2012 |
+| 200 | `pollSystemJob` | export function | 2017 |
+| 201 | `waitForSystemJob` | function | 2043 |
+| 202 | `getIntegrationDoctor` | export function | 2051 |
+| 203 | `queueBackupFolderExport` | export function | 2062 |
+| 204 | `exportBackupFolder` | export function | 2071 |
+| 205 | `queueBackupFolderRestore` | export function | 2075 |
+| 206 | `importBackupFolder` | export function | 2082 |
+| 207 | `getGoogleDriveSyncStatus` | const arrow | 2090 |
+| 208 | `saveGoogleDriveSyncPreferences` | const arrow | 2124 |
+| 209 | `startGoogleDriveSyncOauth` | const arrow | 2127 |
+| 210 | `disconnectGoogleDriveSync` | const arrow | 2130 |
+| 211 | `forgetGoogleDriveSyncCredentials` | const arrow | 2133 |
+| 212 | `queueGoogleDriveSyncNow` | const arrow | 2136 |
+| 213 | `syncGoogleDriveNow` | const arrow | 2139 |
+| 214 | `resetData` | export function | 2144 |
+| 215 | `factoryReset` | export function | 2151 |
+| 216 | `downloadImportTemplate` | export function | 2159 |
+| 217 | `openPath` | export function | 2206 |
+| 218 | `getReturns` | const arrow | 2215 |
+| 219 | `createReturn` | export function | 2221 |
+| 220 | `createSupplierReturn` | export function | 2227 |
+| 221 | `updateSaleStatus` | const arrow | 2236 |
+| 222 | `attachSaleCustomer` | const arrow | 2252 |
+| 223 | `getSalesExport` | const arrow | 2276 |
+| 224 | `updateReturn` | const arrow | 2280 |
+| 225 | `testSyncServer` | export function | 2304 |
+| 226 | `openFolderDialog` | export function | 2323 |
+| 227 | `getDataPath` | const arrow | 2334 |
+| 228 | `getScaleMigrationStatus` | const arrow | 2335 |
+| 229 | `prepareScaleMigration` | const arrow | 2336 |
+| 230 | `runScaleMigration` | const arrow | 2337 |
+| 231 | `setDataPath` | export function | 2338 |
+| 232 | `resetDataPath` | export function | 2343 |
+| 233 | `browseDir` | const arrow | 2348 |
 
 ### 3.147 `frontend/src/api/websocket.ts`
 
@@ -3358,121 +3358,123 @@ Code files scanned: **466**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `loadCatalogEditorSurface` | const arrow | 90 |
-| 2 | `loadCatalogSecondaryTabs` | const arrow | 91 |
-| 3 | `loadCatalogProductsSection` | const arrow | 92 |
-| 4 | `loadCatalogPreviewSurface` | const arrow | 93 |
-| 5 | `getAboutBlockLabel` | function | 115 |
-| 6 | `withAssetVersion` | function | 121 |
-| 7 | `sanitizePortalMediaValue` | function | 131 |
-| 8 | `tt` | function | 141 |
-| 9 | `toBoolean` | function | 149 |
-| 10 | `toNumber` | function | 156 |
-| 11 | `normalizePriceDisplay` | function | 162 |
-| 12 | `normalizeHexColor` | function | 167 |
-| 13 | `normalizeExternalUrl` | function | 173 |
-| 14 | `createFaqId` | function | 189 |
-| 15 | `normalizeFaqItems` | function | 193 |
-| 16 | `translatedPortalText` | function | 249 |
-| 17 | `translateConfiguredFaqText` | function | 255 |
-| 18 | `localizeConfiguredFaqItems` | function | 262 |
-| 19 | `buildFaqStarterItems` | function | 270 |
-| 20 | `buildAiFaqStarterItems` | function | 279 |
-| 21 | `hexToRgba` | function | 289 |
-| 22 | `readPortalCache` | function | 300 |
-| 23 | `writePortalCache` | function | 323 |
-| 24 | `normalizePortalPath` | function | 342 |
-| 25 | `isReservedPortalPath` | function | 355 |
-| 26 | `getPortalTabs` | function | 359 |
-| 27 | `resolvePortalActiveTab` | function | 370 |
-| 28 | `buildDraft` | function | 378 |
-| 29 | `applyDraft` | function | 478 |
-| 30 | `getBranchQty` | function | 602 |
-| 31 | `getStockStatus` | function | 609 |
-| 32 | `normalizeProductGallery` | function | 619 |
-| 33 | `normalizePortalProductSearch` | function | 636 |
-| 34 | `buildRecommendedProductOption` | function | 640 |
-| 35 | `productMatchesRecommendedSearch` | function | 650 |
-| 36 | `formatDateTime` | function | 665 |
-| 37 | `formatPortalPrice` | function | 672 |
-| 38 | `ImageField` | function | 685 |
-| 39 | `readImageFileAsDataUrl` | function | 774 |
-| 40 | `readImageFilesAsDataUrls` | function | 783 |
-| 41 | `pickImageAsDataUrl` | function | 803 |
-| 42 | `pickMultipleImagesAsDataUrls` | function | 816 |
-| 43 | `replaceVars` | function | 829 |
-| 44 | `getPortalResourceText` | function | 833 |
-| 45 | `isFirstPartyTranslateTarget` | function | 871 |
-| 46 | `normalizePortalTranslateChoice` | function | 878 |
-| 47 | `isDocumentVisible` | function | 886 |
-| 48 | `sleep` | function | 891 |
-| 49 | `CatalogPage` | export default function | 997 |
-| 50 | `warmPublicProductsPanel` | const arrow | 1111 |
-| 51 | `warmPublicSecondaryTabs` | const arrow | 1115 |
-| 52 | `copy` | const arrow | 1194 |
-| 53 | `resolveVisibleTab` | const arrow | 1214 |
-| 54 | `getMediaUploadState` | const arrow | 1262 |
-| 55 | `updateMediaUploadState` | const arrow | 1263 |
-| 56 | `forgetMediaUploadState` | const arrow | 1270 |
-| 57 | `loadAssistantStatus` | function | 1317 |
-| 58 | `openProductGallery` | function | 1339 |
-| 59 | `changeTranslateTarget` | function | 1352 |
-| 60 | `isPortalLoadCurrent` | function | 1400 |
-| 61 | `loadPortalEditorData` | function | 1404 |
-| 62 | `refreshPortalView` | function | 1441 |
-| 63 | `loadPortal` | function | 1470 |
-| 64 | `ensureLink` | const arrow | 1726 |
-| 65 | `updateVisibility` | const arrow | 1819 |
-| 66 | `handleScroll` | const arrow | 1849 |
-| 67 | `initWidget` | const arrow | 1894 |
-| 68 | `waitForWidget` | const arrow | 1912 |
-| 69 | `toggleFilterValue` | function | 2036 |
-| 70 | `clearPortalFilters` | function | 2044 |
-| 71 | `setDraft` | function | 2052 |
-| 72 | `toggleRecommendedProduct` | function | 2057 |
-| 73 | `openPortalImage` | function | 2066 |
-| 74 | `setAboutBlocksDraft` | function | 2077 |
-| 75 | `setPromoItemsDraft` | function | 2081 |
-| 76 | `getPortalMediaValue` | function | 2085 |
-| 77 | `setPortalMediaValue` | function | 2099 |
-| 78 | `clearPortalUploadPreview` | function | 2113 |
-| 79 | `clearPortalMediaTarget` | function | 2119 |
-| 80 | `uploadPortalMedia` | function | 2130 |
-| 81 | `cancelPortalMediaUpload` | function | 2200 |
-| 82 | `updateAboutBlock` | function | 2206 |
-| 83 | `updatePromoItem` | function | 2212 |
-| 84 | `addAboutBlock` | function | 2218 |
-| 85 | `addPromoItem` | function | 2222 |
-| 86 | `moveAboutBlockBefore` | function | 2226 |
-| 87 | `removeAboutBlock` | function | 2238 |
-| 88 | `movePromoItemBefore` | function | 2249 |
-| 89 | `removePromoItem` | function | 2261 |
-| 90 | `setFaqDraft` | function | 2272 |
-| 91 | `addFaqItem` | function | 2276 |
-| 92 | `mergeFaqStarterItems` | function | 2287 |
-| 93 | `addFaqStarterSet` | function | 2300 |
-| 94 | `addAiFaqStarterSet` | function | 2304 |
-| 95 | `updateFaqItem` | function | 2308 |
-| 96 | `removeFaqItem` | function | 2314 |
-| 97 | `clearAssistantState` | function | 2318 |
-| 98 | `uploadDraftImage` | function | 2333 |
-| 99 | `uploadAboutBlockMedia` | function | 2337 |
-| 100 | `uploadPromoItemMedia` | function | 2343 |
-| 101 | `openFilePicker` | function | 2347 |
-| 102 | `handleFilePickerSelect` | function | 2351 |
-| 103 | `savePortalDraft` | function | 2377 |
-| 104 | `askAssistant` | function | 2569 |
-| 105 | `refreshMembershipData` | function | 2614 |
-| 106 | `handleMembershipLookup` | function | 2656 |
-| 107 | `addSubmissionImages` | function | 2669 |
-| 108 | `handleSubmissionPaste` | function | 2679 |
-| 109 | `handleSubmitShareProof` | function | 2695 |
-| 110 | `handleReviewSubmission` | function | 2742 |
-| 111 | `renderCatalogSection` | function | 2905 |
-| 112 | `handleUploadSubmissionImages` | const arrow | 2931 |
-| 113 | `renderSecondaryTabPanel` | function | 2987 |
-| 114 | `renderSecondaryTabSection` | function | 2999 |
-| 115 | `scrollPublicPortal` | const arrow | 3128 |
+| 1 | `loadCatalogEditorSurface` | const arrow | 93 |
+| 2 | `loadCatalogSecondaryTabs` | const arrow | 94 |
+| 3 | `loadCatalogProductsSection` | const arrow | 95 |
+| 4 | `loadCatalogPreviewSurface` | const arrow | 96 |
+| 5 | `getCatalogApi` | function | 240 |
+| 6 | `getCatalogErrorMessage` | function | 244 |
+| 7 | `normalizePortalInitialOptions` | function | 248 |
+| 8 | `normalizeCatalogOptions` | function | 257 |
+| 9 | `normalizeBrandOptions` | function | 268 |
+| 10 | `getAboutBlockLabel` | function | 273 |
+| 11 | `withAssetVersion` | function | 279 |
+| 12 | `sanitizePortalMediaValue` | function | 289 |
+| 13 | `tt` | function | 299 |
+| 14 | `toBoolean` | function | 307 |
+| 15 | `toNumber` | function | 314 |
+| 16 | `normalizePriceDisplay` | function | 321 |
+| 17 | `normalizeHexColor` | function | 327 |
+| 18 | `normalizeExternalUrl` | function | 333 |
+| 19 | `createFaqId` | function | 349 |
+| 20 | `normalizeFaqItems` | function | 353 |
+| 21 | `translatedPortalText` | function | 409 |
+| 22 | `translateConfiguredFaqText` | function | 415 |
+| 23 | `localizeConfiguredFaqItems` | function | 422 |
+| 24 | `buildFaqStarterItems` | function | 430 |
+| 25 | `buildAiFaqStarterItems` | function | 439 |
+| 26 | `hexToRgba` | function | 449 |
+| 27 | `readPortalCache` | function | 460 |
+| 28 | `writePortalCache` | function | 483 |
+| 29 | `normalizePortalPath` | function | 502 |
+| 30 | `isReservedPortalPath` | function | 515 |
+| 31 | `getPortalTabs` | function | 519 |
+| 32 | `resolvePortalActiveTab` | function | 530 |
+| 33 | `buildDraft` | function | 538 |
+| 34 | `applyDraft` | function | 638 |
+| 35 | `getBranchQty` | function | 762 |
+| 36 | `getStockStatus` | function | 769 |
+| 37 | `normalizeProductGallery` | function | 780 |
+| 38 | `normalizePortalProductSearch` | function | 797 |
+| 39 | `buildRecommendedProductOption` | function | 801 |
+| 40 | `productMatchesRecommendedSearch` | function | 811 |
+| 41 | `formatDateTime` | function | 826 |
+| 42 | `formatPortalPrice` | function | 834 |
+| 43 | `ImageField` | function | 847 |
+| 44 | `readImageFileAsDataUrl` | function | 936 |
+| 45 | `readImageFilesAsDataUrls` | function | 945 |
+| 46 | `pickImageAsDataUrl` | function | 968 |
+| 47 | `pickMultipleImagesAsDataUrls` | function | 981 |
+| 48 | `replaceVars` | function | 994 |
+| 49 | `getPortalResourceText` | function | 998 |
+| 50 | `isFirstPartyTranslateTarget` | function | 1036 |
+| 51 | `normalizePortalTranslateChoice` | function | 1043 |
+| 52 | `isDocumentVisible` | function | 1051 |
+| 53 | `sleep` | function | 1056 |
+| 54 | `CatalogPage` | export default function | 1162 |
+| 55 | `warmPublicProductsPanel` | const arrow | 1276 |
+| 56 | `warmPublicSecondaryTabs` | const arrow | 1280 |
+| 57 | `updateMediaUploadState` | const arrow | 1432 |
+| 58 | `forgetMediaUploadState` | const arrow | 1439 |
+| 59 | `loadAssistantStatus` | function | 1486 |
+| 60 | `openProductGallery` | function | 1508 |
+| 61 | `changeTranslateTarget` | function | 1521 |
+| 62 | `isPortalLoadCurrent` | function | 1569 |
+| 63 | `loadPortalEditorData` | function | 1573 |
+| 64 | `refreshPortalView` | function | 1615 |
+| 65 | `loadPortal` | function | 1644 |
+| 66 | `ensureLink` | const arrow | 1900 |
+| 67 | `updateVisibility` | const arrow | 1993 |
+| 68 | `handleScroll` | const arrow | 2023 |
+| 69 | `initWidget` | const arrow | 2068 |
+| 70 | `waitForWidget` | const arrow | 2086 |
+| 71 | `toggleFilterValue` | function | 2210 |
+| 72 | `clearPortalFilters` | function | 2218 |
+| 73 | `setDraft` | function | 2226 |
+| 74 | `toggleRecommendedProduct` | function | 2231 |
+| 75 | `openPortalImage` | function | 2240 |
+| 76 | `setAboutBlocksDraft` | function | 2251 |
+| 77 | `setPromoItemsDraft` | function | 2255 |
+| 78 | `getPortalMediaValue` | function | 2259 |
+| 79 | `setPortalMediaValue` | function | 2273 |
+| 80 | `clearPortalUploadPreview` | function | 2287 |
+| 81 | `clearPortalMediaTarget` | function | 2293 |
+| 82 | `uploadPortalMedia` | function | 2304 |
+| 83 | `cancelPortalMediaUpload` | function | 2375 |
+| 84 | `updateAboutBlock` | function | 2381 |
+| 85 | `updatePromoItem` | function | 2387 |
+| 86 | `addAboutBlock` | function | 2393 |
+| 87 | `addPromoItem` | function | 2397 |
+| 88 | `moveAboutBlockBefore` | function | 2401 |
+| 89 | `removeAboutBlock` | function | 2413 |
+| 90 | `movePromoItemBefore` | function | 2424 |
+| 91 | `removePromoItem` | function | 2436 |
+| 92 | `setFaqDraft` | function | 2447 |
+| 93 | `addFaqItem` | function | 2451 |
+| 94 | `mergeFaqStarterItems` | function | 2462 |
+| 95 | `addFaqStarterSet` | function | 2475 |
+| 96 | `addAiFaqStarterSet` | function | 2479 |
+| 97 | `updateFaqItem` | function | 2483 |
+| 98 | `removeFaqItem` | function | 2489 |
+| 99 | `clearAssistantState` | function | 2493 |
+| 100 | `uploadDraftImage` | function | 2508 |
+| 101 | `uploadAboutBlockMedia` | function | 2512 |
+| 102 | `uploadPromoItemMedia` | function | 2518 |
+| 103 | `openFilePicker` | function | 2522 |
+| 104 | `handleFilePickerSelect` | function | 2526 |
+| 105 | `savePortalDraft` | function | 2554 |
+| 106 | `askAssistant` | function | 2746 |
+| 107 | `refreshMembershipData` | function | 2792 |
+| 108 | `handleMembershipLookup` | function | 2834 |
+| 109 | `addSubmissionImages` | function | 2847 |
+| 110 | `handleSubmissionPaste` | function | 2857 |
+| 111 | `handleSubmitShareProof` | function | 2873 |
+| 112 | `handleReviewSubmission` | function | 2920 |
+| 113 | `renderCatalogSection` | function | 3083 |
+| 114 | `handleUploadSubmissionImages` | const arrow | 3109 |
+| 115 | `renderSecondaryTabPanel` | function | 3165 |
+| 116 | `renderSecondaryTabSection` | function | 3177 |
+| 117 | `scrollPublicPortal` | const arrow | 3306 |
 
 ### 3.159 `frontend/src/components/catalog/CatalogPageContext.tsx`
 
@@ -3919,33 +3921,29 @@ Code files scanned: **466**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `reuseSetWhenUnchanged` | function | 52 |
-| 2 | `normalizeFiniteIdsFrom` | function | 61 |
-| 3 | `normalizeFiniteIds` | function | 69 |
-| 4 | `countActiveFlags` | function | 73 |
-| 5 | `countSelectedIds` | function | 81 |
-| 6 | `renderDestinationProductOptions` | function | 89 |
-| 7 | `limitInventorySectionsForMobile` | function | 100 |
-| 8 | `priceCsv` | function | 127 |
-| 9 | `parseInventoryTimestamp` | function | 131 |
-| 10 | `InventoryDiscountBadge` | function | 145 |
-| 11 | `InventoryBatchPreview` | function | 156 |
-| 12 | `label` | const arrow | 158 |
-| 13 | `loadInventoryExportTools` | function | 213 |
-| 14 | `Inventory` | export default function | 228 |
-| 15 | `promise` | const arrow | 471 |
-| 16 | `handleAdjust` | const arrow | 836 |
-| 17 | `openAdjust` | const arrow | 917 |
-| 18 | `openMove` | const arrow | 924 |
-| 19 | `openTransfer` | const arrow | 947 |
-| 20 | `handleMoveStock` | const arrow | 1002 |
-| 21 | `handleTransferStock` | const arrow | 1075 |
-| 22 | `matchesSearch` | const arrow | 1166 |
-| 23 | `productHay` | const arrow | 1173 |
-| 24 | `movHay` | const arrow | 1176 |
-| 25 | `syncViewport` | const arrow | 1232 |
-| 26 | `statsValue` | const arrow | 1851 |
-| 27 | `selectInventorySection` | const arrow | 3072 |
+| 1 | `getInventoryApi` | function | 180 |
+| 2 | `normalizeFiniteIds` | function | 214 |
+| 3 | `countActiveFlags` | function | 218 |
+| 4 | `countSelectedIds` | function | 226 |
+| 5 | `renderDestinationProductOptions` | function | 234 |
+| 6 | `limitInventorySectionsForMobile` | function | 245 |
+| 7 | `priceCsv` | function | 272 |
+| 8 | `parseInventoryTimestamp` | function | 276 |
+| 9 | `InventoryDiscountBadge` | function | 290 |
+| 10 | `InventoryBatchPreview` | function | 301 |
+| 11 | `label` | const arrow | 313 |
+| 12 | `loadInventoryExportTools` | function | 368 |
+| 13 | `Inventory` | export default function | 383 |
+| 14 | `promise` | const arrow | 626 |
+| 15 | `handleAdjust` | const arrow | 992 |
+| 16 | `openAdjust` | const arrow | 1074 |
+| 17 | `openMove` | const arrow | 1081 |
+| 18 | `openTransfer` | const arrow | 1104 |
+| 19 | `handleMoveStock` | const arrow | 1159 |
+| 20 | `handleTransferStock` | const arrow | 1232 |
+| 21 | `syncViewport` | const arrow | 1389 |
+| 22 | `statsValue` | const arrow | 2008 |
+| 23 | `selectInventorySection` | const arrow | 3231 |
 
 ### 3.193 `frontend/src/components/inventory/InventoryImportModal.tsx`
 
@@ -4430,21 +4428,30 @@ Code files scanned: **466**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `Products` | export default function | 130 |
-| 2 | `promise` | const arrow | 212 |
-| 3 | `handleSave` | const arrow | 383 |
-| 4 | `uploadGalleryImages` | const arrow | 407 |
-| 5 | `handleSaveWithGallery` | const arrow | 433 |
-| 6 | `handleBulkDelete` | const arrow | 500 |
-| 7 | `handleBulkOutOfStock` | const arrow | 547 |
-| 8 | `handleBulkChangeBranch` | const arrow | 590 |
-| 9 | `handleBulkAddStock` | const arrow | 620 |
-| 10 | `toggleSelect` | const arrow | 628 |
-| 11 | `toggleSelectAll` | const arrow | 635 |
-| 12 | `handleDelete` | const arrow | 642 |
-| 13 | `renderUnitChip` | const arrow | 722 |
-| 14 | `openLightbox` | const arrow | 736 |
-| 15 | `getStockBadge` | const arrow | 743 |
+| 1 | `getProductApi` | function | 330 |
+| 2 | `getErrorMessage` | function | 334 |
+| 3 | `isObjectRecord` | function | 338 |
+| 4 | `toProductApiResponse` | function | 342 |
+| 5 | `scrollNodeWithOffset` | function | 346 |
+| 6 | `summarizeProductRun` | function | 352 |
+| 7 | `aggregateProductInitials` | function | 356 |
+| 8 | `toModalProduct` | function | 367 |
+| 9 | `toVariantParentProduct` | function | 379 |
+| 10 | `toLightboxState` | function | 385 |
+| 11 | `Products` | export default function | 395 |
+| 12 | `promise` | const arrow | 478 |
+| 13 | `handleSave` | const arrow | 653 |
+| 14 | `handleSaveWithGallery` | const arrow | 703 |
+| 15 | `handleBulkDelete` | const arrow | 770 |
+| 16 | `handleBulkOutOfStock` | const arrow | 817 |
+| 17 | `handleBulkChangeBranch` | const arrow | 860 |
+| 18 | `handleBulkAddStock` | const arrow | 890 |
+| 19 | `toggleSelect` | const arrow | 898 |
+| 20 | `toggleSelectAll` | const arrow | 905 |
+| 21 | `handleDelete` | const arrow | 912 |
+| 22 | `renderUnitChip` | const arrow | 999 |
+| 23 | `openLightbox` | const arrow | 1013 |
+| 24 | `getStockBadge` | const arrow | 1020 |
 
 ### 3.230 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
@@ -4518,7 +4525,7 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `ProductDetailModal` | export default function | 79 |
 | 2 | `T` | const arrow | 95 |
-| 3 | `Row` | const arrow | 116 |
+| 3 | `Row` | const arrow | 121 |
 
 ### 3.237 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
@@ -5613,37 +5620,37 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `sanitizeBaseUrl` | function | 77 |
 | 2 | `loadMethodsModule` | function | 81 |
-| 3 | `getLazyApiMethod` | function | 87 |
-| 4 | `mapOfflineFileChunkStatusUpdates` | function | 101 |
-| 5 | `asArrayBuffer` | function | 117 |
-| 6 | `bytesToBase64` | function | 121 |
-| 7 | `base64ToBytes` | function | 132 |
-| 8 | `stableStringify` | function | 139 |
-| 9 | `sha256Hex` | function | 145 |
-| 10 | `deriveOfflineVaultKey` | function | 153 |
-| 11 | `encryptOfflineVaultValue` | function | 170 |
-| 12 | `decryptOfflineVaultValue` | function | 178 |
-| 13 | `requestOfflinePersistentStorage` | function | 188 |
-| 14 | `dispatchVaultLocked` | function | 195 |
-| 15 | `scheduleOfflineVaultIdleLock` | function | 200 |
-| 16 | `lockOfflineVault` | function | 206 |
-| 17 | `unlockOfflineVault` | function | 214 |
-| 18 | `queueBusinessOutboxOperation` | function | 239 |
-| 19 | `queueOfflineFileChunks` | function | 277 |
-| 20 | `dispatchOutboxProgress` | function | 330 |
-| 21 | `dispatchOutboxFileProgress` | function | 337 |
-| 22 | `dispatchOutboxConflict` | function | 344 |
-| 23 | `getSyncOutboxKey` | function | 351 |
-| 24 | `syncUnlockedOfflineOutbox` | function | 355 |
-| 25 | `syncUnlockedOfflineFileChunks` | function | 464 |
-| 26 | `registerOutboxBackgroundSync` | function | 525 |
-| 27 | `refreshOfflineSnapshotSoon` | function | 540 |
-| 28 | `run` | const arrow | 550 |
-| 29 | `refreshServiceWorkerSoon` | function | 569 |
-| 30 | `runOfflineMaintenance` | function | 579 |
-| 31 | `startOfflineMaintenanceLoop` | function | 591 |
-| 32 | `forwardServiceWorkerOutboxEvent` | function | 599 |
-| 33 | `forwardServiceWorkerAppEvent` | function | 693 |
+| 3 | `getLazyApiMethod` | function | 86 |
+| 4 | `mapOfflineFileChunkStatusUpdates` | function | 100 |
+| 5 | `asArrayBuffer` | function | 116 |
+| 6 | `bytesToBase64` | function | 120 |
+| 7 | `base64ToBytes` | function | 131 |
+| 8 | `stableStringify` | function | 138 |
+| 9 | `sha256Hex` | function | 144 |
+| 10 | `deriveOfflineVaultKey` | function | 152 |
+| 11 | `encryptOfflineVaultValue` | function | 169 |
+| 12 | `decryptOfflineVaultValue` | function | 177 |
+| 13 | `requestOfflinePersistentStorage` | function | 187 |
+| 14 | `dispatchVaultLocked` | function | 194 |
+| 15 | `scheduleOfflineVaultIdleLock` | function | 199 |
+| 16 | `lockOfflineVault` | function | 205 |
+| 17 | `unlockOfflineVault` | function | 213 |
+| 18 | `queueBusinessOutboxOperation` | function | 238 |
+| 19 | `queueOfflineFileChunks` | function | 276 |
+| 20 | `dispatchOutboxProgress` | function | 329 |
+| 21 | `dispatchOutboxFileProgress` | function | 336 |
+| 22 | `dispatchOutboxConflict` | function | 343 |
+| 23 | `getSyncOutboxKey` | function | 350 |
+| 24 | `syncUnlockedOfflineOutbox` | function | 354 |
+| 25 | `syncUnlockedOfflineFileChunks` | function | 463 |
+| 26 | `registerOutboxBackgroundSync` | function | 524 |
+| 27 | `refreshOfflineSnapshotSoon` | function | 539 |
+| 28 | `run` | const arrow | 549 |
+| 29 | `refreshServiceWorkerSoon` | function | 568 |
+| 30 | `runOfflineMaintenance` | function | 578 |
+| 31 | `startOfflineMaintenanceLoop` | function | 590 |
+| 32 | `forwardServiceWorkerOutboxEvent` | function | 598 |
+| 33 | `forwardServiceWorkerAppEvent` | function | 692 |
 
 ### 3.332 `frontend/tailwind.config.ts`
 

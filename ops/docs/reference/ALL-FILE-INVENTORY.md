@@ -14,17 +14,17 @@ Total files documented: **529**
 | 2 | `backend/.env` | backend-root | 67 | 3.0 | Project source/support file |
 | 3 | `backend/.npmrc` | backend-root | 14 | 0.4 | Project source/support file |
 | 4 | `backend/package-lock.json` | backend-root | 6225 | 224.7 | Configuration/data manifest |
-| 5 | `backend/package.json` | backend-root | 66 | 3.6 | Configuration/data manifest |
+| 5 | `backend/package.json` | backend-root | 67 | 3.6 | Configuration/data manifest |
 | 6 | `backend/README.md` | backend-root | 13 | 0.6 | Documentation |
 | 7 | `backend/server.js` | backend-root | 570 | 19.8 | Backend server entrypoint |
 | 8 | `backend/src/accessControl.js` | backend-core | 161 | 5.0 | Project source/support file |
 | 9 | `backend/src/analytics/duckdbRuntime.js` | backend-core | 91 | 2.7 | Project source/support file |
-| 10 | `backend/src/authOtpGuards.js` | backend-core | 31 | 0.9 | Project source/support file |
+| 10 | `backend/src/authOtpGuards.ts` | backend-core | 34 | 1.2 | Project source/support file |
 | 11 | `backend/src/backupSchema.js` | backend-core | 144 | 3.2 | Project source/support file |
 | 12 | `backend/src/businessMetrics.js` | backend-core | 158 | 6.1 | Project source/support file |
-| 13 | `backend/src/catalogTextIntegrity.js` | backend-core | 68 | 2.4 | Project source/support file |
+| 13 | `backend/src/catalogTextIntegrity.ts` | backend-core | 96 | 3.0 | Project source/support file |
 | 14 | `backend/src/config/index.js` | backend-core | 303 | 12.3 | Project source/support file |
-| 15 | `backend/src/conflictControl.js` | backend-core | 81 | 2.5 | Project source/support file |
+| 15 | `backend/src/conflictControl.ts` | backend-core | 117 | 3.4 | Project source/support file |
 | 16 | `backend/src/contactOptions.js` | backend-core | 140 | 4.7 | Project source/support file |
 | 17 | `backend/src/database.js` | backend-core | 4 | 0.1 | Schema/migrations and DB bootstrap |
 | 18 | `backend/src/dataPath/index.js` | backend-core | 201 | 6.0 | Project source/support file |
@@ -33,25 +33,25 @@ Total files documented: **529**
 | 21 | `backend/src/db/postgresSchema.sql` | backend-core | 2148 | 54.6 | Project source/support file |
 | 22 | `backend/src/fileAssets.js` | backend-core | 1261 | 43.9 | Project source/support file |
 | 23 | `backend/src/helpers.js` | backend-core | 625 | 21.0 | Project source/support file |
-| 24 | `backend/src/idempotency.js` | backend-core | 13 | 0.3 | Project source/support file |
+| 24 | `backend/src/idempotency.ts` | backend-core | 14 | 0.3 | Project source/support file |
 | 25 | `backend/src/importCsv.js` | backend-core | 296 | 7.7 | Project source/support file |
 | 26 | `backend/src/importParsing.js` | backend-core | 89 | 3.2 | Project source/support file |
-| 27 | `backend/src/initials.js` | backend-core | 103 | 3.0 | Project source/support file |
-| 28 | `backend/src/maintenanceLock.js` | backend-core | 88 | 2.3 | Project source/support file |
+| 27 | `backend/src/initials.ts` | backend-core | 120 | 3.7 | Project source/support file |
+| 28 | `backend/src/maintenanceLock.ts` | backend-core | 131 | 3.3 | Project source/support file |
 | 29 | `backend/src/middleware.js` | backend-core | 336 | 10.3 | Project source/support file |
-| 30 | `backend/src/money.js` | backend-core | 26 | 0.6 | Project source/support file |
+| 30 | `backend/src/money.ts` | backend-core | 29 | 0.8 | Project source/support file |
 | 31 | `backend/src/netSecurity.js` | backend-core | 122 | 3.3 | Project source/support file |
 | 32 | `backend/src/objectStore.js` | backend-core | 468 | 15.1 | Project source/support file |
-| 33 | `backend/src/optionalSharp.js` | backend-core | 30 | 0.7 | Project source/support file |
+| 33 | `backend/src/optionalSharp.ts` | backend-core | 32 | 0.7 | Project source/support file |
 | 34 | `backend/src/organizationContext/index.js` | backend-core | 264 | 8.1 | Project source/support file |
 | 35 | `backend/src/permissions.js` | backend-core | 198 | 6.3 | Project source/support file |
-| 36 | `backend/src/portalUtils.js` | backend-core | 91 | 2.5 | Project source/support file |
+| 36 | `backend/src/portalUtils.ts` | backend-core | 122 | 3.1 | Project source/support file |
 | 37 | `backend/src/postgresDatabase.js` | backend-core | 596 | 25.4 | Project source/support file |
 | 38 | `backend/src/productBatches.js` | backend-core | 646 | 21.5 | Project source/support file |
 | 39 | `backend/src/productDiscounts.js` | backend-core | 129 | 5.1 | Project source/support file |
 | 40 | `backend/src/productImportPolicies.js` | backend-core | 114 | 4.0 | Project source/support file |
 | 41 | `backend/src/README.md` | backend-core | 12 | 0.7 | Documentation |
-| 42 | `backend/src/requestContext.js` | backend-core | 59 | 1.2 | Project source/support file |
+| 42 | `backend/src/requestContext.ts` | backend-core | 65 | 1.7 | Project source/support file |
 | 43 | `backend/src/routes/actionHistory.js` | backend-routes | 256 | 9.0 | API route handler |
 | 44 | `backend/src/routes/ai.js` | backend-routes | 270 | 9.2 | API route handler |
 | 45 | `backend/src/routes/auth.js` | backend-routes | 1148 | 40.6 | API route handler |
@@ -77,7 +77,7 @@ Total files documented: **529**
 | 65 | `backend/src/routes/units.js` | backend-routes | 151 | 5.9 | API route handler |
 | 66 | `backend/src/routes/users.js` | backend-routes | 1086 | 44.5 | API route handler |
 | 67 | `backend/src/runtimeCache.js` | backend-core | 187 | 5.1 | Project source/support file |
-| 68 | `backend/src/runtimeState/index.js` | backend-core | 74 | 2.2 | Project source/support file |
+| 68 | `backend/src/runtimeState/index.ts` | backend-core | 97 | 2.7 | Project source/support file |
 | 69 | `backend/src/runtimeVersion.js` | backend-core | 134 | 3.7 | Project source/support file |
 | 70 | `backend/src/schemaMetadata.js` | backend-core | 110 | 3.0 | Project source/support file |
 | 71 | `backend/src/security.js` | backend-core | 215 | 6.4 | Project source/support file |
@@ -96,17 +96,17 @@ Total files documented: **529**
 | 84 | `backend/src/services/verification.js` | backend-services | 272 | 8.4 | Integration/service layer |
 | 85 | `backend/src/sessionAuth.js` | backend-core | 215 | 6.8 | Project source/support file |
 | 86 | `backend/src/settingsSnapshot.js` | backend-core | 135 | 4.2 | Project source/support file |
-| 87 | `backend/src/storage/organizationFolders.js` | backend-core | 54 | 1.7 | Project source/support file |
-| 88 | `backend/src/systemFsWorker.js` | backend-core | 95 | 3.0 | Project source/support file |
+| 87 | `backend/src/storage/organizationFolders.ts` | backend-core | 59 | 2.0 | Project source/support file |
+| 88 | `backend/src/systemFsWorker.ts` | backend-core | 122 | 3.6 | Project source/support file |
 | 89 | `backend/src/systemJobs.js` | backend-core | 467 | 14.5 | Project source/support file |
 | 90 | `backend/src/uploadReferenceCleanup.js` | backend-core | 245 | 8.2 | Project source/support file |
 | 91 | `backend/src/uploadSecurity.js` | backend-core | 91 | 3.6 | Project source/support file |
 | 92 | `backend/src/websocket.js` | backend-core | 94 | 3.6 | Project source/support file |
-| 93 | `backend/src/workers/importWorker.js` | backend-core | 35 | 1.0 | Project source/support file |
-| 94 | `backend/src/workers/mediaWorker.js` | backend-core | 34 | 0.9 | Project source/support file |
+| 93 | `backend/src/workers/importWorker.ts` | backend-core | 42 | 1.1 | Project source/support file |
+| 94 | `backend/src/workers/mediaWorker.ts` | backend-core | 41 | 1.0 | Project source/support file |
 | 95 | `backend/test/accessControl.test.ts` | backend-root | 127 | 4.0 | Project source/support file |
 | 96 | `backend/test/analyticsRuntime.test.ts` | backend-root | 49 | 1.2 | Project source/support file |
-| 97 | `backend/test/authOtpGuards.test.ts` | backend-root | 71 | 1.6 | Project source/support file |
+| 97 | `backend/test/authOtpGuards.test.ts` | backend-root | 71 | 1.7 | Project source/support file |
 | 98 | `backend/test/authSecurityFlow.test.ts` | backend-root | 283 | 9.0 | Project source/support file |
 | 99 | `backend/test/backupDefaultDestination.test.ts` | backend-root | 15 | 0.6 | Project source/support file |
 | 100 | `backend/test/backupPerformanceHardening.test.ts` | backend-root | 177 | 9.9 | Project source/support file |
@@ -177,10 +177,10 @@ Total files documented: **529**
 | 165 | `frontend/README.md` | frontend-root | 13 | 0.5 | Documentation |
 | 166 | `frontend/src/api/http.ts` | frontend-api | 1093 | 41.2 | Frontend API/sync helper |
 | 167 | `frontend/src/api/localDb.ts` | frontend-api | 287 | 11.0 | Frontend API/sync helper |
-| 168 | `frontend/src/api/methods.ts` | frontend-api | 2346 | 102.6 | Frontend API/sync helper |
+| 168 | `frontend/src/api/methods.ts` | frontend-api | 2349 | 102.7 | Frontend API/sync helper |
 | 169 | `frontend/src/api/README.md` | frontend-api | 32 | 1.3 | Frontend API/sync helper |
 | 170 | `frontend/src/api/websocket.ts` | frontend-api | 230 | 7.6 | Frontend API/sync helper |
-| 171 | `frontend/src/App.tsx` | frontend-core | 1572 | 60.1 | Main app shell and page mounting |
+| 171 | `frontend/src/App.tsx` | frontend-core | 1572 | 60.4 | Main app shell and page mounting |
 | 172 | `frontend/src/app/appShellUtils.ts` | frontend-core | 159 | 5.2 | Project source/support file |
 | 173 | `frontend/src/app/publicErrorRecovery.ts` | frontend-core | 35 | 1.3 | Project source/support file |
 | 174 | `frontend/src/AppContext.tsx` | frontend-core | 1826 | 73.5 | Global app state/context provider |
@@ -190,7 +190,7 @@ Total files documented: **529**
 | 178 | `frontend/src/components/branches/TransferModal.tsx` | frontend-ui | 415 | 16.0 | UI component/page |
 | 179 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | frontend-ui | 1479 | 102.5 | UI component/page |
 | 180 | `frontend/src/components/catalog/CatalogImageField.tsx` | frontend-ui | 115 | 4.6 | UI component/page |
-| 181 | `frontend/src/components/catalog/CatalogPage.tsx` | frontend-ui | 3218 | 139.2 | UI component/page |
+| 181 | `frontend/src/components/catalog/CatalogPage.tsx` | frontend-ui | 3396 | 148.3 | UI component/page |
 | 182 | `frontend/src/components/catalog/CatalogPageContext.tsx` | frontend-ui | 25 | 0.6 | UI component/page |
 | 183 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | frontend-ui | 454 | 21.5 | UI component/page |
 | 184 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | frontend-ui | 614 | 30.3 | UI component/page |
@@ -224,7 +224,7 @@ Total files documented: **529**
 | 212 | `frontend/src/components/files/FilesProvidersTab.tsx` | frontend-ui | 335 | 19.5 | UI component/page |
 | 213 | `frontend/src/components/files/FilesResponsesTab.tsx` | frontend-ui | 197 | 11.0 | UI component/page |
 | 214 | `frontend/src/components/inventory/DualMoney.tsx` | frontend-ui | 16 | 0.4 | UI component/page |
-| 215 | `frontend/src/components/inventory/Inventory.tsx` | frontend-ui | 4123 | 208.9 | UI component/page |
+| 215 | `frontend/src/components/inventory/Inventory.tsx` | frontend-ui | 4281 | 216.0 | UI component/page |
 | 216 | `frontend/src/components/inventory/InventoryImportModal.tsx` | frontend-ui | 299 | 13.0 | UI component/page |
 | 217 | `frontend/src/components/inventory/inventoryImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 218 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | frontend-ui | 674 | 38.5 | UI component/page |
@@ -241,7 +241,7 @@ Total files documented: **529**
 | 229 | `frontend/src/components/pos/ProductImage.tsx` | frontend-ui | 12 | 0.3 | UI component/page |
 | 230 | `frontend/src/components/pos/QuickAddModal.tsx` | frontend-ui | 49 | 1.8 | UI component/page |
 | 231 | `frontend/src/components/products/config/productPageConfig.ts` | frontend-ui | 24 | 0.7 | UI component/page |
-| 232 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | frontend-ui | 193 | 6.5 | UI component/page |
+| 232 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | frontend-ui | 193 | 6.6 | UI component/page |
 | 233 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | frontend-ui | 180 | 6.2 | UI component/page |
 | 234 | `frontend/src/components/products/forms/ProductForm.tsx` | frontend-ui | 1129 | 52.2 | UI component/page |
 | 235 | `frontend/src/components/products/forms/VariantFormModal.tsx` | frontend-ui | 376 | 15.7 | UI component/page |
@@ -261,14 +261,14 @@ Total files documented: **529**
 | 249 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | frontend-ui | 603 | 25.0 | UI component/page |
 | 250 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | frontend-ui | 603 | 24.0 | UI component/page |
 | 251 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
-| 252 | `frontend/src/components/products/Products.tsx` | frontend-ui | 2006 | 96.3 | UI component/page |
+| 252 | `frontend/src/components/products/Products.tsx` | frontend-ui | 2344 | 109.7 | UI component/page |
 | 253 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | frontend-ui | 125 | 4.1 | UI component/page |
 | 254 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | frontend-ui | 669 | 31.0 | UI component/page |
 | 255 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | frontend-ui | 82 | 2.5 | UI component/page |
 | 256 | `frontend/src/components/products/scanning/scanbotScanner.ts` | frontend-ui | 180 | 6.0 | UI component/page |
 | 257 | `frontend/src/components/products/shared/primitives.tsx` | frontend-ui | 250 | 8.1 | UI component/page |
 | 258 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | frontend-ui | 154 | 5.8 | UI component/page |
-| 259 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | frontend-ui | 322 | 14.3 | UI component/page |
+| 259 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | frontend-ui | 327 | 14.6 | UI component/page |
 | 260 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | frontend-ui | 196 | 6.4 | UI component/page |
 | 261 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | frontend-ui | 391 | 20.5 | UI component/page |
 | 262 | `frontend/src/components/README.md` | frontend-ui | 37 | 1.9 | UI component/page |
@@ -369,10 +369,10 @@ Total files documented: **529**
 | 357 | `frontend/src/utils/scriptTypography.ts` | frontend-utils | 27 | 0.7 | Utility helper |
 | 358 | `frontend/src/utils/settingsRefresh.ts` | frontend-utils | 84 | 2.5 | Utility helper |
 | 359 | `frontend/src/utils/settingsWriteOptions.ts` | frontend-utils | 13 | 0.5 | Utility helper |
-| 360 | `frontend/src/web-api.ts` | frontend-core | 852 | 33.5 | Project source/support file |
+| 360 | `frontend/src/web-api.ts` | frontend-core | 851 | 33.4 | Project source/support file |
 | 361 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 362 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 740 | 60.2 | Project source/support file |
+| 363 | `frontend/tests/actionStability.test.ts` | frontend-root | 740 | 60.4 | Project source/support file |
 | 364 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 365 | `frontend/tests/apiHttp.test.ts` | frontend-root | 440 | 19.0 | Project source/support file |
 | 366 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.6 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 94.3 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |
@@ -516,7 +516,7 @@ Total files documented: **529**
 | 504 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
 | 505 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
 | 506 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
-| 507 | `README.md` | project-root | 159 | 11.8 | Project documentation entrypoint |
+| 507 | `README.md` | project-root | 159 | 11.6 | Project documentation entrypoint |
 | 508 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
 | 509 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
 | 510 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |

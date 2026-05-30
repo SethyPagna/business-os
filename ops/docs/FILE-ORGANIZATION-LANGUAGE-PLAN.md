@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 558 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 559 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 82`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 281`,
+  `.js: 79`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 284`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4488,6 +4488,23 @@ Decision rule:
     lane. The current source extension count is `.js: 82`, `.jsx: 0`,
     `.mjs: 0`, `.cjs: 0`, `.ts: 281`, `.tsx: 107` outside
     generated/runtime folders.
+559. Convert backend worker entrypoints and the system filesystem worker to
+    package-safe TypeScript paths. Done:
+    `backend/src/workers/importWorker.ts` and
+    `backend/src/workers/mediaWorker.ts` now own the dedicated background worker
+    startup paths with JSDoc start/shutdown contracts, and
+    `backend/src/systemFsWorker.ts` now owns child-process export/relocate
+    filesystem work with JSDoc payload/response contracts. Backend worker npm
+    scripts, server worker-role dispatch, PM2 config, Docker scale health
+    checks, Windows run scripts, PowerShell runtime readiness checks, system
+    route worker spawning, and performance verification now target explicit
+    `.ts` paths. Focused worker-entrypoint loading, system filesystem export
+    smoke, route/full-automation/performance checks, the full backend utility
+    suite, and Linux packaging proof passed. Packaging still warns for direct
+    `.ts` entries in `pkg.scripts`, so larger backend route/service
+    conversions remain blocked on the future compile/staging lane. The current
+    source extension count is `.js: 79`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
+    `.ts: 284`, `.tsx: 107` outside generated/runtime folders.
 
 ## Safety Gates
 

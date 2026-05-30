@@ -13,12 +13,12 @@ Code files documented: **466**
 | 1 | `backend/server.js` | 47 | 0 | 40 | 0 |
 | 2 | `backend/src/accessControl.js` | 2 | 1 | 2 | 4 |
 | 3 | `backend/src/analytics/duckdbRuntime.js` | 2 | 1 | 1 | 4 |
-| 4 | `backend/src/authOtpGuards.js` | 1 | 1 | 1 | 2 |
+| 4 | `backend/src/authOtpGuards.ts` | 1 | 1 | 1 | 2 |
 | 5 | `backend/src/backupSchema.js` | 0 | 1 | 0 | 3 |
 | 6 | `backend/src/businessMetrics.js` | 1 | 1 | 1 | 5 |
-| 7 | `backend/src/catalogTextIntegrity.js` | 0 | 1 | 0 | 7 |
+| 7 | `backend/src/catalogTextIntegrity.ts` | 0 | 1 | 0 | 7 |
 | 8 | `backend/src/config/index.js` | 4 | 1 | 1 | 25 |
-| 9 | `backend/src/conflictControl.js` | 0 | 1 | 0 | 12 |
+| 9 | `backend/src/conflictControl.ts` | 0 | 1 | 0 | 12 |
 | 10 | `backend/src/contactOptions.js` | 0 | 1 | 0 | 3 |
 | 11 | `backend/src/database.js` | 1 | 1 | 1 | 40 |
 | 12 | `backend/src/dataPath/index.js` | 2 | 1 | 0 | 5 |
@@ -26,24 +26,24 @@ Code files documented: **466**
 | 14 | `backend/src/db/postgresQueryCompat.js` | 0 | 1 | 0 | 2 |
 | 15 | `backend/src/fileAssets.js` | 12 | 1 | 7 | 15 |
 | 16 | `backend/src/helpers.js` | 4 | 1 | 4 | 23 |
-| 17 | `backend/src/idempotency.js` | 0 | 1 | 0 | 5 |
+| 17 | `backend/src/idempotency.ts` | 0 | 1 | 0 | 5 |
 | 18 | `backend/src/importCsv.js` | 1 | 1 | 0 | 3 |
 | 19 | `backend/src/importParsing.js` | 1 | 1 | 1 | 3 |
-| 20 | `backend/src/initials.js` | 0 | 1 | 0 | 4 |
-| 21 | `backend/src/maintenanceLock.js` | 0 | 1 | 0 | 3 |
+| 20 | `backend/src/initials.ts` | 0 | 1 | 0 | 4 |
+| 21 | `backend/src/maintenanceLock.ts` | 0 | 1 | 0 | 3 |
 | 22 | `backend/src/middleware.js` | 10 | 1 | 7 | 24 |
-| 23 | `backend/src/money.js` | 0 | 1 | 0 | 5 |
+| 23 | `backend/src/money.ts` | 0 | 1 | 0 | 5 |
 | 24 | `backend/src/netSecurity.js` | 1 | 1 | 0 | 5 |
 | 25 | `backend/src/objectStore.js` | 7 | 1 | 1 | 6 |
-| 26 | `backend/src/optionalSharp.js` | 1 | 1 | 0 | 2 |
+| 26 | `backend/src/optionalSharp.ts` | 1 | 1 | 0 | 2 |
 | 27 | `backend/src/organizationContext/index.js` | 7 | 1 | 4 | 6 |
 | 28 | `backend/src/permissions.js` | 0 | 1 | 0 | 4 |
-| 29 | `backend/src/portalUtils.js` | 0 | 1 | 0 | 2 |
+| 29 | `backend/src/portalUtils.ts` | 0 | 1 | 0 | 2 |
 | 30 | `backend/src/postgresDatabase.js` | 7 | 1 | 3 | 2 |
 | 31 | `backend/src/productBatches.js` | 1 | 1 | 1 | 6 |
 | 32 | `backend/src/productDiscounts.js` | 1 | 1 | 1 | 3 |
 | 33 | `backend/src/productImportPolicies.js` | 1 | 1 | 1 | 3 |
-| 34 | `backend/src/requestContext.js` | 1 | 1 | 0 | 2 |
+| 34 | `backend/src/requestContext.ts` | 1 | 1 | 0 | 2 |
 | 35 | `backend/src/routes/actionHistory.js` | 5 | 1 | 4 | 1 |
 | 36 | `backend/src/routes/ai.js` | 6 | 1 | 5 | 1 |
 | 37 | `backend/src/routes/auth.js` | 18 | 1 | 13 | 2 |
@@ -68,7 +68,7 @@ Code files documented: **466**
 | 56 | `backend/src/routes/units.js` | 6 | 1 | 5 | 1 |
 | 57 | `backend/src/routes/users.js` | 11 | 1 | 9 | 1 |
 | 58 | `backend/src/runtimeCache.js` | 2 | 1 | 1 | 4 |
-| 59 | `backend/src/runtimeState/index.js` | 4 | 1 | 1 | 2 |
+| 59 | `backend/src/runtimeState/index.ts` | 4 | 1 | 1 | 2 |
 | 60 | `backend/src/runtimeVersion.js` | 5 | 1 | 1 | 4 |
 | 61 | `backend/src/schemaMetadata.js` | 1 | 1 | 1 | 6 |
 | 62 | `backend/src/security.js` | 1 | 1 | 0 | 7 |
@@ -86,14 +86,14 @@ Code files documented: **466**
 | 74 | `backend/src/services/verification.js` | 2 | 1 | 1 | 2 |
 | 75 | `backend/src/sessionAuth.js` | 2 | 1 | 1 | 4 |
 | 76 | `backend/src/settingsSnapshot.js` | 4 | 1 | 2 | 8 |
-| 77 | `backend/src/storage/organizationFolders.js` | 2 | 1 | 0 | 2 |
-| 78 | `backend/src/systemFsWorker.js` | 3 | 0 | 1 | 0 |
+| 77 | `backend/src/storage/organizationFolders.ts` | 2 | 1 | 0 | 2 |
+| 78 | `backend/src/systemFsWorker.ts` | 3 | 0 | 1 | 0 |
 | 79 | `backend/src/systemJobs.js` | 2 | 1 | 1 | 2 |
 | 80 | `backend/src/uploadReferenceCleanup.js` | 1 | 1 | 1 | 2 |
 | 81 | `backend/src/uploadSecurity.js` | 2 | 1 | 1 | 4 |
 | 82 | `backend/src/websocket.js` | 5 | 1 | 3 | 1 |
-| 83 | `backend/src/workers/importWorker.js` | 2 | 1 | 2 | 1 |
-| 84 | `backend/src/workers/mediaWorker.js` | 2 | 1 | 2 | 1 |
+| 83 | `backend/src/workers/importWorker.ts` | 2 | 1 | 2 | 1 |
+| 84 | `backend/src/workers/mediaWorker.ts` | 2 | 1 | 2 | 1 |
 | 85 | `backend/test/accessControl.test.ts` | 2 | 0 | 1 | 0 |
 | 86 | `backend/test/analyticsRuntime.test.ts` | 2 | 0 | 1 | 0 |
 | 87 | `backend/test/authOtpGuards.test.ts` | 2 | 0 | 1 | 0 |
@@ -167,7 +167,7 @@ Code files documented: **466**
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 3 | 1 | 2 | 1 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 7 | 1 | 5 | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 2 | 1 | 1 | 1 |
-| 158 | `frontend/src/components/catalog/CatalogPage.tsx` | 12 | 1 | 11 | 1 |
+| 158 | `frontend/src/components/catalog/CatalogPage.tsx` | 14 | 1 | 12 | 1 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 | 2 | 0 | 2 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 6 | 1 | 4 | 1 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 8 | 1 | 6 | 1 |
@@ -327,7 +327,7 @@ Code files documented: **466**
 | 315 | `frontend/src/utils/historyHelpers.ts` | 0 | 3 | 0 | 11 |
 | 316 | `frontend/src/utils/importJobRefresh.ts` | 0 | 3 | 0 | 1 |
 | 317 | `frontend/src/utils/index.ts` | 0 | 0 | 0 | 0 |
-| 318 | `frontend/src/utils/initials.ts` | 0 | 7 | 0 | 7 |
+| 318 | `frontend/src/utils/initials.ts` | 0 | 7 | 0 | 8 |
 | 319 | `frontend/src/utils/loaders.ts` | 0 | 9 | 0 | 20 |
 | 320 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 4 |
 | 321 | `frontend/src/utils/permissions.ts` | 0 | 1 | 0 | 2 |
@@ -488,12 +488,12 @@ Code files documented: **466**
   - `./src/database`
   - `./src/fileAssets`
   - `./src/helpers`
-  - `./src/maintenanceLock`
+  - `./src/maintenanceLock.ts`
   - `./src/middleware`
   - `./src/objectStore`
   - `./src/organizationContext`
   - `./src/productBatches`
-  - `./src/requestContext`
+  - `./src/requestContext.ts`
   - `./src/routes/actionHistory`
   - `./src/routes/ai`
   - `./src/routes/auth`
@@ -521,8 +521,8 @@ Code files documented: **466**
   - `./src/serverUtils`
   - `./src/services/importJobs`
   - `./src/websocket`
-  - `./src/workers/importWorker`
-  - `./src/workers/mediaWorker`
+  - `./src/workers/importWorker.ts`
+  - `./src/workers/mediaWorker.ts`
   - `compression`
   - `cors`
   - `express`
@@ -536,12 +536,12 @@ Code files documented: **466**
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/maintenanceLock.js`
+  - `backend/src/maintenanceLock.ts`
   - `backend/src/middleware.js`
   - `backend/src/objectStore.js`
   - `backend/src/organizationContext/index.js`
   - `backend/src/productBatches.js`
-  - `backend/src/requestContext.js`
+  - `backend/src/requestContext.ts`
   - `backend/src/routes/actionHistory.js`
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
@@ -569,8 +569,8 @@ Code files documented: **466**
   - `backend/src/serverUtils.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/websocket.js`
-  - `backend/src/workers/importWorker.js`
-  - `backend/src/workers/mediaWorker.js`
+  - `backend/src/workers/importWorker.ts`
+  - `backend/src/workers/mediaWorker.ts`
 - Referenced by (0)
   - none
 
@@ -603,7 +603,7 @@ Code files documented: **466**
   - `backend/src/services/integrationDoctor.js`
   - `backend/test/analyticsRuntime.test.ts`
 
-### 3.4 `backend/src/authOtpGuards.js`
+### 3.4 `backend/src/authOtpGuards.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -640,7 +640,7 @@ Code files documented: **466**
   - `backend/src/routes/products.js`
   - `backend/src/routes/sales.js`
 
-### 3.7 `backend/src/catalogTextIntegrity.js`
+### 3.7 `backend/src/catalogTextIntegrity.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -660,12 +660,12 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (4)
-  - `../storage/organizationFolders`
+  - `../storage/organizationFolders.ts`
   - `dotenv`
   - `fs`
   - `path`
 - Internal dependencies (1)
-  - `backend/src/storage/organizationFolders.js`
+  - `backend/src/storage/organizationFolders.ts`
 - Referenced by (25)
   - `backend/server.js`
   - `backend/src/accessControl.js`
@@ -681,7 +681,7 @@ Code files documented: **466**
   - `backend/src/routes/sync.js`
   - `backend/src/routes/system/index.js`
   - `backend/src/runtimeCache.js`
-  - `backend/src/runtimeState/index.js`
+  - `backend/src/runtimeState/index.ts`
   - `backend/src/serverUtils.js`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
@@ -693,7 +693,7 @@ Code files documented: **466**
   - `backend/test/importJobStateMachine.test.ts`
   - `backend/test/serverUtils.test.ts`
 
-### 3.9 `backend/src/conflictControl.js`
+### 3.9 `backend/src/conflictControl.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -769,8 +769,8 @@ Code files documented: **466**
   - `backend/src/services/verification.js`
   - `backend/src/sessionAuth.js`
   - `backend/src/systemJobs.js`
-  - `backend/src/workers/importWorker.js`
-  - `backend/src/workers/mediaWorker.js`
+  - `backend/src/workers/importWorker.ts`
+  - `backend/src/workers/mediaWorker.ts`
   - `backend/test/authSecurityFlow.test.ts`
   - `backend/test/fileAssetUsageCache.test.ts`
   - `backend/test/importJobStateMachine.test.ts`
@@ -787,7 +787,7 @@ Code files documented: **466**
   - `backend/src/organizationContext/index.js`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/googleDriveSync/index.js`
-  - `backend/src/systemFsWorker.js`
+  - `backend/src/systemFsWorker.ts`
   - `backend/test/dataPath.test.ts`
 
 ### 3.13 `backend/src/db/cutoverReadiness.js`
@@ -820,7 +820,7 @@ Code files documented: **466**
   - `./config`
   - `./database`
   - `./objectStore`
-  - `./optionalSharp`
+  - `./optionalSharp.ts`
   - `./settingsSnapshot`
   - `./uploadReferenceCleanup`
   - `./uploadSecurity`
@@ -833,7 +833,7 @@ Code files documented: **466**
   - `backend/src/config/index.js`
   - `backend/src/database.js`
   - `backend/src/objectStore.js`
-  - `backend/src/optionalSharp.js`
+  - `backend/src/optionalSharp.ts`
   - `backend/src/settingsSnapshot.js`
   - `backend/src/uploadReferenceCleanup.js`
   - `backend/src/uploadSecurity.js`
@@ -859,12 +859,12 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (4)
   - `./database`
-  - `./requestContext`
+  - `./requestContext.ts`
   - `./runtimeCache`
   - `./services/googleDriveSync`
 - Internal dependencies (4)
   - `backend/src/database.js`
-  - `backend/src/requestContext.js`
+  - `backend/src/requestContext.ts`
   - `backend/src/runtimeCache.js`
   - `backend/src/services/googleDriveSync/index.js`
 - Referenced by (23)
@@ -892,7 +892,7 @@ Code files documented: **466**
   - `backend/src/services/importJobs.js`
   - `backend/src/websocket.js`
 
-### 3.17 `backend/src/idempotency.js`
+### 3.17 `backend/src/idempotency.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -922,15 +922,15 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (1)
-  - `./money`
+  - `./money.ts`
 - Internal dependencies (1)
-  - `backend/src/money.js`
+  - `backend/src/money.ts`
 - Referenced by (3)
   - `backend/src/productImportPolicies.js`
   - `backend/test/importCsv.test.ts`
   - `backend/test/importScaleSmoke.test.ts`
 
-### 3.20 `backend/src/initials.js`
+### 3.20 `backend/src/initials.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -943,7 +943,7 @@ Code files documented: **466**
   - `backend/src/routes/products.js`
   - `backend/test/initials.test.ts`
 
-### 3.21 `backend/src/maintenanceLock.js`
+### 3.21 `backend/src/maintenanceLock.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -979,7 +979,7 @@ Code files documented: **466**
   - `backend/src/uploadSecurity.js`
 - Referenced by (24)
   - `backend/server.js`
-  - `backend/src/authOtpGuards.js`
+  - `backend/src/authOtpGuards.ts`
   - `backend/src/routes/actionHistory.js`
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
@@ -1003,7 +1003,7 @@ Code files documented: **466**
   - `backend/src/routes/units.js`
   - `backend/src/routes/users.js`
 
-### 3.23 `backend/src/money.js`
+### 3.23 `backend/src/money.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -1052,7 +1052,7 @@ Code files documented: **466**
   - `backend/src/services/integrationDoctor.js`
   - `backend/src/settingsSnapshot.js`
 
-### 3.26 `backend/src/optionalSharp.js`
+### 3.26 `backend/src/optionalSharp.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1070,7 +1070,7 @@ Code files documented: **466**
   - `../config`
   - `../dataPath`
   - `../database`
-  - `../storage/organizationFolders`
+  - `../storage/organizationFolders.ts`
   - `crypto`
   - `fs`
   - `path`
@@ -1078,7 +1078,7 @@ Code files documented: **466**
   - `backend/src/config/index.js`
   - `backend/src/dataPath/index.js`
   - `backend/src/database.js`
-  - `backend/src/storage/organizationFolders.js`
+  - `backend/src/storage/organizationFolders.ts`
 - Referenced by (6)
   - `backend/server.js`
   - `backend/src/routes/auth.js`
@@ -1100,7 +1100,7 @@ Code files documented: **466**
   - `backend/src/routes/actionHistory.js`
   - `backend/test/permissionPolicy.test.ts`
 
-### 3.29 `backend/src/portalUtils.js`
+### 3.29 `backend/src/portalUtils.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -1149,9 +1149,9 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (1)
-  - `./money`
+  - `./money.ts`
 - Internal dependencies (1)
-  - `backend/src/money.js`
+  - `backend/src/money.ts`
 - Referenced by (3)
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/products.js`
@@ -1169,7 +1169,7 @@ Code files documented: **466**
   - `backend/src/services/importJobs.js`
   - `backend/test/productImportPolicies.test.ts`
 
-### 3.34 `backend/src/requestContext.js`
+### 3.34 `backend/src/requestContext.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1201,14 +1201,14 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (6)
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../database`
   - `../helpers`
   - `../middleware`
   - `../services/aiGateway`
   - `express`
 - Internal dependencies (5)
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
@@ -1221,13 +1221,13 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (18)
   - `../accessControl`
-  - `../authOtpGuards`
+  - `../authOtpGuards.ts`
   - `../config`
   - `../database`
   - `../helpers`
   - `../middleware`
   - `../organizationContext`
-  - `../runtimeState`
+  - `../runtimeState/index.ts`
   - `../security`
   - `../services/googleOauth`
   - `../services/verification`
@@ -1240,13 +1240,13 @@ Code files documented: **466**
   - `speakeasy`
 - Internal dependencies (13)
   - `backend/src/accessControl.js`
-  - `backend/src/authOtpGuards.js`
+  - `backend/src/authOtpGuards.ts`
   - `backend/src/config/index.js`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
   - `backend/src/organizationContext/index.js`
-  - `backend/src/runtimeState/index.js`
+  - `backend/src/runtimeState/index.ts`
   - `backend/src/security.js`
   - `backend/src/services/googleOauth.js`
   - `backend/src/services/verification.js`
@@ -1261,7 +1261,7 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (8)
   - `../businessMetrics`
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../database`
   - `../helpers`
   - `../middleware`
@@ -1270,7 +1270,7 @@ Code files documented: **466**
   - `express`
 - Internal dependencies (6)
   - `backend/src/businessMetrics.js`
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
@@ -1297,15 +1297,15 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (6)
-  - `../catalogTextIntegrity`
-  - `../conflictControl`
+  - `../catalogTextIntegrity.ts`
+  - `../conflictControl.ts`
   - `../database`
   - `../helpers`
   - `../middleware`
   - `express`
 - Internal dependencies (5)
-  - `backend/src/catalogTextIntegrity.js`
-  - `backend/src/conflictControl.js`
+  - `backend/src/catalogTextIntegrity.ts`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
@@ -1316,14 +1316,14 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (6)
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../contactOptions`
   - `../database`
   - `../helpers`
   - `../middleware`
   - `express`
 - Internal dependencies (5)
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/contactOptions.js`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
@@ -1335,14 +1335,14 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (6)
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../database`
   - `../helpers`
   - `../middleware`
   - `../schemaMetadata`
   - `express`
 - Internal dependencies (5)
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
@@ -1354,14 +1354,14 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (6)
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../fileAssets`
   - `../helpers`
   - `../middleware`
   - `../services/mediaQueue`
   - `express`
 - Internal dependencies (5)
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
@@ -1396,26 +1396,26 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (12)
   - `../businessMetrics`
-  - `../catalogTextIntegrity`
+  - `../catalogTextIntegrity.ts`
   - `../database`
   - `../helpers`
-  - `../idempotency`
-  - `../initials`
+  - `../idempotency.ts`
+  - `../initials.ts`
   - `../middleware`
-  - `../money`
+  - `../money.ts`
   - `../productBatches`
   - `../productDiscounts`
   - `../schemaMetadata`
   - `express`
 - Internal dependencies (11)
   - `backend/src/businessMetrics.js`
-  - `backend/src/catalogTextIntegrity.js`
+  - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
-  - `backend/src/idempotency.js`
-  - `backend/src/initials.js`
+  - `backend/src/idempotency.ts`
+  - `backend/src/initials.ts`
   - `backend/src/middleware.js`
-  - `backend/src/money.js`
+  - `backend/src/money.ts`
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.js`
   - `backend/src/schemaMetadata.js`
@@ -1461,11 +1461,11 @@ Code files documented: **466**
   - `../database`
   - `../fileAssets`
   - `../helpers`
-  - `../initials`
+  - `../initials.ts`
   - `../middleware`
   - `../netSecurity`
   - `../organizationContext`
-  - `../portalUtils`
+  - `../portalUtils.ts`
   - `../runtimeCache`
   - `../security`
   - `../services/portalAi`
@@ -1475,11 +1475,11 @@ Code files documented: **466**
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/initials.js`
+  - `backend/src/initials.ts`
   - `backend/src/middleware.js`
   - `backend/src/netSecurity.js`
   - `backend/src/organizationContext/index.js`
-  - `backend/src/portalUtils.js`
+  - `backend/src/portalUtils.ts`
   - `backend/src/runtimeCache.js`
   - `backend/src/security.js`
   - `backend/src/services/portalAi.js`
@@ -1493,16 +1493,16 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (20)
   - `../businessMetrics`
-  - `../catalogTextIntegrity`
+  - `../catalogTextIntegrity.ts`
   - `../config`
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../database`
   - `../fileAssets`
   - `../helpers`
-  - `../idempotency`
-  - `../initials`
+  - `../idempotency.ts`
+  - `../initials.ts`
   - `../middleware`
-  - `../money`
+  - `../money.ts`
   - `../netSecurity`
   - `../productBatches`
   - `../productDiscounts`
@@ -1514,16 +1514,16 @@ Code files documented: **466**
   - `path`
 - Internal dependencies (17)
   - `backend/src/businessMetrics.js`
-  - `backend/src/catalogTextIntegrity.js`
+  - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/config/index.js`
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/idempotency.js`
-  - `backend/src/initials.js`
+  - `backend/src/idempotency.ts`
+  - `backend/src/initials.ts`
   - `backend/src/middleware.js`
-  - `backend/src/money.js`
+  - `backend/src/money.ts`
   - `backend/src/netSecurity.js`
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.js`
@@ -1538,18 +1538,18 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (7)
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../database`
   - `../helpers`
-  - `../idempotency`
+  - `../idempotency.ts`
   - `../middleware`
   - `../productBatches`
   - `express`
 - Internal dependencies (6)
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
-  - `backend/src/idempotency.js`
+  - `backend/src/idempotency.ts`
   - `backend/src/middleware.js`
   - `backend/src/productBatches.js`
 - Referenced by (1)
@@ -1559,7 +1559,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (9)
-  - `../catalogTextIntegrity`
+  - `../catalogTextIntegrity.ts`
   - `../database`
   - `../helpers`
   - `../middleware`
@@ -1569,7 +1569,7 @@ Code files documented: **466**
   - `../services/mediaQueue`
   - `express`
 - Internal dependencies (8)
-  - `backend/src/catalogTextIntegrity.js`
+  - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
@@ -1585,19 +1585,19 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (8)
   - `../businessMetrics`
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../database`
   - `../helpers`
-  - `../idempotency`
+  - `../idempotency.ts`
   - `../middleware`
   - `../productBatches`
   - `express`
 - Internal dependencies (7)
   - `backend/src/businessMetrics.js`
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
-  - `backend/src/idempotency.js`
+  - `backend/src/idempotency.ts`
   - `backend/src/middleware.js`
   - `backend/src/productBatches.js`
 - Referenced by (1)
@@ -1607,8 +1607,8 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (9)
-  - `../catalogTextIntegrity`
-  - `../conflictControl`
+  - `../catalogTextIntegrity.ts`
+  - `../conflictControl.ts`
   - `../database`
   - `../fileAssets`
   - `../helpers`
@@ -1617,8 +1617,8 @@ Code files documented: **466**
   - `../settingsSnapshot`
   - `express`
 - Internal dependencies (8)
-  - `backend/src/catalogTextIntegrity.js`
-  - `backend/src/conflictControl.js`
+  - `backend/src/catalogTextIntegrity.ts`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
@@ -1659,11 +1659,11 @@ Code files documented: **466**
   - `../../db/cutoverReadiness`
   - `../../fileAssets`
   - `../../helpers`
-  - `../../maintenanceLock`
+  - `../../maintenanceLock.ts`
   - `../../middleware`
   - `../../objectStore`
   - `../../organizationContext`
-  - `../../runtimeState`
+  - `../../runtimeState/index.ts`
   - `../../security`
   - `../../services/backupPackages`
   - `../../services/googleDriveSync`
@@ -1684,11 +1684,11 @@ Code files documented: **466**
   - `backend/src/db/cutoverReadiness.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/maintenanceLock.js`
+  - `backend/src/maintenanceLock.ts`
   - `backend/src/middleware.js`
   - `backend/src/objectStore.js`
   - `backend/src/organizationContext/index.js`
-  - `backend/src/runtimeState/index.js`
+  - `backend/src/runtimeState/index.ts`
   - `backend/src/security.js`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
@@ -1703,15 +1703,15 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (6)
-  - `../catalogTextIntegrity`
-  - `../conflictControl`
+  - `../catalogTextIntegrity.ts`
+  - `../conflictControl.ts`
   - `../database`
   - `../helpers`
   - `../middleware`
   - `express`
 - Internal dependencies (5)
-  - `backend/src/catalogTextIntegrity.js`
-  - `backend/src/conflictControl.js`
+  - `backend/src/catalogTextIntegrity.ts`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
@@ -1722,7 +1722,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (11)
-  - `../conflictControl`
+  - `../conflictControl.ts`
   - `../database`
   - `../fileAssets`
   - `../helpers`
@@ -1734,7 +1734,7 @@ Code files documented: **466**
   - `bcryptjs`
   - `express`
 - Internal dependencies (9)
-  - `backend/src/conflictControl.js`
+  - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
@@ -1760,7 +1760,7 @@ Code files documented: **466**
   - `backend/src/routes/runtime.js`
   - `backend/test/runtimeCache.test.ts`
 
-### 3.59 `backend/src/runtimeState/index.js`
+### 3.59 `backend/src/runtimeState/index.ts`
 
 - Declared exports: `module.exports`
 - Imports (4)
@@ -1890,7 +1890,7 @@ Code files documented: **466**
   - `../../config`
   - `../../dataPath`
   - `../../database`
-  - `../../maintenanceLock`
+  - `../../maintenanceLock.ts`
   - `../../runtimeVersion`
   - `../../security`
   - `../backupPackages`
@@ -1903,7 +1903,7 @@ Code files documented: **466**
   - `backend/src/config/index.js`
   - `backend/src/dataPath/index.js`
   - `backend/src/database.js`
-  - `backend/src/maintenanceLock.js`
+  - `backend/src/maintenanceLock.ts`
   - `backend/src/runtimeVersion.js`
   - `backend/src/security.js`
   - `backend/src/services/backupPackages.js`
@@ -1943,14 +1943,14 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (20)
-  - `../catalogTextIntegrity`
+  - `../catalogTextIntegrity.ts`
   - `../config`
   - `../contactOptions`
   - `../database`
   - `../fileAssets`
   - `../helpers`
   - `../importCsv`
-  - `../money`
+  - `../money.ts`
   - `../netSecurity`
   - `../productBatches`
   - `../productDiscounts`
@@ -1964,14 +1964,14 @@ Code files documented: **466**
   - `path`
   - `yauzl`
 - Internal dependencies (14)
-  - `backend/src/catalogTextIntegrity.js`
+  - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/config/index.js`
   - `backend/src/contactOptions.js`
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/importCsv.js`
-  - `backend/src/money.js`
+  - `backend/src/money.ts`
   - `backend/src/netSecurity.js`
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.js`
@@ -1984,7 +1984,7 @@ Code files documented: **466**
   - `backend/src/routes/runtime.js`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/integrationDoctor.js`
-  - `backend/src/workers/importWorker.js`
+  - `backend/src/workers/importWorker.ts`
   - `backend/test/importJobStateMachine.test.ts`
 
 ### 3.71 `backend/src/services/integrationDoctor.js`
@@ -2031,7 +2031,7 @@ Code files documented: **466**
   - `backend/src/routes/files.js`
   - `backend/src/routes/runtime.js`
   - `backend/src/services/importJobs.js`
-  - `backend/src/workers/mediaWorker.js`
+  - `backend/src/workers/mediaWorker.ts`
   - `backend/test/importJobStateMachine.test.ts`
 
 ### 3.73 `backend/src/services/portalAi.js`
@@ -2093,7 +2093,7 @@ Code files documented: **466**
   - `backend/src/uploadReferenceCleanup.js`
   - `backend/test/settingsSnapshotObjectStorage.test.ts`
 
-### 3.77 `backend/src/storage/organizationFolders.js`
+### 3.77 `backend/src/storage/organizationFolders.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2105,7 +2105,7 @@ Code files documented: **466**
   - `backend/src/config/index.js`
   - `backend/src/organizationContext/index.js`
 
-### 3.78 `backend/src/systemFsWorker.js`
+### 3.78 `backend/src/systemFsWorker.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -2144,10 +2144,10 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (2)
-  - `./optionalSharp`
+  - `./optionalSharp.ts`
   - `fs`
 - Internal dependencies (1)
-  - `backend/src/optionalSharp.js`
+  - `backend/src/optionalSharp.ts`
 - Referenced by (4)
   - `backend/src/fileAssets.js`
   - `backend/src/middleware.js`
@@ -2170,7 +2170,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.83 `backend/src/workers/importWorker.js`
+### 3.83 `backend/src/workers/importWorker.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2182,7 +2182,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.84 `backend/src/workers/mediaWorker.js`
+### 3.84 `backend/src/workers/mediaWorker.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2220,10 +2220,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/authOtpGuards`
+  - `../src/authOtpGuards.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/authOtpGuards.js`
+  - `backend/src/authOtpGuards.ts`
 - Referenced by (0)
   - none
 
@@ -2418,10 +2418,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/idempotency`
+  - `../src/idempotency.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/idempotency.js`
+  - `backend/src/idempotency.ts`
 - Referenced by (0)
   - none
 
@@ -2505,10 +2505,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/initials`
+  - `../src/initials.ts`
   - `assert`
 - Internal dependencies (1)
-  - `backend/src/initials.js`
+  - `backend/src/initials.ts`
 - Referenced by (0)
   - none
 
@@ -2621,10 +2621,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/portalUtils`
+  - `../src/portalUtils.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/portalUtils.js`
+  - `backend/src/portalUtils.ts`
 - Referenced by (0)
   - none
 
@@ -3280,10 +3280,11 @@ Code files documented: **466**
 ### 3.158 `frontend/src/components/catalog/CatalogPage.tsx`
 
 - Declared exports: `function`
-- Imports (12)
+- Imports (14)
   - `../../AppContext`
   - `../../utils/actionGuards.ts`
   - `../../utils/favicon`
+  - `../../utils/initials.ts`
   - `../products/shared/primitives`
   - `../shared/pageActivity`
   - `./CatalogEditorSurface`
@@ -3292,8 +3293,9 @@ Code files documented: **466**
   - `./CatalogProductsSection`
   - `./CatalogSecondaryTabs`
   - `./catalogUi`
+  - `lucide-react`
   - `react`
-- Internal dependencies (11)
+- Internal dependencies (12)
   - `frontend/src/AppContext.tsx`
   - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
@@ -3305,6 +3307,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/favicon.ts`
+  - `frontend/src/utils/initials.ts`
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
@@ -6041,7 +6044,8 @@ Code files documented: **466**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (7)
+- Referenced by (8)
+  - `frontend/src/components/catalog/CatalogPage.tsx`
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/inventory/Inventory.tsx`
   - `frontend/src/components/pos/POS.tsx`
