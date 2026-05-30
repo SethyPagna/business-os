@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T01:32:29.002Z
+Generated: 2026-05-30T01:50:23.241Z
 
 ## Summary
 
@@ -15,12 +15,12 @@ Generated: 2026-05-30T01:32:29.002Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 96 |
+| .tsx | 97 |
 | .js | 84 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
-| .jsx | 11 |
+| .jsx | 10 |
 | .ps1 | 8 |
 | .sh | 3 |
 | .sql | 2 |
@@ -67,15 +67,15 @@ Generated: 2026-05-30T01:32:29.002Z
 | --- | --- | --- |
 | ops/docs/reference/PHASE29-AUDIT.json | 12112 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7923 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6881 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5877 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4288 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6883 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5889 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4299 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2648 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2650 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |

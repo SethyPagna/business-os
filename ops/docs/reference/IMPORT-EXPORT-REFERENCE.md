@@ -292,7 +292,7 @@ Code files documented: **466**
 | 280 | `frontend/src/components/users/UserDetailSheet.tsx` | 2 | 1 | 2 | 1 |
 | 281 | `frontend/src/components/users/UserProfileModal.tsx` | 10 | 1 | 8 | 2 |
 | 282 | `frontend/src/components/users/Users.tsx` | 14 | 1 | 12 | 1 |
-| 283 | `frontend/src/components/utils-settings/AuditLog.jsx` | 10 | 1 | 8 | 1 |
+| 283 | `frontend/src/components/utils-settings/AuditLog.tsx` | 10 | 1 | 8 | 1 |
 | 284 | `frontend/src/components/utils-settings/Backup.jsx` | 10 | 1 | 8 | 1 |
 | 285 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 2 | 1 | 0 | 1 |
 | 286 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
@@ -3053,7 +3053,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/WriteConflictModal.tsx`
   - `frontend/src/components/shared/globalScroll.ts`
   - `frontend/src/components/users/Users.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/src/utils/favicon.ts`
@@ -3163,7 +3163,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/components/users/UserProfileModal.tsx`
   - `frontend/src/components/users/Users.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/OtpModal.tsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
@@ -5132,7 +5132,7 @@ Code files documented: **466**
   - `frontend/src/components/products/surfaces/HeaderActions.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
 
 ### 3.265 `frontend/src/components/shared/FilterMenu.tsx`
 
@@ -5151,7 +5151,7 @@ Code files documented: **466**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
 
 ### 3.266 `frontend/src/components/shared/globalScroll.ts`
 
@@ -5271,7 +5271,7 @@ Code files documented: **466**
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/server/ServerPage.tsx`
   - `frontend/src/components/users/Users.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
 ### 3.273 `frontend/src/components/shared/PageHeader.tsx`
@@ -5306,7 +5306,7 @@ Code files documented: **466**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
 
 ### 3.275 `frontend/src/components/shared/PortalMenu.tsx`
 
@@ -5449,11 +5449,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.283 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.283 `frontend/src/components/utils-settings/AuditLog.tsx`
 
 - Declared exports: `function`
 - Imports (10)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/csv`
   - `../../utils/groupedRecords.ts`
@@ -5738,7 +5738,7 @@ Code files documented: **466**
   - `frontend/src/components/server/ServerPage.tsx`
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/components/users/Users.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/src/components/utils-settings/OtpModal.tsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
@@ -5829,7 +5829,7 @@ Code files documented: **466**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/src/utils/csvExportWorker.ts`
   - `frontend/src/utils/exportPackage.ts`
   - `frontend/tests/exportPackages.test.ts`
@@ -5982,7 +5982,7 @@ Code files documented: **466**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
-  - `frontend/src/components/utils-settings/AuditLog.jsx`
+  - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/tests/groupedRecords.test.ts`
 
 ### 3.315 `frontend/src/utils/historyHelpers.ts`

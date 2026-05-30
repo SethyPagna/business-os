@@ -149,7 +149,7 @@ Total files documented: **193**
 | 137 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
 | 138 | `frontend/src/components/users/UserProfileModal.tsx` | 14 |
 | 139 | `frontend/src/components/users/Users.tsx` | 18 |
-| 140 | `frontend/src/components/utils-settings/AuditLog.jsx` | 16 |
+| 140 | `frontend/src/components/utils-settings/AuditLog.tsx` | 18 |
 | 141 | `frontend/src/components/utils-settings/Backup.jsx` | 30 |
 | 142 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
 | 143 | `frontend/src/components/utils-settings/index.ts` | 0 |
@@ -2127,26 +2127,28 @@ Total files documented: **193**
 | 17 | `handleResetPassword` | const arrow | 643 |
 | 18 | `handleSaveRole` | const arrow | 700 |
 
-### 3.140 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.140 `frontend/src/components/utils-settings/AuditLog.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `toIso` | function | 46 |
-| 2 | `formatDateTime` | function | 52 |
-| 3 | `formatLogTime` | function | 72 |
-| 4 | `getLogEpoch` | function | 76 |
-| 5 | `formatJsonPretty` | function | 83 |
-| 6 | `parseLogJson` | function | 91 |
-| 7 | `flattenSummaryValue` | function | 99 |
-| 8 | `formatEntityName` | function | 118 |
-| 9 | `readableSummary` | function | 124 |
-| 10 | `normalizeFiniteIdsFrom` | function | 144 |
-| 11 | `normalizeFiniteIds` | function | 152 |
-| 12 | `countSelectedIds` | function | 156 |
-| 13 | `countActiveFlags` | function | 164 |
-| 14 | `DetailRow` | function | 172 |
-| 15 | `AuditLog` | component/function | 184 |
-| 16 | `sessionEntryLabel` | function | 578 |
+| 1 | `getAuditApi` | function | 94 |
+| 2 | `isRecord` | function | 98 |
+| 3 | `getErrorMessage` | function | 102 |
+| 4 | `toIso` | function | 134 |
+| 5 | `formatDateTime` | function | 141 |
+| 6 | `formatLogTime` | function | 162 |
+| 7 | `getLogEpoch` | function | 166 |
+| 8 | `formatJsonPretty` | function | 173 |
+| 9 | `parseLogJson` | function | 181 |
+| 10 | `flattenSummaryValue` | function | 189 |
+| 11 | `formatEntityName` | function | 208 |
+| 12 | `readableSummary` | function | 214 |
+| 13 | `normalizeFiniteIds` | function | 242 |
+| 14 | `countSelectedIds` | function | 246 |
+| 15 | `countActiveFlags` | function | 254 |
+| 16 | `DetailRow` | function | 262 |
+| 17 | `AuditLog` | component/function | 274 |
+| 18 | `sessionEntryLabel` | function | 668 |
 
 ### 3.141 `frontend/src/components/utils-settings/Backup.jsx`
 

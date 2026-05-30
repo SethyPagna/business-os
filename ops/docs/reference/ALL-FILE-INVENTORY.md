@@ -316,7 +316,7 @@ Total files documented: **529**
 | 304 | `frontend/src/components/users/UserDetailSheet.tsx` | frontend-ui | 145 | 6.1 | UI component/page |
 | 305 | `frontend/src/components/users/UserProfileModal.tsx` | frontend-ui | 1311 | 67.7 | UI component/page |
 | 306 | `frontend/src/components/users/Users.tsx` | frontend-ui | 1182 | 54.9 | UI component/page |
-| 307 | `frontend/src/components/utils-settings/AuditLog.jsx` | frontend-ui | 1198 | 56.2 | UI component/page |
+| 307 | `frontend/src/components/utils-settings/AuditLog.tsx` | frontend-ui | 1292 | 59.1 | UI component/page |
 | 308 | `frontend/src/components/utils-settings/Backup.jsx` | frontend-ui | 1490 | 70.5 | UI component/page |
 | 309 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | frontend-ui | 73 | 3.0 | UI component/page |
 | 310 | `frontend/src/components/utils-settings/index.ts` | frontend-ui | 7 | 0.3 | UI component/page |
