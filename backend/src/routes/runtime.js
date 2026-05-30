@@ -6,7 +6,7 @@ const { authToken, hasPermission } = require('../middleware')
 const { getQueueStatus, initializeBullQueue } = require('../services/importJobs')
 const { getMediaQueueStatus, initializeMediaQueue } = require('../services/mediaQueue')
 const { getRuntimeCacheStatus, pingRuntimeCache } = require('../runtimeCache')
-const { getRuntimeVersion } = require('../runtimeVersion')
+const { getRuntimeVersion } = require('../runtimeVersion.ts')
 const { db } = require('../database')
 const { hasSuspiciousCatalogText } = require('../catalogTextIntegrity.ts')
 

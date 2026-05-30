@@ -8,6 +8,22 @@ const { execFileSync } = require('child_process')
 const BACKEND_ROOT = path.resolve(__dirname, '..')
 const PROJECT_ROOT = path.resolve(BACKEND_ROOT, '..')
 
+/**
+ * @typedef {{ revision: string, hash: string, builtAt: string }} FrontendBuildInfo
+ * @typedef {{
+ *   app: string,
+ *   packageVersion: string,
+ *   revision: string,
+ *   sourceHash: string,
+ *   frontend: FrontendBuildInfo,
+ *   bootedAt: string,
+ * }} RuntimeVersion
+ */
+
+/**
+ * @param {string[]} [candidates]
+ * @returns {string}
+ */
 function firstExistingDir(candidates = []) {
   for (const candidate of candidates || []) {
     if (candidate && fs.existsSync(candidate)) return candidate
@@ -15,6 +31,10 @@ function firstExistingDir(candidates = []) {
   return ''
 }
 
+/**
+ * @param {string[]} [files]
+ * @returns {string[]}
+ */
 function collectExistingFiles(files = []) {
   const existing = []
   for (const file of files || []) {
@@ -24,6 +44,9 @@ function collectExistingFiles(files = []) {
   return existing
 }
 
+/**
+ * @returns {string}
+ */
 function readGitRevision() {
   if (process.env.BUSINESS_OS_BUILD_REVISION) return process.env.BUSINESS_OS_BUILD_REVISION
   const cwd = firstExistingDir([PROJECT_ROOT, BACKEND_ROOT])
@@ -39,6 +62,11 @@ function readGitRevision() {
   }
 }
 
+/**
+ * @param {string} dir
+ * @param {string[]} [output]
+ * @returns {string[]}
+ */
 function collectFiles(dir, output = []) {
   if (!fs.existsSync(dir)) return output
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -46,13 +74,16 @@ function collectFiles(dir, output = []) {
     const fullPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
       collectFiles(fullPath, output)
-    } else if (entry.isFile() && /\.(js|json)$/i.test(entry.name)) {
+    } else if (entry.isFile() && /\.(js|ts|json)$/i.test(entry.name)) {
       output.push(fullPath)
     }
   }
   return output
 }
 
+/**
+ * @returns {string}
+ */
 function computeSourceHash() {
   if (process.env.BUSINESS_OS_BUILD_HASH) return process.env.BUSINESS_OS_BUILD_HASH
   try {
@@ -77,6 +108,9 @@ function computeSourceHash() {
   }
 }
 
+/**
+ * @returns {FrontendBuildInfo}
+ */
 function emptyFrontendBuildInfo() {
   return {
     revision: '',
@@ -85,6 +119,10 @@ function emptyFrontendBuildInfo() {
   }
 }
 
+/**
+ * @param {string} [rootDir]
+ * @returns {FrontendBuildInfo}
+ */
 function readFrontendBuildInfoFromRoot(rootDir = PROJECT_ROOT) {
   const candidates = [
     path.join(rootDir, 'frontend', 'dist', 'business-os-build.json'),
@@ -105,6 +143,7 @@ function readFrontendBuildInfoFromRoot(rootDir = PROJECT_ROOT) {
   return emptyFrontendBuildInfo()
 }
 
+/** @type {RuntimeVersion} */
 const runtimeVersion = {
   app: 'business-os',
   packageVersion: (() => {
@@ -120,6 +159,9 @@ const runtimeVersion = {
   bootedAt: new Date().toISOString(),
 }
 
+/**
+ * @returns {RuntimeVersion}
+ */
 function getRuntimeVersion() {
   return {
     ...runtimeVersion,

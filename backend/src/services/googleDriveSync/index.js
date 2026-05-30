@@ -13,7 +13,7 @@ const {
   ORGANIZATION_FOLDER_NAME,
 } = require('../../config')
 const { walkFiles } = require('../../dataPath')
-const { getRuntimeVersion } = require('../../runtimeVersion')
+const { getRuntimeVersion } = require('../../runtimeVersion.ts')
 const { encryptSecret, decryptSecret } = require('../../security')
 const {
   DRIVE_SYNC_DEFAULT_RETENTION_DAYS,
