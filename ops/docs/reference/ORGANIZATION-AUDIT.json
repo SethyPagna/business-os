@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 546,
+  "filesScanned": 545,
   "largeFiles": 75,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -127,11 +127,11 @@
       5
     ],
     [
-      "frontend/components/users",
-      5
+      "frontend/components/files",
+      4
     ],
     [
-      "frontend/components/files",
+      "frontend/components/users",
       4
     ],
     [
@@ -194,7 +194,7 @@
     "frontend/src/components/returns/Returns.tsx",
     "frontend/src/components/sales/Sales.tsx",
     "frontend/src/components/server/ServerPage.tsx",
-    "frontend/src/components/users/UserProfileModal.jsx",
+    "frontend/src/components/users/UserProfileModal.tsx",
     "frontend/src/components/users/Users.tsx",
     "frontend/src/components/utils-settings/AuditLog.jsx",
     "frontend/src/components/utils-settings/Backup.jsx",

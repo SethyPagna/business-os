@@ -136,7 +136,7 @@ Backend:
 | File library upload/delete | `frontend/src/components/files/FilePickerModal.tsx`, `frontend/src/components/files/FilesPage.jsx`, `backend/src/routes/files.js` | Duplicate assets, wrong delete | `uploading`, delete id state, synchronous upload/delete refs | Add live file-picker Playwright check |
 | Backup export/restore | `frontend/src/components/utils-settings/Backup.jsx`, `backend/src/routes/system/index.js`, `backend/src/systemJobs.js` | Data loss, duplicate destructive jobs | `loading`, active job disable, backend dedupe key | Keep regression proving UI + backend job dedupe |
 | Settings save | `frontend/src/components/utils-settings/Settings.jsx`, `frontend/src/AppContext.jsx`, `backend/src/routes/settings.js` | Lost config, stale overwrite | write conflict helpers, upload wait check, synchronous save/upload refs, API save queue | Add stale-conflict Playwright check |
-| Profile/avatar save | `frontend/src/components/users/UserProfileModal.jsx`, `frontend/src/api/methods.js` | Duplicate avatar upload, stale profile | `savingProfile`, `savingPassword`, `uploadingAvatar`, synchronous refs, loader timeout | Add disconnected-server recovery check |
+| Profile/avatar save | `frontend/src/components/users/UserProfileModal.tsx`, `frontend/src/api/methods.js` | Duplicate avatar upload, stale profile | `savingProfile`, `savingPassword`, `uploadingAvatar`, synchronous refs, loader timeout | Add disconnected-server recovery check |
 
 ## Initial Findings
 
