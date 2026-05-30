@@ -384,7 +384,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `index.js` | Integration/service layer |
-| 2 | `versioning.js` | Integration/service layer |
+| 2 | `versioning.ts` | Integration/service layer |
 
 
 ### 3.14 Folder: `backend/src/storage`

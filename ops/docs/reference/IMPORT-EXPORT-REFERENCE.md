@@ -77,7 +77,7 @@ Code files documented: **466**
 | 65 | `backend/src/services/backupPackages.js` | 9 | 1 | 4 | 4 |
 | 66 | `backend/src/services/firebaseAuth.js` | 2 | 1 | 0 | 0 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 12 | 1 | 8 | 4 |
-| 68 | `backend/src/services/googleDriveSync/versioning.js` | 0 | 1 | 0 | 2 |
+| 68 | `backend/src/services/googleDriveSync/versioning.ts` | 0 | 1 | 0 | 2 |
 | 69 | `backend/src/services/googleOauth.js` | 2 | 1 | 1 | 4 |
 | 70 | `backend/src/services/importJobs.js` | 20 | 1 | 14 | 7 |
 | 71 | `backend/src/services/integrationDoctor.js` | 10 | 1 | 8 | 2 |
@@ -1891,7 +1891,7 @@ Code files documented: **466**
   - `../../runtimeVersion.ts`
   - `../../security`
   - `../backupPackages`
-  - `./versioning`
+  - `./versioning.ts`
   - `crypto`
   - `fs`
   - `os`
@@ -1904,14 +1904,14 @@ Code files documented: **466**
   - `backend/src/runtimeVersion.ts`
   - `backend/src/security.js`
   - `backend/src/services/backupPackages.js`
-  - `backend/src/services/googleDriveSync/versioning.js`
+  - `backend/src/services/googleDriveSync/versioning.ts`
 - Referenced by (4)
   - `backend/src/helpers.js`
   - `backend/src/routes/notifications.js`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/integrationDoctor.js`
 
-### 3.68 `backend/src/services/googleDriveSync/versioning.js`
+### 3.68 `backend/src/services/googleDriveSync/versioning.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -2402,12 +2402,12 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../src/services/googleDriveSync/versioning`
+  - `../src/services/googleDriveSync/versioning.ts`
   - `node:assert/strict`
   - `node:fs`
   - `node:path`
 - Internal dependencies (1)
-  - `backend/src/services/googleDriveSync/versioning.js`
+  - `backend/src/services/googleDriveSync/versioning.ts`
 - Referenced by (0)
   - none
 

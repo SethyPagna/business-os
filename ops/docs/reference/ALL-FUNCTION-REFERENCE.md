@@ -77,7 +77,7 @@ Code files scanned: **466**
 | 65 | `backend/src/services/backupPackages.js` | 59 |
 | 66 | `backend/src/services/firebaseAuth.js` | 22 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 75 |
-| 68 | `backend/src/services/googleDriveSync/versioning.js` | 7 |
+| 68 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
 | 69 | `backend/src/services/googleOauth.js` | 17 |
 | 70 | `backend/src/services/importJobs.js` | 175 |
 | 71 | `backend/src/services/integrationDoctor.js` | 14 |
@@ -1913,17 +1913,17 @@ Code files scanned: **466**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.68 `backend/src/services/googleDriveSync/versioning.js`
+### 3.68 `backend/src/services/googleDriveSync/versioning.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toSafeDate` | function | 7 |
-| 2 | `toSafeVersionNumber` | function | 12 |
-| 3 | `resolveDriveSyncVersionState` | function | 17 |
-| 4 | `parseVersionName` | function | 56 |
-| 5 | `buildDriveSyncVersionRows` | function | 61 |
-| 6 | `selectDateExpiredVersions` | function | 81 |
-| 7 | `selectExpiredDriveSyncVersions` | function | 92 |
+| 1 | `toSafeDate` | function | 25 |
+| 2 | `toSafeVersionNumber` | function | 30 |
+| 3 | `resolveDriveSyncVersionState` | function | 36 |
+| 4 | `parseVersionName` | function | 75 |
+| 5 | `buildDriveSyncVersionRows` | function | 81 |
+| 6 | `selectDateExpiredVersions` | function | 101 |
+| 7 | `selectExpiredDriveSyncVersions` | function | 113 |
 
 ### 3.69 `backend/src/services/googleOauth.js`
 
