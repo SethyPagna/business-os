@@ -1,3 +1,3 @@
 'use strict'
 
-module.exports = require('./postgresDatabase')
+module.exports = require('./postgresDatabase.ts')

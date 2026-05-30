@@ -63,7 +63,7 @@ runTest('auth runtime no longer imports or writes active Supabase identity', () 
 
 runTest('schema keeps legacy Supabase column unused and adds Google identity columns', () => {
   const schema = read('backend/src/db/postgresSchema.sql')
-  const pgRuntime = read('backend/src/postgresDatabase.js')
+  const pgRuntime = read('backend/src/postgresDatabase.ts')
   assert.match(schema, /supabase_user_id text/)
   assert.match(schema, /google_subject text/)
   assert.match(schema, /google_email text/)

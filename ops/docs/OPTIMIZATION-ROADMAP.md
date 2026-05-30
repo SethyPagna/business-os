@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 608.
+- Latest completed implementation move in this roadmap: Move 609.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -318,7 +318,7 @@ Mini phases:
   - duplicate key checks
   - nullable-to-required readiness checks
   - backup manifest confirmation
-- 6.6 Repeat the schema sweep against runtime DDL in `postgresDatabase.js` and
+- 6.6 Repeat the schema sweep against runtime DDL in `postgresDatabase.ts` and
   `systemJobs.ts` so schema added after the dump is not missed.
 - 6.7 Repeat the relationship sweep against route/service SQL joins, manual
   cascades, and `*_id` filters.
@@ -4891,7 +4891,7 @@ Move 435 status:
 
 Move 436 status:
 - Move 436 tightens the synchronous Postgres runtime bridge in
-  `backend/src/postgresDatabase.js`. Query-row coercion, semicolon-split exec
+  `backend/src/postgresDatabase.ts`. Query-row coercion, semicolon-split exec
   statement materialization, runtime schema/index statement execution, and
   default role seeding now use named direct-loop helpers instead of callback
   chains. Statement translation, transaction boundaries, runtime DDL order,
@@ -6892,4 +6892,20 @@ Move 608 status:
   direct `.ts` scripts, so broader backend conversions still wait for a
   compile/staging package lane. The expected generated language audit now
   reports `JavaScript: 14`, `TypeScript: 297`, and `React TSX: 107` across the
+  active scan roots.
+
+Move 609 status:
+- Move 609 converts `backend/src/postgresDatabase.ts` to a package-safe
+  TypeScript path. The pg-native loader, SQLite-like statement bridge, SQL
+  translation boundary, transaction/savepoint behavior, runtime schema/index
+  bootstrap, default organization/branch/role seeding, lazy database proxy, and
+  maintenance no-op compatibility exports remain unchanged on the existing
+  CommonJS module style. The database facade, schema audit, source assertions,
+  backend README/map, schema relationship docs, and roadmap docs now point at
+  the explicit `.ts` runtime bridge path. Focused Postgres bridge, RFID,
+  product-expiry, product-batch, owned-Google-auth, backend utility, schema
+  audit, stale-path, and Linux packaging proof passed. `pkg` continues to warn
+  for direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The expected generated language audit now
+  reports `JavaScript: 13`, `TypeScript: 298`, and `React TSX: 107` across the
   active scan roots.

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 608 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 609 in this file.
 
 ## Goal
 
@@ -2018,7 +2018,7 @@ Decision rule:
     postchecks, and the Docker release guardrail verifies the script, package
     entry, cleanup report, and full-automation wiring.
 240. Add action-history read-path indexes. Done:
-    `backend/src/postgresDatabase.js` and `backend/src/db/postgresSchema.sql`
+    `backend/src/postgresDatabase.ts` and `backend/src/db/postgresSchema.sql`
     now create `idx_action_history_scope_updated_pg` and
     `idx_action_history_scope_user_updated_pg`, matching the API's
     `scope = ? ORDER BY updated_at DESC, id DESC` and
@@ -2028,7 +2028,7 @@ Decision rule:
     completed read-path indexes in the schema map.
 241. Add unique session-token index. Done:
     A live duplicate check found zero duplicate `user_sessions.token_hash`
-    values across 3,459 current sessions. `backend/src/postgresDatabase.js` and
+    values across 3,459 current sessions. `backend/src/postgresDatabase.ts` and
     `backend/src/db/postgresSchema.sql` now create
     `idx_user_sessions_token_hash_unique_pg`, enforcing the direct
     `WHERE token_hash = ?` session lookup contract. The startup DDL test and
@@ -2055,14 +2055,14 @@ Decision rule:
     behind the old plain-index-only count.
 244. Add idempotency unique indexes for create replay keys. Done:
     Live duplicate checks found zero duplicate non-empty `client_request_id`
-    values in `sales`, `returns`, and `products`. `backend/src/postgresDatabase.js`
+    values in `sales`, `returns`, and `products`. `backend/src/postgresDatabase.ts`
     and `backend/src/db/postgresSchema.sql` now create unique partial indexes for
     `sales(client_request_id)`, `returns(client_request_id)`, and
     `products(client_request_id)` where the request id is present. These indexes
     close the race window behind the existing route-level replay lookup/catchback
     logic and keep accidental double-submit/retry behavior deterministic.
 245. Add parent-first detail-read indexes. Done:
-    `backend/src/postgresDatabase.js` and `backend/src/db/postgresSchema.sql`
+    `backend/src/postgresDatabase.ts` and `backend/src/db/postgresSchema.sql`
     now create `sale_items(sale_id, id)`, `return_items(return_id, id)`,
     `product_images(product_id, sort_order, id)`,
     `import_job_files(job_id, kind, id)`, and
@@ -3406,7 +3406,7 @@ Decision rule:
     cleanup only; no folder move, schema migration, or language conversion was
     needed.
 426. Tighten synchronous Postgres runtime bridge helpers. Done:
-    `backend/src/postgresDatabase.js` now uses direct-loop helpers for query
+    `backend/src/postgresDatabase.ts` now uses direct-loop helpers for query
     row coercion, semicolon-split exec statement materialization, runtime
     schema/index statement execution, and default role seeding. Statement
     translation, transaction boundaries, runtime DDL order, default
@@ -5190,6 +5190,20 @@ Decision rule:
     remain blocked on the future compile/staging lane. The expected generated
     language audit now reports `JavaScript: 14`, `TypeScript: 297`, and `React
     TSX: 107` across the active scan roots.
+609. Convert synchronous Postgres runtime bridge to a package-safe TypeScript path.
+    Done: `backend/src/postgresDatabase.ts` keeps the pg-native loader,
+    SQLite-like statement bridge, SQL translation boundary, transaction/savepoint
+    behavior, runtime schema/index bootstrap, default organization/branch/role
+    seeding, lazy database proxy, and maintenance no-op compatibility exports on
+    the existing CommonJS module style. The database facade, schema audit, source
+    assertions, backend README/map, schema relationship docs, and roadmap docs now
+    point at the explicit `.ts` runtime bridge path. Focused Postgres bridge,
+    RFID, product-expiry, product-batch, owned-Google-auth, backend utility,
+    schema audit, stale-path, and Linux packaging proof passed. Packaging still
+    warns for direct `.ts` entries in `pkg.scripts`, so broader backend
+    conversions remain blocked on the future compile/staging lane. The expected
+    generated language audit now reports `JavaScript: 13`, `TypeScript: 298`,
+    and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

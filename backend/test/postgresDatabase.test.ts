@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { PostgresCompatDatabase } = require('../src/postgresDatabase')
+const { PostgresCompatDatabase } = require('../src/postgresDatabase.ts')
 
 let failed = 0
 
@@ -77,20 +77,20 @@ runTest('transaction commits and rolls back with sync query boundaries', () => {
 })
 
 runTest('default organization seed reuses existing slug or public id', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.ts'), 'utf8')
   assert.match(source, /WHERE public_id = \$1 OR slug = \$2/)
   assert.match(source, /UPDATE organizations[\s\S]+WHERE id = \$2/)
 })
 
 runTest('default role seed avoids partial-index ON CONFLICT', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.ts'), 'utf8')
   assert.doesNotMatch(source, /ON CONFLICT \(code\)/)
   assert.match(source, /SELECT id, code FROM roles WHERE code = \$1 LIMIT 1/)
   assert.match(source, /UPDATE roles[\s\S]+WHERE id = \$4/)
 })
 
 runTest('startup creates read-path indexes for search and movement history', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.ts'), 'utf8')
   for (const indexName of [
     'idx_products_active_stock_name_pg',
     'idx_products_supplier_lower_pg',

@@ -12,7 +12,7 @@ whole-codebase/schema/cleanup guardrail.
 This document is the working relational schema map for Business OS. It was built from repeated scans of:
 
 - `backend/src/db/postgresSchema.sql`
-- `backend/src/postgresDatabase.js`
+- `backend/src/postgresDatabase.ts`
 - `backend/src/systemJobs.ts`
 - `backend/src/routes/**/*.js`
 - `backend/src/services/**/*.js`
@@ -28,12 +28,12 @@ Regenerate it with:
 node ops\scripts\backend\schema-audit.ts
 ```
 
-The canonical server database is Postgres. The backend still exposes a synchronous SQLite-like compatibility API through `postgresDatabase.js`, so many SQL statements are written in SQLite-ish style and translated before execution. The frontend mirrors a subset into IndexedDB/Dexie for offline fallback and queueing. Redis is used for import/media queues and runtime cache. Object files live in MinIO/R2-compatible object storage and are referenced by database rows.
+The canonical server database is Postgres. The backend still exposes a synchronous SQLite-like compatibility API through `postgresDatabase.ts`, so many SQL statements are written in SQLite-ish style and translated before execution. The frontend mirrors a subset into IndexedDB/Dexie for offline fallback and queueing. Redis is used for import/media queues and runtime cache. Object files live in MinIO/R2-compatible object storage and are referenced by database rows.
 
 ## Verification Passes
 
 1. Canonical schema pass: parsed all `CREATE TABLE`, `PRIMARY KEY`, and `CREATE INDEX` statements from `backend/src/db/postgresSchema.sql`.
-2. Runtime schema pass: cross-checked `postgresDatabase.js` and `systemJobs.ts` for `ALTER TABLE`, `CREATE TABLE IF NOT EXISTS`, and indexes not fully represented in the dump.
+2. Runtime schema pass: cross-checked `postgresDatabase.ts` and `systemJobs.ts` for `ALTER TABLE`, `CREATE TABLE IF NOT EXISTS`, and indexes not fully represented in the dump.
 3. Relationship pass: scanned backend routes/services for joins, `*_id` filters, manual cascade deletes, and denormalized snapshot fields.
 4. Implicit schema pass: scanned JSON/text payload columns, dynamic custom-table creation, backup table order, Dexie offline stores, Redis queue/cache, and object-storage references.
 5. Plan update pass: updated this document and the optimization roadmap with new repeated schema-analysis mini phases and recommendations.

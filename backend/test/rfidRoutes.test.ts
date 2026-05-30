@@ -16,7 +16,7 @@ function runTest(name, fn) {
 }
 
 const schema = fs.readFileSync(path.join(__dirname, '../src/db/postgresSchema.sql'), 'utf8')
-const pgRuntime = fs.readFileSync(path.join(__dirname, '../src/postgresDatabase.js'), 'utf8')
+const pgRuntime = fs.readFileSync(path.join(__dirname, '../src/postgresDatabase.ts'), 'utf8')
 const inventory = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
 
 runTest('RFID schema extends products and branch stock without replacing barcode stock', () => {

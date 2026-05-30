@@ -3,7 +3,7 @@
 The backend is the final Docker runtime for Business OS.
 
 - `database.ts` exposes the Postgres database adapter.
-- `postgresDatabase.js` provides the prepared-statement compatibility API used by existing route code while it is moved behind domain repositories.
+- `postgresDatabase.ts` provides the prepared-statement compatibility API used by existing route code while it is moved behind domain repositories.
 - `objectStore.ts` writes production files to the configured S3-compatible object store: R2 by default, MinIO for explicit emergency/offline mode.
 - `services/` owns long-running business workflows such as imports, media jobs, Drive sync, and backup jobs.
 - `routes/` stays as thin request/response wiring.
