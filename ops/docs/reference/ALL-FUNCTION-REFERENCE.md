@@ -47,7 +47,7 @@ Code files scanned: **468**
 | 35 | `backend/src/routes/actionHistory.ts` | 12 |
 | 36 | `backend/src/routes/ai.ts` | 3 |
 | 37 | `backend/src/routes/auth.js` | 31 |
-| 38 | `backend/src/routes/branches.js` | 10 |
+| 38 | `backend/src/routes/branches.ts` | 10 |
 | 39 | `backend/src/routes/catalog.ts` | 4 |
 | 40 | `backend/src/routes/categories.ts` | 2 |
 | 41 | `backend/src/routes/contacts.js` | 34 |
@@ -1124,7 +1124,7 @@ Code files scanned: **468**
 | 30 | `completeGoogleLogin` | function | 608 |
 | 31 | `buildOauthCallbackHtml` | function | 694 |
 
-### 3.38 `backend/src/routes/branches.js`
+### 3.38 `backend/src/routes/branches.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

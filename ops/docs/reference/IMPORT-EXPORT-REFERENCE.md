@@ -47,7 +47,7 @@ Code files documented: **468**
 | 35 | `backend/src/routes/actionHistory.ts` | 5 | 1 | 4 | 1 |
 | 36 | `backend/src/routes/ai.ts` | 6 | 1 | 5 | 1 |
 | 37 | `backend/src/routes/auth.js` | 18 | 1 | 13 | 2 |
-| 38 | `backend/src/routes/branches.js` | 8 | 1 | 6 | 1 |
+| 38 | `backend/src/routes/branches.ts` | 8 | 1 | 6 | 1 |
 | 39 | `backend/src/routes/catalog.ts` | 4 | 1 | 3 | 2 |
 | 40 | `backend/src/routes/categories.ts` | 6 | 1 | 5 | 2 |
 | 41 | `backend/src/routes/contacts.js` | 6 | 1 | 5 | 1 |
@@ -499,7 +499,7 @@ Code files documented: **468**
   - `./src/routes/actionHistory.ts`
   - `./src/routes/ai.ts`
   - `./src/routes/auth`
-  - `./src/routes/branches`
+  - `./src/routes/branches.ts`
   - `./src/routes/catalog.ts`
   - `./src/routes/categories.ts`
   - `./src/routes/contacts`
@@ -547,7 +547,7 @@ Code files documented: **468**
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
-  - `backend/src/routes/branches.js`
+  - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
@@ -634,7 +634,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/database.ts`
 - Referenced by (5)
-  - `backend/src/routes/branches.js`
+  - `backend/src/routes/branches.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/products.js`
@@ -702,7 +702,7 @@ Code files documented: **468**
   - none
 - Referenced by (12)
   - `backend/src/routes/ai.ts`
-  - `backend/src/routes/branches.js`
+  - `backend/src/routes/branches.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.ts`
@@ -743,7 +743,7 @@ Code files documented: **468**
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
-  - `backend/src/routes/branches.js`
+  - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
@@ -872,7 +872,7 @@ Code files documented: **468**
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
-  - `backend/src/routes/branches.js`
+  - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
@@ -983,7 +983,7 @@ Code files documented: **468**
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
-  - `backend/src/routes/branches.js`
+  - `backend/src/routes/branches.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.ts`
@@ -1256,7 +1256,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
 
-### 3.38 `backend/src/routes/branches.js`
+### 3.38 `backend/src/routes/branches.ts`
 
 - Declared exports: `module.exports`
 - Imports (8)
@@ -1807,7 +1807,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/database.ts`
 - Referenced by (6)
-  - `backend/src/routes/branches.js`
+  - `backend/src/routes/branches.ts`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/products.js`
