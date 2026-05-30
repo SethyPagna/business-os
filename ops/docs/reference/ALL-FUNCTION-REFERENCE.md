@@ -298,7 +298,7 @@ Code files scanned: **466**
 | 286 | `frontend/src/components/utils-settings/index.ts` | 0 |
 | 287 | `frontend/src/components/utils-settings/OtpModal.tsx` | 4 |
 | 288 | `frontend/src/components/utils-settings/ResetData.tsx` | 10 |
-| 289 | `frontend/src/components/utils-settings/Settings.jsx` | 21 |
+| 289 | `frontend/src/components/utils-settings/Settings.tsx` | 26 |
 | 290 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
 | 291 | `frontend/src/constants.ts` | 3 |
 | 292 | `frontend/src/index.tsx` | 10 |
@@ -5104,31 +5104,36 @@ Code files scanned: **466**
 | 9 | `T` | const arrow | 263 |
 | 10 | `doFactoryReset` | function | 270 |
 
-### 3.289 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.289 `frontend/src/components/utils-settings/Settings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseStoredColors` | function | 115 |
-| 2 | `buildColorChoices` | function | 126 |
-| 3 | `useCopy` | function | 217 |
-| 4 | `getSettingsNavLabel` | function | 225 |
-| 5 | `SwatchPicker` | function | 242 |
-| 6 | `SettingsSection` | function | 325 |
-| 7 | `Settings` | export default function | 355 |
-| 8 | `showSettingsSection` | const arrow | 381 |
-| 9 | `loadOtpStatus` | function | 447 |
-| 10 | `loadFaviconPreview` | function | 477 |
-| 11 | `setValue` | const arrow | 532 |
-| 12 | `formatPreviewDateTime` | const arrow | 558 |
-| 13 | `moveNavItem` | const arrow | 574 |
-| 14 | `toggleMobilePinned` | const arrow | 584 |
-| 15 | `movePinnedItem` | const arrow | 596 |
-| 16 | `movePinnedBefore` | const arrow | 606 |
-| 17 | `resetNavigationLayout` | const arrow | 618 |
-| 18 | `field` | const arrow | 623 |
-| 19 | `savePaymentMethods` | const arrow | 645 |
-| 20 | `uploadImageSetting` | const arrow | 665 |
-| 21 | `handleSaveSettings` | const arrow | 730 |
+| 1 | `getSettingsApi` | function | 107 |
+| 2 | `getErrorMessage` | function | 111 |
+| 3 | `toStringValue` | function | 115 |
+| 4 | `toNumberValue` | function | 120 |
+| 5 | `isSettingsSectionId` | function | 208 |
+| 6 | `parseStoredColors` | function | 224 |
+| 7 | `buildColorChoices` | function | 235 |
+| 8 | `useCopy` | function | 326 |
+| 9 | `getSettingsNavLabel` | function | 334 |
+| 10 | `SwatchPicker` | function | 351 |
+| 11 | `SettingsSection` | function | 434 |
+| 12 | `Settings` | export default function | 464 |
+| 13 | `showSettingsSection` | const arrow | 490 |
+| 14 | `loadOtpStatus` | function | 560 |
+| 15 | `loadFaviconPreview` | function | 590 |
+| 16 | `setValue` | const arrow | 647 |
+| 17 | `formatPreviewDateTime` | const arrow | 673 |
+| 18 | `moveNavItem` | const arrow | 689 |
+| 19 | `toggleMobilePinned` | const arrow | 699 |
+| 20 | `movePinnedItem` | const arrow | 711 |
+| 21 | `movePinnedBefore` | const arrow | 721 |
+| 22 | `resetNavigationLayout` | const arrow | 733 |
+| 23 | `field` | const arrow | 738 |
+| 24 | `savePaymentMethods` | const arrow | 760 |
+| 25 | `uploadImageSetting` | const arrow | 780 |
+| 26 | `handleSaveSettings` | const arrow | 846 |
 
 ### 3.290 `frontend/src/components/utils-settings/settingsConflict.ts`
 

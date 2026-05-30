@@ -298,7 +298,7 @@ Code files documented: **466**
 | 286 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
 | 287 | `frontend/src/components/utils-settings/OtpModal.tsx` | 3 | 1 | 2 | 2 |
 | 288 | `frontend/src/components/utils-settings/ResetData.tsx` | 6 | 0 | 4 | 1 |
-| 289 | `frontend/src/components/utils-settings/Settings.jsx` | 13 | 1 | 11 | 1 |
+| 289 | `frontend/src/components/utils-settings/Settings.tsx` | 13 | 1 | 11 | 1 |
 | 290 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 2 |
 | 291 | `frontend/src/constants.ts` | 0 | 12 | 0 | 8 |
 | 292 | `frontend/src/index.tsx` | 9 | 0 | 4 | 0 |
@@ -3055,7 +3055,7 @@ Code files documented: **466**
   - `frontend/src/components/users/Users.tsx`
   - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/src/components/utils-settings/Backup.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
   - `frontend/src/utils/favicon.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
@@ -3167,7 +3167,7 @@ Code files documented: **466**
   - `frontend/src/components/utils-settings/Backup.tsx`
   - `frontend/src/components/utils-settings/OtpModal.tsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
   - `frontend/src/index.tsx`
   - `frontend/src/utils/actionHistory.ts`
 
@@ -5190,7 +5190,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/utils-settings/Backup.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.269 `frontend/src/components/shared/Modal.tsx`
 
@@ -5232,7 +5232,7 @@ Code files documented: **466**
   - none
 - Referenced by (3)
   - `frontend/src/components/navigation/Sidebar.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
   - `frontend/tests/navigationConfig.test.ts`
 
 ### 3.271 `frontend/src/components/shared/NotificationCenter.tsx`
@@ -5287,7 +5287,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/server/ServerPage.tsx`
   - `frontend/src/components/utils-settings/Backup.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.274 `frontend/src/components/shared/PaginationControls.tsx`
 
@@ -5353,7 +5353,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/utils-settings/Backup.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.278 `frontend/src/components/shared/WriteConflictModal.tsx`
 
@@ -5510,7 +5510,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.286 `frontend/src/components/utils-settings/index.ts`
 
@@ -5534,7 +5534,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (2)
   - `frontend/src/components/users/UserProfileModal.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.288 `frontend/src/components/utils-settings/ResetData.tsx`
 
@@ -5554,11 +5554,11 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Backup.tsx`
 
-### 3.289 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.289 `frontend/src/components/utils-settings/Settings.tsx`
 
 - Declared exports: `function`
 - Imports (13)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/favicon.ts`
   - `../../utils/loaders.ts`
@@ -5594,7 +5594,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
   - `frontend/tests/settingsConflictHelpers.test.ts`
 
 ### 3.291 `frontend/src/constants.ts`
@@ -5741,7 +5741,7 @@ Code files documented: **466**
   - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/src/components/utils-settings/OtpModal.tsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.300 `frontend/src/utils/actionHistory.ts`
 
@@ -5938,7 +5938,7 @@ Code files documented: **466**
 - Referenced by (3)
   - `frontend/src/App.jsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.313 `frontend/src/utils/formatters.ts`
 
@@ -6068,7 +6068,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/components/users/UserProfileModal.tsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
-  - `frontend/src/components/utils-settings/Settings.jsx`
+  - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.320 `frontend/src/utils/mediaUpload.ts`
 

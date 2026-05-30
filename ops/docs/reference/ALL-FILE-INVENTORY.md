@@ -322,7 +322,7 @@ Total files documented: **529**
 | 310 | `frontend/src/components/utils-settings/index.ts` | frontend-ui | 7 | 0.3 | UI component/page |
 | 311 | `frontend/src/components/utils-settings/OtpModal.tsx` | frontend-ui | 294 | 11.6 | UI component/page |
 | 312 | `frontend/src/components/utils-settings/ResetData.tsx` | frontend-ui | 366 | 15.4 | UI component/page |
-| 313 | `frontend/src/components/utils-settings/Settings.jsx` | frontend-ui | 1730 | 80.6 | UI component/page |
+| 313 | `frontend/src/components/utils-settings/Settings.tsx` | frontend-ui | 1846 | 85.1 | UI component/page |
 | 314 | `frontend/src/components/utils-settings/settingsConflict.ts` | frontend-ui | 64 | 1.8 | UI component/page |
 | 315 | `frontend/src/constants.ts` | frontend-core | 185 | 4.6 | Project source/support file |
 | 316 | `frontend/src/index.tsx` | frontend-core | 206 | 7.2 | Project source/support file |
