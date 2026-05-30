@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 562 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 563 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 74`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 289`,
+  `.js: 73`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 290`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -2590,7 +2590,7 @@ Decision rule:
     operation at once. Admin shell/media guards and frontend utility tests
     cover the change.
 304. Serialize runtime cache prefix invalidation. Done:
-    `backend/src/runtimeCache.js` now uses `deletePrefixesInOrder()` when a
+    `backend/src/runtimeCache.ts` now uses `deletePrefixesInOrder()` when a
     write invalidates several cache namespaces. This keeps Redis invalidation
     from running multiple `SCAN`/`DEL` prefix walks at once during product,
     inventory, settings, sales, returns, or customer write bursts. Backend
@@ -4545,6 +4545,18 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The current
     source extension count is `.js: 74`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
     `.ts: 289`, `.tsx: 107` outside generated/runtime folders.
+563. Convert backend runtime cache helper to a package-safe TypeScript path.
+    Done: `backend/src/runtimeCache.ts` now owns Redis-backed runtime cache
+    helpers with JSDoc cache-status and invalidation contracts. Portal/runtime
+    routes, the shared helper invalidation path, and runtime cache tests now
+    target explicit `.ts` imports while preserving ordered prefix invalidation.
+    Focused runtime-cache, route-contract, portal regression, and
+    full-automation checks passed, as did the full backend utility suite and
+    Linux packaging proof. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service conversions remain blocked
+    on the future compile/staging lane. The current source extension count is
+    `.js: 73`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 290`, `.tsx: 107`
+    outside generated/runtime folders.
 
 ## Safety Gates
 

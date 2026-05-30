@@ -167,7 +167,7 @@ function broadcast(channel, data = {}) {
     if (ws.readyState === 1) ws.send(msg)
   }
   try {
-    const { invalidateForChannel } = require('./runtimeCache')
+    const { invalidateForChannel } = require('./runtimeCache.ts')
     invalidateForChannel(channel).catch(() => {})
   } catch (_) {}
   try {

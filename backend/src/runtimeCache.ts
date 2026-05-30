@@ -9,20 +9,42 @@ const {
 const CACHE_PREFIX = String(process.env.RUNTIME_CACHE_PREFIX || 'business-os:v1').trim() || 'business-os:v1'
 const DEFAULT_TTL_SECONDS = Math.min(300, Math.max(5, Number(process.env.RUNTIME_CACHE_TTL_SECONDS || 30) || 30))
 
+/**
+ * @typedef {{ removed: number, prefixes: string[] }} RuntimeCacheInvalidation
+ * @typedef {{
+ *   enabled: boolean,
+ *   configured: boolean,
+ *   url: string,
+ *   status: string,
+ *   lastReadyAt: string | null,
+ *   lastError: string,
+ * }} RuntimeCacheStatus
+ */
+
 let client = null
 let connectPromise = null
 let lastError = ''
 let lastReadyAt = null
 
+/**
+ * @returns {boolean}
+ */
 function enabled() {
   return !!(RUNTIME_CACHE_ENABLED && CACHE_REDIS_URL)
 }
 
+/**
+ * @param {unknown} key
+ * @returns {string}
+ */
 function namespacedKey(key) {
   const safeKey = String(key || '').trim().replace(/\s+/g, ':')
   return `${CACHE_PREFIX}:${DATABASE_DRIVER || 'postgres'}:${safeKey}`
 }
 
+/**
+ * @returns {Promise<unknown | null>}
+ */
 async function getClient() {
   if (!enabled()) return null
   if (client?.status === 'ready') return client
@@ -61,6 +83,10 @@ async function getClient() {
   return connectPromise
 }
 
+/**
+ * @param {string} key
+ * @returns {Promise<unknown | null>}
+ */
 async function getJson(key) {
   const redis = await getClient()
   if (!redis) return null
@@ -74,6 +100,12 @@ async function getJson(key) {
   }
 }
 
+/**
+ * @param {string} key
+ * @param {unknown} value
+ * @param {number} [ttlSeconds]
+ * @returns {Promise<boolean>}
+ */
 async function setJson(key, value, ttlSeconds = DEFAULT_TTL_SECONDS) {
   const redis = await getClient()
   if (!redis) return false
@@ -87,6 +119,13 @@ async function setJson(key, value, ttlSeconds = DEFAULT_TTL_SECONDS) {
   }
 }
 
+/**
+ * @template T
+ * @param {string} key
+ * @param {number} ttlSeconds
+ * @param {() => Promise<T> | T} producer
+ * @returns {Promise<unknown | T>}
+ */
 async function getOrSetJson(key, ttlSeconds, producer) {
   const cached = await getJson(key)
   if (cached != null) return cached
@@ -95,6 +134,10 @@ async function getOrSetJson(key, ttlSeconds, producer) {
   return value
 }
 
+/**
+ * @param {string} prefix
+ * @returns {Promise<number>}
+ */
 async function deleteByPrefix(prefix) {
   const redis = await getClient()
   if (!redis) return 0
@@ -114,6 +157,10 @@ async function deleteByPrefix(prefix) {
   return removed
 }
 
+/**
+ * @param {string[]} prefixes
+ * @returns {Promise<number>}
+ */
 async function deletePrefixesInOrder(prefixes) {
   let removed = 0
   for (const prefix of prefixes) {
@@ -122,6 +169,10 @@ async function deletePrefixesInOrder(prefixes) {
   return removed
 }
 
+/**
+ * @param {unknown} channel
+ * @returns {string[]}
+ */
 function prefixesForChannel(channel) {
   const value = String(channel || '').trim().toLowerCase()
   if (!value) return []
@@ -143,6 +194,10 @@ function prefixesForChannel(channel) {
   return [...prefixes]
 }
 
+/**
+ * @param {unknown} channel
+ * @returns {Promise<RuntimeCacheInvalidation>}
+ */
 async function invalidateForChannel(channel) {
   const prefixes = prefixesForChannel(channel)
   if (!prefixes.length) return { removed: 0, prefixes: [] }
@@ -152,6 +207,9 @@ async function invalidateForChannel(channel) {
   }
 }
 
+/**
+ * @returns {Promise<boolean>}
+ */
 async function pingRuntimeCache() {
   const redis = await getClient()
   if (!redis) return false
@@ -163,6 +221,9 @@ async function pingRuntimeCache() {
   }
 }
 
+/**
+ * @returns {RuntimeCacheStatus}
+ */
 function getRuntimeCacheStatus() {
   return {
     enabled: enabled(),

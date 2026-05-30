@@ -17,7 +17,7 @@ const {
   getRuntimeCacheStatus,
   invalidateForChannel,
   setJson,
-} = require('../src/runtimeCache')
+} = require('../src/runtimeCache.ts')
 
 let failed = 0
 
@@ -45,7 +45,7 @@ async function main() {
   })
 
   await runTest('runtime cache invalidation scans prefixes in order', async () => {
-    const source = fs.readFileSync(path.join(__dirname, '../src/runtimeCache.js'), 'utf8')
+    const source = fs.readFileSync(path.join(__dirname, '../src/runtimeCache.ts'), 'utf8')
     assert.match(source, /async function deletePrefixesInOrder\(prefixes\)/)
     assert.match(source, /for \(const prefix of prefixes\)/)
     assert.match(source, /removed: await deletePrefixesInOrder\(prefixes\)/)

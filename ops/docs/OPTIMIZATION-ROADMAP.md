@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 562.
+- Latest completed implementation move in this roadmap: Move 563.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -3380,7 +3380,7 @@ Cleanup checkpoint:
   recovery from fanning out every service-worker unregister and cache delete at
   once, while preserving the existing best-effort failure handling.
 - Move 304 serializes runtime cache prefix invalidation:
-  `backend/src/runtimeCache.js` now deletes cache prefixes through
+  `backend/src/runtimeCache.ts` now deletes cache prefixes through
   `deletePrefixesInOrder()` instead of launching parallel Redis `SCAN`/`DEL`
   walks for every affected namespace. Product, inventory, sales, returns, and
   settings writes still invalidate the same prefixes, but the cache layer now
@@ -6190,3 +6190,16 @@ Move 562 status:
   backend route/service conversion still waits for a compile/staging package
   lane. The current source extension count is `.js: 74`, `.jsx: 0`, `.mjs: 0`,
   `.cjs: 0`, `.ts: 289`, `.tsx: 107` outside generated/runtime folders.
+
+Move 563 status:
+- Move 563 converts `backend/src/runtimeCache.ts` to a package-safe TypeScript
+  path. The Redis-backed runtime cache helper now carries JSDoc cache-status
+  and invalidation contracts while preserving safe no-op behavior when disabled
+  and ordered prefix invalidation. Portal/runtime routes, shared helper
+  invalidation, and runtime cache tests use explicit `.ts` imports. Focused
+  runtime-cache, route-contract, portal regression, and full-automation checks
+  passed, as did the full backend utility suite and Linux packaging proof.
+  `pkg` continues to warn for direct `.ts` scripts, so larger backend
+  route/service conversion still waits for a compile/staging package lane. The
+  current source extension count is `.js: 73`, `.jsx: 0`, `.mjs: 0`,
+  `.cjs: 0`, `.ts: 290`, `.tsx: 107` outside generated/runtime folders.

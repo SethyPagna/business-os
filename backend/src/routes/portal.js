@@ -16,7 +16,7 @@ const { checkRateLimit } = require('../security')
 const { getDefaultOrganization, getPortalPublicPath } = require('../organizationContext')
 const { assertSafeOutboundUrl, isSafeExternalImageReference } = require('../netSecurity')
 const { sanitizeMediaList, sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
-const { getOrSetJson } = require('../runtimeCache')
+const { getOrSetJson } = require('../runtimeCache.ts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')
 
 const router = express.Router()
