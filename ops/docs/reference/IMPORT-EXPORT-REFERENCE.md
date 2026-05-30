@@ -31,7 +31,7 @@ Code files documented: **468**
 | 19 | `backend/src/importParsing.ts` | 1 | 1 | 1 | 3 |
 | 20 | `backend/src/initials.ts` | 0 | 1 | 0 | 4 |
 | 21 | `backend/src/maintenanceLock.ts` | 0 | 1 | 0 | 3 |
-| 22 | `backend/src/middleware.js` | 10 | 1 | 7 | 24 |
+| 22 | `backend/src/middleware.ts` | 10 | 1 | 7 | 24 |
 | 23 | `backend/src/money.ts` | 0 | 1 | 0 | 5 |
 | 24 | `backend/src/netSecurity.ts` | 1 | 1 | 0 | 5 |
 | 25 | `backend/src/objectStore.js` | 7 | 1 | 1 | 6 |
@@ -491,7 +491,7 @@ Code files documented: **468**
   - `./src/fileAssets`
   - `./src/helpers`
   - `./src/maintenanceLock.ts`
-  - `./src/middleware`
+  - `./src/middleware.ts`
   - `./src/objectStore`
   - `./src/organizationContext/index.ts`
   - `./src/productBatches`
@@ -539,7 +539,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/maintenanceLock.ts`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/objectStore.js`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/productBatches.js`
@@ -584,7 +584,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/config/index.js`
 - Referenced by (4)
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/system/index.js`
   - `backend/test/accessControl.test.ts`
@@ -607,9 +607,9 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (1)
-  - `./middleware`
+  - `./middleware.ts`
 - Internal dependencies (1)
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
 - Referenced by (2)
   - `backend/src/routes/auth.js`
   - `backend/test/authOtpGuards.test.ts`
@@ -671,7 +671,7 @@ Code files documented: **468**
   - `backend/src/accessControl.ts`
   - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/fileAssets.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/objectStore.js`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/postgresDatabase.js`
@@ -839,7 +839,7 @@ Code files documented: **468**
   - `backend/src/uploadSecurity.ts`
 - Referenced by (15)
   - `backend/server.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/portal.js`
@@ -955,7 +955,7 @@ Code files documented: **468**
   - `backend/src/routes/system/index.js`
   - `backend/src/services/googleDriveSync/index.js`
 
-### 3.22 `backend/src/middleware.js`
+### 3.22 `backend/src/middleware.ts`
 
 - Declared exports: `module.exports`
 - Imports (10)
@@ -1095,7 +1095,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (4)
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/postgresDatabase.js`
   - `backend/src/routes/actionHistory.ts`
   - `backend/test/permissionPolicy.test.ts`
@@ -1186,13 +1186,13 @@ Code files documented: **468**
 - Imports (5)
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../permissions.ts`
   - `express`
 - Internal dependencies (4)
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/permissions.ts`
 - Referenced by (1)
   - `backend/server.js`
@@ -1204,14 +1204,14 @@ Code files documented: **468**
   - `../conflictControl.ts`
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../services/aiGateway`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/services/aiGateway.js`
 - Referenced by (1)
   - `backend/server.js`
@@ -1225,7 +1225,7 @@ Code files documented: **468**
   - `../config`
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../organizationContext/index.ts`
   - `../runtimeState/index.ts`
   - `../security.ts`
@@ -1244,7 +1244,7 @@ Code files documented: **468**
   - `backend/src/config/index.js`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/security.ts`
@@ -1264,7 +1264,7 @@ Code files documented: **468**
   - `../conflictControl.ts`
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../schemaMetadata.ts`
   - `crypto`
   - `express`
@@ -1273,7 +1273,7 @@ Code files documented: **468**
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/schemaMetadata.ts`
 - Referenced by (1)
   - `backend/server.js`
@@ -1302,14 +1302,14 @@ Code files documented: **468**
   - `../conflictControl.ts`
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1322,14 +1322,14 @@ Code files documented: **468**
   - `../contactOptions.ts`
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
   - `backend/src/contactOptions.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1340,14 +1340,14 @@ Code files documented: **468**
   - `../conflictControl.ts`
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../schemaMetadata.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/schemaMetadata.ts`
 - Referenced by (1)
   - `backend/server.js`
@@ -1359,14 +1359,14 @@ Code files documented: **468**
   - `../conflictControl.ts`
   - `../fileAssets`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../services/mediaQueue.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/services/mediaQueue.ts`
 - Referenced by (2)
   - `backend/server.js`
@@ -1379,7 +1379,7 @@ Code files documented: **468**
   - `../config`
   - `../fileAssets`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../services/importJobs`
   - `express`
   - `fs`
@@ -1389,7 +1389,7 @@ Code files documented: **468**
   - `backend/src/config/index.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/services/importJobs.js`
 - Referenced by (1)
   - `backend/server.js`
@@ -1404,7 +1404,7 @@ Code files documented: **468**
   - `../helpers`
   - `../idempotency.ts`
   - `../initials.ts`
-  - `../middleware`
+  - `../middleware.ts`
   - `../money.ts`
   - `../productBatches`
   - `../productDiscounts.ts`
@@ -1417,7 +1417,7 @@ Code files documented: **468**
   - `backend/src/helpers.js`
   - `backend/src/idempotency.ts`
   - `backend/src/initials.ts`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/money.ts`
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.ts`
@@ -1432,13 +1432,13 @@ Code files documented: **468**
 - Imports (5)
   - `../businessMetrics.ts`
   - `../database.ts`
-  - `../middleware`
+  - `../middleware.ts`
   - `../services/googleDriveSync`
   - `express`
 - Internal dependencies (4)
   - `backend/src/businessMetrics.ts`
   - `backend/src/database.ts`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/services/googleDriveSync/index.js`
 - Referenced by (3)
   - `backend/server.js`
@@ -1449,11 +1449,11 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (3)
-  - `../middleware`
+  - `../middleware.ts`
   - `../organizationContext/index.ts`
   - `express`
 - Internal dependencies (2)
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/organizationContext/index.ts`
 - Referenced by (2)
   - `backend/server.js`
@@ -1467,7 +1467,7 @@ Code files documented: **468**
   - `../fileAssets`
   - `../helpers`
   - `../initials.ts`
-  - `../middleware`
+  - `../middleware.ts`
   - `../netSecurity.ts`
   - `../organizationContext/index.ts`
   - `../portalUtils.ts`
@@ -1481,7 +1481,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/initials.ts`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/netSecurity.ts`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/portalUtils.ts`
@@ -1506,7 +1506,7 @@ Code files documented: **468**
   - `../helpers`
   - `../idempotency.ts`
   - `../initials.ts`
-  - `../middleware`
+  - `../middleware.ts`
   - `../money.ts`
   - `../netSecurity.ts`
   - `../productBatches`
@@ -1527,7 +1527,7 @@ Code files documented: **468**
   - `backend/src/helpers.js`
   - `backend/src/idempotency.ts`
   - `backend/src/initials.ts`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/money.ts`
   - `backend/src/netSecurity.ts`
   - `backend/src/productBatches.js`
@@ -1547,7 +1547,7 @@ Code files documented: **468**
   - `../database.ts`
   - `../helpers`
   - `../idempotency.ts`
-  - `../middleware`
+  - `../middleware.ts`
   - `../productBatches`
   - `express`
 - Internal dependencies (6)
@@ -1555,7 +1555,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
   - `backend/src/idempotency.ts`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/productBatches.js`
 - Referenced by (1)
   - `backend/server.js`
@@ -1567,7 +1567,7 @@ Code files documented: **468**
   - `../catalogTextIntegrity.ts`
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../runtimeCache.ts`
   - `../runtimeVersion.ts`
   - `../services/importJobs`
@@ -1577,7 +1577,7 @@ Code files documented: **468**
   - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeVersion.ts`
   - `backend/src/services/importJobs.js`
@@ -1595,7 +1595,7 @@ Code files documented: **468**
   - `../database.ts`
   - `../helpers`
   - `../idempotency.ts`
-  - `../middleware`
+  - `../middleware.ts`
   - `../productBatches`
   - `express`
 - Internal dependencies (7)
@@ -1604,7 +1604,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
   - `backend/src/idempotency.ts`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/productBatches.js`
 - Referenced by (1)
   - `backend/server.js`
@@ -1618,7 +1618,7 @@ Code files documented: **468**
   - `../database.ts`
   - `../fileAssets`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../schemaMetadata.ts`
   - `../settingsSnapshot.ts`
   - `express`
@@ -1628,7 +1628,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/schemaMetadata.ts`
   - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
@@ -1640,7 +1640,7 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (7)
   - `../config`
-  - `../middleware`
+  - `../middleware.ts`
   - `../serverUtils`
   - `crypto`
   - `express`
@@ -1648,7 +1648,7 @@ Code files documented: **468**
   - `path`
 - Internal dependencies (3)
   - `backend/src/config/index.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/serverUtils.js`
 - Referenced by (1)
   - `backend/server.js`
@@ -1667,7 +1667,7 @@ Code files documented: **468**
   - `../../fileAssets`
   - `../../helpers`
   - `../../maintenanceLock.ts`
-  - `../../middleware`
+  - `../../middleware.ts`
   - `../../objectStore`
   - `../../organizationContext/index.ts`
   - `../../runtimeState/index.ts`
@@ -1692,7 +1692,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/maintenanceLock.ts`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/objectStore.js`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/runtimeState/index.ts`
@@ -1714,14 +1714,14 @@ Code files documented: **468**
   - `../conflictControl.ts`
   - `../database.ts`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1734,7 +1734,7 @@ Code files documented: **468**
   - `../database.ts`
   - `../fileAssets`
   - `../helpers`
-  - `../middleware`
+  - `../middleware.ts`
   - `../organizationContext/index.ts`
   - `../services/googleOauth.ts`
   - `../services/verification.ts`
@@ -1746,7 +1746,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/services/googleOauth.ts`
   - `backend/src/services/verification.ts`
@@ -1822,7 +1822,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (7)
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/system/index.js`
@@ -2075,7 +2075,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/database.ts`
 - Referenced by (4)
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/users.js`
   - `backend/src/websocket.ts`
@@ -2158,7 +2158,7 @@ Code files documented: **468**
   - `backend/src/optionalSharp.ts`
 - Referenced by (4)
   - `backend/src/fileAssets.js`
-  - `backend/src/middleware.js`
+  - `backend/src/middleware.ts`
   - `backend/src/services/importJobs.js`
   - `backend/test/uploadSecurity.test.ts`
 

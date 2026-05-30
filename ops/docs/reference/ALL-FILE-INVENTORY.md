@@ -38,7 +38,7 @@ Total files documented: **531**
 | 26 | `backend/src/importParsing.ts` | backend-core | 111 | 3.6 | Project source/support file |
 | 27 | `backend/src/initials.ts` | backend-core | 120 | 3.7 | Project source/support file |
 | 28 | `backend/src/maintenanceLock.ts` | backend-core | 131 | 3.3 | Project source/support file |
-| 29 | `backend/src/middleware.js` | backend-core | 336 | 10.3 | Project source/support file |
+| 29 | `backend/src/middleware.ts` | backend-core | 336 | 10.3 | Project source/support file |
 | 30 | `backend/src/money.ts` | backend-core | 29 | 0.8 | Project source/support file |
 | 31 | `backend/src/netSecurity.ts` | backend-core | 148 | 3.6 | Project source/support file |
 | 32 | `backend/src/objectStore.js` | backend-core | 468 | 15.1 | Project source/support file |

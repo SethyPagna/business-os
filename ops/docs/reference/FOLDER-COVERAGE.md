@@ -184,7 +184,7 @@ Total folders documented: **81**
 | 13 | `importParsing.ts` | Project source/support file |
 | 14 | `initials.ts` | Project source/support file |
 | 15 | `maintenanceLock.ts` | Project source/support file |
-| 16 | `middleware.js` | Project source/support file |
+| 16 | `middleware.ts` | Project source/support file |
 | 17 | `money.ts` | Project source/support file |
 | 18 | `netSecurity.ts` | Project source/support file |
 | 19 | `objectStore.js` | Project source/support file |

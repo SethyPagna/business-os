@@ -31,7 +31,7 @@ Code files scanned: **468**
 | 19 | `backend/src/importParsing.ts` | 6 |
 | 20 | `backend/src/initials.ts` | 7 |
 | 21 | `backend/src/maintenanceLock.ts` | 9 |
-| 22 | `backend/src/middleware.js` | 21 |
+| 22 | `backend/src/middleware.ts` | 21 |
 | 23 | `backend/src/money.ts` | 3 |
 | 24 | `backend/src/netSecurity.ts` | 7 |
 | 25 | `backend/src/objectStore.js` | 29 |
@@ -838,7 +838,7 @@ Code files scanned: **468**
 | 8 | `isMaintenanceWriteAllowed` | function | 87 |
 | 9 | `maintenanceWriteGuard` | function | 109 |
 
-### 3.22 `backend/src/middleware.js`
+### 3.22 `backend/src/middleware.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
