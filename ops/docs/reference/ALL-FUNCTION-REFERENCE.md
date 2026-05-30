@@ -45,7 +45,7 @@ Code files scanned: **468**
 | 33 | `backend/src/productImportPolicies.ts` | 10 |
 | 34 | `backend/src/requestContext.ts` | 5 |
 | 35 | `backend/src/routes/actionHistory.ts` | 12 |
-| 36 | `backend/src/routes/ai.js` | 3 |
+| 36 | `backend/src/routes/ai.ts` | 3 |
 | 37 | `backend/src/routes/auth.js` | 31 |
 | 38 | `backend/src/routes/branches.js` | 10 |
 | 39 | `backend/src/routes/catalog.ts` | 4 |
@@ -1080,7 +1080,7 @@ Code files scanned: **468**
 | 11 | `mapHistoryRows` | function | 103 |
 | 12 | `completeServerHistoryTransition` | function | 214 |
 
-### 3.36 `backend/src/routes/ai.js`
+### 3.36 `backend/src/routes/ai.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

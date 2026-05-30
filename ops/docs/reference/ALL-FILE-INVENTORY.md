@@ -16,7 +16,7 @@ Total files documented: **531**
 | 4 | `backend/package-lock.json` | backend-root | 6225 | 224.7 | Configuration/data manifest |
 | 5 | `backend/package.json` | backend-root | 67 | 3.7 | Configuration/data manifest |
 | 6 | `backend/README.md` | backend-root | 13 | 0.6 | Documentation |
-| 7 | `backend/server.js` | backend-root | 570 | 19.8 | Backend server entrypoint |
+| 7 | `backend/server.js` | backend-root | 570 | 19.9 | Backend server entrypoint |
 | 8 | `backend/src/accessControl.ts` | backend-core | 218 | 6.1 | Project source/support file |
 | 9 | `backend/src/analytics/duckdbRuntime.ts` | backend-core | 109 | 3.0 | Project source/support file |
 | 10 | `backend/src/authOtpGuards.ts` | backend-core | 34 | 1.2 | Project source/support file |
@@ -53,7 +53,7 @@ Total files documented: **531**
 | 41 | `backend/src/README.md` | backend-core | 12 | 0.7 | Documentation |
 | 42 | `backend/src/requestContext.ts` | backend-core | 65 | 1.7 | Project source/support file |
 | 43 | `backend/src/routes/actionHistory.ts` | backend-routes | 256 | 9.0 | API route handler |
-| 44 | `backend/src/routes/ai.js` | backend-routes | 270 | 9.2 | API route handler |
+| 44 | `backend/src/routes/ai.ts` | backend-routes | 270 | 9.2 | API route handler |
 | 45 | `backend/src/routes/auth.js` | backend-routes | 1148 | 40.6 | API route handler |
 | 46 | `backend/src/routes/branches.js` | backend-routes | 452 | 19.7 | API route handler |
 | 47 | `backend/src/routes/catalog.ts` | backend-routes | 110 | 3.0 | API route handler |

@@ -45,7 +45,7 @@ Code files documented: **468**
 | 33 | `backend/src/productImportPolicies.ts` | 1 | 1 | 1 | 3 |
 | 34 | `backend/src/requestContext.ts` | 1 | 1 | 0 | 2 |
 | 35 | `backend/src/routes/actionHistory.ts` | 5 | 1 | 4 | 1 |
-| 36 | `backend/src/routes/ai.js` | 6 | 1 | 5 | 1 |
+| 36 | `backend/src/routes/ai.ts` | 6 | 1 | 5 | 1 |
 | 37 | `backend/src/routes/auth.js` | 18 | 1 | 13 | 2 |
 | 38 | `backend/src/routes/branches.js` | 8 | 1 | 6 | 1 |
 | 39 | `backend/src/routes/catalog.ts` | 4 | 1 | 3 | 2 |
@@ -497,7 +497,7 @@ Code files documented: **468**
   - `./src/productBatches`
   - `./src/requestContext.ts`
   - `./src/routes/actionHistory.ts`
-  - `./src/routes/ai`
+  - `./src/routes/ai.ts`
   - `./src/routes/auth`
   - `./src/routes/branches`
   - `./src/routes/catalog.ts`
@@ -545,7 +545,7 @@ Code files documented: **468**
   - `backend/src/productBatches.js`
   - `backend/src/requestContext.ts`
   - `backend/src/routes/actionHistory.ts`
-  - `backend/src/routes/ai.js`
+  - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
   - `backend/src/routes/catalog.ts`
@@ -701,7 +701,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (12)
-  - `backend/src/routes/ai.js`
+  - `backend/src/routes/ai.ts`
   - `backend/src/routes/branches.js`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
@@ -741,7 +741,7 @@ Code files documented: **468**
   - `backend/src/organizationContext/index.ts`
   - `backend/src/productBatches.js`
   - `backend/src/routes/actionHistory.ts`
-  - `backend/src/routes/ai.js`
+  - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
   - `backend/src/routes/catalog.ts`
@@ -870,7 +870,7 @@ Code files documented: **468**
 - Referenced by (23)
   - `backend/server.js`
   - `backend/src/routes/actionHistory.ts`
-  - `backend/src/routes/ai.js`
+  - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
   - `backend/src/routes/catalog.ts`
@@ -981,7 +981,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/src/authOtpGuards.ts`
   - `backend/src/routes/actionHistory.ts`
-  - `backend/src/routes/ai.js`
+  - `backend/src/routes/ai.ts`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
   - `backend/src/routes/categories.ts`
@@ -1197,7 +1197,7 @@ Code files documented: **468**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.36 `backend/src/routes/ai.js`
+### 3.36 `backend/src/routes/ai.ts`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -1853,7 +1853,7 @@ Code files documented: **468**
   - `backend/src/netSecurity.ts`
   - `backend/src/security.ts`
 - Referenced by (2)
-  - `backend/src/routes/ai.js`
+  - `backend/src/routes/ai.ts`
   - `backend/src/services/portalAi.js`
 
 ### 3.65 `backend/src/services/backupPackages.js`
