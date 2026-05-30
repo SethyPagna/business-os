@@ -7,7 +7,7 @@ const { authToken, getAuditActor, hasPermission, isAdminControlUser } = require(
 const {
   isSensitiveActionHistory,
   permissionForActionHistory,
-} = require('../permissions')
+} = require('../permissions.ts')
 
 const router = express.Router()
 

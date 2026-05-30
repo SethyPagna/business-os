@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 568.
+- Latest completed implementation move in this roadmap: Move 569.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4753,7 +4753,7 @@ Move 420 status:
 Move 421 status:
 - Move 421 tightens startup/runtime infrastructure helper loops in
   `backend/src/config/index.js`, `backend/src/dataPath/index.js`,
-  `backend/src/organizationContext/index.js`, `backend/src/settingsSnapshot.js`,
+  `backend/src/organizationContext/index.js`, `backend/src/settingsSnapshot.ts`,
   and `backend/src/runtimeVersion.ts`. Env candidate filtering, runtime/data
   folder creation, organization folder creation, settings snapshot sanitizing,
   first existing runtime directory selection, and source-hash file filtering
@@ -4856,7 +4856,7 @@ Move 431 status:
 
 Move 432 status:
 - Move 432 tightens permission definition helpers in
-  `backend/src/permissions.js`. Permission definition expansion and
+  `backend/src/permissions.ts`. Permission definition expansion and
   definition lookup now use direct-loop helpers instead of `flatMap()`/`map()`
   and `find()` chains. Section labels, sensitivity metadata, default role
   permissions, action-history permission mapping, sensitive action detection,
@@ -6038,6 +6038,26 @@ Move 552 status:
   marker. The current source extension count is `.js: 94`, `.jsx: 0`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 269`, `.tsx: 107` outside generated/runtime
   folders.
+
+Move 569 status:
+- Move 569 converts `backend/src/permissions.ts` and
+  `backend/src/settingsSnapshot.ts` to package-safe TypeScript paths. Permission
+  policy now carries JSDoc contracts for permission definitions, default role
+  maps, action-history permission mapping, and sensitive-permission checks.
+  Settings snapshots now carry JSDoc contracts for upload path normalization,
+  object-key projection, media list sanitization, local/object existence
+  checks, and settings snapshot sanitization. Middleware, Postgres seeding,
+  action-history, auth/catalog/portal/product/settings routes, file assets,
+  upload reference cleanup, and focused tests use explicit `.ts` paths.
+  Focused permission-policy, settings snapshot object-storage,
+  portal-regression, file asset usage/cache, file asset storage/reconcile,
+  route-contract, offline-security, and performance verifier checks passed, as
+  did the full backend utility suite, schema audit, and Linux packaging proof.
+  `pkg` continues to warn for direct `.ts` scripts, so larger backend
+  route/service conversion still waits for a compile/staging package lane. The
+  current source extension count is
+  `.js: 64`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 299`, `.tsx: 107` outside
+  generated/runtime folders.
 
 Move 553 status:
 - Move 553 starts the backend source TypeScript lane by converting

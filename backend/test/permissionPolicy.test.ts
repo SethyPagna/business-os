@@ -5,7 +5,7 @@ const {
   DEFAULT_ROLE_PERMISSIONS,
   isSensitiveActionHistory,
   permissionForActionHistory,
-} = require('../src/permissions')
+} = require('../src/permissions.ts')
 
 assert.deepEqual(DEFAULT_ROLE_PERMISSIONS.admin, { all: true })
 assert.equal(DEFAULT_ROLE_PERMISSIONS.manager.products, true)

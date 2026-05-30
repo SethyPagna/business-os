@@ -8,7 +8,7 @@ const {
   sanitizeMediaPathAsync,
   sanitizeSettingValue,
   sanitizeSettingValueAsync,
-} = require('./settingsSnapshot')
+} = require('./settingsSnapshot.ts')
 
 function safeJsonArray(value) {
   try {

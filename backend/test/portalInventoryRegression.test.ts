@@ -83,7 +83,7 @@ runTest('product updates only re-check uniqueness when identifier fields actuall
 })
 
 runTest('upload path sanitization verifies object-storage references before serving them', () => {
-  const snapshotSource = readSource('src/settingsSnapshot.js')
+  const snapshotSource = readSource('src/settingsSnapshot.ts')
   const cleanupSource = readSource('src/uploadReferenceCleanup.js')
   const assetSource = readSource('src/fileAssets.js')
 

@@ -8,7 +8,7 @@ const {
   DEFAULT_ORGANIZATION_BOOTSTRAP,
 } = require('./config')
 const { coerceRow, translateSql } = require('./db/postgresQueryCompat')
-const { DEFAULT_ROLE_PERMISSIONS } = require('./permissions')
+const { DEFAULT_ROLE_PERMISSIONS } = require('./permissions.ts')
 
 function loadPgNative() {
   try {

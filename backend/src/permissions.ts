@@ -38,6 +38,16 @@ const PERMISSION_SECTIONS = [
   },
 ]
 
+/**
+ * @typedef {{ key: string, label: string, sensitivity?: string, section?: string, sectionLabel?: string }} PermissionDefinition
+ * @typedef {{ key: string, label: string, items?: PermissionDefinition[] }} PermissionSection
+ * @typedef {Record<string, boolean>} PermissionMap
+ * @typedef {{ entity?: unknown, scope?: unknown, payload?: Record<string, unknown> | null }} ActionHistoryPermissionInput
+ */
+
+/**
+ * @param {PermissionSection[]} sections
+ */
 function buildPermissionDefinitions(sections = []) {
   const definitions = []
   for (const section of sections) {
@@ -132,10 +142,16 @@ const SENSITIVE_ENTITY_KEYS = new Set([
   'drive_credentials',
 ])
 
+/**
+ * @param {unknown} value
+ */
 function normalizeKey(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+/**
+ * @param {unknown} key
+ */
 function getPermissionDefinition(key) {
   const normalized = normalizeKey(key)
   for (const permission of PERMISSION_DEFS) {
@@ -144,6 +160,9 @@ function getPermissionDefinition(key) {
   return null
 }
 
+/**
+ * @param {unknown} key
+ */
 function isSensitivePermissionKey(key) {
   const normalized = normalizeKey(key)
   if (SENSITIVE_PERMISSION_KEYS.has(normalized)) return true
@@ -151,6 +170,9 @@ function isSensitivePermissionKey(key) {
   return definition?.sensitivity === 'critical'
 }
 
+/**
+ * @param {ActionHistoryPermissionInput} input
+ */
 function permissionForActionHistory({ entity, scope } = {}) {
   const entityKey = normalizeKey(entity)
   const scopeKey = normalizeKey(scope)
@@ -159,6 +181,9 @@ function permissionForActionHistory({ entity, scope } = {}) {
     || (scopeKey && scopeKey !== 'global' ? scopeKey : '')
 }
 
+/**
+ * @param {ActionHistoryPermissionInput} input
+ */
 function isSensitiveActionHistory({ entity, scope, payload } = {}) {
   const entityKey = normalizeKey(entity)
   const scopeKey = normalizeKey(scope)
@@ -174,6 +199,10 @@ function isSensitiveActionHistory({ entity, scope, payload } = {}) {
   return false
 }
 
+/**
+ * @param {PermissionMap} permissions
+ * @param {unknown} key
+ */
 function hasPermissionValue(permissions = {}, key) {
   const normalized = normalizeKey(key)
   if (!normalized) return true

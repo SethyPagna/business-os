@@ -5,6 +5,14 @@ const path = require('path')
 const { UPLOADS_PATH } = require('./config')
 const { isObjectStorageEnabled, objectExists } = require('./objectStore')
 
+/**
+ * @typedef {Record<string, unknown>} SettingsSnapshot
+ * @typedef {Map<string, boolean> | null} UploadExistenceCache
+ */
+
+/**
+ * @param {unknown} value
+ */
 function normalizeUploadPublicPath(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
@@ -19,11 +27,17 @@ function normalizeUploadPublicPath(value) {
   return raw
 }
 
+/**
+ * @param {unknown} value
+ */
 function isUploadPublicPath(value) {
   const normalized = normalizeUploadPublicPath(value)
   return normalized.startsWith('/uploads/')
 }
 
+/**
+ * @param {unknown} value
+ */
 function toUploadObjectKey(value) {
   const normalized = normalizeUploadPublicPath(value)
   if (!normalized.startsWith('/uploads/')) return ''
@@ -31,6 +45,10 @@ function toUploadObjectKey(value) {
   return fileName ? `uploads/${fileName}` : ''
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} emptyValue
+ */
 function sanitizeMediaPath(value, emptyValue = '') {
   const normalized = normalizeUploadPublicPath(value)
   if (!normalized) return emptyValue
@@ -39,6 +57,11 @@ function sanitizeMediaPath(value, emptyValue = '') {
   return uploadPublicPathExists(normalized) ? normalized : emptyValue
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} emptyValue
+ * @param {UploadExistenceCache} existenceCache
+ */
 async function sanitizeMediaPathAsync(value, emptyValue = '', existenceCache = null) {
   const normalized = normalizeUploadPublicPath(value)
   if (!normalized) return emptyValue
@@ -55,6 +78,9 @@ async function sanitizeMediaPathAsync(value, emptyValue = '', existenceCache = n
   return exists ? normalized : emptyValue
 }
 
+/**
+ * @param {unknown[]} values
+ */
 function sanitizeMediaList(values = []) {
   const items = Array.isArray(values) ? values : []
   const seen = new Set()
@@ -68,6 +94,10 @@ function sanitizeMediaList(values = []) {
   return sanitized
 }
 
+/**
+ * @param {unknown[]} values
+ * @param {UploadExistenceCache} existenceCache
+ */
 async function sanitizeMediaListAsync(values = [], existenceCache = null) {
   const items = Array.isArray(values) ? values : []
   const seen = new Set()
@@ -81,6 +111,9 @@ async function sanitizeMediaListAsync(values = [], existenceCache = null) {
   return sanitized
 }
 
+/**
+ * @param {unknown} value
+ */
 function uploadPublicPathExists(value) {
   const normalized = normalizeUploadPublicPath(value)
   if (!normalized.startsWith('/uploads/')) return false
@@ -93,14 +126,24 @@ function uploadPublicPathExists(value) {
   }
 }
 
+/**
+ * @param {unknown} value
+ */
 function sanitizeSettingValue(value) {
   return sanitizeMediaPath(value, '')
 }
 
+/**
+ * @param {unknown} value
+ * @param {UploadExistenceCache} existenceCache
+ */
 async function sanitizeSettingValueAsync(value, existenceCache = null) {
   return sanitizeMediaPathAsync(value, '', existenceCache)
 }
 
+/**
+ * @param {SettingsSnapshot} snapshot
+ */
 function sanitizeSettingsSnapshot(snapshot = {}) {
   const next = { ...snapshot }
   for (const key of Object.keys(next)) {
@@ -109,6 +152,9 @@ function sanitizeSettingsSnapshot(snapshot = {}) {
   return next
 }
 
+/**
+ * @param {SettingsSnapshot} snapshot
+ */
 async function sanitizeSettingsSnapshotAsync(snapshot = {}) {
   const next = { ...snapshot }
   const existenceCache = new Map()

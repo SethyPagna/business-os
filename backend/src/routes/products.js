@@ -9,7 +9,7 @@ const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit,
 const { registerUploadFromRequest, storeDataUrlAsset } = require('../fileAssets')
 const { isSafeExternalImageReference } = require('../netSecurity.ts')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
-const { sanitizeMediaList } = require('../settingsSnapshot')
+const { sanitizeMediaList } = require('../settingsSnapshot.ts')
 const { normalizeClientRequestId } = require('../idempotency.ts')
 const { normalizePriceValue } = require('../money.ts')
 const { normalizeProductDiscount } = require('../productDiscounts.ts')

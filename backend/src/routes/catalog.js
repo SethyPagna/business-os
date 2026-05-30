@@ -3,7 +3,7 @@
 const express = require('express')
 const { db } = require('../database')
 const { tryParse } = require('../helpers')
-const { sanitizeMediaList } = require('../settingsSnapshot')
+const { sanitizeMediaList } = require('../settingsSnapshot.ts')
 
 const router = express.Router()
 

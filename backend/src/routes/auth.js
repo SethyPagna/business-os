@@ -61,7 +61,7 @@ const {
   getOrganizationContextForUser,
   ensureOrganizationFilesystemLayout,
 } = require('../organizationContext')
-const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
+const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot.ts')
 const { classifyRequestAccess } = require('../accessControl.ts')
 const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL, R2_PUBLIC_BASE_URL } = require('../config')
 const { buildRuntimeDescriptor } = require('../runtimeState/index.ts')

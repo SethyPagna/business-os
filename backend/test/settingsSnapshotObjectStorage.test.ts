@@ -22,7 +22,7 @@ function runTest(name, fn) {
 
 function withObjectStoreStub(stubbedExports, callback) {
   const objectStorePath = require.resolve('../src/objectStore')
-  const settingsSnapshotPath = require.resolve('../src/settingsSnapshot')
+  const settingsSnapshotPath = require.resolve('../src/settingsSnapshot.ts')
   const uploadCleanupPath = require.resolve('../src/uploadReferenceCleanup')
   const objectStore = require(objectStorePath)
   const originals = {}
@@ -137,7 +137,7 @@ runTest('async settings snapshot drops missing object-storage upload paths', asy
     isObjectStorageEnabled: () => true,
     objectExists: async (key) => key === 'uploads/keep.png',
   }, async () => {
-    const { sanitizeSettingsSnapshotAsync } = require('../src/settingsSnapshot')
+    const { sanitizeSettingsSnapshotAsync } = require('../src/settingsSnapshot.ts')
     const snapshot = await sanitizeSettingsSnapshotAsync({
       business_name: 'Leang Cosmetics',
       customer_portal_logo_image: '/uploads/missing.png',

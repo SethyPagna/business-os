@@ -10,7 +10,7 @@ const { deleteObject, deleteObjects, getObjectStream, isObjectStorageEnabled, li
 const { loadSharp } = require('./optionalSharp.ts')
 const { validateUploadedBuffer } = require('./uploadSecurity.ts')
 const { repairMissingUploadReferencesAsync } = require('./uploadReferenceCleanup')
-const { isUploadPublicPath, normalizeUploadPublicPath } = require('./settingsSnapshot')
+const { isUploadPublicPath, normalizeUploadPublicPath } = require('./settingsSnapshot.ts')
 
 const sharp = loadSharp()
 

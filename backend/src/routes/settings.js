@@ -4,7 +4,7 @@ const { db }  = require('../database')
 const { ok, err, broadcast, logOp, audit } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl.ts')
-const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
+const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot.ts')
 const { requestUploadStorageReconcile } = require('../fileAssets')
 const { hasColumn } = require('../schemaMetadata.ts')
 const {

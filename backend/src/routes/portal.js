@@ -15,7 +15,7 @@ const { generatePortalAiResponse, getPortalAiUsageStatus } = require('../service
 const { checkRateLimit } = require('../security')
 const { getDefaultOrganization, getPortalPublicPath } = require('../organizationContext')
 const { assertSafeOutboundUrl, isSafeExternalImageReference } = require('../netSecurity.ts')
-const { sanitizeMediaList, sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
+const { sanitizeMediaList, sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot.ts')
 const { getOrSetJson } = require('../runtimeCache.ts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')
 
