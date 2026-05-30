@@ -27,7 +27,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 101.0 | 2144 |
 | `backend/src/routes/products.js` | 99.1 | 2218 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 85.1 | 1846 |
-| `backend/src/routes/inventory.js` | 83.8 | 1881 |
+| `backend/src/routes/inventory.ts` | 83.8 | 1881 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 78.5 | 1732 |
 | `frontend/src/AppContext.tsx` | 73.5 | 1826 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 68.4 | 1596 |
@@ -55,7 +55,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/pos/POS.tsx` | 2218 | 117.4 |
 | `backend/src/routes/products.js` | 2218 | 99.1 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2144 | 101.0 |
-| `backend/src/routes/inventory.js` | 1881 | 83.8 |
+| `backend/src/routes/inventory.ts` | 1881 | 83.8 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1846 | 85.1 |
 | `frontend/src/AppContext.tsx` | 1826 | 73.5 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 1732 | 78.5 |
@@ -914,7 +914,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   collection and merged family-row sorting now use direct-loop helpers while
   preserving parent/variant expansion, de-duplication, and product ordering. A
   callback scan now reports no `map()`, `filter()`, `forEach()`, `reduce()`,
-  `find()`, or `Array.from()` hits in `backend/src/routes/inventory.js`.
+  `find()`, or `Array.from()` hits in `backend/src/routes/inventory.ts`.
 - Move 414 tightens sale stock availability sampling. The insufficient-stock
   validation path now uses a direct helper to find the sample sale item for an
   error message, preserving required quantity aggregation, branch scoping, and

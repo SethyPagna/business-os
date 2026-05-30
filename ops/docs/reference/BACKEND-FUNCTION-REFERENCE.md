@@ -4,16 +4,15 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **4**
+Total files documented: **3**
 
 ## 2. Symbol Count by File
 
 | No. | File | Symbols | Route handlers |
 |---:|---|---:|---:|
 | 1 | `backend/server.js` | 23 | 0 |
-| 2 | `backend/src/routes/inventory.js` | 32 | 16 |
-| 3 | `backend/src/routes/products.js` | 64 | 12 |
-| 4 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 2 | `backend/src/routes/products.js` | 64 | 12 |
+| 3 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -45,65 +44,7 @@ Total files documented: **4**
 | 22 | `registerShutdownHandlers` | function | 494 |
 | 23 | `bootstrapServer` | function | 511 |
 
-### 3.2 `backend/src/routes/inventory.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `normalizeImportedTimestamp` | function | 28 |
-| 2 | `recalcProductStock` | function | 36 |
-| 3 | `findTransferByClientRequestId` | function | 40 |
-| 4 | `getStockTransferNoteColumn` | function | 54 |
-| 5 | `buildActiveBranchIndex` | function | 58 |
-| 6 | `collectSetValues` | function | 73 |
-| 7 | `compareInventoryProductRows` | function | 81 |
-| 8 | `insertInventoryProductRowSorted` | function | 89 |
-| 9 | `collectSortedInventoryProductRows` | function | 97 |
-| 10 | `cleanMoveReason` | function | 105 |
-| 11 | `normalizePositiveInt` | function | 111 |
-| 12 | `hasInventoryStatsFilter` | function | 117 |
-| 13 | `cleanInventoryReasonEntry` | function | 125 |
-| 14 | `normalizeInventoryReasonList` | function | 139 |
-| 15 | `loadSavedInventoryReasons` | function | 161 |
-| 16 | `persistSavedInventoryReasons` | function | 172 |
-| 17 | `splitSearchTerms` | function | 182 |
-| 18 | `normalizeMovementDisplayText` | function | 198 |
-| 19 | `sanitizeInventoryResponseProduct` | function | 209 |
-| 20 | `appendInventoryProductFilters` | function | 222 |
-| 21 | `hydrateInventoryProducts` | function | 278 |
-| 22 | `appendAllocationMovementEntries` | function | 301 |
-| 23 | `buildInsertColumnSql` | function | 316 |
-| 24 | `buildInventoryFinancialJoinSql` | function | 329 |
-| 25 | `inventoryFinancialSelectSql` | function | 435 |
-| 26 | `getFilteredInventoryStats` | function | 449 |
-| 27 | `normalizeRfidId` | function | 1231 |
-| 28 | `getRfidSession` | function | 1235 |
-| 29 | `getBranchLedgerQty` | function | 1239 |
-| 30 | `refreshRfidSessionCounts` | function | 1243 |
-| 31 | `upsertRfidSessionItem` | function | 1278 |
-| 32 | `recordRfidEvent` | function | 1303 |
-
-#### 3.2.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | POST | `/adjust` | 500 |
-| 2 | POST | `/transfer` | 695 |
-| 3 | GET | `/reasons` | 863 |
-| 4 | PUT | `/reasons` | 871 |
-| 5 | POST | `/move-row` | 884 |
-| 6 | GET | `/products/search` | 1100 |
-| 7 | GET | `/rfid/status` | 1358 |
-| 8 | POST | `/rfid/tags` | 1385 |
-| 9 | GET | `/rfid/tags/search` | 1422 |
-| 10 | POST | `/rfid/sessions` | 1451 |
-| 11 | POST | `/rfid/sessions/:id/events` | 1472 |
-| 12 | GET | `/rfid/sessions/:id/review` | 1494 |
-| 13 | POST | `/rfid/sessions/:id/apply` | 1514 |
-| 14 | GET | `/stats` | 1597 |
-| 15 | GET | `/summary` | 1611 |
-| 16 | GET | `/movements` | 1779 |
-
-### 3.3 `backend/src/routes/products.js`
+### 3.2 `backend/src/routes/products.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -172,7 +113,7 @@ Total files documented: **4**
 | 63 | `parseIncomingImageRefs` | const arrow | 1768 |
 | 64 | `loadCurrentGallery` | const arrow | 1804 |
 
-#### 3.3.1 Route Handlers
+#### 3.2.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -189,7 +130,7 @@ Total files documented: **4**
 | 11 | POST | `/upload-image` | 1487 |
 | 12 | POST | `/bulk-import` | 1505 |
 
-### 3.4 `backend/src/services/importJobs.js`
+### 3.3 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

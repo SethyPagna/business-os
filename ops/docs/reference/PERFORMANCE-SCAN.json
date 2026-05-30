@@ -12,7 +12,7 @@
   "largestBuiltChunk": "frontend/dist/assets/vendor-zxing-BxcS2Ffh.js",
   "largestBuiltChunkBytes": 446639,
   "oversizedSourceFiles": [
-    "backend/src/routes/inventory.js",
+    "backend/src/routes/inventory.ts",
     "backend/src/routes/products.js",
     "backend/src/routes/sales.ts",
     "backend/src/routes/system/index.ts",
@@ -108,7 +108,7 @@
       "lines": 1846
     },
     {
-      "file": "backend/src/routes/inventory.js",
+      "file": "backend/src/routes/inventory.ts",
       "size": 85861,
       "lines": 1881
     },
@@ -225,7 +225,7 @@
       "lines": 2144
     },
     {
-      "file": "backend/src/routes/inventory.js",
+      "file": "backend/src/routes/inventory.ts",
       "size": 85861,
       "lines": 1881
     },

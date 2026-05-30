@@ -119,7 +119,7 @@ Largest tracked source/hotspot areas by file count:
   flows. Do not delete unless scanner replacement is implemented and verified.
 - The largest maintainable source modules remain `Inventory.tsx`,
   `importJobs.js`, `CatalogPage.tsx`, `Dashboard.tsx`, `Products.tsx`,
-  `products.js`, `POS.tsx`, and `inventory.js`.
+  `products.js`, `POS.tsx`, and `inventory.ts`.
 
 ## Repeat Loop
 
@@ -635,7 +635,7 @@ SQL, schema audit, and relationship-doc updates instead of entering the generic
 conversion queue.
 
 Move 174 completes the next SQL/data-path slice in
-`backend/src/routes/inventory.js`. The RFID stock-apply route now prepares
+`backend/src/routes/inventory.ts`. The RFID stock-apply route now prepares
 branch, product, branch-stock, movement, product-summary, and session-finalize
 statements once per request and reuses them across confirmed product rows. The
 route stays in Node.js because it coordinates request validation, audit, and

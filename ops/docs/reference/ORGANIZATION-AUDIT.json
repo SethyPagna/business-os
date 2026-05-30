@@ -156,7 +156,7 @@
     "backend/src/fileAssets.ts",
     "backend/src/routes/auth.ts",
     "backend/src/routes/contacts.ts",
-    "backend/src/routes/inventory.js",
+    "backend/src/routes/inventory.ts",
     "backend/src/routes/portal.ts",
     "backend/src/routes/products.js",
     "backend/src/routes/returns.ts",

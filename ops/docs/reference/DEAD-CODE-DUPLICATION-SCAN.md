@@ -483,7 +483,7 @@ matching stay centralized instead of duplicating checkout logic inside
 | `backend/src/services/importJobs.js` | Large import pipeline with queue, CSV, image, and policy branches. | Import tests plus live import smoke. |
 | `frontend/src/components/catalog/CatalogPage.tsx` | Large mixed admin/public/editor surface. | Catalog helper tests plus public portal check. |
 | `frontend/src/api/methods.ts` | Large API method registry. | API contract/source tests and app bootstrap check. |
-| `backend/src/routes/products.js` and `backend/src/routes/inventory.js` | Query-heavy route files. | Route contract tests, schema audit, product/inventory live checks. |
+| `backend/src/routes/products.js` and `backend/src/routes/inventory.ts` | Query-heavy route files. | Route contract tests, schema audit, product/inventory live checks. |
 
 ## Duplicate Pattern Watchlist
 
@@ -505,7 +505,7 @@ matching stay centralized instead of duplicating checkout logic inside
   language/runtime candidate; DDL optimization is tracked by the schema
   migration backlog instead.
 - Move 174 removes repeated RFID stock-apply statement setup from the
-  confirmed-product loop in `backend/src/routes/inventory.js`; the loop now
+  confirmed-product loop in `backend/src/routes/inventory.ts`; the loop now
   reuses request-scoped prepared statements for branch/product/stock/movement
   and session updates.
 - Move 175 removes duplicate portal catalog product payload assembly from

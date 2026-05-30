@@ -54,7 +54,7 @@ Code files scanned: **468**
 | 42 | `backend/src/routes/customTables.ts` | 9 |
 | 43 | `backend/src/routes/files.ts` | 3 |
 | 44 | `backend/src/routes/importJobs.ts` | 16 |
-| 45 | `backend/src/routes/inventory.js` | 32 |
+| 45 | `backend/src/routes/inventory.ts` | 32 |
 | 46 | `backend/src/routes/notifications.ts` | 27 |
 | 47 | `backend/src/routes/organizations.ts` | 0 |
 | 48 | `backend/src/routes/portal.ts` | 60 |
@@ -1237,7 +1237,7 @@ Code files scanned: **468**
 | 15 | `shouldForceDelete` | function | 190 |
 | 16 | `auditImportJobEvent` | function | 195 |
 
-### 3.45 `backend/src/routes/inventory.js`
+### 3.45 `backend/src/routes/inventory.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

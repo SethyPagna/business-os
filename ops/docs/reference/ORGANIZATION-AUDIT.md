@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T23:16:30.886Z
+Generated: 2026-05-30T23:26:54.183Z
 
 ## Summary
 
@@ -14,14 +14,14 @@ Generated: 2026-05-30T23:16:30.886Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 349 |
+| .ts | 350 |
 | .tsx | 107 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
-| .js | 3 |
 | .sh | 3 |
+| .js | 2 |
 | .sql | 2 |
 | .css | 1 |
 
@@ -65,9 +65,9 @@ Generated: 2026-05-30T23:16:30.886Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7984 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7076 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7095 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5382 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5401 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -84,7 +84,7 @@ Generated: 2026-05-30T23:16:30.886Z
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
 | frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
-| backend/src/routes/inventory.js | 1881 | backend/routes |
+| backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |
@@ -120,7 +120,7 @@ Generated: 2026-05-30T23:16:30.886Z
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
 | backend/src/routes/portal.ts | 12 | backend/routes |
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
-| backend/src/routes/inventory.js | 11 | backend/routes |
+| backend/src/routes/inventory.ts | 11 | backend/routes |
 | frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |
 | frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |
 | frontend/src/components/contacts/Contacts.tsx | 10 | frontend/components/contacts |

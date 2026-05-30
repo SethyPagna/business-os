@@ -62,7 +62,7 @@ Total files documented: **531**
 | 50 | `backend/src/routes/customTables.ts` | backend-routes | 259 | 9.5 | API route handler |
 | 51 | `backend/src/routes/files.ts` | backend-routes | 133 | 5.2 | API route handler |
 | 52 | `backend/src/routes/importJobs.ts` | backend-routes | 501 | 17.3 | API route handler |
-| 53 | `backend/src/routes/inventory.js` | backend-routes | 1881 | 83.8 | API route handler |
+| 53 | `backend/src/routes/inventory.ts` | backend-routes | 1881 | 83.8 | API route handler |
 | 54 | `backend/src/routes/notifications.ts` | backend-routes | 581 | 19.6 | API route handler |
 | 55 | `backend/src/routes/organizations.ts` | backend-routes | 68 | 2.0 | API route handler |
 | 56 | `backend/src/routes/portal.ts` | backend-routes | 1407 | 51.5 | API route handler |
