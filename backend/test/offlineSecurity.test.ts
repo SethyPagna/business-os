@@ -23,7 +23,7 @@ const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'u
 const syncSource = fs.existsSync(path.join(__dirname, '..', 'src/routes/sync.ts'))
   ? read('src/routes/sync.ts')
   : ''
-const serverUtilsSource = read('src/serverUtils.js')
+const serverUtilsSource = read('src/serverUtils.ts')
 const maintenanceLockSource = read('src/maintenanceLock.ts')
 const systemRouteSource = read('src/routes/system/index.js')
 

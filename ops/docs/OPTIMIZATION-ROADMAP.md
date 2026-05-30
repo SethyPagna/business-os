@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 602.
+- Latest completed implementation move in this roadmap: Move 603.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4840,7 +4840,7 @@ Move 429 status:
 
 Move 430 status:
 - Move 430 tightens server utility host and sanitizer helpers in
-  `backend/src/serverUtils.js`. Configured public host collection, customer
+  `backend/src/serverUtils.ts`. Configured public host collection, customer
   portal host de-duplication, and recursive array key sanitization now use
   direct-loop helpers instead of callback chains. Origin allowlist behavior,
   customer portal host precedence, WebSocket origin checks, CSP/cache headers,
@@ -6798,3 +6798,20 @@ Move 602 status:
   scripts, so broader backend conversions still wait for a compile/staging
   package lane. The generated language audit now reports `JavaScript: 20`,
   `TypeScript: 291`, and `React TSX: 107` across the active scan roots.
+
+Move 603 status:
+- Move 603 converts `backend/src/serverUtils.ts` to a package-safe TypeScript
+  path. Origin/host normalization, configured public/customer portal host
+  detection, CORS policy, WebSocket origin checks, Cloudflare Access
+  diagnostics, prototype-pollution key cleanup, request string sanitization,
+  SPA fallback eligibility, no-store and HTML headers, tunnel CSP/permissions
+  headers, static/upload cache headers, customer portal route detection, and
+  server error mapping remain unchanged on the existing CommonJS helper style.
+  Server bootstrap, WebSocket setup, sync route diagnostics, server/offline
+  security tests, hardening policy, and roadmap docs now point at the explicit
+  `.ts` helper path. Focused helper load, server-utils, websocket,
+  offline-security, route-contract, backend utility, schema audit, stale-path,
+  and Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The generated language audit now reports `JavaScript: 19`,
+  `TypeScript: 292`, and `React TSX: 107` across the active scan roots.

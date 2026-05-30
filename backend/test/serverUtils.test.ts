@@ -15,7 +15,7 @@ const {
   setFrontendStaticHeaders,
   setHtmlNoCacheHeaders,
   isCustomerPortalRoutePath,
-} = require('../src/serverUtils')
+} = require('../src/serverUtils.ts')
 
 let failed = 0
 
@@ -183,7 +183,7 @@ runTest('setTunnelSecurityHeaders emits strict internal CSP with wasm support an
 })
 
 runTest('no-store helper emits scanner-friendly cache directives', () => {
-  const { setNoStoreHeaders } = require('../src/serverUtils')
+  const { setNoStoreHeaders } = require('../src/serverUtils.ts')
   const headers = new Map()
   const res = {
     setHeader(name, value) {

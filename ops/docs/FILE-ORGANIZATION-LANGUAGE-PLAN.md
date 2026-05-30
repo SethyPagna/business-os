@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 602 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 603 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 42`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 321`,
+  `.js: 41`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 322`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3359,7 +3359,7 @@ Decision rule:
     remain unchanged. This was a backend storage utility cleanup only; no
     folder move, schema migration, or language conversion was needed.
 420. Tighten server utility host and sanitizer helpers. Done:
-    `backend/src/serverUtils.js` now uses direct-loop helpers for configured
+    `backend/src/serverUtils.ts` now uses direct-loop helpers for configured
     public host collection, customer portal host de-duplication, and recursive
     array key sanitization. Origin allowlist behavior, customer portal host
     precedence, WebSocket origin checks, CSP/cache headers, and
@@ -5104,6 +5104,22 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The
     generated language audit now reports `JavaScript: 20`, `TypeScript: 291`,
     and `React TSX: 107` across the active scan roots.
+603. Convert server utility/security helper to a package-safe TypeScript path.
+    Done: `backend/src/serverUtils.ts` keeps origin/host normalization,
+    configured public/customer portal host detection, CORS policy, WebSocket
+    origin checks, Cloudflare Access diagnostics, prototype-pollution key
+    cleanup, request string sanitization, SPA fallback eligibility, no-store
+    and HTML headers, tunnel CSP/permissions headers, static/upload cache
+    headers, customer portal route detection, and server error mapping on the
+    existing CommonJS helper style. Server bootstrap, WebSocket setup, sync
+    route diagnostics, server/offline security tests, hardening policy, and
+    roadmap docs now point at the explicit `.ts` helper path. Focused helper
+    load, server-utils, websocket, offline-security, route-contract, backend
+    utility, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so
+    broader backend conversions remain blocked on the future compile/staging
+    lane. The generated language audit now reports `JavaScript: 19`,
+    `TypeScript: 292`, and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

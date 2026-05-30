@@ -11,7 +11,7 @@
 const { WebSocketServer } = require('ws')
 const { wss_clients } = require('./helpers')
 const { getSessionUser } = require('./sessionAuth.ts')
-const { isAllowedWebSocketOrigin } = require('./serverUtils')
+const { isAllowedWebSocketOrigin } = require('./serverUtils.ts')
 
 const WS_MAX_MESSAGE_BYTES = Math.max(256, Number(process.env.WS_MAX_MESSAGE_BYTES || 8 * 1024))
 const WS_MAX_MESSAGES_PER_WINDOW = Math.max(5, Number(process.env.WS_MAX_MESSAGES_PER_WINDOW || 60))

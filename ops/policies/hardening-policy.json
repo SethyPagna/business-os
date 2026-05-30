@@ -165,7 +165,7 @@
       "name": "Server hardening and fast static assets",
       "files": [
         {
-          "path": "backend/src/serverUtils.js",
+          "path": "backend/src/serverUtils.ts",
           "mustContain": [
             "Content-Security-Policy",
             "object-src 'none'",

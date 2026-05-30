@@ -55,7 +55,7 @@ const {
   setFrontendStaticHeaders,
   setUploadStaticHeaders,
   mapServerError,
-} = require('./src/serverUtils')
+} = require('./src/serverUtils.ts')
 const {
   PORT,
   STORAGE_ROOT,

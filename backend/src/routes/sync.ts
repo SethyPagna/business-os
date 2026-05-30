@@ -6,7 +6,7 @@ const path = require('path')
 const express = require('express')
 const { PORT, STORAGE_ROOT } = require('../config/index.ts')
 const { authToken, routeRateLimit, validateUploadBufferPayload } = require('../middleware.ts')
-const { getCloudflareAccessDiagnostics } = require('../serverUtils')
+const { getCloudflareAccessDiagnostics } = require('../serverUtils.ts')
 
 const router = express.Router()
 const CHUNK_SIZE_BYTES = 1024 * 1024
