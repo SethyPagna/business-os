@@ -85,7 +85,7 @@ function canUseApiFallback(config) {
 
 async function verifyRuntimeObjectStoreFallback(reason) {
   console.warn(`R2 S3-compatible check failed (${reason}); trying Cloudflare API fallback used by the runtime.`)
-  const { testObjectStore } = requireFromBackend('./src/objectStore')
+  const { testObjectStore } = requireFromBackend('./src/objectStore.ts')
   const result = await testObjectStore()
   if (!result?.ok) throw new Error('Cloudflare API fallback object-store verification did not return ok')
   console.log(`R2 Cloudflare API fallback ok: bucket=${result.bucket} endpoint=${result.endpoint}`)

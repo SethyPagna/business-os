@@ -39,7 +39,7 @@ const {
 } = require('./googleOauth.ts')
 const { initializeBullQueue, getQueueStatus } = require('./importJobs')
 const { listBackupVersions } = require('./backupPackages')
-const { testObjectStore } = require('../objectStore')
+const { testObjectStore } = require('../objectStore.ts')
 
 function trim(value) {
   return String(value || '').trim()

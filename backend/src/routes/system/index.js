@@ -77,7 +77,7 @@ const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = requir
 const { getMaintenanceLock, withMaintenanceLock } = require('../../maintenanceLock.ts')
 const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness.ts')
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime.ts')
-const { testObjectStore } = require('../../objectStore')
+const { testObjectStore } = require('../../objectStore.ts')
 const { buildIntegrationDoctor } = require('../../services/integrationDoctor.ts')
 const { deleteAllStoredUploads, requestUploadStorageReconcile } = require('../../fileAssets')
 

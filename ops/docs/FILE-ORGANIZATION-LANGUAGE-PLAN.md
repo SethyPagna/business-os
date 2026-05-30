@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 601 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 602 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 43`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 320`,
+  `.js: 42`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 321`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3351,7 +3351,7 @@ Decision rule:
     unchanged. This was a backend shared-helper cleanup only; no folder move,
     schema migration, or language conversion was needed.
 419. Tighten object-store helper loops. Done:
-    `backend/src/objectStore.js` now uses direct-loop helpers for Cloudflare
+    `backend/src/objectStore.ts` now uses direct-loop helpers for Cloudflare
     R2 API query construction, delete-key normalization and de-duplication,
     bulk delete object descriptors, Cloudflare object-list serialization, and
     S3 object-list serialization. S3/R2 driver selection, R2 API fallback
@@ -5088,6 +5088,22 @@ Decision rule:
     broader backend conversions remain blocked on the future compile/staging
     lane. The generated language audit now reports `JavaScript: 21`,
     `TypeScript: 290`, and `React TSX: 107` across the active scan roots.
+602. Convert object storage helper to a package-safe TypeScript path.
+    Done: `backend/src/objectStore.ts` keeps R2/MinIO driver detection, R2 API
+    fallback token/account discovery, Cloudflare object URLs, timeout-wrapped
+    API calls, S3 client reuse, object-key normalization and dedupe, bucket
+    checks, put/read/head/delete/list operations, stream conversion, and the
+    object-store doctor test on the existing CommonJS helper style. Server
+    upload serving, file asset storage, settings snapshot sanitization, backup
+    packages, integration doctor, system route, R2 verifier, backend source
+    probes, and backend docs now point at the explicit `.ts` helper path.
+    Focused helper load,
+    settings object-storage, backup hardening, route-contract, backend utility,
+    schema audit, stale-path, and Linux packaging proof passed. Packaging still
+    warns for direct `.ts` entries in `pkg.scripts`, so broader backend
+    conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 20`, `TypeScript: 291`,
+    and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

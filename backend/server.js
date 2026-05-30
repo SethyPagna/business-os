@@ -40,7 +40,7 @@ const { db, runDatabaseMaintenance } = require('./src/database.ts')
 const { wss_clients } = require('./src/helpers')
 const { getRuntimeVersion } = require('./src/runtimeVersion.ts')
 const { getDuckDbRuntimeStatus } = require('./src/analytics/duckdbRuntime.ts')
-const { getObjectStream, isObjectStorageEnabled } = require('./src/objectStore')
+const { getObjectStream, isObjectStorageEnabled } = require('./src/objectStore.ts')
 const { getLegacyBatchBackfillStatus, scheduleLegacyBatchBackfill } = require('./src/productBatches')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext/index.ts')
 const {

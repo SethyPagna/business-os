@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 601.
+- Latest completed implementation move in this roadmap: Move 602.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4830,7 +4830,7 @@ Move 428 status:
   integrity response shape, and profit calculations remain unchanged.
 
 Move 429 status:
-- Move 429 tightens object-store helper loops in `backend/src/objectStore.js`.
+- Move 429 tightens object-store helper loops in `backend/src/objectStore.ts`.
   Cloudflare R2 API query construction, delete-key normalization and
   de-duplication, bulk delete object descriptors, Cloudflare object-list
   serialization, and S3 object-list serialization now use named direct-loop
@@ -6782,3 +6782,19 @@ Move 601 status:
   compile/staging package lane. The generated language audit now reports
   `JavaScript: 21`, `TypeScript: 290`, and `React TSX: 107` across the active
   scan roots.
+
+Move 602 status:
+- Move 602 converts `backend/src/objectStore.ts` to a package-safe TypeScript
+  path. R2/MinIO driver detection, R2 API fallback token/account discovery,
+  Cloudflare object URL building, timeout-wrapped API calls, S3 client reuse,
+  object-key normalization/dedupe, bucket checks, put/read/head/delete/list
+  operations, stream conversion, and the object-store doctor test remain
+  unchanged on the existing CommonJS helper style. Server upload serving, file
+  asset storage, settings snapshot sanitization, backup packages, integration
+  doctor, system route, R2 verifier, backend source probes, and backend docs
+  now point at the explicit `.ts` helper path. Focused helper load, settings object-storage,
+  backup hardening, route-contract, backend utility, schema audit, stale-path,
+  and Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The generated language audit now reports `JavaScript: 20`,
+  `TypeScript: 291`, and `React TSX: 107` across the active scan roots.

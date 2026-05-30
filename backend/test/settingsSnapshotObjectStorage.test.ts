@@ -21,7 +21,7 @@ function runTest(name, fn) {
 }
 
 function withObjectStoreStub(stubbedExports, callback) {
-  const objectStorePath = require.resolve('../src/objectStore')
+  const objectStorePath = require.resolve('../src/objectStore.ts')
   const settingsSnapshotPath = require.resolve('../src/settingsSnapshot.ts')
   const uploadCleanupPath = require.resolve('../src/uploadReferenceCleanup.ts')
   const objectStore = require(objectStorePath)

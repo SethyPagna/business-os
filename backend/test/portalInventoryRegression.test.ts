@@ -87,7 +87,7 @@ runTest('upload path sanitization verifies object-storage references before serv
   const cleanupSource = readSource('src/uploadReferenceCleanup.ts')
   const assetSource = readSource('src/fileAssets.js')
 
-  assert.match(snapshotSource, /const \{ isObjectStorageEnabled, objectExists \} = require\('\.\/objectStore'\)/, 'settings snapshot sanitization should know when object storage is enabled and how to verify object existence')
+  assert.match(snapshotSource, /const \{ isObjectStorageEnabled, objectExists \} = require\('\.\/objectStore\.ts'\)/, 'settings snapshot sanitization should know when object storage is enabled and how to verify object existence')
   assert.match(snapshotSource, /async function sanitizeMediaPathAsync/, 'settings snapshot sanitization should expose an async object-storage-aware path check')
   assert.match(snapshotSource, /await objectExists\(toUploadObjectKey\(normalized\)\)/, 'object-storage media paths should be verified before they are returned')
   assert.match(snapshotSource, /const \[cleanPath\] = raw\.split\(\/\[\?#\]\/, 1\)/, 'upload sanitization should strip cache-busting query strings from persisted upload paths')
