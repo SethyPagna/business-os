@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **25**
+Total files documented: **24**
 
 ## 2. Symbol Count by File
 
@@ -28,13 +28,12 @@ Total files documented: **25**
 | 16 | `backend/src/routes/system/index.js` | 44 | 38 |
 | 17 | `backend/src/routes/users.js` | 26 | 16 |
 | 18 | `backend/src/serverUtils.js` | 26 | 0 |
-| 19 | `backend/src/services/aiGateway.js` | 17 | 0 |
-| 20 | `backend/src/services/backupPackages.js` | 59 | 0 |
-| 21 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
-| 22 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 23 | `backend/src/services/importJobs.js` | 175 | 0 |
-| 24 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 25 | `backend/src/systemJobs.js` | 28 | 0 |
+| 19 | `backend/src/services/backupPackages.js` | 59 | 0 |
+| 20 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
+| 21 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 22 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 23 | `backend/src/services/portalAi.js` | 42 | 0 |
+| 24 | `backend/src/systemJobs.js` | 28 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -916,29 +915,7 @@ Total files documented: **25**
 | 25 | `setUploadStaticHeaders` | function | 368 |
 | 26 | `mapServerError` | function | 378 |
 
-### 3.19 `backend/src/services/aiGateway.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `nowIso` | function | 6 |
-| 2 | `trim` | function | 10 |
-| 3 | `parseJsonSafe` | function | 14 |
-| 4 | `clamp` | function | 22 |
-| 5 | `maskApiKey` | function | 26 |
-| 6 | `normalizeTextList` | function | 33 |
-| 7 | `getProviderMeta` | function | 106 |
-| 8 | `normalizeProviderPayload` | function | 110 |
-| 9 | `serializeProviderRow` | function | 137 |
-| 10 | `providerCanUseWebResearch` | function | 170 |
-| 11 | `resolveProviderEndpoint` | function | 175 |
-| 12 | `buildProviderHttpError` | function | 182 |
-| 13 | `host` | const arrow | 185 |
-| 14 | `buildGoogleMessageContents` | function | 198 |
-| 15 | `joinGoogleTextParts` | function | 209 |
-| 16 | `callChatProvider` | function | 218 |
-| 17 | `testProviderConfig` | function | 307 |
-
-### 3.20 `backend/src/services/backupPackages.js`
+### 3.19 `backend/src/services/backupPackages.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1002,7 +979,7 @@ Total files documented: **25**
 | 58 | `listLocalBackupVersions` | function | 971 |
 | 59 | `listBackupVersions` | function | 1003 |
 
-### 3.21 `backend/src/services/firebaseAuth.js`
+### 3.20 `backend/src/services/firebaseAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1029,7 +1006,7 @@ Total files documented: **25**
 | 21 | `setAuthUserActive` | function | 342 |
 | 22 | `verifyPasswordWithFirebase` | function | 355 |
 
-### 3.22 `backend/src/services/googleDriveSync/index.js`
+### 3.21 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1109,7 +1086,7 @@ Total files documented: **25**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.23 `backend/src/services/importJobs.js`
+### 3.22 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1289,7 +1266,7 @@ Total files documented: **25**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.24 `backend/src/services/portalAi.js`
+### 3.23 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1336,7 +1313,7 @@ Total files documented: **25**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.25 `backend/src/systemJobs.js`
+### 3.24 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

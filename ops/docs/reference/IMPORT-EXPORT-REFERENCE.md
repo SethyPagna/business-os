@@ -73,7 +73,7 @@ Code files documented: **468**
 | 61 | `backend/src/schemaMetadata.ts` | 1 | 1 | 1 | 6 |
 | 62 | `backend/src/security.ts` | 1 | 1 | 0 | 7 |
 | 63 | `backend/src/serverUtils.js` | 1 | 1 | 1 | 4 |
-| 64 | `backend/src/services/aiGateway.js` | 2 | 1 | 2 | 2 |
+| 64 | `backend/src/services/aiGateway.ts` | 2 | 1 | 2 | 2 |
 | 65 | `backend/src/services/backupPackages.js` | 9 | 1 | 4 | 4 |
 | 66 | `backend/src/services/firebaseAuth.js` | 2 | 1 | 0 | 0 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 12 | 1 | 8 | 4 |
@@ -1027,7 +1027,7 @@ Code files documented: **468**
 - Referenced by (5)
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
-  - `backend/src/services/aiGateway.js`
+  - `backend/src/services/aiGateway.ts`
   - `backend/src/services/importJobs.js`
   - `backend/test/netSecurity.test.ts`
 
@@ -1205,14 +1205,14 @@ Code files documented: **468**
   - `../database.ts`
   - `../helpers`
   - `../middleware.ts`
-  - `../services/aiGateway`
+  - `../services/aiGateway.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
   - `backend/src/middleware.ts`
-  - `backend/src/services/aiGateway.js`
+  - `backend/src/services/aiGateway.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1826,7 +1826,7 @@ Code files documented: **468**
   - `backend/src/routes/auth.js`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/aiGateway.js`
+  - `backend/src/services/aiGateway.ts`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/test/security.test.ts`
 
@@ -1843,7 +1843,7 @@ Code files documented: **468**
   - `backend/src/websocket.ts`
   - `backend/test/serverUtils.test.ts`
 
-### 3.64 `backend/src/services/aiGateway.js`
+### 3.64 `backend/src/services/aiGateway.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2047,10 +2047,10 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (2)
   - `../database.ts`
-  - `./aiGateway`
+  - `./aiGateway.ts`
 - Internal dependencies (2)
   - `backend/src/database.ts`
-  - `backend/src/services/aiGateway.js`
+  - `backend/src/services/aiGateway.ts`
 - Referenced by (1)
   - `backend/src/routes/portal.js`
 

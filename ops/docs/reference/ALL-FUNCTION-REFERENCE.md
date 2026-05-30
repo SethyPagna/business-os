@@ -73,7 +73,7 @@ Code files scanned: **468**
 | 61 | `backend/src/schemaMetadata.ts` | 9 |
 | 62 | `backend/src/security.ts` | 14 |
 | 63 | `backend/src/serverUtils.js` | 26 |
-| 64 | `backend/src/services/aiGateway.js` | 17 |
+| 64 | `backend/src/services/aiGateway.ts` | 17 |
 | 65 | `backend/src/services/backupPackages.js` | 59 |
 | 66 | `backend/src/services/firebaseAuth.js` | 22 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 75 |
@@ -1722,7 +1722,7 @@ Code files scanned: **468**
 | 25 | `setUploadStaticHeaders` | function | 368 |
 | 26 | `mapServerError` | function | 378 |
 
-### 3.64 `backend/src/services/aiGateway.js`
+### 3.64 `backend/src/services/aiGateway.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

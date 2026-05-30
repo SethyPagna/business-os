@@ -82,7 +82,7 @@ Total files documented: **531**
 | 70 | `backend/src/schemaMetadata.ts` | backend-core | 155 | 3.7 | Project source/support file |
 | 71 | `backend/src/security.ts` | backend-core | 253 | 7.1 | Project source/support file |
 | 72 | `backend/src/serverUtils.js` | backend-core | 431 | 15.5 | Project source/support file |
-| 73 | `backend/src/services/aiGateway.js` | backend-services | 364 | 13.6 | Integration/service layer |
+| 73 | `backend/src/services/aiGateway.ts` | backend-services | 364 | 13.6 | Integration/service layer |
 | 74 | `backend/src/services/backupPackages.js` | backend-services | 1060 | 36.3 | Integration/service layer |
 | 75 | `backend/src/services/firebaseAuth.js` | backend-services | 384 | 14.3 | Integration/service layer |
 | 76 | `backend/src/services/googleDriveSync/index.js` | backend-services | 1564 | 57.8 | Integration/service layer |
@@ -91,7 +91,7 @@ Total files documented: **531**
 | 79 | `backend/src/services/importJobs.js` | backend-services | 3880 | 157.1 | Integration/service layer |
 | 80 | `backend/src/services/integrationDoctor.ts` | backend-services | 353 | 11.8 | Integration/service layer |
 | 81 | `backend/src/services/mediaQueue.ts` | backend-services | 200 | 7.2 | Integration/service layer |
-| 82 | `backend/src/services/portalAi.js` | backend-services | 621 | 21.7 | Integration/service layer |
+| 82 | `backend/src/services/portalAi.js` | backend-services | 621 | 21.8 | Integration/service layer |
 | 83 | `backend/src/services/README.md` | backend-services | 29 | 1.0 | Integration/service layer |
 | 84 | `backend/src/services/verification.ts` | backend-services | 272 | 8.4 | Integration/service layer |
 | 85 | `backend/src/sessionAuth.ts` | backend-core | 215 | 6.8 | Project source/support file |
