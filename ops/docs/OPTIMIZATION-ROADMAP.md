@@ -5827,3 +5827,14 @@ Move 536 status:
   library/provider/response read timeouts, provider undo/redo actions, compact
   mobile asset controls, child tab contracts, and action/performance source
   guard behavior unchanged.
+
+Move 537 status:
+- Move 537 converts the login/auth shell to
+  `frontend/src/components/auth/Login.tsx`. The typed boundary now covers auth
+  users, login results, OAuth callback payloads, organization matches,
+  verification capability payloads, password reset responses, app context
+  access, the local auth API gateway, OTP pending user ids, DOM refs, form
+  submit events, OAuth provider state, and error extraction. The move keeps
+  the extensionless app import, owned Google OAuth source checks,
+  login/bootstrap/OTP/reset/OAuth flows, session duration persistence, and
+  organization selector behavior unchanged.

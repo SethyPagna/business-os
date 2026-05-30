@@ -1,3 +1,4 @@
+import type { ComponentType, FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
@@ -11,7 +12,7 @@ import {
   Mail,
   ShieldCheck,
 } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
@@ -24,11 +25,170 @@ import {
 
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 
-function readPendingOauthLogin() {
+type IdValue = string | number
+type TranslateFunction = (key: string) => string | undefined
+type TranslationLookup = (key: string, fallback: string) => string
+type OAuthProvider = 'google' | string
+
+interface AuthUser {
+  id?: IdValue
+  name?: string
+  username?: string
+  organization_id?: IdValue | null
+  organization_name?: string
+  organization_slug?: string
+  organization_public_id?: string
+}
+
+interface AppSettings {
+  login_session_duration?: string | null
+}
+
+interface LoginResult {
+  success?: boolean
+  error?: string
+  message?: string
+  otpRequired?: boolean
+  userId?: IdValue
+  user?: AuthUser
+  sessionExpiresAt?: string
+}
+
+interface AppContextValue {
+  login: (username: string, password: string, sessionDuration?: string, organization?: string) => Promise<LoginResult>
+  persistAuthenticatedUser: (user: AuthUser, sessionDuration?: string, sessionExpiresAt?: string) => Promise<void>
+  settings?: AppSettings | null
+  t: TranslateFunction
+  language?: string
+}
+
+interface OrganizationMatch {
+  id?: IdValue | null
+  name?: string | null
+  slug?: string | null
+  public_id?: string | null
+}
+
+interface PendingOauthLogin {
+  mode?: string
+  provider?: OAuthProvider
+  organization?: OrganizationMatch | null
+  startedAt?: number
+}
+
+interface OauthCallbackResult extends LoginResult {
+  mode?: string
+  provider?: OAuthProvider
+  status?: string
+}
+
+interface VerificationCapabilities {
+  success?: boolean
+  google_oauth?: boolean
+  google_email_auth?: boolean
+  google_login?: {
+    enabled?: boolean
+  } | null
+}
+
+interface OrganizationBootstrap {
+  organization?: OrganizationMatch | null
+  organizationCreationEnabled?: boolean
+}
+
+interface OrganizationSearchResult {
+  items?: OrganizationMatch[]
+}
+
+interface PasswordResetResult {
+  success?: boolean
+  error?: string
+  message?: string
+}
+
+interface StartOauthResult extends PasswordResetResult {
+  url?: string
+}
+
+interface DeviceContext {
+  deviceTz?: string | null
+  deviceName?: string | null
+}
+
+interface AuthApi {
+  getVerificationCapabilities?: () => Promise<VerificationCapabilities>
+  getOrganizationBootstrap?: () => Promise<OrganizationBootstrap>
+  searchOrganizations?: (query: string) => Promise<OrganizationSearchResult>
+  completeGoogleOauth: (payload: {
+    accessToken: string
+    provider: OAuthProvider
+    mode: 'login'
+    organization: string
+    sessionDuration: string
+    clientTime: string
+    deviceTz?: string | null
+    deviceName?: string | null
+  }) => Promise<LoginResult>
+  otpVerify: (payload: {
+    userId: IdValue | null
+    token: string
+    sessionDuration: string
+    clientTime: string
+    deviceTz?: string | null
+    deviceName?: string | null
+  }) => Promise<LoginResult>
+  resetPasswordWithOtp: (payload: {
+    identifier: string
+    organization: string
+    otp: string
+    newPassword: string
+  }) => Promise<PasswordResetResult>
+  requestPasswordResetEmail: (payload: {
+    identifier: string
+    organization: string
+    redirectTo: string
+  }) => Promise<PasswordResetResult>
+  completePasswordReset: (payload: {
+    accessToken: string
+    newPassword: string
+  }) => Promise<PasswordResetResult>
+  startGoogleOauth: (payload: {
+    provider: OAuthProvider
+    mode: 'login'
+    organization: string
+    redirectTo: string
+  }) => Promise<StartOauthResult>
+}
+
+interface OauthButtonProps {
+  icon: ComponentType<{ className?: string }>
+  label: string
+  onClick: () => void
+  disabled: boolean
+  loading: boolean
+}
+
+interface ModeBackButtonProps {
+  label: string
+  onClick: () => void
+}
+
+const useApp = useAppHook as () => AppContextValue
+
+function getAuthApi(): AuthApi {
+  if (typeof window === 'undefined' || !window.api) throw new Error('Auth API is not available.')
+  return window.api as AuthApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return String((error as { message?: unknown })?.message || fallback)
+}
+
+function readPendingOauthLogin(): PendingOauthLogin | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.OAUTH_LOGIN_PENDING) || ''
     if (!raw) return null
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(raw) as PendingOauthLogin | null
     if (!parsed || typeof parsed !== 'object') return null
     const startedAt = Number(parsed.startedAt || 0)
     if (!startedAt || (Date.now() - startedAt) > OAUTH_PENDING_TTL_MS) return null
@@ -38,30 +198,30 @@ function readPendingOauthLogin() {
   }
 }
 
-function clearPendingOauthLogin() {
+function clearPendingOauthLogin(): void {
   try {
     localStorage.removeItem(STORAGE_KEYS.OAUTH_LOGIN_PENDING)
   } catch (_) {}
 }
 
-function readOauthCallbackResult() {
+function readOauthCallbackResult(): OauthCallbackResult | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.OAUTH_CALLBACK_RESULT) || ''
     if (!raw) return null
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(raw) as OauthCallbackResult | null
     return parsed && typeof parsed === 'object' ? parsed : null
   } catch (_) {
     return null
   }
 }
 
-function clearOauthCallbackResult() {
+function clearOauthCallbackResult(): void {
   try {
     localStorage.removeItem(STORAGE_KEYS.OAUTH_CALLBACK_RESULT)
   } catch (_) {}
 }
 
-function OauthButton({ icon: Icon, label, onClick, disabled, loading }) {
+function OauthButton({ icon: Icon, label, onClick, disabled, loading }: OauthButtonProps) {
   return (
     <button
       type="button"
@@ -75,7 +235,7 @@ function OauthButton({ icon: Icon, label, onClick, disabled, loading }) {
   )
 }
 
-function ModeBackButton({ label, onClick }) {
+function ModeBackButton({ label, onClick }: ModeBackButtonProps) {
   return (
     <button
       type="button"
@@ -90,7 +250,8 @@ function ModeBackButton({ label, onClick }) {
 
 export default function Login() {
   const { login, persistAuthenticatedUser, settings, t, language } = useApp()
-  const tr = (key, fallback) => {
+  const authApi = getAuthApi()
+  const tr: TranslationLookup = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
   }
@@ -99,10 +260,10 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [otp, setOtp] = useState('')
   const [otpRequired, setOtpRequired] = useState(false)
-  const [pendingUserId, setPendingUserId] = useState(null)
+  const [pendingUserId, setPendingUserId] = useState<IdValue | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [oauthLoading, setOauthLoading] = useState('')
+  const [oauthLoading, setOauthLoading] = useState<OAuthProvider | ''>('')
   const [sessionDuration, setSessionDuration] = useState(() => {
     try {
       return localStorage.getItem(STORAGE_KEYS.SESSION_DURATION) || 'session'
@@ -135,20 +296,20 @@ export default function Login() {
   })
   const [organizationSearch, setOrganizationSearch] = useState('')
   const [organizationId, setOrganizationId] = useState('')
-  const [organizationMatches, setOrganizationMatches] = useState([])
+  const [organizationMatches, setOrganizationMatches] = useState<OrganizationMatch[]>([])
   const [organizationLoading, setOrganizationLoading] = useState(false)
   const [organizationLocked, setOrganizationLocked] = useState(false)
   const [organizationExpanded, setOrganizationExpanded] = useState(() => {
     try {
-      const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+      const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null') as OrganizationMatch | null
       return !(remembered?.name || remembered?.slug || remembered?.public_id)
     } catch (_) {
       return true
     }
   })
 
-  const usernameRef = useRef()
-  const otpRef = useRef()
+  const usernameRef = useRef<HTMLInputElement | null>(null)
+  const otpRef = useRef<HTMLInputElement | null>(null)
   const organizationDisplayName = organizationSearch || tr('organization_not_selected', 'Choose organization')
   const loginShellDescription = tr(
     'auth_welcome_body',
@@ -159,7 +320,7 @@ export default function Login() {
   const loginFeatureSynced = tr('auth_feature_synced', 'Live server-backed data')
   const loginFeatureTrusted = tr('auth_feature_trusted', 'Built for shared teams')
 
-  const rememberOrganization = (item) => {
+  const rememberOrganization = (item: OrganizationMatch) => {
     try {
       localStorage.setItem(STORAGE_KEYS.ORGANIZATION, JSON.stringify({
         id: item?.id || null,
@@ -199,7 +360,7 @@ export default function Login() {
       const requestId = beginTrackedRequest(capabilityRequestRef)
       try {
         const result = await withLoaderTimeout(
-          () => window.api.getVerificationCapabilities?.(),
+          () => authApi.getVerificationCapabilities?.(),
           'Verification capabilities',
         )
         if (!isTrackedRequestCurrent(capabilityRequestRef, requestId) || !result || result.success === false) return
@@ -218,9 +379,9 @@ export default function Login() {
     const bootstrap = async () => {
       const requestId = beginTrackedRequest(organizationBootstrapRequestRef)
       try {
-        const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+        const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null') as OrganizationMatch | null
         const boot = await withLoaderTimeout(
-          () => window.api.getOrganizationBootstrap?.(),
+          () => authApi.getOrganizationBootstrap?.(),
           'Organization bootstrap',
         )
         if (!isTrackedRequestCurrent(organizationBootstrapRequestRef, requestId)) return
@@ -260,7 +421,7 @@ export default function Login() {
       setOrganizationLoading(true)
       try {
         const result = await withLoaderTimeout(
-          () => window.api.searchOrganizations?.(query),
+          () => authApi.searchOrganizations?.(query),
           'Organization search',
         )
         if (!isTrackedRequestCurrent(organizationSearchRequestRef, requestId)) return
@@ -275,7 +436,7 @@ export default function Login() {
       invalidateTrackedRequest(organizationSearchRequestRef)
       clearTimeout(timer)
     }
-  }, [organizationSearch])
+  }, [authApi, organizationSearch])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -330,7 +491,7 @@ export default function Login() {
         }
         if (callbackResult.otpRequired) {
           setOtpRequired(true)
-          setPendingUserId(callbackResult.userId)
+          setPendingUserId(callbackResult.userId ?? null)
           return
         }
         if (callbackResult.user) {
@@ -359,13 +520,13 @@ export default function Login() {
             return pendingOauth.organization.public_id || pendingOauth.organization.slug || ''
           }
           try {
-            const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+            const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null') as OrganizationMatch | null
             return stored?.public_id || stored?.slug || ''
           } catch (_) {
             return ''
           }
         })()
-        const result = await withLoaderTimeout(() => window.api.completeGoogleOauth({
+        const result = await withLoaderTimeout(() => authApi.completeGoogleOauth({
           accessToken,
           provider: pendingOauth?.provider || provider,
           mode: 'login',
@@ -382,7 +543,7 @@ export default function Login() {
 
         if (result?.otpRequired) {
           setOtpRequired(true)
-          setPendingUserId(result.userId)
+          setPendingUserId(result.userId ?? null)
           return
         }
         if (result?.success && result?.user) {
@@ -395,7 +556,7 @@ export default function Login() {
         clearPendingOauthLogin()
         clearOauthCallbackResult()
         if (isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) {
-          setError(oauthError?.message || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
+          setError(getErrorMessage(oauthError, tr('oauth_signin_failed', 'Sign-in with provider failed.')))
         }
       } finally {
         if (isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) setLoading(false)
@@ -404,11 +565,11 @@ export default function Login() {
 
     run()
     return () => { invalidateTrackedRequest(oauthCallbackRequestRef) }
-  }, [persistAuthenticatedUser, sessionDuration, t])
+  }, [authApi, persistAuthenticatedUser, sessionDuration, t])
 
-  const getDeviceContext = () => getClientDeviceInfo()
+  const getDeviceContext = (): DeviceContext => getClientDeviceInfo()
 
-  const handleLogin = async (event) => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (loginSubmitInFlightRef.current) return
     const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
@@ -426,19 +587,19 @@ export default function Login() {
       )
       if (result?.otpRequired) {
         setOtpRequired(true)
-        setPendingUserId(result.userId)
+        setPendingUserId(result.userId ?? null)
         return
       }
       if (!result?.success) setError(result?.error || 'Login failed')
     } catch (loginError) {
-      setError(loginError?.message || tr('login_failed_try_again', 'Login failed. Please try again.'))
+      setError(getErrorMessage(loginError, tr('login_failed_try_again', 'Login failed. Please try again.')))
     } finally {
       loginSubmitInFlightRef.current = false
       setLoading(false)
     }
   }
 
-  const handleOtp = async (event) => {
+  const handleOtp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (otpVerifyInFlightRef.current) return
     if (!otp.trim()) {
@@ -450,7 +611,7 @@ export default function Login() {
     setLoading(true)
     try {
       const device = getClientDeviceInfo()
-      const verifyResult = await withLoaderTimeout(() => window.api.otpVerify({
+      const verifyResult = await withLoaderTimeout(() => authApi.otpVerify({
         userId: pendingUserId,
         token: otp.trim(),
         sessionDuration,
@@ -465,14 +626,14 @@ export default function Login() {
         setError(verifyResult?.error || tr('invalid_otp_code', 'Invalid OTP code'))
       }
     } catch (otpError) {
-      setError(otpError?.message || tr('otp_verification_failed', 'OTP verification failed'))
+      setError(getErrorMessage(otpError, tr('otp_verification_failed', 'OTP verification failed')))
     } finally {
       otpVerifyInFlightRef.current = false
       setLoading(false)
     }
   }
 
-  const handleOtpInput = (value) => {
+  const handleOtpInput = (value: string) => {
     const clean = value.replace(/\D/g, '').slice(0, 6)
     setOtp(clean)
   }
@@ -490,7 +651,7 @@ export default function Login() {
     passwordResetActionRef.current = true
     setLoading(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.resetPasswordWithOtp({
+      const result = await withLoaderTimeout(() => authApi.resetPasswordWithOtp({
         identifier: resetIdentifier.trim(),
         organization: resolvedOrganization,
         otp: resetOtp.trim(),
@@ -507,7 +668,7 @@ export default function Login() {
       setResetNewPassword('')
       setResetConfirmPassword('')
     } catch (resetError) {
-      setError(resetError?.message || tr('otp_reset_failed', 'Failed to reset password with OTP.'))
+      setError(getErrorMessage(resetError, tr('otp_reset_failed', 'Failed to reset password with OTP.')))
     } finally {
       passwordResetActionRef.current = false
       setLoading(false)
@@ -525,7 +686,7 @@ export default function Login() {
     setLoading(true)
     try {
       const redirectTo = `${window.location.origin}${window.location.pathname}`
-      const result = await withLoaderTimeout(() => window.api.requestPasswordResetEmail({
+      const result = await withLoaderTimeout(() => authApi.requestPasswordResetEmail({
         identifier: resetIdentifier.trim(),
         organization: resolvedOrganization,
         redirectTo,
@@ -536,7 +697,7 @@ export default function Login() {
       }
       setResetInfo(result?.message || tr('email_reset_sent', 'If this account can receive recovery email, reset instructions have been sent.'))
     } catch (resetError) {
-      setError(resetError?.message || tr('email_reset_failed', 'Failed to send password reset email.'))
+      setError(getErrorMessage(resetError, tr('email_reset_failed', 'Failed to send password reset email.')))
     } finally {
       passwordResetActionRef.current = false
       setLoading(false)
@@ -556,7 +717,7 @@ export default function Login() {
     passwordResetActionRef.current = true
     setLoading(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.completePasswordReset({
+      const result = await withLoaderTimeout(() => authApi.completePasswordReset({
         accessToken: recoveryAccessToken,
         newPassword: resetNewPassword,
       }), 'Complete email password reset')
@@ -569,14 +730,14 @@ export default function Login() {
       setResetConfirmPassword('')
       setResetInfo(tr('email_reset_complete_done', 'Password reset complete. You can now log in with your email and new password.'))
     } catch (resetError) {
-      setError(resetError?.message || tr('email_reset_complete_failed', 'Failed to update password from recovery email.'))
+      setError(getErrorMessage(resetError, tr('email_reset_complete_failed', 'Failed to update password from recovery email.')))
     } finally {
       passwordResetActionRef.current = false
       setLoading(false)
     }
   }
 
-  const handleStartOauth = async (provider) => {
+  const handleStartOauth = async (provider: OAuthProvider) => {
     if (oauthStartInFlightRef.current) return
     const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
     if (!resolvedOrganization) {
@@ -603,7 +764,7 @@ export default function Login() {
           startedAt: Date.now(),
         }))
       } catch (_) {}
-      const result = await withLoaderTimeout(() => window.api.startGoogleOauth({
+      const result = await withLoaderTimeout(() => authApi.startGoogleOauth({
         provider,
         mode: 'login',
         organization: resolvedOrganization,
@@ -617,7 +778,7 @@ export default function Login() {
       window.location.assign(result.url)
     } catch (oauthError) {
       clearPendingOauthLogin()
-      setError(oauthError?.message || tr('oauth_start_failed', 'Unable to start sign-in with provider.'))
+      setError(getErrorMessage(oauthError, tr('oauth_start_failed', 'Unable to start sign-in with provider.')))
     } finally {
       oauthStartInFlightRef.current = false
       setOauthLoading('')

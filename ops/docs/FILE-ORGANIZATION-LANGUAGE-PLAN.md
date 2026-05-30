@@ -4227,6 +4227,16 @@ Decision rule:
     compact mobile asset controls, source-inspection tests, and child tab
     contracts intact while sanitizing stale mojibake fallback text before it
     can render in the Library UI.
+537. Convert the login/auth shell to TSX. Done:
+    `frontend/src/components/auth/Login.tsx` now types auth users, login
+    results, OAuth callback payloads, organization matches, verification
+    capability payloads, password reset responses, app context access,
+    local auth API gateway calls, OTP pending user ids, DOM refs, form
+    submit events, OAuth provider state, and error extraction. The conversion
+    keeps the extensionless app import, owned Google OAuth source checks,
+    login/bootstrap/OTP/reset/OAuth flows, session duration persistence, and
+    organization selector behavior intact while containing the JS AppContext
+    boundary behind a typed hook cast.
 
 ## Safety Gates
 

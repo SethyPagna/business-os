@@ -19,7 +19,7 @@ Latest verified runtime health:
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T00-10-03-831Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T00-28-12-268Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -70,6 +70,10 @@ Recent route-level win:
   typed file assets, provider metadata/forms, saved AI responses, selected
   asset ids, local files API calls, upload/delete guards, provider mutation
   guards, and sanitized stale mojibake fallback copy.
+- Login page is now `frontend/src/components/auth/Login.tsx` with typed auth
+  users, login results, OAuth callback payloads, organization matches,
+  verification capability payloads, password reset responses, auth API calls,
+  DOM refs, form submit events, and error extraction.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary

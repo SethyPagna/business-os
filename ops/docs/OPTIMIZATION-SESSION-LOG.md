@@ -776,3 +776,31 @@ Use this shape for future entries:
 - follow-up insight: Library now has a typed local API and upload/provider
   boundary; Login, Catalog secondary tabs, and Users remain the next smaller
   JSX conversion candidates.
+
+- change: converted the login/auth shell to TSX with typed auth users, login
+  result payloads, OAuth callback payloads, organization matches, verification
+  capability payloads, password reset responses, app context access, local
+  auth API gateway calls, OTP pending user ids, DOM refs, form submit events,
+  OAuth provider state, and error extraction
+- affected files:
+  `frontend/src/components/auth/Login.tsx`,
+  `frontend/tests/ownedGoogleAuth.test.ts`
+- route or API target: Login, organization bootstrap/search, Google OAuth
+  sign-in, OTP verification, OTP password reset, email password reset,
+  recovery callback completion, session duration persistence
+- keeper or rollback: keeper; owned Google auth, typecheck, JSX, frontend and
+  backend utility suites, UI audit, production build, organization audit,
+  schema audit, Phase 29 repeat audit, and Phase 8.4 live suite passed
+- route-scoped result: focused typecheck, JSX, and owned Google auth checks
+  passed; broad frontend/backend utility suites, UI audit, production build,
+  organization audit, schema audit, and Phase 29 repeat audit also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,016 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and retained Docker
+  volumes/images as protected data/runtime assets
+- follow-up insight: Login now has a typed auth boundary; Catalog secondary
+  tabs and Users remain smaller JSX conversion candidates before POS,
+  Products, Dashboard, and Inventory.
