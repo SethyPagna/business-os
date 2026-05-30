@@ -174,7 +174,11 @@ runTest('system settings writes reuse prepared statements inside transactions', 
 runTest('settings route caches updated_at schema metadata', () => {
   const fs = require('fs')
   const path = require('path')
-  const source = fs.readFileSync(path.join(__dirname, '../src/routes/settings.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/settings.ts'), 'utf8')
+  const router = require('../src/routes/settings.ts')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/'), 'missing /api/settings read/write route')
+  assert.ok(paths.includes('/meta'), 'missing /api/settings/meta route')
   assert.match(source, /const \{ hasColumn \} = require\('\.\.\/schemaMetadata\.ts'\)/)
   assert.match(source, /return hasColumn\('settings', 'updated_at'\)/)
   assert.doesNotMatch(source, /information_schema\.columns/)

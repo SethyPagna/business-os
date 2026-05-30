@@ -22,7 +22,7 @@ File: `backend/src/routes/auth.js`
 ## Settings
 
 Base: `/api/settings`  
-File: `backend/src/routes/settings.js`
+File: `backend/src/routes/settings.ts`
 
 - `GET /`
 - `POST /`

@@ -30,7 +30,7 @@ runTest('inventory transfer route has idempotency lookup before stock mutation',
 })
 
 runTest('settings conflicts return settings-specific structured payload with current snapshot', () => {
-  const settingsSource = readSource('src/routes/settings.js')
+  const settingsSource = readSource('src/routes/settings.ts')
   const conflictSource = readSource('src/conflictControl.ts')
   assert.match(settingsSource, /settings_conflict/, 'settings route must emit settings_conflict')
   assert.match(settingsSource, /currentSettings/, 'settings conflict must include current server settings')

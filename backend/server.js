@@ -372,7 +372,7 @@ function mountApiRoutes(target) {
   target.use('/api/auth', require('./src/routes/auth'))
   target.use('/api', maintenanceWriteGuard)
   target.use('/api/organizations', require('./src/routes/organizations.ts'))
-  target.use('/api/settings', require('./src/routes/settings'))
+  target.use('/api/settings', require('./src/routes/settings.ts'))
   target.use('/api/categories', require('./src/routes/categories.ts'))
   target.use('/api/units', unitsRouter)
   target.use('/api/branches', require('./src/routes/branches'))

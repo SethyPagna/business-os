@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 584.
+- Latest completed implementation move in this roadmap: Move 585.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4135,7 +4135,7 @@ Move 368 status:
 
 Move 369 status:
 - Move 369 tightens the backend settings save path in
-  `backend/src/routes/settings.js`. Brand option normalization, brand color
+  `backend/src/routes/settings.ts`. Brand option normalization, brand color
   map cleanup, settings snapshot assembly, attempted settings extraction,
   settings normalization/upsert, and settings audit key reporting now use
   direct loops and one shared metadata-key set instead of repeated
@@ -4901,7 +4901,7 @@ Move 436 status:
 Move 437 status:
 - Move 437 tightens small route predicate helpers in
   `backend/src/routes/branches.js`, `backend/src/routes/inventory.js`,
-  `backend/src/routes/portal.js`, `backend/src/routes/settings.js`, and
+  `backend/src/routes/portal.js`, `backend/src/routes/settings.ts`, and
   `backend/src/routes/sync.js`. Paged branch-stock query detection, inventory
   stats filter detection, portal AI profile preference checks, suspicious brand
   option checks, sync conflict detection, and replay success checks now use
@@ -6530,3 +6530,18 @@ Move 584 status:
   waits for a compile/staging package lane. The generated language audit now
   reports `JavaScript: 38`, `TypeScript: 273`, and `React TSX: 107` across the
   active scan roots.
+
+Move 585 status:
+- Move 585 converts `backend/src/routes/settings.ts` to a package-safe
+  TypeScript path. Settings read/write, metadata, brand option normalization,
+  write-conflict responses, snapshot sanitation, audit entries,
+  upload-reference reconcile scheduling, and sync broadcasts remain unchanged
+  while `backend/server.js` imports the explicit `.ts` route. Backend route
+  docs and the route folder guide now point at the TypeScript path, and the
+  route-contract and media/settings contract tests read the TypeScript source.
+  Focused route-contract, settings/media contract, settings route-load, backend
+  utility, schema audit, stale-path, and Linux packaging proof passed. `pkg`
+  continues to warn for direct `.ts` scripts, so larger backend route/service
+  conversion still waits for a compile/staging package lane. The generated
+  language audit now reports `JavaScript: 37`, `TypeScript: 274`, and
+  `React TSX: 107` across the active scan roots.

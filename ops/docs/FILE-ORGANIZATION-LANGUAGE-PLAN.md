@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 584 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 585 in this file.
 
 ## Goal
 
@@ -2395,7 +2395,7 @@ Decision rule:
     builder cache only, reclaiming 2.754 GB of builder cache while preserving
     images, volumes, uploads, secrets, and retained backup packages.
 280. Cache settings schema metadata on the backend settings route. Done:
-    `backend/src/routes/settings.js` now caches the `settings.updated_at`
+    `backend/src/routes/settings.ts` now caches the `settings.updated_at`
     column-existence probe for the lifetime of the process, removing a repeated
     `information_schema.columns` query from every settings read and write while
     preserving the fallback for runtimes without that column. The route
@@ -2938,7 +2938,7 @@ Decision rule:
     was a backend route cleanup only; no folder move, schema migration, or
     runtime conversion was needed.
 359. Tighten backend settings save loops. Done:
-    `backend/src/routes/settings.js` now normalizes brand settings, builds
+    `backend/src/routes/settings.ts` now normalizes brand settings, builds
     settings snapshots, extracts attempted settings, upserts settings, and
     reports audit keys with direct loops plus one shared metadata-key set.
     This was a backend route cleanup only; no folder move, schema migration,
@@ -3415,7 +3415,7 @@ Decision rule:
     migration, or language conversion was needed.
 427. Tighten small route predicate helpers. Done:
     `backend/src/routes/branches.js`, `backend/src/routes/inventory.js`,
-    `backend/src/routes/portal.js`, `backend/src/routes/settings.js`, and
+    `backend/src/routes/portal.js`, `backend/src/routes/settings.ts`, and
     `backend/src/routes/sync.js` now use named direct-loop helpers for paged
     branch-stock query detection, inventory stats filters, portal AI profile
     preferences, suspicious brand option checks, sync conflict detection, and
@@ -4861,6 +4861,20 @@ Decision rule:
     on the future compile/staging lane. The generated language audit now
     reports `JavaScript: 38`, `TypeScript: 273`, and `React TSX: 107` across
     the active scan roots.
+585. Convert settings route to a package-safe TypeScript path.
+    Done: `backend/src/routes/settings.ts` keeps settings read/write, metadata,
+    brand option normalization, write-conflict responses, snapshot sanitation,
+    audit entries, upload-reference reconcile scheduling, and sync broadcasts on
+    the existing CommonJS route style while `backend/server.js` imports the
+    explicit `.ts` route. Backend route docs and the route folder guide now
+    point at the TypeScript path, and the route-contract and media/settings
+    contract tests read the TypeScript source. Focused route-contract,
+    settings/media contract, settings route-load, backend utility, schema audit,
+    stale-path, and Linux packaging proof passed. Packaging still warns for
+    direct `.ts` entries in `pkg.scripts`, so larger backend route/service
+    conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 37`, `TypeScript: 274`,
+    and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 
