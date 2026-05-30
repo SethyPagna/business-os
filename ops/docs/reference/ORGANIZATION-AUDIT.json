@@ -167,7 +167,7 @@
     "backend/src/services/googleDriveSync/index.js",
     "backend/src/services/importJobs.js",
     "backend/test/fullAutomation.test.ts",
-    "frontend/src/App.jsx",
+    "frontend/src/App.tsx",
     "frontend/src/AppContext.jsx",
     "frontend/src/api/http.ts",
     "frontend/src/api/methods.js",

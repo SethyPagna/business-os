@@ -157,7 +157,7 @@ Code files documented: **466**
 | 145 | `frontend/src/api/localDb.ts` | 3 | 10 | 2 | 3 |
 | 146 | `frontend/src/api/methods.js` | 6 | 200 | 6 | 1 |
 | 147 | `frontend/src/api/websocket.ts` | 2 | 4 | 2 | 2 |
-| 148 | `frontend/src/App.jsx` | 32 | 1 | 29 | 1 |
+| 148 | `frontend/src/App.tsx` | 32 | 1 | 29 | 1 |
 | 149 | `frontend/src/app/appShellUtils.ts` | 0 | 16 | 0 | 5 |
 | 150 | `frontend/src/app/publicErrorRecovery.ts` | 0 | 3 | 0 | 1 |
 | 151 | `frontend/src/AppContext.jsx` | 14 | 5 | 13 | 52 |
@@ -2992,24 +2992,24 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/web-api.ts`
 
-### 3.148 `frontend/src/App.jsx`
+### 3.148 `frontend/src/App.tsx`
 
 - Declared exports: `function`
 - Imports (32)
-  - `./AppContext`
+  - `./AppContext.jsx`
   - `./app/appShellUtils.ts`
   - `./app/publicErrorRecovery.ts`
   - `./components/auth/Login`
   - `./components/branches/Branches`
-  - `./components/catalog/CatalogPage`
+  - `./components/catalog/CatalogPage.jsx`
   - `./components/contacts/Contacts`
   - `./components/dashboard/Dashboard`
   - `./components/files/FilesPage`
-  - `./components/inventory/Inventory`
+  - `./components/inventory/Inventory.jsx`
   - `./components/loyalty-points/LoyaltyPointsPage`
   - `./components/navigation/Sidebar`
-  - `./components/pos/POS`
-  - `./components/products/Products`
+  - `./components/pos/POS.jsx`
+  - `./components/products/Products.jsx`
   - `./components/receipt-settings/ReceiptSettings`
   - `./components/returns/Returns`
   - `./components/sales/Sales`
@@ -3069,7 +3069,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (5)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/index.tsx`
@@ -3083,7 +3083,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.151 `frontend/src/AppContext.jsx`
 
@@ -3118,7 +3118,7 @@ Code files documented: **466**
   - `frontend/src/utils/settingsWriteOptions.ts`
   - `frontend/src/web-api.ts`
 - Referenced by (52)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
   - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/branches/BranchForm.tsx`
@@ -3186,7 +3186,7 @@ Code files documented: **466**
   - `frontend/src/constants.ts`
   - `frontend/src/utils/deviceInfo.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.153 `frontend/src/components/branches/Branches.tsx`
 
@@ -3218,7 +3218,7 @@ Code files documented: **466**
   - `frontend/src/utils/bulkOps.ts`
   - `frontend/src/utils/historyHelpers.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.154 `frontend/src/components/branches/BranchForm.tsx`
 
@@ -3301,7 +3301,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/favicon.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.159 `frontend/src/components/catalog/CatalogPageContext.tsx`
 
@@ -3505,7 +3505,7 @@ Code files documented: **466**
   - `frontend/src/utils/csv.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.173 `frontend/src/components/contacts/CustomerFormModal.tsx`
 
@@ -3795,7 +3795,7 @@ Code files documented: **466**
   - `frontend/src/utils/loaders.ts`
   - `frontend/src/utils/pricing.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.186 `frontend/src/components/dashboard/MiniStat.tsx`
 
@@ -3853,7 +3853,7 @@ Code files documented: **466**
   - `frontend/src/utils/historyHelpers.ts`
   - `frontend/src/utils/publicAssetUrls.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.189 `frontend/src/components/files/FilesProvidersTab.tsx`
 
@@ -3949,7 +3949,7 @@ Code files documented: **466**
   - `frontend/src/utils/productBatches.ts`
   - `frontend/src/utils/productGrouping.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.193 `frontend/src/components/inventory/InventoryImportModal.tsx`
 
@@ -4061,7 +4061,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.201 `frontend/src/components/navigation/Sidebar.tsx`
 
@@ -4083,7 +4083,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/navigationConfig.ts`
   - `frontend/src/components/users/UserProfileModal.tsx`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.202 `frontend/src/components/pos/CartItem.tsx`
 
@@ -4148,7 +4148,7 @@ Code files documented: **466**
   - `frontend/src/utils/publicAssetUrls.ts`
   - `frontend/src/utils/scriptTypography.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.205 `frontend/src/components/pos/posCore.ts`
 
@@ -4537,7 +4537,7 @@ Code files documented: **466**
   - `frontend/src/utils/productGrouping.ts`
   - `frontend/src/utils/scriptTypography.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.230 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
@@ -4772,7 +4772,7 @@ Code files documented: **466**
   - `frontend/src/utils/loaders.ts`
   - `frontend/src/utils/receiptAppliedConfig.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.246 `frontend/src/components/receipt-settings/template.ts`
 
@@ -4905,7 +4905,7 @@ Code files documented: **466**
   - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/historyHelpers.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.253 `frontend/src/components/returns/ReturnsListSurface.tsx`
 
@@ -4995,7 +4995,7 @@ Code files documented: **466**
   - `frontend/src/utils/formatters.ts`
   - `frontend/src/utils/groupedRecords.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.257 `frontend/src/components/sales/SalesImportModal.tsx`
 
@@ -5066,7 +5066,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.262 `frontend/src/components/shared/ActionHistoryBar.tsx`
 
@@ -5114,7 +5114,7 @@ Code files documented: **466**
   - `frontend/src/utils/importJobRefresh.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.264 `frontend/src/components/shared/ExportMenu.tsx`
 
@@ -5161,7 +5161,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
   - `frontend/tests/globalScrollControls.test.ts`
 
 ### 3.267 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
@@ -5246,7 +5246,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
 - Referenced by (2)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
 
 ### 3.272 `frontend/src/components/shared/pageActivity.ts`
@@ -5338,7 +5338,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
 - Referenced by (3)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
   - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
 
@@ -5363,7 +5363,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/components/shared/Modal.tsx`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.279 `frontend/src/components/users/PermissionEditor.tsx`
 
@@ -5447,7 +5447,7 @@ Code files documented: **466**
   - `frontend/src/utils/formatters.ts`
   - `frontend/src/utils/historyHelpers.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.283 `frontend/src/components/utils-settings/AuditLog.tsx`
 
@@ -5473,7 +5473,7 @@ Code files documented: **466**
   - `frontend/src/utils/csv.ts`
   - `frontend/src/utils/groupedRecords.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.284 `frontend/src/components/utils-settings/Backup.tsx`
 
@@ -5499,7 +5499,7 @@ Code files documented: **466**
   - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/utils/actionHistory.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.285 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
 
@@ -5584,7 +5584,7 @@ Code files documented: **466**
   - `frontend/src/utils/favicon.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
 
 ### 3.290 `frontend/src/components/utils-settings/settingsConflict.ts`
 
@@ -5618,7 +5618,7 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (9)
-  - `./App.jsx`
+  - `./App.tsx`
   - `./AppContext.jsx`
   - `./app/appShellUtils.ts`
   - `./styles/main.css`
@@ -5628,7 +5628,7 @@ Code files documented: **466**
   - `react`
   - `react-dom/client`
 - Internal dependencies (4)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
   - `frontend/src/AppContext.jsx`
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/styles/main.css`
@@ -5936,7 +5936,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (3)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/utils-settings/Settings.tsx`
 
@@ -6049,7 +6049,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (20)
-  - `frontend/src/App.jsx`
+  - `frontend/src/App.tsx`
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`

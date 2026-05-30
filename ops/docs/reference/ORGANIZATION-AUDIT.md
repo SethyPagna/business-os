@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T03:02:15.640Z
+Generated: 2026-05-30T03:22:55.976Z
 
 ## Summary
 
@@ -15,13 +15,13 @@ Generated: 2026-05-30T03:02:15.640Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 100 |
+| .tsx | 101 |
 | .js | 84 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
-| .jsx | 7 |
+| .jsx | 6 |
 | .sh | 3 |
 | .sql | 2 |
 | .css | 1 |
@@ -65,17 +65,17 @@ Generated: 2026-05-30T03:02:15.640Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 12115 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 12118 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7923 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6894 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5928 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4336 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6900 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5941 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4349 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2661 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2667 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
@@ -101,7 +101,7 @@ Generated: 2026-05-30T03:02:15.640Z
 | File | Relative imports | Area |
 | --- | --- | --- |
 | frontend/src/components/products/Products.jsx | 41 | frontend/components/products |
-| frontend/src/App.jsx | 29 | frontend/src/App.jsx |
+| frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/inventory/Inventory.jsx | 29 | frontend/components/inventory |
 | frontend/src/components/dashboard/Dashboard.tsx | 21 | frontend/components/dashboard |
 | frontend/src/components/sales/Sales.tsx | 21 | frontend/components/sales |

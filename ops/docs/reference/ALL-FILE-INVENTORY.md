@@ -180,7 +180,7 @@ Total files documented: **529**
 | 168 | `frontend/src/api/methods.js` | frontend-api | 2346 | 102.6 | Frontend API/sync helper |
 | 169 | `frontend/src/api/README.md` | frontend-api | 32 | 1.3 | Frontend API/sync helper |
 | 170 | `frontend/src/api/websocket.ts` | frontend-api | 230 | 7.6 | Frontend API/sync helper |
-| 171 | `frontend/src/App.jsx` | frontend-core | 1387 | 53.2 | Main app shell and page mounting |
+| 171 | `frontend/src/App.tsx` | frontend-core | 1572 | 60.1 | Main app shell and page mounting |
 | 172 | `frontend/src/app/appShellUtils.ts` | frontend-core | 159 | 5.2 | Project source/support file |
 | 173 | `frontend/src/app/publicErrorRecovery.ts` | frontend-core | 35 | 1.3 | Project source/support file |
 | 174 | `frontend/src/AppContext.jsx` | frontend-core | 1610 | 64.3 | Global app state/context provider |
