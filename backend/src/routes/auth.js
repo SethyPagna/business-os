@@ -44,7 +44,7 @@ const {
   getVerificationCapabilities,
   normalizeEmail,
   normalizePhone,
-} = require('../services/verification')
+} = require('../services/verification.ts')
 const {
   createAuthSession,
   setAuthSessionCookie,

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 589 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 590 in this file.
 
 ## Goal
 
@@ -4927,6 +4927,18 @@ Decision rule:
     compile/staging lane. The generated language audit now reports
     `JavaScript: 33`, `TypeScript: 278`, and `React TSX: 107` across the active
     scan roots.
+590. Convert verification service to a package-safe TypeScript path.
+    Done: `backend/src/services/verification.ts` keeps verification capability
+    reporting, email/phone normalization, destination masking, disabled-code
+    request responses, and active-code verification helpers on the existing
+    CommonJS service style. Auth and users routes now point at the explicit
+    `.ts` service, and the backend service index doc names the TypeScript file.
+    Focused verification helper load, route-contract, backend utility, schema
+    audit, stale-path, and Linux packaging proof passed. Packaging still warns
+    for direct `.ts` entries in `pkg.scripts`, so broader backend conversions
+    remain blocked on the future compile/staging lane. The generated language
+    audit now reports `JavaScript: 32`, `TypeScript: 279`, and `React TSX: 107`
+    across the active scan roots.
 
 ## Safety Gates
 

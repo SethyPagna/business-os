@@ -21,7 +21,7 @@ const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit, getAuditActor } = require('../middleware')
 const { registerUploadFromRequest } = require('../fileAssets')
 const { getGoogleLoginPublicConfig } = require('../services/googleOauth')
-const { normalizeEmail, normalizePhone } = require('../services/verification')
+const { normalizeEmail, normalizePhone } = require('../services/verification.ts')
 const {
   getDefaultOrganization,
   getDefaultOrganizationGroup,

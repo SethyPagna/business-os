@@ -16,7 +16,7 @@ Routes call service functions as dependency boundaries. The service owns provide
   - legacy Firebase Identity Toolkit integration kept for migration rollback/reference
   - no longer used by the active auth routes
 
-- `verification.js`
+- `verification.ts`
   - one-time code issue/hash/store/verify/consume lifecycle
   - delivery abstraction for Resend / SendGrid / webhooks
   - capability reporting for email/SMS availability

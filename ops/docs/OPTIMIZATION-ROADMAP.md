@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 589.
+- Latest completed implementation move in this roadmap: Move 590.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6602,3 +6602,17 @@ Move 589 status:
   conversions still wait for a compile/staging package lane. The generated
   language audit now reports `JavaScript: 33`, `TypeScript: 278`, and
   `React TSX: 107` across the active scan roots.
+
+Move 590 status:
+- Move 590 converts `backend/src/services/verification.ts` to a package-safe
+  TypeScript path. Verification capability reporting, email/phone
+  normalization, destination masking, disabled-code request responses, and
+  active-code verification helpers remain unchanged on the existing CommonJS
+  service style. Auth and users routes now point at the explicit `.ts` service,
+  and the backend service index doc names the TypeScript file. Focused
+  verification helper load, route-contract, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The generated language audit now reports
+  `JavaScript: 32`, `TypeScript: 279`, and `React TSX: 107` across the active
+  scan roots.
