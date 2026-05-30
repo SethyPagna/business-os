@@ -96,7 +96,7 @@ Cancelled or cancelling jobs cannot be started. Retry clears stale cancellation 
 ## Catalog (internal lightweight read API)
 
 Base: `/api/catalog`  
-File: `backend/src/routes/catalog.js`
+File: `backend/src/routes/catalog.ts`
 
 - `GET /meta`
 - `GET /products`

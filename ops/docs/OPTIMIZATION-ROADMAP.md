@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 577.
+- Latest completed implementation move in this roadmap: Move 578.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4160,7 +4160,7 @@ Move 370 status:
 
 Move 371 status:
 - Move 371 tightens the public catalog product payload path in
-  `backend/src/routes/catalog.js`. Product ID collection, product image
+  `backend/src/routes/catalog.ts`. Product ID collection, product image
   placeholder construction, product image grouping, and final catalog payload
   assembly now use direct loops and small named helpers instead of repeated
   `map()` and `forEach()` passes. Catalog product ordering, image-gallery
@@ -6422,3 +6422,17 @@ Move 577 status:
   conversion still waits for a compile/staging package lane. The current source
   extension count is `.js: 56`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 307`,
   `.tsx: 107` outside generated/runtime folders.
+
+Move 578 status:
+- Move 578 converts `backend/src/routes/catalog.ts` to a package-safe
+  TypeScript path. Internal catalog metadata and product payload responses stay
+  unchanged while the backend server imports the explicit `.ts` route
+  entrypoint. Backend route docs and `backend/src/routes/README.md` now point
+  at the TypeScript path, and `backend/test/routeContracts.test.ts` asserts the
+  `/meta` and `/products` catalog routes directly. Focused route-contract,
+  catalog route load, backend utility, schema audit, stale-path, and Linux
+  packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
+  larger backend route/service conversion still waits for a compile/staging
+  package lane. The current source extension count is
+  `.js: 55`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 308`, `.tsx: 107` outside
+  generated/runtime folders.

@@ -81,6 +81,13 @@ runTest('organizations router registers bootstrap, search, and current context r
   assert.ok(paths.includes('/current'), 'missing /api/organizations/current')
 })
 
+runTest('catalog router registers meta and product read routes', () => {
+  const router = require('../src/routes/catalog.ts')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/meta'), 'missing /api/catalog/meta')
+  assert.ok(paths.includes('/products'), 'missing /api/catalog/products')
+})
+
 runTest('system router registers Google Drive sync connect and disconnect routes', () => {
   const router = require('../src/routes/system')
   const paths = getRoutePaths(router)
