@@ -3,7 +3,7 @@
 const fs = require('fs')
 const path = require('path')
 const multer = require('multer')
-const { UPLOADS_PATH } = require('./config')
+const { UPLOADS_PATH } = require('./config/index.ts')
 const { authorizeProtectedRequest, isPublicApiRequest } = require('./accessControl.ts')
 const { buildUniqueStoredName, compressBufferForAsset, getMediaType, sanitizeOriginalFileName } = require('./fileAssets')
 const { hasPermissionValue } = require('./permissions.ts')

@@ -11,7 +11,7 @@ const {
   GOOGLE_DRIVE_CLIENT_ID,
   GOOGLE_DRIVE_CLIENT_SECRET,
   ORGANIZATION_FOLDER_NAME,
-} = require('../../config')
+} = require('../../config/index.ts')
 const { walkFiles } = require('../../dataPath/index.ts')
 const { getRuntimeVersion } = require('../../runtimeVersion.ts')
 const { encryptSecret, decryptSecret } = require('../../security.ts')

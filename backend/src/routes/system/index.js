@@ -43,7 +43,7 @@ const {
   S3_BUCKET,
   ANALYTICS_ENGINE,
   PARQUET_STORE,
-} = require('../../config')
+} = require('../../config/index.ts')
 const {
   summarizeDataRoot,
   isSamePath,

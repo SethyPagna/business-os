@@ -16,7 +16,7 @@ const {
   BUSINESS_OS_REQUIRE_SCALE_SERVICES,
   REDIS_URL,
   UPLOADS_PATH,
-} = require('../config')
+} = require('../config/index.ts')
 const { audit, broadcast } = require('../helpers')
 const { buildUniqueStoredName, registerStoredAsset, sanitizeOriginalFileName } = require('../fileAssets')
 const { validateUploadedPath } = require('../uploadSecurity.ts')

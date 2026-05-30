@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs')
 const {
   DATABASE_URL,
   DEFAULT_ORGANIZATION_BOOTSTRAP,
-} = require('./config')
+} = require('./config/index.ts')
 const { coerceRow, translateSql } = require('./db/postgresQueryCompat.ts')
 const { DEFAULT_ROLE_PERMISSIONS } = require('./permissions.ts')
 

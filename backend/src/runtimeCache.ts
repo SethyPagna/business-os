@@ -4,7 +4,7 @@ const {
   CACHE_REDIS_URL,
   DATABASE_DRIVER,
   RUNTIME_CACHE_ENABLED,
-} = require('./config')
+} = require('./config/index.ts')
 
 const CACHE_PREFIX = String(process.env.RUNTIME_CACHE_PREFIX || 'business-os:v1').trim() || 'business-os:v1'
 const DEFAULT_TTL_SECONDS = Math.min(300, Math.max(5, Number(process.env.RUNTIME_CACHE_TTL_SECONDS || 30) || 30))

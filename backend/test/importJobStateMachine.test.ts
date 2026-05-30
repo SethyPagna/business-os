@@ -12,7 +12,7 @@ process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES = '0'
 process.env.IMPORT_MEDIA_WAIT_TIMEOUT_MS = '1000'
 
 const { db } = require('../src/database.ts')
-const { IMPORTS_PATH } = require('../src/config')
+const { IMPORTS_PATH } = require('../src/config/index.ts')
 const {
   addJobFile,
   cancelAllImportJobs,

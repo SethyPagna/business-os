@@ -7,7 +7,7 @@ const {
   PARQUET_STORE,
   OBJECT_STORAGE_DRIVER,
   S3_BUCKET,
-} = require('../config')
+} = require('../config/index.ts')
 
 let cachedProbe = null
 

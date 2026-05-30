@@ -1,6 +1,6 @@
 'use strict'
 
-const { TAILSCALE_URL } = require('./config')
+const { TAILSCALE_URL } = require('./config/index.ts')
 
 const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const PUBLIC_API_ALLOWLIST = [

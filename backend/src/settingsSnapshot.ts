@@ -2,7 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { UPLOADS_PATH } = require('./config')
+const { UPLOADS_PATH } = require('./config/index.ts')
 const { isObjectStorageEnabled, objectExists } = require('./objectStore')
 
 /**

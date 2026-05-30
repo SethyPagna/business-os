@@ -9,7 +9,7 @@ const {
   GOOGLE_LOGIN_CLIENT_SECRET,
   GOOGLE_LOGIN_REDIRECT_URI,
   PUBLIC_BASE_URL,
-} = require('../config')
+} = require('../config/index.ts')
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'

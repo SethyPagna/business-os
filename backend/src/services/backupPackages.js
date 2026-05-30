@@ -6,7 +6,7 @@ const path = require('path')
 const { Writable } = require('stream')
 const { pipeline } = require('stream/promises')
 const { BACKUP_TABLES, BACKUP_VERSION, buildBackupSummaryFromCounts } = require('../backupSchema.ts')
-const { DATA_ROOT, S3_BUCKET, OBJECT_STORAGE_DRIVER } = require('../config')
+const { DATA_ROOT, S3_BUCKET, OBJECT_STORAGE_DRIVER } = require('../config/index.ts')
 const { putObject, listObjects, deleteObjects, getObjectStorageDriver, getObjectStream } = require('../objectStore')
 
 const OBJECT_COPY_CONCURRENCY = 2

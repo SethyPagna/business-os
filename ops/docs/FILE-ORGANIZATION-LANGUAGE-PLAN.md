@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 596 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 597 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 48`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 315`,
+  `.js: 47`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 316`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3284,7 +3284,7 @@ Decision rule:
     shape remain unchanged. This was a backend utility cleanup only; no folder
     move, schema migration, or language conversion was needed.
 411. Tighten startup/runtime infrastructure helper loops. Done:
-    `backend/src/config/index.js`, `backend/src/dataPath/index.ts`,
+    `backend/src/config/index.ts`, `backend/src/dataPath/index.ts`,
     `backend/src/organizationContext/index.ts`, `backend/src/settingsSnapshot.ts`,
     and `backend/src/runtimeVersion.ts` now use direct loops for env
     candidates, folder creation, settings snapshot sanitizing, first existing
@@ -5016,6 +5016,20 @@ Decision rule:
     backend conversions remain blocked on the future compile/staging lane. The
     generated language audit now reports `JavaScript: 26`, `TypeScript: 285`,
     and `React TSX: 107` across the active scan roots.
+597. Convert backend runtime config index to a package-safe TypeScript path.
+    Done: `backend/src/config/index.ts` keeps dotenv selection, runtime/data
+    root discovery, organization folder bootstrapping, upload/import directory
+    creation, driver validation, queue/cache/media/import limits, frontend dist
+    selection, public/admin URL resolution, Google OAuth secret-file fallback,
+    data-location helpers, and exported config names on the existing CommonJS
+    style. Every first-party config caller now points at the explicit
+    `config/index.ts` path so Node/package resolution does not rely on
+    directory `index.js` inference. Focused config load, route-contract,
+    backend utility, schema audit, stale-path, and Linux packaging proof
+    passed. Packaging still warns for direct `.ts` entries in `pkg.scripts`, so
+    broader backend conversions remain blocked on the future compile/staging
+    lane. The generated language audit now reports `JavaScript: 25`,
+    `TypeScript: 286`, and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

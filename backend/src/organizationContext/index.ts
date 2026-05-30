@@ -4,7 +4,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const { db } = require('../database.ts')
-const { STORAGE_ROOT, DATA_ROOT, DB_PATH, UPLOADS_PATH, ORGANIZATIONS_ROOT, DATABASE_DRIVER, OBJECT_STORAGE_DRIVER, S3_BUCKET } = require('../config')
+const { STORAGE_ROOT, DATA_ROOT, DB_PATH, UPLOADS_PATH, ORGANIZATIONS_ROOT, DATABASE_DRIVER, OBJECT_STORAGE_DRIVER, S3_BUCKET } = require('../config/index.ts')
 const { isSamePath, summarizeDataRoot } = require('../dataPath/index.ts')
 const { buildOrganizationFolderName } = require('../storage/organizationFolders.ts')
 

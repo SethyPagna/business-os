@@ -4,7 +4,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const express = require('express')
-const { PORT, STORAGE_ROOT } = require('../config')
+const { PORT, STORAGE_ROOT } = require('../config/index.ts')
 const { authToken, routeRateLimit, validateUploadBufferPayload } = require('../middleware.ts')
 const { getCloudflareAccessDiagnostics } = require('../serverUtils')
 

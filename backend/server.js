@@ -70,7 +70,7 @@ const {
   ANALYTICS_ENGINE,
   PARQUET_STORE,
   S3_BUCKET,
-} = require('./src/config')
+} = require('./src/config/index.ts')
 
 const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST)
 const app = express()
