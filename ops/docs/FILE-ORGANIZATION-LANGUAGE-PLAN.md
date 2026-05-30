@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 554 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 555 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 91`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 272`,
+  `.js: 89`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 274`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4431,6 +4431,17 @@ Decision rule:
     so larger backend conversions remain blocked on a compile/staging lane.
     The current source extension count is `.js: 91`, `.jsx: 0`, `.mjs: 0`,
     `.cjs: 0`, `.ts: 272`, `.tsx: 107` outside generated/runtime folders.
+555. Convert backend OTP and optional Sharp helpers to package-safe TypeScript
+    paths. Done: `backend/src/authOtpGuards.ts` now owns OTP target-management
+    checks with JSDoc actor/target/password contracts, and
+    `backend/src/optionalSharp.ts` now owns optional Sharp resolution with a
+    typed cached module boundary. Auth routes, upload security, file-asset
+    optimization, and focused auth/upload/media tests now import the explicit
+    `.ts` paths. Focused tests, backend utility tests, and Linux packaging proof
+    passed; packaging continues to warn for backend `.ts` scripts until the
+    future compile/staging lane replaces direct `pkg.scripts` parsing. The
+    current source extension count is `.js: 89`, `.jsx: 0`, `.mjs: 0`,
+    `.cjs: 0`, `.ts: 274`, `.tsx: 107` outside generated/runtime folders.
 
 ## Safety Gates
 

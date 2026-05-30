@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 554.
+- Latest completed implementation move in this roadmap: Move 555.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6066,3 +6066,17 @@ Move 554 status:
   before route/service files use TypeScript-only syntax. The current source
   extension count is `.js: 91`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 272`,
   `.tsx: 107` outside generated/runtime folders.
+
+Move 555 status:
+- Move 555 converts `backend/src/authOtpGuards.ts` and
+  `backend/src/optionalSharp.ts` to package-safe TypeScript paths. OTP guard
+  functions now carry JSDoc actor/target/password contracts while keeping the
+  same CommonJS exports for auth routes, and optional Sharp loading now carries
+  a typed cached-module boundary while preserving runtime fallback lookup
+  order. Auth, upload security, file asset, and focused tests import explicit
+  `.ts` paths. Focused auth/upload/media/route tests, the full backend utility
+  suite, and Linux packaging proof passed. `pkg` still warns for backend `.ts`
+  scripts, so direct TypeScript syntax in larger route/service files remains
+  gated on a compile/staging package lane. The current source extension count
+  is `.js: 89`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 274`, `.tsx: 107`
+  outside generated/runtime folders.
