@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 609.
+- Latest completed implementation move in this roadmap: Move 610.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2400,7 +2400,7 @@ Cleanup checkpoint:
   language/runtime audit now records this decision under
   `rejectedWebWorkerCandidates` and promotes the next real candidates:
   `frontend/src/utils/csv.ts` for export/ZIP work and
-  `backend/src/services/backupPackages.js` for backup data-path optimization.
+  `backend/src/services/backupPackages.ts` for backup data-path optimization.
 - Move 166 completes the `frontend/src/utils/csv.ts` worker slice:
   `csvExportWorker.ts` now builds export ZIP blobs away from the UI thread,
   `csvExportWorker.mjs` is the stable Vite worker wrapper, and `csv.ts` keeps
@@ -2409,7 +2409,7 @@ Cleanup checkpoint:
   descriptors are normalized so Contacts all-export writes actual CSV files
   into the ZIP instead of passing inert `{ filename, rows }` objects.
 - Move 167 completes the first backend data-path optimization slice:
-  `backend/src/services/backupPackages.js` now prefers keyset pagination for
+  `backend/src/services/backupPackages.ts` now prefers keyset pagination for
   backup table streaming when an `id` column is available, then keeps the
   existing `LIMIT ? OFFSET ?` query as the fallback. This makes large backup
   exports avoid progressively expensive offset scans without changing the
@@ -4271,7 +4271,7 @@ Move 379 status:
 
 Move 380 status:
 - Move 380 tightens backup package retention and listing in
-  `backend/src/services/backupPackages.js`. Backup version cache cloning,
+  `backend/src/services/backupPackages.ts`. Backup version cache cloning,
   writable drain/error waiter notifications, object-manifest construction,
   local backup directory discovery, retention planning, local kept-ID
   summaries, remote delete-key collection, remote removal summaries, local
@@ -4720,7 +4720,7 @@ Move 417 status:
 
 Move 418 status:
 - Move 418 clears the backend service callback-chain scan by tightening
-  `backend/src/services/backupPackages.js` and
+  `backend/src/services/backupPackages.ts` and
   `backend/src/services/googleDriveSync/index.js`. Backup writable waiters,
   concurrent object-copy worker startup, grouped remote backup package
   materialization, backup-version sorting inputs, and Google Drive reusable
@@ -6909,3 +6909,18 @@ Move 609 status:
   compile/staging package lane. The expected generated language audit now
   reports `JavaScript: 13`, `TypeScript: 298`, and `React TSX: 107` across the
   active scan roots.
+
+Move 610 status:
+- Move 610 converts `backend/src/services/backupPackages.ts` to a package-safe
+  TypeScript path. Local/final backup package creation, streaming JSONL table
+  export, checksums, object copy concurrency, reusable local package detection,
+  local/R2 version listing, retention planning, local/remote pruning, manifest
+  validation, and cache invalidation remain unchanged on the existing CommonJS
+  service style. System routes, Drive sync, integration doctor, storage prune
+  tooling, reliability policy/tests, backup tests, and roadmap docs now point at
+  the explicit `.ts` service path. Focused backup retention/schema/performance/
+  reliability checks plus backend utility, schema audit, stale-path, and Linux
+  packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
+  broader backend conversions still wait for a compile/staging package lane.
+  The expected generated language audit now reports `JavaScript: 12`,
+  `TypeScript: 299`, and `React TSX: 107` across the active scan roots.

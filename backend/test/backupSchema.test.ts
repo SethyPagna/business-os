@@ -95,7 +95,7 @@ runTest('streaming backup summary accepts counts without materializing table row
 
 runTest('Docker backup API queues real final-package jobs instead of host action handoff', () => {
   const routeSource = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.js'), 'utf8')
-  const packageSource = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+  const packageSource = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.ts'), 'utf8')
   assert.match(routeSource, /createFinalBackupPackage/)
   assert.match(routeSource, /backup_export/)
   assert.match(packageSource, /streamBackupDataFile/)

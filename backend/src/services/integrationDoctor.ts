@@ -38,7 +38,7 @@ const {
   getGoogleLoginPublicConfig,
 } = require('./googleOauth.ts')
 const { initializeBullQueue, getQueueStatus } = require('./importJobs')
-const { listBackupVersions } = require('./backupPackages')
+const { listBackupVersions } = require('./backupPackages.ts')
 const { testObjectStore } = require('../objectStore.ts')
 
 function trim(value) {

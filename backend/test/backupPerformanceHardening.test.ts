@@ -37,7 +37,7 @@ runTest('portal membership lookup handles new members without raw route failures
 })
 
 runTest('backup package validation uses streaming checksums for package files', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.ts'), 'utf8')
   assert.match(source, /function\s+sha256File\(/)
   assert.match(source, /fs\.createReadStream\(filePath\)/)
   assert.match(source, /async\s+function\s+validateLocalBackupPackage/)
@@ -98,7 +98,7 @@ runTest('drive sync snapshot work avoids synchronous copies and double hashing',
 })
 
 runTest('backup version listing reads enough objects for recent package pages and can reuse local packages', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.ts'), 'utf8')
   const routeSource = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.js'), 'utf8')
   const objectStoreSource = fs.readFileSync(path.join(__dirname, '../src/objectStore.ts'), 'utf8')
   assert.match(source, /backupVersionListCache/)
@@ -125,7 +125,7 @@ runTest('backup version listing reads enough objects for recent package pages an
 })
 
   runTest('backup package retention keeps local versions bounded and prunes R2 mirrors', () => {
-    const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+    const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.ts'), 'utf8')
     const automation = fs.readFileSync(path.join(__dirname, '../../ops/scripts/runtime/storage/prune-storage.ts'), 'utf8')
     const removedWrapperPath = path.join(
       __dirname,
@@ -155,7 +155,7 @@ runTest('backup version listing reads enough objects for recent package pages an
   })
 
 runTest('backup packages complete locally when remote mirror upload is slow', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.ts'), 'utf8')
   assert.match(source, /async\s+function\s+uploadPackageFile\(\{\s*packageId,[\s\S]*optional\s*=\s*false/)
   assert.match(source, /if\s*\(!optional\)\s*throw\s+error/)
   assert.match(source, /remoteUploadErrors/)

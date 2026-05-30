@@ -77,7 +77,7 @@ This is a concise running log of what actually happened in recent sessions.
     the verify worktree runtime was recreated correctly
 
 - Backup version hard timeout fallback
-  - area: `backend/src/services/backupPackages.js`
+  - area: `backend/src/services/backupPackages.ts`
   - result: rejected
   - note: targeted backup API improved, but warm exhaustive reruns woke
     unrelated pockets

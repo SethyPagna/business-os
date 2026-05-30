@@ -20,7 +20,7 @@ const {
   resolveDriveSyncVersionState,
   selectExpiredDriveSyncVersions,
 } = require('./versioning.ts')
-const { createFinalBackupPackage, findReusableLocalBackupPackage } = require('../backupPackages')
+const { createFinalBackupPackage, findReusableLocalBackupPackage } = require('../backupPackages.ts')
 const { isMaintenanceLocked, getMaintenanceLock } = require('../../maintenanceLock.ts')
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'

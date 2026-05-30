@@ -374,7 +374,7 @@ async function main() {
   const {
     pruneLocalBackupVersions,
     pruneRemoteBackupVersions,
-  } = requireFromBackend('./src/services/backupPackages')
+  } = requireFromBackend('./src/services/backupPackages.ts')
 
   const reports = await pruneDirectoryEntries({
     targetDir: path.join(root, 'ops', 'runtime', 'reports'),

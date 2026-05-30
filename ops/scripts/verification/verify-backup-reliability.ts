@@ -36,7 +36,7 @@ function checkNeedles(failures, sources, expectations, checker) {
 function main() {
   const failures = []
   const sources = {
-    backupPackages: { file: 'backend/src/services/backupPackages.js', text: read('backend/src/services/backupPackages.js') },
+    backupPackages: { file: 'backend/src/services/backupPackages.ts', text: read('backend/src/services/backupPackages.ts') },
     driveSync: { file: 'backend/src/services/googleDriveSync/index.js', text: read('backend/src/services/googleDriveSync/index.js') },
     systemJobs: { file: 'backend/src/systemJobs.ts', text: read('backend/src/systemJobs.ts') },
     maintenanceLock: { file: 'backend/src/maintenanceLock.ts', text: read('backend/src/maintenanceLock.ts') },

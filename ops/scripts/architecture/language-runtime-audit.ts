@@ -215,7 +215,7 @@ const FOCUSED_TEST_COVERAGE = [
   },
   {
     track: 'SQL/DuckDB/data-path optimization',
-    candidate: 'backend/src/services/backupPackages.js',
+    candidate: 'backend/src/services/backupPackages.ts',
     tests: [
       'backend/test/backupPerformanceHardening.test.ts',
       'backend/test/backupRetention.test.ts',
@@ -888,7 +888,7 @@ const COMPLETED_WEB_WORKER_FILES = new Set(COMPLETED_WEB_WORKER_SLICES.flatMap((
 
 const COMPLETED_DATA_PATH_SLICES = [
   {
-    target: 'backend/src/services/backupPackages.js',
+    target: 'backend/src/services/backupPackages.ts',
     optimization: 'Backup table streaming now prefers keyset pagination on id and keeps LIMIT/OFFSET as the compatibility fallback.',
     rollback: 'Revert readTableRows to OFFSET-only paging; streamed checksum/package format remains unchanged.',
     proof: [

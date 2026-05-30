@@ -7,7 +7,7 @@ const path = require('node:path')
 const {
   planBackupPackageRetention,
   pruneLocalBackupVersions,
-} = require('../src/services/backupPackages')
+} = require('../src/services/backupPackages.ts')
 
 let failed = 0
 

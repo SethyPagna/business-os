@@ -111,7 +111,7 @@
           "mustNotContain": ["/backup/export", "/backup/import"]
         },
         {
-          "path": "backend/src/services/backupPackages.js",
+          "path": "backend/src/services/backupPackages.ts",
           "mustContain": ["streamBackupDataFile", "LIMIT ? OFFSET ?", "buildBackupSummaryFromCounts", "copyPackageObjects", "objects-errors.json", "throwIfCancelled"],
           "mustNotContain": ["JSON.stringify({ tables })", "const tables = {}", "fs.readFileSync(file.absolutePath)"]
         },

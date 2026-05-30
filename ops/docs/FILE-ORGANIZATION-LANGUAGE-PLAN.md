@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 609 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 610 in this file.
 
 ## Goal
 
@@ -660,7 +660,7 @@ Decision rule:
     Cloudflare portal live check, and storage pruning passed on frontend hash
     `a6a634e7a29d6a46`.
 59. Teach backup retention about Docker-release timestamp packages. Done:
-    `backend/src/services/backupPackages.js` now recognizes timestamped
+    `backend/src/services/backupPackages.ts` now recognizes timestamped
     Docker-release backup folders such as `20260509-065427` only under
     `ops/runtime/docker-release/backups`, while normal backup roots remain
     limited to `datasync-*` packages. `backend/test/backupRetention.test.ts`
@@ -1453,7 +1453,7 @@ Decision rule:
     a CPU-heavy browser loop. `language-runtime-audit.ts` now records it in
     `rejectedWebWorkerCandidates`, removes it from future worker rankings, and
     promotes the next measurable candidates: `frontend/src/utils/csv.ts` for
-    browser export/ZIP work and `backend/src/services/backupPackages.js` for
+    browser export/ZIP work and `backend/src/services/backupPackages.ts` for
     SQL/DuckDB data-path optimization.
 166. Move CSV/ZIP package building into a Web Worker. Done:
     `frontend/src/utils/csvExportWorker.ts` now builds export ZIP blobs off the
@@ -1465,7 +1465,7 @@ Decision rule:
     files inside the ZIP. Dashboard, Inventory, and Contacts package exports
     now await the async worker-backed path.
 167. Optimize backend backup table streaming. Done:
-    `backend/src/services/backupPackages.js` now pages large backup tables with
+    `backend/src/services/backupPackages.ts` now pages large backup tables with
     keyset reads (`WHERE id > ? ORDER BY id ASC LIMIT ?`) after the first page
     while keeping the existing `LIMIT ? OFFSET ?` fallback for tables or
     compatibility paths that cannot use `id`. The package format, checksum
@@ -3005,7 +3005,7 @@ Decision rule:
     service cleanup only; no folder move, schema migration, or runtime
     conversion was needed.
 370. Tighten backup package retention and listing loops. Done:
-    `backend/src/services/backupPackages.js` now uses direct-loop helpers for
+    `backend/src/services/backupPackages.ts` now uses direct-loop helpers for
     cache cloning, object manifests, local backup directory discovery,
     retention planning, local/R2 removal summaries, local version listing, R2
     object aggregation, and final version sorting. This was a backend service
@@ -3260,7 +3260,7 @@ Decision rule:
     backend system-route cleanup only; no folder move, schema migration, or
     language conversion was needed.
 408. Clear backend service callback-chain scan. Done:
-    `backend/src/services/backupPackages.js` now uses direct helpers for
+    `backend/src/services/backupPackages.ts` now uses direct helpers for
     writable waiters, object-copy worker promises, grouped remote package
     values, and backup-version sorting inputs, while
     `backend/src/services/googleDriveSync/index.js` uses a direct reusable
@@ -5204,6 +5204,20 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The expected
     generated language audit now reports `JavaScript: 13`, `TypeScript: 298`,
     and `React TSX: 107` across the active scan roots.
+610. Convert backup package service to a package-safe TypeScript path.
+    Done: `backend/src/services/backupPackages.ts` keeps local/final backup
+    package creation, streaming JSONL table export, checksums, object copy
+    concurrency, reusable local package detection, local/R2 version listing,
+    retention planning, local/remote pruning, manifest validation, and cache
+    invalidation on the existing CommonJS service style. System routes, Drive
+    sync, integration doctor, storage prune tooling, reliability policy/tests,
+    backup tests, and roadmap docs now point at the explicit `.ts` service path.
+    Focused backup retention/schema/performance/reliability checks plus backend
+    utilities, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so broader
+    backend conversions remain blocked on the future compile/staging lane. The
+    expected generated language audit now reports `JavaScript: 12`,
+    `TypeScript: 299`, and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 
