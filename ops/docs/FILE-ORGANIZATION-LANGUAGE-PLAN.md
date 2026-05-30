@@ -4237,6 +4237,15 @@ Decision rule:
     login/bootstrap/OTP/reset/OAuth flows, session duration persistence, and
     organization selector behavior intact while containing the JS AppContext
     boundary behind a typed hook cast.
+538. Convert the catalog secondary tabs shell to TSX. Done:
+    `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` now types
+    portal copy functions, preview config, membership customer/points/totals,
+    purchase/return rows, share submission rows, submission draft state,
+    business facts, social links, about blocks, FAQ items, assistant profile,
+    usage policy, assistant references, assistant recommendations, and
+    tab-dispatch props. The conversion keeps the extensionless Catalog page
+    lazy import, catalog preview chunking rule, portal UI verifier coverage,
+    membership lookup, About, FAQ, and AI assistant surfaces intact.
 
 ## Safety Gates
 

@@ -132,7 +132,7 @@ function manualChunks(id: string): string | undefined {
     }
     if (
       normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')
-      || normalized.includes('/src/components/catalog/CatalogSecondaryTabs.jsx')
+      || normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')
       || normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
     ) {
       return 'catalog-preview'

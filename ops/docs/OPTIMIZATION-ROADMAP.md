@@ -5838,3 +5838,15 @@ Move 537 status:
   the extensionless app import, owned Google OAuth source checks,
   login/bootstrap/OTP/reset/OAuth flows, session duration persistence, and
   organization selector behavior unchanged.
+
+Move 538 status:
+- Move 538 converts the catalog secondary tabs shell to
+  `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`. The typed
+  boundary now covers portal copy functions, preview config, membership
+  customer/points/totals, purchase/return rows, share submission rows,
+  submission draft state, business facts, social links, about blocks, FAQ
+  items, assistant profile, usage policy, assistant references, assistant
+  recommendations, and tab-dispatch props. The move keeps the extensionless
+  Catalog page lazy import, catalog preview chunking rule, portal UI verifier
+  coverage, membership lookup, About, FAQ, and AI assistant surfaces
+  unchanged.

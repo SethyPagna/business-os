@@ -804,3 +804,32 @@ Use this shape for future entries:
 - follow-up insight: Login now has a typed auth boundary; Catalog secondary
   tabs and Users remain smaller JSX conversion candidates before POS,
   Products, Dashboard, and Inventory.
+
+- change: converted the catalog secondary tabs shell to TSX with typed portal
+  copy functions, preview config, membership customer/points/totals,
+  purchase/return rows, share submission rows, submission draft state,
+  business facts, social links, about blocks, FAQ items, assistant profile,
+  usage policy, assistant references, assistant recommendations, and
+  tab-dispatch props
+- affected files:
+  `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`,
+  `frontend/vite.config.ts`,
+  `ops/scripts/frontend/verify-ui.ts`
+- route or API target: customer portal membership lookup, About, FAQ, and AI
+  assistant tab surfaces plus catalog preview chunk assignment
+- keeper or rollback: keeper; typecheck, JSX, UI audit, frontend/backend
+  utility suites, production build, organization audit, schema audit, Phase
+  29 repeat audit, and Phase 8.4 live suite passed
+- route-scoped result: focused typecheck, JSX, and UI audit checks passed;
+  broad frontend/backend utility suites, production build, organization
+  audit, schema audit, and Phase 29 repeat audit also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,226 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and retained Docker
+  volumes/images as protected data/runtime assets
+- follow-up insight: Catalog secondary tabs now have typed customer portal
+  payloads; Users remains the next smaller JSX conversion candidate before
+  POS, Products, Dashboard, and Inventory.

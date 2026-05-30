@@ -29,7 +29,7 @@ const REQUIRED_KM_VALUES = {
 const PORTAL_FILES = [
   path.join(COMPONENT_ROOT, 'catalog', 'CatalogPage.jsx'),
   path.join(COMPONENT_ROOT, 'catalog', 'CatalogProductsSection.tsx'),
-  path.join(COMPONENT_ROOT, 'catalog', 'CatalogSecondaryTabs.jsx'),
+  path.join(COMPONENT_ROOT, 'catalog', 'CatalogSecondaryTabs.tsx'),
   path.join(COMPONENT_ROOT, 'catalog', 'catalogUi.tsx'),
 ]
 

@@ -1,4 +1,4 @@
-import React from 'react'
+import type { ClipboardEventHandler, ComponentType, Dispatch, SetStateAction } from 'react'
 import {
   BadgeDollarSign,
   Bot,
@@ -22,12 +22,256 @@ import {
 } from 'lucide-react'
 import { SectionShell, StatusPill, SummaryTile } from './catalogUi'
 
-function normalizePortalColor(value, fallback) {
+type IdValue = string | number
+type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
+
+interface PreviewConfig {
+  aboutBlocks?: AboutBlock[]
+  aboutContent?: string
+  aboutTitle?: string
+  aiDisclaimer?: string
+  aiIntro?: string
+  aiTitle?: string
+  businessName?: string
+  businessTagline?: string
+  heroGradientEnd?: string
+  heroGradientMid?: string
+  heroGradientStart?: string
+  intro?: string
+  faqTitle?: string
+  logoPositionX?: number
+  logoPositionY?: number
+  logoSize?: number
+  logoZoom?: number
+  priceDisplay?: string
+  showCover?: boolean
+  showPointValue?: boolean
+  submissionEnabled?: boolean
+  submissionInstructions?: string
+  title?: string
+}
+
+interface MembershipCustomer {
+  name?: string
+  membership_number?: string
+  created_at?: unknown
+  phone?: string
+  email?: string
+  company?: string
+  notes?: string
+}
+
+interface MembershipPoints {
+  balance?: number
+  redeemValueUsd?: number
+  redeemValueKhr?: number
+}
+
+interface MembershipTotals {
+  totalSalesUsd?: number
+  totalSalesKhr?: number
+  totalReturnsUsd?: number
+  totalReturnsKhr?: number
+  membershipDiscountUsd?: number
+  membershipDiscountKhr?: number
+}
+
+interface MembershipSale {
+  id: IdValue
+  receipt_number?: string
+  created_at?: unknown
+  branch_name?: string
+  payment_status?: string
+  items_summary?: string
+  total_usd?: number
+  total_khr?: number
+}
+
+interface MembershipReturn {
+  id: IdValue
+  return_number?: string
+  created_at?: unknown
+  branch_name?: string
+  status?: string
+  items_summary?: string
+  reason?: string
+  total_refund_usd?: number
+  total_refund_khr?: number
+}
+
+interface ShareSubmission {
+  id: IdValue
+  platform?: string
+  created_at?: unknown
+  status?: string
+  note?: string
+  screenshots?: string[]
+  reward_points?: number
+  review_note?: string
+}
+
+interface MembershipData {
+  customer?: MembershipCustomer
+  points?: MembershipPoints
+  totals?: MembershipTotals
+  sales?: MembershipSale[]
+  returns?: MembershipReturn[]
+  submissions?: ShareSubmission[]
+}
+
+interface SubmissionDraft {
+  platform: string
+  note: string
+  screenshots: string[]
+}
+
+interface CatalogMembershipSectionProps {
+  copy: CopyFn
+  formatDateTime: (value: unknown) => string
+  formatPortalPrice: (usd: unknown, khr: unknown, config: PreviewConfig) => string
+  membershipNumber: string
+  setMembershipNumber: (value: string) => void
+  handleMembershipLookup: () => void
+  membershipLoading: boolean
+  membershipError?: string
+  membershipData?: MembershipData | null
+  previewConfig: PreviewConfig
+  redeemSummaryText: string
+  submissionDraft: SubmissionDraft
+  setSubmissionDraft: Dispatch<SetStateAction<SubmissionDraft>>
+  submissionSaving: boolean
+  handleSubmissionPaste: ClipboardEventHandler<HTMLTextAreaElement>
+  handleSubmitShareProof: () => void
+  handleUploadSubmissionImages: () => void
+  openPortalImage: (title: string, images: string[], index?: number) => void
+}
+
+interface BusinessFact {
+  key: string
+  label: string
+  value?: string
+  href?: string
+  icon?: ComponentType<{ className?: string }>
+}
+
+interface SocialLink {
+  key: string
+  label: string
+  value: string
+}
+
+interface AboutBlock {
+  id: IdValue
+  title?: string
+  body?: string
+  mediaUrl?: string
+  type?: string
+}
+
+interface CatalogAboutSectionProps {
+  copy: CopyFn
+  previewConfig: PreviewConfig
+  mapEmbedUrl?: string
+  addressFact?: BusinessFact | null
+  businessFacts?: BusinessFact[]
+  socialLinks?: SocialLink[]
+  versionedBusinessLogo?: string
+  versionedBusinessCover?: string
+  openPortalImage: (title: string, images: string[], index?: number) => void
+}
+
+interface FaqItem {
+  id: IdValue
+  question: string
+  answer: string
+}
+
+interface CatalogFaqSectionProps {
+  copy: CopyFn
+  previewConfig: PreviewConfig
+  publicFaqItems: FaqItem[]
+  expandedFaqId: IdValue | null
+  setExpandedFaqId: Dispatch<SetStateAction<IdValue | null>>
+}
+
+interface AssistantProfile {
+  brand: string
+  skinType: string
+  shoppingFor: string
+  goal: string
+  concerns: string
+}
+
+interface AiUsageSummary {
+  activeVisitors?: number
+  perUserPerMinute?: number
+}
+
+interface AssistantRequestPolicy {
+  perUserPerMinute?: number
+}
+
+interface AssistantReference {
+  url?: string
+  title?: string
+  snippet?: string
+}
+
+interface AssistantRecommendation {
+  product_id: IdValue
+  image_path?: string
+  name: string
+  brand?: string
+  category?: string
+  selling_price_khr?: number
+  selling_price_usd?: number
+  reason?: string
+  fit_summary?: string
+  how_to_use?: string
+  cautions?: string
+  ingredients_focus?: string[]
+  online_review_summary?: string
+  online_references?: AssistantReference[]
+}
+
+interface AssistantResponse {
+  summary?: string
+  followUpQuestions?: string[]
+  recommendations?: AssistantRecommendation[]
+}
+
+interface CatalogAiSectionProps {
+  copy: CopyFn
+  previewConfig: PreviewConfig
+  brands: string[]
+  assistantProfile: AssistantProfile
+  setAssistantProfile: Dispatch<SetStateAction<AssistantProfile>>
+  assistantCategoryOptions: string[]
+  assistantQuestion: string
+  setAssistantQuestion: (value: string) => void
+  questionCharLimit: number
+  askAssistant: () => void
+  assistantLoading: boolean
+  clearAssistantState: () => void
+  aiUsageSummary?: AiUsageSummary | null
+  assistantRequestPolicy?: AssistantRequestPolicy | null
+  replaceVars: (template: string, values: Record<string, string | number>) => string
+  assistantError?: string
+  assistantResponse?: AssistantResponse | null
+  assistantExpandedProductId: IdValue | null
+  setAssistantExpandedProductId: Dispatch<SetStateAction<IdValue | null>>
+}
+
+type CatalogSecondaryTabsProps = {
+  tab?: string
+} & Record<string, unknown>
+
+function normalizePortalColor(value: unknown, fallback: string): string {
   const raw = String(value || '').trim()
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
 }
 
-function CatalogMembershipSection(props) {
+function CatalogMembershipSection(props: CatalogMembershipSectionProps) {
   const {
     copy,
     formatDateTime,
@@ -326,7 +570,7 @@ function CatalogMembershipSection(props) {
               </div>
 
               <div className="space-y-3">
-                {(membershipData?.submissions?.length || 0) ? membershipData.submissions.map((submission) => (
+                {(membershipData?.submissions?.length || 0) ? (membershipData.submissions || []).map((submission) => (
                   <article key={submission.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/80">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -373,7 +617,7 @@ function CatalogMembershipSection(props) {
   )
 }
 
-function CatalogAboutSection(props) {
+function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const {
     copy,
     previewConfig,
@@ -560,7 +804,7 @@ function CatalogAboutSection(props) {
                   <button
                     type="button"
                     className="flex w-full items-center justify-center bg-slate-50 p-4 dark:bg-slate-950/60"
-                    onClick={() => openPortalImage(block.title || previewConfig.aboutTitle || copy('about', 'About'), [block.mediaUrl])}
+                    onClick={() => openPortalImage(block.title || previewConfig.aboutTitle || copy('about', 'About'), block.mediaUrl ? [block.mediaUrl] : [])}
                   >
                     {block.type === 'video' ? (
                       <video src={block.mediaUrl} controls preload="metadata" className="max-h-[340px] w-full rounded-2xl bg-white object-contain dark:bg-slate-950" />
@@ -587,7 +831,7 @@ function CatalogAboutSection(props) {
   )
 }
 
-function CatalogFaqSection(props) {
+function CatalogFaqSection(props: CatalogFaqSectionProps) {
   const {
     copy,
     previewConfig,
@@ -641,7 +885,7 @@ function CatalogFaqSection(props) {
   )
 }
 
-function CatalogAiSection(props) {
+function CatalogAiSection(props: CatalogAiSectionProps) {
   const {
     copy,
     previewConfig,
@@ -827,10 +1071,10 @@ function CatalogAiSection(props) {
   )
 }
 
-export default function CatalogSecondaryTabs({ tab, ...props }) {
-  if (tab === 'membership') return <CatalogMembershipSection {...props} />
-  if (tab === 'about') return <CatalogAboutSection {...props} />
-  if (tab === 'faq') return <CatalogFaqSection {...props} />
-  if (tab === 'ai') return <CatalogAiSection {...props} />
+export default function CatalogSecondaryTabs({ tab, ...props }: CatalogSecondaryTabsProps) {
+  if (tab === 'membership') return <CatalogMembershipSection {...(props as unknown as CatalogMembershipSectionProps)} />
+  if (tab === 'about') return <CatalogAboutSection {...(props as unknown as CatalogAboutSectionProps)} />
+  if (tab === 'faq') return <CatalogFaqSection {...(props as unknown as CatalogFaqSectionProps)} />
+  if (tab === 'ai') return <CatalogAiSection {...(props as unknown as CatalogAiSectionProps)} />
   return null
 }

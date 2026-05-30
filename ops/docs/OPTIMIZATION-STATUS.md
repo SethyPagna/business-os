@@ -19,7 +19,7 @@ Latest verified runtime health:
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T00-28-12-268Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T00-42-03-197Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -74,6 +74,11 @@ Recent route-level win:
   users, login results, OAuth callback payloads, organization matches,
   verification capability payloads, password reset responses, auth API calls,
   DOM refs, form submit events, and error extraction.
+- Catalog secondary tabs are now
+  `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` with typed portal
+  copy functions, preview config, membership data, share submissions, about
+  blocks, FAQ items, assistant profile, assistant references, and assistant
+  recommendations.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary
