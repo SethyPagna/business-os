@@ -75,7 +75,7 @@ async function processMediaOptimizationJob({ storedName, source = 'media_queue',
     getFileAssetByPublicPath,
     getMimeTypeFromName,
     optimizeStoredAssetFromQueue,
-  } = require('../fileAssets')
+  } = require('../fileAssets.ts')
   const current = getFileAssetByPublicPath(`/uploads/${safeStoredName}`)
   try {
     await optimizeStoredAssetFromQueue({

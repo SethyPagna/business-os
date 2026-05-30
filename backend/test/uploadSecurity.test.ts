@@ -6,7 +6,7 @@ const {
   getExpectedUploadedKind,
   validateUploadedBuffer,
 } = require('../src/uploadSecurity.ts')
-const { sanitizeOriginalFileName } = require('../src/fileAssets')
+const { sanitizeOriginalFileName } = require('../src/fileAssets.ts')
 
 let failed = 0
 const pendingTests = new Set()

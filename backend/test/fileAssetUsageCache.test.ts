@@ -6,7 +6,7 @@ const {
   __resetFileUsageReferenceCaches,
   buildUploadReferenceUsageMap,
   collectUsagesByPublicPath,
-} = require('../src/fileAssets')
+} = require('../src/fileAssets.ts')
 
 let failed = 0
 const pendingTests = new Set()

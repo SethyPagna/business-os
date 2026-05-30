@@ -11,7 +11,7 @@ const {
   getMediaType,
   listFileAssets,
   registerUploadFromRequest,
-} = require('../fileAssets')
+} = require('../fileAssets.ts')
 
 const router = express.Router()
 const ALLOWED_MEDIA_TYPES = new Set(['all', 'image', 'video', 'document', 'file'])

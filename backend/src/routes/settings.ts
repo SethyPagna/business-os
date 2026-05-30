@@ -5,7 +5,7 @@ const { ok, err, broadcast, logOp, audit } = require('../helpers.ts')
 const { authToken, requirePermission, getAuditActor } = require('../middleware.ts')
 const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl.ts')
 const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot.ts')
-const { requestUploadStorageReconcile } = require('../fileAssets')
+const { requestUploadStorageReconcile } = require('../fileAssets.ts')
 const { hasColumn } = require('../schemaMetadata.ts')
 const {
   assertCatalogTextIntegrity,

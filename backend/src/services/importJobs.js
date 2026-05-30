@@ -18,7 +18,7 @@ const {
   UPLOADS_PATH,
 } = require('../config/index.ts')
 const { audit, broadcast } = require('../helpers.ts')
-const { buildUniqueStoredName, registerStoredAsset, sanitizeOriginalFileName } = require('../fileAssets')
+const { buildUniqueStoredName, registerStoredAsset, sanitizeOriginalFileName } = require('../fileAssets.ts')
 const { validateUploadedPath } = require('../uploadSecurity.ts')
 const { isSafeExternalImageReference } = require('../netSecurity.ts')
 const { normalizePriceValue } = require('../money.ts')

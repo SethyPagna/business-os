@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 614.
+- Latest completed implementation move in this roadmap: Move 615.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4802,7 +4802,7 @@ Move 425 status:
 
 Move 426 status:
 - Move 426 tightens file-asset reference, orphan, and usage helpers in
-  `backend/src/fileAssets.js`. Upload-reference recursion, persisted reference
+  `backend/src/fileAssets.ts`. Upload-reference recursion, persisted reference
   collection, reference backfill registration, tracked upload path collection,
   object/local orphan scans, storage-delete key collection, usage map seeding,
   settings/submission usage expansion, and asset-row serialization now use
@@ -6983,3 +6983,19 @@ Move 614 status:
   compile/staging package lane. The expected generated language audit now
   reports `JavaScript: 8`, `TypeScript: 303`, and `React TSX: 107` across the
   active scan roots.
+
+Move 615 status:
+- Move 615 converts `backend/src/fileAssets.ts` to a package-safe TypeScript
+  path. Upload naming, media type inference, upload security validation,
+  image/video optimization, object storage writes, local/R2 reconciliation,
+  usage reference caching, library pagination, and deletion guards remain
+  unchanged on the existing CommonJS service style. Server prewarm wiring,
+  upload middleware, media queue, file/settings/users/product/portal/system
+  routes, import job asset registration, focused file asset tests, and roadmap
+  docs now point at the explicit `.ts` service path. Focused file asset
+  storage, cache, media, upload security, inventory/media contract, portal
+  regression, backend utility, schema audit, stale-path, and Linux packaging
+  proof passed. `pkg` continues to warn for direct `.ts` scripts, so broader
+  backend conversions still wait for a compile/staging package lane. The
+  expected generated language audit now reports `JavaScript: 7`,
+  `TypeScript: 304`, and `React TSX: 107` across the active scan roots.

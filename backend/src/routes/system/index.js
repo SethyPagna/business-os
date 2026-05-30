@@ -79,7 +79,7 @@ const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness.t
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime.ts')
 const { testObjectStore } = require('../../objectStore.ts')
 const { buildIntegrationDoctor } = require('../../services/integrationDoctor.ts')
-const { deleteAllStoredUploads, requestUploadStorageReconcile } = require('../../fileAssets')
+const { deleteAllStoredUploads, requestUploadStorageReconcile } = require('../../fileAssets.ts')
 
 const router = express.Router()
 const BACKUP_VERSION_LIST_ROUTE_TIMEOUT_MS = 500

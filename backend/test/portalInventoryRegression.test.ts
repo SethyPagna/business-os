@@ -85,7 +85,7 @@ runTest('product updates only re-check uniqueness when identifier fields actuall
 runTest('upload path sanitization verifies object-storage references before serving them', () => {
   const snapshotSource = readSource('src/settingsSnapshot.ts')
   const cleanupSource = readSource('src/uploadReferenceCleanup.ts')
-  const assetSource = readSource('src/fileAssets.js')
+  const assetSource = readSource('src/fileAssets.ts')
 
   assert.match(snapshotSource, /const \{ isObjectStorageEnabled, objectExists \} = require\('\.\/objectStore\.ts'\)/, 'settings snapshot sanitization should know when object storage is enabled and how to verify object existence')
   assert.match(snapshotSource, /async function sanitizeMediaPathAsync/, 'settings snapshot sanitization should expose an async object-storage-aware path check')

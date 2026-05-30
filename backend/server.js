@@ -528,7 +528,7 @@ function bootstrapServer() {
     console.warn(`[product-batches] background backfill skipped: ${error?.message || error}`)
   }
   try {
-    const { prewarmFileAssetListing } = require('./src/fileAssets')
+    const { prewarmFileAssetListing } = require('./src/fileAssets.ts')
     setImmediate(() => {
       prewarmFileAssetListing().catch((error) => {
         console.warn(`[file-assets] prewarm skipped: ${error?.message || error}`)

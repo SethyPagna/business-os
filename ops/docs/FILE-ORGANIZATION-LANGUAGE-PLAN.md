@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 614 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 615 in this file.
 
 ## Goal
 
@@ -3323,7 +3323,7 @@ Decision rule:
     shape remain unchanged. This was a backend runtime utility cleanup only; no
     folder move, schema migration, or language conversion was needed.
 416. Tighten file-asset reference and orphan helpers. Done:
-    `backend/src/fileAssets.js` now uses direct-loop helpers for upload
+    `backend/src/fileAssets.ts` now uses direct-loop helpers for upload
     reference recursion, persisted reference collection, reference backfill
     registration, tracked upload path collection, object/local orphan scans,
     storage-delete key collection, usage map seeding, settings/submission usage
@@ -5272,6 +5272,22 @@ Decision rule:
     broader backend conversions remain blocked on the future compile/staging
     lane. The expected generated language audit now reports `JavaScript: 8`,
     `TypeScript: 303`, and `React TSX: 107` across the active scan roots.
+
+615. Convert file asset service to a package-safe TypeScript path.
+    Done: `backend/src/fileAssets.ts` keeps upload naming, media type
+    inference, upload security validation, image/video optimization, object
+    storage writes, local/R2 reconciliation, usage reference caching, library
+    pagination, and deletion guards on the existing CommonJS service style.
+    Server prewarm wiring, upload middleware, media queue, file/settings/users/
+    product/portal/system routes, import job asset registration, focused file
+    asset tests, and roadmap docs now point at the explicit `.ts` service path.
+    Focused file asset storage, cache, media, upload security, inventory/media
+    contract, portal regression, backend utility, schema audit, stale-path, and
+    Linux packaging proof passed. Packaging still warns for direct `.ts`
+    entries in `pkg.scripts`, so broader backend conversions remain blocked on
+    the future compile/staging lane. The expected generated language audit now
+    reports `JavaScript: 7`, `TypeScript: 304`, and `React TSX: 107` across the
+    active scan roots.
 
 ## Safety Gates
 

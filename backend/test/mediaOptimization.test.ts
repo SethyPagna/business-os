@@ -6,7 +6,7 @@ const {
   MAX_IMAGE_ASSET_BYTES,
   buildVideoOptimizationArgs,
   compressBufferForAsset,
-} = require('../src/fileAssets')
+} = require('../src/fileAssets.ts')
 
 let failed = 0
 const pendingTests = new Set()
