@@ -974,7 +974,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
   },
   {
-    target: 'backend/src/routes/inventory.js',
+    target: 'backend/src/routes/inventory.ts',
     optimization: 'RFID session apply now prepares branch, product, branch-stock, movement, product-summary, and session-finalization statements once per request instead of preparing lookups inside each confirmed product row.',
     rollback: 'Inline the RFID apply db.prepare calls inside the product loop again; RFID confirmed quantity, movement, audit, and session status behavior remain unchanged.',
     proof: [

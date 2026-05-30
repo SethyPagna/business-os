@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 619 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 620 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 36`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 327`,
+  `.js: 35`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 328`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -1518,7 +1518,7 @@ Decision rule:
     `ops/docs/SCHEMA-RELATIONSHIPS.md`, schema-audit proof, backup/restore
     rehearsal, orphan checks, and rollback SQL before any DDL changes are made.
 174. Optimize RFID stock-apply route statement reuse. Done:
-    `backend/src/routes/inventory.js` now prepares the RFID branch lookup,
+    `backend/src/routes/inventory.ts` now prepares the RFID branch lookup,
     product lookup, branch-stock writes, movement insert, product RFID summary
     update, and session-finalization statement once per apply request instead
     of preparing statements inside each confirmed product row. This keeps the
@@ -2419,7 +2419,7 @@ Decision rule:
     2.503 GB of builder cache while preserving images, volumes, uploads,
     secrets, and retained backup packages.
 283. Cache additional backend schema metadata probes. Done:
-    `branches.ts` and `inventory.js` now cache the stock-transfer note-column
+    `branches.ts` and `inventory.ts` now cache the stock-transfer note-column
     selection used by transfer write paths, and `products.js` now caches the
     settings `updated_at` column support used by product import brand-setting
     writes. These are process-lifetime schema-shape probes, so the existing
@@ -2651,7 +2651,7 @@ Decision rule:
     stat-card render path linear and local; no folder move, source deletion, or
     language conversion was justified.
 314. Index backend inventory active branches per request. Done:
-    `backend/src/routes/inventory.js` now builds one `activeBranchIndex` map
+    `backend/src/routes/inventory.ts` now builds one `activeBranchIndex` map
     from loaded active branches and reuses it in inventory adjustment and
     product-row move flows. This removes repeated branch scans from stock write
     pathways while keeping the existing Node/SQL route structure; no folder move
@@ -2814,45 +2814,45 @@ Decision rule:
     cleanup only; no folder move, schema migration, or runtime conversion was
     needed.
 337. Reuse backend inventory reason and search normalization loops. Done:
-    `backend/src/routes/inventory.js` now normalizes saved inventory reasons
+    `backend/src/routes/inventory.ts` now normalizes saved inventory reasons
     through one direct-loop helper and splits inventory search terms with a
     bounded direct loop. This was a backend route cleanup only; no folder move,
     schema migration, or runtime conversion was needed.
 338. Make backend inventory product hydration single-pass. Done:
-    `backend/src/routes/inventory.js` now parses inventory product branch-stock
+    `backend/src/routes/inventory.ts` now parses inventory product branch-stock
     JSON and collects product IDs in one pass before attaching batch rows. This
     was a backend route cleanup only; no folder move, schema migration, or
     runtime conversion was needed.
 339. Consolidate backend stock-adjustment allocation movement loops. Done:
-    `backend/src/routes/inventory.js` now uses
+    `backend/src/routes/inventory.ts` now uses
     `appendAllocationMovementEntries()` for remove/set stock allocation
     movement rows and a direct insertion loop for movement persistence. This
     was a backend route cleanup only; no folder move, schema migration, or
     runtime conversion was needed.
 340. Tighten backend inventory transfer insertion loops. Done:
-    `backend/src/routes/inventory.js` now applies transferred batch
+    `backend/src/routes/inventory.ts` now applies transferred batch
     allocations and writes transfer movement pairs with direct loops, and
     `buildInsertColumnSql()` builds dynamic insert columns/placeholders in one
     helper. This was a backend route cleanup only; no folder move, schema
     migration, or runtime conversion was needed.
 341. Tighten backend inventory row-move movement construction. Done:
-    `backend/src/routes/inventory.js` now writes row-move source and
+    `backend/src/routes/inventory.ts` now writes row-move source and
     destination allocation movement rows with direct loops and precomputed
     source/destination unit-cost fallbacks. This was a backend route cleanup
     only; no folder move, schema migration, or runtime conversion was needed.
 342. Tighten backend RFID transaction loops. Done:
-    `backend/src/routes/inventory.js` now records RFID events and applies RFID
+    `backend/src/routes/inventory.ts` now records RFID events and applies RFID
     present-row stock updates with direct transaction loops, while precomputing
     purchase-price movement totals per product row. This was a backend route
     cleanup only; no folder move, schema migration, or runtime conversion was
     needed.
 343. Tighten backend inventory product list assembly loops. Done:
-    `backend/src/routes/inventory.js` now collects family root IDs, merges
+    `backend/src/routes/inventory.ts` now collects family root IDs, merges
     family/base product rows, sanitizes hydrated rows, and extracts brand
     filters with direct loops. This was a backend route cleanup only; no folder
     move, schema migration, or runtime conversion was needed.
 344. Complete backend inventory route array-chain cleanup. Done:
-    `backend/src/routes/inventory.js` now builds product-filter clauses,
+    `backend/src/routes/inventory.ts` now builds product-filter clauses,
     movement-search clauses, and summary branch-stock payloads with direct
     loops instead of array `map()` chains. This was a backend route cleanup
     only; no folder move, schema migration, or runtime conversion was needed.
@@ -3219,7 +3219,7 @@ Decision rule:
     was a backend product-route cleanup only; no folder move, schema migration,
     or language conversion was needed.
 403. Tighten inventory product family expansion helpers. Done:
-    `backend/src/routes/inventory.js` now shares direct-loop helpers for
+    `backend/src/routes/inventory.ts` now shares direct-loop helpers for
     family root ID collection, merged family-row sorting, and inventory product
     row comparison. A callback scan now reports no `map()`, `filter()`,
     `forEach()`, `reduce()`, `find()`, or `Array.from()` hits in the inventory
@@ -3414,7 +3414,7 @@ Decision rule:
     This was a backend database-runtime cleanup only; no folder move, schema
     migration, or language conversion was needed.
 427. Tighten small route predicate helpers. Done:
-    `backend/src/routes/branches.ts`, `backend/src/routes/inventory.js`,
+    `backend/src/routes/branches.ts`, `backend/src/routes/inventory.ts`,
     `backend/src/routes/portal.ts`, `backend/src/routes/settings.ts`, and
     `backend/src/routes/sync.ts` now use named direct-loop helpers for paged
     branch-stock query detection, inventory stats filters, portal AI profile
@@ -5360,6 +5360,25 @@ Decision rule:
     compile/staging lane. The expected generated language audit now reports
     `JavaScript: 3`,
     `TypeScript: 308`, and `React TSX: 107` across the active scan roots.
+
+620. Convert inventory route to a package-safe TypeScript path.
+    Done: `backend/src/routes/inventory.ts` keeps inventory product search,
+    stock adjustments, branch transfers, movement pagination, saved reason
+    normalization, batch-aware stock mutations, RFID session review and apply,
+    grouped movement history, active-branch indexing, action history, audit
+    logging, and broadcasts on the existing CommonJS route style. Server
+    mounting, route contracts, RFID route checks, product batch hierarchy
+    checks, portal inventory regression checks, inventory/settings/media
+    contracts, frontend action-stability checks, backend route docs, master
+    plan, language-runtime audit metadata, and roadmap docs now point at the
+    explicit `.ts` route path. Focused inventory route load, route-contract,
+    RFID, product batch, portal regression, inventory media/settings contract,
+    frontend action-stability, stale-path, backend utility, schema audit,
+    Linux packaging, and source-load proof passed. Packaging still warns for
+    direct `.ts` entries in `pkg.scripts`, so broader backend conversions
+    remain blocked on the future compile/staging lane. The expected generated
+    language audit now reports `JavaScript: 2`, `TypeScript: 309`, and
+    `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

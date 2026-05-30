@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 619.
+- Latest completed implementation move in this roadmap: Move 620.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2457,7 +2457,7 @@ Cleanup checkpoint:
   through the schema protocol: backup, restore rehearsal, orphan checks,
   rollback SQL, schema audit, and relationship-doc updates.
 - Move 174 optimizes the RFID stock-apply data path:
-  `backend/src/routes/inventory.js` now reuses prepared branch, product,
+  `backend/src/routes/inventory.ts` now reuses prepared branch, product,
   branch-stock, movement, product-summary, and session-finalization statements
   across confirmed product rows in one apply request. The slice avoids a
   language/runtime conversion because the route is still request orchestration
@@ -3441,7 +3441,7 @@ Cleanup checkpoint:
   render path while preserving backend SQL stats as the primary source when
   available.
 - Move 314 indexes backend inventory active branches per request:
-  `backend/src/routes/inventory.js` now builds `activeBranchIndex` from the
+  `backend/src/routes/inventory.ts` now builds `activeBranchIndex` from the
   active branch query and reuses it for default branch fallback and branch-name
   resolution in inventory adjustment and product-row move flows. The route
   contract guard now blocks regressions to repeated active-branch scans in
@@ -3887,7 +3887,7 @@ Move 346 status:
 
 Move 347 status:
 - Move 347 removes inventory-route normalization chains in
-  `backend/src/routes/inventory.js`. Saved inventory reason loading and
+  `backend/src/routes/inventory.ts`. Saved inventory reason loading and
   persistence now share `normalizeInventoryReasonList()` with direct-loop
   cleaning/deduping/sorting, and inventory search terms now use a bounded
   direct-loop splitter instead of `map/filter/slice` chains. The saved settings
@@ -3900,7 +3900,7 @@ Move 347 status:
 
 Move 348 status:
 - Move 348 makes inventory product hydration single-pass in
-  `backend/src/routes/inventory.js`. `hydrateInventoryProducts()` now parses
+  `backend/src/routes/inventory.ts`. `hydrateInventoryProducts()` now parses
   branch-stock JSON, removes the transport JSON column, and collects product
   IDs in one direct loop before attaching batch rows in a second loop. The
   inventory product response shape and branch-scoped batch lookup behavior
@@ -3909,7 +3909,7 @@ Move 348 status:
 
 Move 349 status:
 - Move 349 consolidates stock-adjustment allocation movement construction in
-  `backend/src/routes/inventory.js`. Remove-stock and set-stock reductions now
+  `backend/src/routes/inventory.ts`. Remove-stock and set-stock reductions now
   use `appendAllocationMovementEntries()` instead of three duplicated
   allocation `forEach` blocks, and inventory movement insertion now uses a
   direct loop. Movement type, branch, batch, cost, reason, and optional
@@ -3919,7 +3919,7 @@ Move 349 status:
 
 Move 350 status:
 - Move 350 tightens inventory transfer insertion loops in
-  `backend/src/routes/inventory.js`. Transfer allocation cloning and paired
+  `backend/src/routes/inventory.ts`. Transfer allocation cloning and paired
   movement insertion now use direct loops, and dynamic transfer insert SQL uses
   `buildInsertColumnSql()` instead of separate `map()` chains for quoted
   columns and placeholders. Transfer idempotency, optional note column
@@ -3929,7 +3929,7 @@ Move 350 status:
 
 Move 351 status:
 - Move 351 tightens inventory row-move stock movement construction in
-  `backend/src/routes/inventory.js`. Source and destination allocation
+  `backend/src/routes/inventory.ts`. Source and destination allocation
   movement rows now use direct loops with precomputed unit-cost fallbacks
   instead of callback blocks that recomputed the same cost expressions for
   every allocation. Movement type, branch, product, batch, quantity, stock
@@ -3939,7 +3939,7 @@ Move 351 status:
 
 Move 352 status:
 - Move 352 tightens RFID inventory transaction loops in
-  `backend/src/routes/inventory.js`. RFID event recording now collects
+  `backend/src/routes/inventory.ts`. RFID event recording now collects
   successful `recordRfidEvent()` results in one direct transaction loop
   instead of `map().filter(Boolean)`, and RFID apply now iterates present rows
   with a direct loop plus precomputed purchase-price fallbacks for movement
@@ -3950,7 +3950,7 @@ Move 352 status:
 
 Move 353 status:
 - Move 353 tightens inventory product list assembly in
-  `backend/src/routes/inventory.js`. Family root ID collection, family/base row
+  `backend/src/routes/inventory.ts`. Family root ID collection, family/base row
   merging, response sanitization, and brand filter extraction now use direct
   loops instead of `flatMap().filter()`, spread/`forEach`, response `map()`,
   and brand-row `map()` chains. Product search SQL, family expansion, sorting,
@@ -3960,7 +3960,7 @@ Move 353 status:
 
 Move 354 status:
 - Move 354 completes the obvious inventory route array-chain cleanup in
-  `backend/src/routes/inventory.js`. Product-filter search clauses, inventory
+  `backend/src/routes/inventory.ts`. Product-filter search clauses, inventory
   summary branch-stock parsing, and movement search clauses now use direct
   loops instead of `map()` chains. Generated SQL fragments, parameter names,
   branch-stock JSON parsing fallback, movement search behavior, and response
@@ -4660,14 +4660,14 @@ Move 412 status:
 
 Move 413 status:
 - Move 413 tightens inventory product family expansion in
-  `backend/src/routes/inventory.js`. Family root ID collection and merged
+  `backend/src/routes/inventory.ts`. Family root ID collection and merged
   family-row sorting now use direct-loop helpers instead of `Array.from()`
   materialization and inline sort callbacks. Family expansion SQL inputs,
   parent/variant inclusion, merged row de-duplication, inventory product
   ordering by name then ID, branch-stock hydration, and response sanitization
   remain unchanged. A callback-chain scan now reports no `map()`, `filter()`,
   `forEach()`, `reduce()`, `find()`, or `Array.from()` hits in
-  `backend/src/routes/inventory.js`.
+  `backend/src/routes/inventory.ts`.
 
 Move 414 status:
 - Move 414 tightens sale stock availability sampling in
@@ -4900,7 +4900,7 @@ Move 436 status:
 
 Move 437 status:
 - Move 437 tightens small route predicate helpers in
-  `backend/src/routes/branches.ts`, `backend/src/routes/inventory.js`,
+  `backend/src/routes/branches.ts`, `backend/src/routes/inventory.ts`,
   `backend/src/routes/portal.ts`, `backend/src/routes/settings.ts`, and
   `backend/src/routes/sync.ts`. Paged branch-stock query detection, inventory
   stats filter detection, portal AI profile preference checks, suspicious brand
@@ -7073,3 +7073,22 @@ Move 619 status:
   conversions still wait for a compile/staging package lane. The expected
   generated language audit now reports `JavaScript: 3`, `TypeScript: 308`, and
   `React TSX: 107` across the active scan roots.
+
+Move 620 status:
+- Move 620 converts `backend/src/routes/inventory.ts` to a package-safe
+  TypeScript path. Inventory product search, stock adjustments, branch
+  transfers, movement pagination, saved reason normalization, batch-aware stock
+  mutations, RFID session review and apply, grouped movement history,
+  active-branch indexing, action history, audit logging, and broadcasts remain
+  unchanged on the existing CommonJS route style. Server mounting, route
+  contracts, RFID route checks, product batch hierarchy checks, portal
+  inventory regression checks, inventory/settings/media contracts, frontend
+  action-stability checks, backend route docs, master plan, language-runtime
+  audit metadata, and roadmap docs now point at the explicit `.ts` route path.
+  Focused inventory route load, route-contract, RFID, product batch, portal
+  regression, inventory media/settings contract, frontend action-stability,
+  stale-path, source-load, backend utility, schema audit, and Linux packaging
+  proof passed. `pkg` continues to warn for direct `.ts` scripts, so broader
+  backend conversions still wait for a compile/staging package lane. The
+  expected generated language audit now reports `JavaScript: 2`,
+  `TypeScript: 309`, and `React TSX: 107` across the active scan roots.

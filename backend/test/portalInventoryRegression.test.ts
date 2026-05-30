@@ -47,7 +47,7 @@ runTest('portal catalog product payloads share image and branch-stock materializ
 })
 
 runTest('inventory movements accept large page sizes and use text-safe created_at ordering', () => {
-  const source = readSource('src/routes/inventory.js')
+  const source = readSource('src/routes/inventory.ts')
   assert.match(source, /normalizePositiveInt\(requestedPageSize,\s*50000,\s*\{\s*min:\s*1,\s*max:\s*50000\s*\}\)/, 'movements route should allow explicit pageSize values up to 50000')
   assert.match(source, /COALESCE\(NULLIF\(im\.created_at::text,\s*''\), CURRENT_TIMESTAMP::text\) AS created_at/, 'movement rows should keep text-safe created_at fallback')
   assert.match(source, /ORDER BY COALESCE\(NULLIF\(im\.created_at::text,\s*''\), CURRENT_TIMESTAMP::text\) DESC, im\.id DESC/, 'movement ordering should avoid timestamp/text COALESCE mismatches')

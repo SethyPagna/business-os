@@ -22,7 +22,7 @@ function readSource(relativePath) {
 }
 
 runTest('inventory transfer route has idempotency lookup before stock mutation', () => {
-  const source = readSource('src/routes/inventory.js')
+  const source = readSource('src/routes/inventory.ts')
   assert.match(source, /normalizeClientRequestId/, 'transfer must normalize client_request_id')
   assert.match(source, /findTransferByClientRequestId/, 'transfer must be able to return a previous transfer')
   assert.match(source, /idempotent:\s*true/, 'repeat transfer requests must be reported as idempotent')
@@ -50,7 +50,7 @@ runTest('file upload route compresses images immediately and only defers video o
 })
 
 runTest('movement route keeps pagination metadata and safe created_at fallback', () => {
-  const source = readSource('src/routes/inventory.js')
+  const source = readSource('src/routes/inventory.ts')
   assert.match(source, /pageSize/, 'movement route must accept pageSize')
   assert.match(source, /totalPages/, 'movement route must return totalPages')
   assert.match(source, /COALESCE\(NULLIF\(im\.created_at::text,\s*''\)/, 'movement rows must fallback created_at safely')

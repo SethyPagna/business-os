@@ -117,7 +117,7 @@ File: `backend/src/routes/portal.ts`
 ## Inventory
 
 Base: `/api/inventory`  
-File: `backend/src/routes/inventory.js`
+File: `backend/src/routes/inventory.ts`
 
 - `POST /adjust`
 - `GET /summary`

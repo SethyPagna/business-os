@@ -113,7 +113,7 @@ Priority areas:
 
 - `backend/src/services/importJobs.js`
 - `backend/src/routes/products.js`
-- `backend/src/routes/inventory.js`
+- `backend/src/routes/inventory.ts`
 - `backend/src/routes/sales.ts`
 - `backend/src/routes/system/index.ts`
 - `backend/src/services/googleDriveSync/index.ts`

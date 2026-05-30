@@ -36,7 +36,7 @@ runTest('product router registers required paged search routes', () => {
 })
 
 runTest('inventory router registers required paged product search route', () => {
-  const router = require('../src/routes/inventory')
+  const router = require('../src/routes/inventory.ts')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/products/search'), 'missing /api/inventory/products/search')
   assert.ok(paths.includes('/rfid/status'), 'missing /api/inventory/rfid/status')
@@ -51,7 +51,7 @@ runTest('inventory router registers required paged product search route', () => 
 runTest('inventory movement history allows large import batches', () => {
   const fs = require('fs')
   const path = require('path')
-  const source = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8')
   assert.match(source, /req\.query\.limit \|\| '50000'/)
   assert.match(source, /normalizePositiveInt\(requestedPageSize,\s*50000,\s*\{\s*min:\s*1,\s*max:\s*50000\s*\}\)/)
 })
@@ -188,7 +188,7 @@ runTest('branch and inventory routes cache stock transfer note metadata', () => 
   const fs = require('fs')
   const path = require('path')
   const branchesSource = fs.readFileSync(path.join(__dirname, '../src/routes/branches.ts'), 'utf8')
-  const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
+  const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8')
   assert.match(branchesSource, /const \{ firstExistingColumn \} = require\('\.\.\/schemaMetadata\.ts'\)/)
   assert.match(branchesSource, /return firstExistingColumn\('stock_transfers', \['notes', 'note'\]\)/)
   assert.match(inventorySource, /const \{ firstExistingColumn \} = require\('\.\.\/schemaMetadata\.ts'\)/)
@@ -200,7 +200,7 @@ runTest('branch and inventory routes cache stock transfer note metadata', () => 
 runTest('inventory stock writes index active branches per request', () => {
   const fs = require('fs')
   const path = require('path')
-  const source = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8')
   assert.match(source, /function buildActiveBranchIndex\(rows = \[\]\)/)
   assert.match(source, /const activeBranchIndex = buildActiveBranchIndex\(activeBranches\)/)
   assert.match(source, /activeBranchIndex\.byId\.get\(Number\(targetBranchId\)\)/)
@@ -258,7 +258,7 @@ runTest('activity routes include admin-only user filters for attribution review'
   const fs = require('fs')
   const path = require('path')
   const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.ts'), 'utf8')
-  const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
+  const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8')
   const actionHistorySource = fs.readFileSync(path.join(__dirname, '../src/routes/actionHistory.ts'), 'utf8')
   assert.match(salesSource, /cashier_id\s*=\s*\?/)
   assert.match(salesSource, /isAdminControlUser/)
