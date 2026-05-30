@@ -43,7 +43,7 @@ const manageCategoriesModal = fs.readFileSync(new URL('../src/components/product
 const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageUnitsModal.tsx', import.meta.url), 'utf8')
 const manageBrandsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageBrandsModal.tsx', import.meta.url), 'utf8')
 const productLookupSnapshots = fs.readFileSync(new URL('../src/components/products/lookups/productLookupSnapshots.ts', import.meta.url), 'utf8')
-const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.jsx', import.meta.url), 'utf8')
+const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.tsx', import.meta.url), 'utf8')
 const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePickerModal.tsx', import.meta.url), 'utf8')
 const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.tsx', import.meta.url), 'utf8')
 const usersPage = fs.readFileSync(new URL('../src/components/users/Users.jsx', import.meta.url), 'utf8')
@@ -1660,7 +1660,7 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\(\) => window\.api\.getFiles\(\{[\s\S]{0,180}includeMeta: true,[\s\S]{0,80}\}\), 'Files library', FILES_LIBRARY_LOAD_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => filesApi\.getFiles\(\{[\s\S]{0,180}includeMeta: true,[\s\S]{0,80}\}\), 'Files library', FILES_LIBRARY_LOAD_TIMEOUT_MS\)/,
   'files page library should timeout slow file reads',
 )
 assert.match(
@@ -1675,12 +1675,12 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => filesApi\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/,
   'files page uploads should timeout slow upload requests',
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => filesApi\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/,
   'files page deletes should timeout slow delete requests',
 )
 assert.doesNotMatch(
@@ -1695,7 +1695,7 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\(\) => window\.api\.getAiProviders\(\), label, AI_PROVIDERS_LOAD_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => filesApi\.getAiProviders\(\), label, AI_PROVIDERS_LOAD_TIMEOUT_MS\)/,
   'AI provider reads should timeout slow provider requests',
 )
 assert.doesNotMatch(
@@ -1710,7 +1710,7 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\(\) => window\.api\.getAiResponses\(80\), label, AI_RESPONSES_LOAD_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => filesApi\.getAiResponses\(80\), label, AI_RESPONSES_LOAD_TIMEOUT_MS\)/,
   'AI response reads should timeout slow response requests',
 )
 assert.doesNotMatch(

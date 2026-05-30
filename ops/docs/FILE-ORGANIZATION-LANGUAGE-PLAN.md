@@ -1,4 +1,4 @@
-# File Organization And Language Conversion Plan
+﻿# File Organization And Language Conversion Plan
 
 > Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 529 in this file.
 
@@ -520,7 +520,7 @@ Decision rule:
     and the broad Phase 8.4 Playwright UI live check passed on frontend hash
     `184285cf77ae8c5e`.
 45. Harden Files library asset upload/delete actions. Done:
-    `frontend/src/components/files/FilesPage.jsx` and
+    `frontend/src/components/files/FilesPage.tsx` and
     `frontend/src/components/files/FilePickerModal.tsx` now wrap file asset
     uploads and deletes in explicit timeout contracts while preserving their
     same-tick upload/delete guards. The Files selected-assets toolbar also uses
@@ -4216,6 +4216,17 @@ Decision rule:
     three-per-row mobile stat layout, and action/performance source checks
     intact while removing the old direct `window.api` branch calls from the
     page body.
+536. Convert the files/library page shell to TSX. Done:
+    `frontend/src/components/files/FilesPage.tsx` now types file assets,
+    paged file responses, AI provider metadata, provider forms, provider
+    mutation/test results, saved AI responses, app/sync context access, local
+    files API gateway calls, active tab state, selected asset ids, loading
+    request guards, and upload/delete/provider action guards. The conversion
+    keeps the extensionless app lazy import, asset upload/delete timeouts,
+    library/provider/response read timeouts, provider undo/redo actions,
+    compact mobile asset controls, source-inspection tests, and child tab
+    contracts intact while sanitizing stale mojibake fallback text before it
+    can render in the Library UI.
 
 ## Safety Gates
 

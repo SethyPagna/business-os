@@ -1,4 +1,4 @@
-# Business OS Optimization Master Plan
+﻿# Business OS Optimization Master Plan
 
 Last updated: 2026-05-16
 
@@ -94,7 +94,7 @@ Priority surfaces:
 - `CatalogPage.jsx`
 - `Settings.jsx`
 - `Backup.jsx`
-- `FilesPage.jsx`
+- `FilesPage.tsx`
 - `Returns.tsx`
 
 Preferred tactics:

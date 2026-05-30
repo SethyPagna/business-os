@@ -1,3 +1,4 @@
+import type { ChangeEvent, ComponentProps, ComponentType, ReactNode } from 'react'
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckSquare,
@@ -11,7 +12,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { useApp, useSync } from '../../AppContext'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -29,7 +30,7 @@ import {
 const loadFilesProvidersTab = () => import('./FilesProvidersTab.tsx')
 const loadFilesResponsesTab = () => import('./FilesResponsesTab')
 const FilesProvidersTab = lazy(loadFilesProvidersTab)
-const FilesResponsesTab = lazy(loadFilesResponsesTab)
+const FilesResponsesTab = lazy(loadFilesResponsesTab as () => Promise<{ default: ComponentType<FilesResponsesTabProps> }>)
 
 const FILES_LIBRARY_LOAD_TIMEOUT_MS = 10000
 const AI_PROVIDERS_LOAD_TIMEOUT_MS = 8000
@@ -39,19 +40,217 @@ const AI_PROVIDER_TEST_TIMEOUT_MS = 30000
 const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000
 const FILES_ASSET_DELETE_TIMEOUT_MS = 12000
 
-function AssetPreview({ asset }) {
+type TranslateFunction = (key: string) => string | undefined
+type TranslateWithFallback = (key: string, fallback?: string, fallbackKm?: string) => string
+type NotifyFunction = (message: string, type?: string) => void
+type FilesTab = 'assets' | 'providers' | 'responses'
+type MediaTypeFilter = 'all' | 'image' | 'video' | 'document' | string
+
+interface AppUser {
+  id?: string | number
+  name?: string
+}
+
+interface AppContextValue {
+  notify: NotifyFunction
+  user?: AppUser | null
+  t: TranslateFunction
+}
+
+interface SyncContextValue {
+  syncChannel?: {
+    channel?: string
+    ts?: unknown
+  } | null
+}
+
+interface FileAsset {
+  id: string | number
+  original_name?: string | null
+  public_path?: string | null
+  browser_public_path?: string | null
+  media_type?: string | null
+  mime_type?: string | null
+  byte_size?: number | string | null
+  created_at?: string | number | Date | null
+  updated_at?: string | null
+  usageCount?: number
+  canDelete?: boolean
+}
+
+interface FilesResponse {
+  items?: FileAsset[]
+  total?: number | string
+}
+
+interface ProviderMeta {
+  label?: string
+  supportedTypes?: string[]
+  defaultModel?: string
+  defaultPriority?: number
+  safeRequestsPerMinute?: number
+  safeMaxInputChars?: number
+  safeMaxCompletionTokens?: number
+  safeTimeoutMs?: number
+  safeCooldownSeconds?: number
+}
+
+type ProviderMetaMap = Record<string, ProviderMeta>
+type ProviderOption = [string, ProviderMeta]
+
+interface AiProvider {
+  id: string | number
+  name: string
+  provider: string
+  provider_type?: string
+  account_email?: string
+  project_name?: string
+  default_model?: string
+  supported_models?: string[]
+  endpoint_override?: string
+  notes?: string
+  enabled?: boolean
+  priority?: number | string
+  requests_per_minute?: number | string
+  max_input_chars?: number | string
+  max_completion_tokens?: number | string
+  timeout_ms?: number | string
+  cooldown_seconds?: number | string
+  updated_at?: string
+}
+
+interface ProviderFormState {
+  id: string | number | null
+  name: string
+  provider: string
+  provider_type: string
+  account_email: string
+  project_name: string
+  api_key: string
+  default_model: string
+  supported_models_text: string
+  endpoint_override: string
+  notes: string
+  enabled: boolean
+  priority: number | string
+  requests_per_minute: number | string
+  max_input_chars: number | string
+  max_completion_tokens: number | string
+  timeout_ms: number | string
+  cooldown_seconds: number | string
+  updated_at?: string
+}
+
+interface ProviderPayload {
+  name: string
+  provider: string
+  provider_type: string
+  account_email: string
+  project_name: string
+  api_key: string
+  default_model: string
+  supported_models: string[]
+  endpoint_override: string
+  notes: string
+  enabled: boolean
+  priority: number
+  requests_per_minute: number
+  max_input_chars: number
+  max_completion_tokens: number
+  timeout_ms: number
+  cooldown_seconds: number
+  userId?: string | number
+  userName?: string
+  expectedUpdatedAt?: string
+}
+
+interface ProviderMutationResult {
+  success?: boolean
+  error?: string
+  id?: unknown
+  data?: { id?: unknown } | null
+  item?: AiProvider | null
+}
+
+interface ProviderTestResult {
+  passed?: boolean
+  message?: string
+}
+
+interface ProvidersResponse {
+  items?: AiProvider[]
+  providerMeta?: ProviderMetaMap
+}
+
+interface AiResponseEntry {
+  id: string | number
+  created_at?: string | number | Date | null
+}
+
+interface AiResponsesResponse {
+  items?: AiResponseEntry[]
+}
+
+type FilesResponsesTabProps = {
+  tr: TranslateWithFallback
+  loadResponses: () => void
+  loadingResponses: boolean
+  responses: AiResponseEntry[]
+  expandedResponseId: AiResponseEntry['id'] | null
+  setExpandedResponseId: (updater: (current: AiResponseEntry['id'] | null) => AiResponseEntry['id'] | null) => void
+  formatDateTime: (value: AiResponseEntry['created_at']) => string
+}
+
+interface FilesApi {
+  getFiles: (options: { search: string; mediaType: MediaTypeFilter; page: number; pageSize: number; includeMeta: boolean }) => Promise<FilesResponse>
+  uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string }) => Promise<unknown>
+  deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string }) => Promise<unknown>
+  getAiProviders: () => Promise<ProvidersResponse>
+  getAiResponses: (limit: number) => Promise<AiResponsesResponse>
+  createAiProvider: (payload: ProviderPayload) => Promise<ProviderMutationResult>
+  updateAiProvider: (id: string | number, payload: ProviderPayload) => Promise<ProviderMutationResult>
+  deleteAiProvider: (id: string | number, options: { userId?: string | number; userName?: string; expectedUpdatedAt?: string }) => Promise<ProviderMutationResult>
+  testAiProvider: (id: string | number, options: { userId?: string | number; userName?: string }) => Promise<ProviderTestResult>
+}
+
+interface AssetPreviewProps {
+  asset: FileAsset | null | undefined
+}
+
+type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+
+function getFilesApi(): FilesApi {
+  return (window as unknown as { api: FilesApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function hasMojibake(value: string): boolean {
+  return /áž|áŸ|Â|â/.test(value)
+}
+
+function sanitizeFallback(value: string): string {
+  return hasMojibake(value) ? '' : value
+}
+
+function AssetPreview({ asset }: AssetPreviewProps) {
   const previewUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
   if (asset?.media_type === 'image') {
     return (
       <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-100">
-        <img src={previewUrl} alt={asset.original_name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+        <img src={previewUrl || ''} alt={asset.original_name || 'File preview'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
       </div>
     )
   }
   if (asset?.media_type === 'video') {
     return (
       <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-100">
-        <video src={previewUrl} className="h-full w-full object-cover" controls preload="none" />
+        <video src={previewUrl || ''} className="h-full w-full object-cover" controls preload="none" />
       </div>
     )
   }
@@ -88,17 +287,17 @@ function AssetCardSkeleton() {
   )
 }
 
-function formatDateTime(value) {
+function formatDateTime(value: string | number | Date | null | undefined): string {
   if (!value) return '-'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
+  if (Number.isNaN(date.getTime())) return String(value)
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
 }
 
-function formatFileSize(bytes) {
+function formatFileSize(bytes: number | string | null | undefined): string {
   const size = Number(bytes || 0)
   if (!Number.isFinite(size) || size <= 0) return '-'
   if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(2)} MB`
@@ -106,7 +305,7 @@ function formatFileSize(bytes) {
   return `${size} B`
 }
 
-function emptyProviderForm() {
+function emptyProviderForm(): ProviderFormState {
   return {
     id: null,
     name: '',
@@ -129,18 +328,18 @@ function emptyProviderForm() {
   }
 }
 
-function compactTabLabel(label) {
+function compactTabLabel(label: string): string {
   if (label === 'AI Providers') return 'Providers'
   if (label === 'AI Responses') return 'Responses'
   return label
 }
 
-function getDefaultFilesPageSize() {
+function getDefaultFilesPageSize(): number {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 24
   return window.matchMedia('(max-width: 767px)').matches ? 12 : 24
 }
 
-function downloadAssetFile(asset) {
+function downloadAssetFile(asset: FileAsset) {
   const downloadUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
   if (!downloadUrl || typeof document === 'undefined') return
   const link = document.createElement('a')
@@ -156,31 +355,32 @@ export default function FilesPage() {
   const { notify, user, t } = useApp()
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('files')
-  const [activeTab, setActiveTab] = useState('assets')
+  const filesApi = useMemo(() => getFilesApi(), [])
+  const [activeTab, setActiveTab] = useState<FilesTab>('assets')
 
-  const [files, setFiles] = useState([])
+  const [files, setFiles] = useState<FileAsset[]>([])
   const [search, setSearch] = useState('')
-  const [mediaType, setMediaType] = useState('all')
+  const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
   const deferredSearch = useDeferredValue(search)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(() => getDefaultFilesPageSize())
   const [totalFiles, setTotalFiles] = useState(0)
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [deletingAssetId, setDeletingAssetId] = useState(null)
-  const [selectedAssetIds, setSelectedAssetIds] = useState(() => new Set())
+  const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<number>>(() => new Set())
 
-  const [providers, setProviders] = useState([])
-  const [providerMeta, setProviderMeta] = useState({})
+  const [providers, setProviders] = useState<AiProvider[]>([])
+  const [providerMeta, setProviderMeta] = useState<ProviderMetaMap>({})
   const [providerForm, setProviderForm] = useState(() => emptyProviderForm())
   const [loadingProviders, setLoadingProviders] = useState(false)
   const [savingProvider, setSavingProvider] = useState(false)
-  const [testingProviderId, setTestingProviderId] = useState(null)
-  const [deletingProviderId, setDeletingProviderId] = useState(null)
+  const [testingProviderId, setTestingProviderId] = useState<string | number | null>(null)
+  const [deletingProviderId, setDeletingProviderId] = useState<string | number | null>(null)
 
-  const [responses, setResponses] = useState([])
+  const [responses, setResponses] = useState<AiResponseEntry[]>([])
   const [loadingResponses, setLoadingResponses] = useState(false)
-  const [expandedResponseId, setExpandedResponseId] = useState(null)
+  const [expandedResponseId, setExpandedResponseId] = useState<AiResponseEntry['id'] | null>(null)
   const fileLoadRequestRef = useRef(0)
   const providerLoadRequestRef = useRef(0)
   const responseLoadRequestRef = useRef(0)
@@ -192,10 +392,11 @@ export default function FilesPage() {
   const actionHistory = useActionHistory({ limit: 3, notify })
 
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = (key, fallback, fallbackKm = fallback) => {
+  const tr: TranslateWithFallback = (key, fallback = key, fallbackKm = fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
-    return isKhmer ? fallbackKm : fallback
+    if (!isKhmer) return fallback
+    return sanitizeFallback(fallbackKm) || fallback
   }
   const providerText = {
     entryName: tr('entry_name', 'Entry name', 'ឈ្មោះធាតុ'),
@@ -243,7 +444,7 @@ export default function FilesPage() {
     [selectedAssets],
   )
 
-  const buildProviderPayload = useCallback((provider = {}, overrides = {}) => ({
+  const buildProviderPayload = useCallback((provider: Partial<AiProvider> = {}, overrides: Partial<ProviderFormState> & { supported_models?: string[] } = {}): ProviderPayload => ({
     name: String(overrides.name ?? provider.name ?? '').trim(),
     provider: overrides.provider ?? provider.provider ?? 'groq',
     provider_type: overrides.provider_type ?? provider.provider_type ?? 'chat',
@@ -272,10 +473,10 @@ export default function FilesPage() {
     userName: user?.name,
     expectedUpdatedAt: overrides.updated_at ?? provider.updated_at ?? undefined,
   }), [user?.id, user?.name])
-  const runProviderMutation = useCallback((loader, label) => (
+  const runProviderMutation = useCallback((loader: () => Promise<ProviderMutationResult>, label: string) => (
     withLoaderTimeout(loader, label, AI_PROVIDER_MUTATION_TIMEOUT_MS)
   ), [])
-  const runProviderTest = useCallback((loader, label) => (
+  const runProviderTest = useCallback((loader: () => Promise<ProviderTestResult>, label: string) => (
     withLoaderTimeout(loader, label, AI_PROVIDER_TEST_TIMEOUT_MS)
   ), [])
 
@@ -283,7 +484,7 @@ export default function FilesPage() {
     const requestId = beginTrackedRequest(fileLoadRequestRef)
     setLoadingFiles(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getFiles({
+      const result = await withLoaderTimeout(() => filesApi.getFiles({
         search: deferredSearch,
         mediaType,
         page,
@@ -300,11 +501,11 @@ export default function FilesPage() {
       })
     } catch (error) {
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
-      notify(error?.message || 'Failed to load files', 'error')
+      notify(getErrorMessage(error, 'Failed to load files'), 'error')
     } finally {
       if (isTrackedRequestCurrent(fileLoadRequestRef, requestId)) setLoadingFiles(false)
     }
-  }, [deferredSearch, mediaType, notify, page, pageSize])
+  }, [deferredSearch, filesApi, mediaType, notify, page, pageSize])
 
   useEffect(() => {
     setPage(1)
@@ -339,40 +540,40 @@ export default function FilesPage() {
     const requestId = beginTrackedRequest(providerLoadRequestRef)
     setLoadingProviders(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getAiProviders(), label, AI_PROVIDERS_LOAD_TIMEOUT_MS)
+      const result = await withLoaderTimeout(() => filesApi.getAiProviders(), label, AI_PROVIDERS_LOAD_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(providerLoadRequestRef, requestId)) return null
       setProviders(Array.isArray(result?.items) ? result.items : [])
       setProviderMeta(result?.providerMeta || {})
       return result
     } catch (error) {
       if (!isTrackedRequestCurrent(providerLoadRequestRef, requestId)) return null
-      notify(error?.message || 'Failed to load AI providers', 'error')
+      notify(getErrorMessage(error, 'Failed to load AI providers'), 'error')
       return null
     } finally {
       if (isTrackedRequestCurrent(providerLoadRequestRef, requestId)) {
         setLoadingProviders(false)
       }
     }
-  }, [notify])
+  }, [filesApi, notify])
 
   const loadResponses = useCallback(async (label = 'AI responses') => {
     const requestId = beginTrackedRequest(responseLoadRequestRef)
     setLoadingResponses(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getAiResponses(80), label, AI_RESPONSES_LOAD_TIMEOUT_MS)
+      const result = await withLoaderTimeout(() => filesApi.getAiResponses(80), label, AI_RESPONSES_LOAD_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(responseLoadRequestRef, requestId)) return null
       setResponses(Array.isArray(result?.items) ? result.items : [])
       return result
     } catch (error) {
       if (!isTrackedRequestCurrent(responseLoadRequestRef, requestId)) return null
-      notify(error?.message || 'Failed to load AI responses', 'error')
+      notify(getErrorMessage(error, 'Failed to load AI responses'), 'error')
       return null
     } finally {
       if (isTrackedRequestCurrent(responseLoadRequestRef, requestId)) {
         setLoadingResponses(false)
       }
     }
-  }, [notify])
+  }, [filesApi, notify])
 
   useEffect(() => {
     if (!isActive) {
@@ -428,7 +629,7 @@ export default function FilesPage() {
     invalidateTrackedRequest(responseLoadRequestRef)
   }, [])
 
-  async function handleUpload(event) {
+  async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
@@ -437,21 +638,21 @@ export default function FilesPage() {
     setUploading(true)
     try {
       await withLoaderTimeout(
-        () => window.api.uploadFileAsset({ file, userId: user?.id, userName: user?.name }),
+        () => filesApi.uploadFileAsset({ file, userId: user?.id, userName: user?.name }),
         'Upload file asset',
         FILES_ASSET_UPLOAD_TIMEOUT_MS,
       )
       notify(tr('upload_complete', 'Upload complete'), 'success')
       await loadFiles()
     } catch (error) {
-      notify(error?.message || 'Upload failed', 'error')
+      notify(getErrorMessage(error, 'Upload failed'), 'error')
     } finally {
       uploadInFlightRef.current = false
       setUploading(false)
     }
   }
 
-  async function handleDeleteAsset(asset) {
+  async function handleDeleteAsset(asset: FileAsset) {
     if (!asset?.id || deletingAssetId || deleteInFlightRef.current) return
     if (!asset.canDelete) {
       notify(tr('file_in_use', 'This file is still in use and cannot be deleted.'), 'error')
@@ -465,25 +666,25 @@ export default function FilesPage() {
     setDeletingAssetId(asset.id)
     try {
       await withLoaderTimeout(
-        () => window.api.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined }),
+        () => filesApi.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined }),
         'Delete file asset',
         FILES_ASSET_DELETE_TIMEOUT_MS,
       )
       notify(tr('file_deleted', 'File deleted'), 'success')
       await loadFiles()
     } catch (error) {
-      notify(error?.message || 'Delete failed', 'error')
+      notify(getErrorMessage(error, 'Delete failed'), 'error')
     } finally {
       deleteInFlightRef.current = false
       setDeletingAssetId(null)
     }
   }
 
-  function toggleAssetSelection(assetId) {
+  function toggleAssetSelection(assetId: string | number) {
     const numericId = Number(assetId || 0)
     if (!numericId) return
     setSelectedAssetIds((current) => {
-      const next = new Set(current)
+      const next = new Set<number>(current)
       if (next.has(numericId)) next.delete(numericId)
       else next.add(numericId)
       return next
@@ -543,7 +744,7 @@ export default function FilesPage() {
     try {
       for (const asset of bulkDeletableAssets) {
         await withLoaderTimeout(
-          () => window.api.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined }),
+          () => filesApi.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined }),
           'Delete selected file asset',
           FILES_ASSET_DELETE_TIMEOUT_MS,
         )
@@ -559,7 +760,7 @@ export default function FilesPage() {
       setSelectedAssetIds(new Set())
       await loadFiles()
     } catch (error) {
-      notify(error?.message || 'Bulk delete failed', 'error')
+      notify(getErrorMessage(error, 'Bulk delete failed'), 'error')
     } finally {
       deleteInFlightRef.current = false
       setDeletingAssetId(null)
@@ -582,7 +783,7 @@ export default function FilesPage() {
     })
   }
 
-  function startEditProvider(provider) {
+  function startEditProvider(provider: AiProvider) {
     setProviderForm({
       id: provider.id,
       updated_at: provider.updated_at || '',
@@ -645,8 +846,8 @@ export default function FilesPage() {
     setSavingProvider(true)
     try {
       const result = providerForm.id
-        ? await runProviderMutation(() => window.api.updateAiProvider(providerForm.id, payload), 'Update AI provider')
-        : await runProviderMutation(() => window.api.createAiProvider(payload), 'Create AI provider')
+        ? await runProviderMutation(() => filesApi.updateAiProvider(providerForm.id as string | number, payload), 'Update AI provider')
+        : await runProviderMutation(() => filesApi.createAiProvider(payload), 'Create AI provider')
       const savedProvider = cloneHistorySnapshot(result?.item || { ...payload, id: providerForm.id || extractHistoryResultId(result) })
       notify(providerForm.id ? 'Provider updated' : 'Provider added', 'success')
       startCreateProvider()
@@ -655,12 +856,12 @@ export default function FilesPage() {
         actionHistory.pushAction({
           label: `Edit provider ${previousSnapshot.name || savedProvider.name || ''}`.trim(),
           undo: async () => {
-            const undoResult = await runProviderMutation(() => window.api.updateAiProvider(previousSnapshot.id, buildProviderPayload(previousSnapshot)), 'Undo provider update')
+            const undoResult = await runProviderMutation(() => filesApi.updateAiProvider(previousSnapshot.id, buildProviderPayload(previousSnapshot)), 'Undo provider update')
             if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore provider')
             await loadProviders()
           },
           redo: async () => {
-            const redoResult = await runProviderMutation(() => window.api.updateAiProvider(savedProvider.id, buildProviderPayload(savedProvider)), 'Redo provider update')
+            const redoResult = await runProviderMutation(() => filesApi.updateAiProvider(savedProvider.id, buildProviderPayload(savedProvider)), 'Redo provider update')
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply provider changes')
             await loadProviders()
           },
@@ -671,12 +872,12 @@ export default function FilesPage() {
         actionHistory.pushAction({
           label: `Add provider ${savedProvider.name || ''}`.trim(),
           undo: async () => {
-            const undoResult = await runProviderMutation(() => window.api.deleteAiProvider(createdProviderId, { userId: user?.id, userName: user?.name, expectedUpdatedAt: savedProvider.updated_at || undefined }), 'Undo provider creation')
+            const undoResult = await runProviderMutation(() => filesApi.deleteAiProvider(createdProviderId, { userId: user?.id, userName: user?.name, expectedUpdatedAt: savedProvider.updated_at || undefined }), 'Undo provider creation')
             if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to undo provider creation')
             await loadProviders()
           },
           redo: async () => {
-            const redoResult = await runProviderMutation(() => window.api.createAiProvider(createdProviderPayload), 'Redo provider creation')
+            const redoResult = await runProviderMutation(() => filesApi.createAiProvider(createdProviderPayload), 'Redo provider creation')
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to recreate provider')
             createdProviderId = extractHistoryResultId(redoResult)
             await loadProviders()
@@ -684,19 +885,19 @@ export default function FilesPage() {
         })
       }
     } catch (error) {
-      notify(error?.message || 'Failed to save provider', 'error')
+      notify(getErrorMessage(error, 'Failed to save provider'), 'error')
     } finally {
       finishSingleAction(saveProviderInFlightRef)
       setSavingProvider(false)
     }
   }
 
-  async function testProvider(providerId) {
+  async function testProvider(providerId: string | number) {
     if (!providerId) return
     if (!beginSingleAction(testProviderInFlightRef, { blocked: testingProviderId != null })) return
     setTestingProviderId(providerId)
     try {
-      const result = await runProviderTest(() => window.api.testAiProvider(providerId, { userId: user?.id, userName: user?.name }), 'Test AI provider')
+      const result = await runProviderTest(() => filesApi.testAiProvider(providerId, { userId: user?.id, userName: user?.name }), 'Test AI provider')
       if (result?.passed === false) {
         notify(result?.message || 'Provider test failed', 'error')
       } else {
@@ -704,7 +905,7 @@ export default function FilesPage() {
       }
       await loadProviders()
     } catch (error) {
-      notify(error?.message || 'Provider test failed', 'error')
+      notify(getErrorMessage(error, 'Provider test failed'), 'error')
       await loadProviders()
     } finally {
       finishSingleAction(testProviderInFlightRef)
@@ -712,7 +913,7 @@ export default function FilesPage() {
     }
   }
 
-  async function removeProvider(provider) {
+  async function removeProvider(provider: AiProvider) {
     if (!provider?.id) return
     if (!beginSingleAction(deleteProviderInFlightRef, { blocked: deletingProviderId != null })) return
     if (!window.confirm(`Delete AI provider "${provider.name}"?`)) {
@@ -721,19 +922,19 @@ export default function FilesPage() {
     }
     setDeletingProviderId(provider.id)
     try {
-      await runProviderMutation(() => window.api.deleteAiProvider(provider.id, { userId: user?.id, userName: user?.name, expectedUpdatedAt: provider.updated_at || undefined }), 'Delete AI provider')
+      await runProviderMutation(() => filesApi.deleteAiProvider(provider.id, { userId: user?.id, userName: user?.name, expectedUpdatedAt: provider.updated_at || undefined }), 'Delete AI provider')
       notify('Provider deleted', 'success')
       if (providerForm.id === provider.id) startCreateProvider()
       await loadProviders()
     } catch (error) {
-      notify(error?.message || 'Failed to delete provider', 'error')
+      notify(getErrorMessage(error, 'Failed to delete provider'), 'error')
     } finally {
       finishSingleAction(deleteProviderInFlightRef)
       setDeletingProviderId(null)
     }
   }
 
-  const tabButton = (id, label, Icon) => (
+  const tabButton = (id: FilesTab, label: string, Icon: ComponentType<{ className?: string }>): ReactNode => (
     <button
       type="button"
       onClick={() => setActiveTab(id)}
@@ -760,7 +961,7 @@ export default function FilesPage() {
         )}
       />
 
-      <ActionHistoryBar history={actionHistory} className="mb-1" />
+      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} className="mb-1" />
 
       {activeTab === 'assets' ? (
         <>
@@ -876,6 +1077,7 @@ export default function FilesPage() {
               {files.map((asset) => {
                 const assetId = Number(asset?.id || 0)
                 const selected = selectedAssetIds.has(assetId)
+                const assetUrl = resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path || ''
                 return (
                   <div key={asset.id} className="card min-w-0 overflow-hidden p-3 sm:p-4">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -893,8 +1095,8 @@ export default function FilesPage() {
                     </div>
                     <AssetPreview asset={asset} />
                     <div className="mt-3 min-w-0">
-                      <div className="truncate text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={asset.original_name}>{asset.original_name}</div>
-                      <div className="mt-1 truncate rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path}>{resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path}</div>
+                      <div className="truncate text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={asset.original_name || ''}>{asset.original_name || '-'}</div>
+                      <div className="mt-1 truncate rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={assetUrl}>{assetUrl}</div>
                       <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[11px] text-slate-500">
                         <span>{asset.media_type || 'file'}</span>
                         <span className="text-right">{formatFileSize(asset.byte_size)}</span>
@@ -903,7 +1105,7 @@ export default function FilesPage() {
                       </div>
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-2">
-                      <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path).catch(() => {})} title={tr('copy', 'Copy')}>
+                      <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(assetUrl).catch(() => {})} title={tr('copy', 'Copy')}>
                         <Copy className="inline h-4 w-4 sm:mr-2" />
                         <span className="hidden sm:inline">{tr('copy', 'Copy')}</span>
                       </button>

@@ -1,4 +1,4 @@
-# Business OS Optimization Session Log
+﻿# Business OS Optimization Session Log
 
 Last updated: 2026-05-16
 
@@ -266,7 +266,7 @@ Use this shape for future entries:
   rows, provider metadata, form state, label text, and provider action
   callbacks
 - affected files: `frontend/src/components/files/FilesProvidersTab.tsx`,
-  `frontend/src/components/files/FilesPage.jsx`,
+  `frontend/src/components/files/FilesPage.tsx`,
   `frontend/tests/actionStability.test.ts`
 - route or API target: Library AI providers tab, provider create/update/test
   and delete controls
@@ -746,3 +746,33 @@ Use this shape for future entries:
 - follow-up insight: Branches now has a typed local API and stock/transfer
   boundary; Files, Login, and Catalog secondary tabs remain the next smaller
   JSX route candidates before POS/Products/Dashboard/Inventory.
+
+- change: converted the files/library page shell to TSX with typed file
+  assets, paged file responses, AI provider metadata, provider forms, provider
+  mutation/test result payloads, saved AI responses, tab state, selected asset
+  ids, app/sync context, local files API gateway calls, loading request guards,
+  upload/delete guards, and provider action guards
+- affected files:
+  `frontend/src/components/files/FilesPage.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Library assets list, asset upload/delete, bulk asset
+  delete, AI provider list/create/update/delete/test, provider undo/redo,
+  saved AI responses, child tab handoffs
+- keeper or rollback: keeper if action stability, performance loading UX,
+  typecheck, JSX, frontend/backend utility, build, Phase 29 audit, and Phase
+  8.4 live suite pass
+- route-scoped result: focused typecheck, JSX, action stability, and
+  performance loading UX checks passed; broad frontend/backend utility suites,
+  UI audit, production build, organization audit, schema audit, and Phase 29
+  repeat audit also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,072 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: Library now has a typed local API and upload/provider
+  boundary; Login, Catalog secondary tabs, and Users remain the next smaller
+  JSX conversion candidates.

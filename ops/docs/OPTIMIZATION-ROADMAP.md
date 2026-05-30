@@ -5815,3 +5815,15 @@ Move 535 status:
   contracts, same-tick save/delete/bulk guards, transfer modal handoff,
   compact three-per-row mobile branch stats, and action/performance source
   guard behavior unchanged.
+
+Move 536 status:
+- Move 536 converts the files/library page shell to
+  `frontend/src/components/files/FilesPage.tsx`. The typed boundary now covers
+  file assets, paged file responses, AI provider metadata, provider forms,
+  provider mutation/test results, saved AI responses, app/sync context access,
+  the local files API gateway, active tab state, selected asset ids, loading
+  request guards, and upload/delete/provider action guards. The move keeps the
+  extensionless app lazy import, asset upload/delete timeouts,
+  library/provider/response read timeouts, provider undo/redo actions, compact
+  mobile asset controls, child tab contracts, and action/performance source
+  guard behavior unchanged.

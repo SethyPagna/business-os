@@ -1,4 +1,4 @@
-# Whole-App Hardening And Reliability Program
+﻿# Whole-App Hardening And Reliability Program
 
 Last updated: 2026-05-18
 
@@ -705,7 +705,7 @@ Last updated: 2026-05-18
     Backup Drive sync and backup job action pathways now have explicit timeout
     contracts in `frontend/src/components/utils-settings/Backup.jsx`. Files
     library asset upload/delete pathways now have explicit timeout contracts in
-    `frontend/src/components/files/FilesPage.jsx` and
+    `frontend/src/components/files/FilesPage.tsx` and
     `frontend/src/components/files/FilePickerModal.tsx`. Settings and Catalog
     media upload pathways now have explicit timeout contracts in
     `frontend/src/components/utils-settings/Settings.jsx` and

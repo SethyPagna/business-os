@@ -159,7 +159,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
 
 await runTest('file picker and library upload/delete flows keep synchronous action guards', () => {
   const picker = readFrontend('src/components/files/FilePickerModal.tsx')
-  const filesPage = readFrontend('src/components/files/FilesPage.jsx')
+  const filesPage = readFrontend('src/components/files/FilesPage.tsx')
   const methods = readFrontend('src/api/methods.js')
 
   for (const source of [picker, filesPage]) {
@@ -175,9 +175,9 @@ await runTest('file picker and library upload/delete flows keep synchronous acti
 
   assert.match(filesPage, /const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000/)
   assert.match(filesPage, /const FILES_ASSET_DELETE_TIMEOUT_MS = 12000/)
-  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => window\.api\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/)
-  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => window\.api\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/)
-  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => window\.api\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete selected file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/)
+  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => filesApi\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => filesApi\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/)
+  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => filesApi\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete selected file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/)
   assert.match(filesPage, /Download className="mr-1\.5 inline h-3\.5 w-3\.5"/)
   assert.doesNotMatch(filesPage, /<Save className=/)
 
@@ -671,11 +671,11 @@ await runTest('product stock helper modals use shared guards and bounded mutatio
 })
 
 await runTest('files AI provider actions use shared guards and bounded mutations', () => {
-  const page = readFrontend('src/components/files/FilesPage.jsx')
+  const page = readFrontend('src/components/files/FilesPage.tsx')
   const tab = readFrontend('src/components/files/FilesProvidersTab.tsx')
   const mutationLines = page
     .split('\n')
-    .filter((line) => /window\.api\.(createAiProvider|updateAiProvider|deleteAiProvider|testAiProvider)\(/.test(line))
+    .filter((line) => /filesApi\.(createAiProvider|updateAiProvider|deleteAiProvider|testAiProvider)\(/.test(line))
 
   assert.match(page, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(page, /const AI_PROVIDER_MUTATION_TIMEOUT_MS = 12000/)
@@ -683,9 +683,9 @@ await runTest('files AI provider actions use shared guards and bounded mutations
   assert.match(page, /const saveProviderInFlightRef = useRef\(false\)/)
   assert.match(page, /const testProviderInFlightRef = useRef\(false\)/)
   assert.match(page, /const deleteProviderInFlightRef = useRef\(false\)/)
-  assert.match(page, /const \[deletingProviderId, setDeletingProviderId\] = useState\(null\)/)
-  assert.match(page, /const runProviderMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, AI_PROVIDER_MUTATION_TIMEOUT_MS\)/)
-  assert.match(page, /const runProviderTest = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, AI_PROVIDER_TEST_TIMEOUT_MS\)/)
+  assert.match(page, /const \[deletingProviderId, setDeletingProviderId\] = useState<string \| number \| null>\(null\)/)
+  assert.match(page, /const runProviderMutation = useCallback\(\(loader: \(\) => Promise<ProviderMutationResult>, label: string\) => \([\s\S]*withLoaderTimeout\(loader, label, AI_PROVIDER_MUTATION_TIMEOUT_MS\)/)
+  assert.match(page, /const runProviderTest = useCallback\(\(loader: \(\) => Promise<ProviderTestResult>, label: string\) => \([\s\S]*withLoaderTimeout\(loader, label, AI_PROVIDER_TEST_TIMEOUT_MS\)/)
   assert.match(page, /if \(!beginSingleAction\(saveProviderInFlightRef, \{ blocked: savingProvider \}\)\) return/)
   assert.match(page, /if \(!beginSingleAction\(testProviderInFlightRef, \{ blocked: testingProviderId != null \}\)\) return/)
   assert.match(page, /if \(!beginSingleAction\(deleteProviderInFlightRef, \{ blocked: deletingProviderId != null \}\)\) return/)
