@@ -4,7 +4,7 @@ const assert = require('node:assert/strict')
 const {
   authorizeProtectedRequest,
   isPublicApiRequest,
-} = require('../src/accessControl')
+} = require('../src/accessControl.ts')
 
 let failed = 0
 

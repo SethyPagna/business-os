@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 563.
+- Latest completed implementation move in this roadmap: Move 564.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4872,7 +4872,7 @@ Move 433 status:
 
 Move 434 status:
 - Move 434 tightens small security and maintenance predicates in
-  `backend/src/accessControl.js`, `backend/src/maintenanceLock.js`, and
+  `backend/src/accessControl.ts`, `backend/src/maintenanceLock.js`, and
   `backend/src/uploadSecurity.js`. Public API allowlist matching,
   maintenance-lock write allowlisting, read-only method checks, and upload
   magic-byte matching now use direct loops or named predicates instead of
@@ -6203,3 +6203,18 @@ Move 563 status:
   route/service conversion still waits for a compile/staging package lane. The
   current source extension count is `.js: 73`, `.jsx: 0`, `.mjs: 0`,
   `.cjs: 0`, `.ts: 290`, `.tsx: 107` outside generated/runtime folders.
+
+Move 564 status:
+- Move 564 converts `backend/src/accessControl.ts` to a package-safe TypeScript
+  path. The request access helper now carries JSDoc request/access contracts
+  for host, remote address, public API allowlist, legacy Tailscale identity,
+  and sync-token presentation behavior. Middleware, auth routes, system routes,
+  and access-control tests use explicit `.ts` imports, and a stale unused
+  security import was removed from the helper. Focused access-control, auth
+  OTP, route-contract, offline-security, and full-automation checks passed, as
+  did the full backend utility suite, schema audit, and Linux packaging proof.
+  `pkg` continues to warn for direct `.ts` scripts, so larger backend
+  route/service conversion still waits for a compile/staging package lane. The
+  current source extension count is
+  `.js: 72`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 291`, `.tsx: 107`
+  outside generated/runtime folders.

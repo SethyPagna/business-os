@@ -1,7 +1,6 @@
 'use strict'
 
 const { TAILSCALE_URL } = require('./config')
-const { safeCompare } = require('./security')
 
 const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const PUBLIC_API_ALLOWLIST = [
@@ -15,6 +14,33 @@ const PUBLIC_API_ALLOWLIST = [
   { method: 'GET', pattern: /^\/api\/portal\/membership\/[^/]+\/?$/i },
   { method: 'POST', pattern: /^\/api\/portal\/submissions\/?$/i },
 ]
+
+/**
+ * @typedef {object} RequestLike
+ * @property {string=} method
+ * @property {string=} originalUrl
+ * @property {string=} path
+ * @property {Record<string, string | undefined>=} headers
+ * @property {{ remoteAddress?: string }=} socket
+ * @property {{ remoteAddress?: string }=} connection
+ */
+
+/**
+ * @typedef {object} RequestAccessClassification
+ * @property {'local' | 'remote' | 'tailscale-private' | 'tailscale-public'} mode
+ * @property {string} host
+ * @property {string} remoteAddress
+ * @property {boolean} trustedTailscale
+ * @property {boolean} localRequest
+ * @property {boolean} remoteRequest
+ * @property {boolean} publicRemote
+ * @property {boolean} tokenRequired
+ * @property {boolean} hasConfiguredToken
+ * @property {boolean} tokenProvided
+ * @property {boolean} tokenValid
+ * @property {string} configuredTailscaleHost
+ * @property {string} remoteAccessProvider
+ */
 
 function trim(value) {
   return String(value || '').trim()
@@ -38,12 +64,18 @@ function isLegacyTailscaleEnabled() {
   return getRemoteAccessProvider() === 'tailscale'
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function getRequestHost(req) {
   const forwardedHost = trim(req?.headers?.['x-forwarded-host'])
   const host = forwardedHost || trim(req?.headers?.host)
   return host.replace(/:\d+$/, '').toLowerCase()
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function getRemoteAddress(req) {
   return trim(
     req?.socket?.remoteAddress
@@ -59,12 +91,18 @@ function isLoopbackAddress(value) {
     || ip === '::ffff:127.0.0.1'
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function getPresentedSyncToken(req) {
   const authHeader = trim(req?.headers?.authorization)
   const bearerMatch = authHeader.match(/^bearer\s+(.+)$/i)
   return trim(req?.headers?.['x-sync-token'] || (bearerMatch ? bearerMatch[1] : ''))
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function getTailscaleIdentity(req) {
   return {
     login: trim(req?.headers?.['tailscale-user-login']),
@@ -74,6 +112,9 @@ function getTailscaleIdentity(req) {
   }
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function hasTrustedTailscaleIdentity(req) {
   if (!isLegacyTailscaleEnabled()) return false
   const remoteAddress = getRemoteAddress(req)
@@ -82,6 +123,9 @@ function hasTrustedTailscaleIdentity(req) {
   return !!(identity.login || identity.name || identity.capabilities)
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function isLocalHostRequest(req) {
   const host = getRequestHost(req)
   return LOCALHOST_HOSTS.has(host)
@@ -96,6 +140,9 @@ function getConfiguredTailscaleHost() {
   return normalizeHostname(TAILSCALE_URL)
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function isPublicRemoteRequest(req) {
   const host = getRequestHost(req)
   if (hasTrustedTailscaleIdentity(req)) return false
@@ -104,6 +151,9 @@ function isPublicRemoteRequest(req) {
   return true
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function isPublicApiRequest(req) {
   const method = String(req?.method || 'GET').toUpperCase()
   const path = String(req?.originalUrl || req?.path || '').split('?')[0]
@@ -113,6 +163,10 @@ function isPublicApiRequest(req) {
   return false
 }
 
+/**
+ * @param {RequestLike} req
+ * @returns {RequestAccessClassification}
+ */
 function classifyRequestAccess(req) {
   const trustedTailscale = hasTrustedTailscaleIdentity(req)
   const localRequest = isLocalHostRequest(req)
@@ -142,6 +196,9 @@ function classifyRequestAccess(req) {
   }
 }
 
+/**
+ * @param {RequestLike} req
+ */
 function authorizeProtectedRequest(req) {
   const access = classifyRequestAccess(req)
   return { allowed: true, status: 200, code: 'session_required', access }

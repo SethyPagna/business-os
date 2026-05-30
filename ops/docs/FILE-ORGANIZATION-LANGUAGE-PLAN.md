@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 563 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 564 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 73`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 290`,
+  `.js: 72`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 291`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3388,7 +3388,7 @@ Decision rule:
     This was a backend catalog grouping cleanup only; no folder move, schema
     migration, or language conversion was needed.
 424. Tighten small security and maintenance predicates. Done:
-    `backend/src/accessControl.js`, `backend/src/maintenanceLock.js`, and
+    `backend/src/accessControl.ts`, `backend/src/maintenanceLock.js`, and
     `backend/src/uploadSecurity.js` now use direct-loop helpers or named
     predicates for public API allowlist matching, maintenance-lock write
     allowlisting, read-only method checks, and upload magic-byte matching.
@@ -4556,6 +4556,20 @@ Decision rule:
     `pkg.scripts`, so larger backend route/service conversions remain blocked
     on the future compile/staging lane. The current source extension count is
     `.js: 73`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 290`, `.tsx: 107`
+    outside generated/runtime folders.
+564. Convert backend access-control helper to a package-safe TypeScript path.
+    Done: `backend/src/accessControl.ts` now owns request access
+    classification, public API allowlist checks, legacy Tailscale identity
+    detection, and sync-token presentation helpers with JSDoc request/access
+    contracts. Middleware, auth routes, system routes, and access-control tests
+    now target explicit `.ts` imports, and the stale unused security import was
+    removed from the helper. Focused access-control, auth OTP, route-contract,
+    offline-security, and full-automation checks passed, as did the full
+    backend utility suite, schema audit, and Linux packaging proof. Packaging
+    still warns for direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service conversions remain blocked
+    on the future compile/staging lane. The current source extension count is
+    `.js: 72`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 291`, `.tsx: 107`
     outside generated/runtime folders.
 
 ## Safety Gates
