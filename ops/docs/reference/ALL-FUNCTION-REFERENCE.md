@@ -46,7 +46,7 @@ Code files scanned: **468**
 | 34 | `backend/src/requestContext.ts` | 5 |
 | 35 | `backend/src/routes/actionHistory.ts` | 12 |
 | 36 | `backend/src/routes/ai.ts` | 3 |
-| 37 | `backend/src/routes/auth.js` | 31 |
+| 37 | `backend/src/routes/auth.ts` | 31 |
 | 38 | `backend/src/routes/branches.ts` | 10 |
 | 39 | `backend/src/routes/catalog.ts` | 4 |
 | 40 | `backend/src/routes/categories.ts` | 2 |
@@ -1088,7 +1088,7 @@ Code files scanned: **468**
 | 2 | `getProviderRow` | function | 32 |
 | 3 | `serializeResponseRows` | function | 244 |
 
-### 3.37 `backend/src/routes/auth.js`
+### 3.37 `backend/src/routes/auth.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

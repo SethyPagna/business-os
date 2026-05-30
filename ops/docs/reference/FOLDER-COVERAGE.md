@@ -296,7 +296,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `actionHistory.ts` | API route handler |
 | 2 | `ai.ts` | API route handler |
-| 3 | `auth.js` | API route handler |
+| 3 | `auth.ts` | API route handler |
 | 4 | `branches.ts` | API route handler |
 | 5 | `catalog.ts` | API route handler |
 | 6 | `categories.ts` | API route handler |

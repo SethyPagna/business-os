@@ -54,7 +54,7 @@ Total files documented: **531**
 | 42 | `backend/src/requestContext.ts` | backend-core | 65 | 1.7 | Project source/support file |
 | 43 | `backend/src/routes/actionHistory.ts` | backend-routes | 256 | 9.0 | API route handler |
 | 44 | `backend/src/routes/ai.ts` | backend-routes | 270 | 9.2 | API route handler |
-| 45 | `backend/src/routes/auth.js` | backend-routes | 1148 | 40.6 | API route handler |
+| 45 | `backend/src/routes/auth.ts` | backend-routes | 1148 | 40.6 | API route handler |
 | 46 | `backend/src/routes/branches.ts` | backend-routes | 452 | 19.7 | API route handler |
 | 47 | `backend/src/routes/catalog.ts` | backend-routes | 110 | 3.0 | API route handler |
 | 48 | `backend/src/routes/categories.ts` | backend-routes | 147 | 5.8 | API route handler |

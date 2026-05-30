@@ -46,7 +46,7 @@ Code files documented: **468**
 | 34 | `backend/src/requestContext.ts` | 1 | 1 | 0 | 2 |
 | 35 | `backend/src/routes/actionHistory.ts` | 5 | 1 | 4 | 1 |
 | 36 | `backend/src/routes/ai.ts` | 6 | 1 | 5 | 1 |
-| 37 | `backend/src/routes/auth.js` | 18 | 1 | 13 | 2 |
+| 37 | `backend/src/routes/auth.ts` | 18 | 1 | 13 | 2 |
 | 38 | `backend/src/routes/branches.ts` | 8 | 1 | 6 | 1 |
 | 39 | `backend/src/routes/catalog.ts` | 4 | 1 | 3 | 2 |
 | 40 | `backend/src/routes/categories.ts` | 6 | 1 | 5 | 2 |
@@ -498,7 +498,7 @@ Code files documented: **468**
   - `./src/requestContext.ts`
   - `./src/routes/actionHistory.ts`
   - `./src/routes/ai.ts`
-  - `./src/routes/auth`
+  - `./src/routes/auth.ts`
   - `./src/routes/branches.ts`
   - `./src/routes/catalog.ts`
   - `./src/routes/categories.ts`
@@ -546,7 +546,7 @@ Code files documented: **468**
   - `backend/src/requestContext.ts`
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
@@ -585,7 +585,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/src/middleware.ts`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/system/index.js`
   - `backend/test/accessControl.test.ts`
 
@@ -611,7 +611,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/middleware.ts`
 - Referenced by (2)
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/test/authOtpGuards.test.ts`
 
 ### 3.5 `backend/src/backupSchema.ts`
@@ -675,7 +675,7 @@ Code files documented: **468**
   - `backend/src/objectStore.ts`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/postgresDatabase.ts`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/products.js`
   - `backend/src/routes/sync.ts`
@@ -742,7 +742,7 @@ Code files documented: **468**
   - `backend/src/productBatches.ts`
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
@@ -871,7 +871,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
@@ -982,7 +982,7 @@ Code files documented: **468**
   - `backend/src/authOtpGuards.ts`
   - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.ts`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
@@ -1081,7 +1081,7 @@ Code files documented: **468**
   - `backend/src/storage/organizationFolders.ts`
 - Referenced by (6)
   - `backend/server.js`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/system/index.js`
@@ -1216,7 +1216,7 @@ Code files documented: **468**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.37 `backend/src/routes/auth.js`
+### 3.37 `backend/src/routes/auth.ts`
 
 - Declared exports: `module.exports`
 - Imports (18)
@@ -1779,7 +1779,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/config/index.ts`
 - Referenced by (2)
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/system/index.js`
 
 ### 3.60 `backend/src/runtimeVersion.ts`
@@ -1823,7 +1823,7 @@ Code files documented: **468**
   - none
 - Referenced by (7)
   - `backend/src/middleware.ts`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/aiGateway.ts`
@@ -1942,7 +1942,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/config/index.ts`
 - Referenced by (4)
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/users.js`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/test/ownedGoogleAuth.test.ts`
@@ -2063,7 +2063,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/database.ts`
 - Referenced by (2)
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/users.js`
 
 ### 3.75 `backend/src/sessionAuth.ts`
@@ -2076,7 +2076,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
 - Referenced by (4)
   - `backend/src/middleware.ts`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/users.js`
   - `backend/src/websocket.ts`
 
@@ -2093,7 +2093,7 @@ Code files documented: **468**
   - `backend/src/objectStore.ts`
 - Referenced by (8)
   - `backend/src/fileAssets.js`
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
@@ -2736,7 +2736,7 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (18)
-  - `../src/routes/auth`
+  - `../src/routes/auth.ts`
   - `../src/routes/catalog.ts`
   - `../src/routes/categories.ts`
   - `../src/routes/files.ts`
@@ -2755,7 +2755,7 @@ Code files documented: **468**
   - `node:path`
   - `path`
 - Internal dependencies (13)
-  - `backend/src/routes/auth.js`
+  - `backend/src/routes/auth.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/files.ts`

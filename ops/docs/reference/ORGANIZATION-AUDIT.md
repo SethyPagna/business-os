@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T22:02:02.074Z
+Generated: 2026-05-30T22:10:51.195Z
 
 ## Summary
 
@@ -14,12 +14,12 @@ Generated: 2026-05-30T22:02:02.074Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 340 |
+| .ts | 341 |
 | .tsx | 107 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
-| .js | 12 |
+| .js | 11 |
 | .ps1 | 8 |
 | .sh | 3 |
 | .sql | 2 |
@@ -65,9 +65,9 @@ Generated: 2026-05-30T22:02:02.074Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7984 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6942 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6927 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5240 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5254 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -115,7 +115,7 @@ Generated: 2026-05-30T22:02:02.074Z
 | backend/test/routeContracts.test.ts | 15 | backend/test/routeContracts.test.ts |
 | backend/src/services/importJobs.js | 14 | backend/services |
 | frontend/src/AppContext.tsx | 14 | frontend/src/AppContext.tsx |
-| backend/src/routes/auth.js | 13 | backend/routes |
+| backend/src/routes/auth.ts | 13 | backend/routes |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
 | backend/src/routes/portal.js | 12 | backend/routes |
