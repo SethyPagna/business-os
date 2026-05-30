@@ -369,7 +369,7 @@ function mountApiRoutes(target) {
 
   target.use('/api', networkAccessGuard)
 
-  target.use('/api/auth', require('./src/routes/auth'))
+  target.use('/api/auth', require('./src/routes/auth.ts'))
   target.use('/api', maintenanceWriteGuard)
   target.use('/api/organizations', require('./src/routes/organizations.ts'))
   target.use('/api/settings', require('./src/routes/settings.ts'))

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 610 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 611 in this file.
 
 ## Goal
 
@@ -3056,7 +3056,7 @@ Decision rule:
     backend runtime change, schema migration, or Docker container deletion was
     needed.
 378. Tighten auth bootstrap settings snapshot loop. Done:
-    `backend/src/routes/auth.js` now builds the bootstrap settings snapshot
+    `backend/src/routes/auth.ts` now builds the bootstrap settings snapshot
     with a direct loop instead of a callback chain while preserving the
     sanitized settings payload and existing OAuth callback behavior. This was a
     backend route cleanup only; no folder move, schema migration, or runtime
@@ -3241,7 +3241,7 @@ Decision rule:
     `Array.from()` hits in the contacts route. This was a backend
     contacts-route cleanup only; no folder move, schema migration, or language
     conversion was needed.
-406. Tighten auth/user selection helpers. Done: `backend/src/routes/auth.js`
+406. Tighten auth/user selection helpers. Done: `backend/src/routes/auth.ts`
     now selects the first valid password-reset redirect through
     `findFirstHttpUrl()`, and `backend/src/routes/users.js` now selects UUID
     candidates and linked provider identities through direct-loop helpers. A
@@ -5218,6 +5218,20 @@ Decision rule:
     backend conversions remain blocked on the future compile/staging lane. The
     expected generated language audit now reports `JavaScript: 12`,
     `TypeScript: 299`, and `React TSX: 107` across the active scan roots.
+611. Convert auth route to a package-safe TypeScript path.
+    Done: `backend/src/routes/auth.ts` keeps password login, session rotation,
+    Google OAuth start/callback flows, OTP setup/verification/disable,
+    password-reset helpers, bootstrap payload construction, organization
+    context lookup, audit logging, rate limiting, abuse locks, and verification
+    capability reporting on the existing CommonJS route style. Server route
+    mounting, route/source assertions, hardening policy, route docs, and
+    roadmap docs now point at the explicit `.ts` route path. Focused auth,
+    route-contract, offline-security, owned-Google-auth, backend utility,
+    schema audit, stale-path, and Linux packaging proof passed. Packaging still
+    warns for direct `.ts` entries in `pkg.scripts`, so broader backend
+    conversions remain blocked on the future compile/staging lane. The expected
+    generated language audit now reports `JavaScript: 11`, `TypeScript: 300`,
+    and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

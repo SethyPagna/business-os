@@ -50,7 +50,7 @@ runTest('owned Google OAuth service exposes only Business OS callbacks', () => {
 })
 
 runTest('auth runtime no longer imports or writes active Supabase identity', () => {
-  const source = read('backend/src/routes/auth.js')
+  const source = read('backend/src/routes/auth.ts')
   assert.doesNotMatch(source, /services\/supabaseAuth/)
   assert.doesNotMatch(source, /isSupabaseAuthConfigured/)
   assert.doesNotMatch(source, /updateLocalUserSupabaseIdentity/)

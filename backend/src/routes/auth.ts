@@ -1,6 +1,6 @@
 'use strict'
 /**
- * auth.js
+ * auth.ts
  * Authentication and account-recovery routes.
  *
  * Responsibilities:

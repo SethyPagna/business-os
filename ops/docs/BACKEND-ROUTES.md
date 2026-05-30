@@ -5,7 +5,7 @@ Mounted in `backend/server.js`.
 ## Auth
 
 Base: `/api/auth`  
-File: `backend/src/routes/auth.js`
+File: `backend/src/routes/auth.ts`
 
 - `GET /verification-capabilities`
 - `POST /login`

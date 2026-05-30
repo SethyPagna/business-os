@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 610.
+- Latest completed implementation move in this roadmap: Move 611.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4377,7 +4377,7 @@ Move 387 status:
 
 Move 388 status:
 - Move 388 tightens the auth bootstrap settings snapshot helper in
-  `backend/src/routes/auth.js`. The settings row projection now uses a direct
+  `backend/src/routes/auth.ts`. The settings row projection now uses a direct
   loop instead of a `forEach()` callback while preserving the settings query,
   sanitized settings payload, bootstrap response shape, session behavior, and
   existing OAuth callback changes already present in the route. Focused syntax,
@@ -4695,14 +4695,14 @@ Move 415 status:
 
 Move 416 status:
 - Move 416 tightens the remaining small auth/user route callback scans.
-  Password-reset redirect selection in `backend/src/routes/auth.js` now uses
+  Password-reset redirect selection in `backend/src/routes/auth.ts` now uses
   `findFirstHttpUrl()`, while provider identity UUID and linked-provider
   selection in `backend/src/routes/users.js` now use `findFirstUuid()` and
   `findProviderIdentity()`. Redirect priority, URL validation, UUID trimming,
   provider-name normalization, unlink guard behavior, and auth/user route
   contracts remain unchanged. Callback scans now report no `map()`, `filter()`,
   `forEach()`, `reduce()`, `find()`, `flatMap()`, or `Array.from()` hits in
-  `backend/src/routes/auth.js` or `backend/src/routes/users.js`.
+  `backend/src/routes/auth.ts` or `backend/src/routes/users.js`.
 
 Move 417 status:
 - Move 417 clears the remaining backend route callback-chain scan by tightening
@@ -6924,3 +6924,18 @@ Move 610 status:
   broader backend conversions still wait for a compile/staging package lane.
   The expected generated language audit now reports `JavaScript: 12`,
   `TypeScript: 299`, and `React TSX: 107` across the active scan roots.
+
+Move 611 status:
+- Move 611 converts `backend/src/routes/auth.ts` to a package-safe TypeScript
+  path. Password login, session rotation, Google OAuth start/callback flows,
+  OTP setup/verification/disable, password-reset helpers, bootstrap payload
+  construction, organization context lookup, audit logging, rate limiting,
+  abuse locks, and verification capability reporting remain unchanged on the
+  existing CommonJS route style. Server route mounting, route/source assertions,
+  hardening policy, route docs, and roadmap docs now point at the explicit
+  `.ts` route path. Focused auth, route-contract, offline-security,
+  owned-Google-auth, backend utility, schema audit, stale-path, and Linux
+  packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
+  broader backend conversions still wait for a compile/staging package lane.
+  The expected generated language audit now reports `JavaScript: 11`,
+  `TypeScript: 300`, and `React TSX: 107` across the active scan roots.

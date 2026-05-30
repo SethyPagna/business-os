@@ -36,7 +36,7 @@
           "mustContain": ["supabase_user_id text", "google_subject text", "google_email text"]
         },
         {
-          "path": "backend/src/routes/auth.js",
+          "path": "backend/src/routes/auth.ts",
           "mustContain": ["router.get('/oauth/callback'", "router.post('/oauth/unlink'", "setAuthSessionCookie"],
           "mustNotContain": ["services/supabaseAuth", "isSupabaseAuthConfigured", "supabase_user_id ="]
         }

@@ -67,7 +67,7 @@ runTest('portal router registers required public catalog search route', () => {
 })
 
 runTest('auth router registers Google OAuth start and completion routes', () => {
-  const router = require('../src/routes/auth')
+  const router = require('../src/routes/auth.ts')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/oauth/start'), 'missing /api/auth/oauth/start')
   assert.ok(paths.includes('/oauth/complete'), 'missing /api/auth/oauth/complete')
