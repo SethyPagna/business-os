@@ -5,14 +5,31 @@ const { db } = require('./database')
 const columnPresenceCache = new Map()
 const firstColumnCache = new Map()
 
+/**
+ * @typedef {{ name?: unknown }} ColumnRow
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeName(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+/**
+ * @param {unknown} tableName
+ * @param {unknown} columnName
+ * @returns {string}
+ */
 function columnKey(tableName, columnName) {
   return `${normalizeName(tableName)}:${normalizeName(columnName)}`
 }
 
+/**
+ * @param {unknown[]} [values]
+ * @returns {string[]}
+ */
 function normalizeNames(values = []) {
   const names = []
   for (const value of values || []) {
@@ -22,6 +39,10 @@ function normalizeNames(values = []) {
   return names
 }
 
+/**
+ * @param {ColumnRow[]} [rows]
+ * @returns {string[]}
+ */
 function normalizeColumnRows(rows = []) {
   const names = []
   for (const row of rows || []) {
@@ -31,10 +52,19 @@ function normalizeColumnRows(rows = []) {
   return names
 }
 
+/**
+ * @param {unknown} tableName
+ * @param {unknown[]} [columnNames]
+ * @returns {string}
+ */
 function candidateKey(tableName, columnNames = []) {
   return `${normalizeName(tableName)}:${normalizeNames(columnNames).join('|')}`
 }
 
+/**
+ * @param {string} tableName
+ * @returns {ColumnRow[]}
+ */
 function listColumns(tableName) {
   return db.prepare(`
     SELECT column_name AS name
@@ -45,6 +75,11 @@ function listColumns(tableName) {
   `).all(tableName)
 }
 
+/**
+ * @param {string} tableName
+ * @param {string} columnName
+ * @returns {boolean}
+ */
 function hasColumn(tableName, columnName) {
   const key = columnKey(tableName, columnName)
   if (columnPresenceCache.has(key)) return columnPresenceCache.get(key)
@@ -65,6 +100,11 @@ function hasColumn(tableName, columnName) {
   }
 }
 
+/**
+ * @param {string} tableName
+ * @param {string[]} [columnNames]
+ * @returns {string | null}
+ */
 function firstExistingColumn(tableName, columnNames = []) {
   const candidates = normalizeNames(columnNames)
   const key = candidateKey(tableName, candidates)
@@ -92,6 +132,11 @@ function firstExistingColumn(tableName, columnNames = []) {
   }
 }
 
+/**
+ * @param {string} tableName
+ * @param {string} columnName
+ * @returns {void}
+ */
 function markColumnPresent(tableName, columnName) {
   const table = normalizeName(tableName)
   const column = normalizeName(columnName)

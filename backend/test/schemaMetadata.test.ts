@@ -17,7 +17,7 @@ function runTest(name, fn) {
 
 function loadSchemaMetadataWithColumns(columnsByTable, options = {}) {
   const databasePath = require.resolve('../src/database')
-  const schemaMetadataPath = require.resolve('../src/schemaMetadata')
+  const schemaMetadataPath = require.resolve('../src/schemaMetadata.ts')
   const originalDatabaseModule = require.cache[databasePath]
   delete require.cache[schemaMetadataPath]
 
@@ -42,7 +42,7 @@ function loadSchemaMetadataWithColumns(columnsByTable, options = {}) {
     exports: { db },
   }
 
-  const helper = require('../src/schemaMetadata')
+  const helper = require('../src/schemaMetadata.ts')
   const cleanup = () => {
     delete require.cache[schemaMetadataPath]
     if (originalDatabaseModule) require.cache[databasePath] = originalDatabaseModule

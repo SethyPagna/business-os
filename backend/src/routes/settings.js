@@ -6,7 +6,7 @@ const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl.ts')
 const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
 const { requestUploadStorageReconcile } = require('../fileAssets')
-const { hasColumn } = require('../schemaMetadata')
+const { hasColumn } = require('../schemaMetadata.ts')
 const {
   assertCatalogTextIntegrity,
   hasSuspiciousCatalogText,

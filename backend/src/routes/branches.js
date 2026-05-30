@@ -5,7 +5,7 @@ const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { getStockMetrics } = require('../businessMetrics')
-const { firstExistingColumn } = require('../schemaMetadata')
+const { firstExistingColumn } = require('../schemaMetadata.ts')
 
 const router = express.Router()
 const PAGED_STOCK_QUERY_KEYS = ['page', 'pageSize', 'page_size', 'query', 'q', 'stockState', 'stock_state']

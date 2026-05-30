@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 560 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 561 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 76`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 287`,
+  `.js: 75`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 288`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -2471,7 +2471,7 @@ Decision rule:
     and builder cache only, reclaiming 2.503 GB of builder cache while
     preserving images, volumes, uploads, secrets, and retained backup packages.
 289. Consolidate backend schema metadata caching. Done:
-    `backend/src/schemaMetadata.js` now owns cached table/column metadata
+    `backend/src/schemaMetadata.ts` now owns cached table/column metadata
     helpers for `hasColumn`, ordered `firstExistingColumn`, and
     `markColumnPresent`. Settings, product imports, branch transfers, inventory
     transfers, and custom-table managed rows now reuse that helper instead of
@@ -2505,7 +2505,7 @@ Decision rule:
     Focused helper tests, full backend utility tests, and schema audit pass.
 293. Guard production routes against direct schema metadata probes. Done:
     `backend/test/routeContracts.test.ts` now scans `backend/src/routes/*.js`
-    and fails if any production route bypasses `schemaMetadata.js` with a direct
+    and fails if any production route bypasses `schemaMetadata.ts` with a direct
     `information_schema.columns` query. This keeps the shared process cache as
     the single route-layer pathway for stable schema-shape checks. Focused
     route contracts, full backend utility tests, and schema audit pass.
@@ -3308,7 +3308,7 @@ Decision rule:
     import-policy cleanup only; no folder move, schema migration, or language
     conversion was needed.
 414. Tighten schema/security/runtime helper loops. Done:
-    `backend/src/schemaMetadata.js`, `backend/src/middleware.js`,
+    `backend/src/schemaMetadata.ts`, `backend/src/middleware.js`,
     `backend/src/security.js`, `backend/src/netSecurity.js`, and
     `backend/src/storage/organizationFolders.js` now use direct-loop helpers
     for column candidates, permission keys, any-permission checks,
@@ -4520,6 +4520,18 @@ Decision rule:
     route/service conversions remain blocked on the future compile/staging lane.
     The current source extension count is `.js: 76`, `.jsx: 0`, `.mjs: 0`,
     `.cjs: 0`, `.ts: 287`, `.tsx: 107` outside generated/runtime folders.
+561. Convert the shared backend schema metadata helper to a package-safe
+    TypeScript path. Done: `backend/src/schemaMetadata.ts` now owns cached
+    table/column probing with JSDoc column-row and cache-key helper contracts.
+    Branch, custom-table, inventory, product, and settings routes now target
+    explicit `.ts` imports, and the route-contract test now guards
+    `schemaMetadata.ts` as the shared probe boundary. Focused schema metadata,
+    route-contract, RFID, product-search, and full-automation checks passed, as
+    did the full backend utility suite and Linux packaging proof. Packaging
+    still warns for direct `.ts` entries in `pkg.scripts`, so larger backend
+    route/service conversions remain blocked on the future compile/staging lane.
+    The current source extension count is `.js: 75`, `.jsx: 0`, `.mjs: 0`,
+    `.cjs: 0`, `.ts: 288`, `.tsx: 107` outside generated/runtime folders.
 
 ## Safety Gates
 

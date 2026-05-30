@@ -9,7 +9,7 @@ const { aggregateInitialRows, getInitialKey, getInitialType } = require('../init
 const { getStockMetrics } = require('../businessMetrics')
 const { normalizeCatalogText } = require('../catalogTextIntegrity.ts')
 const { normalizeClientRequestId } = require('../idempotency.ts')
-const { firstExistingColumn } = require('../schemaMetadata')
+const { firstExistingColumn } = require('../schemaMetadata.ts')
 const {
   allocateProductBatches,
   cloneAllocationsToProduct,

@@ -4,7 +4,7 @@ const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
-const { hasColumn, markColumnPresent } = require('../schemaMetadata')
+const { hasColumn, markColumnPresent } = require('../schemaMetadata.ts')
 
 const router = express.Router()
 const CUSTOM_TABLE_COLUMN_TYPES = new Set(['text', 'long_text', 'number', 'decimal', 'boolean', 'date', 'timestamp', 'dropdown'])

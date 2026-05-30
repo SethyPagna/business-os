@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 560.
+- Latest completed implementation move in this roadmap: Move 561.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -3259,7 +3259,7 @@ Cleanup checkpoint:
   Docker-safe cleanup reclaimed 2.503 GB of builder cache while preserving
   images, volumes, uploads, secrets, and retained backups.
 - Move 289 consolidates backend schema metadata caching:
-  `backend/src/schemaMetadata.js` now provides cached column-existence,
+  `backend/src/schemaMetadata.ts` now provides cached column-existence,
   ordered first-column selection, and mark-present helpers. Settings, product
   imports, branch transfers, inventory transfers, and custom-table managed rows
   reuse that single helper, removing duplicated route-local metadata cache
@@ -3287,7 +3287,7 @@ Cleanup checkpoint:
   suite, and schema audit pass.
 - Move 293 guards production routes against direct schema metadata probes:
   route contracts now scan `backend/src/routes/*.js` and fail if a production
-  route bypasses `schemaMetadata.js` with a direct `information_schema.columns`
+  route bypasses `schemaMetadata.ts` with a direct `information_schema.columns`
   query. This keeps stable schema-shape checks on the shared cached helper
   path. Focused route contracts, full backend utility tests, and schema audit
   pass.
@@ -4781,7 +4781,7 @@ Move 423 status:
 
 Move 424 status:
 - Move 424 tightens schema/security/runtime helper loops in
-  `backend/src/schemaMetadata.js`, `backend/src/middleware.js`,
+  `backend/src/schemaMetadata.ts`, `backend/src/middleware.js`,
   `backend/src/security.js`, `backend/src/netSecurity.js`, and
   `backend/src/storage/organizationFolders.js`. Column candidate
   normalization, column presence caching, permission key collection,
@@ -6162,3 +6162,17 @@ Move 560 status:
   backend route/service conversion still waits for a compile/staging package
   lane. The current source extension count is `.js: 76`, `.jsx: 0`, `.mjs: 0`,
   `.cjs: 0`, `.ts: 287`, `.tsx: 107` outside generated/runtime folders.
+
+Move 561 status:
+- Move 561 converts `backend/src/schemaMetadata.ts` to a package-safe
+  TypeScript path. The shared schema metadata helper now carries JSDoc
+  column-row and cache-key helper contracts while preserving cached
+  table/column probing. Branch, custom-table, inventory, product, and settings
+  routes use explicit `.ts` imports, and the route-contract test now guards
+  `schemaMetadata.ts` as the shared probe boundary. Focused schema metadata,
+  route-contract, RFID, product-search, and full-automation checks passed, as
+  did the full backend utility suite and Linux packaging proof. `pkg` continues
+  to warn for direct `.ts` scripts, so larger backend route/service conversion
+  still waits for a compile/staging package lane. The current source extension
+  count is `.js: 75`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 288`,
+  `.tsx: 107` outside generated/runtime folders.
