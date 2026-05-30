@@ -638,7 +638,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `http.ts` | Frontend API/sync helper |
 | 2 | `localDb.ts` | Frontend API/sync helper |
-| 3 | `methods.js` | Frontend API/sync helper |
+| 3 | `methods.ts` | Frontend API/sync helper |
 | 4 | `README.md` | Frontend API/sync helper |
 | 5 | `websocket.ts` | Frontend API/sync helper |
 

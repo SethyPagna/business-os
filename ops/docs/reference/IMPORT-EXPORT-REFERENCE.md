@@ -155,7 +155,7 @@ Code files documented: **466**
 | 143 | `frontend/public/theme-bootstrap.js` | 0 | 0 | 0 | 0 |
 | 144 | `frontend/src/api/http.ts` | 2 | 32 | 2 | 8 |
 | 145 | `frontend/src/api/localDb.ts` | 3 | 10 | 2 | 3 |
-| 146 | `frontend/src/api/methods.js` | 6 | 200 | 6 | 1 |
+| 146 | `frontend/src/api/methods.ts` | 6 | 200 | 6 | 1 |
 | 147 | `frontend/src/api/websocket.ts` | 2 | 4 | 2 | 2 |
 | 148 | `frontend/src/App.tsx` | 32 | 1 | 29 | 1 |
 | 149 | `frontend/src/app/appShellUtils.ts` | 0 | 16 | 0 | 5 |
@@ -2955,11 +2955,11 @@ Code files documented: **466**
   - `frontend/src/utils/csv.ts`
   - `frontend/src/utils/csvImport.ts`
 - Referenced by (3)
-  - `frontend/src/api/methods.js`
+  - `frontend/src/api/methods.ts`
   - `frontend/src/platform/runtime/clientRuntime.ts`
   - `frontend/src/web-api.ts`
 
-### 3.146 `frontend/src/api/methods.js`
+### 3.146 `frontend/src/api/methods.ts`
 
 - Declared exports: `adjustStock`, `applyRfidSession`, `approveImportJob`, `askPortalAi`, `attachSaleCustomer`, `browseDir`, `bulkImportCustomers`, `bulkImportDeliveryContacts`, `bulkImportProducts`, `bulkImportSuppliers`, `cancelImportJob`, `cancelSystemJob`, `changeUserPassword`, `completeGoogleOauth`, `completePasswordReset`, `createActionHistory`, `createAiProvider`, `createBranch`, `createCategory`, `createCustomTable`, `createCustomer`, `createDeliveryContact`, `createImportJob`, `createPortalSubmission`, `createProduct`, `createProductVariant`, `createReturn`, `createRfidSession`, `createRfidTag`, `createRole`, `createSale`, `createSupplier`, `createSupplierReturn`, `createUnit`, `createUser`, `deleteAiProvider`, `deleteAuditLogsRetention`, `deleteBranch`, `deleteCategory`, `deleteCustomRow`, `deleteCustomer`, `deleteDeliveryContact`, `deleteFileAsset`, `deleteImportJob`, `deleteProduct`, `deleteRole`, `deleteSupplier`, `deleteUnit`, `discardPendingSyncQueue`, `disconnectGoogleDriveSync`, `disconnectUserAuthProvider`, `downloadCustomerTemplate`, `downloadImportJobErrors`, `downloadImportTemplate`, `downloadSupplierTemplate`, `exportBackupFolder`, `factoryReset`, `forgetGoogleDriveSyncCredentials`, `getActionHistory`, `getAiProviders`, `getAiResponses`, `getAnalytics`, `getAppBootstrap`, `getAuditLogs`, `getBranchStock`, `getBranchStockIntegrity`, `getBranchSummary`, `getBranches`, `getCatalogMeta`, `getCatalogProducts`, `getCategories`, `getCurrentOrganization`, `getCustomTableData`, `getCustomTables`, `getCustomerPointSummaries`, `getCustomers`, `getDashboard`, `getDataPath`, `getDeliveryContacts`, `getFiles`, `getGoogleDriveSyncStatus`, `getImageDataUrl`, `getImportJob`, `getImportJobReview`, `getImportQueueStatus`, `getIntegrationDoctor`, `getInventoryMovements`, `getInventoryReasons`, `getInventoryStats`, `getInventorySummary`, `getNotificationSummary`, `getOrganizationBootstrap`, `getPendingSyncState`, `getPortalAiStatus`, `getPortalBootstrap`, `getPortalCatalogMeta`, `getPortalCatalogProducts`, `getPortalConfig`, `getPortalSubmissionsForReview`, `getProductFilters`, `getProductLookupUsage`, `getProducts`, `getProductsByIds`, `getReturn`, `getReturns`, `getRfidSessionReview`, `getRfidStatus`, `getRoles`, `getSales`, `getSalesExport`, `getScaleMigrationStatus`, `getSettings`, `getSuppliers`, `getSystemConfig`, `getSystemDebugLog`, `getSystemJob`, `getTransfers`, `getUnits`, `getUserAuthMethods`, `getUserProfile`, `getUsers`, `getVerificationCapabilities`, `importBackupFolder`, `insertCustomRow`, `listImportJobs`, `login`, `logout`, `lookupPortalMembership`, `moveStockRow`, `openCSVDialog`, `openFolderDialog`, `openImageDialog`, `openPath`, `otpConfirm`, `otpDisable`, `otpSetup`, `otpStatus`, `otpVerify`, `pollSystemJob`, `preflightImportJob`, `prepareScaleMigration`, `queueBackupFolderExport`, `queueBackupFolderRestore`, `queueGoogleDriveSyncNow`, `recordRfidSessionEvents`, `redoActionHistory`, `refreshOfflineDeviceSnapshot`, `repairBranchStockIntegrity`, `replaceProductLookupValues`, `requestPasswordResetEmail`, `resetData`, `resetDataPath`, `resetPassword`, `resetPasswordWithOtp`, `retryImportJob`, `retryPendingSyncNow`, `reviewPortalSubmission`, `runScaleMigration`, `saveGoogleDriveSyncPreferences`, `saveInventoryReasons`, `saveSettings`, `searchInventoryProducts`, `searchOrganizations`, `searchPortalCatalogProducts`, `searchProducts`, `searchRfidTags`, `setDataPath`, `startGoogleDriveSyncOauth`, `startGoogleOauth`, `startImportJob`, `syncGoogleDriveNow`, `testAiProvider`, `testSyncServer`, `transferInventoryStock`, `transferStock`, `undoActionHistory`, `unlinkGoogleOauth`, `updateActionHistory`, `updateAiProvider`, `updateBranch`, `updateCategory`, `updateCustomRow`, `updateCustomer`, `updateDeliveryContact`, `updateImportJobDecisions`, `updateProduct`, `updateReturn`, `updateRole`, `updateSaleStatus`, `updateSessionDuration`, `updateSupplier`, `updateUnit`, `updateUser`, `updateUserProfile`, `uploadFileAsset`, `uploadImportJobCsv`, `uploadImportJobImages`, `uploadImportJobZip`, `uploadProductImage`, `uploadUserAvatar`
 - Imports (6)
@@ -5614,7 +5614,7 @@ Code files documented: **466**
   - none
 - Referenced by (8)
   - `frontend/src/api/http.ts`
-  - `frontend/src/api/methods.js`
+  - `frontend/src/api/methods.ts`
   - `frontend/src/api/websocket.ts`
   - `frontend/src/AppContext.tsx`
   - `frontend/src/components/auth/Login.tsx`
@@ -5653,7 +5653,7 @@ Code files documented: **466**
   - `frontend/src/api/localDb.ts`
   - `frontend/src/constants.ts`
 - Referenced by (2)
-  - `frontend/src/api/methods.js`
+  - `frontend/src/api/methods.ts`
   - `frontend/src/web-api.ts`
 
 ### 3.294 `frontend/src/platform/storage/storagePolicy.ts`
@@ -5786,7 +5786,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (5)
-  - `frontend/src/api/methods.js`
+  - `frontend/src/api/methods.ts`
   - `frontend/src/AppContext.tsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/utils/settingsRefresh.ts`
@@ -5862,7 +5862,7 @@ Code files documented: **466**
   - `frontend/src/utils/pricing.ts`
 - Referenced by (3)
   - `frontend/src/api/localDb.ts`
-  - `frontend/src/api/methods.js`
+  - `frontend/src/api/methods.ts`
   - `frontend/tests/csvImport.test.ts`
 
 ### 3.307 `frontend/src/utils/csvRowCounter.ts`
@@ -5903,7 +5903,7 @@ Code files documented: **466**
   - none
 - Referenced by (7)
   - `frontend/src/api/http.ts`
-  - `frontend/src/api/methods.js`
+  - `frontend/src/api/methods.ts`
   - `frontend/src/AppContext.tsx`
   - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/pos/POS.tsx`
@@ -6236,14 +6236,14 @@ Code files documented: **466**
 - Imports (6)
   - `./api/http.ts`
   - `./api/localDb.ts`
-  - `./api/methods.js`
+  - `./api/methods.ts`
   - `./api/websocket.ts`
   - `./constants.ts`
   - `./platform/runtime/clientRuntime.ts`
 - Internal dependencies (6)
   - `frontend/src/api/http.ts`
   - `frontend/src/api/localDb.ts`
-  - `frontend/src/api/methods.js`
+  - `frontend/src/api/methods.ts`
   - `frontend/src/api/websocket.ts`
   - `frontend/src/constants.ts`
   - `frontend/src/platform/runtime/clientRuntime.ts`

@@ -170,7 +170,7 @@
     "frontend/src/App.tsx",
     "frontend/src/AppContext.tsx",
     "frontend/src/api/http.ts",
-    "frontend/src/api/methods.js",
+    "frontend/src/api/methods.ts",
     "frontend/src/components/auth/Login.tsx",
     "frontend/src/components/branches/Branches.tsx",
     "frontend/src/components/catalog/CatalogEditorSurface.tsx",

@@ -155,7 +155,7 @@ Code files scanned: **466**
 | 143 | `frontend/public/theme-bootstrap.js` | 10 |
 | 144 | `frontend/src/api/http.ts` | 62 |
 | 145 | `frontend/src/api/localDb.ts` | 10 |
-| 146 | `frontend/src/api/methods.js` | 233 |
+| 146 | `frontend/src/api/methods.ts` | 233 |
 | 147 | `frontend/src/api/websocket.ts` | 11 |
 | 148 | `frontend/src/App.tsx` | 68 |
 | 149 | `frontend/src/app/appShellUtils.ts` | 10 |
@@ -2881,7 +2881,7 @@ Code files scanned: **466**
 | 9 | `splitCSVLine` | function | 268 |
 | 10 | `buildCSVTemplate` | export function | 279 |
 
-### 3.146 `frontend/src/api/methods.js`
+### 3.146 `frontend/src/api/methods.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

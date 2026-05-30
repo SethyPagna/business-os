@@ -2375,7 +2375,7 @@ Decision rule:
     verification, the ignored/regenerable `release` folder was deleted again.
     Removed bytes: 378,825,966.
 277. Remove redundant settings-meta startup waterfall. Done:
-    `frontend/src/api/methods.js` now uses the `updatedAt` value already
+    `frontend/src/api/methods.ts` now uses the `updatedAt` value already
     returned by `/api/settings` instead of making a second `/api/settings/meta`
     request during every settings load. The saved local settings metadata path
     is preserved for write-conflict protection, but app startup and later
@@ -2796,25 +2796,25 @@ Decision rule:
     localized backend route cleanup; no folder move, schema migration, or
     runtime conversion was needed.
 333. Reuse settings conflict attempted-payload construction. Done:
-    `frontend/src/api/methods.js` now builds settings conflict attempted values
+    `frontend/src/api/methods.ts` now builds settings conflict attempted values
     through `buildAttemptedSettings()` and a shared conflict metadata-key set
     instead of an inline `Object.entries(...).filter(...)` chain inside
     `saveSettings()`. This is a shared API-path cleanup only; no source folder
     move, schema migration, or runtime conversion was needed.
 334. Tighten shared API query and import-image upload loops. Done:
-    `frontend/src/api/methods.js` now builds shared query strings with direct
+    `frontend/src/api/methods.ts` now builds shared query strings with direct
     key iteration and prepares import image browser-file/relative-path lists
     with direct loops. This keeps API URL and upload payload behavior stable
     while removing small repeated allocation chains from common read and import
     paths. No folder move, schema migration, or runtime conversion was needed.
 335. Tighten upload, offline queue, and return conflict API loops. Done:
-    `frontend/src/api/methods.js` now applies XHR upload headers with direct
+    `frontend/src/api/methods.ts` now applies XHR upload headers with direct
     key iteration, collects eligible offline sale queue rows in one pass before
     sorting, and builds return conflict attempted-item snapshots through
     `buildAttemptedReturnItems()`. This was a shared API-path cleanup only; no
     folder move, schema migration, or runtime conversion was needed.
 336. Centralize shared sync-update and mirror serialization loops. Done:
-    `frontend/src/api/methods.js` now reuses named sync-update channel lists
+    `frontend/src/api/methods.ts` now reuses named sync-update channel lists
     through `dispatchSyncUpdates()`, builds pending sync previews through a
     bounded direct-loop serializer, and clones local mirror rows with a direct
     loop before replacing table contents. This was another shared API-path
@@ -4402,6 +4402,18 @@ Decision rule:
     JSX-to-TSX source lane. The current source extension count is `.js: 95`,
     `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 107` outside
     generated/runtime folders.
+552. Convert the frontend API method registry to TypeScript. Done:
+    `frontend/src/api/methods.ts` now owns the browser domain API registry path,
+    and `frontend/src/web-api.ts`, source-reading tests, and docs point at the
+    TypeScript module. This keeps the lazy API bootstrap, offline sync queue,
+    backup/import/POS/product routes, local mirror behavior, and Vite chunking
+    unchanged while removing the final first-party frontend app `.js` module.
+    The file remains a temporary `ts-nocheck` legacy boundary because the
+    registry still mixes many dynamic payloads and Dexie table names; future
+    moves should extract typed domain sections from it before removing that
+    marker. The current source extension count is `.js: 94`, `.jsx: 0`,
+    `.mjs: 0`, `.cjs: 0`, `.ts: 269`, `.tsx: 107` outside generated/runtime
+    folders.
 
 ## Safety Gates
 

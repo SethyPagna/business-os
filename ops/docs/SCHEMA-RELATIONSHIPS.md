@@ -18,7 +18,7 @@ This document is the working relational schema map for Business OS. It was built
 - `backend/src/services/**/*.js`
 - `backend/src/backupSchema.js`
 - `frontend/src/api/localDb.ts`
-- `frontend/src/api/methods.js`
+- `frontend/src/api/methods.ts`
 - runtime configuration in `ops/docker/compose.scale.yml`
 
 The repeatable generated companion report is `ops/docs/reference/SCHEMA-AUDIT.md`.

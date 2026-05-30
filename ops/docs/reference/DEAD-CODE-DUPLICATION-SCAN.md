@@ -482,7 +482,7 @@ matching stay centralized instead of duplicating checkout logic inside
 | `frontend/src/components/inventory/Inventory.tsx` | Large component and likely repeated transforms. | Helper extraction tests and Inventory Playwright checks. |
 | `backend/src/services/importJobs.js` | Large import pipeline with queue, CSV, image, and policy branches. | Import tests plus live import smoke. |
 | `frontend/src/components/catalog/CatalogPage.tsx` | Large mixed admin/public/editor surface. | Catalog helper tests plus public portal check. |
-| `frontend/src/api/methods.js` | Large API method registry. | API contract/source tests and app bootstrap check. |
+| `frontend/src/api/methods.ts` | Large API method registry. | API contract/source tests and app bootstrap check. |
 | `backend/src/routes/products.js` and `backend/src/routes/inventory.js` | Query-heavy route files. | Route contract tests, schema audit, product/inventory live checks. |
 
 ## Duplicate Pattern Watchlist

@@ -177,7 +177,7 @@ Total files documented: **529**
 | 165 | `frontend/README.md` | frontend-root | 13 | 0.5 | Documentation |
 | 166 | `frontend/src/api/http.ts` | frontend-api | 1093 | 41.2 | Frontend API/sync helper |
 | 167 | `frontend/src/api/localDb.ts` | frontend-api | 287 | 11.0 | Frontend API/sync helper |
-| 168 | `frontend/src/api/methods.js` | frontend-api | 2346 | 102.6 | Frontend API/sync helper |
+| 168 | `frontend/src/api/methods.ts` | frontend-api | 2346 | 102.6 | Frontend API/sync helper |
 | 169 | `frontend/src/api/README.md` | frontend-api | 32 | 1.3 | Frontend API/sync helper |
 | 170 | `frontend/src/api/websocket.ts` | frontend-api | 230 | 7.6 | Frontend API/sync helper |
 | 171 | `frontend/src/App.tsx` | frontend-core | 1572 | 60.1 | Main app shell and page mounting |

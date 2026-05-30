@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 551.
+- Latest completed implementation move in this roadmap: Move 552.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -994,7 +994,7 @@ Current checkpoint:
   `ops/docs`; it found 57 files above 700 lines and identifies
   `frontend/src/components/inventory/Inventory.tsx`,
   `backend/src/services/importJobs.js`, `frontend/src/components/catalog/CatalogPage.tsx`,
-  `frontend/src/components/products/Products.tsx`, and `frontend/src/api/methods.js`
+  `frontend/src/components/products/Products.tsx`, and `frontend/src/api/methods.ts`
   as high-value split candidates.
 - First Phase 26 physical move complete: Phase 8.4 live Playwright check scripts
   now live in `ops/scripts/runtime/live-checks`, with relative auth/root imports
@@ -3632,7 +3632,7 @@ Move 327 status:
 
 Move 328 status:
 - Move 328 centralizes client API query-string construction:
-  `frontend/src/api/methods.js` now uses one `buildQueryString()` helper for
+  `frontend/src/api/methods.ts` now uses one `buildQueryString()` helper for
   paged/search/read query parameters across products, inventory, import jobs,
   contacts, files, audit logs, sales, returns, RFID, and portal catalog
   requests. The helper skips null/undefined and, by default, empty strings
@@ -3652,7 +3652,7 @@ Move 328 status:
 
 Move 329 status:
 - Move 329 centralizes client API query-path assembly:
-  `frontend/src/api/methods.js` now uses one `appendQuery()` helper for
+  `frontend/src/api/methods.ts` now uses one `appendQuery()` helper for
   optional query suffixes across product, inventory, portal catalog, import
   job, file, action history, RFID, sales, analytics, contact, audit log,
   return, and export reads. This keeps the Move 328 query builder as the only
@@ -3663,7 +3663,7 @@ Move 329 status:
 
 Move 330 status:
 - Move 330 makes product ID lookup normalization single-pass:
-  `frontend/src/api/methods.js` now uses `normalizePositiveUniqueIds()` for
+  `frontend/src/api/methods.ts` now uses `normalizePositiveUniqueIds()` for
   `getProductsByIds()`, replacing the prior chained `map()`, `filter()`,
   `Set`, `Array.from()`, and `slice()` expression with one bounded loop that
   converts, validates, dedupes, and stops at the request limit. Focused
@@ -3673,7 +3673,7 @@ Move 330 status:
 
 Move 331 status:
 - Move 331 makes actor query and cache cleanup helpers direct-loop based:
-  `frontend/src/api/methods.js` now has `appendActorQuery()` iterate supplied
+  `frontend/src/api/methods.ts` now has `appendActorQuery()` iterate supplied
   extra-query keys directly instead of allocating `Object.entries()` plus a
   callback, and it caches `query.toString()` once before returning the final
   path. `clearCachedQueryResults()` now normalizes prefixes and scans matching
@@ -3845,7 +3845,7 @@ Move 342 status:
 
 Move 343 status:
 - Move 343 extracts settings conflict-attempt payload construction in
-  `frontend/src/api/methods.js`. Settings writes now reuse
+  `frontend/src/api/methods.ts`. Settings writes now reuse
   `buildAttemptedSettings()` and the shared conflict metadata-key set instead
   of rebuilding the same `Object.entries(...).filter(...)` chain on every
   conflict response. The API response shape, conflict draft preservation, and
@@ -3855,7 +3855,7 @@ Move 343 status:
 
 Move 344 status:
 - Move 344 tightens shared API query and import-image upload loops in
-  `frontend/src/api/methods.js`. `buildQueryString()` now iterates parameter
+  `frontend/src/api/methods.ts`. `buildQueryString()` now iterates parameter
   keys directly instead of allocating entry tuples, and
   `uploadImportJobImages()` collects browser files and relative paths with
   direct loops instead of filter/forEach chains. Request URLs, skip-empty
@@ -3865,7 +3865,7 @@ Move 344 status:
 
 Move 345 status:
 - Move 345 removes more shared API allocation chains in
-  `frontend/src/api/methods.js`. XHR file uploads now apply non-empty headers
+  `frontend/src/api/methods.ts`. XHR file uploads now apply non-empty headers
   with a direct key loop, offline sale queue retry eligibility is collected in
   one pass before sorting, and return conflict attempted-item snapshots use
   `buildAttemptedReturnItems()` instead of an inline `map()`. Upload headers,
@@ -3876,7 +3876,7 @@ Move 345 status:
 
 Move 346 status:
 - Move 346 centralizes shared sync-update and mirror serialization loops in
-  `frontend/src/api/methods.js`. Discarded queue and offline-sale synced
+  `frontend/src/api/methods.ts`. Discarded queue and offline-sale synced
   refresh events now reuse `dispatchSyncUpdates()` with named channel lists,
   pending sync queue previews are built through a bounded serializer, and local
   mirror row cloning now uses a direct loop. Sync event names, preview shape,
@@ -6025,3 +6025,16 @@ Move 551 status:
   JSX-to-TSX source lane: the current source extension count is `.js: 95`,
   `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 107` outside
   generated/runtime folders.
+
+Move 552 status:
+- Move 552 converts the frontend domain API registry to
+  `frontend/src/api/methods.ts`. The move keeps the lazy `web-api.ts`
+  bootstrap contract, source-inspection API tests, offline sync queue,
+  backup/import/POS/product gateway behavior, and Vite chunking intact while
+  removing the last first-party frontend app `.js` module. Because this file is
+  still a large legacy registry with dynamic Dexie tables and broad payload
+  shapes, it is marked as a temporary `ts-nocheck` TypeScript boundary; future
+  slices should extract typed domain groups from it before removing that
+  marker. The current source extension count is `.js: 94`, `.jsx: 0`,
+  `.mjs: 0`, `.cjs: 0`, `.ts: 269`, `.tsx: 107` outside generated/runtime
+  folders.

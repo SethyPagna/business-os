@@ -185,12 +185,13 @@ Recent route-level win:
 
 ## Next Best Moves
 
-1. Convert the remaining JSX shells in measured slices: Inventory, Products,
-   and Catalog page. Inventory is the largest operational shell, Products is
-   the broadest table workflow, and Catalog page is the remaining public portal
-   shell.
-2. Split `frontend/src/api/methods.js` into typed sections or convert bounded
-   helper clusters first; it remains the next high-impact API gateway target.
+1. Split `frontend/src/api/methods.ts` into typed sections, starting with
+   bounded helpers and low-risk domain clusters, then remove its temporary
+   `ts-nocheck` marker when request payloads, retries, cache invalidation,
+   import jobs, and offline mirrors are covered by explicit types.
+2. Begin the backend JavaScript-to-TypeScript lane only after the runtime,
+   worker, package, Docker, and release scripts prove how `.ts` backend source
+   will execute and package without data loss.
 3. Update source-inspection tests and ops verification scripts whenever a real
    implementation moves behind a compatibility wrapper.
 4. Refresh Phase 29 references after each migration and keep the public

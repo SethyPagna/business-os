@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T07:31:32.635Z
+Generated: 2026-05-30T08:00:10.798Z
 
 ## Summary
 
@@ -14,9 +14,9 @@ Generated: 2026-05-30T07:31:32.635Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 266 |
+| .ts | 267 |
 | .tsx | 107 |
-| .js | 84 |
+| .js | 83 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -66,16 +66,16 @@ Generated: 2026-05-30T07:31:32.635Z
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7933 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6911 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6028 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4424 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6041 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4436 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
-| ops/docs/reference/PHASE29-AUDIT.json | 3280 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3272 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2686 | ops/docs/reference |
-| frontend/src/api/methods.js | 2346 | frontend/api |
+| frontend/src/api/methods.ts | 2349 | frontend/api |
 | frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
