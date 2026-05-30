@@ -11,7 +11,7 @@ Code files scanned: **466**
 | No. | File | Symbols |
 |---:|---|---:|
 | 1 | `backend/server.js` | 23 |
-| 2 | `backend/src/accessControl.js` | 18 |
+| 2 | `backend/src/accessControl.ts` | 18 |
 | 3 | `backend/src/analytics/duckdbRuntime.js` | 3 |
 | 4 | `backend/src/authOtpGuards.ts` | 3 |
 | 5 | `backend/src/backupSchema.js` | 4 |
@@ -507,28 +507,28 @@ Code files scanned: **466**
 | 22 | `registerShutdownHandlers` | function | 494 |
 | 23 | `bootstrapServer` | function | 511 |
 
-### 3.2 `backend/src/accessControl.js`
+### 3.2 `backend/src/accessControl.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `trim` | function | 19 |
-| 2 | `normalizeHostname` | function | 23 |
-| 3 | `getConfiguredSyncToken` | function | 29 |
-| 4 | `getRemoteAccessProvider` | function | 33 |
-| 5 | `isLegacyTailscaleEnabled` | function | 37 |
-| 6 | `getRequestHost` | function | 41 |
-| 7 | `getRemoteAddress` | function | 47 |
-| 8 | `isLoopbackAddress` | function | 55 |
-| 9 | `getPresentedSyncToken` | function | 62 |
-| 10 | `getTailscaleIdentity` | function | 68 |
-| 11 | `hasTrustedTailscaleIdentity` | function | 77 |
-| 12 | `isLocalHostRequest` | function | 85 |
-| 13 | `isTsNetHost` | function | 90 |
-| 14 | `getConfiguredTailscaleHost` | function | 95 |
-| 15 | `isPublicRemoteRequest` | function | 99 |
-| 16 | `isPublicApiRequest` | function | 107 |
-| 17 | `classifyRequestAccess` | function | 116 |
-| 18 | `authorizeProtectedRequest` | function | 145 |
+| 1 | `trim` | function | 45 |
+| 2 | `normalizeHostname` | function | 49 |
+| 3 | `getConfiguredSyncToken` | function | 55 |
+| 4 | `getRemoteAccessProvider` | function | 59 |
+| 5 | `isLegacyTailscaleEnabled` | function | 63 |
+| 6 | `getRequestHost` | function | 70 |
+| 7 | `getRemoteAddress` | function | 79 |
+| 8 | `isLoopbackAddress` | function | 87 |
+| 9 | `getPresentedSyncToken` | function | 97 |
+| 10 | `getTailscaleIdentity` | function | 106 |
+| 11 | `hasTrustedTailscaleIdentity` | function | 118 |
+| 12 | `isLocalHostRequest` | function | 129 |
+| 13 | `isTsNetHost` | function | 134 |
+| 14 | `getConfiguredTailscaleHost` | function | 139 |
+| 15 | `isPublicRemoteRequest` | function | 146 |
+| 16 | `isPublicApiRequest` | function | 157 |
+| 17 | `classifyRequestAccess` | function | 170 |
+| 18 | `authorizeProtectedRequest` | function | 202 |
 
 ### 3.3 `backend/src/analytics/duckdbRuntime.js`
 

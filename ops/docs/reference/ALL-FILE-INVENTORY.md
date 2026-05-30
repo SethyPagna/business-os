@@ -17,7 +17,7 @@ Total files documented: **529**
 | 5 | `backend/package.json` | backend-root | 67 | 3.6 | Configuration/data manifest |
 | 6 | `backend/README.md` | backend-root | 13 | 0.6 | Documentation |
 | 7 | `backend/server.js` | backend-root | 570 | 19.8 | Backend server entrypoint |
-| 8 | `backend/src/accessControl.js` | backend-core | 161 | 5.0 | Project source/support file |
+| 8 | `backend/src/accessControl.ts` | backend-core | 218 | 6.1 | Project source/support file |
 | 9 | `backend/src/analytics/duckdbRuntime.js` | backend-core | 91 | 2.7 | Project source/support file |
 | 10 | `backend/src/authOtpGuards.ts` | backend-core | 34 | 1.2 | Project source/support file |
 | 11 | `backend/src/backupSchema.js` | backend-core | 144 | 3.2 | Project source/support file |

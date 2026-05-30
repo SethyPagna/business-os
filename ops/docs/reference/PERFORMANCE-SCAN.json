@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6440498,
-  "totalSourceLines": 145856,
+  "totalSourceBytes": 6441701,
+  "totalSourceLines": 145913,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -134,7 +134,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66857,
+      "size": 66859,
       "lines": 1659
     },
     {
@@ -246,7 +246,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66857,
+      "size": 66859,
       "lines": 1659
     },
     {

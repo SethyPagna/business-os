@@ -169,7 +169,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `accessControl.js` | Project source/support file |
+| 1 | `accessControl.ts` | Project source/support file |
 | 2 | `authOtpGuards.ts` | Project source/support file |
 | 3 | `backupSchema.js` | Project source/support file |
 | 4 | `businessMetrics.js` | Project source/support file |

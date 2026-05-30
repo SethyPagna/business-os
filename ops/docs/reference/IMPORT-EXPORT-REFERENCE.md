@@ -11,7 +11,7 @@ Code files documented: **466**
 | No. | File | Imports | Exports | Internal deps | Referenced by |
 |---:|---|---:|---:|---:|---:|
 | 1 | `backend/server.js` | 47 | 0 | 40 | 0 |
-| 2 | `backend/src/accessControl.js` | 2 | 1 | 2 | 4 |
+| 2 | `backend/src/accessControl.ts` | 1 | 1 | 1 | 4 |
 | 3 | `backend/src/analytics/duckdbRuntime.js` | 2 | 1 | 1 | 4 |
 | 4 | `backend/src/authOtpGuards.ts` | 1 | 1 | 1 | 2 |
 | 5 | `backend/src/backupSchema.js` | 0 | 1 | 0 | 3 |
@@ -71,7 +71,7 @@ Code files documented: **466**
 | 59 | `backend/src/runtimeState/index.ts` | 4 | 1 | 1 | 2 |
 | 60 | `backend/src/runtimeVersion.ts` | 5 | 1 | 1 | 4 |
 | 61 | `backend/src/schemaMetadata.ts` | 1 | 1 | 1 | 6 |
-| 62 | `backend/src/security.js` | 1 | 1 | 0 | 7 |
+| 62 | `backend/src/security.js` | 1 | 1 | 0 | 6 |
 | 63 | `backend/src/serverUtils.js` | 1 | 1 | 1 | 4 |
 | 64 | `backend/src/services/aiGateway.js` | 2 | 1 | 2 | 2 |
 | 65 | `backend/src/services/backupPackages.js` | 9 | 1 | 4 | 4 |
@@ -574,15 +574,13 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.2 `backend/src/accessControl.js`
+### 3.2 `backend/src/accessControl.ts`
 
 - Declared exports: `module.exports`
-- Imports (2)
+- Imports (1)
   - `./config`
-  - `./security`
-- Internal dependencies (2)
+- Internal dependencies (1)
   - `backend/src/config/index.js`
-  - `backend/src/security.js`
 - Referenced by (4)
   - `backend/src/middleware.js`
   - `backend/src/routes/auth.js`
@@ -668,7 +666,7 @@ Code files documented: **466**
   - `backend/src/storage/organizationFolders.ts`
 - Referenced by (25)
   - `backend/server.js`
-  - `backend/src/accessControl.js`
+  - `backend/src/accessControl.ts`
   - `backend/src/analytics/duckdbRuntime.js`
   - `backend/src/fileAssets.js`
   - `backend/src/middleware.js`
@@ -959,7 +957,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (10)
-  - `./accessControl`
+  - `./accessControl.ts`
   - `./config`
   - `./fileAssets`
   - `./permissions`
@@ -970,7 +968,7 @@ Code files documented: **466**
   - `multer`
   - `path`
 - Internal dependencies (7)
-  - `backend/src/accessControl.js`
+  - `backend/src/accessControl.ts`
   - `backend/src/config/index.js`
   - `backend/src/fileAssets.js`
   - `backend/src/permissions.js`
@@ -1220,7 +1218,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (18)
-  - `../accessControl`
+  - `../accessControl.ts`
   - `../authOtpGuards.ts`
   - `../config`
   - `../database`
@@ -1239,7 +1237,7 @@ Code files documented: **466**
   - `qrcode`
   - `speakeasy`
 - Internal dependencies (13)
-  - `backend/src/accessControl.js`
+  - `backend/src/accessControl.ts`
   - `backend/src/authOtpGuards.ts`
   - `backend/src/config/index.js`
   - `backend/src/database.js`
@@ -1650,7 +1648,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (24)
-  - `../../accessControl`
+  - `../../accessControl.ts`
   - `../../analytics/duckdbRuntime`
   - `../../backupSchema`
   - `../../config`
@@ -1675,7 +1673,7 @@ Code files documented: **466**
   - `fs`
   - `path`
 - Internal dependencies (20)
-  - `backend/src/accessControl.js`
+  - `backend/src/accessControl.ts`
   - `backend/src/analytics/duckdbRuntime.js`
   - `backend/src/backupSchema.js`
   - `backend/src/config/index.js`
@@ -1813,8 +1811,7 @@ Code files documented: **466**
   - `crypto`
 - Internal dependencies (0)
   - none
-- Referenced by (7)
-  - `backend/src/accessControl.js`
+- Referenced by (6)
   - `backend/src/middleware.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/portal.js`
@@ -2198,10 +2195,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/accessControl`
+  - `../src/accessControl.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/accessControl.js`
+  - `backend/src/accessControl.ts`
 - Referenced by (0)
   - none
 
