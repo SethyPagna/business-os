@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T22:41:48.934Z",
+  "generatedAt": "2026-05-30T22:49:11.029Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      304
+      305
     ],
     [
       "React TSX",
@@ -37,7 +37,7 @@
     ],
     [
       "JavaScript",
-      7
+      6
     ],
     [
       "Shell",
@@ -59,7 +59,7 @@
   "extensionCounts": [
     [
       ".ts",
-      304
+      305
     ],
     [
       ".tsx",
@@ -75,7 +75,7 @@
     ],
     [
       ".js",
-      7
+      6
     ],
     [
       ".sh",
@@ -1669,7 +1669,7 @@
       "covered": true
     },
     {
-      "target": "backend/src/routes/portal.js",
+      "target": "backend/src/routes/portal.ts",
       "optimization": "Portal catalog products now share one image and branch-stock materialization helper plus one payload decorator across full catalog and paged search responses.",
       "rollback": "Inline the image-map, branch-stock-map, gallery, and badge decoration blocks separately in getPortalProducts and getPortalCatalogProductPage again; public catalog response fields remain unchanged.",
       "proof": [

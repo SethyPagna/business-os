@@ -643,7 +643,7 @@ stock recalculation side effects, but the avoidable per-row statement setup is
 gone.
 
 Move 175 completes the next portal route data-flow slice in
-`backend/src/routes/portal.js`. Full catalog and paged catalog search responses
+`backend/src/routes/portal.ts`. Full catalog and paged catalog search responses
 now share `getPortalProductAssets()` and `buildPortalProductPayload()` for
 image gallery, branch-stock, fallback image, and highlight badge assembly,
 removing two parallel materialization blocks while preserving the public

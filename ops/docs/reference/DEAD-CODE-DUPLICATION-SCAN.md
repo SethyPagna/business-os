@@ -509,7 +509,7 @@ matching stay centralized instead of duplicating checkout logic inside
   reuses request-scoped prepared statements for branch/product/stock/movement
   and session updates.
 - Move 175 removes duplicate portal catalog product payload assembly from
-  `backend/src/routes/portal.js`; full catalog and paged search now share the
+  `backend/src/routes/portal.ts`; full catalog and paged search now share the
   same asset materialization and payload decoration helpers.
 - Move 176 removes the repeated active-product scan from image-only bulk import
   in `backend/src/routes/products.js`; uploaded filenames now match through one

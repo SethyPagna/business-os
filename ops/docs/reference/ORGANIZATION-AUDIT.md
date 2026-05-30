@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T22:41:49.464Z
+Generated: 2026-05-30T22:49:09.161Z
 
 ## Summary
 
@@ -14,13 +14,13 @@ Generated: 2026-05-30T22:41:49.464Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 345 |
+| .ts | 346 |
 | .tsx | 107 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
-| .js | 7 |
+| .js | 6 |
 | .sh | 3 |
 | .sql | 2 |
 | .css | 1 |
@@ -65,13 +65,13 @@ Generated: 2026-05-30T22:41:49.464Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7984 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7002 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7019 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5310 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5327 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
-| ops/docs/reference/PHASE29-AUDIT.json | 3272 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3271 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2686 | ops/docs/reference |
@@ -118,7 +118,7 @@ Generated: 2026-05-30T22:41:49.464Z
 | backend/src/routes/auth.ts | 13 | backend/routes |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
-| backend/src/routes/portal.js | 12 | backend/routes |
+| backend/src/routes/portal.ts | 12 | backend/routes |
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
 | backend/src/routes/inventory.js | 11 | backend/routes |
 | frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |

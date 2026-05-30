@@ -57,7 +57,7 @@ Code files scanned: **468**
 | 45 | `backend/src/routes/inventory.js` | 32 |
 | 46 | `backend/src/routes/notifications.ts` | 27 |
 | 47 | `backend/src/routes/organizations.ts` | 0 |
-| 48 | `backend/src/routes/portal.js` | 60 |
+| 48 | `backend/src/routes/portal.ts` | 60 |
 | 49 | `backend/src/routes/products.js` | 64 |
 | 50 | `backend/src/routes/returns.ts` | 10 |
 | 51 | `backend/src/routes/runtime.ts` | 6 |
@@ -1310,7 +1310,7 @@ Code files scanned: **468**
 
 - No top-level named symbols detected.
 
-### 3.48 `backend/src/routes/portal.js`
+### 3.48 `backend/src/routes/portal.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

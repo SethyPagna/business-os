@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **8**
+Total files documented: **7**
 
 ## 2. Symbol Count by File
 
@@ -12,12 +12,11 @@ Total files documented: **8**
 |---:|---|---:|---:|
 | 1 | `backend/server.js` | 23 | 0 |
 | 2 | `backend/src/routes/inventory.js` | 32 | 16 |
-| 3 | `backend/src/routes/portal.js` | 60 | 11 |
-| 4 | `backend/src/routes/products.js` | 64 | 12 |
-| 5 | `backend/src/routes/sales.js` | 24 | 7 |
-| 6 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 7 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 8 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 3 | `backend/src/routes/products.js` | 64 | 12 |
+| 4 | `backend/src/routes/sales.js` | 24 | 7 |
+| 5 | `backend/src/routes/system/index.js` | 44 | 38 |
+| 6 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 7 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -107,88 +106,7 @@ Total files documented: **8**
 | 15 | GET | `/summary` | 1611 |
 | 16 | GET | `/movements` | 1779 |
 
-### 3.3 `backend/src/routes/portal.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `asyncRoute` | function | 24 |
-| 2 | `toNumber` | function | 29 |
-| 3 | `normalizeBoolean` | function | 35 |
-| 4 | `normalizePhone` | function | 41 |
-| 5 | `normalizePublicPath` | function | 46 |
-| 6 | `normalizeUrl` | function | 60 |
-| 7 | `normalizeRedeemValueUsd` | function | 75 |
-| 8 | `normalizeRedeemValueKhr` | function | 80 |
-| 9 | `normalizeHexColor` | function | 87 |
-| 10 | `normalizeFaqItems` | function | 93 |
-| 11 | `normalizePortalTranslations` | function | 111 |
-| 12 | `normalizeProductIdList` | function | 125 |
-| 13 | `loadSettingsMap` | function | 140 |
-| 14 | `buildPortalConfig` | function | 150 |
-| 15 | `buildRankMap` | function | 276 |
-| 16 | `buildEmptyPortalMetric` | function | 297 |
-| 17 | `collectPortalSignalRows` | function | 309 |
-| 18 | `buildIdRankMap` | function | 322 |
-| 19 | `buildRecommendedRankMap` | function | 331 |
-| 20 | `getPortalProductSignals` | function | 339 |
-| 21 | `buildPlaceholders` | function | 415 |
-| 22 | `collectProductIds` | function | 421 |
-| 23 | `getPortalProductAssets` | function | 427 |
-| 24 | `buildPortalProductPayload` | function | 467 |
-| 25 | `buildPortalProductPayloads` | function | 484 |
-| 26 | `calculatePointsValue` | function | 493 |
-| 27 | `summarizePoints` | function | 503 |
-| 28 | `joinWrappedClauses` | function | 543 |
-| 29 | `normalizePortalSubmissionRows` | function | 550 |
-| 30 | `summarizeMembershipTotals` | function | 562 |
-| 31 | `getPortalProducts` | function | 593 |
-| 32 | `cacheTtl` | function | 632 |
-| 33 | `normalizePositiveInt` | function | 636 |
-| 34 | `splitSearchTerms` | function | 642 |
-| 35 | `splitFilterValues` | function | 653 |
-| 36 | `parsePositiveIds` | function | 664 |
-| 37 | `buildNamedPlaceholders` | function | 673 |
-| 38 | `appendSearchTermFilters` | function | 681 |
-| 39 | `appendNamedFilter` | function | 697 |
-| 40 | `normalizeLowerValues` | function | 713 |
-| 41 | `appendPortalProductSearchFilters` | function | 719 |
-| 42 | `collectRowValues` | function | 759 |
-| 43 | `normalizeStringList` | function | 765 |
-| 44 | `uniqueSortedStrings` | function | 776 |
-| 45 | `getPortalCatalogSearchMetadata` | function | 790 |
-| 46 | `distinctField` | const arrow | 795 |
-| 47 | `getPortalCatalogProductPage` | function | 819 |
-| 48 | `getCachedPortalConfig` | function | 882 |
-| 49 | `getCachedPortalMeta` | function | 886 |
-| 50 | `getCachedPortalProducts` | function | 890 |
-| 51 | `getPortalCatalogMeta` | function | 895 |
-| 52 | `findCustomerByMembership` | function | 935 |
-| 53 | `sanitizeScreenshots` | function | 945 |
-| 54 | `materializePortalScreenshots` | function | 958 |
-| 55 | `sanitizeAiProfile` | function | 976 |
-| 56 | `hasAiProfilePreference` | function | 987 |
-| 57 | `getVisitorFingerprint` | function | 995 |
-| 58 | `getClientKey` | function | 1001 |
-| 59 | `applyPortalRateLimit` | function | 1006 |
-| 60 | `collectRecommendationCitations` | function | 1014 |
-
-#### 3.3.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | GET | `/config` | 1023 |
-| 2 | GET | `/bootstrap` | 1027 |
-| 3 | GET | `/catalog/meta` | 1038 |
-| 4 | GET | `/catalog/products` | 1042 |
-| 5 | GET | `/catalog/products/search` | 1047 |
-| 6 | GET | `/ai/status` | 1052 |
-| 7 | POST | `/ai/chat` | 1064 |
-| 8 | GET | `/membership/:membershipNumber` | 1140 |
-| 9 | POST | `/submissions` | 1292 |
-| 10 | GET | `/submissions/review` | 1339 |
-| 11 | PATCH | `/submissions/:id/review` | 1369 |
-
-### 3.4 `backend/src/routes/products.js`
+### 3.3 `backend/src/routes/products.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -257,7 +175,7 @@ Total files documented: **8**
 | 63 | `parseIncomingImageRefs` | const arrow | 1768 |
 | 64 | `loadCurrentGallery` | const arrow | 1804 |
 
-#### 3.4.1 Route Handlers
+#### 3.3.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -274,7 +192,7 @@ Total files documented: **8**
 | 11 | POST | `/upload-image` | 1487 |
 | 12 | POST | `/bulk-import` | 1505 |
 
-### 3.5 `backend/src/routes/sales.js`
+### 3.4 `backend/src/routes/sales.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -303,7 +221,7 @@ Total files documented: **8**
 | 23 | `fetchSaleItemsWithBranches` | function | 308 |
 | 24 | `findSaleByClientRequestId` | function | 317 |
 
-#### 3.5.1 Route Handlers
+#### 3.4.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -315,7 +233,7 @@ Total files documented: **8**
 | 6 | GET | `/dashboard` | 1106 |
 | 7 | GET | `/analytics` | 1229 |
 
-### 3.6 `backend/src/routes/system/index.js`
+### 3.5 `backend/src/routes/system/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -364,7 +282,7 @@ Total files documented: **8**
 | 43 | `listWindowsFsRoots` | const arrow | 1510 |
 | 44 | `listDriveRoots` | const arrow | 1525 |
 
-#### 3.6.1 Route Handlers
+#### 3.5.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -407,7 +325,7 @@ Total files documented: **8**
 | 37 | POST | `/open-path` | 1564 |
 | 38 | POST | `/pick-folder` | 1593 |
 
-### 3.7 `backend/src/services/googleDriveSync/index.js`
+### 3.6 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -487,7 +405,7 @@ Total files documented: **8**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.8 `backend/src/services/importJobs.js`
+### 3.7 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
