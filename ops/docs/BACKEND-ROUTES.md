@@ -45,7 +45,7 @@ File: `backend/src/routes/units.ts`
 ## Branches and Transfers
 
 Base: `/api/branches`  
-File: `backend/src/routes/branches.js`
+File: `backend/src/routes/branches.ts`
 
 - `GET /`
 - `POST /`

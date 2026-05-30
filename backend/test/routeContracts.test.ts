@@ -187,7 +187,7 @@ runTest('settings route caches updated_at schema metadata', () => {
 runTest('branch and inventory routes cache stock transfer note metadata', () => {
   const fs = require('fs')
   const path = require('path')
-  const branchesSource = fs.readFileSync(path.join(__dirname, '../src/routes/branches.js'), 'utf8')
+  const branchesSource = fs.readFileSync(path.join(__dirname, '../src/routes/branches.ts'), 'utf8')
   const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
   assert.match(branchesSource, /const \{ firstExistingColumn \} = require\('\.\.\/schemaMetadata\.ts'\)/)
   assert.match(branchesSource, /return firstExistingColumn\('stock_transfers', \['notes', 'note'\]\)/)

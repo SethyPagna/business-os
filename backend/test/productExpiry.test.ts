@@ -23,7 +23,7 @@ const runtime = fs.readFileSync(path.join(root, 'src/postgresDatabase.js'), 'utf
 const productsRoute = fs.readFileSync(path.join(root, 'src/routes/products.js'), 'utf8')
 const notificationsRoute = fs.readFileSync(path.join(root, 'src/routes/notifications.ts'), 'utf8')
 const salesRoute = fs.readFileSync(path.join(root, 'src/routes/sales.js'), 'utf8')
-const branchesRoute = fs.readFileSync(path.join(root, 'src/routes/branches.js'), 'utf8')
+const branchesRoute = fs.readFileSync(path.join(root, 'src/routes/branches.ts'), 'utf8')
 const metrics = fs.readFileSync(path.join(root, 'src/businessMetrics.ts'), 'utf8')
 
 runTest('products persist expiry date and alert window through schema and runtime migrations', () => {

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 604 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 605 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 40`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 323`,
+  `.js: 39`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 324`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -2419,7 +2419,7 @@ Decision rule:
     2.503 GB of builder cache while preserving images, volumes, uploads,
     secrets, and retained backup packages.
 283. Cache additional backend schema metadata probes. Done:
-    `branches.js` and `inventory.js` now cache the stock-transfer note-column
+    `branches.ts` and `inventory.js` now cache the stock-transfer note-column
     selection used by transfer write paths, and `products.js` now caches the
     settings `updated_at` column support used by product import brand-setting
     writes. These are process-lifetime schema-shape probes, so the existing
@@ -3018,7 +3018,7 @@ Decision rule:
     log serialization. This was a backend service/route cleanup only; no
     folder move, schema migration, or runtime conversion was needed.
 372. Tighten branch stock integrity and transfer loops. Done:
-    `backend/src/routes/branches.js` now uses direct-loop helpers for stock
+    `backend/src/routes/branches.ts` now uses direct-loop helpers for stock
     integrity preview payloads, total quantity calculation, repair stock
     updates, touched-product recalculation, and dynamic transfer insert SQL.
     This was a backend route cleanup only; no folder move, schema migration,
@@ -3414,7 +3414,7 @@ Decision rule:
     This was a backend database-runtime cleanup only; no folder move, schema
     migration, or language conversion was needed.
 427. Tighten small route predicate helpers. Done:
-    `backend/src/routes/branches.js`, `backend/src/routes/inventory.js`,
+    `backend/src/routes/branches.ts`, `backend/src/routes/inventory.js`,
     `backend/src/routes/portal.js`, `backend/src/routes/settings.ts`, and
     `backend/src/routes/sync.ts` now use named direct-loop helpers for paged
     branch-stock query detection, inventory stats filters, portal AI profile
@@ -5136,6 +5136,21 @@ Decision rule:
     the future compile/staging lane. The generated language audit now reports
     `JavaScript: 18`, `TypeScript: 293`, and `React TSX: 107` across the
     active scan roots.
+605. Convert branches route to a package-safe TypeScript path.
+    Done: `backend/src/routes/branches.ts` keeps branch listing, summary
+    metrics, stock-integrity preview and repair, create/update/delete flows,
+    default-branch handling, paged branch-stock search, stock transfer listing,
+    stock transfer writes, audit payloads, broadcast channels, cached
+    stock-transfer note-column selection, and direct-loop SQL helper behavior
+    on the existing CommonJS route style. Server route mounting, product-expiry
+    and route-contract source assertions, backend route docs, and roadmap docs
+    now point at the explicit `.ts` route path. Focused route load,
+    branch-stock, product-expiry, route-contract, backend utility, schema
+    audit, stale-path, and Linux packaging proof passed. Packaging still warns
+    for direct `.ts` entries in `pkg.scripts`, so broader backend conversions
+    remain blocked on the future compile/staging lane. The expected generated
+    language audit now reports `JavaScript: 17`, `TypeScript: 294`, and
+    `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

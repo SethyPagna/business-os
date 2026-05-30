@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 604.
+- Latest completed implementation move in this roadmap: Move 605.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4298,7 +4298,7 @@ Move 381 status:
 
 Move 382 status:
 - Move 382 tightens backend branch stock integrity and transfer helpers in
-  `backend/src/routes/branches.js`. Stock-integrity preview payload and total
+  `backend/src/routes/branches.ts`. Stock-integrity preview payload and total
   quantity calculation now share one direct-loop helper, repair movement
   updates and touched-product recalculation use direct loops, and transfer
   insert placeholders/quoted columns use shared SQL helper functions instead
@@ -4900,7 +4900,7 @@ Move 436 status:
 
 Move 437 status:
 - Move 437 tightens small route predicate helpers in
-  `backend/src/routes/branches.js`, `backend/src/routes/inventory.js`,
+  `backend/src/routes/branches.ts`, `backend/src/routes/inventory.js`,
   `backend/src/routes/portal.js`, `backend/src/routes/settings.ts`, and
   `backend/src/routes/sync.ts`. Paged branch-stock query detection, inventory
   stats filter detection, portal AI profile preference checks, suspicious brand
@@ -6832,3 +6832,20 @@ Move 604 status:
   conversions still wait for a compile/staging package lane. The generated
   language audit now reports `JavaScript: 18`, `TypeScript: 293`, and
   `React TSX: 107` across the active scan roots.
+
+Move 605 status:
+- Move 605 converts `backend/src/routes/branches.ts` to a package-safe
+  TypeScript path. Branch listing, summary metrics, stock-integrity preview and
+  repair, create/update/delete flows, default-branch handling, paged
+  branch-stock search, stock transfer listing, stock transfer writes, audit
+  payloads, broadcast channels, cached stock-transfer note-column selection,
+  and direct-loop SQL helper behavior remain unchanged on the existing
+  CommonJS route style. Server route mounting, product-expiry and
+  route-contract source assertions, backend route docs, and roadmap docs now
+  point at the explicit `.ts` route path. Focused route load, branch-stock,
+  product-expiry, route-contract, backend utility, schema audit, stale-path,
+  and Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The expected generated language audit now reports
+  `JavaScript: 17`, `TypeScript: 294`, and `React TSX: 107` across the active
+  scan roots.
