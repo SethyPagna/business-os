@@ -312,7 +312,7 @@ Total folders documented: **81**
 | 16 | `README.md` | API route handler |
 | 17 | `returns.ts` | API route handler |
 | 18 | `runtime.ts` | API route handler |
-| 19 | `sales.js` | API route handler |
+| 19 | `sales.ts` | API route handler |
 | 20 | `settings.ts` | API route handler |
 | 21 | `sync.ts` | API route handler |
 | 22 | `units.ts` | API route handler |

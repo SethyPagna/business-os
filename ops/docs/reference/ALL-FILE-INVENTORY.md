@@ -70,7 +70,7 @@ Total files documented: **531**
 | 58 | `backend/src/routes/README.md` | backend-routes | 37 | 1.5 | API route handler |
 | 59 | `backend/src/routes/returns.ts` | backend-routes | 1050 | 41.4 | API route handler |
 | 60 | `backend/src/routes/runtime.ts` | backend-routes | 157 | 4.7 | API route handler |
-| 61 | `backend/src/routes/sales.js` | backend-routes | 1573 | 64.6 | API route handler |
+| 61 | `backend/src/routes/sales.ts` | backend-routes | 1573 | 64.6 | API route handler |
 | 62 | `backend/src/routes/settings.ts` | backend-routes | 210 | 7.3 | API route handler |
 | 63 | `backend/src/routes/sync.ts` | backend-routes | 301 | 13.3 | API route handler |
 | 64 | `backend/src/routes/system/index.js` | backend-routes | 1659 | 65.3 | API route handler |

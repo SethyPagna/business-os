@@ -61,7 +61,7 @@ Code files scanned: **468**
 | 49 | `backend/src/routes/products.js` | 64 |
 | 50 | `backend/src/routes/returns.ts` | 10 |
 | 51 | `backend/src/routes/runtime.ts` | 6 |
-| 52 | `backend/src/routes/sales.js` | 24 |
+| 52 | `backend/src/routes/sales.ts` | 24 |
 | 53 | `backend/src/routes/settings.ts` | 8 |
 | 54 | `backend/src/routes/sync.ts` | 12 |
 | 55 | `backend/src/routes/system/index.js` | 44 |
@@ -1470,7 +1470,7 @@ Code files scanned: **468**
 | 5 | `summarizeSuspiciousTextValues` | function | 71 |
 | 6 | `requireRuntimePermission` | function | 91 |
 
-### 3.52 `backend/src/routes/sales.js`
+### 3.52 `backend/src/routes/sales.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

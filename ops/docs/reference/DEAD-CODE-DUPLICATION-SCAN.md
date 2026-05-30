@@ -515,7 +515,7 @@ matching stay centralized instead of duplicating checkout logic inside
   in `backend/src/routes/products.js`; uploaded filenames now match through one
   prebuilt normalized-name map.
 - Move 177 removes repeated sale creation movement statement setup from
-  `backend/src/routes/sales.js`; sold item allocations now reuse the same
+  `backend/src/routes/sales.ts`; sold item allocations now reuse the same
   request-scoped movement insert and timestamp-update statements.
 - Move 178 removes repeated settings delete statement setup from
   `backend/src/routes/system/index.js`; null-valued settings now use the same

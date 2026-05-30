@@ -656,7 +656,7 @@ lookup. This removes the repeated all-product scan from the image loop while
 preserving the same filename-to-product name matching rule.
 
 Move 177 completes the next sales route data-path slice in
-`backend/src/routes/sales.js`. Sale creation now prepares the inventory
+`backend/src/routes/sales.ts`. Sale creation now prepares the inventory
 movement insert and optional movement-created-at update once per transaction
 and reuses them across sold item allocations. This leaves batch allocation,
 stock movement, audit, and imported timestamp semantics intact while removing

@@ -115,7 +115,7 @@ Frontend:
   flows and queues retryable offline POS sales.
 
 Backend:
-- `backend/src/routes/sales.js` returns the existing sale when the same
+- `backend/src/routes/sales.ts` returns the existing sale when the same
   `client_request_id` is submitted again.
 - `backend/src/routes/returns.js` normalizes `client_request_id` for customer
   and supplier returns and handles duplicate-key retry results.
@@ -127,7 +127,7 @@ Backend:
 
 | Area | Representative files | Risk | Current guard | Next check |
 | --- | --- | --- | --- | --- |
-| POS checkout/payment | `frontend/src/components/pos/POS.tsx`, `frontend/src/api/methods.ts`, `backend/src/routes/sales.js` | Duplicate sales, stock double-deduct | `checkoutInFlightRef`, `loading`, `client_request_id`, backend duplicate lookup | Add/keep source regression covering all three layers |
+| POS checkout/payment | `frontend/src/components/pos/POS.tsx`, `frontend/src/api/methods.ts`, `backend/src/routes/sales.ts` | Duplicate sales, stock double-deduct | `checkoutInFlightRef`, `loading`, `client_request_id`, backend duplicate lookup | Add/keep source regression covering all three layers |
 | Customer returns | `frontend/src/components/returns/NewReturnModal.jsx`, `frontend/src/components/returns/EditReturnModal.jsx`, `backend/src/routes/returns.js` | Duplicate returns, wrong restored stock | `submitting`, synchronous submit ref, backend idempotency for creates | Add deeper edit conflict Playwright check |
 | Supplier returns | `frontend/src/components/returns/NewSupplierReturnModal.jsx`, `backend/src/routes/returns.js` | Duplicate supplier stock removal | `submitting`, synchronous submit ref, backend idempotency | Add live form-state Playwright check |
 | Product import/apply | `frontend/src/components/products/import/BulkImportModal.tsx`, `frontend/src/api/methods.ts`, `backend/src/routes/importJobs.js` | Multiple import jobs, repeated uploads, conflicting apply | `loading`, synchronous in-flight ref, server job state, rate limits | Add deeper server idempotency review for approve/start |

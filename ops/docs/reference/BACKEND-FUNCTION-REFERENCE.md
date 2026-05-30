@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **6**
+Total files documented: **5**
 
 ## 2. Symbol Count by File
 
@@ -13,9 +13,8 @@ Total files documented: **6**
 | 1 | `backend/server.js` | 23 | 0 |
 | 2 | `backend/src/routes/inventory.js` | 32 | 16 |
 | 3 | `backend/src/routes/products.js` | 64 | 12 |
-| 4 | `backend/src/routes/sales.js` | 24 | 7 |
-| 5 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 6 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 4 | `backend/src/routes/system/index.js` | 44 | 38 |
+| 5 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -191,48 +190,7 @@ Total files documented: **6**
 | 11 | POST | `/upload-image` | 1487 |
 | 12 | POST | `/bulk-import` | 1505 |
 
-### 3.4 `backend/src/routes/sales.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `periodExpression` | function | 30 |
-| 2 | `hourExpression` | function | 37 |
-| 3 | `toDayBounds` | function | 41 |
-| 4 | `readCachedDashboardSummary` | function | 51 |
-| 5 | `writeCachedDashboardSummary` | function | 58 |
-| 6 | `readCachedDashboardAnalytics` | function | 66 |
-| 7 | `writeCachedDashboardAnalytics` | function | 73 |
-| 8 | `normalizeImportedTimestamp` | function | 81 |
-| 9 | `getSaleItemCosts` | function | 89 |
-| 10 | `assertSaleStockAvailable` | function | 115 |
-| 11 | `findSaleItemForProduct` | function | 142 |
-| 12 | `findCustomerForSaleAssignment` | function | 149 |
-| 13 | `parseBranchId` | function | 170 |
-| 14 | `getActiveBranchContext` | function | 175 |
-| 15 | `requireActiveBranch` | function | 197 |
-| 16 | `resolveSaleItemBranchId` | function | 204 |
-| 17 | `normalizeSaleItems` | function | 215 |
-| 18 | `summarizeSaleBranch` | function | 249 |
-| 19 | `refreshProductStockQuantity` | function | 281 |
-| 20 | `refreshProductStockQuantities` | function | 285 |
-| 21 | `deductBranchStock` | function | 292 |
-| 22 | `restoreBranchStock` | function | 300 |
-| 23 | `fetchSaleItemsWithBranches` | function | 308 |
-| 24 | `findSaleByClientRequestId` | function | 317 |
-
-#### 3.4.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | POST | `/sales` | 328 |
-| 2 | PATCH | `/sales/:id/status` | 555 |
-| 3 | PATCH | `/sales/:id/customer` | 716 |
-| 4 | GET | `/sales` | 810 |
-| 5 | GET | `/sales/export` | 911 |
-| 6 | GET | `/dashboard` | 1106 |
-| 7 | GET | `/analytics` | 1229 |
-
-### 3.5 `backend/src/routes/system/index.js`
+### 3.4 `backend/src/routes/system/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -281,7 +239,7 @@ Total files documented: **6**
 | 43 | `listWindowsFsRoots` | const arrow | 1510 |
 | 44 | `listDriveRoots` | const arrow | 1525 |
 
-#### 3.5.1 Route Handlers
+#### 3.4.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -324,7 +282,7 @@ Total files documented: **6**
 | 37 | POST | `/open-path` | 1564 |
 | 38 | POST | `/pick-folder` | 1593 |
 
-### 3.6 `backend/src/services/importJobs.js`
+### 3.5 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
