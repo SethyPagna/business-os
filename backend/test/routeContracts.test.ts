@@ -88,6 +88,14 @@ runTest('catalog router registers meta and product read routes', () => {
   assert.ok(paths.includes('/products'), 'missing /api/catalog/products')
 })
 
+runTest('runtime router registers version and diagnostics routes', () => {
+  const router = require('../src/routes/runtime.ts')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/version'), 'missing /api/runtime/version')
+  assert.ok(paths.includes('/queues/status'), 'missing /api/runtime/queues/status')
+  assert.ok(paths.includes('/catalog-integrity'), 'missing /api/runtime/catalog-integrity')
+})
+
 runTest('system router registers Google Drive sync connect and disconnect routes', () => {
   const router = require('../src/routes/system')
   const paths = getRoutePaths(router)

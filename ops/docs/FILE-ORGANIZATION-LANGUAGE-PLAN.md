@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 579 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 580 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 54`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 309`,
+  `.js: 53`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 310`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3024,7 +3024,7 @@ Decision rule:
     This was a backend route cleanup only; no folder move, schema migration,
     or runtime conversion was needed.
 373. Tighten runtime catalog-integrity diagnostics loops. Done:
-    `backend/src/routes/runtime.js` now uses direct-loop helpers for product
+    `backend/src/routes/runtime.ts` now uses direct-loop helpers for product
     field counting, suspicious product sampling, and bounded brand-option
     suspicious-text sampling. This was a backend route cleanup only; no folder
     move, schema migration, or runtime conversion was needed.
@@ -4787,6 +4787,19 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The
     current source extension count is `.js: 54`, `.jsx: 0`, `.mjs: 0`,
     `.cjs: 0`, `.ts: 309`, `.tsx: 107` outside generated/runtime folders.
+580. Convert runtime diagnostics route to a package-safe TypeScript path.
+    Done: `backend/src/routes/runtime.ts` keeps runtime version, queue/cache
+    status, and catalog-integrity diagnostics on the existing CommonJS route
+    style while `backend/server.js` and runtime dependency guardrails import or
+    verify the explicit `.ts` path. `backend/test/routeContracts.test.ts` now
+    asserts `/version`, `/queues/status`, and `/catalog-integrity` route
+    registration. Focused route-contract, runtime route load, runtime-deps
+    guardrail, backend utility, schema audit, stale-path, and Linux packaging
+    proof passed. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service conversions remain blocked
+    on the future compile/staging lane. The current source extension count is
+    `.js: 53`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 310`, `.tsx: 107`
+    outside generated/runtime folders.
 
 ## Safety Gates
 

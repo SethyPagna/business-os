@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 579.
+- Latest completed implementation move in this roadmap: Move 580.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4313,7 +4313,7 @@ Move 382 status:
 
 Move 383 status:
 - Move 383 tightens runtime catalog-integrity diagnostics in
-  `backend/src/routes/runtime.js`. Product field counting and suspicious
+  `backend/src/routes/runtime.ts`. Product field counting and suspicious
   product sampling now share named direct-loop helpers, and brand-option
   suspicious-text sampling now uses a bounded direct-loop helper instead of
   chained `map()`/`filter()` passes. Runtime version payloads,
@@ -6450,3 +6450,18 @@ Move 579 status:
   package lane. The current source extension count is
   `.js: 54`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 309`, `.tsx: 107` outside
   generated/runtime folders.
+
+Move 580 status:
+- Move 580 converts `backend/src/routes/runtime.ts` to a package-safe
+  TypeScript path. Runtime version, queue/cache status, and catalog-integrity
+  diagnostics remain unchanged while `backend/server.js` imports the explicit
+  `.ts` route and `ops/scripts/verification/verify-runtime-deps.ts` verifies
+  the current route file. `backend/test/routeContracts.test.ts` now asserts
+  `/version`, `/queues/status`, and `/catalog-integrity` registration directly.
+  Focused route-contract, runtime route load, runtime-deps guardrail, backend
+  utility, schema audit, stale-path, and Linux packaging proof passed. `pkg`
+  continues to warn for direct `.ts` scripts, so larger backend route/service
+  conversion still waits for a compile/staging package lane. The current source
+  extension count is `.js: 53`, `.jsx: 0`,
+  `.mjs: 0`, `.cjs: 0`, `.ts: 310`, `.tsx: 107` outside generated/runtime
+  folders.
