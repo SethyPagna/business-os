@@ -30,7 +30,7 @@ const {
   S3_SECRET_ACCESS_KEY,
 } = require('../config/index.ts')
 const { getDuckDbRuntimeStatus } = require('../analytics/duckdbRuntime.ts')
-const { getDriveSyncStatus } = require('./googleDriveSync')
+const { getDriveSyncStatus } = require('./googleDriveSync/index.ts')
 const {
   CALLBACK_PATH,
   appendCallbackPath,

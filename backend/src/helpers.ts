@@ -171,7 +171,7 @@ function broadcast(channel, data = {}) {
     invalidateForChannel(channel).catch(() => {})
   } catch (_) {}
   try {
-    const { scheduleDriveSync } = require('./services/googleDriveSync')
+    const { scheduleDriveSync } = require('./services/googleDriveSync/index.ts')
     scheduleDriveSync(`broadcast:${channel}`, 4000)
   } catch (_) {}
 }

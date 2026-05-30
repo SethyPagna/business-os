@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 616 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 617 in this file.
 
 ## Goal
 
@@ -2998,7 +2998,7 @@ Decision rule:
     fallback behavior. This was a backend service cleanup only; no folder move,
     schema migration, or runtime conversion was needed.
 369. Tighten main Google Drive sync service loops. Done:
-    `backend/src/services/googleDriveSync/index.js` now uses direct-loop
+    `backend/src/services/googleDriveSync/index.ts` now uses direct-loop
     helpers for settings reads/writes, sync-entry maps, multi-hash streaming,
     fetch error detail joining, snapshot directory lists, duplicate sibling
     filtering, live path sets, and stale mapping selection. This was a backend
@@ -3263,7 +3263,7 @@ Decision rule:
     `backend/src/services/backupPackages.ts` now uses direct helpers for
     writable waiters, object-copy worker promises, grouped remote package
     values, and backup-version sorting inputs, while
-    `backend/src/services/googleDriveSync/index.js` uses a direct reusable
+    `backend/src/services/googleDriveSync/index.ts` uses a direct reusable
     non-folder sibling selector. A callback scan now reports no `map()`,
     `filter()`, `forEach()`, `reduce()`, `find()`, `flatMap()`, or
     `Array.from()` hits anywhere under `backend/src/services`. This was a
@@ -3433,7 +3433,7 @@ Decision rule:
     conversion was needed.
 429. Clear remaining backend source callback-chain scan. Done:
     `backend/src/importCsv.ts`, `backend/src/services/integrationDoctor.ts`,
-    and `backend/src/services/googleDriveSync/index.js` now use named
+    and `backend/src/services/googleDriveSync/index.ts` now use named
     direct-loop predicates for CSV row-content checks, integration
     critical-check aggregation, and Google Drive canonical layout detection.
     CSV parsing, Khmer text preservation, integration report shape, Drive
@@ -5305,6 +5305,23 @@ Decision rule:
     compile/staging lane. The expected generated language audit now reports
     `JavaScript: 6`, `TypeScript: 305`, and `React TSX: 107` across the active
     scan roots.
+
+617. Convert Google Drive sync service to a package-safe TypeScript path.
+    Done: `backend/src/services/googleDriveSync/index.ts` keeps Drive OAuth,
+    encrypted token storage, sync preference writes, periodic scheduling,
+    reusable backup package selection, resumable uploads, folder-id
+    revalidation, version-folder rotation, retention pruning, mapping recovery,
+    progress state, and status reporting on the existing CommonJS service
+    style. Helper scheduling, notification summaries, integration doctor,
+    system routes, backup reliability checks, Drive versioning tests, hardening
+    policy, master plan, language-runtime audit metadata, and roadmap docs now
+    point at the explicit `.ts` service path. Focused Drive sync service load,
+    Drive versioning, backup performance hardening, backup reliability,
+    backend utility, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so broader
+    backend conversions remain blocked on the future compile/staging lane. The
+    expected generated language audit now reports `JavaScript: 5`,
+    `TypeScript: 306`, and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

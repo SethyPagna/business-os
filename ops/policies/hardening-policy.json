@@ -116,7 +116,7 @@
           "mustNotContain": ["JSON.stringify({ tables })", "const tables = {}", "fs.readFileSync(file.absolutePath)"]
         },
         {
-          "path": "backend/src/services/googleDriveSync/index.js",
+          "path": "backend/src/services/googleDriveSync/index.ts",
           "mustContain": ["uploadType=resumable", "DRIVE_RESUMABLE_CHUNK_BYTES", "upload_session_url", "content_sha256", "uploadedBytes", "retryCount"],
           "mustNotContain": ["fs.readFileSync(file.absolutePath)", "Buffer.concat", "buildMultipartBody"]
         },

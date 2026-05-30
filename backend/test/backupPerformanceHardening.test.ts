@@ -68,7 +68,7 @@ runTest('system jobs throttle noisy persistence while forcing major state change
 })
 
 runTest('drive sync snapshot work avoids synchronous copies and double hashing', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.ts'), 'utf8')
   assert.match(source, /DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS\s*=\s*6\s*\*\s*60\s*\*\s*60/)
   assert.match(source, /DRIVE_SYNC_REUSE_BACKUP_MAX_AGE_MS\s*=\s*15\s*\*\s*60\s*\*\s*1000/)
   assert.match(source, /queuedTimer:\s*null/)

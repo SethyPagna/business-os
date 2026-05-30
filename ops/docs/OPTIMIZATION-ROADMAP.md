@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 616.
+- Latest completed implementation move in this roadmap: Move 617.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4257,7 +4257,7 @@ Move 378 status:
 
 Move 379 status:
 - Move 379 tightens the main Google Drive sync service in
-  `backend/src/services/googleDriveSync/index.js`. Settings placeholder
+  `backend/src/services/googleDriveSync/index.ts`. Settings placeholder
   construction, settings row mapping, settings update entry selection, settings
   delete preparation, sync-entry mapping, multi-hash streaming, fetch-failure
   detail joining, snapshot directory sorting, duplicate sibling filtering, live
@@ -4721,7 +4721,7 @@ Move 417 status:
 Move 418 status:
 - Move 418 clears the backend service callback-chain scan by tightening
   `backend/src/services/backupPackages.ts` and
-  `backend/src/services/googleDriveSync/index.js`. Backup writable waiters,
+  `backend/src/services/googleDriveSync/index.ts`. Backup writable waiters,
   concurrent object-copy worker startup, grouped remote backup package
   materialization, backup-version sorting inputs, and Google Drive reusable
   non-folder sibling selection now use named direct-loop helpers instead of
@@ -4920,7 +4920,7 @@ Move 438 status:
 Move 439 status:
 - Move 439 clears the remaining backend source callback-chain scan in
   `backend/src/importCsv.ts`, `backend/src/services/integrationDoctor.ts`, and
-  `backend/src/services/googleDriveSync/index.js`. CSV row-content checks,
+  `backend/src/services/googleDriveSync/index.ts`. CSV row-content checks,
   integration critical-check aggregation, and Google Drive canonical layout
   detection now use named direct-loop predicates. CSV parsing, Khmer text
   preservation, integration report shape, Drive versioning, mapping reset
@@ -7016,3 +7016,21 @@ Move 616 status:
   still wait for a compile/staging package lane. The expected generated
   language audit now reports `JavaScript: 6`, `TypeScript: 305`, and
   `React TSX: 107` across the active scan roots.
+
+Move 617 status:
+- Move 617 converts `backend/src/services/googleDriveSync/index.ts` to a
+  package-safe TypeScript path. Drive OAuth, encrypted token storage, sync
+  preference writes, periodic scheduling, reusable backup package selection,
+  resumable uploads, folder-id revalidation, version-folder rotation, retention
+  pruning, mapping recovery, progress state, and status reporting remain
+  unchanged on the existing CommonJS service style. Helper scheduling,
+  notification summaries, integration doctor, system routes, backup reliability
+  checks, Drive versioning tests, hardening policy, master plan,
+  language-runtime audit metadata, and roadmap docs now point at the explicit
+  `.ts` service path. Focused Drive sync service load, Drive versioning, backup
+  performance hardening, backup reliability, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The expected generated language audit now
+  reports `JavaScript: 5`, `TypeScript: 306`, and `React TSX: 107` across the
+  active scan roots.

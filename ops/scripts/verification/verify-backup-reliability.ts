@@ -37,7 +37,7 @@ function main() {
   const failures = []
   const sources = {
     backupPackages: { file: 'backend/src/services/backupPackages.ts', text: read('backend/src/services/backupPackages.ts') },
-    driveSync: { file: 'backend/src/services/googleDriveSync/index.js', text: read('backend/src/services/googleDriveSync/index.js') },
+    driveSync: { file: 'backend/src/services/googleDriveSync/index.ts', text: read('backend/src/services/googleDriveSync/index.ts') },
     systemJobs: { file: 'backend/src/systemJobs.ts', text: read('backend/src/systemJobs.ts') },
     maintenanceLock: { file: 'backend/src/maintenanceLock.ts', text: read('backend/src/maintenanceLock.ts') },
     systemRoutes: { file: 'backend/src/routes/system/index.js', text: read('backend/src/routes/system/index.js') },

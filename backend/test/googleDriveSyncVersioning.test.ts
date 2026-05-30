@@ -81,14 +81,14 @@ runTest('drive sync retention deletes versions older than seven days by default'
 })
 
 runTest('drive sync interval defaults to six hours and allows up to twenty four hours', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.ts'), 'utf8')
   assert.match(source, /DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS\s*=\s*6\s*\*\s*60\s*\*\s*60/)
   assert.match(source, /DRIVE_SYNC_MAX_INTERVAL_SECONDS\s*=\s*24\s*\*\s*60\s*\*\s*60/)
   assert.match(source, /Math\.max\(DRIVE_SYNC_MIN_INTERVAL_SECONDS,\s*config\.syncIntervalSeconds\)/)
 })
 
 runTest('drive sync uses resumable streaming uploads instead of whole-file buffers', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.ts'), 'utf8')
   assert.match(source, /DRIVE_RESUMABLE_THRESHOLD_BYTES\s*=\s*5\s*\*\s*1024\s*\*\s*1024/)
   assert.match(source, /DRIVE_RESUMABLE_CHUNK_BYTES\s*=\s*8\s*\*\s*1024\s*\*\s*1024/)
   assert.match(source, /uploadType=resumable/)
@@ -101,14 +101,14 @@ runTest('drive sync uses resumable streaming uploads instead of whole-file buffe
 })
 
 runTest('drive sync revalidates cached folder ids before reuse', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.ts'), 'utf8')
   assert.match(source, /const existingById = await getDriveFileIfExists\(config, existing\.remote_file_id\)/)
   assert.match(source, /if \(existingById\?\.id\) \{/)
   assert.match(source, /upsertDriveSyncEntry\(\{\s*relativePath: relativeDir,\s*itemType: 'folder'/s)
 })
 
 runTest('drive sync recovers from drive write-scope mapping failures', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.ts'), 'utf8')
   assert.match(source, /function isDriveWriteAccessError\(error\)/)
   assert.match(source, /may not have granted the app .* write access to all of the children of file/i)
   assert.match(source, /if \(!canRecoverDriveItemWrite\(error\)\) throw error/)
