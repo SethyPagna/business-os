@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict')
 
-const { getDuckDbRuntimeStatus } = require('../src/analytics/duckdbRuntime')
+const { getDuckDbRuntimeStatus } = require('../src/analytics/duckdbRuntime.ts')
 
 let failed = 0
 

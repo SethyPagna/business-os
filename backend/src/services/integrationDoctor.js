@@ -29,7 +29,7 @@ const {
   S3_REGION,
   S3_SECRET_ACCESS_KEY,
 } = require('../config')
-const { getDuckDbRuntimeStatus } = require('../analytics/duckdbRuntime')
+const { getDuckDbRuntimeStatus } = require('../analytics/duckdbRuntime.ts')
 const { getDriveSyncStatus } = require('./googleDriveSync')
 const {
   CALLBACK_PATH,

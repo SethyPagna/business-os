@@ -11,6 +11,22 @@ const {
 
 let cachedProbe = null
 
+/**
+ * @typedef {{
+ *   analyticsEngine?: string,
+ *   parquetStore?: string,
+ *   probe?: boolean,
+ * }} DuckDbRuntimeOptions
+ */
+
+/**
+ * @typedef {{
+ *   available: boolean,
+ *   packageName: string | null,
+ *   reason: string,
+ * }} DuckDbPackageProbe
+ */
+
 function tryRequireDuckDbPackage(packageName) {
   try {
     return require(packageName)
@@ -24,6 +40,7 @@ function tryRequireDuckDbPackage(packageName) {
   }
 }
 
+/** @returns {DuckDbPackageProbe} */
 function probeDuckDbPackage() {
   if (cachedProbe) return cachedProbe
   const candidates = ['@duckdb/node-api', 'duckdb']
@@ -53,6 +70,7 @@ function probeDuckDbPackage() {
   return cachedProbe
 }
 
+/** @param {DuckDbRuntimeOptions} [options] */
 function getDuckDbRuntimeStatus(options = {}) {
   const configuredEngine = String(options.analyticsEngine || ANALYTICS_ENGINE || 'none').toLowerCase()
   const configuredStore = String(options.parquetStore || PARQUET_STORE || 'none').toLowerCase()

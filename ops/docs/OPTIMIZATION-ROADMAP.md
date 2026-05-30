@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 570.
+- Latest completed implementation move in this roadmap: Move 571.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6318,3 +6318,16 @@ Move 570 status:
   route/service conversion still waits for a compile/staging package lane. The
   current source extension count is `.js: 63`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
   `.ts: 300`, `.tsx: 107` outside generated/runtime folders.
+
+Move 571 status:
+- Move 571 converts `backend/src/analytics/duckdbRuntime.ts` to a package-safe
+  TypeScript path. The helper keeps optional DuckDB package probing unchanged
+  and adds JSDoc option/probe contracts for analytics runtime diagnostics. The
+  backend server, system routes, integration doctor, and analytics runtime test
+  use explicit `.ts` imports. Focused helper load, analytics runtime,
+  route-contract, and stale-path scans passed, as did the full backend utility
+  suite, schema audit, and Linux packaging proof. `pkg` continues to warn for
+  direct `.ts` scripts, so larger
+  backend route/service conversion still waits for a compile/staging package
+  lane. The current source extension count is `.js: 62`, `.jsx: 0`, `.mjs: 0`,
+  `.cjs: 0`, `.ts: 301`, `.tsx: 107` outside generated/runtime folders.
