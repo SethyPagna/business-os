@@ -4,6 +4,24 @@ const DRIVE_SYNC_VERSION_PREFIX = 'datasync'
 const DRIVE_SYNC_VERSION_MS = 24 * 60 * 60 * 1000
 const DRIVE_SYNC_DEFAULT_RETENTION_DAYS = 7
 
+/**
+ * @typedef {{
+ *   currentVersionNumber?: string | number,
+ *   currentVersionStartedAt?: string | Date,
+ *   now?: string | Date,
+ * }} DriveSyncVersionStateInput
+ */
+
+/**
+ * @typedef {{
+ *   name?: string,
+ *   modifiedTime?: string,
+ *   createdTime?: string,
+ *   created_at?: string,
+ *   modified_at?: string,
+ * }} DriveSyncVersionItem
+ */
+
 function toSafeDate(value) {
   const time = Date.parse(String(value || ''))
   return Number.isFinite(time) ? new Date(time) : null
@@ -14,6 +32,7 @@ function toSafeVersionNumber(value) {
   return Number.isInteger(number) && number > 0 ? number : 0
 }
 
+/** @param {DriveSyncVersionStateInput} [input] */
 function resolveDriveSyncVersionState({
   currentVersionNumber,
   currentVersionStartedAt,
@@ -58,6 +77,7 @@ function parseVersionName(name) {
   return match ? Number.parseInt(match[1], 10) : 0
 }
 
+/** @param {DriveSyncVersionItem[]} [items] */
 function buildDriveSyncVersionRows(items = []) {
   const versions = []
   let rowsWithVersionTime = 0
@@ -89,6 +109,7 @@ function selectDateExpiredVersions(versions = [], cutoffMs) {
   return expired
 }
 
+/** @param {DriveSyncVersionItem[]} [items] */
 function selectExpiredDriveSyncVersions(items = [], retentionDays = DRIVE_SYNC_DEFAULT_RETENTION_DAYS, now = new Date()) {
   const safeRetentionDays = Math.max(1, Number.parseInt(retentionDays, 10) || DRIVE_SYNC_DEFAULT_RETENTION_DAYS)
   const nowDate = now instanceof Date ? now : toSafeDate(now)

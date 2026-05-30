@@ -8,7 +8,7 @@ const {
   DRIVE_SYNC_DEFAULT_RETENTION_DAYS,
   resolveDriveSyncVersionState,
   selectExpiredDriveSyncVersions,
-} = require('../src/services/googleDriveSync/versioning')
+} = require('../src/services/googleDriveSync/versioning.ts')
 
 let failed = 0
 

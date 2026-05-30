@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 571 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 572 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 62`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 301`,
+  `.js: 61`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 302`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -2992,7 +2992,7 @@ Decision rule:
     failover selection. This was a backend service cleanup only; no folder
     move, schema migration, or runtime conversion was needed.
 368. Tighten Google Drive sync version-retention loops. Done:
-    `backend/src/services/googleDriveSync/versioning.js` now normalizes Drive
+    `backend/src/services/googleDriveSync/versioning.ts` now normalizes Drive
     sync version rows and selects date-expired versions with direct-loop
     helpers while preserving timestamp-first retention and version-number
     fallback behavior. This was a backend service cleanup only; no folder move,
@@ -4678,6 +4678,19 @@ Decision rule:
     lane. The current source extension count is `.js: 62`, `.jsx: 0`,
     `.mjs: 0`, `.cjs: 0`, `.ts: 301`, `.tsx: 107` outside generated/runtime
     folders.
+572. Convert Google Drive sync versioning helper to a package-safe TypeScript
+    path. Done: `backend/src/services/googleDriveSync/versioning.ts` keeps the
+    existing version rotation and retention behavior while adding JSDoc input
+    and version item contracts. The main Google Drive sync service and focused
+    versioning test now import the explicit `.ts` path, and older roadmap
+    references were normalized to avoid stale path drift. Focused helper load,
+    Google Drive sync versioning, integration-doctor, and stale-path scans
+    passed, as did the full backend utility suite, schema audit, and Linux
+    packaging proof. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service
+    conversions remain blocked on the future compile/staging lane. The current
+    source extension count is `.js: 61`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
+    `.ts: 302`, `.tsx: 107` outside generated/runtime folders.
 
 ## Safety Gates
 

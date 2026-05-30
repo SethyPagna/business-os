@@ -19,7 +19,7 @@ const {
   DRIVE_SYNC_DEFAULT_RETENTION_DAYS,
   resolveDriveSyncVersionState,
   selectExpiredDriveSyncVersions,
-} = require('./versioning')
+} = require('./versioning.ts')
 const { createFinalBackupPackage, findReusableLocalBackupPackage } = require('../backupPackages')
 const { isMaintenanceLocked, getMaintenanceLock } = require('../../maintenanceLock.ts')
 
