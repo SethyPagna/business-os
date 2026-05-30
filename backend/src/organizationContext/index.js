@@ -6,7 +6,7 @@ const path = require('path')
 const { db } = require('../database')
 const { STORAGE_ROOT, DATA_ROOT, DB_PATH, UPLOADS_PATH, ORGANIZATIONS_ROOT, DATABASE_DRIVER, OBJECT_STORAGE_DRIVER, S3_BUCKET } = require('../config')
 const { isSamePath, summarizeDataRoot } = require('../dataPath')
-const { buildOrganizationFolderName } = require('../storage/organizationFolders')
+const { buildOrganizationFolderName } = require('../storage/organizationFolders.ts')
 
 function trim(value) {
   return String(value || '').trim()

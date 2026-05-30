@@ -5,7 +5,7 @@ const path = require('path')
 const {
   trim,
   buildOrganizationFolderName,
-} = require('../storage/organizationFolders')
+} = require('../storage/organizationFolders.ts')
 
 const IS_PKG = typeof process.pkg !== 'undefined'
 const RUNTIME_DIR = trim(process.env.BUSINESS_OS_RUNTIME_DIR)

@@ -9,7 +9,7 @@
  */
 
 const { db } = require('./database')
-const { getRequestMeta } = require('./requestContext')
+const { getRequestMeta } = require('./requestContext.ts')
 
 // ── Server-side operation log ─────────────────────────────────────────────────
 const serverLog = []

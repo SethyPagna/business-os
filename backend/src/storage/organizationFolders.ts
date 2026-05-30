@@ -3,10 +3,12 @@
 const fs = require('fs')
 const path = require('path')
 
+/** @param {unknown} value @returns {string} */
 function trim(value) {
   return String(value || '').trim()
 }
 
+/** @param {unknown} value @param {string} [fallback] @returns {string} */
 function sanitizeOrganizationFolderLabel(value, fallback = 'Organization') {
   const normalized = String(value || '')
     .normalize('NFKD')
@@ -17,12 +19,14 @@ function sanitizeOrganizationFolderLabel(value, fallback = 'Organization') {
   return normalized || fallback
 }
 
+/** @param {unknown} publicId @param {unknown} nameOrSlug @param {string} [fallback] @returns {string} */
 function buildOrganizationFolderName(publicId, nameOrSlug, fallback = 'Organization') {
   const stableId = trim(publicId)
   if (!stableId) return sanitizeOrganizationFolderLabel(nameOrSlug, fallback)
   return `${stableId} (${sanitizeOrganizationFolderLabel(nameOrSlug, fallback)})`
 }
 
+/** @param {unknown} folderName @returns {string} */
 function extractOrganizationPublicId(folderName) {
   const value = trim(folderName)
   if (!value) return ''
@@ -30,6 +34,7 @@ function extractOrganizationPublicId(folderName) {
   return marker > 0 ? value.slice(0, marker) : value
 }
 
+/** @param {string} organizationsRoot @param {unknown} publicId @returns {string | null} */
 function findOrganizationFolderByPublicId(organizationsRoot, publicId) {
   const stableId = trim(publicId)
   if (!stableId || !fs.existsSync(organizationsRoot)) return null
