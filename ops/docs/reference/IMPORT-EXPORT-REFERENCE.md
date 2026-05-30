@@ -75,7 +75,7 @@ Code files documented: **468**
 | 63 | `backend/src/serverUtils.js` | 1 | 1 | 1 | 4 |
 | 64 | `backend/src/services/aiGateway.ts` | 2 | 1 | 2 | 2 |
 | 65 | `backend/src/services/backupPackages.js` | 9 | 1 | 4 | 4 |
-| 66 | `backend/src/services/firebaseAuth.js` | 2 | 1 | 0 | 0 |
+| 66 | `backend/src/services/firebaseAuth.ts` | 2 | 1 | 0 | 0 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 12 | 1 | 8 | 4 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 0 | 1 | 0 | 2 |
 | 69 | `backend/src/services/googleOauth.ts` | 2 | 1 | 1 | 4 |
@@ -1880,7 +1880,7 @@ Code files documented: **468**
   - `backend/src/services/integrationDoctor.ts`
   - `backend/test/backupRetention.test.ts`
 
-### 3.66 `backend/src/services/firebaseAuth.js`
+### 3.66 `backend/src/services/firebaseAuth.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)

@@ -75,7 +75,7 @@ Code files scanned: **468**
 | 63 | `backend/src/serverUtils.js` | 26 |
 | 64 | `backend/src/services/aiGateway.ts` | 17 |
 | 65 | `backend/src/services/backupPackages.js` | 59 |
-| 66 | `backend/src/services/firebaseAuth.js` | 22 |
+| 66 | `backend/src/services/firebaseAuth.ts` | 22 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 75 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
 | 69 | `backend/src/services/googleOauth.ts` | 17 |
@@ -1808,7 +1808,7 @@ Code files scanned: **468**
 | 58 | `listLocalBackupVersions` | function | 971 |
 | 59 | `listBackupVersions` | function | 1003 |
 
-### 3.66 `backend/src/services/firebaseAuth.js`
+### 3.66 `backend/src/services/firebaseAuth.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

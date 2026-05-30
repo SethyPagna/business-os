@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **24**
+Total files documented: **23**
 
 ## 2. Symbol Count by File
 
@@ -29,11 +29,10 @@ Total files documented: **24**
 | 17 | `backend/src/routes/users.js` | 26 | 16 |
 | 18 | `backend/src/serverUtils.js` | 26 | 0 |
 | 19 | `backend/src/services/backupPackages.js` | 59 | 0 |
-| 20 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
-| 21 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 22 | `backend/src/services/importJobs.js` | 175 | 0 |
-| 23 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 24 | `backend/src/systemJobs.js` | 28 | 0 |
+| 20 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 21 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 22 | `backend/src/services/portalAi.js` | 42 | 0 |
+| 23 | `backend/src/systemJobs.js` | 28 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -979,34 +978,7 @@ Total files documented: **24**
 | 58 | `listLocalBackupVersions` | function | 971 |
 | 59 | `listBackupVersions` | function | 1003 |
 
-### 3.20 `backend/src/services/firebaseAuth.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `truthy` | function | 16 |
-| 2 | `trim` | function | 20 |
-| 3 | `normalizePrivateKey` | function | 24 |
-| 4 | `parseJsonSafe` | function | 28 |
-| 5 | `loadServiceAccount` | function | 36 |
-| 6 | `isFirebaseAuthConfigured` | function | 85 |
-| 7 | `isFirebasePhoneVerificationConfigured` | function | 89 |
-| 8 | `hasFirebaseAdminCredentials` | function | 93 |
-| 9 | `base64Url` | function | 97 |
-| 10 | `buildGoogleServiceJwt` | function | 106 |
-| 11 | `getGoogleAccessToken` | function | 136 |
-| 12 | `normalizeProviderError` | function | 172 |
-| 13 | `parseResponseData` | function | 189 |
-| 14 | `callFirebasePublic` | function | 193 |
-| 15 | `callFirebaseAdmin` | function | 222 |
-| 16 | `normalizeEmail` | function | 257 |
-| 17 | `normalizeE164` | function | 262 |
-| 18 | `getFirebaseAuthPublicConfig` | function | 270 |
-| 19 | `createOrUpdateAuthUser` | function | 282 |
-| 20 | `updateAuthPassword` | function | 323 |
-| 21 | `setAuthUserActive` | function | 342 |
-| 22 | `verifyPasswordWithFirebase` | function | 355 |
-
-### 3.21 `backend/src/services/googleDriveSync/index.js`
+### 3.20 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1086,7 +1058,7 @@ Total files documented: **24**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.22 `backend/src/services/importJobs.js`
+### 3.21 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1266,7 +1238,7 @@ Total files documented: **24**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.23 `backend/src/services/portalAi.js`
+### 3.22 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1313,7 +1285,7 @@ Total files documented: **24**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.24 `backend/src/systemJobs.js`
+### 3.23 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
