@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-30T11:07:14.934Z
+Generated: 2026-05-30T11:16:40.350Z
 
 ## Summary
 
@@ -22,9 +22,9 @@ Generated: 2026-05-30T11:07:14.934Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 250 |
+| TypeScript | 252 |
 | React TSX | 107 |
-| JavaScript | 59 |
+| JavaScript | 57 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |

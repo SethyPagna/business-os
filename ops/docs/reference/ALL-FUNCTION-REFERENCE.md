@@ -27,8 +27,8 @@ Code files scanned: **466**
 | 15 | `backend/src/fileAssets.js` | 61 |
 | 16 | `backend/src/helpers.js` | 30 |
 | 17 | `backend/src/idempotency.ts` | 1 |
-| 18 | `backend/src/importCsv.js` | 17 |
-| 19 | `backend/src/importParsing.js` | 6 |
+| 18 | `backend/src/importCsv.ts` | 16 |
+| 19 | `backend/src/importParsing.ts` | 6 |
 | 20 | `backend/src/initials.ts` | 7 |
 | 21 | `backend/src/maintenanceLock.ts` | 9 |
 | 22 | `backend/src/middleware.js` | 21 |
@@ -778,38 +778,37 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `normalizeClientRequestId` | function | 4 |
 
-### 3.18 `backend/src/importCsv.js`
+### 3.18 `backend/src/importCsv.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `stripBom` | function | 9 |
-| 2 | `normalizeDigit` | function | 13 |
-| 3 | `normalizeNumericText` | function | 21 |
-| 4 | `countDelimiter` | function | 28 |
-| 5 | `detectCsvDelimiter` | function | 47 |
-| 6 | `parseDelimitedRows` | function | 62 |
-| 7 | `hasDelimitedRowContent` | function | 107 |
-| 8 | `normalizeCsvKey` | function | 114 |
-| 9 | `normalizeCsvHeaders` | function | 122 |
-| 10 | `hasDelimitedRowContent` | function | 130 |
-| 11 | `hasParsedCsvRowContent` | function | 137 |
-| 12 | `buildParsedCsvRows` | function | 144 |
-| 13 | `parseCsvRows` | function | 154 |
-| 14 | `detectCsvDelimiterFromFile` | function | 161 |
-| 15 | `csvValuesToRow` | function | 172 |
-| 16 | `hasCsvContent` | function | 183 |
-| 17 | `emitRecord` | const function | 201 |
+| 1 | `stripBom` | function | 15 |
+| 2 | `normalizeDigit` | function | 22 |
+| 3 | `normalizeNumericText` | function | 33 |
+| 4 | `countDelimiter` | function | 44 |
+| 5 | `detectCsvDelimiter` | function | 66 |
+| 6 | `parseDelimitedRows` | function | 85 |
+| 7 | `normalizeCsvKey` | function | 130 |
+| 8 | `normalizeCsvHeaders` | function | 141 |
+| 9 | `hasDelimitedRowContent` | function | 152 |
+| 10 | `hasParsedCsvRowContent` | function | 162 |
+| 11 | `buildParsedCsvRows` | function | 172 |
+| 12 | `parseCsvRows` | function | 186 |
+| 13 | `detectCsvDelimiterFromFile` | function | 196 |
+| 14 | `csvValuesToRow` | function | 212 |
+| 15 | `hasCsvContent` | function | 226 |
+| 16 | `emitRecord` | const function | 248 |
 
-### 3.19 `backend/src/importParsing.js`
+### 3.19 `backend/src/importParsing.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeDigit` | function | 9 |
-| 2 | `normalizeNumericText` | function | 17 |
-| 3 | `removeCurrencyNoise` | function | 24 |
-| 4 | `normalizeNumberSeparators` | function | 31 |
-| 5 | `parseImportNumericValue` | function | 65 |
-| 6 | `normalizeImportMoney` | function | 80 |
+| 1 | `normalizeDigit` | function | 13 |
+| 2 | `normalizeNumericText` | function | 24 |
+| 3 | `removeCurrencyNoise` | function | 34 |
+| 4 | `normalizeNumberSeparators` | function | 44 |
+| 5 | `parseImportNumericValue` | function | 83 |
+| 6 | `normalizeImportMoney` | function | 102 |
 
 ### 3.20 `backend/src/initials.ts`
 

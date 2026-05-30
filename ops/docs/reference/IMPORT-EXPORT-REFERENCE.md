@@ -27,8 +27,8 @@ Code files documented: **466**
 | 15 | `backend/src/fileAssets.js` | 12 | 1 | 7 | 15 |
 | 16 | `backend/src/helpers.js` | 4 | 1 | 4 | 23 |
 | 17 | `backend/src/idempotency.ts` | 0 | 1 | 0 | 5 |
-| 18 | `backend/src/importCsv.js` | 1 | 1 | 0 | 3 |
-| 19 | `backend/src/importParsing.js` | 1 | 1 | 1 | 3 |
+| 18 | `backend/src/importCsv.ts` | 1 | 1 | 0 | 3 |
+| 19 | `backend/src/importParsing.ts` | 1 | 1 | 1 | 3 |
 | 20 | `backend/src/initials.ts` | 0 | 1 | 0 | 4 |
 | 21 | `backend/src/maintenanceLock.ts` | 0 | 1 | 0 | 3 |
 | 22 | `backend/src/middleware.js` | 10 | 1 | 7 | 24 |
@@ -904,7 +904,7 @@ Code files documented: **466**
   - `backend/src/routes/sales.js`
   - `backend/test/idempotency.test.ts`
 
-### 3.18 `backend/src/importCsv.js`
+### 3.18 `backend/src/importCsv.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -916,7 +916,7 @@ Code files documented: **466**
   - `backend/test/importCsv.test.ts`
   - `backend/test/importScaleSmoke.test.ts`
 
-### 3.19 `backend/src/importParsing.js`
+### 3.19 `backend/src/importParsing.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1009,7 +1009,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (5)
-  - `backend/src/importParsing.js`
+  - `backend/src/importParsing.ts`
   - `backend/src/productDiscounts.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/products.js`
@@ -1159,9 +1159,9 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (1)
-  - `./importParsing`
+  - `./importParsing.ts`
 - Internal dependencies (1)
-  - `backend/src/importParsing.js`
+  - `backend/src/importParsing.ts`
 - Referenced by (3)
   - `backend/src/routes/products.js`
   - `backend/src/services/importJobs.js`
@@ -1946,7 +1946,7 @@ Code files documented: **466**
   - `../database`
   - `../fileAssets`
   - `../helpers`
-  - `../importCsv`
+  - `../importCsv.ts`
   - `../money.ts`
   - `../netSecurity`
   - `../productBatches`
@@ -1967,7 +1967,7 @@ Code files documented: **466**
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/importCsv.js`
+  - `backend/src/importCsv.ts`
   - `backend/src/money.ts`
   - `backend/src/netSecurity.js`
   - `backend/src/productBatches.js`
@@ -2426,15 +2426,15 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (6)
-  - `../src/importCsv`
-  - `../src/importParsing`
+  - `../src/importCsv.ts`
+  - `../src/importParsing.ts`
   - `fs`
   - `node:assert/strict`
   - `os`
   - `path`
 - Internal dependencies (2)
-  - `backend/src/importCsv.js`
-  - `backend/src/importParsing.js`
+  - `backend/src/importCsv.ts`
+  - `backend/src/importParsing.ts`
 - Referenced by (0)
   - none
 
@@ -2486,15 +2486,15 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (6)
-  - `../src/importCsv`
-  - `../src/importParsing`
+  - `../src/importCsv.ts`
+  - `../src/importParsing.ts`
   - `fs`
   - `node:assert/strict`
   - `os`
   - `path`
 - Internal dependencies (2)
-  - `backend/src/importCsv.js`
-  - `backend/src/importParsing.js`
+  - `backend/src/importCsv.ts`
+  - `backend/src/importParsing.ts`
 - Referenced by (0)
   - none
 

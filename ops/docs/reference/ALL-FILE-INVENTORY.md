@@ -34,8 +34,8 @@ Total files documented: **529**
 | 22 | `backend/src/fileAssets.js` | backend-core | 1261 | 43.9 | Project source/support file |
 | 23 | `backend/src/helpers.js` | backend-core | 625 | 21.0 | Project source/support file |
 | 24 | `backend/src/idempotency.ts` | backend-core | 14 | 0.3 | Project source/support file |
-| 25 | `backend/src/importCsv.js` | backend-core | 296 | 7.7 | Project source/support file |
-| 26 | `backend/src/importParsing.js` | backend-core | 89 | 3.2 | Project source/support file |
+| 25 | `backend/src/importCsv.ts` | backend-core | 343 | 8.4 | Project source/support file |
+| 26 | `backend/src/importParsing.ts` | backend-core | 111 | 3.6 | Project source/support file |
 | 27 | `backend/src/initials.ts` | backend-core | 120 | 3.7 | Project source/support file |
 | 28 | `backend/src/maintenanceLock.ts` | backend-core | 131 | 3.3 | Project source/support file |
 | 29 | `backend/src/middleware.js` | backend-core | 336 | 10.3 | Project source/support file |

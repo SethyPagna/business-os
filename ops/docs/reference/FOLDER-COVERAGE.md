@@ -180,8 +180,8 @@ Total folders documented: **81**
 | 9 | `fileAssets.js` | Project source/support file |
 | 10 | `helpers.js` | Project source/support file |
 | 11 | `idempotency.ts` | Project source/support file |
-| 12 | `importCsv.js` | Project source/support file |
-| 13 | `importParsing.js` | Project source/support file |
+| 12 | `importCsv.ts` | Project source/support file |
+| 13 | `importParsing.ts` | Project source/support file |
 | 14 | `initials.ts` | Project source/support file |
 | 15 | `maintenanceLock.ts` | Project source/support file |
 | 16 | `middleware.js` | Project source/support file |
