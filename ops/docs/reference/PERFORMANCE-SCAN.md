@@ -66,7 +66,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/services/googleDriveSync/index.js` | 1564 | 57.8 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1479 | 102.5 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
-| `backend/src/routes/portal.js` | 1407 | 51.4 |
+| `backend/src/routes/portal.js` | 1407 | 51.5 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 1311 | 67.7 |
 

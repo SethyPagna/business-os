@@ -176,7 +176,7 @@ Total folders documented: **81**
 | 5 | `catalogTextIntegrity.ts` | Project source/support file |
 | 6 | `conflictControl.ts` | Project source/support file |
 | 7 | `contactOptions.ts` | Project source/support file |
-| 8 | `database.js` | Schema/migrations and DB bootstrap |
+| 8 | `database.ts` | Schema/migrations and DB bootstrap |
 | 9 | `fileAssets.js` | Project source/support file |
 | 10 | `helpers.js` | Project source/support file |
 | 11 | `idempotency.ts` | Project source/support file |

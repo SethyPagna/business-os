@@ -26,7 +26,7 @@ Total files documented: **529**
 | 14 | `backend/src/config/index.js` | backend-core | 303 | 12.3 | Project source/support file |
 | 15 | `backend/src/conflictControl.ts` | backend-core | 117 | 3.4 | Project source/support file |
 | 16 | `backend/src/contactOptions.ts` | backend-core | 211 | 6.5 | Project source/support file |
-| 17 | `backend/src/database.js` | backend-core | 4 | 0.1 | Schema/migrations and DB bootstrap |
+| 17 | `backend/src/database.ts` | backend-core | 4 | 0.1 | Schema/migrations and DB bootstrap |
 | 18 | `backend/src/dataPath/index.js` | backend-core | 201 | 6.0 | Project source/support file |
 | 19 | `backend/src/db/cutoverReadiness.js` | backend-core | 164 | 5.3 | Project source/support file |
 | 20 | `backend/src/db/postgresQueryCompat.js` | backend-core | 229 | 6.5 | Project source/support file |
@@ -65,7 +65,7 @@ Total files documented: **529**
 | 53 | `backend/src/routes/inventory.js` | backend-routes | 1881 | 83.8 | API route handler |
 | 54 | `backend/src/routes/notifications.js` | backend-routes | 581 | 19.6 | API route handler |
 | 55 | `backend/src/routes/organizations.js` | backend-routes | 63 | 1.8 | API route handler |
-| 56 | `backend/src/routes/portal.js` | backend-routes | 1407 | 51.4 | API route handler |
+| 56 | `backend/src/routes/portal.js` | backend-routes | 1407 | 51.5 | API route handler |
 | 57 | `backend/src/routes/products.js` | backend-routes | 2218 | 99.1 | API route handler |
 | 58 | `backend/src/routes/README.md` | backend-routes | 37 | 1.5 | API route handler |
 | 59 | `backend/src/routes/returns.js` | backend-routes | 1050 | 41.4 | API route handler |

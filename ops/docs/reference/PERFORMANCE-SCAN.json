@@ -3,7 +3,7 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6446730,
+  "totalSourceBytes": 6446802,
   "totalSourceLines": 146166,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
@@ -54,7 +54,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160899,
+      "size": 160901,
       "lines": 3880
     },
     {
@@ -99,7 +99,7 @@
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 101459,
+      "size": 101461,
       "lines": 2218
     },
     {
@@ -109,7 +109,7 @@
     },
     {
       "file": "backend/src/routes/inventory.js",
-      "size": 85853,
+      "size": 85855,
       "lines": 1881
     },
     {
@@ -134,12 +134,12 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66857,
+      "size": 66859,
       "lines": 1659
     },
     {
       "file": "backend/src/routes/sales.js",
-      "size": 66189,
+      "size": 66191,
       "lines": 1573
     },
     {
@@ -159,7 +159,7 @@
     },
     {
       "file": "backend/src/services/googleDriveSync/index.js",
-      "size": 59151,
+      "size": 59153,
       "lines": 1564
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160899,
+      "size": 160901,
       "lines": 3880
     },
     {
@@ -216,7 +216,7 @@
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 101459,
+      "size": 101461,
       "lines": 2218
     },
     {
@@ -226,7 +226,7 @@
     },
     {
       "file": "backend/src/routes/inventory.js",
-      "size": 85853,
+      "size": 85855,
       "lines": 1881
     },
     {
@@ -246,7 +246,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66857,
+      "size": 66859,
       "lines": 1659
     },
     {
@@ -256,7 +256,7 @@
     },
     {
       "file": "backend/src/routes/sales.js",
-      "size": 66189,
+      "size": 66191,
       "lines": 1573
     },
     {
@@ -266,7 +266,7 @@
     },
     {
       "file": "backend/src/services/googleDriveSync/index.js",
-      "size": 59151,
+      "size": 59153,
       "lines": 1564
     },
     {
@@ -281,7 +281,7 @@
     },
     {
       "file": "backend/src/routes/portal.js",
-      "size": 52683,
+      "size": 52685,
       "lines": 1407
     },
     {

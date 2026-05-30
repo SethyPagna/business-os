@@ -20,7 +20,7 @@ Code files scanned: **466**
 | 8 | `backend/src/config/index.js` | 11 |
 | 9 | `backend/src/conflictControl.ts` | 6 |
 | 10 | `backend/src/contactOptions.ts` | 10 |
-| 11 | `backend/src/database.js` | 0 |
+| 11 | `backend/src/database.ts` | 0 |
 | 12 | `backend/src/dataPath/index.js` | 9 |
 | 13 | `backend/src/db/cutoverReadiness.js` | 10 |
 | 14 | `backend/src/db/postgresQueryCompat.js` | 12 |
@@ -621,7 +621,7 @@ Code files scanned: **466**
 | 9 | `getPrimaryContactOption` | function | 166 |
 | 10 | `buildImportedContactState` | function | 178 |
 
-### 3.11 `backend/src/database.js`
+### 3.11 `backend/src/database.ts`
 
 - No top-level named symbols detected.
 
