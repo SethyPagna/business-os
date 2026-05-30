@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **45**
+Total files documented: **44**
 
 ## 2. Symbol Count by File
 
@@ -54,7 +54,6 @@ Total files documented: **45**
 | 42 | `backend/src/sessionAuth.js` | 13 | 0 |
 | 43 | `backend/src/systemJobs.js` | 28 | 0 |
 | 44 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
-| 45 | `backend/src/websocket.js` | 1 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1772,10 +1771,4 @@ Total files documented: **45**
 | 1 | `safeJsonArray` | function | 13 |
 | 2 | `repairMissingUploadReferences` | function | 22 |
 | 3 | `repairMissingUploadReferencesAsync` | function | 134 |
-
-### 3.45 `backend/src/websocket.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `attachWss` | function | 24 |
 

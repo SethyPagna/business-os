@@ -25,7 +25,7 @@ Total folders documented: **81**
 | 13 | `backend/src/services/googleDriveSync` | Provider/service integrations | 2 | 0 |
 | 14 | `backend/src/storage` | Backend runtime core | 1 | 0 |
 | 15 | `backend/src/workers` | Backend runtime core | 2 | 0 |
-| 16 | `backend/test` | Project folder | 51 | 0 |
+| 16 | `backend/test` | Project folder | 52 | 0 |
 | 17 | `frontend` | Frontend project root | 8 | 3 |
 | 18 | `frontend/public` | Project folder | 6 | 1 |
 | 19 | `frontend/public/scanbot-web-sdk` | Project folder | 0 | 1 |
@@ -208,7 +208,7 @@ Total folders documented: **81**
 | 37 | `systemJobs.js` | Project source/support file |
 | 38 | `uploadReferenceCleanup.js` | Project source/support file |
 | 39 | `uploadSecurity.ts` | Project source/support file |
-| 40 | `websocket.js` | Project source/support file |
+| 40 | `websocket.ts` | Project source/support file |
 
 
 ### 3.4 Folder: `backend/src/analytics`
@@ -417,7 +417,7 @@ Total folders documented: **81**
 ### 3.16 Folder: `backend/test`
 
 - Purpose: Project folder
-- Direct files: **51**
+- Direct files: **52**
 - Direct subfolders: **0**
 
 #### 3.16.2 Files
@@ -475,6 +475,7 @@ Total folders documented: **81**
 | 49 | `settingsSnapshotObjectStorage.test.ts` | Project source/support file |
 | 50 | `systemJobs.test.ts` | Project source/support file |
 | 51 | `uploadSecurity.test.ts` | Project source/support file |
+| 52 | `websocket.test.ts` | Project source/support file |
 
 
 ### 3.17 Folder: `frontend`
