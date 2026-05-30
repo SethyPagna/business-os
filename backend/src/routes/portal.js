@@ -7,7 +7,7 @@
  */
 const express = require('express')
 const { db } = require('../database.ts')
-const { tryParse, broadcast } = require('../helpers')
+const { tryParse, broadcast } = require('../helpers.ts')
 const { authToken, requirePermission, getAuditActor } = require('../middleware.ts')
 const { storeDataUrlAsset } = require('../fileAssets')
 const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../portalUtils.ts')

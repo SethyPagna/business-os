@@ -17,7 +17,7 @@ const {
   REDIS_URL,
   UPLOADS_PATH,
 } = require('../config/index.ts')
-const { audit, broadcast } = require('../helpers')
+const { audit, broadcast } = require('../helpers.ts')
 const { buildUniqueStoredName, registerStoredAsset, sanitizeOriginalFileName } = require('../fileAssets')
 const { validateUploadedPath } = require('../uploadSecurity.ts')
 const { isSafeExternalImageReference } = require('../netSecurity.ts')

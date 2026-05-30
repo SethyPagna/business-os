@@ -9,7 +9,7 @@
  */
 
 const { WebSocketServer } = require('ws')
-const { wss_clients } = require('./helpers')
+const { wss_clients } = require('./helpers.ts')
 const { getSessionUser } = require('./sessionAuth.ts')
 const { isAllowedWebSocketOrigin } = require('./serverUtils.ts')
 

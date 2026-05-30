@@ -54,7 +54,7 @@ const {
   BACKUP_TABLES,
   buildBackupSummary,
 } = require('../../backupSchema.ts')
-const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataIntegrityCheck } = require('../../helpers')
+const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataIntegrityCheck } = require('../../helpers.ts')
 const { authToken, requirePermission, requireAnyPermission, getAuditActor, isAdminControlUser } = require('../../middleware.ts')
 const { checkRateLimit } = require('../../security.ts')
 const { classifyRequestAccess } = require('../../accessControl.ts')

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 605.
+- Latest completed implementation move in this roadmap: Move 606.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4821,7 +4821,7 @@ Move 427 status:
   public helper exports remain unchanged.
 
 Move 428 status:
-- Move 428 tightens shared backend helper loops in `backend/src/helpers.js`.
+- Move 428 tightens shared backend helper loops in `backend/src/helpers.ts`.
   CSV non-empty line filtering, header normalization, parsed-row construction,
   backup import placeholder/value construction, returned-item quantity maps,
   fully-returned sale detection, integrity success checks, and sale profit COGS
@@ -6849,3 +6849,17 @@ Move 605 status:
   package lane. The expected generated language audit now reports
   `JavaScript: 17`, `TypeScript: 294`, and `React TSX: 107` across the active
   scan roots.
+
+Move 606 status:
+- Move 606 converts `backend/src/helpers.ts` to a package-safe TypeScript path.
+  HTTP response helpers, audit logging, action-history payload safety,
+  WebSocket broadcast fanout, runtime cache and Drive sync invalidation hooks,
+  CSV parsing/import helpers, stock/sale/cost verification helpers, safe cost
+  lookup, and sale profit calculation remain unchanged on the existing
+  CommonJS helper style. All first-party route, service, and WebSocket imports
+  now point at the explicit `.ts` helper path. Focused helper load,
+  route-contract, backend utility, schema audit, stale-path, and Linux
+  packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
+  broader backend conversions still wait for a compile/staging package lane.
+  The expected generated language audit now reports `JavaScript: 16`,
+  `TypeScript: 295`, and `React TSX: 107` across the active scan roots.

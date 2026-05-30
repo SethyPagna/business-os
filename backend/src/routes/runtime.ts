@@ -1,7 +1,7 @@
 'use strict'
 
 const express = require('express')
-const { ok, err } = require('../helpers')
+const { ok, err } = require('../helpers.ts')
 const { authToken, hasPermission } = require('../middleware.ts')
 const { getQueueStatus, initializeBullQueue } = require('../services/importJobs')
 const { getMediaQueueStatus, initializeMediaQueue } = require('../services/mediaQueue.ts')

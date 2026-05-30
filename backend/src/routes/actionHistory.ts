@@ -2,7 +2,7 @@
 
 const express = require('express')
 const { db } = require('../database.ts')
-const { ok, err, audit } = require('../helpers')
+const { ok, err, audit } = require('../helpers.ts')
 const { authToken, getAuditActor, hasPermission, isAdminControlUser } = require('../middleware.ts')
 const {
   isSensitiveActionHistory,

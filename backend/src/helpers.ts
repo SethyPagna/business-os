@@ -1,6 +1,6 @@
 'use strict'
 /**
- * helpers.js — Shared utility functions for route handlers.
+ * helpers.ts — Shared utility functions for route handlers.
  *
  * Keeping these here (rather than inlining in routes) means:
  *  - One audit() signature change propagates everywhere.

@@ -21,7 +21,7 @@ const crypto = require('crypto')
 const speakeasy = require('speakeasy')
 const qrcode = require('qrcode')
 const { db } = require('../database.ts')
-const { ok, err, audit, logOp, tryParse } = require('../helpers')
+const { ok, err, audit, logOp, tryParse } = require('../helpers.ts')
 const { authToken } = require('../middleware.ts')
 const {
   encryptSecret,

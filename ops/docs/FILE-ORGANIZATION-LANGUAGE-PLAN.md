@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 605 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 606 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 39`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 324`,
+  `.js: 38`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 325`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3342,7 +3342,7 @@ Decision rule:
     unchanged. This was a backend stock-hierarchy utility cleanup only; no
     folder move, schema migration, or language conversion was needed.
 418. Tighten shared backend helper loops. Done:
-    `backend/src/helpers.js` now uses direct-loop helpers for CSV non-empty
+    `backend/src/helpers.ts` now uses direct-loop helpers for CSV non-empty
     line filtering, header normalization, parsed-row construction, backup
     import placeholder/value construction, returned-item quantity maps,
     fully-returned sale detection, integrity success checks, and sale profit
@@ -5151,6 +5151,19 @@ Decision rule:
     remain blocked on the future compile/staging lane. The expected generated
     language audit now reports `JavaScript: 17`, `TypeScript: 294`, and
     `React TSX: 107` across the active scan roots.
+606. Convert shared backend helpers to a package-safe TypeScript path.
+    Done: `backend/src/helpers.ts` keeps HTTP response helpers, audit logging,
+    action-history payload safety, WebSocket broadcast fanout, runtime cache and
+    Drive sync invalidation hooks, CSV parsing/import helpers, stock/sale/cost
+    verification helpers, safe cost lookup, and sale profit calculation on the
+    existing CommonJS helper style. All first-party route, service, and
+    WebSocket imports now point at the explicit `.ts` helper path. Focused
+    helper load, route-contract, backend utility, schema audit, stale-path, and
+    Linux packaging proof passed. Packaging still warns for direct `.ts`
+    entries in `pkg.scripts`, so broader backend conversions remain blocked on
+    the future compile/staging lane. The expected generated language audit now
+    reports `JavaScript: 16`, `TypeScript: 295`, and `React TSX: 107` across
+    the active scan roots.
 
 ## Safety Gates
 

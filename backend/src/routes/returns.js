@@ -1,7 +1,7 @@
 'use strict'
 const express = require('express')
 const { db }  = require('../database.ts')
-const { ok, err, audit, recordActionHistory, broadcast, getSafeCostPrice } = require('../helpers')
+const { ok, err, audit, recordActionHistory, broadcast, getSafeCostPrice } = require('../helpers.ts')
 const { authToken, requirePermission, getAuditActor } = require('../middleware.ts')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { normalizeClientRequestId } = require('../idempotency.ts')

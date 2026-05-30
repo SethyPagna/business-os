@@ -2,7 +2,7 @@
 
 const express = require('express')
 const { db } = require('../database.ts')
-const { tryParse } = require('../helpers')
+const { tryParse } = require('../helpers.ts')
 const { sanitizeMediaList } = require('../settingsSnapshot.ts')
 
 const router = express.Router()

@@ -17,7 +17,7 @@
 const express = require('express')
 const bcrypt = require('bcryptjs')
 const { db } = require('../database.ts')
-const { ok, err, audit, broadcast } = require('../helpers')
+const { ok, err, audit, broadcast } = require('../helpers.ts')
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit, getAuditActor } = require('../middleware.ts')
 const { registerUploadFromRequest } = require('../fileAssets')
 const { getGoogleLoginPublicConfig } = require('../services/googleOauth.ts')
