@@ -611,7 +611,7 @@ Last updated: 2026-05-18
     focused Product scanner live check passed on frontend hash
     `48b70424364d4ee8`.
   - Thirty-sixth Phase 26 organization move complete: Product adjust-stock
-    payload delegation is now complete in `Products.jsx`. Restore branch-stock
+    payload delegation is now complete in `Products.tsx`. Restore branch-stock
     sync, deleted-product stock restore, clear-stock, bulk add-stock, and branch
     initialization all use
     `frontend/src/components/products/helpers/productWriteHelpers.ts` for
@@ -677,7 +677,7 @@ Last updated: 2026-05-18
     lightbox state construction now also lives under
     `frontend/src/components/products/helpers`. Product lightbox index updates
     now also live under `frontend/src/components/products/helpers`, and the
-    disabled legacy lightbox overlay branch has been removed from `Products.jsx`.
+    disabled legacy lightbox overlay branch has been removed from `Products.tsx`.
     Product detail lightbox gallery/source fallback now also lives under
     `frontend/src/components/products/helpers`. Product row thumbnail state now
     also lives under `frontend/src/components/products/helpers`. Product
@@ -742,7 +742,7 @@ Last updated: 2026-05-18
     Products page action-history restore/delete, deleted-product restore, bulk
     update, clear-stock, add-stock, and branch-move stock pathways now route
     through bounded mutation runners in
-    `frontend/src/components/products/Products.jsx`. The broad Phase 8.4
+    `frontend/src/components/products/Products.tsx`. The broad Phase 8.4
     Playwright UI live check passed on build `42f694565739` / frontend hash
     `70927cf691f499db`, with Products search/filter/action-history reads,
     import modal opening, and no framework overlay or relevant console errors.

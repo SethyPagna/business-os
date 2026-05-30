@@ -238,7 +238,7 @@ Code files scanned: **466**
 | 226 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
 | 227 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
 | 228 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
-| 229 | `frontend/src/components/products/Products.jsx` | 15 |
+| 229 | `frontend/src/components/products/Products.tsx` | 15 |
 | 230 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
 | 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 7 |
 | 232 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
@@ -4426,7 +4426,7 @@ Code files scanned: **466**
 | 9 | `fetchProductsByIds` | function | 165 |
 | 10 | `restoreLookupProductSnapshots` | export function | 194 |
 
-### 3.229 `frontend/src/components/products/Products.jsx`
+### 3.229 `frontend/src/components/products/Products.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

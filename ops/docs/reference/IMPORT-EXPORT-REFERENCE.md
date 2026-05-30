@@ -238,7 +238,7 @@ Code files documented: **466**
 | 226 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 6 | 1 | 5 | 1 |
 | 227 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 6 | 1 | 5 | 1 |
 | 228 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 1 | 3 | 1 | 0 |
-| 229 | `frontend/src/components/products/Products.jsx` | 32 | 1 | 30 | 1 |
+| 229 | `frontend/src/components/products/Products.tsx` | 32 | 1 | 30 | 1 |
 | 230 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 1 | 1 | 0 | 2 |
 | 231 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 7 | 1 | 4 | 1 |
 | 232 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 | 1 | 0 | 2 |
@@ -2939,7 +2939,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.tsx`
   - `frontend/src/components/dashboard/Dashboard.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/shared/BackgroundImportTracker.tsx`
   - `frontend/src/utils/publicAssetUrls.ts`
   - `frontend/src/web-api.ts`
@@ -3009,7 +3009,7 @@ Code files documented: **466**
   - `./components/loyalty-points/LoyaltyPointsPage`
   - `./components/navigation/Sidebar`
   - `./components/pos/POS.tsx`
-  - `./components/products/Products.jsx`
+  - `./components/products/Products.tsx`
   - `./components/receipt-settings/ReceiptSettings`
   - `./components/returns/Returns`
   - `./components/sales/Sales`
@@ -3042,7 +3042,7 @@ Code files documented: **466**
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/components/pos/POS.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
@@ -3146,7 +3146,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
   - `frontend/src/components/receipt/Receipt.tsx`
@@ -4226,7 +4226,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.211 `frontend/src/components/products/forms/ProductForm.tsx`
 
@@ -4250,7 +4250,7 @@ Code files documented: **466**
   - `frontend/src/utils/mediaUpload.ts`
   - `frontend/src/utils/pricing.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.212 `frontend/src/components/products/forms/VariantFormModal.tsx`
 
@@ -4273,7 +4273,7 @@ Code files documented: **466**
   - `frontend/src/utils/loaders.ts`
   - `frontend/src/utils/pricing.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.213 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
 
@@ -4367,7 +4367,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/tests/productHistoryHelpers.test.ts`
 
 ### 3.222 `frontend/src/components/products/import/BulkImportModal.tsx`
@@ -4386,7 +4386,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.223 `frontend/src/components/products/import/productImportPlanner.ts`
 
@@ -4427,7 +4427,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.226 `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
 
@@ -4446,7 +4446,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.227 `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
 
@@ -4465,7 +4465,7 @@ Code files documented: **466**
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.228 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
 
@@ -4477,7 +4477,7 @@ Code files documented: **466**
 - Referenced by (0)
   - none
 
-### 3.229 `frontend/src/components/products/Products.jsx`
+### 3.229 `frontend/src/components/products/Products.tsx`
 
 - Declared exports: `function`
 - Imports (32)
@@ -4616,7 +4616,7 @@ Code files documented: **466**
   - `frontend/src/components/pos/ProductImage.tsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 ### 3.235 `frontend/src/components/products/surfaces/HeaderActions.tsx`
@@ -4630,7 +4630,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.236 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
@@ -4648,7 +4648,7 @@ Code files documented: **466**
   - `frontend/src/utils/pricing.ts`
   - `frontend/src/utils/productBatches.ts`
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.237 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
@@ -4674,7 +4674,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.239 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 
@@ -5097,7 +5097,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/users/UserProfileModal.tsx`
@@ -5156,7 +5156,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.tsx`
@@ -5183,7 +5183,7 @@ Code files documented: **466**
 - Referenced by (3)
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/pos/POS.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
 
 ### 3.268 `frontend/src/components/shared/LoadingWatchdog.tsx`
 
@@ -5223,7 +5223,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SalesImportModal.tsx`
@@ -5274,7 +5274,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/pos/POS.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/server/ServerPage.tsx`
@@ -5311,7 +5311,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/pos/POS.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.tsx`
@@ -5737,7 +5737,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.tsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
@@ -5771,7 +5771,7 @@ Code files documented: **466**
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
   - `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/users/UserProfileModal.tsx`
@@ -5805,7 +5805,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/tests/bulkOps.test.ts`
 
@@ -5817,7 +5817,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 ### 3.304 `frontend/src/utils/csv.ts`
@@ -5835,7 +5835,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/dashboard/Dashboard.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.tsx`
@@ -5988,7 +5988,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/helpers/productFilterHelpers.ts`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.tsx`
@@ -6010,7 +6010,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/users/Users.tsx`
 
@@ -6046,7 +6046,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/pos/posCore.ts`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/src/utils/groupedRecords.ts`
   - `frontend/src/utils/productGrouping.ts`
 
@@ -6164,7 +6164,7 @@ Code files documented: **466**
 - Referenced by (4)
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/pos/posCore.ts`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/tests/productGrouping.test.ts`
 
 ### 3.326 `frontend/src/utils/publicAssetUrls.ts`
@@ -6207,7 +6207,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/InventoryProductsSurface.tsx`
   - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/POS.tsx`
-  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/Products.tsx`
   - `frontend/tests/scriptTypography.test.ts`
 
 ### 3.329 `frontend/src/utils/settingsRefresh.ts`

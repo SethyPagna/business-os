@@ -925,7 +925,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `Products.jsx` | UI component/page |
+| 1 | `Products.tsx` | UI component/page |
 
 
 ### 3.40 Folder: `frontend/src/components/products/config`

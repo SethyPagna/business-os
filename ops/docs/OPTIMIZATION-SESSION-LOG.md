@@ -1,4 +1,4 @@
-﻿# Business OS Optimization Session Log
+# Business OS Optimization Session Log
 
 Last updated: 2026-05-16
 
@@ -71,7 +71,7 @@ This is a concise running log of what actually happened in recent sessions.
     both desktop and mobile Returns slower in the real route audit
 
 - Products orphaned load-promise bookkeeping removal
-  - area: `frontend/src/components/products/Products.jsx`
+  - area: `frontend/src/components/products/Products.tsx`
   - result: rejected
   - note: looked like dead bookkeeping, but real route timings regressed once
     the verify worktree runtime was recreated correctly

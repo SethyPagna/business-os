@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T05:52:27.067Z
+Generated: 2026-05-30T06:26:50.538Z
 
 ## Summary
 
@@ -15,14 +15,14 @@ Generated: 2026-05-30T05:52:27.067Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 104 |
+| .tsx | 105 |
 | .js | 84 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
-| .jsx | 3 |
 | .sh | 3 |
+| .jsx | 2 |
 | .sql | 2 |
 | .css | 1 |
 
@@ -67,16 +67,17 @@ Generated: 2026-05-30T05:52:27.067Z
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7933 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6911 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5978 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4387 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5997 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4400 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3280 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2679 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2688 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
+| frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
@@ -85,7 +86,6 @@ Generated: 2026-05-30T05:52:27.067Z
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
 | frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
-| frontend/src/components/products/Products.jsx | 2006 | frontend/components/products |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
@@ -100,7 +100,7 @@ Generated: 2026-05-30T05:52:27.067Z
 
 | File | Relative imports | Area |
 | --- | --- | --- |
-| frontend/src/components/products/Products.jsx | 41 | frontend/components/products |
+| frontend/src/components/products/Products.tsx | 41 | frontend/components/products |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/inventory/Inventory.jsx | 29 | frontend/components/inventory |
 | frontend/src/components/dashboard/Dashboard.tsx | 21 | frontend/components/dashboard |

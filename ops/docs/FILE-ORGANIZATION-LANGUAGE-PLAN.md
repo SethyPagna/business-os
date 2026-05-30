@@ -239,14 +239,14 @@ Decision rule:
 16. Split product page helpers. Done: `productPageHelpers.mjs` now lives in
     `frontend/src/components/products/helpers`, holding debounce, brand color
     parsing/normalization, and frame scheduling helpers. The dead local
-    `multiMatch` helper was removed from `Products.jsx`. Helper source tests,
+    `multiMatch` helper was removed from `Products.tsx`. Helper source tests,
     source checks, typecheck, production build, runtime health, focused Product
     page Playwright, and focused Product scanner Playwright passed on frontend
     hash `a440b744817036af`.
 17. Split product gallery helpers. Done: `productGalleryHelpers.ts` now lives
     in `frontend/src/components/products/helpers`, owning gallery
     normalization, product gallery fallback selection, and public product image
-    URL resolution. `Products.jsx` no longer imports `resolvePublicAssetUrl`
+    URL resolution. `Products.tsx` no longer imports `resolvePublicAssetUrl`
     directly or carries local gallery normalization logic. Helper source tests,
     source checks, typecheck, production build, runtime health, focused Product
     page Playwright, and focused Product scanner Playwright passed on frontend
@@ -254,14 +254,14 @@ Decision rule:
 18. Move product row presentation parts. Done: `ProductRowParts.tsx` now lives
     in `frontend/src/components/products/surfaces`, owning the product discount
     badge, row action menu wrapper, batch preview chips, and desktop details
-    cell. `Products.jsx` no longer defines those presentation helpers inline.
+    cell. `Products.tsx` no longer defines those presentation helpers inline.
     Source checks, typecheck, production build, runtime health, focused Product
     page Playwright, and focused Product scanner Playwright passed on frontend
     hash `f04520d849d51963`.
 19. Split product filter/export helpers. Done: `productFilterHelpers.mjs` now
     lives in `frontend/src/components/products/helpers`, owning search-term
     parsing, branch quantity lookup, filtered product selection, and product
-    CSV export row shaping. `Products.jsx` now delegates that data work to the
+    CSV export row shaping. `Products.tsx` now delegates that data work to the
     helper module, and the moved behavior has focused source tests. Source
     checks, typecheck, production build, runtime health, focused Product page
     Playwright, and focused Product scanner Playwright passed on frontend hash
@@ -277,7 +277,7 @@ Decision rule:
 21. Split product group view helpers. Done:
     `productGroupViewHelpers.mjs` now lives in
     `frontend/src/components/products/helpers`, owning grouped product price
-    labels and grouped summary chip text. `Products.jsx` now delegates those
+    labels and grouped summary chip text. `Products.tsx` now delegates those
     calculations to the helper module while preserving the existing grouped row
     render contract. The moved behavior has focused source tests. Source checks,
     typecheck, production build, runtime health, focused Product page
@@ -287,7 +287,7 @@ Decision rule:
     `productDisplayHelpers.mjs` now lives in
     `frontend/src/components/products/helpers`, owning lookup map construction,
     merged brand filter options, branch id/name maps, branch summary labels, and
-    stock-status classification. `Products.jsx` now delegates that display data
+    stock-status classification. `Products.tsx` now delegates that display data
     work while keeping the row UI and badges unchanged. The moved behavior has
     focused source tests. Source checks, typecheck, production build, runtime
     health, focused Product page Playwright, and focused Product scanner
@@ -296,7 +296,7 @@ Decision rule:
     `productMenuHelpers.mjs` now lives in
     `frontend/src/components/products/helpers`, owning export menu item
     construction, supplier filter option normalization, and active filter count
-    calculation. `Products.jsx` now delegates that menu metadata work while
+    calculation. `Products.tsx` now delegates that menu metadata work while
     keeping the header and filter menu surfaces unchanged. The moved behavior
     has focused source tests. Source checks, typecheck, production build,
     runtime health, focused Product page Playwright, and focused Product scanner
@@ -304,7 +304,7 @@ Decision rule:
 24. Split product filter menu section builder. Done:
     `productMenuHelpers.mjs` now also owns Product filter menu section and
     option construction, including year/month, branch, group, stock, category,
-    brand, and supplier filter toggles. `Products.jsx` now delegates the menu
+    brand, and supplier filter toggles. `Products.tsx` now delegates the menu
     data builder while keeping the shared `FilterMenu` UI unchanged. The moved
     behavior has focused source tests for section ordering, active flags, and
     toggle side effects. Source checks, typecheck, production build, runtime
@@ -314,7 +314,7 @@ Decision rule:
     `productDisplayHelpers.mjs` now also owns row purchase-price fallback,
     margin math, visible stock quantity, promotion calculation, compact
     brand/category metadata, branch labels, and mobile stock badge presentation.
-    `Products.jsx` now delegates shared desktop/mobile row display state while
+    `Products.tsx` now delegates shared desktop/mobile row display state while
     keeping row rendering and actions unchanged. The moved behavior has focused
     source tests for margins, status labels/classes, compact metadata, and
     promotion pricing. Source checks, typecheck, production build, runtime
@@ -322,7 +322,7 @@ Decision rule:
     Playwright passed on frontend hash `8426a118f46c25cc`.
 26. Split product lightbox state helper. Done:
     `productGalleryHelpers.ts` now also owns lightbox image URL resolution,
-    empty-gallery handling, and start-index clamping. `Products.jsx` now
+    empty-gallery handling, and start-index clamping. `Products.tsx` now
     delegates lightbox state construction while keeping the lightbox UI and
     navigation actions unchanged. The moved behavior has focused source tests
     for resolved upload URLs, high/negative/invalid index clamping, title
@@ -331,7 +331,7 @@ Decision rule:
     scanner Playwright passed on frontend hash `3469c4d8b3425629`.
 27. Split product lightbox index helpers and remove dead overlay branch. Done:
     `productGalleryHelpers.ts` now also owns reusable lightbox index clamping
-    and active lightbox index updates. `Products.jsx` now delegates gallery
+    and active lightbox index updates. `Products.tsx` now delegates gallery
     index changes to that helper and no longer carries the disabled legacy
     `false && lightbox` overlay branch. The moved behavior has focused source
     tests for high/low/invalid/empty index clamping, null lightbox state, and
@@ -341,7 +341,7 @@ Decision rule:
 28. Split product detail lightbox gallery-input helper. Done:
     `productGalleryHelpers.ts` now also owns the detail-modal lightbox input
     decision: prefer a normalized clicked gallery when present, otherwise fall
-    back to the clicked image source. `Products.jsx` now delegates that
+    back to the clicked image source. `Products.tsx` now delegates that
     gallery/source fallback before opening the shared lightbox, keeping the
     detail modal UI unchanged. The moved behavior has focused source tests for
     gallery preference, clicked-source fallback, de-duplication, trimming, and
@@ -362,7 +362,7 @@ Decision rule:
     hash `3e2b508f0b07839b`.
 30. Split product collection index helpers. Done:
     `productSelectionHelpers.mjs` now also owns product id map construction and
-    parent-product id set construction. `Products.jsx` now delegates the
+    parent-product id set construction. `Products.tsx` now delegates the
     `productsById` and `parentProductIds` indexes used by grouping and
     filtering, keeping the filter/group behavior unchanged while making invalid
     ids and duplicate parent references source-tested. Focused source checks,
@@ -373,7 +373,7 @@ Decision rule:
     `productWriteHelpers.mjs` now owns Products restore/write payload
     construction, including normalized gallery/image fields, price fallbacks,
     stock thresholds, active/group flags, parent ids, and user attribution.
-    `Products.jsx` keeps only a small user-context wrapper for undo/redo,
+    `Products.tsx` keeps only a small user-context wrapper for undo/redo,
     restore, and deleted-product recreation flows. The moved behavior has
     focused source tests for gallery de-duplication, price fallback, threshold
     normalization, group/variant flags, and user metadata. Focused source
@@ -384,7 +384,7 @@ Decision rule:
     `productWriteHelpers.mjs` now also owns branch-stock restore adjustment
     planning. It compares target snapshot stock with current branch stock,
     filters invalid branch ids, treats invalid quantities as zero, and returns
-    only the add/remove deltas needed for restore. `Products.jsx` now keeps the
+    only the add/remove deltas needed for restore. `Products.tsx` now keeps the
     API loop focused on executing those planned adjustments instead of mixing
     map/set diffing with mutation calls. Focused source checks, typecheck,
     helper tests, production build, performance verification, runtime health,
@@ -394,7 +394,7 @@ Decision rule:
     `productWriteHelpers.mjs` now also owns the smaller deleted-restore
     planning decisions: default branch selection, deleted-id set construction,
     preferred restore branch selection, and parent-id remapping when a deleted
-    parent is restored in the same batch. `Products.jsx` now keeps the
+    parent is restored in the same batch. `Products.tsx` now keeps the
     deleted-product restore loop focused on payload creation, API calls, id
     tracking, and branch-stock restoration. Focused source checks, typecheck,
     helper tests, production build, performance verification, runtime health,
@@ -404,7 +404,7 @@ Decision rule:
     `productWriteHelpers.mjs` now also owns bulk out-of-stock branch-row
     planning. It filters invalid branch ids, ignores zero/invalid quantities,
     resolves purchase/cost unit prices once, and returns only valid stock
-    removal adjustments. `Products.jsx` now keeps the out-of-stock loop focused
+    removal adjustments. `Products.tsx` now keeps the out-of-stock loop focused
     on executing preplanned branch adjustments. Focused source checks,
     typecheck, helper tests, production build, performance verification,
     runtime health, focused Product page Playwright, and focused Product
@@ -414,7 +414,7 @@ Decision rule:
     identifies the first valid positive-stock branch, returns an explicit
     transfer plan when stock must move, returns an initialize plan when the
     product has no valid positive stock, and returns no-op when stock is
-    already in the target branch. `Products.jsx` now keeps the branch-change
+    already in the target branch. `Products.tsx` now keeps the branch-change
     mutation loop focused on executing those explicit plans. Focused source
     checks, typecheck, helper tests, production build, performance
     verification, runtime health, focused Product page Playwright, and focused
@@ -437,7 +437,7 @@ Decision rule:
     removes only `undefined` fields, preserves intentional `null` and blank
     string updates, attaches user attribution, and selects the current
     optimistic-lock timestamp before falling back to the snapshot timestamp for
-    redo. `Products.jsx` now keeps the bulk update loop focused on confirmation,
+    redo. `Products.tsx` now keeps the bulk update loop focused on confirmation,
     concurrent execution, failed-id selection, undo/redo registration, and
     notifications. Focused source checks, typecheck, helper tests, production
     build, performance verification, runtime health, focused Product page
@@ -448,7 +448,7 @@ Decision rule:
     form-to-update shaping. The info helper keeps populated category, unit,
     supplier, brand, and valid low-stock threshold values while ignoring blank
     fields and unsafe threshold text. The pricing helper normalizes only
-    provided price fields through the shared price normalizer. `Products.jsx`
+    provided price fields through the shared price normalizer. `Products.tsx`
     no longer imports pricing normalization directly or assembles those update
     objects inside render handlers. Focused source checks, typecheck, helper
     tests, production build, performance verification, runtime health, focused
@@ -459,7 +459,7 @@ Decision rule:
     construction for bulk add-stock and clear-stock execution paths. The helper
     normalizes product ids, product names, branch ids, quantities, user
     attribution, reasons, and unit-cost fallback/override behavior in one
-    source-tested place. `Products.jsx` now delegates nested clear-stock and
+    source-tested place. `Products.tsx` now delegates nested clear-stock and
     add-stock `window.api.adjustStock(...)` payload construction while keeping
     the workflow loops responsible for fetching latest products, running
     concurrent tasks, and refreshing state. A diagnostic Playwright probe
@@ -471,11 +471,11 @@ Decision rule:
     `48b70424364d4ee8`.
 40. Finish product adjust-stock payload delegation. Done:
     `productWriteHelpers.mjs` now covers every `window.api.adjustStock(...)`
-    payload in `Products.jsx`: restore branch-stock sync, deleted-product stock
+    payload in `Products.tsx`: restore branch-stock sync, deleted-product stock
     restore, clear-stock, bulk add-stock, and branch initialization. The helper
     now supports snapshot product-name overrides and zero-quantity branch
     initialization while preserving purchase/cost unit-cost fallback behavior.
-    `Products.jsx` no longer carries raw `adjustStock({ ... })` object
+    `Products.tsx` no longer carries raw `adjustStock({ ... })` object
     construction; the page keeps ownership of fetches, concurrency, restore
     order, transfer-stock calls, and refresh/notification flow. Focused source
     checks, typecheck, helper tests, production build, performance
@@ -487,7 +487,7 @@ Decision rule:
     plan into `fromBranchId`, `toBranchId`, quantity, product identity, note,
     and user attribution. A focused helper test caught invalid branch-id
     normalization before build verification, so the helper now uses the shared
-    finite-number normalizer for transfer branch ids. `Products.jsx` keeps
+    finite-number normalizer for transfer branch ids. `Products.tsx` keeps
     ownership of choosing transfer versus branch initialization while delegating
     the transfer payload shape. Focused source checks, typecheck, helper tests,
     production build, performance verification, runtime health, focused Product
@@ -633,7 +633,7 @@ Decision rule:
     tests, JSX check, typecheck, production build, and broad Phase 8.4
     Playwright UI live check passed on frontend hash `813ec1480c527052`.
 57. Harden Products page history and bulk mutation pathways. Done:
-    `frontend/src/components/products/Products.jsx` now routes product
+    `frontend/src/components/products/Products.tsx` now routes product
     action-history restore/delete, deleted-product restore, bulk product update,
     clear-stock, bulk add-stock, and bulk branch-move stock writes through the
     existing bounded product write/delete runners or a new 12s stock mutation
@@ -2627,7 +2627,7 @@ Decision rule:
     opening through those indexes. This improves repeated inventory operations
     without moving inventory modules or changing data flows.
 309. Index product page branch moves and fresh history snapshots. Done:
-    `frontend/src/components/products/Products.jsx` now builds `branchesById`
+    `frontend/src/components/products/Products.tsx` now builds `branchesById`
     for bulk branch-change target resolution and indexes freshly fetched
     product snapshots before save/variant undo history entries are created.
     This keeps product write flows aligned with the id-map strategy used in POS
@@ -2770,7 +2770,7 @@ Decision rule:
     Done:
     `frontend/src/components/products/helpers/productSelectionHelpers.ts` now
     provides `normalizePositiveProductIds()` and replaces chained map/filter
-    helper internals with direct loops. `frontend/src/components/products/Products.jsx`
+    helper internals with direct loops. `frontend/src/components/products/Products.tsx`
     uses the helper for bulk delete redo, bulk out-of-stock redo, and bulk
     add-stock success/failure ID normalization. This was a localized
     render/action bookkeeping cleanup; no folder move or language conversion
@@ -4365,6 +4365,19 @@ Decision rule:
     consumers of `useCatalogPageContext<T>()`. The current source extension
     count is `.js: 95`, `.jsx: 3`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`,
     `.tsx: 104` outside generated/runtime folders.
+549. Convert the products page shell to TSX. Done:
+    `frontend/src/components/products/Products.tsx` now types product rows,
+    lookup rows, branch stock rows, filter metadata, modal state,
+    search/sort/bulk-edit unions, lightbox state, app/sync context access,
+    action-history restore payloads, and the local product API gateway. The
+    conversion keeps the extensionless app lazy import, product grouping and
+    pagination helpers, compact controls, product source checks, undo/redo
+    product restore paths, image upload, bulk stock actions, and detail/form
+    modals intact while centralizing direct product API calls behind
+    `getProductApi()`. Product modal boundaries now normalize optional
+    database values before they reach stricter TSX child components. The
+    current source extension count is `.js: 95`, `.jsx: 2`, `.mjs: 0`,
+    `.cjs: 0`, `.ts: 268`, `.tsx: 105` outside generated/runtime folders.
 
 ## Safety Gates
 

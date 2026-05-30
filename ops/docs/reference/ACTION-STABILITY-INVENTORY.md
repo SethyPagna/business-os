@@ -553,7 +553,7 @@ Continue with Phase 8.4:
   `ops/runtime/reports/phase84-product-scanning-actions-live-check-2026-05-18T07-15-06-876Z/report.json`.
   The eleventh physical move placed Products page config constants at
   `frontend/src/components/products/config/productPageConfig.mjs`; source tests
-  now verify the timeout values there while `Products.jsx` imports the same
+  now verify the timeout values there while `Products.tsx` imports the same
   constants. The Product page action live check and Product scanner live check
   passed against frontend hash `e0871873ba445219`. Latest reports:
   `ops/runtime/reports/phase84-product-page-actions-live-check-2026-05-18T07-23-57-202Z/report.json`
@@ -673,7 +673,7 @@ Continue with Phase 8.4:
   The twenty-third organization move placed product lightbox index update logic
   in `frontend/src/components/products/helpers/productGalleryHelpers.ts`; the
   module now also owns reusable lightbox index clamping and active lightbox
-  index updates. `Products.jsx` delegates gallery index changes to that helper
+  index updates. `Products.tsx` delegates gallery index changes to that helper
   and no longer carries the disabled legacy `false && lightbox` overlay branch.
   Focused helper tests, source checks, typecheck, production build, runtime
   health, Product page action live check, and Product scanner live check passed

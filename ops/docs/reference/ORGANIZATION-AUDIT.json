@@ -187,7 +187,7 @@
     "frontend/src/components/inventory/Inventory.jsx",
     "frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx",
     "frontend/src/components/pos/POS.tsx",
-    "frontend/src/components/products/Products.jsx",
+    "frontend/src/components/products/Products.tsx",
     "frontend/src/components/products/forms/ProductForm.tsx",
     "frontend/src/components/products/import/BulkImportModal.tsx",
     "frontend/src/components/products/lookups/ManageBrandsModal.tsx",

@@ -994,7 +994,7 @@ Current checkpoint:
   `ops/docs`; it found 57 files above 700 lines and identifies
   `frontend/src/components/inventory/Inventory.jsx`,
   `backend/src/services/importJobs.js`, `frontend/src/components/catalog/CatalogPage.jsx`,
-  `frontend/src/components/products/Products.jsx`, and `frontend/src/api/methods.js`
+  `frontend/src/components/products/Products.tsx`, and `frontend/src/api/methods.js`
   as high-value split candidates.
 - First Phase 26 physical move complete: Phase 8.4 live Playwright check scripts
   now live in `ops/scripts/runtime/live-checks`, with relative auth/root imports
@@ -1051,7 +1051,7 @@ Current checkpoint:
 - Eleventh Phase 26 physical move complete: Products page config constants
   now live under `frontend/src/components/products/config/productPageConfig.mjs`.
   Month options, visual defaults, read timeouts, and mutation timeouts are
-  imported by `Products.jsx`, while source tests read the config module
+  imported by `Products.tsx`, while source tests read the config module
   directly. Source checks, typecheck, production build, runtime health, focused
   Product page action live check, and focused Product scanner live check passed
   on frontend hash `e0871873ba445219`.
@@ -1059,7 +1059,7 @@ Current checkpoint:
   live under `frontend/src/components/products/helpers/productPageHelpers.mjs`.
   The module owns the debounce hook, brand color map parsing, brand lookup
   normalization, and next-frame scheduling helper; the dead local `multiMatch`
-  helper was removed from `Products.jsx`. Helper source tests, source checks,
+  helper was removed from `Products.tsx`. Helper source tests, source checks,
   typecheck, production build, runtime health, focused Product page action live
   check, and focused Product scanner live check passed on frontend hash
   `a440b744817036af`.
@@ -1067,7 +1067,7 @@ Current checkpoint:
   now live under
   `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module owns gallery normalization, primary-image fallback selection, and
-  public product image URL resolution. `Products.jsx` now depends on that helper
+  public product image URL resolution. `Products.tsx` now depends on that helper
   instead of carrying local gallery normalization or direct public asset URL
   resolution. Helper source tests, source checks, typecheck, production build,
   runtime health, focused Product page action live check, and focused Product
@@ -1075,7 +1075,7 @@ Current checkpoint:
 - Fourteenth Phase 26 physical move complete: Product row presentation helpers
   now live under `frontend/src/components/products/surfaces/ProductRowParts.tsx`.
   The module owns the product discount badge, row action menu wrapper, batch
-  preview chips, and desktop details cell. `Products.jsx` now imports those
+  preview chips, and desktop details cell. `Products.tsx` now imports those
   presentation pieces instead of defining them inline. Source checks, typecheck,
   production build, runtime health, focused Product page action live check, and
   focused Product scanner live check passed on frontend hash
@@ -1084,7 +1084,7 @@ Current checkpoint:
   now lives under
   `frontend/src/components/products/helpers/productFilterHelpers.mjs`. The
   module owns search-term parsing, branch quantity lookup, filtered product
-  selection, and product CSV export row shaping. `Products.jsx` now delegates
+  selection, and product CSV export row shaping. `Products.tsx` now delegates
   that data work to the helper module. Focused helper tests, source checks,
   typecheck, production build, runtime health, focused Product page action live
   check, and focused Product scanner live check passed on frontend hash
@@ -1094,7 +1094,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productSelectionHelpers.mjs`. The
   module owns visible id extraction, selected-visible id resolution, pagination
   summary math, selected product filtering, letter jump targets, and
-  selection-scope predicates. `Products.jsx` now delegates that data work to the
+  selection-scope predicates. `Products.tsx` now delegates that data work to the
   helper module. Focused helper tests, source checks, typecheck, production
   build, runtime health, focused Product page action live check, and focused
   Product scanner live check passed on frontend hash `f0b69a89f50f0e7f`.
@@ -1102,7 +1102,7 @@ Current checkpoint:
   now lives under
   `frontend/src/components/products/helpers/productGroupViewHelpers.mjs`. The
   module owns grouped product price labels and grouped summary chip text for
-  list rows. `Products.jsx` now delegates that presentation data work to the
+  list rows. `Products.tsx` now delegates that presentation data work to the
   helper module. Focused helper tests, source checks, typecheck, production
   build, runtime health, focused Product page action live check, and focused
   Product scanner live check passed on frontend hash `5781a6bf1ff07e16`.
@@ -1111,7 +1111,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productDisplayHelpers.mjs`. The
   module owns category/unit lookup maps, merged brand option construction,
   branch id/name maps, branch summary labels, and stock-status classification.
-  `Products.jsx` now delegates that display data work while preserving the row
+  `Products.tsx` now delegates that display data work while preserving the row
   UI. Focused helper tests, source checks, typecheck, production build, runtime
   health, focused Product page action live check, and focused Product scanner
   live check passed on frontend hash `6039db439c681904`.
@@ -1119,7 +1119,7 @@ Current checkpoint:
   logic now lives under
   `frontend/src/components/products/helpers/productMenuHelpers.mjs`. The module
   owns export menu item construction, supplier filter option normalization, and
-  active filter count calculation. `Products.jsx` now delegates that menu data
+  active filter count calculation. `Products.tsx` now delegates that menu data
   work while preserving the header/export/filter surfaces. Focused helper tests,
   source checks, typecheck, production build, runtime health, focused Product
   page action live check, and focused Product scanner live check passed on
@@ -1128,7 +1128,7 @@ Current checkpoint:
   builder logic now lives under
   `frontend/src/components/products/helpers/productMenuHelpers.mjs`. The module
   now also owns year/month, branch, group, stock, category, brand, and supplier
-  filter section construction. `Products.jsx` now delegates that menu data
+  filter section construction. `Products.tsx` now delegates that menu data
   builder while preserving the shared `FilterMenu` UI surface. Focused helper
   tests, source checks, typecheck, production build, runtime health, focused
   Product page action live check, and focused Product scanner live check passed
@@ -1138,7 +1138,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productDisplayHelpers.mjs`. The
   module now also owns purchase-price fallback, margin math, visible stock
   quantity, promotion calculation, compact brand/category metadata, branch
-  labels, and mobile stock badge presentation. `Products.jsx` now delegates
+  labels, and mobile stock badge presentation. `Products.tsx` now delegates
   shared desktop/mobile row display data while preserving row rendering and
   actions. Focused helper tests, source checks, typecheck, production build,
   runtime health, focused Product page action live check, and focused Product
@@ -1147,7 +1147,7 @@ Current checkpoint:
   construction now lives under
   `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module now also owns lightbox image URL resolution, empty-gallery handling,
-  and safe start-index clamping. `Products.jsx` now delegates lightbox state
+  and safe start-index clamping. `Products.tsx` now delegates lightbox state
   construction while preserving the lightbox UI and navigation actions. Focused
   helper tests, source checks, typecheck, production build, runtime health,
   focused Product page action live check, and focused Product scanner live
@@ -1156,7 +1156,7 @@ Current checkpoint:
   update logic now lives under
   `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module now also owns reusable lightbox index clamping and active lightbox
-  index updates. `Products.jsx` delegates gallery index changes to that helper
+  index updates. `Products.tsx` delegates gallery index changes to that helper
   and no longer carries the disabled legacy `false && lightbox` overlay branch.
   Focused helper tests, source checks, typecheck, production build, runtime
   health, focused Product page action live check, and focused Product scanner
@@ -1165,7 +1165,7 @@ Current checkpoint:
   gallery-input fallback now lives under
   `frontend/src/components/products/helpers/productGalleryHelpers.ts`. The
   module now also owns the detail-modal decision to prefer a normalized clicked
-  gallery or fall back to the clicked source image. `Products.jsx` delegates
+  gallery or fall back to the clicked source image. `Products.tsx` delegates
   that fallback before opening the shared lightbox while preserving the detail
   modal UI. Focused helper tests, source checks, typecheck, production build,
   runtime health, focused Product page action live check, and focused Product
@@ -1194,7 +1194,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productWriteHelpers.mjs`. The
   module owns normalized gallery/image fields, price fallbacks, stock
   thresholds, active/group flags, parent ids, and user attribution for restore
-  and deleted-product recreation flows. `Products.jsx` delegates that payload
+  and deleted-product recreation flows. `Products.tsx` delegates that payload
   construction through a small user-context wrapper. Focused helper tests,
   source checks, typecheck, production build, performance verification,
   runtime health, focused Product page action live check, and focused Product
@@ -1204,7 +1204,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productWriteHelpers.mjs`. The
   helper compares snapshot branch stock with current branch stock, ignores
   invalid branch ids, treats invalid quantities as zero, and returns only the
-  add/remove deltas needed for restore. `Products.jsx` now keeps the API loop
+  add/remove deltas needed for restore. `Products.tsx` now keeps the API loop
   focused on executing planned adjustments. Focused helper tests, source
   checks, typecheck, production build, performance verification, runtime
   health, focused Product page action live check, and focused Product scanner
@@ -1214,7 +1214,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productWriteHelpers.mjs`. The
   module now owns default restore branch selection, deleted-id set
   construction, preferred restore branch selection, and parent-id remapping for
-  deleted parent/variant batches. `Products.jsx` keeps the restore loop focused
+  deleted parent/variant batches. `Products.tsx` keeps the restore loop focused
   on API creation, id tracking, and stock restoration. Focused helper tests,
   source checks, typecheck, production build, performance verification,
   runtime health, focused Product page action live check, and focused Product
@@ -1224,7 +1224,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productWriteHelpers.mjs`. The
   helper filters invalid branch ids, ignores zero/invalid quantities, resolves
   purchase/cost unit prices once, and returns only valid branch stock removal
-  adjustments for the bulk out-of-stock path. `Products.jsx` now keeps that
+  adjustments for the bulk out-of-stock path. `Products.tsx` now keeps that
   nested loop focused on executing preplanned adjustments. Focused helper
   tests, source checks, typecheck, production build, performance verification,
   runtime health, focused Product page action live check, and focused Product
@@ -1234,7 +1234,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productWriteHelpers.mjs`. The
   helper identifies a valid positive-stock source branch, returns an explicit
   transfer plan, returns an initialize plan when no positive stock exists, and
-  returns no-op when the product is already in the target branch. `Products.jsx`
+  returns no-op when the product is already in the target branch. `Products.tsx`
   now executes those plans instead of interpreting raw branch rows inline.
   Focused helper tests, source checks, typecheck, production build, performance
   verification, runtime health, focused Product page action live check, and
@@ -1257,7 +1257,7 @@ Current checkpoint:
   helper removes only `undefined` update fields, preserves intentional `null`
   and blank-string values, attaches user attribution, and selects the current
   optimistic-lock timestamp before falling back to a snapshot timestamp for
-  redo. `Products.jsx` now delegates both update and redo payload construction
+  redo. `Products.tsx` now delegates both update and redo payload construction
   while keeping the workflow loop responsible for confirmation, concurrent
   execution, undo/redo registration, and notifications. Focused helper tests,
   source checks, typecheck, production build, performance verification, runtime
@@ -1269,7 +1269,7 @@ Current checkpoint:
   helper keeps populated category, unit, supplier, brand, and valid low-stock
   threshold values while ignoring blank fields and unsafe threshold text. The
   pricing helper normalizes only provided price fields through the shared price
-  normalizer. `Products.jsx` no longer imports pricing normalization directly
+  normalizer. `Products.tsx` no longer imports pricing normalization directly
   or builds those update objects inside render handlers. Focused helper tests,
   source checks, typecheck, production build, performance verification, runtime
   health, focused Product page action live check, and focused Product scanner
@@ -1279,7 +1279,7 @@ Current checkpoint:
   `frontend/src/components/products/helpers/productWriteHelpers.mjs`. The
   helper normalizes product ids, product names, branch ids, quantities, reasons,
   user attribution, and unit-cost fallback/override behavior for bulk
-  add-stock and clear-stock execution paths. `Products.jsx` now delegates those
+  add-stock and clear-stock execution paths. `Products.tsx` now delegates those
   nested `adjustStock` payloads while preserving the workflow loops that fetch
   latest product rows, run concurrent tasks, and refresh state. A diagnostic
   Playwright probe confirmed the Add Product modal opened after one transient
@@ -1289,7 +1289,7 @@ Current checkpoint:
   page action live check, and focused Product scanner live check passed on
   frontend hash `48b70424364d4ee8`.
 - Thirty-sixth Phase 26 organization move complete: Product adjust-stock
-  payload delegation is now complete for `Products.jsx`. Restore branch-stock
+  payload delegation is now complete for `Products.tsx`. Restore branch-stock
   sync, deleted-product stock restore, clear-stock, bulk add-stock, and branch
   initialization all build their `window.api.adjustStock(...)` payloads through
   `frontend/src/components/products/helpers/productWriteHelpers.mjs`. The
@@ -3410,7 +3410,7 @@ Cleanup checkpoint:
   product detail opening now use indexed lookups instead of repeated branch or
   product summary scans.
 - Move 309 indexes product page branch moves and fresh history snapshots:
-  `Products.jsx` now builds `branchesById` for bulk branch-change target
+  `Products.tsx` now builds `branchesById` for bulk branch-change target
   resolution, and indexes freshly fetched product snapshots with
   `buildProductIdMap()` before save/variant history entries are created. This
   keeps Products, POS, and Inventory aligned on id-map lookups for active
@@ -3737,7 +3737,7 @@ Move 335 status:
   now gives the desktop Products table a real minimum width and fixed column
   widths, with nowrap headers, so medium desktop widths use local horizontal
   scrolling instead of squeezing Product Details, Cost In, Selling Price, Stock,
-  and Status together. `frontend/src/components/products/Products.jsx` also
+  and Status together. `frontend/src/components/products/Products.tsx` also
   lets product names wrap inside their column without bleeding into adjacent
   cells. `frontend/src/components/pos/POS.tsx` now gives the desktop products
   pane and cart pane stable minimum widths inside a horizontally scrollable
@@ -3806,7 +3806,7 @@ Move 339 status:
   `frontend/src/components/products/helpers/productSelectionHelpers.ts` now
   exposes `normalizePositiveProductIds()` and rewrites visible ID, product ID
   map, and parent ID set construction with direct loops instead of chained
-  map/filter passes. `frontend/src/components/products/Products.jsx` reuses
+  map/filter passes. `frontend/src/components/products/Products.tsx` reuses
   that helper for bulk delete redo IDs, bulk out-of-stock redo IDs, and bulk
   add-stock success/failure IDs. The focused product-selection helper test now
   covers primitive IDs and restored-entry IDs, and the full frontend utility
@@ -5975,3 +5975,22 @@ Move 548 status:
   source checks, media upload controls, drag/drop reorder flows, review queue
   actions, and public portal editor behavior unchanged while making
   `useCatalogPageContext<T>()` explicit for typed context consumers.
+
+Move 549 status:
+- Move 549 converts the products page shell to
+  `frontend/src/components/products/Products.tsx`. The typed boundary now
+  covers product rows, lookup rows, branch stock rows, filter metadata,
+  modal state, search/sort/bulk-edit unions, action-history restore payloads,
+  lightbox state, app/sync context access, and the local products API gateway
+  for bounded product search, by-id recovery, product writes, stock moves,
+  transfers, filter metadata, and image upload. The move keeps the
+  extensionless app lazy import, product grouping/pagination helpers, compact
+  products controls, undo/redo stock restore flow, same-tick save/delete/bulk
+  guards, timeout source checks, product import handoff, detail/lightbox
+  modals, and product source-inspection tests unchanged while replacing direct
+  `window.api` calls with typed `getProductApi()` access. Product modal
+  boundaries now normalize database-ish optional values before rendering, and
+  focused source tests were adjusted to verify behavior instead of pre-TS
+  syntax. The current source extension count is `.js: 95`, `.jsx: 2`,
+  `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 105` outside generated/runtime
+  folders.

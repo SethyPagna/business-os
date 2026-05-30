@@ -95,7 +95,7 @@ Total files documented: **193**
 | 83 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
 | 84 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
 | 85 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 7 |
-| 86 | `frontend/src/components/products/Products.jsx` | 15 |
+| 86 | `frontend/src/components/products/Products.tsx` | 24 |
 | 87 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 4 |
 | 88 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 7 |
 | 89 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 |
@@ -1568,25 +1568,34 @@ Total files documented: **193**
 | 6 | `fetchLookupProductSnapshotsForName` | function | 113 |
 | 7 | `fetchProductsByIds` | function | 165 |
 
-### 3.86 `frontend/src/components/products/Products.jsx`
+### 3.86 `frontend/src/components/products/Products.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `Products` | component/function | 130 |
-| 2 | `promise` | const arrow | 212 |
-| 3 | `handleSave` | const arrow | 383 |
-| 4 | `uploadGalleryImages` | const arrow | 407 |
-| 5 | `handleSaveWithGallery` | const arrow | 433 |
-| 6 | `handleBulkDelete` | const arrow | 500 |
-| 7 | `handleBulkOutOfStock` | const arrow | 547 |
-| 8 | `handleBulkChangeBranch` | const arrow | 590 |
-| 9 | `handleBulkAddStock` | const arrow | 620 |
-| 10 | `toggleSelect` | const arrow | 628 |
-| 11 | `toggleSelectAll` | const arrow | 635 |
-| 12 | `handleDelete` | const arrow | 642 |
-| 13 | `renderUnitChip` | const arrow | 722 |
-| 14 | `openLightbox` | const arrow | 736 |
-| 15 | `getStockBadge` | const arrow | 743 |
+| 1 | `getProductApi` | function | 330 |
+| 2 | `getErrorMessage` | function | 334 |
+| 3 | `isObjectRecord` | function | 338 |
+| 4 | `toProductApiResponse` | function | 342 |
+| 5 | `scrollNodeWithOffset` | function | 346 |
+| 6 | `summarizeProductRun` | function | 352 |
+| 7 | `aggregateProductInitials` | function | 356 |
+| 8 | `toModalProduct` | function | 367 |
+| 9 | `toVariantParentProduct` | function | 379 |
+| 10 | `toLightboxState` | function | 385 |
+| 11 | `Products` | component/function | 395 |
+| 12 | `promise` | const arrow | 478 |
+| 13 | `handleSave` | const arrow | 653 |
+| 14 | `handleSaveWithGallery` | const arrow | 703 |
+| 15 | `handleBulkDelete` | const arrow | 770 |
+| 16 | `handleBulkOutOfStock` | const arrow | 817 |
+| 17 | `handleBulkChangeBranch` | const arrow | 860 |
+| 18 | `handleBulkAddStock` | const arrow | 890 |
+| 19 | `toggleSelect` | const arrow | 898 |
+| 20 | `toggleSelectAll` | const arrow | 905 |
+| 21 | `handleDelete` | const arrow | 912 |
+| 22 | `renderUnitChip` | const arrow | 999 |
+| 23 | `openLightbox` | const arrow | 1013 |
+| 24 | `getStockBadge` | const arrow | 1020 |
 
 ### 3.87 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
@@ -1654,7 +1663,7 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `ProductDetailModal` | component/function | 79 |
 | 2 | `T` | const arrow | 95 |
-| 3 | `Row` | const arrow | 116 |
+| 3 | `Row` | const arrow | 121 |
 
 ### 3.94 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
