@@ -29,7 +29,7 @@ const productsRoute = readSource('src/routes/products.js')
 const salesRoute = readSource('src/routes/sales.js')
 const returnsRoute = readSource('src/routes/returns.js')
 const importJobs = readSource('src/services/importJobs.js')
-const metrics = readSource('src/businessMetrics.js')
+const metrics = readSource('src/businessMetrics.ts')
 
 runTest('schema and runtime migrations create batch stock tables and allocation tables', () => {
   assert.match(schema, /Name: product_batches; Type: TABLE/i)

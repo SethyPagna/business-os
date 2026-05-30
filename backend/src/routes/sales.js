@@ -5,7 +5,7 @@ const { ok, err, audit, recordActionHistory, broadcast, logOp, getSafeCostPrice,
 const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { normalizeClientRequestId } = require('../idempotency.ts')
-const { getExpiringProducts, getLowStockProducts, getOutOfStockProducts, getStockMetrics } = require('../businessMetrics')
+const { getExpiringProducts, getLowStockProducts, getOutOfStockProducts, getStockMetrics } = require('../businessMetrics.ts')
 const {
   allocateProductBatches,
   getAvailableProductQuantity,

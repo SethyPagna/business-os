@@ -4,7 +4,7 @@ const { db }  = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
-const { getStockMetrics } = require('../businessMetrics')
+const { getStockMetrics } = require('../businessMetrics.ts')
 const { firstExistingColumn } = require('../schemaMetadata.ts')
 
 const router = express.Router()

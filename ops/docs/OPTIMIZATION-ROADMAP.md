@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 565.
+- Latest completed implementation move in this roadmap: Move 566.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6232,3 +6232,19 @@ Move 565 status:
   `.ts` scripts, so larger backend route/service conversion still waits for a
   compile/staging package lane. The current source extension count is `.js: 71`, `.jsx: 0`, `.mjs: 0`,
   `.cjs: 0`, `.ts: 292`, `.tsx: 107` outside generated/runtime folders.
+
+Move 566 status:
+- Move 566 converts `backend/src/businessMetrics.ts` to a package-safe
+  TypeScript path. The business metrics helper now carries JSDoc metric-row and
+  query option contracts while preserving sellable product SQL predicates,
+  effective-cost expressions, stock metric aggregation, low/out stock alerts,
+  and expiry alert queries. Branch, inventory, notification, product, and sales
+  routes use explicit `.ts` imports, and source-inspection tests read the
+  TypeScript helper. Focused product-expiry, product-batch hierarchy,
+  route-contract, notification-cache, portal-regression, and full-automation
+  checks passed, as did the full backend utility suite, schema audit, and Linux
+  packaging proof. `pkg` continues to
+  warn for direct `.ts` scripts, so larger backend route/service conversion
+  still waits for a compile/staging package lane. The current source extension
+  count is `.js: 70`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 293`, `.tsx: 107`
+  outside generated/runtime folders.

@@ -15,7 +15,7 @@ const { normalizePriceValue } = require('../money.ts')
 const { normalizeProductDiscount } = require('../productDiscounts.ts')
 const { hasColumn } = require('../schemaMetadata.ts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')
-const { getStockMetrics } = require('../businessMetrics')
+const { getStockMetrics } = require('../businessMetrics.ts')
 const {
   assertCatalogTextIntegrity,
   hasSuspiciousCatalogText,

@@ -2,6 +2,15 @@
 
 const { db } = require('./database')
 
+/**
+ * @typedef {'usd' | 'khr'} CostCurrency
+ * @typedef {{ branchId?: string | number | null, productAlias?: string, stockAlias?: string }} StockQuantityOptions
+ * @typedef {{ branchId?: string | number | null }} StockMetricsOptions
+ * @typedef {{ limit?: string | number }} ProductLimitOptions
+ * @typedef {{ limit?: string | number, days?: string | number }} ExpiringProductOptions
+ * @typedef {{ total_products?: unknown, in_stock?: unknown, low_stock?: unknown, out_of_stock?: unknown, stock_quantity?: unknown, stock_value_usd?: unknown, stock_value_khr?: unknown }} MetricRow
+ */
+
 function sellableProductWhere(alias = 'p') {
   return [
     `${alias}.is_active = 1`,
@@ -9,16 +18,26 @@ function sellableProductWhere(alias = 'p') {
   ]
 }
 
+/**
+ * @param {string} alias
+ * @param {CostCurrency} currency
+ */
 function effectiveCostExpr(alias = 'p', currency = 'usd') {
   const purchase = currency === 'khr' ? 'purchase_price_khr' : 'purchase_price_usd'
   const cost = currency === 'khr' ? 'cost_price_khr' : 'cost_price_usd'
   return `COALESCE(NULLIF(${alias}.${purchase}, 0), ${alias}.${cost}, 0)`
 }
 
+/**
+ * @param {StockQuantityOptions} options
+ */
 function stockQuantityExpr({ branchId = null, productAlias = 'p', stockAlias = 'bs' } = {}) {
   return branchId ? `COALESCE(${stockAlias}.quantity, 0)` : `COALESCE(${productAlias}.stock_quantity, 0)`
 }
 
+/**
+ * @param {MetricRow} row
+ */
 function normalizeMetricRow(row = {}) {
   return {
     total_products: Number(row.total_products || 0),
@@ -31,6 +50,9 @@ function normalizeMetricRow(row = {}) {
   }
 }
 
+/**
+ * @param {StockMetricsOptions} options
+ */
 function getStockMetrics({ branchId = null } = {}) {
   const numericBranchId = Number.parseInt(branchId, 10)
   const hasBranch = Number.isFinite(numericBranchId) && numericBranchId > 0
@@ -66,6 +88,9 @@ function getStockMetrics({ branchId = null } = {}) {
   return normalizeMetricRow(row)
 }
 
+/**
+ * @param {ProductLimitOptions} options
+ */
 function getLowStockProducts({ limit = 20 } = {}) {
   const safeLimit = Math.max(1, Math.min(5000, Number.parseInt(limit, 10) || 20))
   const whereSql = sellableProductWhere('p').join(' AND ')
@@ -80,6 +105,9 @@ function getLowStockProducts({ limit = 20 } = {}) {
   `).all(safeLimit)
 }
 
+/**
+ * @param {ProductLimitOptions} options
+ */
 function getOutOfStockProducts({ limit = 20 } = {}) {
   const safeLimit = Math.max(1, Math.min(5000, Number.parseInt(limit, 10) || 20))
   const whereSql = sellableProductWhere('p').join(' AND ')
@@ -93,6 +121,9 @@ function getOutOfStockProducts({ limit = 20 } = {}) {
   `).all(safeLimit)
 }
 
+/**
+ * @param {ProductLimitOptions} options
+ */
 function getStockAlertProducts({ limit = 5000 } = {}) {
   const safeLimit = Math.max(1, Math.min(5000, Number.parseInt(limit, 10) || 5000))
   const whereSql = sellableProductWhere('p').join(' AND ')
@@ -115,6 +146,9 @@ function getStockAlertProducts({ limit = 5000 } = {}) {
   }
 }
 
+/**
+ * @param {ExpiringProductOptions} options
+ */
 function getExpiringProducts({ limit = 20, days = 30 } = {}) {
   const safeLimit = Math.max(1, Math.min(200, Number.parseInt(limit, 10) || 20))
   const safeDays = Math.max(0, Math.min(3650, Number.parseInt(days, 10) || 30))

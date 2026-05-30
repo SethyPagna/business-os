@@ -3,7 +3,7 @@
 const express = require('express')
 const { db } = require('../database')
 const { authToken, hasPermission } = require('../middleware')
-const { getExpiringProducts, getStockAlertProducts } = require('../businessMetrics')
+const { getExpiringProducts, getStockAlertProducts } = require('../businessMetrics.ts')
 const { getDriveSyncConfig } = require('../services/googleDriveSync')
 
 const router = express.Router()

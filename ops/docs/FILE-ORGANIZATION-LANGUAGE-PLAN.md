@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 565 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 566 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 71`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 292`,
+  `.js: 70`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 293`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4584,6 +4584,20 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The current source
     extension count is `.js: 71`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 292`,
     `.tsx: 107` outside generated/runtime folders.
+566. Convert backend business metrics helper to a package-safe TypeScript path.
+    Done: `backend/src/businessMetrics.ts` now owns sellable product SQL
+    predicates, effective-cost expressions, stock metric aggregation, low/out
+    stock alerts, and expiry alert queries with JSDoc metric-row and query
+    option contracts. Branch, inventory, notification, product, and sales routes
+    now target explicit `.ts` imports, and source-inspection tests now read the
+    TypeScript helper. Focused product-expiry, product-batch hierarchy,
+    route-contract, notification-cache, portal-regression, and full-automation
+    checks passed, as did the full backend utility suite, schema audit, and
+    Linux packaging proof. Packaging still
+    warns for direct `.ts` entries in `pkg.scripts`, so larger backend
+    route/service conversions remain blocked on the future compile/staging
+    lane. The current source extension count is `.js: 70`, `.jsx: 0`, `.mjs: 0`,
+    `.cjs: 0`, `.ts: 293`, `.tsx: 107` outside generated/runtime folders.
 
 ## Safety Gates
 

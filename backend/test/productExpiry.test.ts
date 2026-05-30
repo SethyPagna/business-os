@@ -24,7 +24,7 @@ const productsRoute = fs.readFileSync(path.join(root, 'src/routes/products.js'),
 const notificationsRoute = fs.readFileSync(path.join(root, 'src/routes/notifications.js'), 'utf8')
 const salesRoute = fs.readFileSync(path.join(root, 'src/routes/sales.js'), 'utf8')
 const branchesRoute = fs.readFileSync(path.join(root, 'src/routes/branches.js'), 'utf8')
-const metrics = fs.readFileSync(path.join(root, 'src/businessMetrics.js'), 'utf8')
+const metrics = fs.readFileSync(path.join(root, 'src/businessMetrics.ts'), 'utf8')
 
 runTest('products persist expiry date and alert window through schema and runtime migrations', () => {
   assert.match(schema, /expiry_date/i)
