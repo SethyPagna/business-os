@@ -1004,7 +1004,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
   },
   {
-    target: 'backend/src/routes/products.js',
+    target: 'backend/src/routes/products.ts',
     optimization: 'Image-only bulk import now builds one normalized product-name map before processing uploaded image filenames, replacing a full active-product scan for every image.',
     rollback: 'Remove productsByImageBaseName and return to allProducts.find inside the image loop; image matching behavior remains name-based.',
     proof: [

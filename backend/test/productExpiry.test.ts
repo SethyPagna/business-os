@@ -20,7 +20,7 @@ async function runTest(name, fn) {
 const root = path.resolve(__dirname, '..')
 const schema = fs.readFileSync(path.join(root, 'src/db/postgresSchema.sql'), 'utf8')
 const runtime = fs.readFileSync(path.join(root, 'src/postgresDatabase.ts'), 'utf8')
-const productsRoute = fs.readFileSync(path.join(root, 'src/routes/products.js'), 'utf8')
+const productsRoute = fs.readFileSync(path.join(root, 'src/routes/products.ts'), 'utf8')
 const notificationsRoute = fs.readFileSync(path.join(root, 'src/routes/notifications.ts'), 'utf8')
 const salesRoute = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8')
 const branchesRoute = fs.readFileSync(path.join(root, 'src/routes/branches.ts'), 'utf8')

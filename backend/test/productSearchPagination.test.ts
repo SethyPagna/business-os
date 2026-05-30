@@ -2,7 +2,7 @@ const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
 
-const productsRoute = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.js'), 'utf8')
+const productsRoute = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8')
 
 assert(productsRoute.includes('query.ids || query.productIds || query.product_ids'), 'product search should accept ids/productIds query filters')
 assert(productsRoute.includes('p.id IN'), 'product search should constrain id lookups in SQL')

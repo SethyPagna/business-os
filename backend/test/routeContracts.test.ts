@@ -24,8 +24,8 @@ function getRoutePaths(router) {
 }
 
 runTest('product router registers required paged search routes', () => {
-  const router = require('../src/routes/products')
-  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/products.js'), 'utf8')
+  const router = require('../src/routes/products.ts')
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/products.ts'), 'utf8')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/search'), 'missing /api/products/search')
   assert.ok(paths.includes('/filters'), 'missing /api/products/filters')
@@ -212,7 +212,7 @@ runTest('inventory stock writes index active branches per request', () => {
 runTest('product import route caches settings updated_at schema metadata', () => {
   const fs = require('fs')
   const path = require('path')
-  const source = fs.readFileSync(path.join(__dirname, '../src/routes/products.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/products.ts'), 'utf8')
   assert.match(source, /const \{ hasColumn \} = require\('\.\.\/schemaMetadata\.ts'\)/)
   assert.match(source, /function settingsHasUpdatedAt\(\)/)
   assert.match(source, /return hasColumn\('settings', 'updated_at'\)/)

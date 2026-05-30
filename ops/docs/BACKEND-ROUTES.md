@@ -62,7 +62,7 @@ Compatibility alias:
 ## Products
 
 Base: `/api/products`  
-File: `backend/src/routes/products.js`
+File: `backend/src/routes/products.ts`
 
 - `GET /`
 - `POST /variant`

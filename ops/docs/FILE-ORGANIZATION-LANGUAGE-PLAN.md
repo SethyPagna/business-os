@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 620 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 621 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 35`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 328`,
+  `.js: 34`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 329`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -1537,7 +1537,7 @@ Decision rule:
     `backend/test/portalInventoryRegression.test.ts` guarding the shared
     helper contract.
 176. Optimize image-only product bulk import matching. Done:
-    `backend/src/routes/products.js` now builds a `productsByImageBaseName` map
+    `backend/src/routes/products.ts` now builds a `productsByImageBaseName` map
     once from active products before processing uploaded image filenames. The
     image-only import path now does one normalized-name lookup per image instead
     of scanning every active product for every uploaded file. The behavior stays
@@ -2420,7 +2420,7 @@ Decision rule:
     secrets, and retained backup packages.
 283. Cache additional backend schema metadata probes. Done:
     `branches.ts` and `inventory.ts` now cache the stock-transfer note-column
-    selection used by transfer write paths, and `products.js` now caches the
+    selection used by transfer write paths, and `products.ts` now caches the
     settings `updated_at` column support used by product import brand-setting
     writes. These are process-lifetime schema-shape probes, so the existing
     no-column fallbacks remain while repeated `information_schema.columns`
@@ -2782,7 +2782,7 @@ Decision rule:
     data-flow cleanup only; no folder move, schema migration, or runtime
     conversion was needed.
 332. Reuse product-route ID and token normalization helpers. Done:
-    `backend/src/routes/products.js` now shares direct-loop helpers for
+    `backend/src/routes/products.ts` now shares direct-loop helpers for
     positive ID collection and comma-token normalization across image map
     loading, product search filters, include parsing, branch-stock hydration,
     lookup replacement, and import image reference parsing. This was a
@@ -2857,34 +2857,34 @@ Decision rule:
     loops instead of array `map()` chains. This was a backend route cleanup
     only; no folder move, schema migration, or runtime conversion was needed.
 345. Tighten shared backend product image and branch-stock helper loops. Done:
-    `backend/src/routes/products.js` now seeds branch-stock rows, persists
+    `backend/src/routes/products.ts` now seeds branch-stock rows, persists
     product image galleries, loads image maps, and attaches gallery payloads
     with direct loops. This was a backend route cleanup only; no folder move,
     schema migration, or runtime conversion was needed.
 346. Tighten backend product lookup metadata assembly loops. Done:
-    `backend/src/routes/products.js` now parses brand options, builds lookup
+    `backend/src/routes/products.ts` now parses brand options, builds lookup
     usage entries, collects sample products, and prepares brand/category/unit
     rows with direct loops. This was a backend route cleanup only; no folder
     move, schema migration, or runtime conversion was needed.
 347. Tighten backend product search filter and branch-stock attachment loops.
-    Done: `backend/src/routes/products.js` now builds product ID bindings,
+    Done: `backend/src/routes/products.ts` now builds product ID bindings,
     search clauses, lookup filters, metadata distinct values, branch-stock
     placeholders, branch-stock groups, and branch-stock response payloads with
     direct loops. This was a backend route cleanup only; no folder move, schema
     migration, or runtime conversion was needed.
 348. Tighten backend product family expansion and search response loops. Done:
-    `backend/src/routes/products.js` now filters family sources, scans family
+    `backend/src/routes/products.ts` now filters family sources, scans family
     rows, binds family SQL values, parses paged rows, collects batch IDs, and
     attaches batch payloads with direct loops. This was a backend route cleanup
     only; no folder move, schema migration, or runtime conversion was needed.
 349. Tighten backend product lookup replacement and legacy list response
-    loops. Done: `backend/src/routes/products.js` now builds lookup
+    loops. Done: `backend/src/routes/products.ts` now builds lookup
     replacement placeholders, parses legacy product list rows, collects batch
     lookup IDs, and assembles product/batch payloads with direct loops. This
     was a backend route cleanup only; no folder move, schema migration, or
     runtime conversion was needed.
 350. Tighten backend product edit stock adjustment movement loops. Done:
-    `backend/src/routes/products.js` now processes manual stock reduction
+    `backend/src/routes/products.ts` now processes manual stock reduction
     allocations and inventory movement inserts with direct loops and
     precomputed product/cost values. This was a backend route cleanup only; no
     folder move, schema migration, or runtime conversion was needed.
@@ -2895,19 +2895,19 @@ Decision rule:
     were preserved. This was a retention cleanup only; no folder move, schema
     migration, or runtime conversion was needed.
 352. Tighten backend product bulk-import setup loops. Done:
-    `backend/src/routes/products.js` now counts legacy image payload bytes,
+    `backend/src/routes/products.ts` now counts legacy image payload bytes,
     matches image-only imports, and builds category, unit, and brand lookup
     maps with direct loops instead of allocation-heavy callback chains. This
     was a backend route cleanup only; no folder move, schema migration, or
     runtime conversion was needed.
 353. Tighten backend product bulk-import image and batch reset loops. Done:
-    `backend/src/routes/products.js` now builds batch reset placeholders,
+    `backend/src/routes/products.ts` now builds batch reset placeholders,
     parses import image references, loads current image galleries, collects
     resolved import images, seeds new-product branch stock, and cleans imported
     brand options with direct loops. This was a backend route cleanup only; no
     folder move, schema migration, or runtime conversion was needed.
 354. Tighten backend product import signature and sales checkout loops. Done:
-    `backend/src/routes/products.js` now builds product import signatures with
+    `backend/src/routes/products.ts` now builds product import signatures with
     a direct loop, and `backend/src/routes/sales.ts` now normalizes checkout
     branch context, sale items, product metadata lookup, batch migration, and
     allocation/movement writes with direct loops. This was a backend route
@@ -3211,7 +3211,7 @@ Decision rule:
     import-service cleanup only; no folder move, schema migration, or language
     conversion was needed.
 402. Tighten product-route branch and sorted-map helpers. Done:
-    `backend/src/routes/products.js` now shares direct-loop helpers for default
+    `backend/src/routes/products.ts` now shares direct-loop helpers for default
     branch selection, branch-by-id lookup, branch-by-name lookup, bounded set
     materialization, sorted map values, and import same-detail product
     matching. A callback scan now reports no `map()`, `filter()`, `forEach()`,
@@ -5379,6 +5379,27 @@ Decision rule:
     remain blocked on the future compile/staging lane. The expected generated
     language audit now reports `JavaScript: 2`, `TypeScript: 309`, and
     `React TSX: 107` across the active scan roots.
+
+621. Convert products route to a package-safe TypeScript path.
+    Done: `backend/src/routes/products.ts` keeps product CRUD, variant
+    grouping, product image upload/compression, conflict handling, special and
+    promotion price normalization, expiry fields, batch seeding, branch stock
+    seeding, bulk import policy checks, lookup replacement, product search,
+    pagination, media cleanup, action history, audit logging, and broadcasts on
+    the existing CommonJS route style. Server mounting, route contracts,
+    product search pagination checks, product expiry checks, product batch
+    hierarchy checks, portal inventory regression checks, import decision
+    integrity checks, frontend action-stability checks, hardening policy,
+    backend route docs, master plan, language-runtime audit metadata, and
+    roadmap docs now point at the explicit `.ts` route path. Focused product
+    route load, route-contract, product search, product expiry, product batch,
+    portal regression, import decision, frontend action-stability, stale-path,
+    backend utility, schema audit, Linux packaging, and source-load proof
+    passed. Packaging still warns for direct `.ts` entries in `pkg.scripts`,
+    so broader backend conversions remain blocked on the future
+    compile/staging lane. The expected generated language audit now reports
+    `JavaScript: 1`, `TypeScript: 310`, and `React TSX: 107` across the active
+    scan roots.
 
 ## Safety Gates
 

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 620.
+- Latest completed implementation move in this roadmap: Move 621.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2473,7 +2473,7 @@ Cleanup checkpoint:
   materialization blocks are gone and
   `backend/test/portalInventoryRegression.test.ts` guards the helper contract.
 - Move 176 optimizes image-only product bulk import matching:
-  `backend/src/routes/products.js` now builds one normalized product-name map
+  `backend/src/routes/products.ts` now builds one normalized product-name map
   before walking uploaded image filenames. Matching each filename to a product
   is now a direct map lookup instead of a repeated active-product scan, keeping
   the same name-based behavior while improving large image-import batches.
@@ -3834,7 +3834,7 @@ Move 341 status:
 
 Move 342 status:
 - Move 342 reuses direct-loop ID and token normalization in
-  `backend/src/routes/products.js`. Product image map loading, product search
+  `backend/src/routes/products.ts`. Product image map loading, product search
   `include` parsing, comma-separated search terms, ID filters, branch-stock
   hydration IDs, lookup replacement source values, and inline image-list
   parsing now avoid repeated chained map/filter/dedupe arrays. The route keeps
@@ -3970,7 +3970,7 @@ Move 354 status:
 
 Move 355 status:
 - Move 355 tightens shared product image and branch-stock helper loops in
-  `backend/src/routes/products.js`. Branch-stock seeding, product image gallery
+  `backend/src/routes/products.ts`. Branch-stock seeding, product image gallery
   persistence, image-map loading, and gallery attachment now use direct loops
   instead of `forEach()`/`map()` callback chains. Gallery order, primary image
   selection, product payload shape, branch-stock seed behavior, and SQL
@@ -3980,7 +3980,7 @@ Move 355 status:
 
 Move 356 status:
 - Move 356 tightens product lookup metadata assembly in
-  `backend/src/routes/products.js`. Brand option parsing, lookup usage entry
+  `backend/src/routes/products.ts`. Brand option parsing, lookup usage entry
   construction, product sample collection, and brand/category/unit row
   preparation now use direct loops instead of filter/map/forEach chains.
   Snapshot versioning, lookup sorting, unresolved counts, sample product
@@ -3990,7 +3990,7 @@ Move 356 status:
 
 Move 357 status:
 - Move 357 tightens product search filter and branch-stock attachment loops in
-  `backend/src/routes/products.js`. Product ID bindings, search term clauses,
+  `backend/src/routes/products.ts`. Product ID bindings, search term clauses,
   lookup field filters, metadata distinct-value extraction, branch-stock SQL
   placeholders, branch-stock grouping, and branch-stock payload attachment now
   use direct loops instead of `map()`/`forEach()` chains. SQL parameter names,
@@ -4001,7 +4001,7 @@ Move 357 status:
 
 Move 358 status:
 - Move 358 tightens product family expansion and search response assembly in
-  `backend/src/routes/products.js`. Family source filtering, family row
+  `backend/src/routes/products.ts`. Family source filtering, family row
   scanning, bounded bind-list construction, expanded row custom-field parsing,
   duplicate removal, paged search row parsing, batch ID collection, and batch
   payload attachment now use direct loops. The explicit `.slice(0, 100)` guard
@@ -4013,7 +4013,7 @@ Move 358 status:
 
 Move 359 status:
 - Move 359 tightens product lookup replacement and legacy product list response
-  assembly in `backend/src/routes/products.js`. Lookup replacement placeholder
+  assembly in `backend/src/routes/products.ts`. Lookup replacement placeholder
   construction, legacy product row parsing, product ID collection for batch
   lookup, and final product/batch payload assembly now use direct loops instead
   of `map()` chains. Lookup replacement SQL, audit payloads, raw branch-stock
@@ -4024,7 +4024,7 @@ Move 359 status:
 
 Move 360 status:
 - Move 360 tightens product edit stock adjustment movement loops in
-  `backend/src/routes/products.js`. Batch allocation results for manual stock
+  `backend/src/routes/products.ts`. Batch allocation results for manual stock
   reductions now flow through direct loops, and inventory movement insertion
   now uses a direct loop with precomputed product name and purchase-price
   values. Branch-specific and all-branch removal checks, allocation order,
@@ -4047,7 +4047,7 @@ Move 361 status:
 
 Move 362 status:
 - Move 362 tightens the legacy product bulk-import setup path in
-  `backend/src/routes/products.js`. Base64 image byte counting, image-only
+  `backend/src/routes/products.ts`. Base64 image byte counting, image-only
   product matching, category/unit lookup maps, and brand option lookup maps now
   use direct loops instead of `reduce()`, `forEach()`, and chained `map()` /
   `filter()` allocations. Import size limits, image-only matching behavior,
@@ -4058,7 +4058,7 @@ Move 362 status:
 
 Move 363 status:
 - Move 363 completes the next obvious legacy product bulk-import callback-chain
-  cleanup in `backend/src/routes/products.js`. Batch-stock reset ID/placeholder
+  cleanup in `backend/src/routes/products.ts`. Batch-stock reset ID/placeholder
   construction, image-reference parsing, current-gallery loading, pre-resolved
   import image collection, new-product branch-stock seeding, and final imported
   brand cleanup now use direct loops. Batch reset behavior, CSV image order and
@@ -4070,7 +4070,7 @@ Move 363 status:
 
 Move 364 status:
 - Move 364 closes the simple product import-signature projection cleanup and
-  starts the backend sales checkout hot-path cleanup. `backend/src/routes/products.js`
+  starts the backend sales checkout hot-path cleanup. `backend/src/routes/products.ts`
   now builds import-detail signature parts with a direct loop, and
   `backend/src/routes/sales.ts` now builds active-branch context, normalizes
   sale items, summarizes sale branches, dedupes checkout product IDs, maps
@@ -4647,7 +4647,7 @@ Move 411 status:
 
 Move 412 status:
 - Move 412 tightens product-route branch, import-signature, and sorted-map
-  helper paths in `backend/src/routes/products.js`. Default-branch selection,
+  helper paths in `backend/src/routes/products.ts`. Default-branch selection,
   branch-by-id lookup, branch-by-name lookup, product import same-detail
   matching, bounded set materialization, category usage sorting, and clean
   brand option sorting now use named direct-loop helpers instead of
@@ -4656,7 +4656,7 @@ Move 412 status:
   category usage ordering, brand setting persistence, and route contracts
   remain unchanged. A callback-chain scan now reports no `map()`, `filter()`,
   `forEach()`, `reduce()`, `find()`, or `Array.from()` hits in
-  `backend/src/routes/products.js`.
+  `backend/src/routes/products.ts`.
 
 Move 413 status:
 - Move 413 tightens inventory product family expansion in
@@ -7092,3 +7092,24 @@ Move 620 status:
   backend conversions still wait for a compile/staging package lane. The
   expected generated language audit now reports `JavaScript: 2`,
   `TypeScript: 309`, and `React TSX: 107` across the active scan roots.
+
+Move 621 status:
+- Move 621 converts `backend/src/routes/products.ts` to a package-safe
+  TypeScript path. Product CRUD, variant grouping, product image
+  upload/compression, conflict handling, special and promotion price
+  normalization, expiry fields, batch seeding, branch stock seeding, bulk
+  import policy checks, lookup replacement, product search, pagination, media
+  cleanup, action history, audit logging, and broadcasts remain unchanged on
+  the existing CommonJS route style. Server mounting, route contracts, product
+  search pagination checks, product expiry checks, product batch hierarchy
+  checks, portal inventory regression checks, import decision integrity checks,
+  frontend action-stability checks, hardening policy, backend route docs,
+  master plan, language-runtime audit metadata, and roadmap docs now point at
+  the explicit `.ts` route path. Focused product route load, route-contract,
+  product search, product expiry, product batch, portal regression, import
+  decision, frontend action-stability, stale-path, source-load, backend
+  utility, schema audit, and Linux packaging proof passed. `pkg` continues to
+  warn for direct `.ts` scripts, so broader backend conversions still wait for
+  a compile/staging package lane. The expected generated language audit now
+  reports `JavaScript: 1`, `TypeScript: 310`, and `React TSX: 107` across the
+  active scan roots.

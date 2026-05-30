@@ -133,7 +133,7 @@
           "mustContain": ["routeRateLimit", "validateUploadedFile", "compressUpload"]
         },
         {
-          "path": "backend/src/routes/products.js",
+          "path": "backend/src/routes/products.ts",
           "mustContain": ["products:upload_image", "validateUploadedFile", "compressUpload"]
         },
         {

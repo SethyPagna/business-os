@@ -67,7 +67,7 @@ runTest('sales and returns stock upserts qualify branch_stock quantity for Postg
 })
 
 runTest('product image uploads compress immediately and return cache-busting metadata', () => {
-  const source = readSource('src/routes/products.js')
+  const source = readSource('src/routes/products.ts')
   assert.match(source, /validateUploadedFile,\s*compressUpload/, 'product upload route should run synchronous image compression')
   assert.match(source, /registerUploadFromRequest\(req\.file, getAuditActor\(req\), \{ deferOptimization: false \}\)/, 'product upload route should register images after immediate compression')
   assert.match(source, /public_path: asset\.public_path/, 'product upload route should return the public asset path directly')
@@ -75,7 +75,7 @@ runTest('product image uploads compress immediately and return cache-busting met
 })
 
 runTest('product updates only re-check uniqueness when identifier fields actually change', () => {
-  const source = readSource('src/routes/products.js')
+  const source = readSource('src/routes/products.ts')
   assert.match(source, /const nameChanged = normalizeProductIdentifier\(merged\.name, \{ lower: true \}\) !== normalizeProductIdentifier\(prev\.name, \{ lower: true \}\)/, 'product updates should compare normalized names before running duplicate validation')
   assert.match(source, /const skuChanged = normalizeProductIdentifier\(merged\.sku\) !== normalizeProductIdentifier\(prev\.sku\)/, 'product updates should compare SKU before duplicate validation')
   assert.match(source, /const barcodeChanged = normalizeProductIdentifier\(merged\.barcode\) !== normalizeProductIdentifier\(prev\.barcode\)/, 'product updates should compare barcode before duplicate validation')
