@@ -3,8 +3,8 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
-const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
-const { assertCatalogTextIntegrity, normalizeCatalogText } = require('../catalogTextIntegrity')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
+const { assertCatalogTextIntegrity, normalizeCatalogText } = require('../catalogTextIntegrity.ts')
 
 const router = express.Router()
 const DEFAULT_CATEGORY_COLOR = '#6366f1'

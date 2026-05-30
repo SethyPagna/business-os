@@ -8,7 +8,7 @@ const { ok, err, audit, recordActionHistory, broadcast, logOp, tryParse } = requ
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
 const { registerUploadFromRequest, storeDataUrlAsset } = require('../fileAssets')
 const { isSafeExternalImageReference } = require('../netSecurity')
-const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { sanitizeMediaList } = require('../settingsSnapshot')
 const { normalizeClientRequestId } = require('../idempotency.ts')
 const { normalizePriceValue } = require('../money.ts')
@@ -21,7 +21,7 @@ const {
   hasSuspiciousCatalogText,
   normalizeCatalogText,
   normalizeOptionList,
-} = require('../catalogTextIntegrity')
+} = require('../catalogTextIntegrity.ts')
 const {
   hasImportValue,
   normalizeFieldRule,

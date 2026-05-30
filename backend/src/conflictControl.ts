@@ -1,6 +1,17 @@
 'use strict'
 
+/**
+ * @typedef {Record<string, unknown> & { updated_at?: unknown }} ConflictRecord
+ * @typedef {{ status(code: number): { json(payload: Record<string, unknown>): unknown } }} JsonResponse
+ */
+
 class WriteConflictError extends Error {
+  /**
+   * @param {string} entity
+   * @param {ConflictRecord | null | undefined} currentRecord
+   * @param {unknown} expectedUpdatedAt
+   * @param {'updated' | 'deleted'} [reason]
+   */
   constructor(entity, currentRecord, expectedUpdatedAt, reason = 'updated') {
     super(reason === 'deleted'
       ? `This ${entity} was removed on another device. Refresh and try again.`
@@ -14,11 +25,19 @@ class WriteConflictError extends Error {
   }
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
 function normalizeUpdatedAt(value) {
   const normalized = String(value || '').trim()
   return normalized || null
 }
 
+/**
+ * @param {Record<string, unknown>} [payload]
+ * @returns {string | null}
+ */
 function getExpectedUpdatedAt(payload = {}) {
   return normalizeUpdatedAt(
     payload.expectedUpdatedAt
@@ -28,6 +47,12 @@ function getExpectedUpdatedAt(payload = {}) {
   )
 }
 
+/**
+ * @param {string} entity
+ * @param {ConflictRecord | null | undefined} currentRecord
+ * @param {unknown} expectedUpdatedAt
+ * @returns {void}
+ */
 function assertUpdatedAtMatch(entity, currentRecord, expectedUpdatedAt) {
   const expected = normalizeUpdatedAt(expectedUpdatedAt)
   if (!expected) return
@@ -40,6 +65,11 @@ function assertUpdatedAtMatch(entity, currentRecord, expectedUpdatedAt) {
   }
 }
 
+/**
+ * @param {JsonResponse} res
+ * @param {WriteConflictError} error
+ * @returns {unknown}
+ */
 function sendWriteConflict(res, error) {
   return res.status(error.status || 409).json({
     success: false,
@@ -54,6 +84,12 @@ function sendWriteConflict(res, error) {
   })
 }
 
+/**
+ * @param {JsonResponse} res
+ * @param {WriteConflictError} error
+ * @param {{ currentSettings?: Record<string, unknown>, attempted?: Record<string, unknown> }} [options]
+ * @returns {unknown}
+ */
 function sendSettingsConflict(res, error, { currentSettings = {}, attempted = {} } = {}) {
   return res.status(error.status || 409).json({
     success: false,

@@ -3,7 +3,7 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, parseCSVRows } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
-const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const {
   CONTACT_OPTION_LIMIT,
   buildImportedContactState,

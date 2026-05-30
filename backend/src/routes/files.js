@@ -3,7 +3,7 @@
 const express = require('express')
 const { authToken, assetUpload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
 const { ok, err, audit, broadcast } = require('../helpers')
-const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { enqueueMediaOptimization } = require('../services/mediaQueue')
 const {
   deleteFileAsset,

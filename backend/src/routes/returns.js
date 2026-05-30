@@ -3,7 +3,7 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, recordActionHistory, broadcast, getSafeCostPrice } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
-const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { normalizeClientRequestId } = require('../idempotency.ts')
 const {
   allocateProductBatches,

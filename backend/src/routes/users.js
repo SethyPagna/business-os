@@ -27,7 +27,7 @@ const {
   getDefaultOrganizationGroup,
   getOrganizationContextForUser,
 } = require('../organizationContext')
-const { assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { revokeUserSessions } = require('../sessionAuth')
 
 const router = express.Router()

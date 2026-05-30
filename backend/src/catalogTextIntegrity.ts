@@ -4,6 +4,15 @@ const SUSPICIOUS_REPEATED_QUESTION_RE = /\?{2,}/
 const SUSPICIOUS_MOJIBAKE_RE = /(?:Ã¯Â¿|Ã¢â‚¬|Ã¢â€š|Ãƒ[\x80-\xBF]|Ã‚[\x80-\xBF])/i
 const SUSPICIOUS_SINGLE_QUESTION_RE = /(?:[A-Za-z\u00C0-\u024F]\?[A-Za-z\u00C0-\u024F])|(?:[A-Za-z\u00C0-\u024F]'\?[A-Za-z\u00C0-\u024F])|(?:^\?+$)/u
 
+/**
+ * @typedef {{ defaultValue?: string, preserveNull?: boolean }} CatalogTextOptions
+ */
+
+/**
+ * @param {unknown} value
+ * @param {CatalogTextOptions} [options]
+ * @returns {string | null}
+ */
 function normalizeCatalogText(value, { defaultValue = '', preserveNull = false } = {}) {
   if (value === undefined || value === null) return preserveNull ? null : defaultValue
   const normalized = String(value)
@@ -15,6 +24,10 @@ function normalizeCatalogText(value, { defaultValue = '', preserveNull = false }
   return normalized || (preserveNull ? null : defaultValue)
 }
 
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
 function hasSuspiciousCatalogText(value) {
   if (typeof value !== 'string') return false
   const normalized = normalizeCatalogText(value)
@@ -25,6 +38,11 @@ function hasSuspiciousCatalogText(value) {
   return SUSPICIOUS_MOJIBAKE_RE.test(normalized)
 }
 
+/**
+ * @param {Record<string, unknown>} [record]
+ * @param {unknown[]} [fields]
+ * @returns {string[]}
+ */
 function listSuspiciousCatalogFields(record = {}, fields = []) {
   const suspiciousFields = []
   for (const value of Array.isArray(fields) ? fields : []) {
@@ -36,12 +54,22 @@ function listSuspiciousCatalogFields(record = {}, fields = []) {
   return suspiciousFields
 }
 
+/**
+ * @param {Record<string, unknown>} [record]
+ * @param {unknown[]} [fields]
+ * @param {string} [label]
+ * @returns {void}
+ */
 function assertCatalogTextIntegrity(record = {}, fields = [], label = 'catalog text') {
   const suspiciousFields = listSuspiciousCatalogFields(record, fields)
   if (!suspiciousFields.length) return
   throw new Error(`${label} looks corrupted in: ${suspiciousFields.join(', ')}`)
 }
 
+/**
+ * @param {unknown[]} [values]
+ * @returns {string[]}
+ */
 function normalizeOptionList(values = []) {
   const canonical = new Map()
   for (const rawValue of Array.isArray(values) ? values : []) {

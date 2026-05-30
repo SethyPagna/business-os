@@ -8,7 +8,7 @@ const { getMediaQueueStatus, initializeMediaQueue } = require('../services/media
 const { getRuntimeCacheStatus, pingRuntimeCache } = require('../runtimeCache')
 const { getRuntimeVersion } = require('../runtimeVersion')
 const { db } = require('../database')
-const { hasSuspiciousCatalogText } = require('../catalogTextIntegrity')
+const { hasSuspiciousCatalogText } = require('../catalogTextIntegrity.ts')
 
 const router = express.Router()
 const PRODUCT_CATALOG_FIELDS = ['name', 'brand', 'category', 'unit', 'description', 'supplier']

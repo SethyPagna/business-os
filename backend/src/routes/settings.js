@@ -3,7 +3,7 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, broadcast, logOp, audit } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
-const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl')
+const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl.ts')
 const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
 const { requestUploadStorageReconcile } = require('../fileAssets')
 const { hasColumn } = require('../schemaMetadata')
@@ -12,7 +12,7 @@ const {
   hasSuspiciousCatalogText,
   normalizeCatalogText,
   normalizeOptionList,
-} = require('../catalogTextIntegrity')
+} = require('../catalogTextIntegrity.ts')
 
 const router = express.Router()
 const SETTINGS_CONFLICT_CODE = 'settings_conflict'

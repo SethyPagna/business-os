@@ -7,7 +7,7 @@ const { normalizePriceValue } = require('../money.ts')
 const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')
 const { getStockMetrics } = require('../businessMetrics')
-const { normalizeCatalogText } = require('../catalogTextIntegrity')
+const { normalizeCatalogText } = require('../catalogTextIntegrity.ts')
 const { normalizeClientRequestId } = require('../idempotency.ts')
 const { firstExistingColumn } = require('../schemaMetadata')
 const {

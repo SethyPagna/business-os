@@ -45,7 +45,7 @@ const {
   hasSuspiciousCatalogText,
   normalizeCatalogText,
   normalizeOptionList,
-} = require('../catalogTextIntegrity')
+} = require('../catalogTextIntegrity.ts')
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
 const MAX_ZIP_IMAGES = 25_000
