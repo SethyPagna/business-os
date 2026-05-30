@@ -17,7 +17,7 @@ const { getDefaultOrganization, getPortalPublicPath } = require('../organization
 const { assertSafeOutboundUrl, isSafeExternalImageReference } = require('../netSecurity')
 const { sanitizeMediaList, sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
 const { getOrSetJson } = require('../runtimeCache')
-const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
+const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')
 
 const router = express.Router()
 

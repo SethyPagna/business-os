@@ -1,5 +1,12 @@
 'use strict'
 
+/**
+ * @typedef {'latin' | 'number' | 'khmer' | 'other' | 'symbol'} InitialType
+ * @typedef {{ value?: unknown, count?: unknown }} InitialRow
+ * @typedef {{ key: string, label: string, count: number, type: InitialType }} InitialAggregate
+ */
+
+/** @type {string[]} */
 const KHMER_INITIALS = [
   '\u1780', '\u1781', '\u1782', '\u1783', '\u1784',
   '\u1785', '\u1786', '\u1787', '\u1788', '\u1789',
@@ -10,7 +17,9 @@ const KHMER_INITIALS = [
   '\u179F', '\u17A0', '\u17A1', '\u17A2',
 ]
 
+/** @returns {Map<string, number>} */
 function buildKhmerOrder() {
+  /** @type {Map<string, number>} */
   const order = new Map()
   for (let index = 0; index < KHMER_INITIALS.length; index += 1) {
     order.set(KHMER_INITIALS[index], index)
@@ -21,10 +30,12 @@ function buildKhmerOrder() {
 const KHMER_ORDER = buildKhmerOrder()
 const khmerCollator = new Intl.Collator('km', { sensitivity: 'base' })
 
+/** @param {unknown} value @returns {string} */
 function normalizeInitialText(value) {
   return String(value || '').normalize('NFC').trim().replace(/\s+/g, ' ')
 }
 
+/** @param {unknown} value @returns {string} */
 function getInitialKey(value) {
   const first = [...normalizeInitialText(value)][0] || ''
   if (!first) return '#'
@@ -36,6 +47,7 @@ function getInitialKey(value) {
   return first
 }
 
+/** @param {unknown} key @returns {InitialType} */
 function getInitialType(key) {
   const value = String(key || '')
   if (/^[A-Z]$/.test(value)) return 'latin'
@@ -45,10 +57,12 @@ function getInitialType(key) {
   return 'symbol'
 }
 
+/** @param {unknown} left @param {unknown} right @returns {number} */
 function compareInitialKeys(left, right) {
   const a = String(left || '')
   const b = String(right || '')
   if (a === b) return 0
+  /** @param {unknown} key @returns {number} */
   const rank = (key) => {
     const type = getInitialType(key)
     if (type === 'latin') return 1
@@ -63,13 +77,15 @@ function compareInitialKeys(left, right) {
   if (getInitialType(a) === 'khmer' && getInitialType(b) === 'khmer') {
     const knownA = KHMER_ORDER.has(a)
     const knownB = KHMER_ORDER.has(b)
-    if (knownA && knownB) return KHMER_ORDER.get(a) - KHMER_ORDER.get(b)
+    if (knownA && knownB) return (KHMER_ORDER.get(a) || 0) - (KHMER_ORDER.get(b) || 0)
     return khmerCollator.compare(a, b)
   }
   return a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
 }
 
+/** @param {InitialRow[]} [rows] @returns {InitialAggregate[]} */
 function aggregateInitialRows(rows = []) {
+  /** @type {Map<string, number>} */
   const map = new Map()
   for (const row of Array.isArray(rows) ? rows : []) {
     const key = getInitialKey(row?.value)
@@ -81,6 +97,7 @@ function aggregateInitialRows(rows = []) {
   const entries = [...map.entries()]
   entries.sort(([left], [right]) => compareInitialKeys(left, right))
 
+  /** @type {InitialAggregate[]} */
   const aggregates = []
   for (const [key, count] of entries) {
     aggregates.push({

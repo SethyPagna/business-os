@@ -49,7 +49,8 @@
       "frontend-dist/**/*"
     ],
     "scripts": [
-      "src/**/*.js"
+      "src/**/*.js",
+      "src/**/*.ts"
     ],
     "targets": [
       "node24-linux-x64"

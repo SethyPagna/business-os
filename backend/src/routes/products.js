@@ -14,7 +14,7 @@ const { normalizeClientRequestId } = require('../idempotency')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
 const { hasColumn } = require('../schemaMetadata')
-const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
+const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')
 const { getStockMetrics } = require('../businessMetrics')
 const {
   assertCatalogTextIntegrity,
