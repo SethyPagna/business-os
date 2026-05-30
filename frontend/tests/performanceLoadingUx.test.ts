@@ -7,7 +7,7 @@ const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', imp
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.jsx', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.jsx', import.meta.url), 'utf8')
-const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.jsx', import.meta.url), 'utf8')
+const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
 const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
 const otpModal = fs.readFileSync(new URL('../src/components/utils-settings/OtpModal.tsx', import.meta.url), 'utf8')
 const resetData = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
@@ -1240,17 +1240,17 @@ assert.match(
 )
 assert.match(
   auditLog,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getAuditLogs\(params\),\s*'Audit log',\s*AUDIT_LOG_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getAuditApi\(\)\.getAuditLogs\(params\),\s*'Audit log',\s*AUDIT_LOG_LOAD_TIMEOUT_MS,\s*\)/,
   'audit log should timeout slow audit reads with the explicit constant',
 )
 assert.match(
   auditLog,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.deleteAuditLogsRetention\(30\),\s*'Clear old audit logs',\s*AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getAuditApi\(\)\.deleteAuditLogsRetention\(30\),\s*'Clear old audit logs',\s*AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,\s*\)/,
   'audit log retention cleanup should timeout slow delete actions',
 )
 assert.match(
   auditLog,
-  /function normalizeFiniteIdsFrom\(items = \[\], getValue = \(value\) => value\)/,
+  /function normalizeFiniteIdsFrom<T>\(items: T\[\] = \[\], getValue: \(value: T\) => unknown = \(value\) => value\): number\[\]/,
   'audit log selection should share a finite-id normalization helper',
 )
 assert.match(

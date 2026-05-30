@@ -3582,7 +3582,7 @@ Move 324 status:
 
 Move 325 status:
 - Move 325 reuses Audit Log selection and filter-count helpers:
-  `frontend/src/components/utils-settings/AuditLog.jsx` now builds one memoized
+  `frontend/src/components/utils-settings/AuditLog.tsx` now builds one memoized
   visible log ID list for selection cleanup/select-all, normalizes section/group
   selection IDs through `normalizeFiniteIds()`, counts partial selection state
   through `countSelectedIds()`, and counts active filters through
@@ -5874,3 +5874,15 @@ Move 540 status:
   the sidebar/profile extensionless import path, profile/OTP/auth-method
   timeout contracts, avatar CORS guardrails, Google OAuth source checks, and
   same-tick profile/password/avatar upload guards unchanged.
+
+Move 541 status:
+- Move 541 converts the audit log shell to
+  `frontend/src/components/utils-settings/AuditLog.tsx`. The typed boundary
+  now covers audit log rows, paged audit responses, audit user filters, app
+  context access, the local audit API gateway, detail-row props, export items,
+  grouped selection ids, sort/group modes, animation-frame refs, loader
+  watchdog refs, and error extraction. The move keeps the extensionless app
+  lazy import, utils-settings barrel export, audit read and retention cleanup
+  timeout contracts, same-tick retention cleanup guard, grouped selection
+  helpers, CSV export behavior, and source guard behavior unchanged while
+  making refresh click handling explicit.

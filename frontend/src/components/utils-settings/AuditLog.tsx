@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { ChevronDown, ChevronRight, ClipboardList, Clock3, MonitorSmartphone, RefreshCw, Search, User2, X } from 'lucide-react'
-import { isBrokenLocalizedString, useApp } from '../../AppContext'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.jsx'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
@@ -15,11 +16,98 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
+type SortDirection = 'asc' | 'desc'
+type AuditGroupMode = 'time' | 'time+action'
+type TranslateFn = (key: string) => string
+
+interface AuditUserOption {
+  id?: string | number | null
+  name?: string | null
+}
+
+interface AuditLogRow {
+  id?: string | number | null
+  action?: string | null
+  table_name?: string | null
+  entity?: string | null
+  user_name?: string | null
+  device_name?: string | null
+  device_tz?: string | null
+  client_time?: string | null
+  created_at?: string | null
+  old_value?: string | null
+  new_value?: string | null
+  details?: string | null
+}
+
+interface AuditLogResponse {
+  items?: AuditLogRow[]
+  total?: number | string | null
+  partial?: boolean
+  source?: string | null
+  filters?: {
+    users?: AuditUserOption[]
+  }
+}
+
+interface AuditLogParams {
+  page: number
+  pageSize: number
+  search?: string
+  action?: string
+  userId?: string
+  startDate?: string
+  endDate?: string
+}
+
+interface AuditApi {
+  getAuditLogs(params: AuditLogParams): Promise<AuditLogResponse | AuditLogRow[]>
+  deleteAuditLogsRetention(olderThanDays: number): Promise<unknown>
+}
+
+interface AppContextValue {
+  t: TranslateFn
+  user?: {
+    role_code?: unknown
+    username?: unknown
+  } | null
+  hasPermission?: (permission: string) => boolean
+}
+
+interface DetailRowProps {
+  label: ReactNode
+  value: unknown
+  mono?: boolean
+}
+
+type AuditFallback = string | { en?: string; km?: string }
+
+interface ExportItem {
+  label: string
+  onClick: () => void
+  color?: string
+}
+
+const useApp = useAppHook as () => AppContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+function getAuditApi(): AuditApi {
+  return (window as unknown as { api: AuditApi }).api
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
 const DEFAULT_ACTION_CLASS = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
 const AUDIT_LOG_LOAD_TIMEOUT_MS = 20000
 const AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS = 12000
 
-const ACTION_COLOR_CLASS = {
+const ACTION_COLOR_CLASS: Record<string, string> = {
   create: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   update: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   delete: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
@@ -43,18 +131,20 @@ const ACTION_COLOR_CLASS = {
   backup_restore: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300',
 }
 
-function toIso(raw) {
+function toIso(raw: unknown): string | null {
   if (!raw) return null
-  if (raw.includes('T') || raw.endsWith('Z')) return raw
-  return `${raw.replace(' ', 'T')}Z`
+  const value = String(raw)
+  if (value.includes('T') || value.endsWith('Z')) return value
+  return `${value.replace(' ', 'T')}Z`
 }
 
-function formatDateTime(raw) {
+function formatDateTime(raw: unknown): string {
   const iso = toIso(raw)
   if (!iso) return '--'
+  const fallback = String(raw)
   try {
     const date = new Date(iso)
-    if (Number.isNaN(date.getTime())) return raw
+    if (Number.isNaN(date.getTime())) return fallback
     return date.toLocaleString(undefined, {
       year: 'numeric',
       month: 'short',
@@ -65,22 +155,22 @@ function formatDateTime(raw) {
       hour12: false,
     })
   } catch {
-    return raw
+    return fallback
   }
 }
 
-function formatLogTime(log) {
+function formatLogTime(log: AuditLogRow): string {
   return formatDateTime(log.client_time || log.created_at)
 }
 
-function getLogEpoch(log) {
+function getLogEpoch(log: AuditLogRow | null | undefined): number {
   const iso = toIso(log?.client_time || log?.created_at)
   if (!iso) return 0
   const epoch = new Date(iso).getTime()
   return Number.isFinite(epoch) ? epoch : 0
 }
 
-function formatJsonPretty(value) {
+function formatJsonPretty(value: string): string {
   try {
     return JSON.stringify(JSON.parse(value), null, 2)
   } catch {
@@ -88,7 +178,7 @@ function formatJsonPretty(value) {
   }
 }
 
-function parseLogJson(raw) {
+function parseLogJson(raw: string | null | undefined): unknown {
   try {
     return raw ? JSON.parse(raw) : null
   } catch {
@@ -96,7 +186,7 @@ function parseLogJson(raw) {
   }
 }
 
-function flattenSummaryValue(value) {
+function flattenSummaryValue(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null
   if (Array.isArray(value)) {
     return value
@@ -104,7 +194,7 @@ function flattenSummaryValue(value) {
       .filter(Boolean)
       .join(', ')
   }
-  if (typeof value === 'object') {
+  if (isRecord(value)) {
     const entries = Object.entries(value)
       .filter(([, entryValue]) => entryValue !== null && entryValue !== undefined && entryValue !== '')
       .slice(0, 4)
@@ -115,15 +205,15 @@ function flattenSummaryValue(value) {
   return String(value)
 }
 
-function formatEntityName(log) {
+function formatEntityName(log: AuditLogRow): string {
   const raw = String(log.table_name || log.entity || '').trim()
   if (!raw) return 'System'
   return raw.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
-function readableSummary(log) {
+function readableSummary(log: AuditLogRow): string | null {
   const parsed = parseLogJson(log.new_value)
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+  if (isRecord(parsed)) {
     const keys = ['name', 'receiptNumber', 'returnNumber', 'username', 'reason', 'status', 'branch', 'destinationDir', 'sourceDir', 'notes', 'platform', 'membershipNumber']
     const parts = keys
       .filter((key) => parsed[key] !== undefined && parsed[key] !== null && parsed[key] !== '')
@@ -141,19 +231,19 @@ function readableSummary(log) {
   return null
 }
 
-function normalizeFiniteIdsFrom(items = [], getValue = (value) => value) {
+function normalizeFiniteIdsFrom<T>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
   return items.reduce((normalized, item) => {
     const id = Number(getValue(item))
     if (Number.isFinite(id)) normalized.push(id)
     return normalized
-  }, [])
+  }, [] as number[])
 }
 
-function normalizeFiniteIds(ids = []) {
+function normalizeFiniteIds(ids: unknown[] = []): number[] {
   return normalizeFiniteIdsFrom(ids)
 }
 
-function countSelectedIds(ids = [], selectedIds = new Set()) {
+function countSelectedIds(ids: number[] = [], selectedIds: Set<number> = new Set()): number {
   let count = 0
   for (const id of ids) {
     if (selectedIds.has(id)) count += 1
@@ -161,7 +251,7 @@ function countSelectedIds(ids = [], selectedIds = new Set()) {
   return count
 }
 
-function countActiveFlags(flags = []) {
+function countActiveFlags(flags: boolean[] = []): number {
   let count = 0
   for (const flag of flags) {
     if (flag) count += 1
@@ -169,7 +259,7 @@ function countActiveFlags(flags = []) {
   return count
 }
 
-function DetailRow({ label, value, mono }) {
+function DetailRow({ label, value, mono = false }: DetailRowProps) {
   if (!value && value !== 0) return null
   return (
     <div className="flex gap-3">
@@ -184,34 +274,34 @@ function DetailRow({ label, value, mono }) {
 export default function AuditLog() {
   const { t, user, hasPermission } = useApp()
   const isActive = useIsPageActive('audit_log')
-  const [logs, setLogs] = useState([])
+  const [logs, setLogs] = useState<AuditLogRow[]>([])
   const [search, setSearch] = useState('')
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [actionFilter, setActionFilter] = useState('all')
   const [userFilter, setUserFilter] = useState('all')
-  const [auditUsers, setAuditUsers] = useState([])
+  const [auditUsers, setAuditUsers] = useState<AuditUserOption[]>([])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [totalLogs, setTotalLogs] = useState(0)
-  const [groupMode, setGroupMode] = useState('time')
-  const [sortDirection, setSortDirection] = useState('desc')
-  const [collapsedSections, setCollapsedSections] = useState(() => new Set())
-  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [groupMode, setGroupMode] = useState<AuditGroupMode>('time')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [initialDesktopRevealReady, setInitialDesktopRevealReady] = useState(false)
   const [initialMobileRevealReady, setInitialMobileRevealReady] = useState(false)
-  const [detailLog, setDetailLog] = useState(null)
-  const [error, setError] = useState(null)
+  const [detailLog, setDetailLog] = useState<AuditLogRow | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [clearingOldLogs, setClearingOldLogs] = useState(false)
   const skeletonRows = useMemo(() => Array.from({ length: 8 }, (_, index) => index), [])
   const loadedOnceRef = useRef(false)
   const pageLoadRequestedRef = useRef(false)
   const loadRequestRef = useRef(0)
-  const loadWatchdogRef = useRef(null)
+  const loadWatchdogRef = useRef<number | null>(null)
   const clearOldLogsInFlightRef = useRef(false)
-  const selectAllRef = useRef(null)
+  const selectAllRef = useRef<HTMLInputElement | null>(null)
   const aliveRef = useRef(true)
   const isAdmin = useMemo(() => {
     const roleCode = String(user?.role_code || '').toLowerCase()
@@ -220,7 +310,7 @@ export default function AuditLog() {
   }, [hasPermission, user])
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
-  const actionLabels = useMemo(() => ({
+  const actionLabels = useMemo<Record<string, string>>(() => ({
     create: t('create') || 'Create',
     update: t('edit') || 'Update',
     delete: t('delete') || 'Delete',
@@ -244,7 +334,7 @@ export default function AuditLog() {
     backup_restore: `${t('backup') || 'Backup'} ${t('restore') || 'Restore'}`,
   }), [t])
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const auditFallbacks = useMemo(() => ({
+  const auditFallbacks = useMemo<Record<string, AuditFallback>>(() => ({
     all_time: { en: 'All time', km: 'គ្រប់ពេល' },
     time: 'ពេលវេលា',
     sort: 'តម្រៀប',
@@ -254,7 +344,7 @@ export default function AuditLog() {
     export: 'នាំចេញ',
     entries: 'កំណត់ត្រា',
   }), [])
-  const copy = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const copy = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const override = auditFallbacks[key]
     if (override && typeof override === 'object') {
       if (isKhmer && override.km && !isBrokenLocalizedString(override.km)) return override.km
@@ -268,18 +358,18 @@ export default function AuditLog() {
     return isBrokenLocalizedString(fallbackEn) ? key : fallbackEn
   }, [auditFallbacks, isKhmer, t])
 
-  const actionLabel = useCallback((action) => {
+  const actionLabel = useCallback((action: unknown): string => {
     if (!action) return '--'
     const key = String(action).toLowerCase()
     return actionLabels[key] || key.replace(/_/g, ' ')
   }, [actionLabels])
 
-  const actionColorClass = useCallback((action) => {
+  const actionColorClass = useCallback((action: unknown): string => {
     if (!action) return DEFAULT_ACTION_CLASS
     return ACTION_COLOR_CLASS[String(action).toLowerCase()] || DEFAULT_ACTION_CLASS
   }, [])
 
-  const auditDateRange = useMemo(() => {
+  const auditDateRange = useMemo<Pick<AuditLogParams, 'startDate' | 'endDate'>>(() => {
     if (yearFilter === 'all') return {}
     const year = Number(yearFilter)
     if (!Number.isFinite(year)) return {}
@@ -298,7 +388,7 @@ export default function AuditLog() {
     }
   }, [monthFilter, yearFilter])
 
-  const load = useCallback(async (silent = false) => {
+  const load = useCallback(async (silent = false): Promise<void> => {
     const requestId = beginTrackedRequest(loadRequestRef)
     let didLoadRows = false
     if (!silent && aliveRef.current) {
@@ -312,7 +402,7 @@ export default function AuditLog() {
       }, 20000)
     }
     try {
-      const params = {
+      const params: AuditLogParams = {
         page,
         pageSize,
         search: search.trim() || undefined,
@@ -321,7 +411,7 @@ export default function AuditLog() {
         ...auditDateRange,
       }
       const data = await withLoaderTimeout(
-        () => window.api.getAuditLogs(params),
+        () => getAuditApi().getAuditLogs(params),
         'Audit log',
         AUDIT_LOG_LOAD_TIMEOUT_MS,
       )
@@ -348,13 +438,13 @@ export default function AuditLog() {
       }
       setLogs(rows)
       setTotalLogs(nextTotal)
-      setAuditUsers(Array.isArray(data?.filters?.users) ? data.filters.users : [])
+      setAuditUsers(!Array.isArray(data) && Array.isArray(data?.filters?.users) ? data.filters.users : [])
       didLoadRows = true
     } catch (err) {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       console.error('Failed to load audit logs:', err)
       if (!silent && !loadedOnceRef.current) {
-        setError(err?.message || 'Failed to load audit logs.')
+        setError(getErrorMessage(err, 'Failed to load audit logs.'))
       } else if (!silent) {
         setError('Audit log could not refresh right now. Showing the latest loaded data.')
       }
@@ -417,7 +507,7 @@ export default function AuditLog() {
   )
 
   const actionOptions = useMemo(() => {
-    const seen = new Map()
+    const seen = new Map<string, string>()
     logs.forEach((log) => {
       const key = String(log?.action || '').toLowerCase()
       if (!key) return
@@ -470,7 +560,7 @@ export default function AuditLog() {
       return
     }
     let cancelled = false
-    let nestedFrame = null
+    let nestedFrame: number | null = null
     const frame = window.requestAnimationFrame(() => {
       nestedFrame = window.requestAnimationFrame(() => {
         if (!cancelled) setInitialDesktopRevealReady(true)
@@ -494,7 +584,7 @@ export default function AuditLog() {
       return
     }
     let cancelled = false
-    let nestedFrame = null
+    let nestedFrame: number | null = null
     const frame = window.requestAnimationFrame(() => {
       nestedFrame = window.requestAnimationFrame(() => {
         if (!cancelled) setInitialMobileRevealReady(true)
@@ -530,13 +620,13 @@ export default function AuditLog() {
     selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
   }, [selectedIds.size, visibleIds.length])
 
-  const toggleSelected = useCallback((logId) => {
+  const toggleSelected = useCallback((logId: unknown) => {
     const numericId = Number(logId)
     if (!Number.isFinite(numericId)) return
     setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
   }, [])
 
-  const toggleSelectAll = useCallback((checked) => {
+  const toggleSelectAll = useCallback((checked: boolean) => {
     if (!checked) {
       setSelectedIds(new Set())
       return
@@ -544,12 +634,12 @@ export default function AuditLog() {
     setSelectedIds(new Set(visibleIds))
   }, [visibleIds])
 
-  const toggleSelectionScope = useCallback((ids, checked) => {
+  const toggleSelectionScope = useCallback((ids: unknown[], checked: boolean) => {
     const normalized = normalizeFiniteIds(ids)
     setSelectedIds((current) => toggleIdSet(current, normalized, checked))
   }, [])
 
-  const toggleSectionCollapsed = useCallback((sectionId) => {
+  const toggleSectionCollapsed = useCallback((sectionId: string) => {
     setCollapsedSections((current) => {
       const next = new Set(current)
       if (next.has(sectionId)) next.delete(sectionId)
@@ -559,7 +649,7 @@ export default function AuditLog() {
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => {
+    (ids: unknown[] = []) => {
       const normalized = normalizeFiniteIds(ids)
       return normalized.length > 0 && countSelectedIds(normalized, selectedIds) === normalized.length
     },
@@ -567,7 +657,7 @@ export default function AuditLog() {
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => {
+    (ids: unknown[] = []) => {
       const normalized = normalizeFiniteIds(ids)
       const selectedCount = countSelectedIds(normalized, selectedIds)
       return selectedCount > 0 && selectedCount < normalized.length
@@ -575,11 +665,11 @@ export default function AuditLog() {
     [selectedIds],
   )
 
-  function sessionEntryLabel(log) {
+  function sessionEntryLabel(log: AuditLogRow): string {
     return `#${Number(log?.id || 0)}`
   }
 
-  const exportRows = useCallback((rows, prefix = 'audit-log') => {
+  const exportRows = useCallback((rows: AuditLogRow[], prefix = 'audit-log') => {
     downloadCSV(`${prefix}-${new Date().toISOString().slice(0, 10)}.csv`, rows.map((log) => ({
       Entry: sessionEntryLabel(log),
       Time: formatLogTime(log),
@@ -604,12 +694,16 @@ export default function AuditLog() {
     </colgroup>
   )
 
-  const exportItems = useMemo(() => ([
+  const handleRefresh = useCallback(() => {
+    load(false)
+  }, [load])
+
+  const exportItems = useMemo<ExportItem[]>(() => ([
     { label: copy('export_visible_logs', 'Export visible logs', 'នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ'), onClick: () => exportRows(visibleLogs, 'audit-log-visible') },
     selectedLogs.length ? { label: copy('export_selected_logs', 'Export selected logs', 'នាំចេញកំណត់ហេតុដែលបានជ្រើស'), onClick: () => exportRows(selectedLogs, 'audit-log-selected'), color: 'blue' } : null,
     actionFilter !== 'all' ? { label: copy('export_filtered_action', `Export ${actionLabel(actionFilter)}`, `នាំចេញតាមសកម្មភាព ${actionLabel(actionFilter)}`), onClick: () => exportRows(visibleLogs, `audit-log-${actionFilter}`) } : null,
     yearFilter !== 'all' || monthFilter !== 'all' ? { label: copy('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportRows(visibleLogs, 'audit-log-filtered') } : null,
-  ].filter(Boolean)), [actionFilter, actionLabel, copy, exportRows, monthFilter, selectedLogs, selectedLogs.length, visibleLogs, yearFilter])
+  ].filter((item): item is ExportItem => Boolean(item))), [actionFilter, actionLabel, copy, exportRows, monthFilter, selectedLogs, selectedLogs.length, visibleLogs, yearFilter])
 
   const filterSections = useMemo(() => ([
     {
@@ -705,13 +799,13 @@ export default function AuditLog() {
       setClearingOldLogs(true)
       setLoading(true)
       await withLoaderTimeout(
-        () => window.api.deleteAuditLogsRetention(30),
+        () => getAuditApi().deleteAuditLogsRetention(30),
         'Clear old audit logs',
         AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,
       )
       await load(true)
     } catch (err) {
-      setError(err?.message || 'Failed to clear old audit logs.')
+      setError(getErrorMessage(err, 'Failed to clear old audit logs.'))
     } finally {
       finishSingleAction(clearOldLogsInFlightRef)
       setClearingOldLogs(false)
@@ -730,7 +824,7 @@ export default function AuditLog() {
           {t('audit_log') || 'Audit Log'}
         </h1>
         <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-0.5">
-          <button onClick={load} className="btn-secondary inline-flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
+          <button onClick={handleRefresh} className="btn-secondary inline-flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
             <RefreshCw className="h-4 w-4" />
             {copy('refresh', 'Refresh')}
           </button>
@@ -824,7 +918,7 @@ export default function AuditLog() {
               {(t('error') || 'Error')}: {t('audit_log') || 'Audit Log'}
             </p>
             <p className="mb-2 text-xs text-red-600 dark:text-red-400">{error}</p>
-            <button onClick={load} className="text-xs font-medium text-red-600 hover:underline dark:text-red-400">
+            <button onClick={handleRefresh} className="text-xs font-medium text-red-600 hover:underline dark:text-red-400">
               {t('retry') || 'Try again'}
             </button>
           </div>

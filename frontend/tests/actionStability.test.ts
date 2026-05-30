@@ -308,14 +308,14 @@ await runTest('server queue and connection actions use guarded bounded actions',
 })
 
 await runTest('audit log retention cleanup uses a guarded bounded action', () => {
-  const source = readFrontend('src/components/utils-settings/AuditLog.jsx')
+  const source = readFrontend('src/components/utils-settings/AuditLog.tsx')
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS = 12000/)
   assert.match(source, /const \[clearingOldLogs, setClearingOldLogs\] = useState\(false\)/)
   assert.match(source, /const clearOldLogsInFlightRef = useRef\(false\)/)
   assert.match(source, /if \(!window\.confirm\('Clear audit logs older than 30 days\?'\)\) return[\s\S]*if \(!beginSingleAction\(clearOldLogsInFlightRef, \{ blocked: clearingOldLogs \}\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.deleteAuditLogsRetention\(30\),\s*'Clear old audit logs',\s*AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getAuditApi\(\)\.deleteAuditLogsRetention\(30\),\s*'Clear old audit logs',\s*AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(clearOldLogsInFlightRef\)[\s\S]*setClearingOldLogs\(false\)[\s\S]*setLoading\(false\)/)
   assert.match(source, /disabled=\{clearingOldLogs\}/)
 })

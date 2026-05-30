@@ -906,3 +906,39 @@ Use this shape for future entries:
 - follow-up insight: The users folder no longer needs a profile modal shim;
   the remaining larger JSX shells are POS, Products, Dashboard, Inventory,
   Catalog page/editor, and utils-settings pages.
+
+- change: converted the audit log shell to TSX with typed audit rows, paged
+  audit responses, audit user filter rows, local audit API gateway calls, app
+  context access, detail-row props, export items, selected id sets, grouped
+  section ids, sort/group modes, loader watchdog refs, animation frame refs,
+  and error extraction
+- affected files:
+  `frontend/src/components/utils-settings/AuditLog.tsx`,
+  `frontend/src/components/utils-settings/index.ts`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/utilsSettingsBarrel.test.ts`
+- route or API target: Audit Log read/search/filter/group/export, row detail
+  modal, bulk selection, refresh, and admin retention cleanup surfaces
+- keeper or rollback: keeper; focused typecheck, JSX, utils-settings barrel,
+  action stability, performance loading UX, frontend/backend utility suites,
+  UI audit, production build, organization audit, schema audit, generated
+  reference refresh, Phase 29 repeat audit, Phase 8.4 live suite, and prune
+  checks passed
+- route-scoped result: focused TSX source checks passed; broad
+  frontend/backend utility suites, UI audit, production build, organization
+  audit, schema audit, generated reference refresh, and pre/post-prune Phase
+  29 repeat audits also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up. The
+  running app still served frontend hash `55cf7b8ef08a4b8d`; the fresh local
+  production build hash is `5b0200961bed11da`. Live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T01-46-20-552Z/report.json`.
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,152 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: Audit Log is the first utils-settings page shell moved to
+  TSX; Backup and Settings remain the next bounded utils-settings conversion
+  candidates before POS, Products, Dashboard, Inventory, and Catalog.

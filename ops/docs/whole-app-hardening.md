@@ -735,7 +735,7 @@ Last updated: 2026-05-18
     `frontend/src/components/server/ServerPage.tsx`.
     Audit Log retention cleanup now has an explicit timeout contract and
     same-tick guard in
-    `frontend/src/components/utils-settings/AuditLog.jsx`.
+    `frontend/src/components/utils-settings/AuditLog.tsx`.
     Catalog customer portal share-proof submission and staff review actions now
     have explicit timeout contracts and same-tick guards in
     `frontend/src/components/catalog/CatalogPage.jsx`.

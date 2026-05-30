@@ -1,6 +1,6 @@
 ﻿# File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 540 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 541 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 11 `.jsx`
+  - 10 `.jsx`
   - 1 `.js`
   - 80 `.ts` including declaration files
-  - 96 `.tsx`
+  - 97 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -615,7 +615,7 @@ Decision rule:
     and broad Phase 8.4 Playwright UI live check passed on frontend hash
     `baaa4a6c9a19b70f`.
 55. Harden Audit Log retention cleanup. Done:
-    `frontend/src/components/utils-settings/AuditLog.jsx` now wraps the admin
+    `frontend/src/components/utils-settings/AuditLog.tsx` now wraps the admin
     "Clear 30d" audit-log retention delete in a shared same-tick guard and a
     12s timeout contract, while disabling the button during cleanup. This keeps
     repeated clicks from stacking destructive retention cleanup calls and avoids
@@ -4266,6 +4266,17 @@ Decision rule:
     extensionless import path, preserves profile/OTP/auth-method timeout
     contracts, avatar CORS guardrails, Google OAuth source checks, and
     same-tick profile/password/avatar upload guards.
+541. Convert the audit log shell to TSX. Done:
+    `frontend/src/components/utils-settings/AuditLog.tsx` now types audit
+    log rows, paged audit responses, audit user filters, local audit API
+    gateway calls, app context access, detail-row props, export items,
+    selected id sets, grouped section ids, sort/group modes, animation-frame
+    refs, loader watchdog refs, and error extraction. The conversion keeps the
+    extensionless app lazy import, utils-settings barrel export, audit read
+    and retention-cleanup timeout contracts, same-tick retention cleanup
+    guard, grouped selection helpers, CSV export behavior, and source
+    inspection tests intact while preventing React click events from being
+    interpreted as the loader's silent flag.
 
 ## Safety Gates
 
