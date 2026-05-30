@@ -1402,7 +1402,7 @@ export async function deleteFileAsset(id, payload = {}) {
 
 /**
  * uploadProductImage — accepts { productId, filePath, fileName } where filePath
- * is a base64 data-URL (set by Products.jsx browser file-picker), OR a native
+ * is a base64 data-URL (set by Products.tsx browser file-picker), OR a native
  * file system path (Electron). Converts to FormData and POSTs as multipart.
  */
 export async function uploadProductImage({ productId, file, filePath, fileName }) {
@@ -1495,7 +1495,7 @@ export function openCSVDialog() {
 }
 
 /**
- * openImageDialog — in browser mode always returns null so Products.jsx
+ * openImageDialog — in browser mode always returns null so Products.tsx
  * falls through to its own file-input fallback.
  */
 export function openImageDialog() {

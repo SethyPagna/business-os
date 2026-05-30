@@ -14,7 +14,7 @@ type ProductLike = {
 type ProductGroup = {
   key: string
   name: string
-  anchorId?: string
+  anchorId?: ProductId
   ids: ProductId[]
   items: ProductLike[]
   hasMultipleItems: boolean

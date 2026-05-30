@@ -13,8 +13,8 @@ type Branch = {
 }
 
 type BranchStockEntry = {
-  branch_id?: number | string
-  quantity?: number
+  branch_id?: number | string | null
+  quantity?: unknown
 }
 
 type Product = {
@@ -85,7 +85,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
       return {
         branchId: branch.id,
         branchName: branch.name,
-        current: branchStock?.quantity ?? 0,
+        current: Number(branchStock?.quantity ?? 0),
         delta: '',
         type: 'add',
       }

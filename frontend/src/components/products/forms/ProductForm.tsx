@@ -87,11 +87,11 @@ interface ProductFormState extends GroupCandidate {
   expiry_alert_days?: EditableNumber
   unit?: string
   supplier?: string
-  image_path?: string
+  image_path?: string | null
   image_gallery?: unknown[]
-  branch_stock?: Array<{ branch_id?: EntityId; quantity?: number }>
+  branch_stock?: Array<{ branch_id?: EntityId | null; quantity?: unknown }>
   branch_id?: EntityId | ''
-  is_group?: number | boolean
+  is_group?: number | boolean | null
 }
 
 interface ProductSavePayload extends ProductFormState {

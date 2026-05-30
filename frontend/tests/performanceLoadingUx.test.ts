@@ -34,7 +34,7 @@ const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/return
 const branches = fs.readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
 const transferModal = fs.readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 const catalogPage = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
-const products = fs.readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
+const products = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const productPageConfig = fs.readFileSync(new URL('../src/components/products/config/productPageConfig.ts', import.meta.url), 'utf8')
 const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.tsx', import.meta.url), 'utf8')
 const productForm = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
@@ -1440,12 +1440,12 @@ assert.match(
 )
 assert.match(
   products,
-  /const runProductStockMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_STOCK_MUTATION_TIMEOUT_MS\)/,
+  /const runProductStockMutation = useCallback\([\s\S]*withLoaderTimeout\(loader, label, PRODUCT_STOCK_MUTATION_TIMEOUT_MS\)/,
   'products page stock mutations should route through the timeout helper',
 )
 assert.doesNotMatch(
   products,
-  /await\s+window\.api\.(adjustStock|transferStock|createProduct|updateProduct|deleteProduct)\(/,
+  /await\s+(?:window\.api|productApi)\.(adjustStock|transferStock|createProduct|updateProduct|deleteProduct)\(/,
   'products page mutating product and stock API calls should not be awaited directly',
 )
 assert.match(
@@ -1495,27 +1495,27 @@ assert.match(
 )
 assert.match(
   products,
-  /withLoaderTimeout\(\(\) => window\.api\.getCategories\(\), 'Product categories', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => productApi\.getCategories\(\), 'Product categories', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS\)/,
   'products auxiliary category reads should timeout slow category requests',
 )
 assert.match(
   products,
-  /withLoaderTimeout\(\(\) => window\.api\.getUnits\(\), 'Product units', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => productApi\.getUnits\(\), 'Product units', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS\)/,
   'products auxiliary unit reads should timeout slow unit requests',
 )
 assert.match(
   products,
-  /withLoaderTimeout\(\(\) => window\.api\.getBranches\(\), 'Product branches', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => productApi\.getBranches\(\), 'Product branches', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS\)/,
   'products auxiliary branch reads should timeout slow branch requests',
 )
 assert.match(
   products,
-  /withLoaderTimeout\(\(\) => window\.api\.getProductFilters\(\{\}\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => productApi\.getProductFilters\(\{\}\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)/,
   'products filter metadata should timeout slow filter requests',
 )
 assert.match(
   products,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getProductsByIds\(uniqueIds, \{ include: 'branch_stock,images,batches' \}\),\s*'Products by id',\s*PRODUCTS_BY_ID_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => productApi\.getProductsByIds\(uniqueIds, \{ include: 'branch_stock,images,batches' \}\),\s*'Products by id',\s*PRODUCTS_BY_ID_TIMEOUT_MS,\s*\)/,
   'products by-id refreshes should timeout slow detail requests',
 )
 assert.match(

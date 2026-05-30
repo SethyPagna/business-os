@@ -9,7 +9,7 @@ type Translate = (key: string) => string | undefined
 type Branch = {
   id: number | string
   name: string
-  is_default?: boolean
+  is_default?: boolean | number | null
 }
 
 type Product = {

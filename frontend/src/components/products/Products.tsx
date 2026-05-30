@@ -126,91 +126,357 @@ const ProductForm = lazy(() => import('./forms/ProductForm'))
 const ProductDetailModal = lazy(() => import('./surfaces/ProductDetailModal'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 
+type EntityId = string | number
+type Loader<T = unknown> = () => Promise<T>
+type NotificationTone = 'error' | 'info' | 'success' | 'warning' | string
+type SearchMode = 'AND' | 'OR'
+type ProductSortDirection = 'asc' | 'desc'
+type BulkEditMode = 'branch' | 'info' | 'pricing' | 'stock' | null
+type ProductModalMode = 'brands' | 'bulk' | 'cats' | 'form' | 'units' | null
+type ProductFormTab = 'basic' | 'pricing' | 'stock'
+
+interface BranchStockRow {
+  branch_id?: EntityId | null
+  branch_name?: string
+  quantity?: number | string | null
+  [key: string]: unknown
+}
+
+interface ProductRecord {
+  id?: EntityId
+  name?: string
+  sku?: string
+  barcode?: string
+  category?: string
+  brand?: string
+  unit?: string
+  supplier?: string
+  description?: string
+  parent_id?: EntityId | null
+  image_path?: string | null
+  image_gallery?: unknown[]
+  branch_stock?: BranchStockRow[]
+  stock_quantity?: number | string | null
+  created_at?: string
+  updated_at?: string
+  purchase_price_usd?: number | string | null
+  purchase_price_khr?: number | string | null
+  cost_price_usd?: number | string | null
+  cost_price_khr?: number | string | null
+  selling_price_usd?: number | string | null
+  selling_price_khr?: number | string | null
+  special_price_usd?: number | string | null
+  special_price_khr?: number | string | null
+  low_stock_threshold?: number | string | null
+  out_of_stock_threshold?: number | string | null
+  is_active?: boolean | number | null
+  is_group?: boolean | number | null
+  [key: string]: unknown
+}
+
+interface LookupRecord {
+  id?: EntityId
+  name?: string
+  color?: string
+  [key: string]: unknown
+}
+
+interface BranchRecord extends LookupRecord {
+  is_default?: boolean | number | null
+}
+
+type ProductFilterInitial = {
+  count: number
+  key: string
+  label: string
+  type?: string
+}
+
+type InitialOptionInput = {
+  count?: unknown
+  key?: unknown
+  label?: unknown
+  value?: unknown
+}
+
+type ProductFilterMeta = {
+  brands: string[]
+  categories: string[]
+  suppliers: string[]
+  initials: ProductFilterInitial[]
+}
+
+type BulkEditForm = Record<string, string | number | undefined> & {
+  action?: string
+  branchId?: EntityId | ''
+  brand?: string
+  category?: string
+  low_stock_threshold?: string | number
+  purchase_price_khr?: string | number
+  purchase_price_usd?: string | number
+  qty?: string | number
+  selling_price_khr?: string | number
+  selling_price_usd?: string | number
+  special_price_khr?: string | number
+  special_price_usd?: string | number
+  supplier?: string
+  unit?: string
+}
+
+type BulkAddModalState = {
+  ids: number[]
+  snapshots: ProductRecord[]
+} | null
+
+type RestoredProductEntry = {
+  restoredId?: EntityId
+  snapshot?: ProductRecord
+}
+
+type BulkAddStockResult = {
+  branchId?: EntityId
+  done?: number
+  failed?: number
+  failedIds?: EntityId[]
+  quantity?: number | string
+  updatedIds?: EntityId[]
+}
+
+type ProductLightboxState = {
+  images: string[]
+  index: number
+  title: string
+} | null
+
+type VariantParentRecord = ProductRecord & {
+  id: EntityId
+  name: string
+}
+
+type ProductApiResponse = Record<string, unknown> & {
+  data?: ProductRecord | null
+  error?: string
+  id?: EntityId
+  item?: ProductRecord | null
+  message?: string
+  path?: string
+  success?: boolean
+}
+
+type ProductSearchResponse = {
+  filters?: Partial<ProductFilterMeta>
+  initials?: unknown[]
+  items?: ProductRecord[]
+  total?: number
+}
+
+type ProductApi = {
+  adjustStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
+  createProduct: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
+  deleteProduct: (id: EntityId, userId?: EntityId, userName?: string | null) => Promise<ProductApiResponse | undefined>
+  getBranches: () => Promise<BranchRecord[]>
+  getCategories: () => Promise<LookupRecord[]>
+  getProductFilters: (query?: Record<string, unknown>) => Promise<Partial<ProductFilterMeta> | undefined>
+  getProductsByIds: (ids: number[], options?: Record<string, unknown>) => Promise<ProductRecord[]>
+  getUnits: () => Promise<LookupRecord[]>
+  searchProducts: (query: Record<string, unknown>) => Promise<ProductSearchResponse | ProductRecord[] | undefined>
+  transferStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
+  updateProduct: (id: EntityId, payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
+  uploadProductImage: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
+}
+
+type ProductsAppContext = {
+  exchangeRate: number
+  fmtKHR: (value: unknown) => string
+  fmtUSD: (value: unknown) => string
+  khrSymbol: string
+  notify: (message: string, tone?: NotificationTone) => void
+  settings: Record<string, unknown>
+  t: (key: string) => string
+  usdSymbol: string
+  user: { id?: EntityId; name?: string } | null
+}
+
+type ProductsSyncContext = {
+  syncChannel?: {
+    channel?: string
+    reason?: string
+    source?: string
+    ts?: number
+  } | null
+}
+
+type ProductGroupLike = {
+  anchorId?: EntityId
+  hasMultipleItems: boolean
+  ids: EntityId[]
+  items: ProductRecord[]
+  key: string
+  name: string
+  stockTotal?: number
+}
+
+type ProductSectionLike = {
+  groups: ProductGroupLike[]
+  id: string
+  ids: EntityId[]
+  items: ProductRecord[]
+  label: string
+}
+
+const useProductsApp = useApp as () => ProductsAppContext
+const useProductsSync = useSync as () => ProductsSyncContext
+
+function getProductApi(): ProductApi {
+  return (window as Window & { api?: ProductApi }).api as ProductApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function toProductApiResponse(value: unknown): ProductApiResponse {
+  return isObjectRecord(value) ? value : {}
+}
+
+function scrollNodeWithOffset(node: HTMLElement | null, offset = 96): void {
+  if (!node) return
+  const top = node.getBoundingClientRect().top + window.scrollY - offset
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+}
+
+function summarizeProductRun(run: unknown): ReturnType<typeof summarizeProductBulkRun> {
+  return summarizeProductBulkRun(run as Parameters<typeof summarizeProductBulkRun>[0])
+}
+
+function aggregateProductInitials(rows: unknown): ProductFilterInitial[] {
+  const source = Array.isArray(rows) ? rows.filter(isObjectRecord) : []
+  return aggregateInitialOptions(source as InitialOptionInput[])
+}
+
+function toLookupOptions<T extends LookupRecord>(items: T[]): Array<T & { id: EntityId; name: string }> {
+  return items
+    .filter((item) => item?.id !== undefined && item?.id !== null && String(item?.name || '').trim())
+    .map((item) => ({ ...item, id: item.id as EntityId, name: String(item.name) }))
+}
+
+function toModalProduct(product: ProductRecord | null): ProductRecord | null {
+  if (!product) return null
+  return {
+    ...product,
+    id: product.id ?? 0,
+    name: String(product.name || ''),
+    image_path: product.image_path || undefined,
+    stock_quantity: Number(product.stock_quantity || 0),
+    selling_price_usd: Number(product.selling_price_usd || 0),
+  }
+}
+
+function toVariantParentProduct(product: ProductRecord | null): VariantParentRecord | null {
+  const normalized = toModalProduct(product)
+  if (!normalized?.id || !normalized.name) return null
+  return { ...normalized, id: normalized.id, name: String(normalized.name) }
+}
+
+function toLightboxState(value: ReturnType<typeof updateProductLightboxIndex>, fallback: ProductLightboxState): ProductLightboxState {
+  if (!value || !Array.isArray(value.images) || !value.images.length) return null
+  return {
+    images: value.images,
+    index: Number(value.index || 0),
+    title: String(value.title || fallback?.title || ''),
+  }
+}
+
 
 export default function Products() {
-  const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
-  const { syncChannel } = useSync()
+  const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useProductsApp()
+  const { syncChannel } = useProductsSync()
+  const productApi = getProductApi()
   const isActive = useIsPageActive('products')
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelReason = String(syncChannel?.reason || '')
   const syncChannelSource = String(syncChannel?.source || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
+  const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string) => {
     const candidate = fallbackKm || fallbackEn
     return isBrokenLocalizedString(candidate)
       ? fallbackEn
       : candidate
   }, [])
-  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key: string, fallbackEn = key, fallbackKm = fallbackEn): string => {
     const value = t(key)
     if (value && value !== key && !isBrokenLocalizedString(value)) return value
     return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, isKhmer, t])
-  const [products,     setProducts]     = useState([])
-  const [categories,   setCategories]   = useState([])
-  const [units,        setUnits]        = useState([])
-  const [branches,     setBranches]     = useState([])
+  const [products,     setProducts]     = useState<ProductRecord[]>([])
+  const [categories,   setCategories]   = useState<LookupRecord[]>([])
+  const [units,        setUnits]        = useState<LookupRecord[]>([])
+  const [branches,     setBranches]     = useState<BranchRecord[]>([])
   const [branchFilter, setBranchFilter] = useState('all')
   const [stockFilter,  setStockFilter]  = useState('all') // all | in_stock | low | out
   const [groupFilter, setGroupFilter] = useState('all') // all | grouped | parent | variant | standalone
   const [createdYearFilter, setCreatedYearFilter] = useState('all')
   const [createdMonthFilter, setCreatedMonthFilter] = useState('all')
-  const [productSortDirection, setProductSortDirection] = useState('desc')
+  const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('desc')
   const [search,       setSearch]       = useState('')
-  const [searchMode,   setSearchMode]   = useState('AND') // 'AND' | 'OR'
+  const [searchMode,   setSearchMode]   = useState<SearchMode>('AND') // 'AND' | 'OR'
   const [productPage, setProductPage] = useState(1)
   const [productPageSize, setProductPageSize] = useState(20)
   const [productPageDraft, setProductPageDraft] = useState('1')
   const [productTotal, setProductTotal] = useState(0)
-  const [productFilterMeta, setProductFilterMeta] = useState({ brands: [], categories: [], suppliers: [], initials: [] })
+  const [productFilterMeta, setProductFilterMeta] = useState<ProductFilterMeta>({ brands: [], categories: [], suppliers: [], initials: [] })
   const [initialFilter, setInitialFilter] = useState('all')
-  const [selectedIds,    setSelectedIds]    = useState(new Set())
+  const [selectedIds,    setSelectedIds]    = useState<Set<number>>(new Set())
   const [bulkEditOpen,   setBulkEditOpen]   = useState(false)
-  const [bulkEditMode,   setBulkEditMode]   = useState(null)  // 'info'|'pricing'|'stock'|'branch'
-  const [bulkEditForm,   setBulkEditForm]   = useState({})
+  const [bulkEditMode,   setBulkEditMode]   = useState<BulkEditMode>(null)
+  const [bulkEditForm,   setBulkEditForm]   = useState<BulkEditForm>({})
   const [catFilter,    setCatFilter]    = useState('all')
   const [brandFilter,  setBrandFilter]  = useState('all')
   const [supplierFilter, setSupplierFilter] = useState('all')
-  const [modal,        setModal]        = useState(null)
-  const [selected,     setSelected]     = useState(null)
-  const [formInitialTab, setFormInitialTab] = useState('basic')
-  const [detailProduct,setDetailProduct]= useState(null)
+  const [modal,        setModal]        = useState<ProductModalMode>(null)
+  const [selected,     setSelected]     = useState<ProductRecord | null>(null)
+  const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
+  const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
   const [loading,      setLoading]      = useState(true)
   const [refreshingProducts, setRefreshingProducts] = useState(false)
-  const [loadError,    setLoadError]    = useState(null)
+  const [loadError,    setLoadError]    = useState<string | null>(null)
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
-  const [variantModal, setVariantModal] = useState(null) // parent product for adding variant
-  const [collapsedProductSections, setCollapsedProductSections] = useState(() => new Set())
-  const [collapsedProductGroups, setCollapsedProductGroups] = useState(() => new Set())
+  const [variantModal, setVariantModal] = useState<ProductRecord | null>(null)
+  const [collapsedProductSections, setCollapsedProductSections] = useState<Set<string>>(() => new Set())
+  const [collapsedProductGroups, setCollapsedProductGroups] = useState<Set<string>>(() => new Set())
   const [isProductFilterMenuOpen, setIsProductFilterMenuOpen] = useState(false)
   const loadedOnceRef = useRef(false)
   const auxOptionsLoadedRef = useRef(false)
   const loadRequestRef = useRef(0)
-  const loadWatchdogRef = useRef(null)
-  const loadPromiseRef = useRef(null)
+  const loadWatchdogRef = useRef<number | null>(null)
+  const loadPromiseRef = useRef<Promise<void> | null>(null)
   const productSaveInFlightRef = useRef(false)
   const productDeleteInFlightRef = useRef(false)
   const bulkActionInFlightRef = useRef(false)
-  const desktopSelectAllRef = useRef(null)
-  const mobileSelectAllRef = useRef(null)
-  const initializedCollapsedGroupKeysRef = useRef(new Set())
+  const desktopSelectAllRef = useRef<HTMLInputElement | null>(null)
+  const mobileSelectAllRef = useRef<HTMLInputElement | null>(null)
+  const initializedCollapsedGroupKeysRef = useRef<Set<string>>(new Set())
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'products' })
   const debouncedSearch = useDebouncedValue(search, 180)
-  const runProductWriteMutation = useCallback((loader, label, timeoutMs = PRODUCT_WRITE_MUTATION_TIMEOUT_MS) => (
+  const runProductWriteMutation = useCallback(<T,>(loader: Loader<T>, label: string, timeoutMs = PRODUCT_WRITE_MUTATION_TIMEOUT_MS): Promise<T> => (
     withLoaderTimeout(loader, label, timeoutMs)
   ), [])
-  const runProductDeleteMutation = useCallback((loader, label) => (
+  const runProductDeleteMutation = useCallback(<T,>(loader: Loader<T>, label: string): Promise<T> => (
     withLoaderTimeout(loader, label, PRODUCT_DELETE_MUTATION_TIMEOUT_MS)
   ), [])
-  const runProductStockMutation = useCallback((loader, label) => (
+  const runProductStockMutation = useCallback(<T,>(loader: Loader<T>, label: string): Promise<T> => (
     withLoaderTimeout(loader, label, PRODUCT_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
 
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
-      window.clearTimeout(loadWatchdogRef.current)
+      if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
       const firstLoad = !loadedOnceRef.current
       if (!silent || firstLoad) {
         setLoadError(null)
@@ -242,22 +508,26 @@ export default function Products() {
           include: 'branch_stock,images,batches',
         }
         const result = await settleLoaderMap({
-          products: () => window.api.searchProducts(productQuery),
+          products: () => productApi.searchProducts(productQuery),
         })
-        const productPayload = result.values.products || {}
-        const prods = Array.isArray(productPayload?.items)
-          ? productPayload.items
+        const rawProductPayload = result.values.products
+        const productPayload = Array.isArray(rawProductPayload)
+          ? rawProductPayload
+          : (isObjectRecord(rawProductPayload) ? rawProductPayload as ProductSearchResponse : {})
+        const productPayloadObject = Array.isArray(productPayload) ? null : productPayload
+        const prods = Array.isArray(productPayloadObject?.items)
+          ? productPayloadObject.items
           : (Array.isArray(productPayload) ? productPayload : [])
-        const searchFilters = productPayload?.filters || {}
+        const searchFilters = productPayloadObject?.filters || {}
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
         if (versionMismatchError) {
-          setLoadError(versionMismatchError.message)
+          setLoadError(getErrorMessage(versionMismatchError, 'Product API version mismatch'))
           throw versionMismatchError
         }
         if (Array.isArray(prods)) setProducts(prods)
-        setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
+        setProductTotal(Number(productPayloadObject?.total ?? prods.length) || 0)
         setProductFilterMeta((previous) => {
           const hasPreviousMeta = Array.isArray(previous?.brands) && previous.brands.length
             || Array.isArray(previous?.categories) && previous.categories.length
@@ -268,7 +538,7 @@ export default function Products() {
             brands: Array.isArray(searchFilters?.brands) ? searchFilters.brands : [],
             categories: Array.isArray(searchFilters?.categories) ? searchFilters.categories : [],
             suppliers: Array.isArray(searchFilters?.suppliers) ? searchFilters.suppliers : [],
-            initials: aggregateInitialOptions(searchFilters?.initials || productPayload?.initials || []),
+            initials: aggregateProductInitials(searchFilters?.initials || productPayloadObject?.initials || []),
           }
         })
 
@@ -285,9 +555,9 @@ export default function Products() {
         const shouldLoadAuxOptions = !auxOptionsLoadedRef.current || !categories.length || !units.length || !branches.length
         if (shouldLoadAuxOptions) {
           void settleLoaderMap({
-            categories: () => withLoaderTimeout(() => window.api.getCategories(), 'Product categories', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
-            units: () => withLoaderTimeout(() => window.api.getUnits(), 'Product units', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
-            branches: () => withLoaderTimeout(() => window.api.getBranches(), 'Product branches', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
+            categories: () => withLoaderTimeout(() => productApi.getCategories(), 'Product categories', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
+            units: () => withLoaderTimeout(() => productApi.getUnits(), 'Product units', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
+            branches: () => withLoaderTimeout(() => productApi.getBranches(), 'Product branches', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
           }).then((auxResult) => {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
             const cats = auxResult.values.categories
@@ -302,13 +572,13 @@ export default function Products() {
           }).catch(() => {})
         }
 
-        void withLoaderTimeout(() => window.api.getProductFilters({}), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS).then((filters) => {
+        void withLoaderTimeout(() => productApi.getProductFilters({}), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS).then((filters) => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
           setProductFilterMeta({
             brands: Array.isArray(filters?.brands) ? filters.brands : [],
             categories: Array.isArray(filters?.categories) ? filters.categories : [],
             suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
-            initials: aggregateInitialOptions(filters?.initials || []),
+            initials: aggregateProductInitials(filters?.initials || []),
           })
         }).catch(() => {})
 
@@ -317,7 +587,7 @@ export default function Products() {
         }
       } catch (e) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        const nextMessage = e?.message || tr('products_load_failed', 'Failed to load products')
+        const nextMessage = getErrorMessage(e, tr('products_load_failed', 'Failed to load products'))
         if (!loadedOnceRef.current) {
           setLoadError(nextMessage)
           notify(nextMessage, 'error')
@@ -325,7 +595,7 @@ export default function Products() {
           notify(tr('products_refresh_failed', 'Unable to refresh products right now. Showing the latest loaded data.'), 'warning')
         }
       } finally {
-        window.clearTimeout(loadWatchdogRef.current)
+        if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setLoading(false)
         setRefreshingProducts(false)
@@ -340,7 +610,7 @@ export default function Products() {
     return wrappedPromise
   }, [branchFilter, brandFilter, branches.length, catFilter, categories.length, debouncedSearch, groupFilter, initialFilter, notify, productPage, productPageSize, productSortDirection, searchMode, stockFilter, supplierFilter, t, tr, units.length])
 
-  const fetchProductsByIds = useCallback(async (ids = []) => {
+  const fetchProductsByIds = useCallback(async (ids: EntityId[] = []): Promise<ProductRecord[]> => {
     const uniqueIds = Array.from(new Set(
       (ids || [])
         .map((id) => Number(id))
@@ -348,16 +618,16 @@ export default function Products() {
     )).slice(0, 100)
     if (!uniqueIds.length) return []
     const payload = await withLoaderTimeout(
-      () => window.api.getProductsByIds(uniqueIds, { include: 'branch_stock,images,batches' }),
+      () => productApi.getProductsByIds(uniqueIds, { include: 'branch_stock,images,batches' }),
       'Products by id',
       PRODUCTS_BY_ID_TIMEOUT_MS,
     )
-    return Array.isArray(payload?.items) ? payload.items : []
+    return Array.isArray(payload) ? payload : []
   }, [])
 
   useEffect(() => {
     if (!isActive) {
-      window.clearTimeout(loadWatchdogRef.current)
+      if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
       setLoading(false)
@@ -375,22 +645,22 @@ export default function Products() {
     if (['products', 'categories', 'units', 'branches', 'suppliers', 'settings'].includes(syncChannelName)) load(true)
   }, [isActive, load, syncChannelName, syncChannelReason, syncChannelSource, syncChannelTs])
   useEffect(() => () => {
-    window.clearTimeout(loadWatchdogRef.current)
+    if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
     loadPromiseRef.current = null
   }, [])
 
-  const handleSave = async (form) => {
+  const handleSave = async (form: ProductRecord) => {
     if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
     if (!beginSingleAction(productSaveInFlightRef)) return
     try {
-      const data = { ...form, userId: user.id, userName: user.name }
+      const data = { ...form, userId: user?.id, userName: user?.name }
 
       if (!selected) {
-        const res = await runProductWriteMutation(() => window.api.createProduct(data), 'Create product')
+        const res = await runProductWriteMutation(() => productApi.createProduct(data), 'Create product')
         if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
       } else {
-        const res = await runProductWriteMutation(() => window.api.updateProduct(selected.id, data), 'Update product')
+        const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, data), 'Update product')
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
       }
 
@@ -398,14 +668,14 @@ export default function Products() {
       setModal(null); setSelected(null); setDetailProduct(null); load()
     } catch(e) {
       console.error('[handleSave] error:', e)
-      notify(e.message || 'Failed to save product', 'error')
+      notify(getErrorMessage(e, 'Failed to save product'), 'error')
     } finally {
       finishSingleAction(productSaveInFlightRef)
     }
   }
 
-  const uploadGalleryImages = async (productId, gallery = []) => {
-    const next = []
+  const uploadGalleryImages = async (productId: EntityId | null | undefined, gallery: unknown[] = []): Promise<string[]> => {
+    const next: string[] = []
     for (const entry of normalizeProductGallery(gallery)) {
       if (!entry.startsWith('data:image/')) {
         next.push(entry)
@@ -420,7 +690,7 @@ export default function Products() {
             : '.jpg'
       const fileName = `product_${productId || 'new'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
       const uploaded = await runProductWriteMutation(
-        () => window.api.uploadProductImage({ productId, filePath: entry, fileName }),
+        () => productApi.uploadProductImage({ productId, filePath: entry, fileName }),
         'Upload product image',
         PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
       )
@@ -430,7 +700,7 @@ export default function Products() {
     return normalizeProductGallery(next)
   }
 
-  const handleSaveWithGallery = async (form) => {
+  const handleSaveWithGallery = async (form: ProductRecord) => {
     if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
     if (!beginSingleAction(productSaveInFlightRef)) return
     try {
@@ -445,17 +715,17 @@ export default function Products() {
         image_gallery: uploadedGallery,
         image_path: uploadedGallery[0] || null,
         client_request_id: createClientRequestId || form.client_request_id || undefined,
-        userId: user.id,
-        userName: user.name,
+        userId: user?.id,
+        userName: user?.name,
       }
       let createdProductId = 0
 
       if (!selected) {
-        const res = await runProductWriteMutation(() => window.api.createProduct(payload), 'Create product')
+        const res = await runProductWriteMutation(() => productApi.createProduct(payload), 'Create product')
         if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
         createdProductId = extractHistoryResultId(res)
       } else {
-        const res = await runProductWriteMutation(() => window.api.updateProduct(selected.id, payload), 'Update product')
+        const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload), 'Update product')
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
       }
 
@@ -491,7 +761,7 @@ export default function Products() {
       await load(true)
     } catch (e) {
       console.error('[handleSaveWithGallery] error:', e)
-      notify(e.message || 'Failed to save product', 'error')
+      notify(getErrorMessage(e, 'Failed to save product'), 'error')
     } finally {
       finishSingleAction(productSaveInFlightRef)
     }
@@ -507,17 +777,17 @@ export default function Products() {
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     try {
-      const deletionRun = await runConcurrentTasks(selectedVisibleIds, async (id) => {
-        const result = await runProductDeleteMutation(() => window.api.deleteProduct(id), 'Delete product')
+      const deletionRun = await runConcurrentTasks<EntityId, number>(selectedVisibleIds, async (id: EntityId) => {
+        const result = await runProductDeleteMutation(() => productApi.deleteProduct(id), 'Delete product')
         if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
         return Number(id)
       })
-      const { done, failed, failedIds } = summarizeProductBulkRun(deletionRun)
+      const { done, failed, failedIds } = summarizeProductRun(deletionRun)
       setSelectedIds(new Set(failedIds))
       await load(true)
       const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
       if (done > 0 && deletedSnapshots.length) {
-        let restoredEntries = []
+        let restoredEntries: RestoredProductEntry[] = []
         actionHistory.pushAction({
           label: `Delete ${done} product${done === 1 ? '' : 's'}`,
           undo: async () => {
@@ -527,11 +797,11 @@ export default function Products() {
             const idsToDelete = restoredEntries.length
               ? normalizePositiveProductIds(restoredEntries, (entry) => entry.restoredId)
               : normalizePositiveProductIds(deletedSnapshots, (snapshot) => snapshot.id)
-            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => {
-              const result = await runProductDeleteMutation(() => window.api.deleteProduct(id), 'Re-delete product')
+            const redoRun = await runConcurrentTasks<EntityId, void>(idsToDelete, async (id: EntityId) => {
+              const result = await runProductDeleteMutation(() => productApi.deleteProduct(id), 'Re-delete product')
               if (result?.success === false) throw new Error(result.error || 'Failed to re-delete product')
             })
-            if (redoRun.failures.length) throw new Error(redoRun.failures[0]?.error?.message || 'Failed to re-delete product')
+            if (redoRun.failures.length) throw new Error(getErrorMessage(redoRun.failures[0]?.error, 'Failed to re-delete product'))
             await load(true)
           },
         })
@@ -549,11 +819,11 @@ export default function Products() {
     if (!confirm(`Set ${selectedVisibleCount} product(s) to out-of-stock (quantity = 0)?`)) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
-    const failedIds = []
+    const failedIds: number[] = []
     let done = 0
     let failed = 0
     try {
-      const idsToClear = []
+      const idsToClear: number[] = []
       for (const id of selectedVisibleIds) {
         try {
           idsToClear.push(Number(id))
@@ -587,7 +857,7 @@ export default function Products() {
     }
   }
 
-  const handleBulkChangeBranch = async (branchId) => {
+  const handleBulkChangeBranch = async (branchId: EntityId) => {
     if (!selectedVisibleIds.length || !branchId || bulkActionBusy) return
     const branch = branchesById.get(String(branchId))
     if (!branch) return
@@ -616,7 +886,7 @@ export default function Products() {
     }
   }
 
-  const [bulkAddModal, setBulkAddModal] = useState(null)
+  const [bulkAddModal, setBulkAddModal] = useState<BulkAddModalState>(null)
   const handleBulkAddStock = () => {
     if (!selectedVisibleIds.length) return
     setBulkAddModal({
@@ -625,21 +895,21 @@ export default function Products() {
     })
   }
 
-  const toggleSelect = (id) => setSelectedIds((prev) => {
+  const toggleSelect = (id: EntityId) => setSelectedIds((prev) => {
     const numericId = Number(id)
     if (!Number.isFinite(numericId)) return prev
     const n = new Set(prev)
     n.has(numericId) ? n.delete(numericId) : n.add(numericId)
     return n
   })
-  const toggleSelectAll = (checked) => {
+  const toggleSelectAll = (checked: boolean) => {
     if (!checked) {
       setSelectedIds(new Set())
       return
     }
     setSelectedIds(new Set(visibleIds))
   }
-  const handleDelete = async (p) => {
+  const handleDelete = async (p: ProductRecord) => {
     if (!beginSingleAction(productDeleteInFlightRef)) return
     if (!confirm(`${t('confirm_delete')} "${p.name}"?`)) {
       finishSingleAction(productDeleteInFlightRef)
@@ -647,9 +917,9 @@ export default function Products() {
     }
     try {
       const snapshot = cloneHistorySnapshot(p)
-      await runProductDeleteMutation(() => window.api.deleteProduct(p.id, user.id, user.name), 'Delete product')
+      await runProductDeleteMutation(() => productApi.deleteProduct(p.id || 0, user?.id, user?.name), 'Delete product')
       await load(true)
-      let restoredEntries = []
+      let restoredEntries: RestoredProductEntry[] = []
       actionHistory.pushAction({
         label: `Delete product ${snapshot.name || ''}`.trim(),
         undo: async () => {
@@ -658,68 +928,75 @@ export default function Products() {
         redo: async () => {
           const targetId = Number(restoredEntries[0]?.restoredId || snapshot.id || 0)
           if (!targetId) return
-          const result = await runProductDeleteMutation(() => window.api.deleteProduct(targetId), 'Delete product again')
+          const result = await runProductDeleteMutation(() => productApi.deleteProduct(targetId), 'Delete product again')
           if (result?.success === false) throw new Error(result.error || 'Failed to delete product again')
           await load(true)
         },
       })
       notify('Product deleted')
       setDetailProduct(null)
-    } catch(e) { notify(e.message || 'Failed', 'error') }
+    } catch(e) { notify(getErrorMessage(e, 'Failed'), 'error') }
     finally { finishSingleAction(productDeleteInFlightRef) }
   }
 
-  const catMap = useMemo(() => buildNameLookupMap(categories), [categories])
-  const unitMap = useMemo(() => buildNameLookupMap(units), [units])
+  const catMap = useMemo<Record<string, LookupRecord>>(() => buildNameLookupMap(categories), [categories])
+  const unitMap = useMemo<Record<string, LookupRecord>>(() => buildNameLookupMap(units), [units])
   const brandOptions = useMemo(
-    () => buildProductBrandOptions(productFilterMeta.brands, settings?.product_brand_options),
+    () => buildProductBrandOptions(productFilterMeta.brands, String(settings?.product_brand_options || '[]')),
     [productFilterMeta.brands, settings?.product_brand_options],
   )
-  const brandColorMap = useMemo(
-    () => parseBrandColorMap(settings?.product_brand_color_map),
+  const brandColorMap = useMemo<Record<string, string>>(
+    () => Object.fromEntries(
+      Object.entries(parseBrandColorMap(settings?.product_brand_color_map))
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    ),
     [settings?.product_brand_color_map],
   )
   const branchNameById = useMemo(() => buildBranchNameByIdMap(branches), [branches])
   const branchesById = useMemo(() => new Map((Array.isArray(branches) ? branches : []).map((branch) => [String(branch?.id), branch])), [branches])
-  const [lightbox, setLightbox] = useState(null)
+  const [lightbox, setLightbox] = useState<ProductLightboxState>(null)
   const availableCreatedYears = useMemo(
     () => getAvailableYears(products, (product) => product?.created_at),
     [products],
   )
+  const categoryOptions = useMemo(() => toLookupOptions(categories), [categories])
+  const unitOptions = useMemo(() => toLookupOptions(units), [units])
+  const branchOptions = useMemo(() => toLookupOptions(branches), [branches])
   const getBrandColor = useCallback(
-    (brandName) => brandColorMap[normalizeBrandLookup(brandName)] || '',
+    (brandName: unknown): string => brandColorMap[normalizeBrandLookup(brandName)] || '',
     [brandColorMap],
   )
   const getBranchSummaryLabel = useCallback(
-    (product) => buildProductBranchSummaryLabel(product, branchNameById),
+    (product: Record<string, unknown>): string => buildProductBranchSummaryLabel(product, branchNameById),
     [branchNameById],
   )
-  const renderMetaPill = useCallback((item) => {
+  const renderMetaPill = useCallback((item: { className?: string; color?: string; key: string; label?: unknown } | null) => {
     if (!item?.label) return null
+    const label = String(item.label)
     const color = item.color || DEFAULT_META_PILL_COLOR
     if (item.color) {
       return (
         <span
           key={item.key}
-          {...getKhmerTextProps(item.label, 'max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold')}
+          {...getKhmerTextProps(label, 'max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold')}
           style={{ background: color, color: getContrastingTextColor(color) }}
-          title={item.label}
+          title={label}
         >
-          {item.label}
+          {label}
         </span>
       )
     }
     return (
       <span
         key={item.key}
-        {...getKhmerTextProps(item.label, `max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${item.className || 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`)}
-        title={item.label}
+        {...getKhmerTextProps(label, `max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${item.className || 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`)}
+        title={label}
       >
-        {item.label}
+        {label}
       </span>
     )
   }, [])
-  const renderUnitChip = (unitName) => {
+  const renderUnitChip = (unitName: string | undefined) => {
     if (!unitName) return null
     const color = unitMap[unitName]?.color
     if (!color) return <span {...getKhmerTextProps(unitName, 'ml-1 shrink-0 whitespace-nowrap text-xs font-normal text-gray-400')}>{unitName}</span>
@@ -733,14 +1010,14 @@ export default function Products() {
     )
   }
 
-  const openLightbox = (gallery, startIndex = 0, title = '') => {
+  const openLightbox = (gallery: unknown, startIndex = 0, title = '') => {
     const nextLightbox = buildProductLightboxState(gallery, startIndex, title)
     if (nextLightbox) setLightbox(nextLightbox)
   }
 
-  const getBranchQty = useCallback((product, branchId) => getProductBranchQuantity(product, branchId), [])
+  const getBranchQty = useCallback((product: Record<string, unknown>, branchId: unknown) => getProductBranchQuantity(product, branchId), [])
   const parentProductIds = useMemo(() => buildParentProductIdSet(products), [products])
-  const getStockBadge = (p) => {
+  const getStockBadge = (p: ProductRecord) => {
     const status = getProductStockStatus(p, { branchFilter, getBranchQty })
     if (status === 'out_of_stock') return <span className="badge-red">{t('out_of_stock')}</span>
     if (status === 'low_stock') return <span className="badge-yellow">{t('low_stock')}</span>
@@ -770,15 +1047,15 @@ export default function Products() {
 
   const productsById = useMemo(() => buildProductIdMap(products), [products])
 
-  const productSections = useMemo(
+  const productSections = useMemo<ProductSectionLike[]>(
     () => buildProductGroupSections(filtered, {
       productsById,
       sortDirection: productSortDirection,
-    }),
+    }) as unknown as ProductSectionLike[],
     [filtered, productSortDirection, productsById],
   )
 
-  const allVisibleProducts = useMemo(
+  const allVisibleProducts = useMemo<ProductRecord[]>(
     () => productSections.flatMap((section) => section.items),
     [productSections],
   )
@@ -787,7 +1064,7 @@ export default function Products() {
     setProductPage(1)
   }, [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, initialFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
 
-  const visibleProducts = useMemo(
+  const visibleProducts = useMemo<ProductRecord[]>(
     () => allVisibleProducts,
     [allVisibleProducts],
   )
@@ -796,7 +1073,7 @@ export default function Products() {
   const visibleIdsSignature = useMemo(() => visibleIds.join(','), [visibleIds])
   const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIdsSignature])
   const selectedVisibleIds = useMemo(
-    () => buildSelectedVisibleIds(selectedIds, visibleIds),
+    () => buildSelectedVisibleIds(selectedIds, visibleIds).map((id) => Number(id)).filter((id) => Number.isFinite(id)),
     [selectedIds, visibleIds],
   )
   const selectedVisibleIdsSet = useMemo(
@@ -830,7 +1107,7 @@ export default function Products() {
     [selectedVisibleIdsSet, visibleProducts],
   )
   const jumpTargetIdsByLetter = useMemo(
-    () => buildJumpTargetIdsByLetter(productSections, collapsedProductSections),
+    () => buildJumpTargetIdsByLetter(productSections as unknown as Parameters<typeof buildJumpTargetIdsByLetter>[0], collapsedProductSections),
     [collapsedProductSections, productSections],
   )
   const visibleLetters = useMemo(
@@ -887,7 +1164,7 @@ export default function Products() {
     setProductPageDraft(String(productSafePage))
   }, [productSafePage])
 
-  const toggleSelectionScope = useCallback((ids, checked) => {
+  const toggleSelectionScope = useCallback((ids: EntityId[], checked: boolean) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
   }, [])
 
@@ -910,16 +1187,16 @@ export default function Products() {
   }, [productSafePageSize])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => isSelectionScopeFullySelectedHelper(ids, selectedVisibleIdsSet),
+    (ids: EntityId[] = []) => isSelectionScopeFullySelectedHelper(ids, selectedVisibleIdsSet),
     [selectedVisibleIdsSet],
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => isSelectionScopePartiallySelectedHelper(ids, selectedVisibleIdsSet),
+    (ids: EntityId[] = []) => isSelectionScopePartiallySelectedHelper(ids, selectedVisibleIdsSet),
     [selectedVisibleIdsSet],
   )
   const isProductSelected = useCallback(
-    (id) => selectedVisibleIdsSet.has(Number(id)),
+    (id: EntityId) => selectedVisibleIdsSet.has(Number(id)),
     [selectedVisibleIdsSet],
   )
 
@@ -969,7 +1246,7 @@ export default function Products() {
     setProductSortDirection('desc')
   }, [])
 
-  const handleLookupReviewSelection = useCallback((selection) => {
+  const handleLookupReviewSelection = useCallback((selection: { type?: unknown; value?: unknown }) => {
     const type = String(selection?.type || '').toLowerCase()
     const value = String(selection?.value || '').trim()
     if (!value) return
@@ -991,11 +1268,11 @@ export default function Products() {
   }, [clearAllFilters])
 
   const initialOptions = useMemo(
-    () => aggregateInitialOptions(productFilterMeta.initials || []),
+    () => aggregateProductInitials(productFilterMeta.initials || []),
     [productFilterMeta.initials],
   )
 
-  const toggleProductSection = useCallback((sectionId) => {
+  const toggleProductSection = useCallback((sectionId: string) => {
     setCollapsedProductSections((current) => {
       const next = new Set(current)
       if (next.has(sectionId)) next.delete(sectionId)
@@ -1004,7 +1281,7 @@ export default function Products() {
     })
   }, [])
 
-  const toggleProductGroup = useCallback((groupKey) => {
+  const toggleProductGroup = useCallback((groupKey: string) => {
     setCollapsedProductGroups((current) => {
       const next = new Set(current)
       if (next.has(groupKey)) next.delete(groupKey)
@@ -1013,72 +1290,72 @@ export default function Products() {
     })
   }, [])
 
-  const jumpToLetter = useCallback((letter) => {
+  const jumpToLetter = useCallback((letter: string) => {
     const targetId = jumpTargetIdsByLetter.get(String(letter || '').toUpperCase())
     if (!targetId) return
     const nodes = Array.from(document.querySelectorAll(`[data-product-jump-id="${targetId}"]`))
     const node = nodes.find((entry) => entry.getClientRects().length > 0) || nodes[0]
-    scrollNodeWithOffset(node)
+    scrollNodeWithOffset(node instanceof HTMLElement ? node : null)
   }, [jumpTargetIdsByLetter])
 
-  const getGroupPriceLabel = useCallback((group) => {
+  const getGroupPriceLabel = useCallback((group: ProductGroupLike) => {
     return buildProductGroupPriceLabel(group, fmtUSD)
   }, [fmtUSD])
 
-  const getGroupSummaryParts = useCallback((group, { includeCount = true } = {}) => {
-    return buildProductGroupSummaryParts(group, { includeCount, t, fmtUSD })
+  const getGroupSummaryParts = useCallback((group: ProductGroupLike, { includeCount = true }: { includeCount?: boolean } = {}) => {
+    return buildProductGroupSummaryParts(group, { includeCount, t: (key: string) => t(key) || key, fmtUSD })
   }, [fmtUSD, t])
 
-  const snapshotProductsByIds = useCallback((ids = []) => (
+  const snapshotProductsByIds = useCallback((ids: EntityId[] = []): ProductRecord[] => (
     products
       .filter((product) => ids.includes(Number(product?.id || 0)))
-      .map((product) => JSON.parse(JSON.stringify(product)))
+      .map((product) => JSON.parse(JSON.stringify(product)) as ProductRecord)
   ), [products])
 
-  const buildProductWritePayload = useCallback((snapshot = {}) => (
-    buildProductWritePayloadForSnapshot(snapshot, { id: user.id, name: user.name })
-  ), [user.id, user.name])
+  const buildProductWritePayload = useCallback((snapshot: ProductRecord = {}) => (
+    buildProductWritePayloadForSnapshot(snapshot, { id: user?.id, name: user?.name })
+  ), [user?.id, user?.name])
 
-  const restoreProductBranchStock = useCallback(async (productId, snapshot, currentProduct, reason) => {
+  const restoreProductBranchStock = useCallback(async (productId: EntityId, snapshot: ProductRecord, currentProduct: ProductRecord, reason: string) => {
     const adjustments = buildProductBranchStockAdjustments(snapshot, currentProduct)
-    const syncRun = await runConcurrentTasks(adjustments, async ({ branchId, type, quantity }) => {
+    const syncRun = await runConcurrentTasks(adjustments, async ({ branchId, type, quantity }: { branchId: EntityId; type: string; quantity: unknown }) => {
       await runProductStockMutation(
-        () => window.api.adjustStock(buildProductStockAdjustmentPayload(snapshot, {
+        () => productApi.adjustStock(buildProductStockAdjustmentPayload(snapshot, {
           productId,
           productName: snapshot?.name || currentProduct?.name || '',
           type,
           quantity,
           branchId,
           reason,
-          user: { id: user.id, name: user.name },
+          user: { id: user?.id, name: user?.name },
         })),
         'Restore product branch stock',
       )
     })
     if (syncRun.failures.length) throw (syncRun.failures[0]?.error || new Error('Failed to restore branch stock'))
-  }, [runProductStockMutation, user.id, user.name])
+  }, [runProductStockMutation, user?.id, user?.name])
 
-  const restoreProductSnapshots = useCallback(async (snapshots = [], reason = 'Restore products') => {
+  const restoreProductSnapshots = useCallback(async (snapshots: ProductRecord[] = [], reason = 'Restore products') => {
     if (!snapshots.length) return
-    const latestProducts = await fetchProductsByIds(snapshots.map((snapshot) => snapshot?.id))
+    const latestProducts = await fetchProductsByIds(normalizePositiveProductIds(snapshots, (snapshot) => snapshot?.id))
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    const restoreRun = await runConcurrentTasks(snapshots, async (snapshot) => {
+    const restoreRun = await runConcurrentTasks<ProductRecord, void>(snapshots, async (snapshot: ProductRecord) => {
       const productId = Number(snapshot?.id || 0)
       const currentProduct = latestMap.get(productId)
       if (!currentProduct) return
-      await runProductWriteMutation(() => window.api.updateProduct(productId, buildProductWritePayload(snapshot)), 'Restore product')
+      await runProductWriteMutation(() => productApi.updateProduct(productId, buildProductWritePayload(snapshot)), 'Restore product')
       await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
     })
     if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))
     await load(true)
   }, [buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock, runProductWriteMutation])
 
-  const restoreDeletedProducts = useCallback(async (snapshots = [], reason = 'Restore deleted products') => {
+  const restoreDeletedProducts = useCallback(async (snapshots: ProductRecord[] = [], reason = 'Restore deleted products'): Promise<RestoredProductEntry[]> => {
     if (!snapshots.length) return []
     const defaultBranchId = getDefaultProductRestoreBranchId(branches)
-    const restored = []
+    const restored: RestoredProductEntry[] = []
     const orderedSnapshots = orderProductRestoreSnapshots(snapshots)
-    const restoredIdMap = new Map()
+    const restoredIdMap = new Map<number, number>()
     const deletedIdSet = buildDeletedProductIdSet(orderedSnapshots)
     for (const snapshot of orderedSnapshots) {
       const preferredBranchId = getPreferredProductRestoreBranchId(snapshot, defaultBranchId)
@@ -1092,17 +1369,18 @@ export default function Products() {
         branch_id: preferredBranchId || defaultBranchId || '',
         stock_quantity: 0,
       }
-      const result = await runProductWriteMutation(() => window.api.createProduct(createPayload), 'Restore deleted product')
+      const result = await runProductWriteMutation(() => productApi.createProduct(createPayload), 'Restore deleted product')
       const restoredId = Number(result?.id || result?.data?.id || 0)
       if (!restoredId) throw new Error(result?.error || 'Failed to restore deleted product')
       const snapshotId = Number(snapshot?.id || 0)
       if (snapshotId > 0) restoredIdMap.set(snapshotId, restoredId)
       restored.push({ snapshot, restoredId })
     }
-    const latestProducts = await fetchProductsByIds(restored.map((entry) => entry.restoredId))
+    const latestProducts = await fetchProductsByIds(normalizePositiveProductIds(restored, (entry) => entry.restoredId))
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    const stockRestoreRun = await runConcurrentTasks(restored, async (entry) => {
-      const currentProduct = latestMap.get(entry.restoredId)
+    const stockRestoreRun = await runConcurrentTasks<RestoredProductEntry, void>(restored, async (entry: RestoredProductEntry) => {
+      if (!entry.restoredId || !entry.snapshot) return
+      const currentProduct = latestMap.get(Number(entry.restoredId))
       await restoreProductBranchStock(entry.restoredId, entry.snapshot, currentProduct || { branch_stock: [] }, reason)
     })
     if (stockRestoreRun.failures.length) throw (stockRestoreRun.failures[0]?.error || new Error('Failed to restore deleted product stock'))
@@ -1110,15 +1388,15 @@ export default function Products() {
     return restored
   }, [branches, buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock, runProductWriteMutation])
 
-  const pushCreatedProductHistory = useCallback((snapshot, label = '') => {
+  const pushCreatedProductHistory = useCallback((snapshot: ProductRecord, label = '') => {
     const baseSnapshot = cloneHistorySnapshot(snapshot)
     let activeCreatedProductId = Number(baseSnapshot?.id || 0)
     if (!activeCreatedProductId) return false
-    let restoredEntries = []
+    let restoredEntries: RestoredProductEntry[] = []
     actionHistory.pushAction({
       label: label || `Add product ${baseSnapshot?.name || ''}`.trim(),
       undo: async () => {
-        const result = await runProductDeleteMutation(() => window.api.deleteProduct(activeCreatedProductId), 'Undo product creation')
+        const result = await runProductDeleteMutation(() => productApi.deleteProduct(activeCreatedProductId), 'Undo product creation')
         if (result?.success === false) throw new Error(result.error || 'Failed to undo product creation')
         await load(true)
       },
@@ -1130,7 +1408,7 @@ export default function Products() {
     return true
   }, [actionHistory, load, restoreDeletedProducts, runProductDeleteMutation])
 
-  const handleVariantDone = useCallback(async (payload = {}) => {
+  const handleVariantDone = useCallback(async (payload: { createdProductId?: EntityId; snapshot?: ProductRecord } = {}) => {
     setVariantModal(null)
     const createdProductId = Number(payload?.createdProductId || 0)
     const latestProducts = await fetchProductsByIds([createdProductId])
@@ -1145,23 +1423,23 @@ export default function Products() {
     await load(true)
   }, [fetchProductsByIds, load, pushCreatedProductHistory])
 
-  const openProductFormTab = useCallback((product, tab = 'basic') => {
+  const openProductFormTab = useCallback((product: ProductRecord, tab: ProductFormTab = 'basic') => {
     setSelected(product)
     setFormInitialTab(tab)
     setModal('form')
   }, [])
 
-  const clearProductStockByIds = useCallback(async (productIds = [], reason = 'Set products out of stock') => {
+  const clearProductStockByIds = useCallback(async (productIds: EntityId[] = [], reason = 'Set products out of stock') => {
     if (!productIds.length) return
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    const clearRun = await runConcurrentTasks(productIds, async (productId) => {
+    const clearRun = await runConcurrentTasks<EntityId, void>(productIds, async (productId: EntityId) => {
       const currentProduct = latestMap.get(Number(productId))
       if (!currentProduct) return
       const adjustments = buildProductClearStockAdjustments(currentProduct)
-      const branchRun = await runConcurrentTasks(adjustments, async (adjustment) => {
+      const branchRun = await runConcurrentTasks(adjustments, async (adjustment: { branchId: EntityId; quantity: unknown; unitCostUsd?: unknown; unitCostKhr?: unknown }) => {
         await runProductStockMutation(
-          () => window.api.adjustStock(buildProductStockAdjustmentPayload(currentProduct, {
+          () => productApi.adjustStock(buildProductStockAdjustmentPayload(currentProduct, {
             productId,
             type: 'remove',
             quantity: adjustment.quantity,
@@ -1169,7 +1447,7 @@ export default function Products() {
             unitCostUsd: adjustment.unitCostUsd,
             unitCostKhr: adjustment.unitCostKhr,
             reason,
-            user: { id: user.id, name: user.name },
+            user: { id: user?.id, name: user?.name },
           })),
           'Clear product stock',
         )
@@ -1178,9 +1456,9 @@ export default function Products() {
     })
     if (clearRun.failures.length) throw (clearRun.failures[0]?.error || new Error('Failed to clear product stock'))
     await load(true)
-  }, [fetchProductsByIds, load, user.id, user.name])
+  }, [fetchProductsByIds, load, user?.id, user?.name])
 
-  const addStockToProducts = useCallback(async (productIds = [], quantity, branchId, reason = 'Bulk add stock') => {
+  const addStockToProducts = useCallback(async (productIds: EntityId[] = [], quantity: unknown, branchId: unknown, reason = 'Bulk add stock') => {
     const amount = Number(quantity || 0)
     const numericBranchId = Number(branchId || 0)
     if (!productIds.length || !Number.isFinite(amount) || amount <= 0) {
@@ -1190,31 +1468,31 @@ export default function Products() {
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
 
-    const addRun = await runConcurrentTasks(productIds, async (productId) => {
+    const addRun = await runConcurrentTasks<EntityId, number>(productIds, async (productId: EntityId) => {
       const currentProduct = latestMap.get(Number(productId))
       if (!currentProduct) {
         throw new Error('Product not found')
       }
       await runProductStockMutation(
-        () => window.api.adjustStock(buildProductStockAdjustmentPayload(currentProduct, {
+        () => productApi.adjustStock(buildProductStockAdjustmentPayload(currentProduct, {
           productId,
           type: 'add',
           quantity: amount,
           branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
           reason,
-          user: { id: user.id, name: user.name },
+          user: { id: user?.id, name: user?.name },
         })),
         'Bulk add product stock',
       )
       return Number(productId)
     })
-    const summary = summarizeProductBulkRun(addRun)
+    const summary = summarizeProductRun(addRun)
 
     await load(true)
     return summary
-  }, [fetchProductsByIds, load, runProductStockMutation, user.id, user.name])
+  }, [fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
 
-  const moveProductsToBranch = useCallback(async (productIds = [], branchId, reason = 'Bulk branch change') => {
+  const moveProductsToBranch = useCallback(async (productIds: EntityId[] = [], branchId: unknown, reason = 'Bulk branch change') => {
     const numericBranchId = Number(branchId || 0)
     if (!productIds.length || !Number.isFinite(numericBranchId) || numericBranchId <= 0) {
       return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
@@ -1223,7 +1501,7 @@ export default function Products() {
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
 
-    const moveRun = await runConcurrentTasks(productIds, async (productId) => {
+    const moveRun = await runConcurrentTasks<EntityId, number>(productIds, async (productId: EntityId) => {
       const product = latestMap.get(Number(productId))
       if (!product) {
         throw new Error('Product not found')
@@ -1231,35 +1509,35 @@ export default function Products() {
       const movePlan = buildProductBranchMovePlan(product, numericBranchId)
       if (movePlan?.action === 'transfer') {
         await runProductStockMutation(
-          () => window.api.transferStock(buildProductTransferStockPayload(product, movePlan, {
+          () => productApi.transferStock(buildProductTransferStockPayload(product, movePlan, {
             productId,
             reason,
-            user: { id: user.id, name: user.name },
+            user: { id: user?.id, name: user?.name },
           })),
           'Move product branch stock',
         )
       } else if (movePlan?.action === 'initialize') {
         await runProductStockMutation(
-          () => window.api.adjustStock(buildProductStockAdjustmentPayload(product, {
+          () => productApi.adjustStock(buildProductStockAdjustmentPayload(product, {
             productId,
             type: 'add',
             quantity: 0,
             branchId: movePlan.branchId,
             reason,
-            user: { id: user.id, name: user.name },
+            user: { id: user?.id, name: user?.name },
           })),
           'Initialize product branch stock',
         )
       }
       return Number(productId)
     })
-    const summary = summarizeProductBulkRun(moveRun)
+    const summary = summarizeProductRun(moveRun)
 
     await load(true)
     return summary
-  }, [fetchProductsByIds, load, runProductStockMutation, user.id, user.name])
+  }, [fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
 
-  const runBulkProductUpdates = useCallback(async (updates) => {
+  const runBulkProductUpdates = useCallback(async (updates: Record<string, unknown>) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
     const nextUpdates = buildDefinedProductUpdates(updates)
     if (!Object.keys(nextUpdates).length) {
@@ -1272,19 +1550,19 @@ export default function Products() {
     let done = 0
     let failed = 0
     try {
-      const updateRun = await runConcurrentTasks(selectedVisibleIds, async (id) => {
+      const updateRun = await runConcurrentTasks<EntityId, number>(selectedVisibleIds, async (id: EntityId) => {
         const current = productsById.get(Number(id))
         const result = await runProductWriteMutation(
-          () => window.api.updateProduct(
+          () => productApi.updateProduct(
             id,
-            buildProductBulkUpdatePayload(nextUpdates, current, { id: user.id, name: user.name }),
+            buildProductBulkUpdatePayload(nextUpdates, current, { id: user?.id, name: user?.name }),
           ),
           'Bulk update product',
         )
         if (result?.success === false) throw new Error(result.error || 'Failed to update product')
         return Number(id)
       })
-      const { done: completedCount, failed: failedCount, failedIds } = summarizeProductBulkRun(updateRun)
+      const { done: completedCount, failed: failedCount, failedIds } = summarizeProductRun(updateRun)
       done = completedCount
       failed = failedCount
       setSelectedIds(new Set(failedIds))
@@ -1297,12 +1575,14 @@ export default function Products() {
           label: `Update ${done} product${done === 1 ? '' : 's'}`,
           undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo product bulk update'),
           redo: async () => {
-            const redoRun = await runConcurrentTasks(restoredSnapshots, async (snapshot) => {
-              const current = productsById.get(Number(snapshot.id))
+            const redoRun = await runConcurrentTasks<ProductRecord, void>(restoredSnapshots, async (snapshot: ProductRecord) => {
+              if (!snapshot.id) return
+              const snapshotId = snapshot.id
+              const current = productsById.get(Number(snapshotId))
               const result = await runProductWriteMutation(
-                () => window.api.updateProduct(
-                  snapshot.id,
-                  buildProductBulkUpdatePayload(nextUpdates, current, { id: user.id, name: user.name }, snapshot?.updated_at),
+                () => productApi.updateProduct(
+                  snapshotId,
+                  buildProductBulkUpdatePayload(nextUpdates, current, { id: user?.id, name: user?.name }, snapshot?.updated_at),
                 ),
                 'Redo product bulk update',
               )
@@ -1322,7 +1602,7 @@ export default function Products() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
+  }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user?.id, user?.name])
 
   const productFilterSections = useMemo(() => buildProductFilterSections({
     availableCreatedYears,
@@ -1341,21 +1621,27 @@ export default function Products() {
       supplierFilter,
     },
     isOpen: isProductFilterMenuOpen,
-    monthOptions: CREATED_MONTH_OPTIONS,
+    monthOptions: [...CREATED_MONTH_OPTIONS],
     setBrandFilter,
     setBranchFilter,
     setCatFilter,
     setCreatedMonthFilter,
     setCreatedYearFilter,
     setGroupFilter,
-    setProductSortDirection,
+    setProductSortDirection: (value: string) => setProductSortDirection(value === 'asc' ? 'asc' : 'desc'),
     setStockFilter,
     setSupplierFilter,
     suppliers,
     t,
   }), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, isProductFilterMenuOpen, productSortDirection, stockFilter, supplierFilter, suppliers, t])
 
-  const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
+  const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
+    const productId = p.id ?? 0
+    const productName = String(p.name || '')
+    const sellingUsd = Number(p.selling_price_usd || 0)
+    const sellingKhr = Number(p.selling_price_khr || 0)
+    const specialUsd = Number(p.special_price_usd || 0)
+    const specialKhr = Number(p.special_price_khr || 0)
     const {
       branchSummaryLabel,
       compactMeta,
@@ -1379,27 +1665,31 @@ export default function Products() {
     const thumbnailState = buildProductThumbnailState(p)
     return (
       <tr
-        key={p.id}
-        data-product-jump-id={p.id}
-        className={`table-row cursor-pointer ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+        key={productId}
+        data-product-jump-id={productId}
+        className={`table-row cursor-pointer ${isProductSelected(productId) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
         onClick={() => setDetailProduct(p)}
       >
-        <td className={`px-3 py-2 w-8 ${indented ? 'pl-6' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSelect(p.id) }}>
-          <input type="checkbox" className="rounded" checked={isProductSelected(p.id)} onChange={() => toggleSelect(p.id)} />
+        <td className={`px-3 py-2 w-8 ${indented ? 'pl-6' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSelect(productId) }}>
+          <input type="checkbox" className="rounded" checked={isProductSelected(productId)} onChange={() => toggleSelect(productId)} />
         </td>
         <td className="px-3 py-2">
           {thumbnailState.hasImage
-            ? <ProductImg src={thumbnailState.thumbnail} alt={p.name} className="w-10 h-10 rounded-lg object-cover cursor-zoom-in hover:ring-2 hover:ring-blue-400" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, p.name) }} />
+            ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="w-10 h-10 rounded-lg object-cover cursor-zoom-in hover:ring-2 hover:ring-blue-400" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }} />
             : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
         </td>
         <td className="px-3 py-2 align-top">
           {compactMeta.length ? (
             <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1">
-              {compactMeta.map((item) => renderMetaPill(item))}
+              {compactMeta.map((item) => renderMetaPill(item ? {
+                key: String(item.key),
+                label: String(item.label || ''),
+                color: typeof item.color === 'string' ? item.color : undefined,
+              } : null))}
             </div>
           ) : null}
           <div className="flex min-w-0 items-center gap-1.5">
-            <div {...getKhmerTextProps(p.name, 'min-w-0 break-words font-medium text-gray-900 dark:text-white')}>{p.name}</div>
+            <div {...getKhmerTextProps(productName, 'min-w-0 break-words font-medium text-gray-900 dark:text-white')}>{productName}</div>
             {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
             {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">variant</span> : null}
           </div>
@@ -1408,8 +1698,8 @@ export default function Products() {
           <ProductDetailsCell
             product={p}
             promotion={promotion}
-            branchLabel={branchSummaryLabel}
-            selectedBranchName={selectedBranchName}
+            branchLabel={String(branchSummaryLabel || '')}
+            selectedBranchName={selectedBranchName ? String(selectedBranchName) : ''}
             selectedBranchId={branchFilter}
             renderMetaPill={renderMetaPill}
             tr={tr}
@@ -1421,29 +1711,29 @@ export default function Products() {
           {purchaseKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(purchaseKhr)}</div>}
         </td>
         <td className="px-3 py-2 text-right col-highlight-green">
-          <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(p.selling_price_usd)}</div>
-          {p.selling_price_khr > 0 && <div className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</div>}
-          {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+          <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
+          {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
+          {specialUsd > 0 || specialKhr > 0 ? (
             <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
-              Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
-              {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
+              Special {fmtUSD(specialUsd || sellingUsd)}
+              {specialKhr > 0 ? ` / ${fmtKHR(specialKhr)}` : ''}
             </div>
           ) : null}
           {promotion.active ? (
             <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
-              {p.discount_label || tr('discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
+              {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
             </div>
           ) : null}
         </td>
         <td className="px-3 py-2 text-right hidden lg:table-cell">
-          {purchaseUsd > 0 && p.selling_price_usd > 0
+          {purchaseUsd > 0 && sellingUsd > 0
             ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-gray-400">{marginPct.toFixed(1)}%</div></div>
             : <span className="text-gray-300">N/A</span>}
         </td>
         <td className="px-3 py-2 text-right">
           <div className="font-bold text-gray-900 dark:text-white">
-            {qty}
-            {renderUnitChip(p.unit)}
+            {String(qty || 0)}
+            {renderUnitChip(typeof p.unit === 'string' ? p.unit : undefined)}
           </div>
         </td>
         <td className="px-3 py-2 text-center">{getStockBadge(p)}</td>
@@ -1462,7 +1752,14 @@ export default function Products() {
     )
   }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getStockBadge, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderMetaPill, renderUnitChip, t, tr])
 
-  const renderMobileProductCard = useCallback((p, { indented = false } = {}) => {
+  const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
+    const productId = p.id ?? 0
+    const productName = String(p.name || '')
+    const categoryName = String(p.category || '')
+    const brandName = String(p.brand || '')
+    const sellingUsd = Number(p.selling_price_usd || 0)
+    const specialUsd = Number(p.special_price_usd || 0)
+    const unitName = typeof p.unit === 'string' ? p.unit : undefined
     const {
       mobileStatusClass,
       mobileStatusLabel,
@@ -1479,23 +1776,23 @@ export default function Products() {
 
     return (
       <div
-        key={p.id}
-        data-product-jump-id={p.id}
-        className={`card cursor-pointer px-3 py-2.5 ${isProductSelected(p.id) ? 'ring-1 ring-blue-400 bg-blue-50/70 dark:bg-blue-900/20' : ''} ${indented ? 'ml-3 border-l-4 border-l-slate-200 dark:border-l-slate-700' : ''}`}
+        key={productId}
+        data-product-jump-id={productId}
+        className={`card cursor-pointer px-3 py-2.5 ${isProductSelected(productId) ? 'ring-1 ring-blue-400 bg-blue-50/70 dark:bg-blue-900/20' : ''} ${indented ? 'ml-3 border-l-4 border-l-slate-200 dark:border-l-slate-700' : ''}`}
         onClick={() => setDetailProduct(p)}
       >
         <div className="flex items-start gap-3">
-          <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={isProductSelected(p.id)} onChange={(e) => { e.stopPropagation(); toggleSelect(p.id) }} onClick={(e) => e.stopPropagation()} />
+          <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={isProductSelected(productId)} onChange={(e) => { e.stopPropagation(); toggleSelect(productId) }} onClick={(e) => e.stopPropagation()} />
           <div className="relative flex-shrink-0">
             {thumbnailState.hasImage
-              ? <ProductImg src={thumbnailState.thumbnail} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, p.name) }} />
+              ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }} />
               : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
             <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <div {...getKhmerTextProps(p.name, 'truncate text-sm font-semibold text-gray-900 dark:text-white')}>{p.name}</div>
+                <div {...getKhmerTextProps(productName, 'truncate text-sm font-semibold text-gray-900 dark:text-white')}>{productName}</div>
               </div>
               <div className="flex shrink-0 items-start gap-1.5">
                 <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${mobileStatusClass}`}>
@@ -1515,28 +1812,28 @@ export default function Products() {
               </div>
             </div>
             <div className="mt-0.5 flex flex-wrap gap-1">
-              {p.category ? (
+              {categoryName ? (
                 <span
                   className="inline-block max-w-[8rem] truncate rounded-full px-1.5 py-0.5 text-[10px]"
                   style={{
-                    background: catMap[p.category]?.color || '#6b7280',
-                    color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
+                    background: catMap[categoryName]?.color || '#6b7280',
+                    color: getContrastingTextColor(catMap[categoryName]?.color || '#6b7280'),
                   }}
-                  title={p.category}
+                  title={categoryName}
                 >
-                  {p.category}
+                  {categoryName}
                 </span>
               ) : null}
-              {p.brand ? (
+              {brandName ? (
                 <span
-                  className={`inline-block max-w-[8rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium ${getBrandColor(p.brand) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
-                  style={getBrandColor(p.brand) ? {
-                    background: getBrandColor(p.brand),
-                    color: getContrastingTextColor(getBrandColor(p.brand)),
+                  className={`inline-block max-w-[8rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+                  style={getBrandColor(brandName) ? {
+                    background: getBrandColor(brandName),
+                    color: getContrastingTextColor(getBrandColor(brandName)),
                   } : undefined}
-                  title={p.brand}
+                  title={brandName}
                 >
-                  {p.brand}
+                  {brandName}
                 </span>
               ) : null}
             </div>
@@ -1546,11 +1843,11 @@ export default function Products() {
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-[5.35rem] text-[11px]">
               <span className="whitespace-nowrap text-red-600">{fmtUSD(purchaseUsd)}</span>
               <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span className="whitespace-nowrap text-green-700">{fmtUSD(p.selling_price_usd)}</span>
-              {(p.special_price_usd || 0) > 0 ? (
+              <span className="whitespace-nowrap text-green-700">{fmtUSD(sellingUsd)}</span>
+              {specialUsd > 0 ? (
                 <>
                   <span className="text-gray-300 dark:text-gray-600">|</span>
-                  <span className="whitespace-nowrap text-blue-700 dark:text-blue-400">{fmtUSD(p.special_price_usd || 0)}</span>
+                  <span className="whitespace-nowrap text-blue-700 dark:text-blue-400">{fmtUSD(specialUsd)}</span>
                 </>
               ) : null}
               {promotion.active ? (
@@ -1560,7 +1857,7 @@ export default function Products() {
                 </>
               ) : null}
               <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span className={withKhmerTextClass(p.unit, 'inline-flex min-w-0 max-w-full items-center whitespace-nowrap text-gray-500')}>{qty}{renderUnitChip(p.unit)}</span>
+              <span className={withKhmerTextClass(unitName, 'inline-flex min-w-0 max-w-full items-center whitespace-nowrap text-gray-500')}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
         </div>
       </div>
     )
@@ -1606,7 +1903,7 @@ export default function Products() {
             onChange={(event) => setSearch(event.target.value)}
           />
           <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-gray-300 bg-white p-0.5 dark:border-gray-600 dark:bg-gray-900">
-            {['AND', 'OR'].map((mode) => (
+            {(['AND', 'OR'] as SearchMode[]).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setSearchMode(mode)}
@@ -1745,7 +2042,7 @@ export default function Products() {
                       opt.onClick()
                       return
                     }
-                    setBulkEditMode(bulkEditMode===opt.id?null:opt.id); setBulkEditOpen(true); setBulkEditForm({})
+                    setBulkEditMode(bulkEditMode === opt.id ? null : opt.id as BulkEditMode); setBulkEditOpen(true); setBulkEditForm({})
                   }}
                   className={`inline-flex h-8 min-w-0 items-center justify-center overflow-hidden rounded-xl border px-2 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'}`}>
                   <span className="truncate">{opt.label}</span>
@@ -1874,6 +2171,7 @@ export default function Products() {
         collapsedProductSections={collapsedProductSections}
         desktopSelectAllRef={desktopSelectAllRef}
         getGroupSummaryParts={getGroupSummaryParts}
+        initialDesktopRevealReady={loadedOnceRef.current || !loading}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
         isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
         loading={loading}
@@ -1897,7 +2195,19 @@ export default function Products() {
       {detailProduct && (
         <Suspense fallback={null}>
           <ProductDetailModal
-            p={detailProduct} catMap={catMap} unitMap={unitMap} brandColorMap={brandColorMap} fmtUSD={fmtUSD} fmtKHR={fmtKHR} t={t}
+            p={{
+              ...detailProduct,
+              name: String(detailProduct.name || ''),
+              stock_quantity: Number(detailProduct.stock_quantity || 0),
+              selling_price_usd: Number(detailProduct.selling_price_usd || 0),
+              image_path: detailProduct.image_path || undefined,
+            }}
+            catMap={catMap}
+            unitMap={unitMap}
+            brandColorMap={brandColorMap}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+            t={t}
             onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
             onAddVariant={!detailProduct.parent_id ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
             onDiscount={() => { setDetailProduct(null); openProductFormTab(detailProduct, 'pricing') }}
@@ -1906,7 +2216,7 @@ export default function Products() {
             onClose={()=>setDetailProduct(null)}
             onImageClick={(src, gallery, startIndex = 0) => {
               const sourceGallery = buildProductLightboxGalleryInput(src, gallery)
-              openLightbox(sourceGallery, startIndex, detailProduct?.name || '')
+              openLightbox(sourceGallery, startIndex, String(detailProduct?.name || ''))
             }}
           />
         </Suspense>
@@ -1920,7 +2230,7 @@ export default function Products() {
             images={lightbox?.images || []}
             index={lightbox?.index || 0}
             onClose={() => setLightbox(null)}
-            onIndexChange={(index) => setLightbox((curr) => updateProductLightboxIndex(curr, index))}
+            onIndexChange={(index) => setLightbox((curr) => toLightboxState(updateProductLightboxIndex(curr, index), curr))}
             labels={{
               prev: t('prev') || 'Prev',
               next: t('next') || 'Next',
@@ -1935,11 +2245,17 @@ export default function Products() {
         <Suspense fallback={null}>
           <BulkAddStockModal
             productIds={bulkAddModal.ids}
-            products={products}
-            branches={branches}
+            products={products.map((product) => ({
+              ...product,
+              id: product.id ?? 0,
+              name: String(product.name || ''),
+              purchase_price_usd: Number(product.purchase_price_usd || 0),
+              purchase_price_khr: Number(product.purchase_price_khr || 0),
+            }))}
+            branches={branchOptions}
             user={user}
             onClose={() => setBulkAddModal(null)}
-            onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0 } = {}) => {
+            onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0 }: BulkAddStockResult) => {
               const numericQuantity = Number(quantity || 0)
               const successfulIds = normalizePositiveProductIds(updatedIds)
               const restoredSnapshots = (bulkAddModal?.snapshots || []).filter((snapshot) => successfulIds.includes(Number(snapshot?.id || 0)))
@@ -1965,17 +2281,39 @@ export default function Products() {
       )}
       {modal==='form' && (
         <Suspense fallback={null}>
-          <ProductForm product={selected} categories={categories} units={units} branches={branches} brandOptions={brandOptions} groupCandidates={products} initialTab={formInitialTab} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />
+          <ProductForm
+            product={toModalProduct(selected)}
+            categories={categoryOptions}
+            units={unitOptions}
+            branches={branchOptions}
+            brandOptions={brandOptions}
+            groupCandidates={products.map((product) => ({
+              id: product.id,
+              name: String(product.name || ''),
+              parent_id: product.parent_id || null,
+            }))}
+            initialTab={formInitialTab}
+            onSave={(payload) => handleSaveWithGallery((payload || {}) as unknown as ProductRecord)}
+            onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
+            t={t}
+            usdSymbol={usdSymbol}
+            khrSymbol={khrSymbol}
+            exchangeRate={exchangeRate}
+            user={user}
+          />
         </Suspense>
       )}
       {variantModal && (
         <Suspense fallback={null}>
           <VariantFormModal
-            parent={variantModal}
-            categories={categories} units={units} branches={branches} user={user}
+            parent={toVariantParentProduct(variantModal)!}
+            units={unitOptions}
+            branches={branchOptions}
+            user={user}
             onClose={()=>setVariantModal(null)}
             onDone={handleVariantDone}
-            t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate}
+            t={t}
+            usdSymbol={usdSymbol}
           />
         </Suspense>
       )}
@@ -1996,7 +2334,7 @@ export default function Products() {
       )}
       {modal==='bulk' && (
         <Suspense fallback={null}>
-          <BulkImportModal onClose={()=>setModal(null)} onDone={load} t={t} />
+          <BulkImportModal onClose={()=>setModal(null)} onDone={() => { void load() }} t={t} />
         </Suspense>
       )}
     </div>

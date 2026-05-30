@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const productsPage = readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
+const productsPage = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const productFilterHelpers = readFileSync(new URL('../src/components/products/helpers/productFilterHelpers.ts', import.meta.url), 'utf8')
 const productMenuHelpers = readFileSync(new URL('../src/components/products/helpers/productMenuHelpers.ts', import.meta.url), 'utf8')
 const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
@@ -10,7 +10,7 @@ const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.t
 const apiMethods = readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
 
 assert.ok(
-  productsPage.includes('window.api.getProductsByIds'),
+  /productApi\.getProductsByIds|window\.api\.getProductsByIds/.test(productsPage),
   'Products page should fetch touched records by id for undo/redo and bulk actions',
 )
 assert.ok(
@@ -77,7 +77,7 @@ assert.doesNotMatch(
 )
 assert.match(
   productsPage,
-  /p\.brand[\s\S]*getBrandColor\(p\.brand\)[\s\S]*pl-\[5\.35rem\]/,
+  /(?:p\.brand|brandName)[\s\S]*getBrandColor\((?:p\.brand|brandName)\)[\s\S]*pl-\[5\.35rem\]/,
   'Mobile product cards should show brand and let the lower metadata row span under the action button',
 )
 assert.match(

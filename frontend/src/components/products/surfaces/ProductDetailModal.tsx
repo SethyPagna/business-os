@@ -6,7 +6,7 @@ import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../../utils/productBatches.ts'
 
 type Translate = (key: string) => string | undefined
-type FormatMoney = (value: number) => string
+type FormatMoney = (value: unknown) => string
 
 type ColorLookupEntry = {
   color?: string
@@ -16,13 +16,13 @@ type ColorLookup = Record<string, ColorLookupEntry | undefined>
 type BrandColorLookup = Record<string, string | undefined>
 
 type BranchStockEntry = {
-  branch_id?: string | number
+  branch_id?: string | number | null
   branch_name?: string
-  quantity?: number
+  quantity?: unknown
 }
 
 type ProductDetailProduct = {
-  name: string
+  name?: unknown
   sku?: string
   barcode?: string
   category?: string
@@ -30,23 +30,23 @@ type ProductDetailProduct = {
   supplier?: string
   unit?: string
   description?: string
-  stock_quantity: number
-  out_of_stock_threshold?: number
-  low_stock_threshold?: number
-  purchase_price_usd?: number
-  cost_price_usd?: number
-  purchase_price_khr?: number
-  cost_price_khr?: number
-  selling_price_usd: number
-  selling_price_khr?: number
-  special_price_usd?: number
-  special_price_khr?: number
+  stock_quantity?: unknown
+  out_of_stock_threshold?: unknown
+  low_stock_threshold?: unknown
+  purchase_price_usd?: unknown
+  cost_price_usd?: unknown
+  purchase_price_khr?: unknown
+  cost_price_khr?: unknown
+  selling_price_usd?: unknown
+  selling_price_khr?: unknown
+  special_price_usd?: unknown
+  special_price_khr?: unknown
   discount_badge_color?: string
   discount_label?: string
   expiry_date?: string
   created_at?: string
   image_path?: string
-  image_gallery?: Array<string | null | undefined>
+  image_gallery?: unknown[]
   batches?: unknown
   branch_stock?: BranchStockEntry[]
   [key: string]: unknown
@@ -93,14 +93,19 @@ export default function ProductDetailModal({
   t,
 }: ProductDetailModalProps) {
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key) : fallback) || fallback
-  const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
-  const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
-  const specialUsd = p.special_price_usd || 0
-  const specialKhr = p.special_price_khr || 0
-  const sellingKhr = p.selling_price_khr || 0
+  const productName = String(p.name || '')
+  const purchaseUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
+  const purchaseKhr = Number(p.purchase_price_khr || p.cost_price_khr || 0)
+  const sellingUsd = Number(p.selling_price_usd || 0)
+  const specialUsd = Number(p.special_price_usd || 0)
+  const specialKhr = Number(p.special_price_khr || 0)
+  const sellingKhr = Number(p.selling_price_khr || 0)
+  const stockQuantity = Number(p.stock_quantity || 0)
+  const outOfStockThreshold = Number(p.out_of_stock_threshold || 0)
+  const lowStockThreshold = Number(p.low_stock_threshold || 10)
   const promotion = calculateProductDiscount(p)
-  const marginUsd = p.selling_price_usd - purchaseUsd
-  const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd) * 100 : 0
+  const marginUsd = sellingUsd - purchaseUsd
+  const marginPct = sellingUsd > 0 ? (marginUsd / sellingUsd) * 100 : 0
   const gallery = Array.isArray(p?.image_gallery) && p.image_gallery.length
     ? p.image_gallery.filter((imagePath): imagePath is string => Boolean(imagePath)).slice(0, 5)
     : (p?.image_path ? [p.image_path] : [])
@@ -129,7 +134,7 @@ export default function ProductDetailModal({
               {primaryImage ? (
                 <ProductImg
                   src={primaryImage}
-                  alt={p.name}
+                  alt={productName}
                   className="h-full w-full cursor-zoom-in object-cover"
                   onClick={(event) => {
                     event.stopPropagation()
@@ -141,7 +146,7 @@ export default function ProductDetailModal({
               )}
             </div>
             <div className="min-w-0">
-              <div className="truncate font-bold text-gray-900 dark:text-white">{p.name}</div>
+              <div className="truncate font-bold text-gray-900 dark:text-white">{productName}</div>
               {p.sku ? <div className="font-mono text-xs text-gray-400">{p.sku}</div> : null}
             </div>
           </div>
@@ -179,7 +184,7 @@ export default function ProductDetailModal({
             </Row>
           ) : null}
           <Row label={T('label_stock', 'Stock')}>
-            <strong className="text-gray-900 dark:text-white">{p.stock_quantity}</strong>
+            <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
             {p.unit ? (
               unitColor ? (
                 <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
@@ -212,12 +217,12 @@ export default function ProductDetailModal({
               {purchaseKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
             </Row>
             <Row label={T('label_selling_price', 'Selling Price')}>
-              <span className="text-green-600">{fmtUSD(p.selling_price_usd)}</span>
+              <span className="text-green-600">{fmtUSD(sellingUsd)}</span>
               {sellingKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
             </Row>
             {(specialUsd > 0 || specialKhr > 0) ? (
               <Row label={T('special_price', 'Special Price')}>
-                <span className="text-blue-600">{fmtUSD(specialUsd || p.selling_price_usd || 0)}</span>
+                <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
                 {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
               </Row>
             ) : null}
@@ -242,7 +247,7 @@ export default function ProductDetailModal({
               <div className="mb-1.5 text-xs text-gray-400">{T('label_branches', 'Branch Stock')}</div>
               <div className="flex flex-wrap gap-1.5">
                 {(p.branch_stock || []).map((bs) => {
-                  const branchQuantity = bs.quantity || 0
+                  const branchQuantity = Number(bs.quantity || 0)
                   return (
                   <span
                     key={bs.branch_id || bs.branch_name}
@@ -288,9 +293,9 @@ export default function ProductDetailModal({
           ) : null}
 
           <Row label={T('status', 'Status')}>
-            {p.stock_quantity <= (p.out_of_stock_threshold || 0) ? (
+            {stockQuantity <= outOfStockThreshold ? (
               <span className="badge-red">{T('out_of_stock', 'Out of stock')}</span>
-            ) : p.stock_quantity <= (p.low_stock_threshold || 10) ? (
+            ) : stockQuantity <= lowStockThreshold ? (
               <span className="badge-yellow">{T('low_stock', 'Low stock')}</span>
             ) : (
               <span className="badge-green">{T('in_stock', 'In stock')}</span>
