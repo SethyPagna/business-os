@@ -73,7 +73,7 @@ const {
 const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
 const { createFinalBackupPackage, findReusableLocalBackupPackage, listBackupVersions, validateLocalBackupPackage } = require('../../services/backupPackages')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState/index.ts')
-const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = require('../../systemJobs')
+const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = require('../../systemJobs.ts')
 const { getMaintenanceLock, withMaintenanceLock } = require('../../maintenanceLock.ts')
 const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness.ts')
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime.ts')

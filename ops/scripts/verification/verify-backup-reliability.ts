@@ -38,7 +38,7 @@ function main() {
   const sources = {
     backupPackages: { file: 'backend/src/services/backupPackages.js', text: read('backend/src/services/backupPackages.js') },
     driveSync: { file: 'backend/src/services/googleDriveSync/index.js', text: read('backend/src/services/googleDriveSync/index.js') },
-    systemJobs: { file: 'backend/src/systemJobs.js', text: read('backend/src/systemJobs.js') },
+    systemJobs: { file: 'backend/src/systemJobs.ts', text: read('backend/src/systemJobs.ts') },
     maintenanceLock: { file: 'backend/src/maintenanceLock.ts', text: read('backend/src/maintenanceLock.ts') },
     systemRoutes: { file: 'backend/src/routes/system/index.js', text: read('backend/src/routes/system/index.js') },
     backupUi: { file: 'frontend/src/components/utils-settings/Backup.tsx', text: read('frontend/src/components/utils-settings/Backup.tsx') },

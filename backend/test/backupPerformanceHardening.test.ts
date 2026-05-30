@@ -59,7 +59,7 @@ runTest('backup package validation uses streaming checksums for package files', 
 })
 
 runTest('system jobs throttle noisy persistence while forcing major state changes', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/systemJobs.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/systemJobs.ts'), 'utf8')
   assert.match(source, /JOB_PERSIST_MIN_INTERVAL_MS\s*=\s*750/)
   assert.match(source, /JOB_PROGRESS_PERSIST_STEP\s*=\s*5/)
   assert.match(source, /function\s+schedulePersistJob\(/)
@@ -166,7 +166,7 @@ runTest('backup packages complete locally when remote mirror upload is slow', ()
 })
 
 runTest('system jobs recover stale queued or running rows after restart', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/systemJobs.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/systemJobs.ts'), 'utf8')
   assert.match(source, /Recovered after server restart/)
   assert.match(source, /WHERE status IN \('queued', 'running', 'cancelling'\)/)
 })

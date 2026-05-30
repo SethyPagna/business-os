@@ -107,7 +107,7 @@ await runTest('background import tracker actions use a synchronous action guard'
 await runTest('backup export and restore keep local busy state plus backend job dedupe', () => {
   const backup = readFrontend('src/components/utils-settings/Backup.tsx')
   const systemRoute = readRepo('backend/src/routes/system/index.js')
-  const systemJobs = readRepo('backend/src/systemJobs.js')
+  const systemJobs = readRepo('backend/src/systemJobs.ts')
 
   assert.match(backup, /data-testid="backup-export-create"[\s\S]*disabled=\{!!loading \|\| activeBackupJobRunning\}/)
   assert.match(backup, /data-testid="backup-restore-start"[\s\S]*disabled=\{!!loading \|\| activeBackupJobRunning\}/)

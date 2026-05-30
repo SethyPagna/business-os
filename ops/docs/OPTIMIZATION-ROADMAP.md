@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 600.
+- Latest completed implementation move in this roadmap: Move 601.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -319,7 +319,7 @@ Mini phases:
   - nullable-to-required readiness checks
   - backup manifest confirmation
 - 6.6 Repeat the schema sweep against runtime DDL in `postgresDatabase.js` and
-  `systemJobs.js` so schema added after the dump is not missed.
+  `systemJobs.ts` so schema added after the dump is not missed.
 - 6.7 Repeat the relationship sweep against route/service SQL joins, manual
   cascades, and `*_id` filters.
 - 6.8 Repeat the implicit-schema sweep against JSON text columns, settings
@@ -4792,7 +4792,7 @@ Move 424 status:
   organization folder precedence remain unchanged.
 
 Move 425 status:
-- Move 425 tightens system job lifecycle helpers in `backend/src/systemJobs.js`.
+- Move 425 tightens system job lifecycle helpers in `backend/src/systemJobs.ts`.
   Runtime migration statement execution, finished-job collection, old finished
   job cleanup, persisted job row serialization, and in-memory job listing now
   use direct-loop helpers instead of `forEach()`/`Array.from()`/`filter()`/
@@ -6763,4 +6763,22 @@ Move 600 status:
   to warn for direct `.ts` scripts, so broader backend conversions still wait
   for a compile/staging package lane. The generated language audit now reports
   `JavaScript: 22`, `TypeScript: 289`, and `React TSX: 107` across the active
+  scan roots.
+
+Move 601 status:
+- Move 601 converts `backend/src/systemJobs.ts` to a package-safe TypeScript
+  path. Job id generation, public job serialization, active-job dedupe,
+  runtime table creation/migration, stale queued/running/cancelling job
+  recovery, throttled persistence, progress persistence steps, cancellation
+  errors, cancellable worker lifecycle, queued/running/completed/failed/
+  cancelled status transitions, retention cleanup, and database-backed job
+  listing remain unchanged on the existing CommonJS helper style. The system
+  route, backend tests, frontend action-stability source probe, backup
+  reliability verifier, schema audit, hardening policy, schema relationship
+  doc, and roadmap docs now point at the explicit `.ts` helper path. Focused
+  helper load, system-jobs, route-contract, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The generated language audit now reports
+  `JavaScript: 21`, `TypeScript: 290`, and `React TSX: 107` across the active
   scan roots.

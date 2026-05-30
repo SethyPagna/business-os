@@ -121,7 +121,7 @@
           "mustNotContain": ["fs.readFileSync(file.absolutePath)", "Buffer.concat", "buildMultipartBody"]
         },
         {
-          "path": "backend/src/systemJobs.js",
+          "path": "backend/src/systemJobs.ts",
           "mustContain": ["cancelSystemJob", "AbortController", "cancel_requested_at", "metrics_json", "SystemJobCancelledError"]
         },
         {

@@ -13,7 +13,7 @@ This document is the working relational schema map for Business OS. It was built
 
 - `backend/src/db/postgresSchema.sql`
 - `backend/src/postgresDatabase.js`
-- `backend/src/systemJobs.js`
+- `backend/src/systemJobs.ts`
 - `backend/src/routes/**/*.js`
 - `backend/src/services/**/*.js`
 - `backend/src/backupSchema.ts`
@@ -33,7 +33,7 @@ The canonical server database is Postgres. The backend still exposes a synchrono
 ## Verification Passes
 
 1. Canonical schema pass: parsed all `CREATE TABLE`, `PRIMARY KEY`, and `CREATE INDEX` statements from `backend/src/db/postgresSchema.sql`.
-2. Runtime schema pass: cross-checked `postgresDatabase.js` and `systemJobs.js` for `ALTER TABLE`, `CREATE TABLE IF NOT EXISTS`, and indexes not fully represented in the dump.
+2. Runtime schema pass: cross-checked `postgresDatabase.js` and `systemJobs.ts` for `ALTER TABLE`, `CREATE TABLE IF NOT EXISTS`, and indexes not fully represented in the dump.
 3. Relationship pass: scanned backend routes/services for joins, `*_id` filters, manual cascade deletes, and denormalized snapshot fields.
 4. Implicit schema pass: scanned JSON/text payload columns, dynamic custom-table creation, backup table order, Dexie offline stores, Redis queue/cache, and object-storage references.
 5. Plan update pass: updated this document and the optimization roadmap with new repeated schema-analysis mini phases and recommendations.

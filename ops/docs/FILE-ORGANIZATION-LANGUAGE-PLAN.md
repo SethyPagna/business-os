@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 600 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 601 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 44`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 319`,
+  `.js: 43`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 320`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3316,7 +3316,7 @@ Decision rule:
     and organization folder discovery. This was a backend utility cleanup only;
     no folder move, schema migration, or language conversion was needed.
 415. Tighten system job lifecycle helpers. Done:
-    `backend/src/systemJobs.js` now uses direct-loop helpers for migration
+    `backend/src/systemJobs.ts` now uses direct-loop helpers for migration
     statement execution, finished-job collection, old finished job cleanup,
     persisted job row serialization, and in-memory job listing. Stale recovery,
     persistence throttling, completed-job cap, listing order, and public job
@@ -5072,6 +5072,22 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The
     generated language audit now reports `JavaScript: 22`, `TypeScript: 289`,
     and `React TSX: 107` across the active scan roots.
+601. Convert system jobs lifecycle helper to a package-safe TypeScript path.
+    Done: `backend/src/systemJobs.ts` keeps job id generation, public job
+    serialization, active-job dedupe, runtime table creation/migration, stale
+    queued/running/cancelling job recovery, throttled persistence, progress
+    persistence steps, cancellation errors, cancellable worker lifecycle,
+    queued/running/completed/failed/cancelled status transitions, retention
+    cleanup, and database-backed job listing on the existing CommonJS helper
+    style. The system route, backend tests, frontend action-stability source
+    probe, backup reliability verifier, schema audit, hardening policy,
+    schema relationship doc, and roadmap docs now point at the explicit `.ts`
+    helper path. Focused helper load, system-jobs, route-contract, backend
+    utility, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so
+    broader backend conversions remain blocked on the future compile/staging
+    lane. The generated language audit now reports `JavaScript: 21`,
+    `TypeScript: 290`, and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

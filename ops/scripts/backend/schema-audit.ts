@@ -12,7 +12,7 @@ const summaryPath = path.join(root, 'ops', 'docs', 'reference', 'SCHEMA-AUDIT.js
 const sourceFiles = {
   canonicalSchema: 'backend/src/db/postgresSchema.sql',
   runtimeSchema: 'backend/src/postgresDatabase.js',
-  systemJobs: 'backend/src/systemJobs.js',
+  systemJobs: 'backend/src/systemJobs.ts',
   backupSchema: 'backend/src/backupSchema.ts',
   dexieSchema: 'frontend/src/api/localDb.ts',
   relationshipDoc: 'ops/docs/SCHEMA-RELATIONSHIPS.md',

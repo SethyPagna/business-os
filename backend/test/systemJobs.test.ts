@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = require('../src/systemJobs')
+const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = require('../src/systemJobs.ts')
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
