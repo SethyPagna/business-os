@@ -98,7 +98,7 @@ Total files documented: **531**
 | 86 | `backend/src/settingsSnapshot.ts` | backend-core | 181 | 5.0 | Project source/support file |
 | 87 | `backend/src/storage/organizationFolders.ts` | backend-core | 59 | 2.0 | Project source/support file |
 | 88 | `backend/src/systemFsWorker.ts` | backend-core | 122 | 3.6 | Project source/support file |
-| 89 | `backend/src/systemJobs.js` | backend-core | 467 | 14.5 | Project source/support file |
+| 89 | `backend/src/systemJobs.ts` | backend-core | 467 | 14.5 | Project source/support file |
 | 90 | `backend/src/uploadReferenceCleanup.ts` | backend-core | 245 | 8.2 | Project source/support file |
 | 91 | `backend/src/uploadSecurity.ts` | backend-core | 119 | 4.1 | Project source/support file |
 | 92 | `backend/src/websocket.ts` | backend-core | 94 | 3.6 | Project source/support file |

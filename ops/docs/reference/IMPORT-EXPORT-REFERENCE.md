@@ -88,7 +88,7 @@ Code files documented: **468**
 | 76 | `backend/src/settingsSnapshot.ts` | 4 | 1 | 2 | 8 |
 | 77 | `backend/src/storage/organizationFolders.ts` | 2 | 1 | 0 | 2 |
 | 78 | `backend/src/systemFsWorker.ts` | 3 | 0 | 1 | 0 |
-| 79 | `backend/src/systemJobs.js` | 2 | 1 | 1 | 2 |
+| 79 | `backend/src/systemJobs.ts` | 2 | 1 | 1 | 2 |
 | 80 | `backend/src/uploadReferenceCleanup.ts` | 1 | 1 | 1 | 2 |
 | 81 | `backend/src/uploadSecurity.ts` | 2 | 1 | 1 | 4 |
 | 82 | `backend/src/websocket.ts` | 5 | 1 | 3 | 2 |
@@ -768,7 +768,7 @@ Code files documented: **468**
   - `backend/src/services/portalAi.js`
   - `backend/src/services/verification.ts`
   - `backend/src/sessionAuth.ts`
-  - `backend/src/systemJobs.js`
+  - `backend/src/systemJobs.ts`
   - `backend/src/workers/importWorker.ts`
   - `backend/src/workers/mediaWorker.ts`
   - `backend/test/authSecurityFlow.test.ts`
@@ -1676,7 +1676,7 @@ Code files documented: **468**
   - `../../services/googleDriveSync`
   - `../../services/importJobs`
   - `../../services/integrationDoctor.ts`
-  - `../../systemJobs`
+  - `../../systemJobs.ts`
   - `child_process`
   - `express`
   - `fs`
@@ -1701,7 +1701,7 @@ Code files documented: **468**
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.ts`
-  - `backend/src/systemJobs.js`
+  - `backend/src/systemJobs.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -2125,7 +2125,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.79 `backend/src/systemJobs.js`
+### 3.79 `backend/src/systemJobs.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2851,10 +2851,10 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/systemJobs`
+  - `../src/systemJobs.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/systemJobs.js`
+  - `backend/src/systemJobs.ts`
 - Referenced by (0)
   - none
 

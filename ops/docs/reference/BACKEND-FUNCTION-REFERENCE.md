@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **23**
+Total files documented: **22**
 
 ## 2. Symbol Count by File
 
@@ -32,7 +32,6 @@ Total files documented: **23**
 | 20 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
 | 21 | `backend/src/services/importJobs.js` | 175 | 0 |
 | 22 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 23 | `backend/src/systemJobs.js` | 28 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1284,37 +1283,4 @@ Total files documented: **23**
 | 40 | `productsById` | function | 475 |
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
-
-### 3.23 `backend/src/systemJobs.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `nowIso` | function | 12 |
-| 2 | `makeJobId` | function | 16 |
-| 3 | `publicJob` | function | 20 |
-| 4 | `findActiveJob` | function | 44 |
-| 5 | `safeJsonParse` | function | 55 |
-| 6 | `getDb` | function | 64 |
-| 7 | `ensureTable` | function | 68 |
-| 8 | `persistJob` | function | 124 |
-| 9 | `collectFinishedJobs` | function | 171 |
-| 10 | `removeOldFinishedJobs` | function | 182 |
-| 11 | `serializeJobRows` | function | 188 |
-| 12 | `listActiveJobs` | function | 198 |
-| 13 | `cleanupJobs` | function | 207 |
-| 14 | `buildPersistSignature` | function | 224 |
-| 15 | `markPersisted` | function | 239 |
-| 16 | `flushPersistJob` | function | 244 |
-| 17 | `shouldPersistJob` | function | 256 |
-| 18 | `schedulePersistJob` | function | 274 |
-| 19 | `updateJob` | function | 285 |
-| 20 | `SystemJobCancelledError` | class | 302 |
-| 21 | `startSystemJob` | function | 310 |
-| 22 | `runWorker` | const arrow | 339 |
-| 23 | `isCancelled` | const arrow | 358 |
-| 24 | `throwIfCancelled` | const arrow | 359 |
-| 25 | `progress` | const arrow | 362 |
-| 26 | `cancelSystemJob` | function | 415 |
-| 27 | `getSystemJob` | function | 432 |
-| 28 | `listSystemJobs` | function | 444 |
 

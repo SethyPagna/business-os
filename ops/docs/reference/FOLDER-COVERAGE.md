@@ -205,7 +205,7 @@ Total folders documented: **81**
 | 34 | `sessionAuth.ts` | Project source/support file |
 | 35 | `settingsSnapshot.ts` | Project source/support file |
 | 36 | `systemFsWorker.ts` | Project source/support file |
-| 37 | `systemJobs.js` | Project source/support file |
+| 37 | `systemJobs.ts` | Project source/support file |
 | 38 | `uploadReferenceCleanup.ts` | Project source/support file |
 | 39 | `uploadSecurity.ts` | Project source/support file |
 | 40 | `websocket.ts` | Project source/support file |

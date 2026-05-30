@@ -1,6 +1,6 @@
 # Generated Schema Audit
 
-Generated: 2026-05-30T20:29:05.184Z
+Generated: 2026-05-30T20:38:42.179Z
 
 Source position: Session 2 / Phase 6 schema map expanded; Phase 8.4 loader recovery remains active.
 
@@ -113,10 +113,10 @@ Runtime-added columns:
 - `products.expiry_date` TEXT (backend/src/postgresDatabase.js:237)
 - `products.rfid_confirmed_qty` DOUBLE PRECISION DEFAULT 0 (backend/src/postgresDatabase.js:293)
 - `stock_transfers.client_request_id` TEXT (backend/src/postgresDatabase.js:228)
-- `system_jobs.cancel_requested_at` TIMESTAMPTZ (backend/src/systemJobs.js:96)
-- `system_jobs.cancellable` INTEGER DEFAULT 0 (backend/src/systemJobs.js:95)
-- `system_jobs.metrics_json` TEXT (backend/src/systemJobs.js:93)
-- `system_jobs.retry_count` INTEGER DEFAULT 0 (backend/src/systemJobs.js:94)
+- `system_jobs.cancel_requested_at` TIMESTAMPTZ (backend/src/systemJobs.ts:96)
+- `system_jobs.cancellable` INTEGER DEFAULT 0 (backend/src/systemJobs.ts:95)
+- `system_jobs.metrics_json` TEXT (backend/src/systemJobs.ts:93)
+- `system_jobs.retry_count` INTEGER DEFAULT 0 (backend/src/systemJobs.ts:94)
 - `users.google_email` TEXT (backend/src/postgresDatabase.js:219)
 - `users.google_email_verified` BIGINT DEFAULT 0 (backend/src/postgresDatabase.js:220)
 - `users.google_linked_at` TEXT (backend/src/postgresDatabase.js:221)

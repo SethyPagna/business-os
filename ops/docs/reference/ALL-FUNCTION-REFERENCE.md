@@ -88,7 +88,7 @@ Code files scanned: **468**
 | 76 | `backend/src/settingsSnapshot.ts` | 12 |
 | 77 | `backend/src/storage/organizationFolders.ts` | 5 |
 | 78 | `backend/src/systemFsWorker.ts` | 7 |
-| 79 | `backend/src/systemJobs.js` | 28 |
+| 79 | `backend/src/systemJobs.ts` | 28 |
 | 80 | `backend/src/uploadReferenceCleanup.ts` | 3 |
 | 81 | `backend/src/uploadSecurity.ts` | 7 |
 | 82 | `backend/src/websocket.ts` | 1 |
@@ -2293,7 +2293,7 @@ Code files scanned: **468**
 | 6 | `runRelocateDataRoot` | function | 94 |
 | 7 | `main` | function | 104 |
 
-### 3.79 `backend/src/systemJobs.js`
+### 3.79 `backend/src/systemJobs.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
