@@ -16,6 +16,7 @@ business-os-data/
 business-os-safety-backups/
 backend/uploads/
 backend/data/
+backend/.pkg-stage/
 temp-*/
 temp-vite-build.mjs
 /package.json

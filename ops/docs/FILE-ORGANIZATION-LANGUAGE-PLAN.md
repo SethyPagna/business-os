@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 622 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 623 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 33`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 330`,
+  `.js: 33`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 331`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -5422,6 +5422,19 @@ Decision rule:
     compile/staging package lane. The expected generated language audit now
     reports `TypeScript: 311`, `React TSX: 107`, and no `JavaScript` entry
     across the active scan roots.
+
+623. Add backend package staging for TypeScript source.
+    Done: `ops/scripts/backend/build-package-stage.ts` now prepares an ignored
+    `backend/.pkg-stage` release input by copying backend source, renaming
+    staged `.ts` files to `.js`, and rewriting staged runtime `.ts` requires
+    and path strings to `.js`. `backend/package.json` now runs that stage
+    before `@yao-pkg/pkg` and points `pkg` at `.pkg-stage`, so Linux package
+    proof no longer emits the previous direct-`.ts` script warnings. The
+    Docker release verifier now requires the stage script, ignored generated
+    folder, JavaScript-only staged package scripts, guarded stage deletion, and
+    runtime require rewriting. Docker release verification and Linux packaging
+    proof passed; generated `backend/.pkg-stage` and `dist-bin` are cleanup
+    targets after proof and must not be committed.
 
 ## Safety Gates
 

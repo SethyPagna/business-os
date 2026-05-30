@@ -18,7 +18,7 @@
     "verify:integrity": "node ../ops/scripts/backend/verify-data-integrity.ts",
     "verify:integrity:comprehensive": "node ../ops/scripts/backend/verify-data-integrity.ts --comprehensive --output ../ops/runtime/reports/data-integrity-comprehensive-latest.json",
     "verify:integrity:fix": "node ../ops/scripts/backend/verify-data-integrity.ts --fix",
-    "build:linux": "npx @yao-pkg/pkg . --target node24-linux-x64 --output ../dist-bin/business-os-server-linux"
+    "build:linux": "node ../ops/scripts/backend/build-package-stage.ts && npx @yao-pkg/pkg .pkg-stage --target node24-linux-x64 --output ../dist-bin/business-os-server-linux"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1040.0",

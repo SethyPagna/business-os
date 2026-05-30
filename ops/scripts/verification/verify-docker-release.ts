@@ -22,6 +22,8 @@ const fullAutomationPath = path.join(root, 'ops', 'scripts', 'powershell', 'full
 const startRuntimePath = path.join(root, 'ops', 'scripts', 'powershell', 'start-runtime.ps1')
 const automationPolicyPath = path.join(root, 'ops', 'automation', 'business-os-automation.json')
 const opsPackagePath = path.join(root, 'ops', 'package.json')
+const backendPackagePath = path.join(root, 'backend', 'package.json')
+const buildPackageStagePath = path.join(root, 'ops', 'scripts', 'backend', 'build-package-stage.ts')
 const summaryPath = path.join(root, 'ops', 'docs', 'reference', 'DOCKER-RELEASE-GUARDRAIL.json')
 const cloudflareRuntimePaths = {
   rotateToken: path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'rotate-cloudflare-tunnel-token.ts'),
@@ -340,6 +342,8 @@ function main() {
     startRuntimePath,
     automationPolicyPath,
     opsPackagePath,
+    backendPackagePath,
+    buildPackageStagePath,
     cloudflareRuntimePaths.rotateToken,
     cloudflareRuntimePaths.updateOrigin,
     cloudflareRuntimePaths.verifyAutomation,
@@ -544,8 +548,33 @@ function main() {
     '/ops/runtime/',
     '/release/',
     '/output/',
+    'backend/.pkg-stage/',
   ]
   gitignoreRequiredEntries.forEach((token) => requireToken(gitignore, token, '.gitignore'))
+
+  let backendPackage = null
+  try {
+    backendPackage = JSON.parse(read(backendPackagePath))
+  } catch (error) {
+    failures.push(`Backend package JSON is invalid: ${error.message}`)
+  }
+  const packageStageScript = read(buildPackageStagePath)
+  const packageStageCoverage = {
+    scriptPresent: fs.existsSync(buildPackageStagePath),
+    buildScriptUsesStage: backendPackage?.scripts?.['build:linux']?.includes('build-package-stage.ts') &&
+      backendPackage?.scripts?.['build:linux']?.includes('@yao-pkg/pkg .pkg-stage'),
+    stageIgnored: gitignore.includes('backend/.pkg-stage/'),
+    stageRewritesRuntimeRequires: packageStageScript.includes('rewriteRuntimeRequires') &&
+      packageStageScript.includes("require($1$2.js$1)") &&
+      packageStageScript.includes("\\.ts\\1"),
+    stageRenamesTsToJs: packageStageScript.includes("if (ext === '.ts') pendingRenames.push(file)") &&
+      packageStageScript.includes("source.slice(0, -3) + '.js'"),
+    stageRejectsUnexpectedDeletes: packageStageScript.includes("path.basename(resolved) !== '.pkg-stage'") &&
+      packageStageScript.includes('Refusing to remove unexpected package stage'),
+    stagePackageScriptsAreJavaScript: packageStageScript.includes("'src/**/*.js'") &&
+      !packageStageScript.includes("'src/**/*.ts'"),
+  }
+  assertBooleanCoverage(packageStageCoverage, 'packageStageCoverage')
 
   const pruneStorage = read(pruneStoragePath)
   const pruneRequiredEntries = [
@@ -630,6 +659,7 @@ function main() {
       !fullAutomation.includes('--docker-safe-prune'),
     dockerSafePrunePolicy,
     postStartDiagnosticsCoverage,
+    packageStageCoverage,
     cloudflareRuntimeCoverage,
     testDataCleanupCoverage,
     policyParseError,

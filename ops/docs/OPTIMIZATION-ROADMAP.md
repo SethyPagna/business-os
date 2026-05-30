@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 622.
+- Latest completed implementation move in this roadmap: Move 623.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7134,3 +7134,17 @@ Move 622 status:
   scripts, so the next backend-wide slice is the compile/staging package lane.
   The generated language audit now reports `TypeScript: 311`,
   `React TSX: 107`, and no `JavaScript` entry across the active scan roots.
+
+Move 623 status:
+- Move 623 adds a backend package staging lane for the TypeScript backend
+  source. `ops/scripts/backend/build-package-stage.ts` prepares an ignored
+  `backend/.pkg-stage` release input by copying backend source, renaming
+  staged `.ts` files to `.js`, and rewriting staged runtime `.ts` requires and
+  path strings to `.js`. `backend/package.json` now runs the staging script
+  before `@yao-pkg/pkg` and packages `.pkg-stage`, which removes the previous
+  direct-`.ts` script warnings from Linux package proof while preserving the
+  live Node 24 TypeScript source path. The Docker release verifier now checks
+  the stage script, ignored generated folder, JavaScript-only staged package
+  scripts, guarded stage deletion, and runtime require rewriting. Docker
+  release verification and Linux packaging proof passed; generated
+  `backend/.pkg-stage` and `dist-bin` remain cleanup targets after proof.
