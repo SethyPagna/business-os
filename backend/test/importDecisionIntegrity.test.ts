@@ -4,7 +4,7 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 
-const source = fs.readFileSync(path.join(__dirname, '../src/services/importJobs.js'), 'utf8')
+const source = fs.readFileSync(path.join(__dirname, '../src/services/importJobs.ts'), 'utf8')
 const routeSource = fs.readFileSync(path.join(__dirname, '../src/routes/importJobs.ts'), 'utf8')
 
 assert.match(

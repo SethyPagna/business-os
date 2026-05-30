@@ -37,7 +37,7 @@ const {
   getGoogleLoginOrigins,
   getGoogleLoginPublicConfig,
 } = require('./googleOauth.ts')
-const { initializeBullQueue, getQueueStatus } = require('./importJobs')
+const { initializeBullQueue, getQueueStatus } = require('./importJobs.ts')
 const { listBackupVersions } = require('./backupPackages.ts')
 const { testObjectStore } = require('../objectStore.ts')
 

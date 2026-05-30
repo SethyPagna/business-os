@@ -538,7 +538,7 @@ function bootstrapServer() {
     console.warn(`[file-assets] prewarm skipped: ${error?.message || error}`)
   }
   try {
-    const { initializeBullQueue, recoverImportJobs } = require('./src/services/importJobs')
+    const { initializeBullQueue, recoverImportJobs } = require('./src/services/importJobs.ts')
     initializeBullQueue().catch((error) => {
       console.warn(`[import-jobs] Queue initialization skipped: ${error?.message || error}`)
     })

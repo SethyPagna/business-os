@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 621.
+- Latest completed implementation move in this roadmap: Move 622.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -993,7 +993,7 @@ Current checkpoint:
   scanned 345 files across `frontend/src`, `backend/src`, `ops/scripts`, and
   `ops/docs`; it found 57 files above 700 lines and identifies
   `frontend/src/components/inventory/Inventory.tsx`,
-  `backend/src/services/importJobs.js`, `frontend/src/components/catalog/CatalogPage.tsx`,
+  `backend/src/services/importJobs.ts`, `frontend/src/components/catalog/CatalogPage.tsx`,
   `frontend/src/components/products/Products.tsx`, and `frontend/src/api/methods.ts`
   as high-value split candidates.
 - First Phase 26 physical move complete: Phase 8.4 live Playwright check scripts
@@ -2418,7 +2418,7 @@ Cleanup checkpoint:
   worker target because its heavy callers already run through focused workers
   and the remaining sync parser path is a compatibility/fallback boundary.
 - Move 168 completes the first import-job data-path optimization slice:
-  `backend/src/services/importJobs.js` now caches same-name product rows and
+  `backend/src/services/importJobs.ts` now caches same-name product rows and
   supplier lookups inside the product import context, then updates that cache
   when rows create or update products. This reduces repeated per-row database
   lookups during reviewed product imports without changing row decisions,
@@ -2441,7 +2441,7 @@ Cleanup checkpoint:
 - Move 171 completes the import-job route list optimization:
   `backend/src/routes/importJobs.ts` now computes the current user's permitted
   import types and passes that list into `listImportJobs()`, while
-  `backend/src/services/importJobs.js` applies a SQL `type IN (...)` filter
+  `backend/src/services/importJobs.ts` applies a SQL `type IN (...)` filter
   before decoration. This keeps the permission contract unchanged while avoiding
   wasted fetch/decorate/filter work for users who can only view one import
   domain.
@@ -3447,7 +3447,7 @@ Cleanup checkpoint:
   contract guard now blocks regressions to repeated active-branch scans in
   these stock write pathways.
 - Move 315 indexes product-import branches by normalized name per job:
-  `backend/src/services/importJobs.js` now adds `branchesByName` to the product
+  `backend/src/services/importJobs.ts` now adds `branchesByName` to the product
   import context and updates it when an import creates a branch. Product import
   stock rows now resolve branch names through the per-job map instead of
   rescanning `ctx.activeBranches` for every row, while preserving the existing
@@ -3823,7 +3823,7 @@ Move 340 status:
 
 Move 341 status:
 - Move 341 removes repeated import-service normalization allocations in
-  `backend/src/services/importJobs.js`. Import job type filtering, review
+  `backend/src/services/importJobs.ts`. Import job type filtering, review
   duplicate-group counting, incoming image-list parsing, setting option
   parsing, and cancel-wait job ID normalization now use direct loops and
   dedupe sets instead of chained `map/filter`, `Array.from(...).filter`, or
@@ -4501,7 +4501,7 @@ Move 398 status:
 
 Move 399 status:
 - Move 399 tightens import job service list/update loops in
-  `backend/src/services/importJobs.js`. Import job listing now uses a reusable
+  `backend/src/services/importJobs.ts`. Import job listing now uses a reusable
   SQL placeholder builder and a direct row decoration helper instead of
   `map()`/`filter()` chains, and import job patch updates now collect allowed
   fields, assignments, and named parameters in one direct pass. Type filtering,
@@ -4512,7 +4512,7 @@ Move 399 status:
 
 Move 400 status:
 - Move 400 tightens import image-reference and product-gallery loops in
-  `backend/src/services/importJobs.js`. Incoming image key collection now uses
+  `backend/src/services/importJobs.ts`. Incoming image key collection now uses
   shared key lists and direct loops, product gallery synchronization now
   de-duplicates and stops at the existing five-image cap during one pass, image
   insert ordering now uses a direct indexed loop, and current-gallery loading
@@ -4524,7 +4524,7 @@ Move 400 status:
 
 Move 401 status:
 - Move 401 tightens import product review grouping loops in
-  `backend/src/services/importJobs.js`. Duplicate-name review groups now share
+  `backend/src/services/importJobs.ts`. Duplicate-name review groups now share
   direct-loop helpers for set ingestion, set serialization, subgroup
   finalization, and group sorting instead of nested `forEach()` and
   `Array.from().filter().map().sort()` chains. Group inclusion rules,
@@ -4535,7 +4535,7 @@ Move 401 status:
 
 Move 402 status:
 - Move 402 tightens import review decision and label loops in
-  `backend/src/services/importJobs.js`. Identifier filter checks, product
+  `backend/src/services/importJobs.ts`. Identifier filter checks, product
   conflict labels, contact conflict labels, generic empty-row detection,
   decision field copying, field override copying, and product signature
   serialization now use named direct-loop helpers instead of local
@@ -4547,7 +4547,7 @@ Move 402 status:
 
 Move 403 status:
 - Move 403 tightens import review count and group-decision loops in
-  `backend/src/services/importJobs.js`. Review conflict count accumulation now
+  `backend/src/services/importJobs.ts`. Review conflict count accumulation now
   runs through a named direct-loop helper, and group decision normalization now
   replaces the local `Object.entries().forEach()` callback with a direct helper
   that preserves `name:` key stripping and invalid-value rejection. Count keys,
@@ -4558,7 +4558,7 @@ Move 403 status:
 
 Move 404 status:
 - Move 404 tightens import product parent and lookup-map helpers in
-  `backend/src/services/importJobs.js`. Parent product selection now scans once
+  `backend/src/services/importJobs.ts`. Parent product selection now scans once
   with `compareParentProductCandidate()` instead of cloning and sorting the
   full candidate list, settings option maps now build options and normalized
   lookup entries in one pass, and product context category/unit/supplier/branch
@@ -4571,7 +4571,7 @@ Move 404 status:
 
 Move 405 status:
 - Move 405 tightens import product row-cache ordering in
-  `backend/src/services/importJobs.js`. The per-job same-name product cache now
+  `backend/src/services/importJobs.ts`. The per-job same-name product cache now
   updates through `insertProductImportRow()`, which removes any existing row for
   the same product ID and inserts the replacement in sorted position instead of
   filtering and re-sorting the whole list. Product import ordering by group,
@@ -4582,7 +4582,7 @@ Move 405 status:
 
 Move 406 status:
 - Move 406 tightens import branch-batch stock cleanup in
-  `backend/src/services/importJobs.js`. Product batch IDs now flow through a
+  `backend/src/services/importJobs.ts`. Product batch IDs now flow through a
   shared direct-loop `collectRowIds()` helper, and replacement stock cleanup now
   uses `clearBranchBatchStockForProduct()` plus the existing SQL placeholder
   builder instead of duplicated `map()` chains. Replacement behavior for rows
@@ -4593,7 +4593,7 @@ Move 406 status:
 
 Move 407 status:
 - Move 407 tightens import cancellation placeholder and ID loops in
-  `backend/src/services/importJobs.js`. Cancellable-job queries, active-job wait
+  `backend/src/services/importJobs.ts`. Cancellable-job queries, active-job wait
   polling, cancel-all updates, import file cancellation, and delete-all job ID
   collection now reuse `buildSqlPlaceholders()` and `collectRowIds()` instead
   of repeated `map()` chains. Cancellable status coverage, duplicate job ID
@@ -4604,7 +4604,7 @@ Move 407 status:
 
 Move 408 status:
 - Move 408 reconciles obsolete Phase 29 status wording and tightens import
-  image/CSV lookup construction in `backend/src/services/importJobs.js`.
+  image/CSV lookup construction in `backend/src/services/importJobs.ts`.
   Roadmap docs now say the first Phase 29 baseline is complete while Phase 29
   remains active as the recurring guardrail. Image lookup keys, image-only
   product matching keys, inventory product/branch lookup maps, sales
@@ -4616,7 +4616,7 @@ Move 408 status:
 
 Move 409 status:
 - Move 409 tightens import error CSV export in
-  `backend/src/services/importJobs.js`. Error CSV generation now appends rows
+  `backend/src/services/importJobs.ts`. Error CSV generation now appends rows
   with a direct helper loop instead of nested `map()` chains and spread
   materialization. The UTF-8 BOM, header order, 5,000-row error limit, quote
   escaping, empty-field fallback, row ordering, and public download contract
@@ -4624,7 +4624,7 @@ Move 409 status:
 
 Move 410 status:
 - Move 410 tightens remaining import product signature and ZIP-file selection
-  callbacks in `backend/src/services/importJobs.js`. Same-name product
+  callbacks in `backend/src/services/importJobs.ts`. Same-name product
   signature matching now uses `findProductWithSignature()` in review,
   preflight, and apply paths, and ZIP extraction now uses
   `getUnprocessedJobFiles()` instead of an inline `filter()` callback. Product
@@ -4636,14 +4636,14 @@ Move 410 status:
 
 Move 411 status:
 - Move 411 clears the final import-service callback chain in
-  `backend/src/services/importJobs.js`. Brand-option cleanup after product
+  `backend/src/services/importJobs.ts`. Brand-option cleanup after product
   imports now uses `buildSafeCatalogOptionList()` to normalize option text,
   drop blanks, and reject suspicious catalog text before the existing
   `normalizeOptionList()` de-duplication. Brand option persistence,
   suspicious-text rejection, settings broadcasts, product import accounting,
   and catalog update behavior remain unchanged. A callback-chain scan now
   reports no `map()`, `filter()`, `forEach()`, `reduce()`, `find()`, or
-  `Array.from()` hits in `backend/src/services/importJobs.js`.
+  `Array.from()` hits in `backend/src/services/importJobs.ts`.
 
 Move 412 status:
 - Move 412 tightens product-route branch, import-signature, and sorted-map
@@ -7113,3 +7113,24 @@ Move 621 status:
   a compile/staging package lane. The expected generated language audit now
   reports `JavaScript: 1`, `TypeScript: 310`, and `React TSX: 107` across the
   active scan roots.
+
+Move 622 status:
+- Move 622 converts `backend/src/services/importJobs.ts` to a package-safe
+  TypeScript path. Import job creation, file registration, CSV/TSV streaming,
+  image ZIP extraction, product review grouping, row-decision persistence,
+  preflight checks, apply processing, cancellation, retry, deletion,
+  BullMQ/local queue recovery, media wait handling, and queue status reporting
+  remain unchanged on the existing CommonJS service style. Server startup,
+  import-job routes, runtime/system routes, integration doctor, import worker,
+  source-guard tests, performance verification, master plan, session log,
+  language-runtime audit metadata, and roadmap docs now point at the explicit
+  `.ts` service path. Focused service-load, route-contract, import performance
+  hardening, import decision integrity, product batch hierarchy, import scale
+  smoke, import CSV, product import policy, stale-path, schema audit,
+  language-runtime audit, and Linux packaging proof passed. A standalone
+  `importJobStateMachine` run still needs a live `DATABASE_URL` test
+  environment; without it the existing Postgres guard rejects the direct test
+  before exercising service behavior. `pkg` continues to warn for direct `.ts`
+  scripts, so the next backend-wide slice is the compile/staging package lane.
+  The generated language audit now reports `TypeScript: 311`,
+  `React TSX: 107`, and no `JavaScript` entry across the active scan roots.

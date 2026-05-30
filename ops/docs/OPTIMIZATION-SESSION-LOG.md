@@ -1,8 +1,29 @@
 # Business OS Optimization Session Log
 
-Last updated: 2026-05-16
+Last updated: 2026-05-31
 
 This is a concise running log of what actually happened in recent sessions.
+
+## 2026-05-31
+
+### Accepted
+
+- Backend source JavaScript elimination
+  - area: `backend/src/services/importJobs.ts`
+  - result: kept
+  - note: final `backend/src` JavaScript file was renamed to a package-safe
+    TypeScript path with explicit runtime/test imports, source-load proof,
+    focused import tests, schema audit, language audit, and Linux packaging
+    proof
+
+### Follow-up
+
+- Backend package compile/staging lane
+  - area: `backend/package.json`
+  - result: pending
+  - note: `pkg` still exits successfully but warns about direct `.ts` scripts;
+    next backend-wide conversion work should introduce a compiled/staged
+    package lane before more runtime/config file conversion
 
 ## 2026-05-16
 
@@ -39,7 +60,7 @@ This is a concise running log of what actually happened in recent sessions.
   - note: stopped building filter section data while the menu is closed
 
 - Import tracker settled-list cache
-  - area: `backend/src/services/importJobs.js`
+  - area: `backend/src/services/importJobs.ts`
   - result: kept
   - note: repeated dashboard/import tracker polling now reuses short-lived
     settled job lists

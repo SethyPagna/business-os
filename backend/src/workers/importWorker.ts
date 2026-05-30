@@ -3,7 +3,7 @@
 process.env.BUSINESS_OS_WORKER_ROLE = process.env.BUSINESS_OS_WORKER_ROLE || 'import-worker'
 
 const { closeDatabase } = require('../database.ts')
-const { recoverImportJobs, startImportWorkers } = require('../services/importJobs')
+const { recoverImportJobs, startImportWorkers } = require('../services/importJobs.ts')
 
 let shuttingDown = false
 

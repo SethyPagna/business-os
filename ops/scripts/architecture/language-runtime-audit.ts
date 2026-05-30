@@ -903,7 +903,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
   },
   {
-    target: 'backend/src/services/importJobs.js',
+    target: 'backend/src/services/importJobs.ts',
     optimization: 'Product import apply now caches same-name product lookups and supplier lookups per job, then updates the in-memory product cache when rows create or update products.',
     rollback: 'Remove getProductsByNameForImport, rememberProductForImport, supplierMap, and return to per-row database lookups; import job schema and row decisions remain unchanged.',
     proof: [

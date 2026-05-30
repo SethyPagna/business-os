@@ -28,7 +28,7 @@ const inventoryRoute = readSource('src/routes/inventory.ts')
 const productsRoute = readSource('src/routes/products.ts')
 const salesRoute = readSource('src/routes/sales.ts')
 const returnsRoute = readSource('src/routes/returns.ts')
-const importJobs = readSource('src/services/importJobs.js')
+const importJobs = readSource('src/services/importJobs.ts')
 const metrics = readSource('src/businessMetrics.ts')
 
 runTest('schema and runtime migrations create batch stock tables and allocation tables', () => {

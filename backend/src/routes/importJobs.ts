@@ -25,7 +25,7 @@ const {
   preflightImportJob,
   resetImportJobForRetry,
   updateImportJobDecisions,
-} = require('../services/importJobs')
+} = require('../services/importJobs.ts')
 
 const router = express.Router()
 const ALLOWED_TYPES = new Set(['products', 'customers', 'suppliers', 'delivery_contacts', 'inventory', 'sales'])

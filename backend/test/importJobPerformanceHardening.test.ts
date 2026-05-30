@@ -18,7 +18,7 @@ function runTest(name, fn) {
 }
 
 runTest('import job listing caches settled tracker payloads and invalidates on writes', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/services/importJobs.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/importJobs.ts'), 'utf8')
   assert.match(source, /IMPORT_JOB_LIST_CACHE_MS\s*=\s*5_000/)
   assert.match(source, /IMPORT_JOB_LIST_CACHEABLE_STATUSES\s*=\s*new Set\(\['completed', 'completed_with_errors', 'failed', 'cancelled', 'awaiting_review'\]\)/)
   assert.match(source, /const importJobListCache = new Map\(\)/)

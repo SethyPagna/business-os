@@ -111,7 +111,7 @@ Status target: `in progress`
 
 Priority areas:
 
-- `backend/src/services/importJobs.js`
+- `backend/src/services/importJobs.ts`
 - `backend/src/routes/products.ts`
 - `backend/src/routes/inventory.ts`
 - `backend/src/routes/sales.ts`

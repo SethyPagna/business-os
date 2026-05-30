@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 621 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 622 in this file.
 
 ## Goal
 
@@ -9,14 +9,14 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 34`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 329`,
+  `.js: 33`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 330`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
   conversion slices.
-- Backend source conversion has started with small CommonJS-compatible `.ts`
-  helpers that Node 24 can load directly; every backend conversion must update
-  release packaging before deleting the old `.js` path.
+- Backend source conversion is complete under `backend/src`; remaining
+  JavaScript lives outside backend source and still needs package-aware
+  conversion or config/runtime exception review.
 - TypeScript is strict for converted frontend source and focused converted
   tests. Backend `.ts` source currently uses Node 24 type stripping and
   CommonJS exports until the broader backend build lane is converted.
@@ -1475,7 +1475,7 @@ Decision rule:
     inventory, and sales import surfaces already run their heavy CSV work
     through focused worker slices.
 168. Optimize product import lookup loops. Done:
-    `backend/src/services/importJobs.js` now keeps a per-job product-name cache
+    `backend/src/services/importJobs.ts` now keeps a per-job product-name cache
     for product import apply work and a supplier lookup cache inside the product
     import context. Repeated same-name rows, variants, and supplier values avoid
     repeated database lookups, while `rememberProductForImport()` keeps the
@@ -2657,7 +2657,7 @@ Decision rule:
     pathways while keeping the existing Node/SQL route structure; no folder move
     or runtime conversion was needed.
 315. Index product-import branches by normalized name per job. Done:
-    `backend/src/services/importJobs.js` now keeps a `branchesByName` map in the
+    `backend/src/services/importJobs.ts` now keeps a `branchesByName` map in the
     product import context and updates it when imported rows create new
     branches. This is a hot-path import optimization only; no schema migration,
     folder move, or language conversion was justified.
@@ -2776,7 +2776,7 @@ Decision rule:
     lookup guard. This was a local TypeScript helper cleanup; no folder move or
     runtime conversion was needed.
 331. Remove import-service chained normalization allocations. Done:
-    `backend/src/services/importJobs.js` now uses direct loops for import job
+    `backend/src/services/importJobs.ts` now uses direct loops for import job
     type filtering, duplicate-group counting, image-list parsing, setting
     option parsing, and cancel-wait job ID normalization. This was a backend
     data-flow cleanup only; no folder move, schema migration, or runtime
@@ -3121,55 +3121,55 @@ Decision rule:
     fields, and upload order. This was a backend route cleanup only; no folder
     move, schema migration, or runtime conversion was needed.
 389. Tighten import job service list/update loops. Done:
-    `backend/src/services/importJobs.js` now lists decorated import jobs and
+    `backend/src/services/importJobs.ts` now lists decorated import jobs and
     builds import-job update assignments with direct helper loops while
     preserving type filtering, pagination limits, and allowed patch fields.
     This was a backend service cleanup only; no folder move, schema migration,
     or runtime conversion was needed.
 390. Tighten import image-reference and product-gallery loops. Done:
-    `backend/src/services/importJobs.js` now collects incoming image references,
+    `backend/src/services/importJobs.ts` now collects incoming image references,
     de-duplicates product galleries, inserts gallery rows, and loads current
     galleries with direct bounded loops while preserving the five-image cap and
     upload path normalization. This was a backend import/media cleanup only; no
     folder move, schema migration, or runtime conversion was needed.
 391. Tighten import product review grouping loops. Done:
-    `backend/src/services/importJobs.js` now finalizes duplicate-name import
+    `backend/src/services/importJobs.ts` now finalizes duplicate-name import
     review groups and subgroups with direct-loop helpers while preserving row
     ordering, field/issue payloads, existing matches, and suggested actions.
     This was a backend import-review cleanup only; no folder move, schema
     migration, or runtime conversion was needed.
 392. Tighten import review decision and label loops. Done:
-    `backend/src/services/importJobs.js` now builds conflict labels, checks
+    `backend/src/services/importJobs.ts` now builds conflict labels, checks
     identifier filters, detects generic empty rows, copies review decision
     fields, applies field overrides, and serializes product signatures with
     named direct-loop helpers. This was a backend import-review cleanup only;
     no folder move, schema migration, or runtime conversion was needed.
 393. Tighten import review count and group-decision loops. Done:
-    `backend/src/services/importJobs.js` now accumulates review conflict counts
+    `backend/src/services/importJobs.ts` now accumulates review conflict counts
     and normalizes group decisions with named direct-loop helpers while
     preserving count keys, pagination behavior, merge order, and policy
     persistence. This was a backend import-review cleanup only; no folder move,
     schema migration, or runtime conversion was needed.
 394. Tighten import product parent and lookup-map helpers. Done:
-    `backend/src/services/importJobs.js` now picks parent products in one pass,
+    `backend/src/services/importJobs.ts` now picks parent products in one pass,
     builds settings option maps without array-map constructors, and shares a
     direct lookup-map helper for product import category, unit, supplier, and
     branch indexes. This was a backend import/product cleanup only; no folder
     move, schema migration, or runtime conversion was needed.
 395. Tighten import product row-cache ordering. Done:
-    `backend/src/services/importJobs.js` now updates same-name product cache
+    `backend/src/services/importJobs.ts` now updates same-name product cache
     rows with ordered insertion instead of filter-then-sort, preserving product
     import ordering and cache behavior. This was a backend import/product
     cleanup only; no folder move, schema migration, or runtime conversion was
     needed.
 396. Tighten import branch-batch stock cleanup. Done:
-    `backend/src/services/importJobs.js` now shares direct-loop batch ID
+    `backend/src/services/importJobs.ts` now shares direct-loop batch ID
     collection and branch-batch stock zeroing for replacement imports while
     preserving stock rollups and batch increase behavior. This was a backend
     import/stock cleanup only; no folder move, schema migration, or runtime
     conversion was needed.
 397. Tighten import cancellation placeholder and ID loops. Done:
-    `backend/src/services/importJobs.js` now reuses shared SQL placeholder and
+    `backend/src/services/importJobs.ts` now reuses shared SQL placeholder and
     row-ID helpers for cancellable-job queries, wait polling, cancel-all
     updates, import file cancellation, and delete-all job ID collection. This
     was a backend import-cancellation cleanup only; no folder move, schema
@@ -3180,20 +3180,20 @@ Decision rule:
     `ops/docs/SCHEMA-RELATIONSHIPS.md` now preserve the current plan position:
     Phase 8.4 active, Phase 26 at 51 completed moves, Phase 28 active with R2
     prune follow-up, and Phase 29 active as the recurring guardrail after its
-    first baseline. `backend/src/services/importJobs.js` now builds image
+    first baseline. `backend/src/services/importJobs.ts` now builds image
     lookups and inventory/sales CSV lookup maps with named direct-loop helpers
     instead of temporary arrays and callback chains. This was a documentation
     cleanup plus backend import-service optimization only; no source folder
     move, schema migration, or language conversion was needed.
 399. Tighten import error CSV export. Done:
-    `backend/src/services/importJobs.js` now builds error CSV output with a
+    `backend/src/services/importJobs.ts` now builds error CSV output with a
     direct row helper instead of nested `map()` chains and spread
     materialization. This preserves the export header, UTF-8 BOM, quote
     escaping, row limit, row ordering, and download contract. This was a
     backend import/export cleanup only; no folder move, schema migration, or
     language conversion was needed.
 400. Tighten import product signature and ZIP-file selection callbacks. Done:
-    `backend/src/services/importJobs.js` now shares
+    `backend/src/services/importJobs.ts` now shares
     `findProductWithSignature()` for same-name product signature matching in
     review, preflight, and apply paths, and `getUnprocessedJobFiles()` for ZIP
     extraction selection. This preserves signature equality, imported
@@ -3202,7 +3202,7 @@ Decision rule:
     import-service cleanup only; no folder move, schema migration, or language
     conversion was needed.
 401. Clear final import-service callback chain. Done:
-    `backend/src/services/importJobs.js` now uses
+    `backend/src/services/importJobs.ts` now uses
     `buildSafeCatalogOptionList()` for brand-option cleanup after product
     imports, preserving text normalization, blank filtering, suspicious catalog
     text rejection, and `normalizeOptionList()` de-duplication. A callback
@@ -5400,6 +5400,28 @@ Decision rule:
     compile/staging lane. The expected generated language audit now reports
     `JavaScript: 1`, `TypeScript: 310`, and `React TSX: 107` across the active
     scan roots.
+
+622. Convert import job service to a package-safe TypeScript path.
+    Done: `backend/src/services/importJobs.ts` keeps import job creation,
+    file registration, CSV/TSV streaming, image ZIP extraction, product review
+    grouping, row-decision persistence, preflight checks, apply processing,
+    cancellation, retry, deletion, BullMQ/local queue recovery, media wait
+    handling, and queue status reporting on the existing CommonJS service
+    style. Server startup, import-job routes, runtime/system routes,
+    integration doctor, import worker, source-guard tests, performance
+    verification, master plan, session log, language-runtime audit metadata,
+    and roadmap docs now point at the explicit `.ts` service path. Focused
+    service-load, route-contract, import performance hardening, import
+    decision integrity, product batch hierarchy, import scale smoke, import
+    CSV, product import policy, stale-path, schema audit, language-runtime
+    audit, and Linux packaging proof passed. A standalone
+    `importJobStateMachine` run still needs a live `DATABASE_URL` test
+    environment; without it the existing Postgres guard rejects the direct
+    test before exercising service behavior. Packaging still warns for direct
+    `.ts` entries in `pkg.scripts`, so the next backend-wide slice remains the
+    compile/staging package lane. The expected generated language audit now
+    reports `TypeScript: 311`, `React TSX: 107`, and no `JavaScript` entry
+    across the active scan roots.
 
 ## Safety Gates
 

@@ -3,7 +3,7 @@
 const express = require('express')
 const { ok, err } = require('../helpers.ts')
 const { authToken, hasPermission } = require('../middleware.ts')
-const { getQueueStatus, initializeBullQueue } = require('../services/importJobs')
+const { getQueueStatus, initializeBullQueue } = require('../services/importJobs.ts')
 const { getMediaQueueStatus, initializeMediaQueue } = require('../services/mediaQueue.ts')
 const { getRuntimeCacheStatus, pingRuntimeCache } = require('../runtimeCache.ts')
 const { getRuntimeVersion } = require('../runtimeVersion.ts')

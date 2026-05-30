@@ -70,7 +70,7 @@ const {
   saveDriveSyncPreferences,
   forgetDriveSyncCredentials,
 } = require('../../services/googleDriveSync/index.ts')
-const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
+const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs.ts')
 const { createFinalBackupPackage, findReusableLocalBackupPackage, listBackupVersions, validateLocalBackupPackage } = require('../../services/backupPackages.ts')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState/index.ts')
 const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = require('../../systemJobs.ts')

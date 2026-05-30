@@ -102,7 +102,7 @@ assert(!apiMethods.includes("apiFetch('GET', '/api/settings/meta')"), 'Settings 
 assert(read(path.join(SRC_ROOT, 'utils', 'csv.ts')).includes('UTF8_BOM'), 'CSV downloads/templates must include UTF-8 BOM for Khmer Excel compatibility.')
 
 const backendImportCsv = read(path.join(PROJECT_ROOT, 'backend', 'src', 'importCsv.ts'))
-const backendImportJobs = read(path.join(PROJECT_ROOT, 'backend', 'src', 'services', 'importJobs.js'))
+const backendImportJobs = read(path.join(PROJECT_ROOT, 'backend', 'src', 'services', 'importJobs.ts'))
 const backendPackage = read(path.join(PROJECT_ROOT, 'backend', 'package.json'))
 assert(backendImportCsv.includes('parseCsvRowBatchesFromFile'), 'Backend imports must expose a streaming CSV batch reader.')
 assert(backendImportJobs.includes('rowBatchesFromFile'), 'Backend import jobs must consume CSV rows from streaming batches.')
