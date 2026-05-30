@@ -198,7 +198,7 @@ Total folders documented: **81**
 | 27 | `README.md` | Documentation |
 | 28 | `requestContext.ts` | Project source/support file |
 | 29 | `runtimeCache.js` | Project source/support file |
-| 30 | `runtimeVersion.js` | Project source/support file |
+| 30 | `runtimeVersion.ts` | Project source/support file |
 | 31 | `schemaMetadata.ts` | Project source/support file |
 | 32 | `security.js` | Project source/support file |
 | 33 | `serverUtils.js` | Project source/support file |

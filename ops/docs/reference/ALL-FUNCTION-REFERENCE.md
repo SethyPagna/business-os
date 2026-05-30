@@ -69,7 +69,7 @@ Code files scanned: **466**
 | 57 | `backend/src/routes/users.js` | 26 |
 | 58 | `backend/src/runtimeCache.js` | 12 |
 | 59 | `backend/src/runtimeState/index.ts` | 6 |
-| 60 | `backend/src/runtimeVersion.js` | 8 |
+| 60 | `backend/src/runtimeVersion.ts` | 8 |
 | 61 | `backend/src/schemaMetadata.ts` | 9 |
 | 62 | `backend/src/security.js` | 14 |
 | 63 | `backend/src/serverUtils.js` | 26 |
@@ -1644,18 +1644,18 @@ Code files scanned: **466**
 | 5 | `bumpStorageVersion` | function | 67 |
 | 6 | `buildRuntimeDescriptor` | function | 80 |
 
-### 3.60 `backend/src/runtimeVersion.js`
+### 3.60 `backend/src/runtimeVersion.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `firstExistingDir` | function | 11 |
-| 2 | `collectExistingFiles` | function | 18 |
-| 3 | `readGitRevision` | function | 27 |
-| 4 | `collectFiles` | function | 42 |
-| 5 | `computeSourceHash` | function | 56 |
-| 6 | `emptyFrontendBuildInfo` | function | 80 |
-| 7 | `readFrontendBuildInfoFromRoot` | function | 88 |
-| 8 | `getRuntimeVersion` | function | 123 |
+| 1 | `firstExistingDir` | function | 27 |
+| 2 | `collectExistingFiles` | function | 38 |
+| 3 | `readGitRevision` | function | 50 |
+| 4 | `collectFiles` | function | 70 |
+| 5 | `computeSourceHash` | function | 87 |
+| 6 | `emptyFrontendBuildInfo` | function | 114 |
+| 7 | `readFrontendBuildInfoFromRoot` | function | 126 |
+| 8 | `getRuntimeVersion` | function | 165 |
 
 ### 3.61 `backend/src/schemaMetadata.ts`
 

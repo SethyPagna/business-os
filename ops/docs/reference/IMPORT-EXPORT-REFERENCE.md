@@ -69,7 +69,7 @@ Code files documented: **466**
 | 57 | `backend/src/routes/users.js` | 11 | 1 | 9 | 1 |
 | 58 | `backend/src/runtimeCache.js` | 2 | 1 | 1 | 4 |
 | 59 | `backend/src/runtimeState/index.ts` | 4 | 1 | 1 | 2 |
-| 60 | `backend/src/runtimeVersion.js` | 5 | 1 | 1 | 4 |
+| 60 | `backend/src/runtimeVersion.ts` | 5 | 1 | 1 | 4 |
 | 61 | `backend/src/schemaMetadata.ts` | 1 | 1 | 1 | 6 |
 | 62 | `backend/src/security.js` | 1 | 1 | 0 | 7 |
 | 63 | `backend/src/serverUtils.js` | 1 | 1 | 1 | 4 |
@@ -517,7 +517,7 @@ Code files documented: **466**
   - `./src/routes/system`
   - `./src/routes/units`
   - `./src/routes/users`
-  - `./src/runtimeVersion`
+  - `./src/runtimeVersion.ts`
   - `./src/serverUtils`
   - `./src/services/importJobs`
   - `./src/websocket`
@@ -565,7 +565,7 @@ Code files documented: **466**
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.js`
   - `backend/src/routes/users.js`
-  - `backend/src/runtimeVersion.js`
+  - `backend/src/runtimeVersion.ts`
   - `backend/src/serverUtils.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/websocket.js`
@@ -1564,7 +1564,7 @@ Code files documented: **466**
   - `../helpers`
   - `../middleware`
   - `../runtimeCache`
-  - `../runtimeVersion`
+  - `../runtimeVersion.ts`
   - `../services/importJobs`
   - `../services/mediaQueue`
   - `express`
@@ -1574,7 +1574,7 @@ Code files documented: **466**
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
   - `backend/src/runtimeCache.js`
-  - `backend/src/runtimeVersion.js`
+  - `backend/src/runtimeVersion.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.js`
 - Referenced by (1)
@@ -1774,7 +1774,7 @@ Code files documented: **466**
   - `backend/src/routes/auth.js`
   - `backend/src/routes/system/index.js`
 
-### 3.60 `backend/src/runtimeVersion.js`
+### 3.60 `backend/src/runtimeVersion.ts`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -1891,7 +1891,7 @@ Code files documented: **466**
   - `../../dataPath`
   - `../../database`
   - `../../maintenanceLock.ts`
-  - `../../runtimeVersion`
+  - `../../runtimeVersion.ts`
   - `../../security`
   - `../backupPackages`
   - `./versioning`
@@ -1904,7 +1904,7 @@ Code files documented: **466**
   - `backend/src/dataPath/index.js`
   - `backend/src/database.js`
   - `backend/src/maintenanceLock.ts`
-  - `backend/src/runtimeVersion.js`
+  - `backend/src/runtimeVersion.ts`
   - `backend/src/security.js`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/versioning.js`
@@ -2764,13 +2764,13 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (5)
-  - `../src/runtimeVersion`
+  - `../src/runtimeVersion.ts`
   - `fs`
   - `node:assert/strict`
   - `os`
   - `path`
 - Internal dependencies (1)
-  - `backend/src/runtimeVersion.js`
+  - `backend/src/runtimeVersion.ts`
 - Referenced by (0)
   - none
 
