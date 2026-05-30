@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 591.
+- Latest completed implementation move in this roadmap: Move 592.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4171,7 +4171,7 @@ Move 371 status:
 
 Move 372 status:
 - Move 372 tightens the action history and user list response projection
-  paths in `backend/src/routes/actionHistory.js` and
+  paths in `backend/src/routes/actionHistory.ts` and
   `backend/src/routes/users.js`. Action-history row serialization and user
   row sanitization now use direct-loop helper functions instead of endpoint
   `rows.map(...)` calls, keeping response shaping named and easier to profile.
@@ -6631,3 +6631,16 @@ Move 591 status:
   compile/staging package lane. The generated language audit now reports
   `JavaScript: 31`, `TypeScript: 280`, and `React TSX: 107` across the active
   scan roots.
+
+Move 592 status:
+- Move 592 converts `backend/src/routes/actionHistory.ts` to a package-safe
+  TypeScript path. Action-history list, record, status update, server-backed
+  undo/redo, permission checks, sensitive payload checks, payload-size guards,
+  and JSON payload normalization remain unchanged on the existing CommonJS
+  route style. The server mount, route-contract source probe, and backend route
+  docs now point at the explicit `.ts` route. Focused route load,
+  route-contract, backend utility, schema audit, stale-path, and Linux
+  packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
+  broader backend conversions still wait for a compile/staging package lane.
+  The generated language audit now reports `JavaScript: 30`, `TypeScript: 281`,
+  and `React TSX: 107` across the active scan roots.

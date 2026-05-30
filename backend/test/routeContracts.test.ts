@@ -259,7 +259,7 @@ runTest('activity routes include admin-only user filters for attribution review'
   const path = require('path')
   const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.js'), 'utf8')
   const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
-  const actionHistorySource = fs.readFileSync(path.join(__dirname, '../src/routes/actionHistory.js'), 'utf8')
+  const actionHistorySource = fs.readFileSync(path.join(__dirname, '../src/routes/actionHistory.ts'), 'utf8')
   assert.match(salesSource, /cashier_id\s*=\s*\?/)
   assert.match(salesSource, /isAdminControlUser/)
   assert.match(inventorySource, /user_id\s*=\s*\?/)

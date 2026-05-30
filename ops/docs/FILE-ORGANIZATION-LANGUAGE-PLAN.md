@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 591 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 592 in this file.
 
 ## Goal
 
@@ -2956,7 +2956,7 @@ Decision rule:
     with direct loops and small named helpers. This was a backend route cleanup
     only; no folder move, schema migration, or runtime conversion was needed.
 362. Tighten action history and user list response loops. Done:
-    `backend/src/routes/actionHistory.js` and `backend/src/routes/users.js`
+    `backend/src/routes/actionHistory.ts` and `backend/src/routes/users.js`
     now serialize action-history rows and sanitize user list rows with
     direct-loop helper functions instead of endpoint `rows.map(...)` calls.
     This was a backend route cleanup only; no folder move, schema migration,
@@ -4951,6 +4951,18 @@ Decision rule:
     Packaging still warns for direct `.ts` entries in `pkg.scripts`, so broader
     backend conversions remain blocked on the future compile/staging lane. The
     generated language audit now reports `JavaScript: 31`, `TypeScript: 280`,
+    and `React TSX: 107` across the active scan roots.
+592. Convert action-history route to a package-safe TypeScript path.
+    Done: `backend/src/routes/actionHistory.ts` keeps action-history list,
+    record, status update, server-backed undo/redo, permission checks,
+    sensitive payload checks, payload-size guards, and JSON payload
+    normalization on the existing CommonJS route style. The server mount,
+    route-contract source probe, and backend route docs now point at the
+    explicit `.ts` route. Focused route load, route-contract, backend utility,
+    schema audit, stale-path, and Linux packaging proof passed. Packaging still
+    warns for direct `.ts` entries in `pkg.scripts`, so broader backend
+    conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 30`, `TypeScript: 281`,
     and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates

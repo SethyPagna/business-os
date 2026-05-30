@@ -190,6 +190,6 @@ File: `backend/src/routes/system/index.js`
 ## Action History
 
 Base: `/api/action-history`
-File: `backend/src/routes/actionHistory.js`
+File: `backend/src/routes/actionHistory.ts`
 
 - `GET /` supports scoped history and admin-only `userId` filtering for all-history views.
