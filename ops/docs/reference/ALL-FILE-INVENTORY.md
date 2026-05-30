@@ -44,7 +44,7 @@ Total files documented: **529**
 | 32 | `backend/src/objectStore.js` | backend-core | 468 | 15.1 | Project source/support file |
 | 33 | `backend/src/optionalSharp.ts` | backend-core | 32 | 0.7 | Project source/support file |
 | 34 | `backend/src/organizationContext/index.js` | backend-core | 264 | 8.1 | Project source/support file |
-| 35 | `backend/src/permissions.js` | backend-core | 198 | 6.3 | Project source/support file |
+| 35 | `backend/src/permissions.ts` | backend-core | 227 | 7.0 | Project source/support file |
 | 36 | `backend/src/portalUtils.ts` | backend-core | 122 | 3.1 | Project source/support file |
 | 37 | `backend/src/postgresDatabase.js` | backend-core | 596 | 25.4 | Project source/support file |
 | 38 | `backend/src/productBatches.js` | backend-core | 646 | 21.5 | Project source/support file |
@@ -95,7 +95,7 @@ Total files documented: **529**
 | 83 | `backend/src/services/README.md` | backend-services | 29 | 1.0 | Integration/service layer |
 | 84 | `backend/src/services/verification.js` | backend-services | 272 | 8.4 | Integration/service layer |
 | 85 | `backend/src/sessionAuth.js` | backend-core | 215 | 6.8 | Project source/support file |
-| 86 | `backend/src/settingsSnapshot.js` | backend-core | 135 | 4.2 | Project source/support file |
+| 86 | `backend/src/settingsSnapshot.ts` | backend-core | 181 | 5.0 | Project source/support file |
 | 87 | `backend/src/storage/organizationFolders.ts` | backend-core | 59 | 2.0 | Project source/support file |
 | 88 | `backend/src/systemFsWorker.ts` | backend-core | 122 | 3.6 | Project source/support file |
 | 89 | `backend/src/systemJobs.js` | backend-core | 467 | 14.5 | Project source/support file |

@@ -189,7 +189,7 @@ Total folders documented: **81**
 | 18 | `netSecurity.ts` | Project source/support file |
 | 19 | `objectStore.js` | Project source/support file |
 | 20 | `optionalSharp.ts` | Project source/support file |
-| 21 | `permissions.js` | Project source/support file |
+| 21 | `permissions.ts` | Project source/support file |
 | 22 | `portalUtils.ts` | Project source/support file |
 | 23 | `postgresDatabase.js` | Project source/support file |
 | 24 | `productBatches.js` | Project source/support file |
@@ -203,7 +203,7 @@ Total folders documented: **81**
 | 32 | `security.js` | Project source/support file |
 | 33 | `serverUtils.js` | Project source/support file |
 | 34 | `sessionAuth.js` | Project source/support file |
-| 35 | `settingsSnapshot.js` | Project source/support file |
+| 35 | `settingsSnapshot.ts` | Project source/support file |
 | 36 | `systemFsWorker.ts` | Project source/support file |
 | 37 | `systemJobs.js` | Project source/support file |
 | 38 | `uploadReferenceCleanup.js` | Project source/support file |

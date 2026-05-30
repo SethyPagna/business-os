@@ -37,7 +37,7 @@ Code files documented: **466**
 | 25 | `backend/src/objectStore.js` | 7 | 1 | 1 | 6 |
 | 26 | `backend/src/optionalSharp.ts` | 1 | 1 | 0 | 2 |
 | 27 | `backend/src/organizationContext/index.js` | 7 | 1 | 4 | 6 |
-| 28 | `backend/src/permissions.js` | 0 | 1 | 0 | 4 |
+| 28 | `backend/src/permissions.ts` | 0 | 1 | 0 | 4 |
 | 29 | `backend/src/portalUtils.ts` | 0 | 1 | 0 | 2 |
 | 30 | `backend/src/postgresDatabase.js` | 7 | 1 | 3 | 2 |
 | 31 | `backend/src/productBatches.js` | 1 | 1 | 1 | 6 |
@@ -85,7 +85,7 @@ Code files documented: **466**
 | 73 | `backend/src/services/portalAi.js` | 2 | 1 | 2 | 1 |
 | 74 | `backend/src/services/verification.js` | 2 | 1 | 1 | 2 |
 | 75 | `backend/src/sessionAuth.js` | 2 | 1 | 1 | 4 |
-| 76 | `backend/src/settingsSnapshot.js` | 4 | 1 | 2 | 8 |
+| 76 | `backend/src/settingsSnapshot.ts` | 4 | 1 | 2 | 8 |
 | 77 | `backend/src/storage/organizationFolders.ts` | 2 | 1 | 0 | 2 |
 | 78 | `backend/src/systemFsWorker.ts` | 3 | 0 | 1 | 0 |
 | 79 | `backend/src/systemJobs.js` | 2 | 1 | 1 | 2 |
@@ -687,7 +687,7 @@ Code files documented: **466**
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.js`
   - `backend/src/services/mediaQueue.js`
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
   - `backend/test/importJobStateMachine.test.ts`
   - `backend/test/serverUtils.test.ts`
 
@@ -819,7 +819,7 @@ Code files documented: **466**
   - `./database`
   - `./objectStore`
   - `./optionalSharp.ts`
-  - `./settingsSnapshot`
+  - `./settingsSnapshot.ts`
   - `./uploadReferenceCleanup`
   - `./uploadSecurity.ts`
   - `child_process`
@@ -832,7 +832,7 @@ Code files documented: **466**
   - `backend/src/database.js`
   - `backend/src/objectStore.js`
   - `backend/src/optionalSharp.ts`
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
   - `backend/src/uploadReferenceCleanup.js`
   - `backend/src/uploadSecurity.ts`
 - Referenced by (15)
@@ -960,7 +960,7 @@ Code files documented: **466**
   - `./accessControl.ts`
   - `./config`
   - `./fileAssets`
-  - `./permissions`
+  - `./permissions.ts`
   - `./security`
   - `./sessionAuth`
   - `./uploadSecurity.ts`
@@ -971,7 +971,7 @@ Code files documented: **466**
   - `backend/src/accessControl.ts`
   - `backend/src/config/index.js`
   - `backend/src/fileAssets.js`
-  - `backend/src/permissions.js`
+  - `backend/src/permissions.ts`
   - `backend/src/security.js`
   - `backend/src/sessionAuth.js`
   - `backend/src/uploadSecurity.ts`
@@ -1048,7 +1048,7 @@ Code files documented: **466**
   - `backend/src/routes/system/index.js`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/integrationDoctor.js`
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
 
 ### 3.26 `backend/src/optionalSharp.ts`
 
@@ -1085,7 +1085,7 @@ Code files documented: **466**
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/users.js`
 
-### 3.28 `backend/src/permissions.js`
+### 3.28 `backend/src/permissions.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -1115,7 +1115,7 @@ Code files documented: **466**
 - Imports (7)
   - `./config`
   - `./db/postgresQueryCompat`
-  - `./permissions`
+  - `./permissions.ts`
   - `bcryptjs`
   - `fs`
   - `path`
@@ -1123,7 +1123,7 @@ Code files documented: **466**
 - Internal dependencies (3)
   - `backend/src/config/index.js`
   - `backend/src/db/postgresQueryCompat.js`
-  - `backend/src/permissions.js`
+  - `backend/src/permissions.ts`
 - Referenced by (2)
   - `backend/src/database.js`
   - `backend/test/postgresDatabase.test.ts`
@@ -1185,13 +1185,13 @@ Code files documented: **466**
   - `../database`
   - `../helpers`
   - `../middleware`
-  - `../permissions`
+  - `../permissions.ts`
   - `express`
 - Internal dependencies (4)
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-  - `backend/src/permissions.js`
+  - `backend/src/permissions.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1230,7 +1230,7 @@ Code files documented: **466**
   - `../services/googleOauth`
   - `../services/verification`
   - `../sessionAuth`
-  - `../settingsSnapshot`
+  - `../settingsSnapshot.ts`
   - `bcryptjs`
   - `crypto`
   - `express`
@@ -1249,7 +1249,7 @@ Code files documented: **466**
   - `backend/src/services/googleOauth.js`
   - `backend/src/services/verification.js`
   - `backend/src/sessionAuth.js`
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1282,12 +1282,12 @@ Code files documented: **466**
 - Imports (4)
   - `../database`
   - `../helpers`
-  - `../settingsSnapshot`
+  - `../settingsSnapshot.ts`
   - `express`
 - Internal dependencies (3)
   - `backend/src/database.js`
   - `backend/src/helpers.js`
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1467,7 +1467,7 @@ Code files documented: **466**
   - `../runtimeCache.ts`
   - `../security`
   - `../services/portalAi`
-  - `../settingsSnapshot`
+  - `../settingsSnapshot.ts`
   - `express`
 - Internal dependencies (12)
   - `backend/src/database.js`
@@ -1481,7 +1481,7 @@ Code files documented: **466**
   - `backend/src/runtimeCache.ts`
   - `backend/src/security.js`
   - `backend/src/services/portalAi.js`
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1506,7 +1506,7 @@ Code files documented: **466**
   - `../productDiscounts.ts`
   - `../productImportPolicies.ts`
   - `../schemaMetadata.ts`
-  - `../settingsSnapshot`
+  - `../settingsSnapshot.ts`
   - `express`
   - `fs`
   - `path`
@@ -1527,7 +1527,7 @@ Code files documented: **466**
   - `backend/src/productDiscounts.ts`
   - `backend/src/productImportPolicies.ts`
   - `backend/src/schemaMetadata.ts`
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1612,7 +1612,7 @@ Code files documented: **466**
   - `../helpers`
   - `../middleware`
   - `../schemaMetadata.ts`
-  - `../settingsSnapshot`
+  - `../settingsSnapshot.ts`
   - `express`
 - Internal dependencies (8)
   - `backend/src/catalogTextIntegrity.ts`
@@ -1622,7 +1622,7 @@ Code files documented: **466**
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
   - `backend/src/schemaMetadata.ts`
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -2069,7 +2069,7 @@ Code files documented: **466**
   - `backend/src/routes/users.js`
   - `backend/src/websocket.js`
 
-### 3.76 `backend/src/settingsSnapshot.js`
+### 3.76 `backend/src/settingsSnapshot.ts`
 
 - Declared exports: `module.exports`
 - Imports (4)
@@ -2130,9 +2130,9 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (1)
-  - `./settingsSnapshot`
+  - `./settingsSnapshot.ts`
 - Internal dependencies (1)
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
   - `backend/src/fileAssets.js`
   - `backend/test/settingsSnapshotObjectStorage.test.ts`
@@ -2595,10 +2595,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/permissions`
+  - `../src/permissions.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/permissions.js`
+  - `backend/src/permissions.ts`
 - Referenced by (0)
   - none
 
@@ -2799,11 +2799,11 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/settingsSnapshot`
+  - `../src/settingsSnapshot.ts`
   - `../src/uploadReferenceCleanup`
   - `node:assert/strict`
 - Internal dependencies (2)
-  - `backend/src/settingsSnapshot.js`
+  - `backend/src/settingsSnapshot.ts`
   - `backend/src/uploadReferenceCleanup.js`
 - Referenced by (0)
   - none

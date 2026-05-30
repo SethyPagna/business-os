@@ -37,7 +37,7 @@ Code files scanned: **466**
 | 25 | `backend/src/objectStore.js` | 29 |
 | 26 | `backend/src/optionalSharp.ts` | 1 |
 | 27 | `backend/src/organizationContext/index.js` | 14 |
-| 28 | `backend/src/permissions.js` | 7 |
+| 28 | `backend/src/permissions.ts` | 7 |
 | 29 | `backend/src/portalUtils.ts` | 6 |
 | 30 | `backend/src/postgresDatabase.js` | 14 |
 | 31 | `backend/src/productBatches.js` | 34 |
@@ -85,7 +85,7 @@ Code files scanned: **466**
 | 73 | `backend/src/services/portalAi.js` | 42 |
 | 74 | `backend/src/services/verification.js` | 21 |
 | 75 | `backend/src/sessionAuth.js` | 13 |
-| 76 | `backend/src/settingsSnapshot.js` | 12 |
+| 76 | `backend/src/settingsSnapshot.ts` | 12 |
 | 77 | `backend/src/storage/organizationFolders.ts` | 5 |
 | 78 | `backend/src/systemFsWorker.ts` | 7 |
 | 79 | `backend/src/systemJobs.js` | 28 |
@@ -941,17 +941,17 @@ Code files scanned: **466**
 | 13 | `ensureOrganizationFilesystemLayout` | function | 157 |
 | 14 | `getOrganizationStorageStatus` | function | 226 |
 
-### 3.28 `backend/src/permissions.js`
+### 3.28 `backend/src/permissions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `buildPermissionDefinitions` | function | 41 |
-| 2 | `normalizeKey` | function | 135 |
-| 3 | `getPermissionDefinition` | function | 139 |
-| 4 | `isSensitivePermissionKey` | function | 147 |
-| 5 | `permissionForActionHistory` | function | 154 |
-| 6 | `isSensitiveActionHistory` | function | 162 |
-| 7 | `hasPermissionValue` | function | 177 |
+| 1 | `buildPermissionDefinitions` | function | 51 |
+| 2 | `normalizeKey` | function | 148 |
+| 3 | `getPermissionDefinition` | function | 155 |
+| 4 | `isSensitivePermissionKey` | function | 166 |
+| 5 | `permissionForActionHistory` | function | 176 |
+| 6 | `isSensitiveActionHistory` | function | 187 |
+| 7 | `hasPermissionValue` | function | 206 |
 
 ### 3.29 `backend/src/portalUtils.ts`
 
@@ -2252,22 +2252,22 @@ Code files scanned: **466**
 | 12 | `revokeAuthSession` | function | 175 |
 | 13 | `revokeUserSessions` | function | 187 |
 
-### 3.76 `backend/src/settingsSnapshot.js`
+### 3.76 `backend/src/settingsSnapshot.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeUploadPublicPath` | function | 8 |
-| 2 | `isUploadPublicPath` | function | 22 |
-| 3 | `toUploadObjectKey` | function | 27 |
-| 4 | `sanitizeMediaPath` | function | 34 |
-| 5 | `sanitizeMediaPathAsync` | function | 42 |
-| 6 | `sanitizeMediaList` | function | 58 |
-| 7 | `sanitizeMediaListAsync` | function | 71 |
-| 8 | `uploadPublicPathExists` | function | 84 |
-| 9 | `sanitizeSettingValue` | function | 96 |
-| 10 | `sanitizeSettingValueAsync` | function | 100 |
-| 11 | `sanitizeSettingsSnapshot` | function | 104 |
-| 12 | `sanitizeSettingsSnapshotAsync` | function | 112 |
+| 1 | `normalizeUploadPublicPath` | function | 16 |
+| 2 | `isUploadPublicPath` | function | 33 |
+| 3 | `toUploadObjectKey` | function | 41 |
+| 4 | `sanitizeMediaPath` | function | 52 |
+| 5 | `sanitizeMediaPathAsync` | function | 65 |
+| 6 | `sanitizeMediaList` | function | 84 |
+| 7 | `sanitizeMediaListAsync` | function | 101 |
+| 8 | `uploadPublicPathExists` | function | 117 |
+| 9 | `sanitizeSettingValue` | function | 132 |
+| 10 | `sanitizeSettingValueAsync` | function | 140 |
+| 11 | `sanitizeSettingsSnapshot` | function | 147 |
+| 12 | `sanitizeSettingsSnapshotAsync` | function | 158 |
 
 ### 3.77 `backend/src/storage/organizationFolders.ts`
 
