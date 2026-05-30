@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 553.
+- Latest completed implementation move in this roadmap: Move 554.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6051,3 +6051,18 @@ Move 553 status:
   the test remains stable across Windows consoles and generated docs. The
   current source extension count is `.js: 93`, `.jsx: 0`, `.mjs: 0`,
   `.cjs: 0`, `.ts: 270`, `.tsx: 107` outside generated/runtime folders.
+
+Move 554 status:
+- Move 554 converts two more backend helpers to package-safe TypeScript paths:
+  `backend/src/money.ts` and `backend/src/idempotency.ts`. Money normalization
+  now carries JSDoc input/output contracts for finite-number coercion,
+  round-up decimal handling, and normalized price values; idempotency now
+  carries a nullable string return contract for bounded client request ids.
+  Product, inventory, sales, returns, import parsing, product discount, import
+  job, and focused test imports now point at explicit `.ts` helper paths.
+  Focused import/idempotency/route tests, the full backend utility suite, and
+  Linux packaging proof passed. `pkg` still warns for backend `.ts` scripts, so
+  the next larger backend conversion should add a compile/staging pipeline
+  before route/service files use TypeScript-only syntax. The current source
+  extension count is `.js: 91`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 272`,
+  `.tsx: 107` outside generated/runtime folders.
