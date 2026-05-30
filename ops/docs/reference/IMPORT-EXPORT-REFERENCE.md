@@ -23,7 +23,7 @@ Code files documented: **466**
 | 11 | `backend/src/database.ts` | 1 | 1 | 1 | 40 |
 | 12 | `backend/src/dataPath/index.js` | 2 | 1 | 0 | 5 |
 | 13 | `backend/src/db/cutoverReadiness.ts` | 2 | 1 | 0 | 2 |
-| 14 | `backend/src/db/postgresQueryCompat.js` | 0 | 1 | 0 | 2 |
+| 14 | `backend/src/db/postgresQueryCompat.ts` | 0 | 1 | 0 | 2 |
 | 15 | `backend/src/fileAssets.js` | 12 | 1 | 7 | 15 |
 | 16 | `backend/src/helpers.js` | 4 | 1 | 4 | 23 |
 | 17 | `backend/src/idempotency.ts` | 0 | 1 | 0 | 5 |
@@ -800,7 +800,7 @@ Code files documented: **466**
   - `backend/src/routes/system/index.js`
   - `backend/test/postgresCutoverReadiness.test.ts`
 
-### 3.14 `backend/src/db/postgresQueryCompat.js`
+### 3.14 `backend/src/db/postgresQueryCompat.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -1114,7 +1114,7 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (7)
   - `./config`
-  - `./db/postgresQueryCompat`
+  - `./db/postgresQueryCompat.ts`
   - `./permissions.ts`
   - `bcryptjs`
   - `fs`
@@ -1122,7 +1122,7 @@ Code files documented: **466**
   - `pg-native`
 - Internal dependencies (3)
   - `backend/src/config/index.js`
-  - `backend/src/db/postgresQueryCompat.js`
+  - `backend/src/db/postgresQueryCompat.ts`
   - `backend/src/permissions.ts`
 - Referenced by (2)
   - `backend/src/database.ts`
@@ -2654,10 +2654,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/db/postgresQueryCompat`
+  - `../src/db/postgresQueryCompat.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/db/postgresQueryCompat.js`
+  - `backend/src/db/postgresQueryCompat.ts`
 - Referenced by (0)
   - none
 

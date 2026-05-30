@@ -29,7 +29,7 @@ Total files documented: **529**
 | 17 | `backend/src/database.ts` | backend-core | 4 | 0.1 | Schema/migrations and DB bootstrap |
 | 18 | `backend/src/dataPath/index.js` | backend-core | 201 | 6.0 | Project source/support file |
 | 19 | `backend/src/db/cutoverReadiness.ts` | backend-core | 173 | 5.5 | Project source/support file |
-| 20 | `backend/src/db/postgresQueryCompat.js` | backend-core | 229 | 6.5 | Project source/support file |
+| 20 | `backend/src/db/postgresQueryCompat.ts` | backend-core | 240 | 6.7 | Project source/support file |
 | 21 | `backend/src/db/postgresSchema.sql` | backend-core | 2148 | 54.6 | Project source/support file |
 | 22 | `backend/src/fileAssets.js` | backend-core | 1261 | 43.9 | Project source/support file |
 | 23 | `backend/src/helpers.js` | backend-core | 625 | 21.0 | Project source/support file |

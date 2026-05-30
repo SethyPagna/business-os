@@ -23,7 +23,7 @@ Code files scanned: **466**
 | 11 | `backend/src/database.ts` | 0 |
 | 12 | `backend/src/dataPath/index.js` | 9 |
 | 13 | `backend/src/db/cutoverReadiness.ts` | 10 |
-| 14 | `backend/src/db/postgresQueryCompat.js` | 12 |
+| 14 | `backend/src/db/postgresQueryCompat.ts` | 12 |
 | 15 | `backend/src/fileAssets.js` | 61 |
 | 16 | `backend/src/helpers.js` | 30 |
 | 17 | `backend/src/idempotency.ts` | 1 |
@@ -654,22 +654,22 @@ Code files scanned: **466**
 | 9 | `analyzeFiles` | function | 124 |
 | 10 | `analyzePostgresCutoverReadiness` | function | 134 |
 
-### 3.14 `backend/src/db/postgresQueryCompat.js`
+### 3.14 `backend/src/db/postgresQueryCompat.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `countPositionalPlaceholders` | function | 57 |
-| 2 | `stripTrailingSemicolon` | function | 82 |
-| 3 | `replacePositionalParams` | function | 86 |
-| 4 | `normalizePortableSqlFunctions` | function | 120 |
-| 5 | `translateInsertOrIgnore` | function | 131 |
-| 6 | `translateParameters` | function | 135 |
-| 7 | `appendReturning` | function | 160 |
-| 8 | `isNumericFieldName` | function | 172 |
-| 9 | `getInsertTableName` | function | 179 |
-| 10 | `translateSql` | function | 184 |
-| 11 | `coerceRowValue` | function | 202 |
-| 12 | `coerceRow` | function | 215 |
+| 1 | `countPositionalPlaceholders` | function | 63 |
+| 2 | `stripTrailingSemicolon` | function | 88 |
+| 3 | `replacePositionalParams` | function | 92 |
+| 4 | `normalizePortableSqlFunctions` | function | 126 |
+| 5 | `translateInsertOrIgnore` | function | 137 |
+| 6 | `translateParameters` | function | 141 |
+| 7 | `appendReturning` | function | 166 |
+| 8 | `isNumericFieldName` | function | 178 |
+| 9 | `getInsertTableName` | function | 185 |
+| 10 | `translateSql` | function | 195 |
+| 11 | `coerceRowValue` | function | 213 |
+| 12 | `coerceRow` | function | 226 |
 
 ### 3.15 `backend/src/fileAssets.js`
 
