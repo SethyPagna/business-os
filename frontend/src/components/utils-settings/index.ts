@@ -1,5 +1,5 @@
 export { default as AuditLog } from './AuditLog'
-export { default as Backup } from './Backup.jsx'
+export { default as Backup } from './Backup'
 export { default as Settings } from './Settings.jsx'
 export { ResetData, FactoryReset } from './ResetData'
 export { default as FontFamilyPicker } from './FontFamilyPicker'

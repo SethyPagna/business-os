@@ -6,7 +6,7 @@ const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.ts
 const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.jsx', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
-const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.jsx', import.meta.url), 'utf8')
+const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
 const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
 const otpModal = fs.readFileSync(new URL('../src/components/utils-settings/OtpModal.tsx', import.meta.url), 'utf8')
@@ -81,7 +81,7 @@ assert.match(inventory, /inventory-history-row/, 'inventory history controls sho
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')
 assert.match(inventory, /inventory-history-row[\s\S]{0,160}<ActionHistoryBar/, 'inventory history controls should render inside the dedicated history row')
 
-assert.match(backup, /useState\('all'\)/, 'Backup should default to the lightweight overview tab without showing duplicate All and Overview tabs')
+assert.match(backup, /useState<BackupSectionId>\('all'\)/, 'Backup should default to the lightweight overview tab without showing duplicate All and Overview tabs')
 assert.match(backup, /BackupOverview/, 'Backup overview should provide lightweight section entry points')
 assert.doesNotMatch(backup, /function DataFolderLocation/, 'unused backup data-folder UI should not remain in the bundle')
 assert.doesNotMatch(backup, /function ScaleMigrationSection/, 'unused backup migration UI should not remain in the bundle')
@@ -91,12 +91,12 @@ assert.match(backup, /const INTEGRATION_DOCTOR_DEEP_TIMEOUT_MS = 30000/, 'deep i
 assert.match(backup, /const SYSTEM_JOB_STATUS_TIMEOUT_MS = 10000/, 'backup system job polling should use an explicit timeout')
 assert.match(
   backup,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getIntegrationDoctor\?\.\(\{ deep \}\),\s*deep \? 'Deep integration doctor' : 'Integration doctor',\s*deep \? INTEGRATION_DOCTOR_DEEP_TIMEOUT_MS : INTEGRATION_DOCTOR_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.getIntegrationDoctor\?\.\(\{ deep \}\),\s*deep \? 'Deep integration doctor' : 'Integration doctor',\s*deep \? INTEGRATION_DOCTOR_DEEP_TIMEOUT_MS : INTEGRATION_DOCTOR_TIMEOUT_MS,\s*\)/,
   'integration doctor reads should timeout slow diagnostics',
 )
 assert.match(
   backup,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getSystemJob\?\.\(jobId\),\s*`\$\{reason\} status`,\s*SYSTEM_JOB_STATUS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.getSystemJob\?\.\(jobId\),\s*`\$\{reason\} status`,\s*SYSTEM_JOB_STATUS_TIMEOUT_MS,\s*\)/,
   'backup system job status polls should timeout slow reads',
 )
 assert.match(

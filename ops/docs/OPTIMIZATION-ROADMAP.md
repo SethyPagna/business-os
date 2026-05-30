@@ -5886,3 +5886,16 @@ Move 541 status:
   timeout contracts, same-tick retention cleanup guard, grouped selection
   helpers, CSV export behavior, and source guard behavior unchanged while
   making refresh click handling explicit.
+
+Move 542 status:
+- Move 542 converts the backup shell to
+  `frontend/src/components/utils-settings/Backup.tsx`. The typed boundary now
+  covers backup jobs, job metrics/results, integration doctor payloads, Google
+  Drive sync status/forms, app context access, action-history rows, the local
+  backup API gateway, section ids, action locks, retry timers, job watcher
+  handlers, overview cards, and backup/Drive button props. The move keeps the
+  extensionless utils-settings barrel export, queued export and restore flows,
+  Drive sync action timeouts, cancellable job polling, overview-only default
+  section, backup reliability verifier, and source guard behavior unchanged
+  while centralizing direct `window.api` backup access behind a typed
+  `getBackupApi()` boundary.

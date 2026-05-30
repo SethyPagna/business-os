@@ -942,3 +942,46 @@ Use this shape for future entries:
 - follow-up insight: Audit Log is the first utils-settings page shell moved to
   TSX; Backup and Settings remain the next bounded utils-settings conversion
   candidates before POS, Products, Dashboard, Inventory, and Catalog.
+
+- change: converted the backup shell to TSX with typed backup jobs, job
+  metrics/results, integration doctor payloads, Google Drive sync
+  status/forms, app context access, action-history rows, local backup API
+  gateway calls, section ids, action locks, retry timers, job watcher
+  handlers, overview cards, and backup/Drive button props
+- affected files:
+  `frontend/src/components/utils-settings/Backup.tsx`,
+  `frontend/src/components/utils-settings/index.ts`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/backupJobs.test.ts`,
+  `frontend/tests/ownedGoogleAuth.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/sectionNavigation.test.ts`,
+  `frontend/tests/utilsSettingsBarrel.test.ts`,
+  `ops/scripts/verification/verify-backup-reliability.ts`
+- route or API target: Backup overview, integration doctor, queued backup
+  export/restore, Google Drive sync preferences/connect/sync/disconnect/forget,
+  cancellable system job polling, and action-history recording surfaces
+- keeper or rollback: keeper; focused typecheck, JSX, utils-settings barrel,
+  backup jobs, section navigation, performance loading UX, action stability,
+  owned Google auth, backup reliability, frontend/backend utility suites, UI
+  audit, production build, organization audit, schema audit, generated
+  reference refresh, Phase 29 repeat audit, Phase 8.4 live suite, and prune
+  checks passed
+- route-scoped result: focused TSX source checks passed; broad
+  frontend/backend utility suites, UI audit, production build, organization
+  audit, schema audit, generated reference refresh, and pre/post-prune Phase
+  29 repeat audits also passed. Direct backup `window.api` calls are now
+  contained behind the typed `getBackupApi()` gateway.
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up. The
+  running app still served frontend hash `55cf7b8ef08a4b8d`; the fresh local
+  production build hash is `016a61d39eff3e04`. Live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T02-10-58-114Z/report.json`.
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,177 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: Backup is the second utils-settings shell moved to TSX;
+  Settings remains the next bounded utils-settings candidate before POS,
+  Products, Dashboard, Inventory, and Catalog.

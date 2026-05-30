@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { ArchiveRestore, CheckCircle2, Cloud, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
-import { isBrokenLocalizedString, useApp } from '../../AppContext'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.jsx'
 import { ResetData, FactoryReset } from './ResetData'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -15,6 +16,232 @@ import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 
+type TranslateFn = (key: string) => string
+type NotifyFn = (message: string, type?: string) => void
+type BackupSectionId = 'all' | 'doctor' | 'export' | 'restore' | 'drive' | 'maintenance'
+type BackupAction = '' | 'folder-export' | 'folder-import' | 'cancel' | 'save' | 'connect' | 'sync' | 'disconnect' | 'forget' | 'quick' | 'deep'
+type BackupTone = 'slate' | 'blue' | 'amber'
+type StopFn = () => void
+
+interface BackupButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  children: ReactNode
+}
+
+interface AppContextValue {
+  t: TranslateFn
+  notify: NotifyFn
+  hasPermission(permission: string): boolean
+}
+
+interface ActionHistoryItem {
+  id?: string | number
+  label?: string
+  status?: string
+}
+
+interface ActionHistoryUserOption {
+  id: string | number
+  name?: string
+  username?: string
+}
+
+interface ActionHistoryValue {
+  pushAction: (payload: Record<string, unknown>) => void
+  undoItems?: ActionHistoryItem[]
+  redoItems?: ActionHistoryItem[]
+  serverItems?: ActionHistoryItem[]
+  isAdmin?: boolean
+  userFilter?: string
+  setUserFilter?: (userId: string) => void
+  userOptions?: ActionHistoryUserOption[]
+  canUndo?: boolean
+  canRedo?: boolean
+  busy?: boolean | string
+  lastUndoLabel?: string
+  lastRedoLabel?: string
+  undo: (id?: string | number) => void
+  redo: (id?: string | number) => void
+}
+
+interface BackupJobMetrics {
+  currentFile?: string
+  currentTable?: string
+  filesTotal?: number | string
+  filesProcessed?: number | string
+  currentTableTotal?: number | string
+  currentTableRows?: number | string
+  retryCount?: number | string
+  totalBytes?: number | string
+  uploadedBytes?: number | string
+}
+
+interface BackupJobResult {
+  packageId?: string
+  localPath?: string
+  objectPrefix?: string
+  manifest?: unknown
+  message?: string
+  summary?: Record<string, number | string | undefined>
+}
+
+interface BackupJob {
+  id?: string | number
+  type?: string
+  status?: string
+  phase?: string
+  progress?: number | string
+  message?: string
+  error?: string
+  created_at?: string
+  started_at?: string
+  updated_at?: string
+  metrics?: BackupJobMetrics
+  result?: BackupJobResult
+  cancellable?: boolean
+}
+
+interface QueuedJobResponse {
+  job_id?: string | number
+  item?: BackupJob
+}
+
+interface DoctorCheck {
+  ok?: boolean
+  status?: string
+  message?: string
+  writeReadDelete?: {
+    ok?: boolean
+    error?: string
+  }
+}
+
+interface IntegrationDoctorResult {
+  checks?: Record<string, DoctorCheck | undefined>
+  runtime?: Record<string, unknown>
+  expectedOauth?: {
+    googleLoginClient?: OauthClient
+    googleDriveClient?: OauthClient
+  }
+}
+
+interface OauthClient {
+  name?: string
+  authorizedRedirectUris?: string[]
+  authorizedJavaScriptOrigins?: string[]
+}
+
+interface DriveSyncStatus {
+  clientId?: string
+  folderName?: string
+  deleteMissing?: boolean
+  enabled?: boolean
+  syncIntervalSeconds?: number | string
+  unavailable?: boolean
+  cooldownUntil?: number | string
+  connected?: boolean
+  connectedEmail?: string
+  connectedName?: string
+  hasClientSecret?: boolean
+  redirectUri?: string
+  lastSyncedAt?: string
+  lastError?: string
+}
+
+interface DriveSyncForm {
+  clientId: string
+  folderName: string
+  deleteMissing: boolean
+  enabled: boolean
+  syncIntervalMinutes: number | string
+}
+
+interface BackupApi {
+  getIntegrationDoctor?(options: { deep: boolean }): Promise<{ item?: IntegrationDoctorResult }>
+  getSystemJob?(jobId: string | number): Promise<{ item?: BackupJob } | BackupJob>
+  cancelSystemJob?(jobId: string | number, reason: string): Promise<{ item?: BackupJob } | BackupJob>
+  getGoogleDriveSyncStatus?(): Promise<{ item?: DriveSyncStatus; unavailable?: boolean; cooldownUntil?: number | string }>
+  saveGoogleDriveSyncPreferences?(payload: Record<string, unknown>): Promise<{ item?: DriveSyncStatus }>
+  startGoogleDriveSyncOauth?(payload: Record<string, unknown>): Promise<{ authUrl?: string }>
+  queueGoogleDriveSyncNow?(): Promise<QueuedJobResponse>
+  disconnectGoogleDriveSync?(): Promise<unknown>
+  forgetGoogleDriveSyncCredentials?(payload: { confirm: boolean }): Promise<unknown>
+  queueBackupFolderExport?(destinationDir: string): Promise<QueuedJobResponse>
+  queueBackupFolderRestore?(sourceDir: string): Promise<QueuedJobResponse>
+}
+
+interface JobProgressCardProps {
+  job: BackupJob | null
+  copy: CopyFn
+  onClear: () => void
+  onCancel: (job: BackupJob) => void
+}
+
+interface DoctorStatusPillProps {
+  label: string
+  check?: DoctorCheck
+}
+
+interface IntegrationDoctorCardProps {
+  copy: CopyFn
+  notify: NotifyFn
+  active: boolean
+}
+
+interface SectionChipProps {
+  label: string
+  value: ReactNode
+  tone?: BackupTone
+}
+
+interface GoogleDriveSyncSectionProps {
+  t: TranslateFn
+  notify: NotifyFn
+  active?: boolean
+  actionHistory?: ActionHistoryValue | null
+}
+
+interface BackupOverviewProps {
+  copy: CopyFn
+  onSelect: (section: BackupSectionId) => void
+}
+
+interface JobWatcherHandlers {
+  onUpdate?: (job: BackupJob) => void
+  onComplete?: (job: BackupJob | null) => void
+  onError?: (error: Error, job?: BackupJob) => void
+}
+
+interface JobWatcherOptions extends JobWatcherHandlers {
+  reason?: string
+  pollMs?: number
+}
+
+type CopyFn = (key: string, fallback: string, fallbackKm?: string) => string
+type BackupLocalCopy = {
+  km: Record<string, string>
+  en?: Record<string, string>
+}
+
+const useApp = useAppHook as () => AppContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+function getBackupApi(): BackupApi {
+  return (window as unknown as { api: BackupApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+function unwrapJob(result: { item?: BackupJob } | BackupJob | null | undefined): BackupJob | null {
+  if (!result) return null
+  if (typeof result === 'object' && 'item' in result) {
+    const wrapped = result as { item?: BackupJob }
+    return wrapped.item || null
+  }
+  return result as BackupJob
+}
+
 const QUICK_BACKUP_SECTIONS = [
   'Products + inventory',
   'Sales + returns',
@@ -22,7 +249,7 @@ const QUICK_BACKUP_SECTIONS = [
   'Portal + files',
 ]
 
-const BACKUP_SECTION_OPTIONS = [
+const BACKUP_SECTION_OPTIONS: Array<{ value: BackupSectionId; label: string; hint: string }> = [
   { value: 'all', label: 'Overview', hint: 'Open one backup tool at a time so the page stays responsive.' },
   { value: 'doctor', label: 'Doctor', hint: 'Check Docker data, storage, Google Drive, Google login, and backup package readiness.' },
   { value: 'export', label: 'Export', hint: 'Create a full Docker-safe backup package.' },
@@ -31,7 +258,13 @@ const BACKUP_SECTION_OPTIONS = [
   { value: 'maintenance', label: 'Maintenance', hint: 'Advanced maintenance and reset tools.' },
 ]
 
-const BACKUP_LOCAL_COPY = {
+const BACKUP_SECTION_IDS = new Set<BackupSectionId>(BACKUP_SECTION_OPTIONS.map((option) => option.value))
+
+function isBackupSectionId(value: string): value is BackupSectionId {
+  return BACKUP_SECTION_IDS.has(value as BackupSectionId)
+}
+
+const BACKUP_LOCAL_COPY: BackupLocalCopy = {
   km: {
     backup: 'បម្រុងទុក',
     export_backup_desc: 'បង្កើតកញ្ចប់បម្រុងទុក Docker ពេញលេញ ដែលមានទិន្នន័យ Postgres, R2 ឬ object storage offline, ការកំណត់, អ្នកប្រើ, ឯកសារ portal និង metadata សម្រាប់ស្ដារ។',
@@ -76,7 +309,7 @@ const BACKUP_LOCAL_COPY = {
     checking: 'កំពុងពិនិត្យ...',
   },
 }
-function PathActionButton({ children, ...props }) {
+function PathActionButton({ children, ...props }: BackupButtonProps) {
   return (
     <button
       type="button"
@@ -88,7 +321,7 @@ function PathActionButton({ children, ...props }) {
   )
 }
 
-function PrimaryActionButton({ children, ...props }) {
+function PrimaryActionButton({ children, ...props }: BackupButtonProps) {
   return (
     <button
       type="button"
@@ -100,8 +333,8 @@ function PrimaryActionButton({ children, ...props }) {
   )
 }
 
-function formatElapsed(createdAt) {
-  const started = Date.parse(createdAt || '')
+function formatElapsed(createdAt: unknown): string {
+  const started = Date.parse(String(createdAt || ''))
   if (!Number.isFinite(started)) return ''
   const seconds = Math.max(0, Math.round((Date.now() - started) / 1000))
   if (seconds < 60) return `${seconds}s`
@@ -109,7 +342,7 @@ function formatElapsed(createdAt) {
   return `${minutes}m ${seconds % 60}s`
 }
 
-function JobProgressCard({ job, copy, onClear, onCancel }) {
+function JobProgressCard({ job, copy, onClear, onCancel }: JobProgressCardProps) {
   if (!job) return null
   const progress = Math.max(0, Math.min(100, Number(job.progress || 0)))
   const status = String(job.status || '').toLowerCase()
@@ -169,7 +402,7 @@ function JobProgressCard({ job, copy, onClear, onCancel }) {
   )
 }
 
-function DoctorStatusPill({ label, check }) {
+function DoctorStatusPill({ label, check }: DoctorStatusPillProps) {
   const ok = check?.ok === true
   const attention = check?.status === 'needs_attention' || check?.ok === false
   return (
@@ -193,9 +426,9 @@ const DRIVE_SYNC_OAUTH_TIMEOUT_MS = 15000
 const DRIVE_SYNC_QUEUE_TIMEOUT_MS = 12000
 const BACKUP_JOB_QUEUE_TIMEOUT_MS = 15000
 
-function IntegrationDoctorCard({ copy, notify, active }) {
-  const [doctor, setDoctor] = useState(null)
-  const [busy, setBusy] = useState('')
+function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardProps) {
+  const [doctor, setDoctor] = useState<IntegrationDoctorResult | null>(null)
+  const [busy, setBusy] = useState<BackupAction>('')
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -203,13 +436,13 @@ function IntegrationDoctorCard({ copy, notify, active }) {
     return () => { mountedRef.current = false }
   }, [])
 
-  const runDoctor = useCallback(async (deep = false) => {
+  const runDoctor = useCallback(async (deep = false): Promise<void> => {
     if (busy) return
     setBusy(deep ? 'deep' : 'quick')
     try {
       await yieldToBrowser()
       const result = await withLoaderTimeout(
-        () => window.api.getIntegrationDoctor?.({ deep }),
+        () => getBackupApi().getIntegrationDoctor?.({ deep }),
         deep ? 'Deep integration doctor' : 'Integration doctor',
         deep ? INTEGRATION_DOCTOR_DEEP_TIMEOUT_MS : INTEGRATION_DOCTOR_TIMEOUT_MS,
       )
@@ -217,7 +450,7 @@ function IntegrationDoctorCard({ copy, notify, active }) {
       setDoctor(result?.item || null)
       if (deep) notify(copy('integration_doctor_complete', 'Integration doctor complete'), 'success')
     } catch (error) {
-      if (mountedRef.current) notify(`${copy('integration_doctor_failed', 'Integration doctor failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      if (mountedRef.current) notify(`${copy('integration_doctor_failed', 'Integration doctor failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       if (mountedRef.current) setBusy('')
     }
@@ -299,9 +532,9 @@ function IntegrationDoctorCard({ copy, notify, active }) {
   )
 }
 
-function useCopy(t) {
+function useCopy(t: TranslateFn): CopyFn {
   const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
-  return (key, fallback, fallbackKm = fallback) => {
+  return (key: string, fallback: string, fallbackKm = fallback): string => {
     const value = t?.(key)
     if (value && value !== key && !isBrokenLocalizedString(value)) return value
     if (isKhmer) {
@@ -315,11 +548,12 @@ function useCopy(t) {
   }
 }
 
-function formatDateTime(raw) {
+function formatDateTime(raw: unknown): string {
   if (!raw) return '--'
-  const value = raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`
+  const rawValue = String(raw)
+  const value = rawValue.includes('T') || rawValue.endsWith('Z') ? rawValue : `${rawValue.replace(' ', 'T')}Z`
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return raw
+  if (Number.isNaN(date.getTime())) return rawValue
   return date.toLocaleString(undefined, {
     year: 'numeric',
     month: 'short',
@@ -330,7 +564,7 @@ function formatDateTime(raw) {
   })
 }
 
-function formatBytes(value) {
+function formatBytes(value: unknown): string {
   const amount = Number(value || 0)
   if (!Number.isFinite(amount) || amount <= 0) return '0 B'
   if (amount < 1024) return `${amount} B`
@@ -339,7 +573,7 @@ function formatBytes(value) {
   return `${(amount / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
-function yieldToBrowser() {
+function yieldToBrowser(): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve()
   if (typeof window.requestAnimationFrame === 'function') {
     return new Promise((resolve) => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)))
@@ -347,7 +581,7 @@ function yieldToBrowser() {
   return new Promise((resolve) => window.setTimeout(resolve, 0))
 }
 
-function getJobSignature(job) {
+function getJobSignature(job: BackupJob | null | undefined): string {
   if (!job || typeof job !== 'object') return ''
   const metrics = job.metrics || {}
   return JSON.stringify({
@@ -366,17 +600,17 @@ function getJobSignature(job) {
   })
 }
 
-function startJobWatcher(jobId, {
+function startJobWatcher(jobId: string | number | undefined, {
   reason = 'System job',
   pollMs = 1200,
-  onUpdate = null,
-  onComplete = null,
-  onError = null,
-} = {}) {
+  onUpdate,
+  onComplete,
+  onError,
+}: JobWatcherOptions = {}): StopFn {
   if (typeof window === 'undefined' || !jobId) return () => {}
   let stopped = false
   let inFlight = false
-  let timer = null
+  let timer: number | null = null
   let lastSignature = ''
   let changedOnLastTick = true
   let consecutiveFailures = 0
@@ -403,11 +637,11 @@ function startJobWatcher(jobId, {
     inFlight = true
     try {
       const result = await withLoaderTimeout(
-        () => window.api.getSystemJob?.(jobId),
+        () => getBackupApi().getSystemJob?.(jobId),
         `${reason} status`,
         SYSTEM_JOB_STATUS_TIMEOUT_MS,
       )
-      const job = result?.item || result
+      const job = unwrapJob(result)
       if (stopped) return
       consecutiveFailures = 0
       const signature = getJobSignature(job)
@@ -418,18 +652,18 @@ function startJobWatcher(jobId, {
       const status = String(job?.status || '').toLowerCase()
       if (status === 'completed') {
         stop()
-        if (typeof onComplete === 'function') onComplete(job)
+        if (typeof onComplete === 'function') onComplete(job || null)
       } else if (status === 'failed' || status === 'cancelled') {
         stop()
         const message = job?.error || job?.message || `${reason} failed`
-        if (typeof onError === 'function') onError(new Error(message), job)
+        if (typeof onError === 'function') onError(new Error(message), job || undefined)
       }
     } catch (error) {
       consecutiveFailures += 1
       changedOnLastTick = false
       if (consecutiveFailures >= SYSTEM_JOB_STATUS_MAX_FAILURES) {
         stop()
-        if (typeof onError === 'function') onError(error)
+        if (typeof onError === 'function') onError(error instanceof Error ? error : new Error(String(error)))
       }
     } finally {
       inFlight = false
@@ -451,7 +685,7 @@ function startJobWatcher(jobId, {
   return stop
 }
 
-function SectionChip({ label, value, tone = 'slate' }) {
+function SectionChip({ label, value, tone = 'slate' }: SectionChipProps) {
   const toneClass = {
     slate: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
     blue: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-700/50 dark:bg-blue-900/20 dark:text-blue-200',
@@ -473,7 +707,7 @@ const DRIVE_SYNC_PRESET_HOURS = [3, 6, 9, 12, 24]
 const DRIVE_SYNC_STATUS_TIMEOUT_MS = 5000
 const DRIVE_SYNC_JOB_POLL_MS = 2000
 
-function secondsToSyncMinutes(seconds) {
+function secondsToSyncMinutes(seconds: unknown): number {
   const raw = Number(seconds)
   if (!Number.isFinite(raw) || raw <= 0) return DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES
   return Math.min(
@@ -482,7 +716,7 @@ function secondsToSyncMinutes(seconds) {
   )
 }
 
-function minutesToSyncSeconds(minutes) {
+function minutesToSyncSeconds(minutes: unknown): number {
   const raw = Number(minutes)
   const safeMinutes = Number.isFinite(raw)
     ? Math.min(DRIVE_SYNC_MAX_INTERVAL_MINUTES, Math.max(DRIVE_SYNC_MIN_INTERVAL_MINUTES, Math.round(raw)))
@@ -490,43 +724,43 @@ function minutesToSyncSeconds(minutes) {
   return safeMinutes * 60
 }
 
-function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null }) {
+function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null }: GoogleDriveSyncSectionProps) {
   const copy = useCopy(t)
-  const [busy, setBusy] = useState('')
-  const [status, setStatus] = useState(null)
-  const [form, setForm] = useState({
+  const [busy, setBusy] = useState<BackupAction>('')
+  const [status, setStatus] = useState<DriveSyncStatus | null>(null)
+  const [form, setForm] = useState<DriveSyncForm>({
     clientId: '',
     folderName: 'Business OS Sync',
     deleteMissing: true,
     enabled: true,
     syncIntervalMinutes: DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES,
   })
-  const [activeJob, setActiveJob] = useState(null)
+  const [activeJob, setActiveJob] = useState<BackupJob | null>(null)
   const [pendingAuthUrl, setPendingAuthUrl] = useState('')
   const loadRequestRef = useRef(0)
-  const retryTimerRef = useRef(null)
+  const retryTimerRef = useRef<number | null>(null)
   const failureCountRef = useRef(0)
   const failureNotifiedRef = useRef(false)
   const inFlightRef = useRef(false)
   const unavailableUntilRef = useRef(0)
-  const loadRef = useRef(null)
+  const loadRef = useRef<((options?: { force?: boolean }) => Promise<void>) | null>(null)
   const isMountedRef = useRef(true)
-  const jobStopRef = useRef(null)
+  const jobStopRef = useRef<StopFn | null>(null)
   const activeJobSignatureRef = useRef('')
-  const dirtyFieldsRef = useRef(new Set())
-  const actionLockRef = useRef('')
+  const dirtyFieldsRef = useRef<Set<keyof DriveSyncForm>>(new Set())
+  const actionLockRef = useRef<BackupAction>('')
 
-  const updateDraftField = useCallback((field, value) => {
+  const updateDraftField = useCallback((field: keyof DriveSyncForm, value: DriveSyncForm[keyof DriveSyncForm]) => {
     dirtyFieldsRef.current.add(field)
     setForm((current) => ({ ...current, [field]: value }))
   }, [])
 
-  const applyDriveIntervalPreset = useCallback((hours) => {
+  const applyDriveIntervalPreset = useCallback((hours: number) => {
     updateDraftField('syncIntervalMinutes', hours * 60)
   }, [updateDraftField])
 
-  const scheduleRetry = useCallback((delayMs) => {
-    window.clearTimeout(retryTimerRef.current)
+  const scheduleRetry = useCallback((delayMs: unknown) => {
+    if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current)
     if (!active) return
     retryTimerRef.current = window.setTimeout(() => {
       if (!isMountedRef.current || !active) return
@@ -534,14 +768,14 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     }, Math.max(5000, Number(delayMs || 0) || 30000))
   }, [active])
 
-  const load = useCallback(async ({ force = false } = {}) => {
+  const load = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     if (!active) return
     if (inFlightRef.current) return
     if (!force && unavailableUntilRef.current > Date.now()) return
     const requestId = beginTrackedRequest(loadRequestRef)
     inFlightRef.current = true
     try {
-      const result = await withLoaderTimeout(() => window.api.getGoogleDriveSyncStatus?.(), 'Drive sync status', DRIVE_SYNC_STATUS_TIMEOUT_MS)
+      const result = await withLoaderTimeout(() => getBackupApi().getGoogleDriveSyncStatus?.(), 'Drive sync status', DRIVE_SYNC_STATUS_TIMEOUT_MS)
       const item = result?.item || null
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       if (result?.unavailable) {
@@ -552,7 +786,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         unavailableUntilRef.current = 0
         failureCountRef.current = 0
         failureNotifiedRef.current = false
-        window.clearTimeout(retryTimerRef.current)
+        if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current)
       }
       setStatus((current) => item || current || null)
       setForm((current) => {
@@ -575,7 +809,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       scheduleRetry(nextDelayMs)
       if (!failureNotifiedRef.current) {
         failureNotifiedRef.current = true
-        notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+        notify(`${copy('failed', 'Failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
       }
     } finally {
       if (isTrackedRequestCurrent(loadRequestRef, requestId)) {
@@ -593,7 +827,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!active) {
       unavailableUntilRef.current = 0
       inFlightRef.current = false
-      window.clearTimeout(retryTimerRef.current)
+      if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current)
       invalidateTrackedRequest(loadRequestRef)
       return
     }
@@ -605,14 +839,14 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   useEffect(() => () => {
     isMountedRef.current = false
     actionLockRef.current = ''
-    window.clearTimeout(retryTimerRef.current)
+    if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current)
     jobStopRef.current?.()
     invalidateTrackedRequest(loadRequestRef)
   }, [])
 
   useEffect(() => {
     if (!active) return undefined
-    const handler = (event) => {
+    const handler = (event: MessageEvent<{ type?: string; status?: string; message?: string }>) => {
       if (event?.data?.type !== 'business-os-drive-sync') return
       if (event.data.status === 'connected') {
         notify(copy('drive_sync_connected', 'Google Drive connected'), 'success')
@@ -627,7 +861,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     return () => window.removeEventListener('message', handler)
   }, [active, copy, load, notify])
 
-  const trackQueuedJob = useCallback((queued, reason, handlers = {}) => {
+  const trackQueuedJob = useCallback((queued: QueuedJobResponse | undefined, reason: string, handlers: JobWatcherHandlers = {}) => {
     const jobId = queued?.job_id || queued?.item?.id
     if (!jobId) return queued
     jobStopRef.current?.()
@@ -663,35 +897,35 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     return queued
   }, [load])
 
-  const beginAction = useCallback((action) => {
+  const beginAction = useCallback((action: BackupAction) => {
     if (actionLockRef.current) return false
     actionLockRef.current = action
     setBusy(action)
     return true
   }, [])
 
-  const finishAction = useCallback((action) => {
+  const finishAction = useCallback((action: BackupAction) => {
     if (actionLockRef.current === action) actionLockRef.current = ''
     setBusy('')
   }, [])
 
-  const cancelActiveJob = useCallback(async (job) => {
+  const cancelActiveJob = useCallback(async (job: BackupJob) => {
     if (!job?.id || actionLockRef.current) return
     if (!beginAction('cancel')) return
     try {
       const result = await withLoaderTimeout(
-        () => window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page'),
+        () => getBackupApi().cancelSystemJob?.(job.id!, 'Cancelled from Backup page'),
         'Cancel backup job',
         SYSTEM_JOB_CANCEL_TIMEOUT_MS,
       )
-      const nextJob = result?.item || result
+      const nextJob = unwrapJob(result)
       if (nextJob && isMountedRef.current) {
         activeJobSignatureRef.current = getJobSignature(nextJob)
         setActiveJob(nextJob)
       }
       notify(copy('job_cancel_requested', 'Cancel requested'), 'info')
     } catch (error) {
-      notify(`${copy('job_cancel_failed', 'Cancel failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      notify(`${copy('job_cancel_failed', 'Cancel failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishAction('cancel')
     }
@@ -702,7 +936,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     try {
       await yieldToBrowser()
       const result = await withLoaderTimeout(
-        () => window.api.saveGoogleDriveSyncPreferences?.({
+        () => getBackupApi().saveGoogleDriveSyncPreferences?.({
           folderName: form.folderName,
           deleteMissing: form.deleteMissing,
           enabled: form.enabled,
@@ -721,7 +955,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       notify(copy('saved', 'Saved'), 'success')
       window.setTimeout(() => load({ force: true }), 0)
     } catch (error) {
-      notify(`${copy('save_failed', 'Save failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      notify(`${copy('save_failed', 'Save failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishAction('save')
     }
@@ -743,7 +977,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     try {
       await yieldToBrowser()
       const result = await withLoaderTimeout(
-        () => window.api.startGoogleDriveSyncOauth?.({
+        () => getBackupApi().startGoogleDriveSyncOauth?.({
           clientId: form.clientId,
           folderName: form.folderName,
           deleteMissing: form.deleteMissing,
@@ -766,7 +1000,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       dirtyFieldsRef.current.clear()
       notify(copy('drive_sync_setup_ready', 'Google Drive setup is ready.'), 'info')
     } catch (error) {
-      notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishAction('connect')
     }
@@ -777,7 +1011,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     try {
       await yieldToBrowser()
       const queued = await withLoaderTimeout(
-        () => window.api.queueGoogleDriveSyncNow?.(),
+        () => getBackupApi().queueGoogleDriveSyncNow?.(),
         'Queue Google Drive sync',
         DRIVE_SYNC_QUEUE_TIMEOUT_MS,
       )
@@ -798,12 +1032,12 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             )
           },
           onError: (error) => {
-            notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+            notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
           },
         })
       }, 0)
     } catch (error) {
-      notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishAction('sync')
     }
@@ -816,7 +1050,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     try {
       await yieldToBrowser()
       await withLoaderTimeout(
-        () => window.api.disconnectGoogleDriveSync?.(),
+        () => getBackupApi().disconnectGoogleDriveSync?.(),
         'Disconnect Google Drive sync',
         DRIVE_SYNC_ACTION_TIMEOUT_MS,
       )
@@ -828,7 +1062,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       })
       notify(copy('drive_sync_disconnected', 'Google Drive disconnected'), 'success')
     } catch (error) {
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      notify(`${copy('failed', 'Failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishAction('disconnect')
     }
@@ -841,7 +1075,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     try {
       await yieldToBrowser()
       await withLoaderTimeout(
-        () => window.api.forgetGoogleDriveSyncCredentials?.({ confirm: true }),
+        () => getBackupApi().forgetGoogleDriveSyncCredentials?.({ confirm: true }),
         'Forget Google Drive credentials',
         DRIVE_SYNC_ACTION_TIMEOUT_MS,
       )
@@ -857,7 +1091,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       })
       notify(copy('drive_sync_credentials_forgotten', 'Saved Google Drive app credentials were removed'), 'success')
     } catch (error) {
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      notify(`${copy('failed', 'Failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishAction('forget')
     }
@@ -1064,8 +1298,13 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   )
 }
 
-function BackupOverview({ copy, onSelect }) {
-  const entries = [
+function BackupOverview({ copy, onSelect }: BackupOverviewProps) {
+  const entries: Array<{
+    id: BackupSectionId
+    icon: typeof CheckCircle2
+    title: string
+    body: string
+  }> = [
     {
       id: 'doctor',
       icon: CheckCircle2,
@@ -1135,18 +1374,21 @@ export default function Backup() {
   const { t, notify, hasPermission } = useApp()
   const copy = useCopy(t)
   const isActive = useIsPageActive('backup')
-  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup' })
-  const [loading, setLoading] = useState('')
+  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup' }) as ActionHistoryValue
+  const [loading, setLoading] = useState<BackupAction>('')
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')
-  const [activeJob, setActiveJob] = useState(null)
+  const [activeJob, setActiveJob] = useState<BackupJob | null>(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
-  const [backupSection, setBackupSection] = useState('all')
+  const [backupSection, setBackupSection] = useState<BackupSectionId>('all')
   const aliveRef = useRef(true)
-  const jobStopRef = useRef(null)
+  const jobStopRef = useRef<StopFn | null>(null)
   const activeJobSignatureRef = useRef('')
-  const actionLockRef = useRef('')
-  const showBackupSection = (sectionId) => backupSection === sectionId
+  const actionLockRef = useRef<BackupAction>('')
+  const showBackupSection = (sectionId: BackupSectionId) => backupSection === sectionId
+  const handleBackupSectionChange = useCallback((value: string) => {
+    if (isBackupSectionId(value)) setBackupSection(value)
+  }, [])
 
   useEffect(() => {
     aliveRef.current = true
@@ -1157,14 +1399,14 @@ export default function Backup() {
     }
   }, [])
 
-  const beginBackupAction = useCallback((action) => {
+  const beginBackupAction = useCallback((action: BackupAction) => {
     if (actionLockRef.current) return false
     actionLockRef.current = action
     setLoading(action)
     return true
   }, [])
 
-  const finishBackupAction = useCallback((action) => {
+  const finishBackupAction = useCallback((action: BackupAction) => {
     if (actionLockRef.current === action) actionLockRef.current = ''
     if (aliveRef.current) setLoading((current) => (current === action ? '' : current))
   }, [])
@@ -1177,7 +1419,7 @@ export default function Backup() {
     try {
       await yieldToBrowser()
       const queued = await withLoaderTimeout(
-        () => window.api.queueBackupFolderExport?.(exportDestination),
+        () => getBackupApi().queueBackupFolderExport?.(exportDestination),
         'Queue backup export',
         BACKUP_JOB_QUEUE_TIMEOUT_MS,
       )
@@ -1223,7 +1465,7 @@ export default function Backup() {
                 activeJobSignatureRef.current = getJobSignature(job)
                 setActiveJob(job)
               }
-              if (aliveRef.current) notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
+              if (aliveRef.current) notify(`${copy('export_failed', 'Export failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
               if (aliveRef.current) setLoading('')
             },
           })
@@ -1232,7 +1474,7 @@ export default function Backup() {
       }
       throw new Error(copy('backup_job_not_queued', 'Backup job could not be queued. Run Doctor or restart Business OS.'))
     } catch (error) {
-      notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
+      notify(`${copy('export_failed', 'Export failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishBackupAction('folder-export')
     }
@@ -1248,7 +1490,7 @@ export default function Backup() {
     try {
       await yieldToBrowser()
       const queued = await withLoaderTimeout(
-        () => window.api.queueBackupFolderRestore?.(folderImportPath),
+        () => getBackupApi().queueBackupFolderRestore?.(folderImportPath),
         'Queue backup restore',
         BACKUP_JOB_QUEUE_TIMEOUT_MS,
       )
@@ -1293,7 +1535,7 @@ export default function Backup() {
                 activeJobSignatureRef.current = getJobSignature(job)
                 setActiveJob(job)
               }
-              if (aliveRef.current) notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
+              if (aliveRef.current) notify(`${copy('import_failed', 'Import failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
               if (aliveRef.current) setLoading('')
             },
           })
@@ -1302,7 +1544,7 @@ export default function Backup() {
       }
       throw new Error(copy('backup_restore_job_not_queued', 'Restore job could not be queued. Run Doctor or restart Business OS.'))
     } catch (error) {
-      notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
+      notify(`${copy('import_failed', 'Import failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishBackupAction('folder-import')
     }
@@ -1310,23 +1552,23 @@ export default function Backup() {
 
   const activeBackupJobRunning = ['queued', 'running', 'cancelling'].includes(String(activeJob?.status || '').toLowerCase())
 
-  const cancelActiveBackupJob = useCallback(async (job) => {
+  const cancelActiveBackupJob = useCallback(async (job: BackupJob) => {
     if (!job?.id || actionLockRef.current) return
     if (!beginBackupAction('cancel')) return
     try {
       const result = await withLoaderTimeout(
-        () => window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page'),
+        () => getBackupApi().cancelSystemJob?.(job.id!, 'Cancelled from Backup page'),
         'Cancel backup job',
         SYSTEM_JOB_CANCEL_TIMEOUT_MS,
       )
-      const nextJob = result?.item || result
+      const nextJob = unwrapJob(result)
       if (nextJob && aliveRef.current) {
         activeJobSignatureRef.current = getJobSignature(nextJob)
         setActiveJob(nextJob)
       }
       notify(copy('job_cancel_requested', 'Cancel requested'), 'info')
     } catch (error) {
-      notify(`${copy('job_cancel_failed', 'Cancel failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      notify(`${copy('job_cancel_failed', 'Cancel failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishBackupAction('cancel')
     }
@@ -1345,7 +1587,7 @@ export default function Backup() {
           label=""
           options={BACKUP_SECTION_OPTIONS}
           value={backupSection}
-          onChange={setBackupSection}
+          onChange={handleBackupSectionChange}
         />
         <LoadingWatchdog
           loading={!!loading}

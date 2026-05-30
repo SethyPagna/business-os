@@ -93,7 +93,7 @@ Priority surfaces:
 - `Dashboard.jsx`
 - `CatalogPage.jsx`
 - `Settings.jsx`
-- `Backup.jsx`
+- `Backup.tsx`
 - `FilesPage.tsx`
 - `Returns.tsx`
 

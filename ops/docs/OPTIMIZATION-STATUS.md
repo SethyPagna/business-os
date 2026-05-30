@@ -16,12 +16,12 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `5b0200961bed11da`
+  `016a61d39eff3e04`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T01-46-20-552Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T02-10-58-114Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -94,6 +94,10 @@ Recent route-level win:
   typed audit rows, paged response payloads, user filter options, selection
   ids, grouped sections, export items, local audit API calls, loader refs, and
   retention cleanup guards.
+- Backup is now `frontend/src/components/utils-settings/Backup.tsx` with typed
+  backup jobs, job metrics/results, integration doctor payloads, Google Drive
+  sync status/forms, section ids, action locks, job watcher handlers, local
+  backup API calls, and cancellable queued backup/Drive job flows.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary

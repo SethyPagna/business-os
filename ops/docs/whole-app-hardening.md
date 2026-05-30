@@ -703,7 +703,7 @@ Last updated: 2026-05-18
     `adjustStock` payload now delegates there. Product transfer-stock payload
     construction now also lives under `frontend/src/components/products/helpers`.
     Backup Drive sync and backup job action pathways now have explicit timeout
-    contracts in `frontend/src/components/utils-settings/Backup.jsx`. Files
+    contracts in `frontend/src/components/utils-settings/Backup.tsx`. Files
     library asset upload/delete pathways now have explicit timeout contracts in
     `frontend/src/components/files/FilesPage.tsx` and
     `frontend/src/components/files/FilePickerModal.tsx`. Settings and Catalog
@@ -756,7 +756,8 @@ Last updated: 2026-05-18
     1 Cloudflare R2 backup mirror. Full automation now runs the retention
     script before heavy verification, and Cloudflare Access admin sessions are
     configured for 720 hours to reduce repeated email-code prompts on trusted
-    admin browsers. Follow-up verification normalized `Backup.jsx` line endings
+    admin browsers. Follow-up verification normalized the then-JSX Backup page
+    line endings
     so the full whitespace gate passes with only Git CRLF warnings. The latest
     prune kept the newest 20 runtime report folders and 3 local backup packages
     per backup root; Cloudflare R2 mirror retention also completed with zero

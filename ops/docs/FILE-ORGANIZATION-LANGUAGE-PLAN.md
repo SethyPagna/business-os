@@ -1,6 +1,6 @@
 ﻿# File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 541 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 542 in this file.
 
 ## Goal
 
@@ -9,10 +9,10 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Frontend source: 195 files under `frontend/src`.
-  - 10 `.jsx`
+  - 9 `.jsx`
   - 1 `.js`
   - 80 `.ts` including declaration files
-  - 97 `.tsx`
+  - 98 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -504,13 +504,13 @@ Decision rule:
     bound. Cloudflare Access policy now reads a 720-hour admin session duration
     from automation policy to reduce repeated email-code prompts.
 43. Normalize Backup page line endings for whitespace gate stability. Done:
-    `frontend/src/components/utils-settings/Backup.jsx` is now LF-normalized
+    `frontend/src/components/utils-settings/Backup.tsx` is now LF-normalized
     so `git diff --check` no longer reports every changed line as trailing
     whitespace. Backup UI utility tests, frontend JSX syntax check, frontend
     typecheck, focused `git diff --check`, and full `git diff --check` passed;
     only normal Git CRLF conversion warnings remain.
 44. Harden Backup Drive and job action pathways. Done:
-    `frontend/src/components/utils-settings/Backup.jsx` now wraps Google Drive
+    `frontend/src/components/utils-settings/Backup.tsx` now wraps Google Drive
     sync preferences, OAuth start, manual sync queueing, disconnect, credential
     forget, backup export/restore queueing, and system-job cancellation in
     explicit timeout contracts while keeping the existing same-tick action
@@ -4277,6 +4277,17 @@ Decision rule:
     guard, grouped selection helpers, CSV export behavior, and source
     inspection tests intact while preventing React click events from being
     interpreted as the loader's silent flag.
+542. Convert the backup shell to TSX. Done:
+    `frontend/src/components/utils-settings/Backup.tsx` now types backup
+    jobs, job metrics/results, integration doctor payloads, Google Drive sync
+    status/forms, app context access, action-history rows, the local backup
+    API gateway, section ids, action locks, retry timers, job watcher
+    handlers, overview cards, and backup/Drive button props. The conversion
+    keeps the extensionless utils-settings barrel export, queued export and
+    restore flows, Drive sync action timeouts, cancellable job polling,
+    overview-only default section, backup reliability verifier, and source
+    inspection tests intact while centralizing `window.api` access behind a
+    typed `getBackupApi()` boundary.
 
 ## Safety Gates
 

@@ -5,7 +5,7 @@ const barrel = fs.readFileSync(new URL('../src/components/utils-settings/index.t
 const jsxModules = fs.readFileSync(new URL('../src/types/jsx-modules.d.ts', import.meta.url), 'utf8')
 
 assert.match(barrel, /export \{ default as AuditLog \} from '\.\/AuditLog'/)
-assert.match(barrel, /export \{ default as Backup \} from '\.\/Backup\.jsx'/)
+assert.match(barrel, /export \{ default as Backup \} from '\.\/Backup'/)
 assert.match(barrel, /export \{ default as Settings \} from '\.\/Settings\.jsx'/)
 assert.match(barrel, /export \{ ResetData, FactoryReset \} from '\.\/ResetData'/)
 assert.match(barrel, /export \{ default as FontFamilyPicker \} from '\.\/FontFamilyPicker'/)

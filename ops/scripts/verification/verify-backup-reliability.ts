@@ -41,7 +41,7 @@ function main() {
     systemJobs: { file: 'backend/src/systemJobs.js', text: read('backend/src/systemJobs.js') },
     maintenanceLock: { file: 'backend/src/maintenanceLock.js', text: read('backend/src/maintenanceLock.js') },
     systemRoutes: { file: 'backend/src/routes/system/index.js', text: read('backend/src/routes/system/index.js') },
-    backupUi: { file: 'frontend/src/components/utils-settings/Backup.jsx', text: read('frontend/src/components/utils-settings/Backup.jsx') },
+    backupUi: { file: 'frontend/src/components/utils-settings/Backup.tsx', text: read('frontend/src/components/utils-settings/Backup.tsx') },
     apiMethods: { file: 'frontend/src/api/methods.js', text: read('frontend/src/api/methods.js') },
     offlineApi: { file: 'frontend/src/web-api.ts', text: read('frontend/src/web-api.ts') },
     fullAutomation: { file: 'ops/scripts/powershell/full-automation.ps1', text: read('ops/scripts/powershell/full-automation.ps1') },
