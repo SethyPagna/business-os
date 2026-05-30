@@ -1,6 +1,6 @@
 ﻿# File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 539 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 540 in this file.
 
 ## Goal
 
@@ -8,11 +8,11 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 
 ## Current Shape
 
-- Frontend source: 196 files under `frontend/src`.
-  - 12 `.jsx`
+- Frontend source: 195 files under `frontend/src`.
+  - 11 `.jsx`
   - 1 `.js`
-  - 81 `.ts` including declaration files
-  - 95 `.tsx`
+  - 80 `.ts` including declaration files
+  - 96 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -4256,6 +4256,16 @@ Decision rule:
     modal handoff, user detail sheet handoff, and source-inspection tests
     intact while tightening the shared action-history and user-detail null
     boundaries surfaced by the TSX migration.
+540. Convert the user profile modal to TSX. Done:
+    `frontend/src/components/users/UserProfileModal.tsx` now types profile
+    user rows, settings, verification capability payloads, sign-in method
+    state, profile mutation results, the local profile API gateway, avatar
+    editor props, file-input events, OTP modal mode, active section state, and
+    stored organization fallback parsing. The conversion removes the temporary
+    temporary profile modal shim from Move 539, keeps the sidebar/profile
+    extensionless import path, preserves profile/OTP/auth-method timeout
+    contracts, avatar CORS guardrails, Google OAuth source checks, and
+    same-tick profile/password/avatar upload guards.
 
 ## Safety Gates
 

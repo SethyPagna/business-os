@@ -236,7 +236,7 @@ await runTest('catalog portal submission writes use guarded bounded actions', ()
 })
 
 await runTest('profile saves and avatar upload keep same-tick guards', () => {
-  const source = readFrontend('src/components/users/UserProfileModal.jsx')
+  const source = readFrontend('src/components/users/UserProfileModal.tsx')
 
   assert.match(source, /const saveProfileInFlightRef = useRef\(false\)/)
   assert.match(source, /const savePasswordInFlightRef = useRef\(false\)/)

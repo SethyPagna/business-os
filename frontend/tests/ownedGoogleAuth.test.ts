@@ -19,7 +19,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
 const loginSource = fs.readFileSync(new URL('../src/components/auth/Login.tsx', import.meta.url), 'utf8')
-const profileSource = fs.readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
+const profileSource = fs.readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 const backupSource = fs.readFileSync(new URL('../src/components/utils-settings/Backup.jsx', import.meta.url), 'utf8')
 const enSource = fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')
 const kmSource = fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')

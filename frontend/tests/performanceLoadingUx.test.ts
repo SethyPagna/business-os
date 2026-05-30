@@ -47,7 +47,7 @@ const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.tsx
 const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePickerModal.tsx', import.meta.url), 'utf8')
 const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.tsx', import.meta.url), 'utf8')
 const usersPage = fs.readFileSync(new URL('../src/components/users/Users.tsx', import.meta.url), 'utf8')
-const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
+const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
 const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
@@ -1210,22 +1210,22 @@ assert.match(
 )
 assert.match(
   userProfileModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getUserProfile\(user\.id\),\s*'Profile details',\s*PROFILE_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getProfileApi\(\)\.getUserProfile\(user\.id as EntityId\),\s*'Profile details',\s*PROFILE_LOAD_TIMEOUT_MS,\s*\)/,
   'profile details should timeout slow reads',
 )
 assert.match(
   userProfileModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.otpStatus\(user\.id\),\s*'Profile OTP status',\s*PROFILE_OTP_STATUS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getProfileApi\(\)\.otpStatus\(user\.id as EntityId\),\s*'Profile OTP status',\s*PROFILE_OTP_STATUS_TIMEOUT_MS,\s*\)/,
   'profile OTP status should timeout slow reads',
 )
 assert.match(
   userProfileModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getVerificationCapabilities\?\.\(\),\s*'Profile verification capabilities',\s*PROFILE_VERIFICATION_CAPS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getProfileApi\(\)\.getVerificationCapabilities\?\.\(\),\s*'Profile verification capabilities',\s*PROFILE_VERIFICATION_CAPS_TIMEOUT_MS,\s*\)/,
   'profile verification capabilities should timeout slow reads',
 )
 assert.match(
   userProfileModal,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getUserAuthMethods\?\.\(user\.id\),\s*'Profile sign-in methods',\s*PROFILE_AUTH_METHODS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getProfileApi\(\)\.getUserAuthMethods\?\.\(user\.id as EntityId\),\s*'Profile sign-in methods',\s*PROFILE_AUTH_METHODS_TIMEOUT_MS,\s*\)/,
   'profile sign-in methods should timeout slow reads',
 )
 assert.match(

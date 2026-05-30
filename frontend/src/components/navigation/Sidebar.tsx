@@ -22,7 +22,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useApp as useAppHook } from '../../AppContext.jsx'
-import UserProfileModalComponent from '../users/UserProfileModal.jsx'
+import UserProfileModalComponent from '../users/UserProfileModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import NotificationCenter from '../shared/NotificationCenter'

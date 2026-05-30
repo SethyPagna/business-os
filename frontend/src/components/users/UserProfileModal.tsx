@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import { Chrome, Link2, LogOut, Mail, ShieldCheck } from 'lucide-react'
 import Modal from '../shared/Modal'
 import OtpModal from '../utils-settings/OtpModal'
 import FilePickerModal from '../files/FilePickerModal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { STORAGE_KEYS } from '../../constants'
-import { isBrokenLocalizedString, useApp } from '../../AppContext'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.jsx'
 import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 
@@ -13,6 +14,156 @@ const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
 const PROFILE_VERIFICATION_CAPS_TIMEOUT_MS = 8000
 const PROFILE_AUTH_METHODS_TIMEOUT_MS = 12000
+const PROFILE_SAVE_TIMEOUT_MS = 20000
+const PROFILE_PASSWORD_TIMEOUT_MS = 20000
+const PROFILE_AUTH_REFRESH_TIMEOUT_MS = 12000
+const PROFILE_OAUTH_START_TIMEOUT_MS = 20000
+const PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS = 20000
+const PROFILE_AVATAR_UPLOAD_TIMEOUT_MS = 30000
+
+type EntityId = string | number
+type ProfileSection = 'personal' | 'login_methods' | 'security' | 'organization'
+type OtpMode = 'setup' | 'disable' | null
+type TranslateFn = (key: string) => string
+type NotifyFn = (message: string, tone?: string) => void
+
+interface UserProfileModalProps {
+  onClose: () => void
+}
+
+interface ProfileUser {
+  id?: EntityId | null
+  name?: string | null
+  username?: string | null
+  phone?: string | null
+  email?: string | null
+  avatar_path?: string | null
+  updated_at?: string | null
+  role_name?: string | null
+  branch_name?: string | null
+  organization_name?: string | null
+}
+
+interface ProfileSettings {
+  login_session_duration?: string | null
+  business_name?: string | null
+  [key: string]: unknown
+}
+
+interface AppContextValue {
+  user?: ProfileUser | null
+  notify: NotifyFn
+  hasPermission: (permission: string) => boolean
+  saveSettings?: (settings: Record<string, unknown>) => unknown | Promise<unknown>
+  settings?: ProfileSettings | null
+  t: TranslateFn
+  logout: () => void
+}
+
+interface ProfileResult extends ProfileUser {
+  success?: boolean
+  error?: string
+}
+
+interface OtpStatusResult {
+  otpEnabled?: boolean
+}
+
+interface VerificationCapabilitiesResult {
+  success?: boolean
+  google_oauth?: boolean
+  google_email_auth?: boolean
+  google_login?: { enabled?: boolean } | null
+}
+
+interface AuthMethodsResult {
+  success?: boolean
+  google_linked?: boolean
+  google_ready?: boolean
+  email_login_enabled?: boolean
+  [key: string]: unknown
+}
+
+interface MutationResult {
+  success?: boolean
+  error?: string
+  url?: string
+  path?: string
+  methods?: AuthMethodsResult
+  [key: string]: unknown
+}
+
+interface ProfileApi {
+  getUserProfile: (id: EntityId) => Promise<ProfileResult>
+  otpStatus: (id: EntityId) => Promise<OtpStatusResult>
+  getVerificationCapabilities?: () => Promise<VerificationCapabilitiesResult>
+  getUserAuthMethods?: (id: EntityId) => Promise<AuthMethodsResult>
+  updateUserProfile: (id: EntityId, payload: Record<string, unknown>) => Promise<ProfileResult>
+  changeUserPassword: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
+  startGoogleOauth: (payload: Record<string, unknown>) => Promise<MutationResult>
+  unlinkGoogleOauth: (payload: Record<string, unknown>) => Promise<MutationResult>
+  disconnectUserAuthProvider: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
+  uploadUserAvatar: (payload: { file: File }) => Promise<MutationResult>
+}
+
+interface AvatarPreviewProps {
+  name?: string | null
+  avatarPath?: string | null
+}
+
+interface ProfileSectionButtonProps {
+  active: boolean
+  children: ReactNode
+  onClick: () => void
+}
+
+interface AvatarCropOptions {
+  src: string
+  zoom?: number
+  positionX?: number
+  positionY?: number
+  size?: number
+}
+
+interface AvatarEditorModalProps {
+  open: boolean
+  src: string
+  zoom: number
+  positionX: number
+  positionY: number
+  onZoomChange: (value: number) => void
+  onPositionXChange: (value: number) => void
+  onPositionYChange: (value: number) => void
+  onClose: () => void
+  onSave: () => void
+  saving: boolean
+  tr: (key: string, fallbackEn: string, fallbackKm?: string) => string
+}
+
+interface StoredOrganization {
+  name?: string | null
+}
+
+const useApp = useAppHook as () => AppContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+function getProfileApi(): ProfileApi {
+  if (typeof window === 'undefined' || !window.api) throw new Error('Profile API is not available.')
+  return window.api as ProfileApi
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function parseStoredOrganization(): StoredOrganization | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
 
 /**
  * 1. User Profile Modal
@@ -22,7 +173,7 @@ const PROFILE_AUTH_METHODS_TIMEOUT_MS = 12000
  * - OTP and linked-provider account controls.
  */
 
-function AvatarPreview({ name, avatarPath }) {
+function AvatarPreview({ name, avatarPath }: AvatarPreviewProps) {
   if (avatarPath) {
     return (
       <img
@@ -40,7 +191,7 @@ function AvatarPreview({ name, avatarPath }) {
   )
 }
 
-function ProfileSectionButton({ active, children, onClick }) {
+function ProfileSectionButton({ active, children, onClick }: ProfileSectionButtonProps) {
   return (
     <button
       type="button"
@@ -57,7 +208,7 @@ function ProfileSectionButton({ active, children, onClick }) {
   )
 }
 
-const PROFILE_KM_FALLBACKS = {
+const PROFILE_KM_FALLBACKS: Record<string, string> = {
   profile: 'ប្រវត្តិរូប',
   loading_account: 'កំពុងផ្ទុកគណនី...',
   personal_details: 'ព័ត៌មានផ្ទាល់ខ្លួន',
@@ -150,11 +301,11 @@ const PROFILE_KM_FALLBACKS = {
   avatar_preview: 'មើលជាមុន',
 }
 
-function clamp(value, min, max) {
+function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-function loadImageElement(src) {
+function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     try {
@@ -169,7 +320,7 @@ function loadImageElement(src) {
   })
 }
 
-async function renderAvatarCropBlob({ src, zoom = 100, positionX = 50, positionY = 50, size = 512 }) {
+async function renderAvatarCropBlob({ src, zoom = 100, positionX = 50, positionY = 50, size = 512 }: AvatarCropOptions): Promise<Blob> {
   const image = await loadImageElement(src)
   const canvas = document.createElement('canvas')
   canvas.width = size
@@ -208,7 +359,7 @@ function AvatarEditorModal({
   onSave,
   saving,
   tr,
-}) {
+}: AvatarEditorModalProps) {
   if (!open || !src) return null
 
   return (
@@ -232,15 +383,15 @@ function AvatarEditorModal({
         <div className="space-y-3">
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('crop_zoom', 'Zoom')}</span>
-            <input type="range" min="100" max="240" step="5" value={zoom} onChange={(event) => onZoomChange(event.target.value)} className="w-full accent-blue-600" />
+            <input type="range" min="100" max="240" step="5" value={zoom} onChange={(event) => onZoomChange(Number(event.target.value))} className="w-full accent-blue-600" />
           </label>
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('crop_horizontal', 'Horizontal position')}</span>
-            <input type="range" min="0" max="100" step="1" value={positionX} onChange={(event) => onPositionXChange(event.target.value)} className="w-full accent-blue-600" />
+            <input type="range" min="0" max="100" step="1" value={positionX} onChange={(event) => onPositionXChange(Number(event.target.value))} className="w-full accent-blue-600" />
           </label>
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('crop_vertical', 'Vertical position')}</span>
-            <input type="range" min="0" max="100" step="1" value={positionY} onChange={(event) => onPositionYChange(event.target.value)} className="w-full accent-blue-600" />
+            <input type="range" min="0" max="100" step="1" value={positionY} onChange={(event) => onPositionYChange(Number(event.target.value))} className="w-full accent-blue-600" />
           </label>
         </div>
         <div className="flex justify-end gap-2">
@@ -256,27 +407,32 @@ function AvatarEditorModal({
   )
 }
 
-export default function UserProfileModal({ onClose }) {
+export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const { user, notify, hasPermission, saveSettings, settings, t, logout } = useApp()
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'profile' })
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key && !isBrokenLocalizedString(value)) return value
     const khmerFallback = PROFILE_KM_FALLBACKS[key] || fallbackKm
     if (isKhmer && !isBrokenLocalizedString(khmerFallback)) return khmerFallback
     return fallbackEn
   }
+  const currentUserId = user?.id ?? null
+  const requireCurrentUserId = (): EntityId => {
+    if (currentUserId == null) throw new Error('Profile user is not available.')
+    return currentUserId
+  }
   const [loading, setLoading] = useState(true)
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingPassword, setSavingPassword] = useState(false)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
-  const [profile, setProfile] = useState(null)
+  const [profile, setProfile] = useState<ProfileUser | null>(null)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false)
   const [avatarEditorSrc, setAvatarEditorSrc] = useState('')
   const [otpEnabled, setOtpEnabled] = useState(false)
-  const [otpMode, setOtpMode] = useState(null)
+  const [otpMode, setOtpMode] = useState<OtpMode>(null)
   const [oauthConnecting, setOauthConnecting] = useState('')
   const [disconnectingProvider, setDisconnectingProvider] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({
@@ -284,11 +440,11 @@ export default function UserProfileModal({ onClose }) {
     googleLoginAuth: false,
     googleLoginEmailAuth: false,
   })
-  const [authMethods, setAuthMethods] = useState(null)
+  const [authMethods, setAuthMethods] = useState<AuthMethodsResult | null>(null)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [activeSection, setActiveSection] = useState('personal')
+  const [activeSection, setActiveSection] = useState<ProfileSection>('personal')
   const [sessionDuration, setSessionDuration] = useState(() => {
     try {
       return localStorage.getItem(STORAGE_KEYS.SESSION_DURATION) || 'session'
@@ -299,7 +455,7 @@ export default function UserProfileModal({ onClose }) {
   const [avatarZoom, setAvatarZoom] = useState(100)
   const [avatarPositionX, setAvatarPositionX] = useState(50)
   const [avatarPositionY, setAvatarPositionY] = useState(50)
-  const avatarFileInputRef = useRef(null)
+  const avatarFileInputRef = useRef<HTMLInputElement | null>(null)
   const avatarObjectUrlRef = useRef('')
   const loadProfileRequestRef = useRef(0)
   const saveProfileInFlightRef = useRef(false)
@@ -316,12 +472,7 @@ export default function UserProfileModal({ onClose }) {
   const needsSensitivePassword = !canAdminOverride || !!authMethods?.google_linked
   const title = tr('profile', 'Profile')
   const organizationDetails = useMemo(() => {
-    let storedOrganization = null
-    try {
-      storedOrganization = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
-    } catch (_) {
-      storedOrganization = null
-    }
+    const storedOrganization = parseStoredOrganization()
 
     return {
       name: profile?.organization_name || user?.organization_name || storedOrganization?.name || settings?.business_name || tr('organization_not_selected', 'Organization not selected'),
@@ -335,37 +486,37 @@ export default function UserProfileModal({ onClose }) {
    * 3. Data Hydration
    * 3.1 Load profile, OTP status, and provider capabilities.
    */
-  const loadProfile = async () => {
+  const loadProfile = async (): Promise<void> => {
     if (!user?.id) return
     const requestId = beginTrackedRequest(loadProfileRequestRef)
     if (!profile) setLoading(true)
     try {
       const result = await settleLoaderMap({
         profile: () => withLoaderTimeout(
-          () => window.api.getUserProfile(user.id),
+          () => getProfileApi().getUserProfile(user.id as EntityId),
           'Profile details',
           PROFILE_LOAD_TIMEOUT_MS,
         ),
         otp: () => withLoaderTimeout(
-          () => window.api.otpStatus(user.id),
+          () => getProfileApi().otpStatus(user.id as EntityId),
           'Profile OTP status',
           PROFILE_OTP_STATUS_TIMEOUT_MS,
         ),
         caps: () => withLoaderTimeout(
-          () => window.api.getVerificationCapabilities?.(),
+          () => getProfileApi().getVerificationCapabilities?.(),
           'Profile verification capabilities',
           PROFILE_VERIFICATION_CAPS_TIMEOUT_MS,
         ).catch(() => null),
         authMethods: () => withLoaderTimeout(
-          () => window.api.getUserAuthMethods?.(user.id),
+          () => getProfileApi().getUserAuthMethods?.(user.id as EntityId),
           'Profile sign-in methods',
           PROFILE_AUTH_METHODS_TIMEOUT_MS,
         ).catch(() => null),
       })
-      const profileResult = result.values.profile
-      const otpResult = result.values.otp
-      const capsResult = result.values.caps
-      const authMethodsResult = result.values.authMethods
+      const profileResult = result.values.profile as ProfileResult | undefined
+      const otpResult = result.values.otp as OtpStatusResult | undefined
+      const capsResult = result.values.caps as VerificationCapabilitiesResult | null | undefined
+      const authMethodsResult = result.values.authMethods as AuthMethodsResult | null | undefined
 
       if (!isTrackedRequestCurrent(loadProfileRequestRef, requestId)) return
       if (!result.hasAnySuccess || !profileResult) {
@@ -391,7 +542,7 @@ export default function UserProfileModal({ onClose }) {
       }
     } catch (error) {
       if (!isTrackedRequestCurrent(loadProfileRequestRef, requestId)) return
-      notify(error?.message || 'Failed to load profile', 'error')
+      notify(getErrorMessage(error, 'Failed to load profile'), 'error')
     } finally {
       if (isTrackedRequestCurrent(loadProfileRequestRef, requestId)) setLoading(false)
     }
@@ -439,7 +590,8 @@ export default function UserProfileModal({ onClose }) {
     setSavingProfile(true)
     try {
       const previousEmail = String(profile.email || '').trim().toLowerCase()
-      const result = await withLoaderTimeout(() => window.api.updateUserProfile(user.id, {
+      const userId = requireCurrentUserId()
+      const result = await withLoaderTimeout(() => getProfileApi().updateUserProfile(userId, {
         name: profile.name,
         username: profile.username,
         phone: profile.phone,
@@ -448,9 +600,9 @@ export default function UserProfileModal({ onClose }) {
         expectedUpdatedAt: profile.updated_at || undefined,
         currentPassword: canAdminOverride ? undefined : currentPassword,
         adminOverride: canAdminOverride,
-        userId: user.id,
-        userName: user.name,
-      }), 'Save profile', 20000)
+        userId,
+        userName: user?.name,
+      }), 'Save profile', PROFILE_SAVE_TIMEOUT_MS)
       if (result?.success === false) {
         notify(result.error || 'Failed to save profile', 'error')
         return
@@ -460,7 +612,7 @@ export default function UserProfileModal({ onClose }) {
         window.dispatchEvent(new CustomEvent('user:updated', { detail: nextUser }))
         setProfile(nextUser)
       }
-      const authResult = await withLoaderTimeout(() => window.api.getUserAuthMethods?.(user.id), 'Profile sign-in methods', 12000).catch(() => null)
+      const authResult = await withLoaderTimeout(() => getProfileApi().getUserAuthMethods?.(userId), 'Profile sign-in methods', PROFILE_AUTH_REFRESH_TIMEOUT_MS).catch(() => null)
       if (authResult && authResult.success !== false) {
         const { success: _authSuccess, ...authData } = authResult || {}
         setAuthMethods(authData)
@@ -476,11 +628,11 @@ export default function UserProfileModal({ onClose }) {
       actionHistory.pushAction({
         scope: 'profile',
         entity: 'user',
-        entity_id: user.id,
+        entity_id: userId,
         label: tr('profile_updated', 'Profile updated'),
       })
     } catch (error) {
-      notify(error?.message || 'Failed to save profile', 'error')
+      notify(getErrorMessage(error, 'Failed to save profile'), 'error')
     } finally {
       saveProfileInFlightRef.current = false
       setSavingProfile(false)
@@ -496,13 +648,14 @@ export default function UserProfileModal({ onClose }) {
     savePasswordInFlightRef.current = true
     setSavingPassword(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.changeUserPassword(user.id, {
+      const userId = requireCurrentUserId()
+      const result = await withLoaderTimeout(() => getProfileApi().changeUserPassword(userId, {
         currentPassword: canAdminOverride ? undefined : currentPassword,
         newPassword,
         adminOverride: canAdminOverride,
-        userId: user.id,
-        userName: user.name,
-      }), 'Change password', 20000)
+        userId,
+        userName: user?.name,
+      }), 'Change password', PROFILE_PASSWORD_TIMEOUT_MS)
       if (result?.success === false) {
         notify(result.error || 'Failed to change password', 'error')
         return
@@ -514,11 +667,11 @@ export default function UserProfileModal({ onClose }) {
       actionHistory.pushAction({
         scope: 'profile',
         entity: 'user',
-        entity_id: user.id,
+        entity_id: userId,
         label: tr('password_updated', 'Password updated'),
       })
     } catch (error) {
-      notify(error?.message || 'Failed to change password', 'error')
+      notify(getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       savePasswordInFlightRef.current = false
       setSavingPassword(false)
@@ -533,12 +686,12 @@ export default function UserProfileModal({ onClose }) {
         actionHistory.pushAction({
           scope: 'profile',
           entity: 'user',
-          entity_id: user.id,
+          entity_id: currentUserId,
           label: tr('save_login_duration', 'Save login duration'),
         })
       })
-      .catch((error) => {
-        notify(error?.message || 'Failed to save login duration preference', 'error')
+      .catch((error: unknown) => {
+        notify(getErrorMessage(error, 'Failed to save login duration preference'), 'error')
       })
       .finally(() => {
         saveSessionInFlightRef.current = false
@@ -551,21 +704,21 @@ export default function UserProfileModal({ onClose }) {
     actionHistory.pushAction({
       scope: 'profile',
       entity: 'otp',
-      entity_id: user.id,
+      entity_id: currentUserId,
       label: tr('security_settings_updated', 'Security settings updated'),
     })
     notify(tr('security_settings_updated', 'Security settings updated'), 'success')
   }
 
-  const handleAvatarPick = () => avatarFileInputRef.current?.click()
+  const handleAvatarPick = (): void => avatarFileInputRef.current?.click()
 
-  const resetAvatarEditor = () => {
+  const resetAvatarEditor = (): void => {
     setAvatarZoom(100)
     setAvatarPositionX(50)
     setAvatarPositionY(50)
   }
 
-  const openAvatarEditor = (src) => {
+  const openAvatarEditor = (src: unknown): void => {
     const cleanSrc = String(src || '').trim()
     if (!cleanSrc) return
     resetAvatarEditor()
@@ -573,7 +726,7 @@ export default function UserProfileModal({ onClose }) {
     setAvatarEditorOpen(true)
   }
 
-  const closeAvatarEditor = () => {
+  const closeAvatarEditor = (): void => {
     setAvatarEditorOpen(false)
     if (avatarObjectUrlRef.current && avatarEditorSrc === avatarObjectUrlRef.current) {
       URL.revokeObjectURL(avatarObjectUrlRef.current)
@@ -583,7 +736,7 @@ export default function UserProfileModal({ onClose }) {
     resetAvatarEditor()
   }
 
-  const handleStartOauthLink = async (provider) => {
+  const handleStartOauthLink = async (provider: string): Promise<void> => {
     if (oauthRequestInFlightRef.current) return
     const normalizedProvider = String(provider || '').trim().toLowerCase()
     if (!normalizedProvider) return
@@ -604,25 +757,25 @@ export default function UserProfileModal({ onClose }) {
         }))
       } catch (_) {}
       const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=link&auth_provider=${encodeURIComponent(normalizedProvider)}`
-      const result = await withLoaderTimeout(() => window.api.startGoogleOauth({
+      const result = await withLoaderTimeout(() => getProfileApi().startGoogleOauth({
         provider: normalizedProvider,
         mode: 'link',
         redirectTo,
-      }), 'Start sign-in provider', 20000)
+      }), 'Start sign-in provider', PROFILE_OAUTH_START_TIMEOUT_MS)
       if (result?.success === false || !result?.url) {
         notify(result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
         return
       }
       window.location.assign(result.url)
     } catch (error) {
-      notify(error?.message || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
+      notify(getErrorMessage(error, tr('oauth_start_failed', 'Unable to start sign-in with provider.')), 'error')
     } finally {
       oauthRequestInFlightRef.current = false
       setOauthConnecting('')
     }
   }
 
-  const handleDisconnectOauthProvider = async (provider) => {
+  const handleDisconnectOauthProvider = async (provider: string): Promise<void> => {
     if (disconnectingProvider) return
     const normalizedProvider = String(provider || '').trim().toLowerCase()
     if (!normalizedProvider) return
@@ -635,12 +788,12 @@ export default function UserProfileModal({ onClose }) {
     try {
       const result = await withLoaderTimeout(() => (
         normalizedProvider === 'google'
-          ? window.api.unlinkGoogleOauth({ currentPassword })
-          : window.api.disconnectUserAuthProvider(user.id, {
+          ? getProfileApi().unlinkGoogleOauth({ currentPassword })
+          : getProfileApi().disconnectUserAuthProvider(requireCurrentUserId(), {
             provider: normalizedProvider,
             currentPassword,
           })
-      ), 'Disconnect sign-in provider', 20000)
+      ), 'Disconnect sign-in provider', PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS)
       if (result?.success === false) {
         notify(result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
         return
@@ -648,7 +801,7 @@ export default function UserProfileModal({ onClose }) {
       if (result?.methods) {
         setAuthMethods(result.methods)
       } else {
-        const authResult = await window.api.getUserAuthMethods?.(user.id).catch(() => null)
+        const authResult = await getProfileApi().getUserAuthMethods?.(requireCurrentUserId()).catch(() => null)
         if (authResult && authResult.success !== false) {
           const { success: _authSuccess, ...authData } = authResult || {}
           setAuthMethods(authData)
@@ -659,11 +812,11 @@ export default function UserProfileModal({ onClose }) {
       actionHistory.pushAction({
         scope: 'profile',
         entity: 'auth_provider',
-        entity_id: user.id,
+        entity_id: currentUserId,
         label: tr('identity_unlinked_success', 'Sign-in method disconnected.'),
       })
     } catch (error) {
-      notify(error?.message || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
+      notify(getErrorMessage(error, tr('identity_unlink_failed', 'Failed to disconnect sign-in method.')), 'error')
     } finally {
       setDisconnectingProvider('')
     }
@@ -674,7 +827,7 @@ export default function UserProfileModal({ onClose }) {
    * 6.1 Preview the picked image with an object URL.
    * 6.2 Upload through backend media endpoint.
    */
-  const handleAvatarSelected = async (event) => {
+  const handleAvatarSelected = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
@@ -690,11 +843,11 @@ export default function UserProfileModal({ onClose }) {
       avatarObjectUrlRef.current = objectUrl
       openAvatarEditor(objectUrl)
     } catch (error) {
-      notify(error?.message || tr('choose_image_file', 'Please choose an image file'), 'error')
+      notify(getErrorMessage(error, tr('choose_image_file', 'Please choose an image file')), 'error')
     }
   }
 
-  const saveAvatarFromEditor = async () => {
+  const saveAvatarFromEditor = async (): Promise<void> => {
     if (uploadingAvatar || avatarUploadInFlightRef.current) return
     avatarUploadInFlightRef.current = true
     setUploadingAvatar(true)
@@ -706,19 +859,19 @@ export default function UserProfileModal({ onClose }) {
         positionY: avatarPositionY,
       })
       const file = new File([blob], 'avatar.png', { type: 'image/png' })
-      const uploadResult = await withLoaderTimeout(() => window.api.uploadUserAvatar({ file }), 'Upload avatar', 30000)
+      const uploadResult = await withLoaderTimeout(() => getProfileApi().uploadUserAvatar({ file }), 'Upload avatar', PROFILE_AVATAR_UPLOAD_TIMEOUT_MS)
       if (!uploadResult?.path) throw new Error(tr('upload_no_image_path', 'Upload did not return an image path'))
-      setProfile((current) => ({ ...current, avatar_path: uploadResult.path }))
+      setProfile((current) => ({ ...(current || {}), avatar_path: uploadResult.path }))
       notify(tr('avatar_uploaded', 'Avatar uploaded'), 'success')
       actionHistory.pushAction({
         scope: 'profile',
         entity: 'user_avatar',
-        entity_id: user.id,
+        entity_id: currentUserId,
         label: tr('avatar_uploaded', 'Avatar uploaded'),
       })
       closeAvatarEditor()
     } catch (error) {
-      notify(error?.message || tr('avatar_upload_failed', 'Avatar upload failed'), 'error')
+      notify(getErrorMessage(error, tr('avatar_upload_failed', 'Avatar upload failed')), 'error')
     } finally {
       avatarUploadInFlightRef.current = false
       setUploadingAvatar(false)

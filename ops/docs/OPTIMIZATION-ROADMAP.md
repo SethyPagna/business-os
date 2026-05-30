@@ -5862,3 +5862,15 @@ Move 539 status:
   modal handoff, user detail sheet handoff, and action/performance source
   guard behavior unchanged while tightening shared action-history and
   user-detail nullability types exposed by the conversion.
+
+Move 540 status:
+- Move 540 converts the user profile modal to
+  `frontend/src/components/users/UserProfileModal.tsx`. The typed boundary now
+  covers profile user rows, profile settings, verification capability payloads,
+  sign-in method state, profile mutation results, app context access, the local
+  profile API gateway, avatar editor props, file input events, OTP modal mode,
+  active section state, and stored organization fallback parsing. The move
+  removes the temporary profile modal shim from Move 539 and keeps
+  the sidebar/profile extensionless import path, profile/OTP/auth-method
+  timeout contracts, avatar CORS guardrails, Google OAuth source checks, and
+  same-tick profile/password/avatar upload guards unchanged.

@@ -68,7 +68,7 @@ for (const filePath of sourceFiles) {
 const bulkImportPath = path.join(SRC_ROOT, 'components', 'products', 'import', 'BulkImportModal.tsx')
 const bulkImport = read(bulkImportPath)
 const productForm = read(path.join(SRC_ROOT, 'components', 'products', 'forms', 'ProductForm.tsx'))
-const userProfile = read(path.join(SRC_ROOT, 'components', 'users', 'UserProfileModal.jsx'))
+const userProfile = read(path.join(SRC_ROOT, 'components', 'users', 'UserProfileModal.tsx'))
 const inventoryImport = read(path.join(SRC_ROOT, 'components', 'inventory', 'InventoryImportModal.tsx'))
 const salesImport = read(path.join(SRC_ROOT, 'components', 'sales', 'SalesImportModal.tsx'))
 const contactImport = read(path.join(SRC_ROOT, 'components', 'contacts', 'shared.tsx'))

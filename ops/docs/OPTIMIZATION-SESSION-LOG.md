@@ -867,3 +867,42 @@ Use this shape for future entries:
 - follow-up insight: Users now has a typed admin boundary; User Profile Modal
   remains the next users-folder JSX target before the larger POS, Products,
   Dashboard, and Inventory shells.
+
+- change: converted the user profile modal to TSX with typed profile user
+  rows, settings, verification capability payloads, sign-in method state,
+  profile mutation results, app context access, local profile API gateway
+  calls, avatar editor props, file-input events, OTP modal mode, active section
+  state, and stored organization fallback parsing
+- affected files:
+  `frontend/src/components/users/UserProfileModal.tsx`,
+  `frontend/src/components/navigation/Sidebar.tsx`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/adminShellMediaGuards.test.ts`,
+  `frontend/tests/ownedGoogleAuth.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/scripts/frontend/verify-performance.ts`
+- route or API target: self-service profile, avatar crop/upload, OTP refresh,
+  Google OAuth link/unlink, password update, session-duration save, and
+  sign-out surfaces
+- keeper or rollback: keeper; focused typecheck, JSX, action stability,
+  performance loading UX, media guard, owned Google auth, performance
+  verifier, frontend/backend utility suites, UI audit, production build,
+  organization audit, schema audit, generated reference refresh, Phase 29
+  repeat audit, Phase 8.4 live suite, and prune checks passed
+- route-scoped result: focused source and type gates passed; broad
+  frontend/backend utility suites, UI audit, production build, organization
+  audit, schema audit, generated reference refresh, and pre/post-prune Phase
+  29 repeat audits also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up. The
+  running app still served frontend hash `55cf7b8ef08a4b8d`; the fresh local
+  production build hash is `678282931a4c4696`. Live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T01-28-37-946Z/report.json`.
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,177 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: The users folder no longer needs a profile modal shim;
+  the remaining larger JSX shells are POS, Products, Dashboard, Inventory,
+  Catalog page/editor, and utils-settings pages.
