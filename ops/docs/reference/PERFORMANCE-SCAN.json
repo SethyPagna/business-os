@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6432948,
-  "totalSourceLines": 145506,
+  "totalSourceBytes": 6438009,
+  "totalSourceLines": 145708,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -54,7 +54,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160887,
+      "size": 160893,
       "lines": 3880
     },
     {
@@ -99,7 +99,7 @@
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 101447,
+      "size": 101451,
       "lines": 2218
     },
     {
@@ -109,7 +109,7 @@
     },
     {
       "file": "backend/src/routes/inventory.js",
-      "size": 85847,
+      "size": 85849,
       "lines": 1881
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160887,
+      "size": 160893,
       "lines": 3880
     },
     {
@@ -216,7 +216,7 @@
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 101447,
+      "size": 101451,
       "lines": 2218
     },
     {
@@ -226,7 +226,7 @@
     },
     {
       "file": "backend/src/routes/inventory.js",
-      "size": 85847,
+      "size": 85849,
       "lines": 1881
     },
     {

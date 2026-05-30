@@ -25,7 +25,7 @@ Total files documented: **529**
 | 13 | `backend/src/catalogTextIntegrity.ts` | backend-core | 96 | 3.0 | Project source/support file |
 | 14 | `backend/src/config/index.js` | backend-core | 303 | 12.3 | Project source/support file |
 | 15 | `backend/src/conflictControl.ts` | backend-core | 117 | 3.4 | Project source/support file |
-| 16 | `backend/src/contactOptions.js` | backend-core | 140 | 4.7 | Project source/support file |
+| 16 | `backend/src/contactOptions.ts` | backend-core | 211 | 6.5 | Project source/support file |
 | 17 | `backend/src/database.js` | backend-core | 4 | 0.1 | Schema/migrations and DB bootstrap |
 | 18 | `backend/src/dataPath/index.js` | backend-core | 201 | 6.0 | Project source/support file |
 | 19 | `backend/src/db/cutoverReadiness.js` | backend-core | 164 | 5.3 | Project source/support file |
@@ -48,8 +48,8 @@ Total files documented: **529**
 | 36 | `backend/src/portalUtils.ts` | backend-core | 122 | 3.1 | Project source/support file |
 | 37 | `backend/src/postgresDatabase.js` | backend-core | 596 | 25.4 | Project source/support file |
 | 38 | `backend/src/productBatches.js` | backend-core | 646 | 21.5 | Project source/support file |
-| 39 | `backend/src/productDiscounts.js` | backend-core | 129 | 5.1 | Project source/support file |
-| 40 | `backend/src/productImportPolicies.js` | backend-core | 114 | 4.0 | Project source/support file |
+| 39 | `backend/src/productDiscounts.ts` | backend-core | 200 | 6.8 | Project source/support file |
+| 40 | `backend/src/productImportPolicies.ts` | backend-core | 174 | 5.4 | Project source/support file |
 | 41 | `backend/src/README.md` | backend-core | 12 | 0.7 | Documentation |
 | 42 | `backend/src/requestContext.ts` | backend-core | 65 | 1.7 | Project source/support file |
 | 43 | `backend/src/routes/actionHistory.js` | backend-routes | 256 | 9.0 | API route handler |
@@ -143,7 +143,7 @@ Total files documented: **529**
 | 131 | `backend/test/postgresQueryCompat.test.ts` | backend-root | 98 | 3.5 | Project source/support file |
 | 132 | `backend/test/productBatchHierarchy.test.ts` | backend-root | 104 | 4.8 | Project source/support file |
 | 133 | `backend/test/productExpiry.test.ts` | backend-root | 68 | 2.8 | Project source/support file |
-| 134 | `backend/test/productImportPolicies.test.ts` | backend-root | 72 | 2.9 | Project source/support file |
+| 134 | `backend/test/productImportPolicies.test.ts` | backend-root | 72 | 3.0 | Project source/support file |
 | 135 | `backend/test/productSearchPagination.test.ts` | backend-root | 19 | 1.6 | Project source/support file |
 | 136 | `backend/test/rfidRoutes.test.ts` | backend-root | 59 | 3.0 | Project source/support file |
 | 137 | `backend/test/routeContracts.test.ts` | backend-root | 256 | 14.1 | Project source/support file |

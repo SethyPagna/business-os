@@ -19,7 +19,7 @@ Code files scanned: **466**
 | 7 | `backend/src/catalogTextIntegrity.ts` | 5 |
 | 8 | `backend/src/config/index.js` | 11 |
 | 9 | `backend/src/conflictControl.ts` | 6 |
-| 10 | `backend/src/contactOptions.js` | 10 |
+| 10 | `backend/src/contactOptions.ts` | 10 |
 | 11 | `backend/src/database.js` | 0 |
 | 12 | `backend/src/dataPath/index.js` | 9 |
 | 13 | `backend/src/db/cutoverReadiness.js` | 10 |
@@ -41,8 +41,8 @@ Code files scanned: **466**
 | 29 | `backend/src/portalUtils.ts` | 6 |
 | 30 | `backend/src/postgresDatabase.js` | 14 |
 | 31 | `backend/src/productBatches.js` | 34 |
-| 32 | `backend/src/productDiscounts.js` | 9 |
-| 33 | `backend/src/productImportPolicies.js` | 10 |
+| 32 | `backend/src/productDiscounts.ts` | 9 |
+| 33 | `backend/src/productImportPolicies.ts` | 10 |
 | 34 | `backend/src/requestContext.ts` | 5 |
 | 35 | `backend/src/routes/actionHistory.js` | 12 |
 | 36 | `backend/src/routes/ai.js` | 3 |
@@ -606,20 +606,20 @@ Code files scanned: **466**
 | 5 | `sendWriteConflict` | function | 73 |
 | 6 | `sendSettingsConflict` | function | 93 |
 
-### 3.10 `backend/src/contactOptions.js`
+### 3.10 `backend/src/contactOptions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `cleanText` | function | 5 |
-| 2 | `normalizeContactOption` | function | 10 |
-| 3 | `hasContactOptionData` | function | 21 |
-| 4 | `collectNormalizedContactOptions` | function | 31 |
-| 5 | `collectLegacyContactOptions` | function | 43 |
-| 6 | `parseStoredContactOptions` | function | 60 |
-| 7 | `parseImportContactOptions` | function | 79 |
-| 8 | `serializeContactOptions` | function | 95 |
-| 9 | `getPrimaryContactOption` | function | 100 |
-| 10 | `buildImportedContactState` | function | 107 |
+| 1 | `cleanText` | function | 9 |
+| 2 | `normalizeContactOption` | function | 41 |
+| 3 | `hasContactOptionData` | function | 57 |
+| 4 | `collectNormalizedContactOptions` | function | 72 |
+| 5 | `collectLegacyContactOptions` | function | 89 |
+| 6 | `parseStoredContactOptions` | function | 111 |
+| 7 | `parseImportContactOptions` | function | 135 |
+| 8 | `serializeContactOptions` | function | 156 |
+| 9 | `getPrimaryContactOption` | function | 166 |
+| 10 | `buildImportedContactState` | function | 178 |
 
 ### 3.11 `backend/src/database.js`
 
@@ -1023,34 +1023,34 @@ Code files scanned: **466**
 | 33 | `getReturnItemAllocations` | function | 598 |
 | 34 | `markReturnItemAllocationsReversed` | function | 610 |
 
-### 3.32 `backend/src/productDiscounts.js`
+### 3.32 `backend/src/productDiscounts.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeBooleanFlag` | function | 8 |
-| 2 | `normalizePercent` | function | 17 |
-| 3 | `normalizeDiscountType` | function | 23 |
-| 4 | `normalizeHexColor` | function | 28 |
-| 5 | `normalizeDateText` | function | 33 |
-| 6 | `pick` | function | 41 |
-| 7 | `normalizeProductDiscount` | function | 45 |
-| 8 | `isDiscountActive` | function | 67 |
-| 9 | `calculateDiscountedPrice` | function | 81 |
+| 1 | `normalizeBooleanFlag` | function | 41 |
+| 2 | `normalizePercent` | function | 54 |
+| 3 | `normalizeDiscountType` | function | 64 |
+| 4 | `normalizeHexColor` | function | 74 |
+| 5 | `normalizeDateText` | function | 83 |
+| 6 | `pick` | function | 97 |
+| 7 | `normalizeProductDiscount` | function | 106 |
+| 8 | `isDiscountActive` | function | 133 |
+| 9 | `calculateDiscountedPrice` | function | 152 |
 
-### 3.33 `backend/src/productImportPolicies.js`
+### 3.33 `backend/src/productImportPolicies.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseImportNumber` | function | 5 |
-| 2 | `parseImportFlag` | function | 13 |
-| 3 | `hasImportValue` | function | 22 |
-| 4 | `normalizeFieldRule` | function | 27 |
-| 5 | `splitUniqueImportValues` | function | 34 |
-| 6 | `collectImportListValues` | function | 47 |
-| 7 | `buildLowercaseSet` | function | 56 |
-| 8 | `appendUniqueImportValue` | function | 64 |
-| 9 | `resolveImportValue` | function | 81 |
-| 10 | `normalizeImageConflictMode` | function | 95 |
+| 1 | `parseImportNumber` | function | 17 |
+| 2 | `parseImportFlag` | function | 31 |
+| 3 | `hasImportValue` | function | 45 |
+| 4 | `normalizeFieldRule` | function | 55 |
+| 5 | `splitUniqueImportValues` | function | 66 |
+| 6 | `collectImportListValues` | function | 83 |
+| 7 | `buildLowercaseSet` | function | 96 |
+| 8 | `appendUniqueImportValue` | function | 110 |
+| 9 | `resolveImportValue` | function | 135 |
+| 10 | `normalizeImageConflictMode` | function | 155 |
 
 ### 3.34 `backend/src/requestContext.ts`
 

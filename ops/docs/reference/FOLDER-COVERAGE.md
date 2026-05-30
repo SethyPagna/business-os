@@ -175,7 +175,7 @@ Total folders documented: **81**
 | 4 | `businessMetrics.js` | Project source/support file |
 | 5 | `catalogTextIntegrity.ts` | Project source/support file |
 | 6 | `conflictControl.ts` | Project source/support file |
-| 7 | `contactOptions.js` | Project source/support file |
+| 7 | `contactOptions.ts` | Project source/support file |
 | 8 | `database.js` | Schema/migrations and DB bootstrap |
 | 9 | `fileAssets.js` | Project source/support file |
 | 10 | `helpers.js` | Project source/support file |
@@ -193,8 +193,8 @@ Total folders documented: **81**
 | 22 | `portalUtils.ts` | Project source/support file |
 | 23 | `postgresDatabase.js` | Project source/support file |
 | 24 | `productBatches.js` | Project source/support file |
-| 25 | `productDiscounts.js` | Project source/support file |
-| 26 | `productImportPolicies.js` | Project source/support file |
+| 25 | `productDiscounts.ts` | Project source/support file |
+| 26 | `productImportPolicies.ts` | Project source/support file |
 | 27 | `README.md` | Documentation |
 | 28 | `requestContext.ts` | Project source/support file |
 | 29 | `runtimeCache.js` | Project source/support file |

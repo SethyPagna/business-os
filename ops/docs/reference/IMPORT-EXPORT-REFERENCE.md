@@ -19,7 +19,7 @@ Code files documented: **466**
 | 7 | `backend/src/catalogTextIntegrity.ts` | 0 | 1 | 0 | 7 |
 | 8 | `backend/src/config/index.js` | 4 | 1 | 1 | 25 |
 | 9 | `backend/src/conflictControl.ts` | 0 | 1 | 0 | 12 |
-| 10 | `backend/src/contactOptions.js` | 0 | 1 | 0 | 3 |
+| 10 | `backend/src/contactOptions.ts` | 0 | 1 | 0 | 3 |
 | 11 | `backend/src/database.js` | 1 | 1 | 1 | 40 |
 | 12 | `backend/src/dataPath/index.js` | 2 | 1 | 0 | 5 |
 | 13 | `backend/src/db/cutoverReadiness.js` | 2 | 1 | 0 | 2 |
@@ -41,8 +41,8 @@ Code files documented: **466**
 | 29 | `backend/src/portalUtils.ts` | 0 | 1 | 0 | 2 |
 | 30 | `backend/src/postgresDatabase.js` | 7 | 1 | 3 | 2 |
 | 31 | `backend/src/productBatches.js` | 1 | 1 | 1 | 6 |
-| 32 | `backend/src/productDiscounts.js` | 1 | 1 | 1 | 3 |
-| 33 | `backend/src/productImportPolicies.js` | 1 | 1 | 1 | 3 |
+| 32 | `backend/src/productDiscounts.ts` | 1 | 1 | 1 | 3 |
+| 33 | `backend/src/productImportPolicies.ts` | 1 | 1 | 1 | 3 |
 | 34 | `backend/src/requestContext.ts` | 1 | 1 | 0 | 2 |
 | 35 | `backend/src/routes/actionHistory.js` | 5 | 1 | 4 | 1 |
 | 36 | `backend/src/routes/ai.js` | 6 | 1 | 5 | 1 |
@@ -714,7 +714,7 @@ Code files documented: **466**
   - `backend/src/routes/units.js`
   - `backend/src/routes/users.js`
 
-### 3.10 `backend/src/contactOptions.js`
+### 3.10 `backend/src/contactOptions.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -926,7 +926,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `backend/src/money.ts`
 - Referenced by (3)
-  - `backend/src/productImportPolicies.js`
+  - `backend/src/productImportPolicies.ts`
   - `backend/test/importCsv.test.ts`
   - `backend/test/importScaleSmoke.test.ts`
 
@@ -1012,7 +1012,7 @@ Code files documented: **466**
   - none
 - Referenced by (5)
   - `backend/src/importParsing.js`
-  - `backend/src/productDiscounts.js`
+  - `backend/src/productDiscounts.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/products.js`
   - `backend/src/services/importJobs.js`
@@ -1145,7 +1145,7 @@ Code files documented: **466**
   - `backend/src/routes/sales.js`
   - `backend/src/services/importJobs.js`
 
-### 3.32 `backend/src/productDiscounts.js`
+### 3.32 `backend/src/productDiscounts.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1157,7 +1157,7 @@ Code files documented: **466**
   - `backend/src/routes/products.js`
   - `backend/src/services/importJobs.js`
 
-### 3.33 `backend/src/productImportPolicies.js`
+### 3.33 `backend/src/productImportPolicies.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1317,14 +1317,14 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (6)
   - `../conflictControl.ts`
-  - `../contactOptions`
+  - `../contactOptions.ts`
   - `../database`
   - `../helpers`
   - `../middleware`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
-  - `backend/src/contactOptions.js`
+  - `backend/src/contactOptions.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
@@ -1404,7 +1404,7 @@ Code files documented: **466**
   - `../middleware`
   - `../money.ts`
   - `../productBatches`
-  - `../productDiscounts`
+  - `../productDiscounts.ts`
   - `../schemaMetadata`
   - `express`
 - Internal dependencies (11)
@@ -1417,7 +1417,7 @@ Code files documented: **466**
   - `backend/src/middleware.js`
   - `backend/src/money.ts`
   - `backend/src/productBatches.js`
-  - `backend/src/productDiscounts.js`
+  - `backend/src/productDiscounts.ts`
   - `backend/src/schemaMetadata.js`
 - Referenced by (2)
   - `backend/server.js`
@@ -1505,8 +1505,8 @@ Code files documented: **466**
   - `../money.ts`
   - `../netSecurity`
   - `../productBatches`
-  - `../productDiscounts`
-  - `../productImportPolicies`
+  - `../productDiscounts.ts`
+  - `../productImportPolicies.ts`
   - `../schemaMetadata`
   - `../settingsSnapshot`
   - `express`
@@ -1526,8 +1526,8 @@ Code files documented: **466**
   - `backend/src/money.ts`
   - `backend/src/netSecurity.js`
   - `backend/src/productBatches.js`
-  - `backend/src/productDiscounts.js`
-  - `backend/src/productImportPolicies.js`
+  - `backend/src/productDiscounts.ts`
+  - `backend/src/productImportPolicies.ts`
   - `backend/src/schemaMetadata.js`
   - `backend/src/settingsSnapshot.js`
 - Referenced by (2)
@@ -1945,7 +1945,7 @@ Code files documented: **466**
 - Imports (20)
   - `../catalogTextIntegrity.ts`
   - `../config`
-  - `../contactOptions`
+  - `../contactOptions.ts`
   - `../database`
   - `../fileAssets`
   - `../helpers`
@@ -1953,8 +1953,8 @@ Code files documented: **466**
   - `../money.ts`
   - `../netSecurity`
   - `../productBatches`
-  - `../productDiscounts`
-  - `../productImportPolicies`
+  - `../productDiscounts.ts`
+  - `../productImportPolicies.ts`
   - `../uploadSecurity`
   - `./mediaQueue`
   - `bullmq`
@@ -1966,7 +1966,7 @@ Code files documented: **466**
 - Internal dependencies (14)
   - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/config/index.js`
-  - `backend/src/contactOptions.js`
+  - `backend/src/contactOptions.ts`
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
@@ -1974,8 +1974,8 @@ Code files documented: **466**
   - `backend/src/money.ts`
   - `backend/src/netSecurity.js`
   - `backend/src/productBatches.js`
-  - `backend/src/productDiscounts.js`
-  - `backend/src/productImportPolicies.js`
+  - `backend/src/productDiscounts.ts`
+  - `backend/src/productImportPolicies.ts`
   - `backend/src/services/mediaQueue.js`
   - `backend/src/uploadSecurity.js`
 - Referenced by (7)
@@ -2314,10 +2314,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/contactOptions`
+  - `../src/contactOptions.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/contactOptions.js`
+  - `backend/src/contactOptions.ts`
 - Referenced by (0)
   - none
 
@@ -2692,10 +2692,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/productImportPolicies`
+  - `../src/productImportPolicies.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/productImportPolicies.js`
+  - `backend/src/productImportPolicies.ts`
 - Referenced by (0)
   - none
 
