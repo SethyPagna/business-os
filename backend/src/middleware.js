@@ -8,7 +8,7 @@ const { authorizeProtectedRequest, isPublicApiRequest } = require('./accessContr
 const { buildUniqueStoredName, compressBufferForAsset, getMediaType, sanitizeOriginalFileName } = require('./fileAssets')
 const { hasPermissionValue } = require('./permissions.ts')
 const { getSessionUser } = require('./sessionAuth')
-const { checkRateLimit } = require('./security')
+const { checkRateLimit } = require('./security.ts')
 const { validateUploadedPath, validateUploadedBuffer } = require('./uploadSecurity.ts')
 
 function authToken(req, res, next) {

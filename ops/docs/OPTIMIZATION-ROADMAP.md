@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 575.
+- Latest completed implementation move in this roadmap: Move 576.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4782,7 +4782,7 @@ Move 423 status:
 Move 424 status:
 - Move 424 tightens schema/security/runtime helper loops in
   `backend/src/schemaMetadata.ts`, `backend/src/middleware.js`,
-  `backend/src/security.js`, `backend/src/netSecurity.ts`, and
+  `backend/src/security.ts`, `backend/src/netSecurity.ts`, and
   `backend/src/storage/organizationFolders.js`. Column candidate
   normalization, column presence caching, permission key collection,
   any-permission checks, rate/abuse timestamp pruning, private IPv4 parsing,
@@ -6391,3 +6391,19 @@ Move 575 status:
   package lane. The current source extension count is `.js: 58`, `.jsx: 0`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 305`, `.tsx: 107` outside generated/runtime
   folders.
+
+Move 576 status:
+- Move 576 converts `backend/src/security.ts` to a package-safe TypeScript
+  path. The helper keeps secret encryption/decryption fallback, rate limiting,
+  timing-safe comparison, and abuse-lock behavior unchanged while adding JSDoc
+  contracts for rate-limit and abuse-lock result shapes. Auth, portal, system,
+  middleware, AI gateway, and Google Drive sync callers now import the explicit
+  `.ts` path. `backend/test/security.test.ts` was added to the backend utility
+  suite to protect plaintext fallback, rate-limit blocking/reset, safe
+  comparison, and abuse-lock clear behavior directly. Focused security,
+  route-contract, offline-security, owned-Google-auth, integration-doctor, and
+  stale-path scans passed, as did the full backend utility suite, schema audit,
+  and Linux packaging proof. `pkg` continues to warn for direct `.ts` scripts, so larger backend
+  route/service conversion still waits for a compile/staging package lane. The
+  current source extension count is `.js: 57`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
+  `.ts: 306`, `.tsx: 107` outside generated/runtime folders.

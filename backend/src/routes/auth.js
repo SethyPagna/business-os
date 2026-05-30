@@ -31,7 +31,7 @@ const {
   checkAbuseLock,
   recordAbuseFailure,
   clearAbuseFailure,
-} = require('../security')
+} = require('../security.ts')
 const {
   buildGoogleOauthStartUrl,
   exchangeGoogleOauthCode,

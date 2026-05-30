@@ -14,7 +14,7 @@ const {
 } = require('../../config')
 const { walkFiles } = require('../../dataPath/index.ts')
 const { getRuntimeVersion } = require('../../runtimeVersion.ts')
-const { encryptSecret, decryptSecret } = require('../../security')
+const { encryptSecret, decryptSecret } = require('../../security.ts')
 const {
   DRIVE_SYNC_DEFAULT_RETENTION_DAYS,
   resolveDriveSyncVersionState,

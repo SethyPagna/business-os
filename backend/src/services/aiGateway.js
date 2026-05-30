@@ -1,6 +1,6 @@
 'use strict'
 
-const { encryptSecret, decryptSecret } = require('../security')
+const { encryptSecret, decryptSecret } = require('../security.ts')
 const { assertSafeOutboundUrl } = require('../netSecurity.ts')
 
 function nowIso() {

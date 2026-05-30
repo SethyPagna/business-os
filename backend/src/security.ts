@@ -6,6 +6,25 @@ const ENC_PREFIX = 'enc:v1'
 const _rateBuckets = new Map()
 const _abuseBuckets = new Map()
 
+/**
+ * @typedef {{
+ *   windowMs?: number,
+ *   threshold?: number,
+ *   lockMs?: number,
+ * }} AbuseFailureOptions
+ *
+ * @typedef {{
+ *   allowed: boolean,
+ *   retryAfterSeconds: number,
+ * }} RateLimitResult
+ *
+ * @typedef {{
+ *   locked: boolean,
+ *   retryAfterSeconds: number,
+ *   attempts?: number,
+ * }} AbuseLockResult
+ */
+
 function normalizeEncryptionKey(rawValue) {
   const value = String(rawValue || '').trim()
   if (!value) return null
@@ -84,6 +103,13 @@ function keepRecentTimestamps(timestamps = [], cutoff) {
   return kept
 }
 
+/**
+ * @param {string} name
+ * @param {string} key
+ * @param {number} maxAttempts
+ * @param {number} windowMs
+ * @returns {RateLimitResult}
+ */
 function checkRateLimit(name, key, maxAttempts, windowMs) {
   const bucketName = String(name || 'default')
   const identity = String(key || 'global')
@@ -153,6 +179,12 @@ function pruneAbuseBucket(bucket, nowMs, windowMs) {
   }
 }
 
+/**
+ * @param {string} name
+ * @param {string} key
+ * @param {number} [lockWindowMs]
+ * @returns {AbuseLockResult}
+ */
 function checkAbuseLock(name, key, lockWindowMs = 15 * 60 * 1000) {
   const nowMs = Date.now()
   const windowMs = Math.max(1_000, Number(lockWindowMs || 15 * 60 * 1000))
@@ -170,6 +202,12 @@ function checkAbuseLock(name, key, lockWindowMs = 15 * 60 * 1000) {
   return { locked: false, retryAfterSeconds: 0 }
 }
 
+/**
+ * @param {string} name
+ * @param {string} key
+ * @param {AbuseFailureOptions} [options]
+ * @returns {AbuseLockResult}
+ */
 function recordAbuseFailure(name, key, options = {}) {
   const bucket = getAbuseBucket(name)
   const identity = String(key || 'global')
