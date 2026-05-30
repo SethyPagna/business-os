@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 557.
+- Latest completed implementation move in this roadmap: Move 558.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6111,3 +6111,21 @@ Move 557 status:
   compile/staging package lane. The current source extension count is `.js: 85`,
   `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 278`, `.tsx: 107` outside
   generated/runtime folders.
+
+Move 558 status:
+- Move 558 converts `backend/src/runtimeState/index.ts`,
+  `backend/src/maintenanceLock.ts`, and `backend/src/portalUtils.ts` to
+  package-safe TypeScript paths. Runtime state now carries JSDoc
+  state/descriptor contracts for storage-version state and health/bootstrap
+  descriptors. Maintenance lock now carries JSDoc lock/request/response
+  contracts for restore/backup write guarding and scoped lock execution.
+  Portal utilities now carry about-block contracts while preserving Google Maps
+  embed normalization. Server, auth, system, portal, Google Drive sync,
+  offline-security, portal utility, and backup-reliability verification imports
+  use explicit `.ts` paths. Focused portal/offline/route/runtime/
+  backup-reliability checks, the full backend utility suite, and Linux
+  packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
+  larger backend route/service conversion still waits for a compile/staging
+  package lane. The current source extension count is `.js: 82`, `.jsx: 0`,
+  `.mjs: 0`, `.cjs: 0`, `.ts: 281`, `.tsx: 107` outside generated/runtime
+  folders.
