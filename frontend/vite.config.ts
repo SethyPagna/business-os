@@ -124,7 +124,7 @@ function manualChunks(id: string): string | undefined {
     const normalized = id.replace(/\\/g, '/')
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
-    if (normalized.endsWith('/src/api/methods.js')) return 'app-api-methods'
+    if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
     ) {

@@ -7,7 +7,7 @@ const productMenuHelpers = readFileSync(new URL('../src/components/products/help
 const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
 const posPage = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
 const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
-const apiMethods = readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+const apiMethods = readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 
 assert.ok(
   /productApi\.getProductsByIds|window\.api\.getProductsByIds/.test(productsPage),

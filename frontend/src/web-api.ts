@@ -10,7 +10,7 @@
  *   api/http.ts      - apiFetch, route(), read cache
  *   api/websocket.ts - WebSocket connection manager
  *   api/localDb.ts   - Dexie (IndexedDB) schema + helpers
- *   api/methods.js   - all domain API methods
+ *   api/methods.ts   - all domain API methods
  */
 
 import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.ts'
@@ -79,8 +79,7 @@ function sanitizeBaseUrl(value: unknown): string {
 }
 
 function loadMethodsModule(): Promise<MethodsModule> {
-  // @ts-expect-error methods.js remains the large JS API registry during the incremental TS migration.
-  if (!methodsModulePromise) methodsModulePromise = import('./api/methods.js')
+  if (!methodsModulePromise) methodsModulePromise = import('./api/methods.ts')
   return methodsModulePromise
 }
 

@@ -1,11 +1,14 @@
+// @ts-nocheck
 
-// ─── Device info helper ───────────────────────────────────────────────────────
+// Legacy domain API registry. This file is now a TypeScript module so callers,
+// tests, and bundling use the same extension path; the next slices should move
+// typed domain groups out of this boundary and remove ts-nocheck.
 function getDeviceInfo() {
   return getClientDeviceInfo()
 }
 
 /**
- * api/methods.js — All window.api domain methods.
+ * api/methods.ts — All window.api domain methods.
  *
  * Each method calls route() with a server function (apiFetch) and,
  * where available, a local Dexie fallback for offline-first reads.

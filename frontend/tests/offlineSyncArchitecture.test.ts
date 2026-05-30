@@ -18,7 +18,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 
 const swSource = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
-const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 
 await runTest('service worker replays the IndexedDB outbox through secure authenticated background sync', () => {
   assert.match(swSource, /const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'/)

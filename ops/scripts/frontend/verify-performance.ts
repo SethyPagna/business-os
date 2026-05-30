@@ -94,7 +94,7 @@ assert(sidebar.includes('announcePageIntent') && sidebar.includes('onPointerEnte
 assert(!/from ['"]\.\.\/\.\.\/lang\/(?:en|km)\.json['"]/.test(catalogPage), 'Catalog route must not import full app language JSON packs; use portalLanguagePacks plus local fallbacks.')
 assert(read(path.join(FRONTEND_ROOT, 'vite.config.ts')).includes('vendor-zxing'), 'Heavy barcode scanner dependencies must be split out of the startup vendor chunk.')
 
-const apiMethods = read(path.join(SRC_ROOT, 'api', 'methods.js'))
+const apiMethods = read(path.join(SRC_ROOT, 'api', 'methods.ts'))
 assert(apiMethods.includes('uploadImportJobImages'), 'Import job image batch uploader is missing.')
 assert(!/imageFiles:\s*imagePayload/.test(apiMethods + bulkImport), 'Bulk image imports must not send imageFiles JSON payloads.')
 assert(apiMethods.includes("const settingsResponse = await apiFetch('GET', '/api/settings')"), 'Settings reads must use /api/settings inline updatedAt.')

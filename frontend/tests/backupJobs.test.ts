@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 await (async function backupJobApiShouldExposeQueuedFlows() {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.match(source, /export\s+async\s+function\s+queueBackupFolderExport/)
   assert.match(source, /export\s+async\s+function\s+queueBackupFolderRestore/)
   assert.match(source, /export\s+const\s+queueGoogleDriveSyncNow/)
@@ -85,7 +85,7 @@ await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
 })()
 
 await (async function finalBackupRemovesInlineJsonDownloadPath() {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /export\s+async\s+function\s+exportBackup\(/)
   assert.doesNotMatch(source, /export\s+async\s+function\s+importBackup\(/)
   assert.doesNotMatch(source, /pickBackupFile/)

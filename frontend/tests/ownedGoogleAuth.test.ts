@@ -16,7 +16,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
   }
 }
 
-const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
 const loginSource = fs.readFileSync(new URL('../src/components/auth/Login.tsx', import.meta.url), 'utf8')
 const profileSource = fs.readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')

@@ -32,7 +32,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 
 await runTest('POS checkout keeps client, API, and backend duplicate guards', () => {
   const pos = readFrontend('src/components/pos/POS.tsx')
-  const methods = readFrontend('src/api/methods.js')
+  const methods = readFrontend('src/api/methods.ts')
   const salesRoute = readRepo('backend/src/routes/sales.js')
 
   assert.match(pos, /if \(loading \|\| checkoutInFlightRef\.current\) return/)
@@ -122,7 +122,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   const newReturn = readFrontend('src/components/returns/NewReturnModal.tsx')
   const editReturn = readFrontend('src/components/returns/EditReturnModal.tsx')
   const supplierReturn = readFrontend('src/components/returns/NewSupplierReturnModal.tsx')
-  const methods = readFrontend('src/api/methods.js')
+  const methods = readFrontend('src/api/methods.ts')
   const returnsRoute = readRepo('backend/src/routes/returns.js')
 
   for (const source of [newReturn, editReturn, supplierReturn]) {
@@ -160,7 +160,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
 await runTest('file picker and library upload/delete flows keep synchronous action guards', () => {
   const picker = readFrontend('src/components/files/FilePickerModal.tsx')
   const filesPage = readFrontend('src/components/files/FilesPage.tsx')
-  const methods = readFrontend('src/api/methods.js')
+  const methods = readFrontend('src/api/methods.ts')
 
   for (const source of [picker, filesPage]) {
     assert.match(source, /const uploadInFlightRef = useRef\(false\)/)
@@ -254,7 +254,7 @@ await runTest('profile saves and avatar upload keep same-tick guards', () => {
 
 await runTest('settings save and app favicon upload keep synchronous guards', () => {
   const source = readFrontend('src/components/utils-settings/Settings.tsx')
-  const methods = readFrontend('src/api/methods.js')
+  const methods = readFrontend('src/api/methods.ts')
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const \[savingSettings, setSavingSettings\] = useState\(false\)/)

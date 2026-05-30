@@ -9,7 +9,7 @@ This folder is the browser-side transport layer for Business OS.
   - auth token attachment, retry handling, offline/server-unreachable detection
   - runtime version mismatch, Cloudflare Access redirect, transient gateway, write-dedupe, and read-fallback classification
 
-- `methods.js`
+- `methods.ts`
   - named Business OS API calls used by page components
   - keeps request/response shapes centralized so UI pages do not hand-roll endpoints
   - next high-risk TypeScript target because it is still the large domain registry

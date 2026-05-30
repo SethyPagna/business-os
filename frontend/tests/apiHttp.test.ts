@@ -261,7 +261,7 @@ await runTest('read routes return fallback on transient gateway errors without s
 })
 
 await runTest('integration doctor is a read-only route and does not pass a null GET body', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const block = source.match(/export async function getIntegrationDoctor[\s\S]*?\n}/)?.[0] || ''
   assert.match(block, /apiFetch\('GET',\s*`\/api\/system\/integration-doctor\$\{suffix\}`,\s*undefined,/)
   assert.doesNotMatch(block, /apiFetch\('GET'[\s\S]*,\s*null\s*,/)
@@ -269,13 +269,13 @@ await runTest('integration doctor is a read-only route and does not pass a null 
 })
 
 await runTest('import job delete prefers canonical DELETE route with legacy fallback', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.match(source, /deleteImportJob\s*=\s*\(id,[\s\S]*apiFetch\('DELETE',\s*`\/api\/import-jobs\/\$\{encodedId\}/)
   assert.match(source, /apiFetch\('POST',\s*`\/api\/import-jobs\/\$\{encodedId\}\/delete`/)
 })
 
 await runTest('read-only 530 pollers use fallback data and backoff hooks', () => {
-  const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const trackerSource = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
   const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
   const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
@@ -297,14 +297,14 @@ await runTest('read-only 530 pollers use fallback data and backoff hooks', () =>
 })
 
 await runTest('app bootstrap converts invalid sessions into an explicit unauthorized result', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.match(source, /if\s*\(isInvalidSessionError\(error\)\)/)
   assert.match(source, /unauthorized:\s*true/)
   assert.match(source, /authError:\s*error\?\.message \|\| 'Please sign in again to continue\.'/)
 })
 
 await runTest('paged audit and user-attributed activity APIs expose user filters', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.match(source, /getAuditLogs\s*=\s*\(params\s*=\s*\{\}\)/)
   assert.match(source, /appendQuery\('\/api\/system\/audit-logs', q\)/)
   assert.match(source, /const auditRows = Array\.isArray\(result\) \? result : \(result\?\.items \|\| \[\]\)/)
@@ -317,7 +317,7 @@ await runTest('paged audit and user-attributed activity APIs expose user filters
 })
 
 await runTest('client API query strings use one shared builder', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.match(
     source,
     /function buildQueryString\(params = \{\}, \{ skipEmpty = true \} = \{\}\)[\s\S]*for \(const key of Object\.keys\(params \|\| \{\}\)\)[\s\S]*const value = params\[key\][\s\S]*query\.append\(key, value\)/,
@@ -333,7 +333,7 @@ await runTest('client API query strings use one shared builder', () => {
 })
 
 await runTest('product id lookup normalizes ids without intermediate map/filter arrays', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.match(
     source,
     /function normalizePositiveUniqueIds\(ids = \[\], limit = 100\)[\s\S]*const seen = new Set\(\)[\s\S]*for \(const value of ids \|\| \[\]\)[\s\S]*uniqueIds\.push\(id\)[\s\S]*if \(uniqueIds\.length >= limit\) break/,
@@ -343,7 +343,7 @@ await runTest('product id lookup normalizes ids without intermediate map/filter 
 })
 
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.match(
     source,
     /function appendActorQuery\(path, extra = \{\}\)[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
@@ -427,7 +427,7 @@ await runTest('health payload exposes data, storage, queue, cache, and analytics
 })
 
 await runTest('large search methods do not use empty local fallbacks for required APIs', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', appendQuery\('\/api\/products\/search', q\)/)
   assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', appendQuery\('\/api\/inventory\/products\/search', q\)/)
   assert.doesNotMatch(source, /products:search:\$\{q\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)

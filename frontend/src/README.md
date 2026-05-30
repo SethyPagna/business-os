@@ -16,7 +16,7 @@ This folder contains the React SPA used by Business OS.
 ## Key Rules
 
 1. Business correctness belongs to the backend; the frontend should guide workflows and validate UX inputs.
-2. Components should call `api/methods.js` rather than custom fetch calls; `methods.js` remains the large domain registry while transport, websocket, local cache, and browser bootstrap code migrate to TypeScript.
+2. Components should call `api/methods.ts` rather than custom fetch calls; `methods.ts` remains the large domain registry while transport, websocket, local cache, and browser bootstrap code migrate to TypeScript.
 3. User-facing strings should use translation keys in both `en.json` and `km.json`.
 4. New pages should include permission-aware UI, loading/error states, and responsive layouts.
 
