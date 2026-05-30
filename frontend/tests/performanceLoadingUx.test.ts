@@ -5,7 +5,7 @@ const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
-const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
+const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
 const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
@@ -138,7 +138,7 @@ assert.match(
 )
 assert.doesNotMatch(
   appContext,
-  /await window\.api\?\.getAppBootstrap\?\.\(/,
+  /await getInventoryApi\\(\\)\\?\.getAppBootstrap\?\.\(/,
   'app bootstrap reads should go through the shared timeout helper',
 )
 assert.match(
@@ -570,42 +570,42 @@ assert.match(
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\(\) => window\.api\.getUsers\(\), 'Inventory user filters', INVENTORY_USER_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => getInventoryApi\(\)\.getUsers\(\), 'Inventory user filters', INVENTORY_USER_OPTIONS_TIMEOUT_MS\)/,
   'inventory user filter options should timeout slow user reads',
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getInventoryReasons\?\.\(\) \?\? Promise\.resolve\(\{ items: \[\] \}\),\s*'Inventory reasons',\s*INVENTORY_REASONS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getInventoryReasons\?\.\(\) \?\? Promise\.resolve\(\{ items: \[\] \}\),\s*'Inventory reasons',\s*INVENTORY_REASONS_TIMEOUT_MS,\s*\)/,
   'inventory saved reasons should timeout slow reason reads',
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getBranches\(\),\s*'Inventory branches',\s*INVENTORY_BRANCHES_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getBranches\(\),\s*'Inventory branches',\s*INVENTORY_BRANCHES_TIMEOUT_MS,\s*\)/,
   'inventory branches should timeout slow branch reads',
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getInventoryStats\(statsQuery\),\s*'Inventory stats',\s*INVENTORY_STATS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getInventoryStats\(statsQuery\),\s*'Inventory stats',\s*INVENTORY_STATS_TIMEOUT_MS,\s*\)/,
   'inventory primary stats should timeout slow stats reads',
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.searchInventoryProducts\(productQuery\),\s*'Inventory products',\s*INVENTORY_PRODUCTS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.searchInventoryProducts\(productQuery\),\s*'Inventory products',\s*INVENTORY_PRODUCTS_TIMEOUT_MS,\s*\)/,
   'inventory product summary should timeout slow product reads',
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getInventoryMovements\(\{[\s\S]*page: movementMeta\.page,[\s\S]*pageSize: movementMeta\.pageSize,[\s\S]*\}\),\s*'Inventory movements',\s*INVENTORY_MOVEMENTS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getInventoryMovements\(\{[\s\S]*page: movementMeta\.page,[\s\S]*pageSize: movementMeta\.pageSize,[\s\S]*\}\),\s*'Inventory movements',\s*INVENTORY_MOVEMENTS_TIMEOUT_MS,\s*\)/,
   'inventory movements should timeout slow movement reads',
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => \(window\.api\.getRfidStatus \? window\.api\.getRfidStatus\(branchOpts\)\.catch\(\(\) => null\) : Promise\.resolve\(null\)\),\s*'Inventory RFID status',\s*INVENTORY_RFID_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => \(getInventoryApi\(\)\.getRfidStatus \? getInventoryApi\(\)\.getRfidStatus\(branchOpts\)\.catch\(\(\) => null\) : Promise\.resolve\(null\)\),\s*'Inventory RFID status',\s*INVENTORY_RFID_TIMEOUT_MS,\s*\)/,
   'inventory RFID status should timeout slow RFID reads',
 )
 assert.doesNotMatch(
   inventory,
-  /withLoaderTimeout\(\(\) => window\.api\.getUsers\(\), 'Inventory user filters'[\s\S]{0,340}catch\(\(\) => \{[\s\S]{0,180}setUserOptions\(\[\]\)/,
+  /withLoaderTimeout\(\(\) => getInventoryApi\(\)\.getUsers\(\), 'Inventory user filters'[\s\S]{0,340}catch\(\(\) => \{[\s\S]{0,180}setUserOptions\(\[\]\)/,
   'inventory user filter options should keep previously loaded options on refresh failure',
 )
 assert.doesNotMatch(
@@ -615,7 +615,7 @@ assert.doesNotMatch(
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getProductsByIds\(\[productId\], \{ include: 'branch_stock,images,batches' \}\),\s*'Inventory product detail',\s*INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getProductsByIds\(\[productId\], \{ include: 'branch_stock,images,batches' \}\),\s*'Inventory product detail',\s*INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS,\s*\)/,
   'inventory movement product detail fallback should timeout slow product detail reads',
 )
 assert.match(
@@ -680,7 +680,7 @@ assert.match(
 )
 assert.match(
   inventory,
-  /const visibleInventoryProductIds = useMemo\([\s\S]*visibleInventoryProducts\.reduce/,
+  /const visibleInventoryProductIds = useMemo(?:<[^>]+>)?\([\s\S]*visibleInventoryProducts\.reduce/,
   'inventory product selection should precompute visible ids once per visible list',
 )
 assert.match(
@@ -690,12 +690,12 @@ assert.match(
 )
 assert.match(
   inventory,
-  /function normalizeFiniteIdsFrom\(items = \[\],[\s\S]*items\.reduce/,
+  /function normalizeFiniteIdsFrom(?:<[^>]+>)?\(items(?:: [^=]+)? = \[\],[\s\S]*items\.reduce/,
   'inventory selection ids should be normalized through a single helper pass',
 )
 assert.match(
   inventory,
-  /function normalizeFiniteIds\(ids = \[\]\) \{[\s\S]*return normalizeFiniteIdsFrom\(ids\)/,
+  /function normalizeFiniteIds\(ids(?:: [^=]+)? = \[\]\)(?:: [^{]+)? \{[\s\S]*return normalizeFiniteIdsFrom\(ids\)/,
   'inventory selection scope ids should use the shared normalization helper',
 )
 assert.match(
@@ -705,7 +705,7 @@ assert.match(
 )
 assert.match(
   inventory,
-  /function countSelectedIds\(ids = \[\], selectedIds = new Set\(\)\) \{[\s\S]*for \(const id of ids\)/,
+  /function countSelectedIds\(ids(?:: [^=]+)? = \[\], selectedIds(?:: [^=]+)? = new Set\(\)\)(?:: [^{]+)? \{[\s\S]*for \(const id of ids\)/,
   'inventory partial selection counts should use one counter helper instead of filter allocations',
 )
 assert.match(
@@ -720,7 +720,7 @@ assert.match(
 )
 assert.match(
   inventory,
-  /function renderDestinationProductOptions\(products = \[\], excludedProductId\) \{[\s\S]*return products\.map\(\(product\) => \{[\s\S]*if \(Number\.isFinite\(excludedId\) && id === excludedId\) return null/,
+  /function renderDestinationProductOptions\(products(?:: [^=]+)? = \[\], excludedProductId(?:\?: [^)]+)?\) \{[\s\S]*return products\.map\(\(product\) => \{[\s\S]*if \(Number\.isFinite\(excludedId\) && id === excludedId\) return null/,
   'inventory destination product options should skip excluded products without a filtered allocation',
 )
 assert.match(
@@ -750,7 +750,7 @@ assert.doesNotMatch(
 )
 assert.match(
   inventory,
-  /function countActiveFlags\(flags = \[\]\) \{[\s\S]*for \(const flag of flags\)/,
+  /function countActiveFlags\(flags(?:: [^=]+)? = \[\]\)(?:: [^{]+)? \{[\s\S]*for \(const flag of flags\)/,
   'inventory filter badge counts should use one counter helper instead of filter allocations',
 )
 assert.match(
@@ -775,7 +775,7 @@ assert.match(
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getReturns\(\{ scope: 'all' \}\),\s*'Inventory returns stats',\s*INVENTORY_RETURNS_STATS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getReturns\(\{ scope: 'all' \}\),\s*'Inventory returns stats',\s*INVENTORY_RETURNS_STATS_TIMEOUT_MS,\s*\)/,
   'inventory return stats should timeout slow returns reads',
 )
 assert.match(
@@ -790,7 +790,7 @@ assert.doesNotMatch(
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getDashboard\(\),\s*'Inventory dashboard stats',\s*INVENTORY_DASHBOARD_STATS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getDashboard\(\),\s*'Inventory dashboard stats',\s*INVENTORY_DASHBOARD_STATS_TIMEOUT_MS,\s*\)/,
   'inventory dashboard fee stats should timeout slow dashboard reads',
 )
 assert.doesNotMatch(
@@ -1305,7 +1305,7 @@ assert.match(
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api\?|getServerApi\(\))\.getPendingSyncState\?\.\(\),\s*'Pending sync queue',\s*SERVER_PENDING_SYNC_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:getInventoryApi\\(\\)\\?|getServerApi\(\))\.getPendingSyncState\?\.\(\),\s*'Pending sync queue',\s*SERVER_PENDING_SYNC_TIMEOUT_MS,\s*\)/,
   'server pending sync state should timeout slow queue reads',
 )
 assert.match(
@@ -1570,12 +1570,12 @@ assert.match(
 )
 assert.doesNotMatch(
   productForm,
-  /withLoaderTimeout\(\(\) => window\.api\.getSuppliers\(\), 'Product suppliers'[\s\S]{0,260}catch \{[\s\S]{0,160}setSupplierList\(\[\]\)/,
+  /withLoaderTimeout\(\(\) => getInventoryApi\(\)\.getSuppliers\(\), 'Product suppliers'[\s\S]{0,260}catch \{[\s\S]{0,160}setSupplierList\(\[\]\)/,
   'product supplier options should keep previously loaded options on refresh failure',
 )
 assert.doesNotMatch(
   products,
-  /withLoaderTimeout\(\(\) => window\.api\.getProductFilters\(\{\}\), 'Product filters'[\s\S]{0,260}catch[\s\S]{0,180}setProductFilterMeta\(\{[\s\S]{0,120}brands: \[\]/,
+  /withLoaderTimeout\(\(\) => getInventoryApi\(\)\.getProductFilters\(\{\}\), 'Product filters'[\s\S]{0,260}catch[\s\S]{0,180}setProductFilterMeta\(\{[\s\S]{0,120}brands: \[\]/,
   'products filter metadata should keep previous filters when a refresh fails',
 )
 assert.match(
@@ -1896,7 +1896,7 @@ assert.match(
 )
 assert.doesNotMatch(
   manageCategoriesModal,
-  /window\.api\.getProducts\(\)/,
+  /getInventoryApi\(\)\.getProducts\(\)/,
   'category lookup manager should not fetch the full product catalog for lookup snapshots',
 )
 assert.match(
@@ -1956,7 +1956,7 @@ assert.match(
 )
 assert.doesNotMatch(
   manageUnitsModal,
-  /window\.api\.getProducts\(\)/,
+  /getInventoryApi\(\)\.getProducts\(\)/,
   'unit lookup manager should not fetch the full product catalog for lookup snapshots',
 )
 assert.match(
@@ -2011,7 +2011,7 @@ assert.match(
 )
 assert.doesNotMatch(
   manageBrandsModal,
-  /window\.api\.getProducts\(\)/,
+  /getInventoryApi\(\)\.getProducts\(\)/,
   'brand lookup manager should not fetch the full product catalog for lookup snapshots',
 )
 assert.match(

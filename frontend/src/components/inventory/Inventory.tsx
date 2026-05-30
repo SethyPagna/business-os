@@ -1,6 +1,7 @@
 // Main Inventory page sub-components imported from sibling files.
 
 import { Fragment, Suspense, lazy, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
+import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
@@ -12,10 +13,11 @@ import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/Pagi
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import InventoryProductsSurface from './InventoryProductsSurface'
-const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
-const InventoryImportModal = lazy(() => import('./InventoryImportModal'))
-const InventoryMovementsSurface = lazy(() => import('./InventoryMovementsSurface'))
-const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface'))
+const ProductDetailModal = lazy(() => import('./ProductDetailModal')) as any
+const InventoryImportModal = lazy(() => import('./InventoryImportModal')) as any
+const InventoryMovementsSurface = lazy(() => import('./InventoryMovementsSurface')) as any
+const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface')) as any
+const InventoryProductsSurfaceLegacy = InventoryProductsSurface as any
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -36,6 +38,149 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 
+type LegacyInventoryRecord = Record<string, any>
+type InventoryId = number | string
+type Translator = (key: string) => string | undefined
+type TranslationWithFallback = (key: string, fallbackEn?: string, fallbackKm?: string) => string
+type MoneyFormatter = (value: number) => string
+type InventoryLoader<T = any> = () => Promise<T>
+
+type InventoryProduct = LegacyInventoryRecord & {
+  id?: InventoryId
+  name?: string
+  unit?: string
+  parent_id?: InventoryId | null
+  is_group?: boolean
+  branch_stock?: LegacyInventoryRecord[]
+}
+
+type InventoryBranch = LegacyInventoryRecord & {
+  id?: InventoryId
+  name?: string
+  is_default?: boolean
+}
+
+type InventoryMovement = LegacyInventoryRecord & {
+  id?: InventoryId
+  movement_type?: string
+  quantity?: number
+}
+
+type MovementMeta = {
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+type InventoryReasonType = 'adjust' | 'transfer' | 'move'
+
+type InventoryReason = {
+  id: string
+  type: InventoryReasonType
+  label: string
+}
+
+type InventoryReasonGroups = Record<InventoryReasonType, InventoryReason[]>
+
+type InventoryUserOption = {
+  id: InventoryId
+  name?: string
+  username?: string
+}
+
+type InventoryStats = LegacyInventoryRecord | null
+type ReturnStats = LegacyInventoryRecord | null
+
+type InventoryFormValue = string | number
+
+type AdjustForm = {
+  product_id?: InventoryId
+  type: string
+  quantity: InventoryFormValue
+  unit_cost_usd: InventoryFormValue
+  unit_cost_khr: InventoryFormValue
+  reason: string
+  branch_id: InventoryId | ''
+}
+
+type MoveForm = {
+  mode: string
+  destination_product_id: InventoryId | ''
+  destination_name: string
+  quantity: InventoryFormValue
+  branch_id: InventoryId | ''
+  reason: string
+  note: string
+  selling_price_usd: string
+  special_price_usd: string
+  discount_enabled: boolean
+  discount_type: string
+  discount_percent: string
+  discount_amount_usd: string
+}
+
+type TransferForm = {
+  from_branch_id: InventoryId | ''
+  to_branch_id: InventoryId | ''
+  quantity: InventoryFormValue
+  reason: string
+}
+
+type InventoryBatchLine = LegacyInventoryRecord & {
+  product?: InventoryProduct
+  productId: InventoryId
+  action: string
+  quantity: InventoryFormValue
+  branch_id?: InventoryId | ''
+  reason?: string
+  note?: string
+}
+
+type InventoryBatch = {
+  items: InventoryBatchLine[]
+} | null
+
+type StatDetail = {
+  id: string
+  label: ReactNode
+  details?: Array<{ label?: ReactNode; value?: ReactNode; note?: ReactNode }>
+  detailSections?: Array<{
+    title?: ReactNode
+    subtitle?: ReactNode
+    rows?: Array<{ label?: ReactNode; value?: ReactNode; note?: ReactNode }>
+  }>
+} | null
+
+type SectionOption = {
+  value: string
+  label: ReactNode
+  hint?: string
+}
+
+type InventoryAppContext = {
+  t: Translator
+  user?: LegacyInventoryRecord | null
+  notify: (message: string, type?: string) => void
+  fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
+  usdSymbol: string
+}
+
+type InventorySyncContext = {
+  syncChannel?: LegacyInventoryRecord | null
+}
+
+type InventoryApi = Record<string, any>
+
+type LoadOptions = {
+  force?: boolean
+}
+
+function getInventoryApi(): InventoryApi {
+  return window.api as InventoryApi
+}
+
 const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 const INVENTORY_USER_OPTIONS_TIMEOUT_MS = 8000
 const INVENTORY_REASONS_TIMEOUT_MS = 8000
@@ -49,7 +194,7 @@ const INVENTORY_RETURNS_STATS_TIMEOUT_MS = 12000
 const INVENTORY_DASHBOARD_STATS_TIMEOUT_MS = 12000
 const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
 
-function reuseSetWhenUnchanged(current, nextValues = []) {
+function reuseSetWhenUnchanged<T>(current: Set<T>, nextValues: T[] = []): Set<T> {
   const next = new Set(nextValues)
   if (next.size !== current.size) return next
   for (const value of current) {
@@ -58,19 +203,19 @@ function reuseSetWhenUnchanged(current, nextValues = []) {
   return current
 }
 
-function normalizeFiniteIdsFrom(items = [], getValue = (value) => value) {
+function normalizeFiniteIdsFrom<T>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
   return items.reduce((normalized, item) => {
     const id = Number(getValue(item))
     if (Number.isFinite(id)) normalized.push(id)
     return normalized
-  }, [])
+  }, [] as number[])
 }
 
-function normalizeFiniteIds(ids = []) {
+function normalizeFiniteIds(ids: unknown[] = []): number[] {
   return normalizeFiniteIdsFrom(ids)
 }
 
-function countActiveFlags(flags = []) {
+function countActiveFlags(flags: unknown[] = []): number {
   let count = 0
   for (const flag of flags) {
     if (flag) count += 1
@@ -78,7 +223,7 @@ function countActiveFlags(flags = []) {
   return count
 }
 
-function countSelectedIds(ids = [], selectedIds = new Set()) {
+function countSelectedIds(ids: InventoryId[] = [], selectedIds: Set<InventoryId> = new Set()): number {
   let count = 0
   for (const id of ids) {
     if (selectedIds.has(id)) count += 1
@@ -86,7 +231,7 @@ function countSelectedIds(ids = [], selectedIds = new Set()) {
   return count
 }
 
-function renderDestinationProductOptions(products = [], excludedProductId) {
+function renderDestinationProductOptions(products: InventoryProduct[] = [], excludedProductId?: InventoryId) {
   const excludedId = Number(excludedProductId)
   return products.map((product) => {
     const id = Number(product?.id)
@@ -97,7 +242,7 @@ function renderDestinationProductOptions(products = [], excludedProductId) {
 
 const INVENTORY_MOBILE_INITIAL_ITEM_LIMIT = 4
 
-function limitInventorySectionsForMobile(sections = [], maxItems = INVENTORY_MOBILE_INITIAL_ITEM_LIMIT) {
+function limitInventorySectionsForMobile(sections: LegacyInventoryRecord[] = [], maxItems = INVENTORY_MOBILE_INITIAL_ITEM_LIMIT): LegacyInventoryRecord[] {
   const limit = Math.max(1, Number(maxItems || INVENTORY_MOBILE_INITIAL_ITEM_LIMIT))
   let remaining = limit
   const limitedSections = []
@@ -124,11 +269,11 @@ function limitInventorySectionsForMobile(sections = [], maxItems = INVENTORY_MOB
   return limitedSections
 }
 
-function priceCsv(value) {
+function priceCsv(value: unknown): string {
   return formatPriceNumber(value || 0)
 }
 
-function parseInventoryTimestamp(value) {
+function parseInventoryTimestamp(value: unknown): Date | null {
   if (!value) return null
   const raw = String(value).trim()
   if (!raw) return null
@@ -142,8 +287,8 @@ function parseInventoryTimestamp(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
-function InventoryDiscountBadge({ product, fmtUSD, t }) {
-  const promotion = calculateProductDiscount(product)
+function InventoryDiscountBadge({ product, fmtUSD, t }: { product: InventoryProduct; fmtUSD: MoneyFormatter; t: Translator }) {
+  const promotion = calculateProductDiscount(product as any)
   if (!promotion.active) return null
   const label = product?.discount_label || (typeof t === 'function' ? (t('discounts') || 'Discounts') : 'Discounts')
   return (
@@ -153,9 +298,19 @@ function InventoryDiscountBadge({ product, fmtUSD, t }) {
   )
 }
 
-function InventoryBatchPreview({ product, branchId = 'all', t, compact = false }) {
-  const preview = buildBatchPreview(product, branchId, { limit: compact ? 2 : 3 })
-  const label = (key, fallback) => (typeof t === 'function' ? (t(key) || fallback) : fallback)
+function InventoryBatchPreview({
+  product,
+  branchId = 'all',
+  t,
+  compact = false,
+}: {
+  product: InventoryProduct
+  branchId?: InventoryId | null
+  t: Translator
+  compact?: boolean
+}) {
+  const preview = buildBatchPreview(product as any, branchId ?? undefined, { limit: compact ? 2 : 3 })
+  const label = (key: string, fallback: string) => (typeof t === 'function' ? (t(key) || fallback) : fallback)
   if (!preview.totalCount) return null
   return (
     <div className={`flex flex-wrap items-center gap-1 ${compact ? 'mt-1' : 'mt-1.5'}`}>
@@ -163,9 +318,9 @@ function InventoryBatchPreview({ product, branchId = 'all', t, compact = false }
         <span
           key={`${product?.id || 'product'}-inv-batch-${batch.id || batch.batch_id}`}
           className="inline-flex max-w-[13rem] items-center truncate rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
-          title={`${batch.lot_code || label('batch', 'Batch')} / ${batch.expiry_date || label('no_expiry', 'No expiry')} / ${batch.quantity}`}
+          title={`${String(batch.lot_code || label('batch', 'Batch'))} / ${String(batch.expiry_date || label('no_expiry', 'No expiry'))} / ${String(batch.quantity ?? '')}`}
         >
-          {batch.lot_code || label('batch', 'Batch')} / {batch.expiry_date || label('no_expiry', 'No expiry')} / {batch.quantity}
+          {String(batch.lot_code || label('batch', 'Batch'))} / {String(batch.expiry_date || label('no_expiry', 'No expiry'))} / {String(batch.quantity ?? '')}
         </span>
       ))}
       {preview.extraCount ? (
@@ -208,7 +363,7 @@ const RFID_SECTION_OPTIONS = [
   { value: 'sessions', labelKey: 'rfid_section_sessions', hintKey: 'rfid_section_sessions_hint', label: 'Sessions', hint: 'Audit RFID scan sessions and manually apply approved results.' },
 ]
 
-let inventoryExportToolsPromise = null
+let inventoryExportToolsPromise: Promise<LegacyInventoryRecord> | null = null
 
 async function loadInventoryExportTools() {
   if (!inventoryExportToolsPromise) {
@@ -226,37 +381,37 @@ async function loadInventoryExportTools() {
 }
 
 export default function Inventory() {
-  const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp()
-  const { syncChannel } = useSync()
+  const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp() as InventoryAppContext
+  const { syncChannel } = useSync() as InventorySyncContext
   const isActive = useIsPageActive('inventory')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const safeT = useCallback((key, fallback) => {
+  const safeT = useCallback((key: string, fallback: string) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key && !isBrokenLocalizedString(value) ? value : fallback
   }, [t])
-  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key: string, fallbackEn = '', fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key && !isBrokenLocalizedString(value)) return value
     if (isKhmer && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
     return fallbackEn
   }, [isKhmer, t])
-  const [summary,       setSummary]       = useState([])
-  const [stockStats,    setStockStats]    = useState(null)
+  const [summary,       setSummary]       = useState<InventoryProduct[]>([])
+  const [stockStats,    setStockStats]    = useState<InventoryStats>(null)
   const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
   const [statsRefreshError, setStatsRefreshError] = useState('')
-  const [movements,     setMovements]     = useState([])
+  const [movements,     setMovements]     = useState<InventoryMovement[]>([])
   const [movementsLoaded, setMovementsLoaded] = useState(false)
-  const [movementMeta,  setMovementMeta]  = useState({ total: 0, page: 1, pageSize: 50, totalPages: 1 })
-  const [branches,      setBranches]      = useState([])
-  const [returnStats,   setReturnStats]   = useState(null)
+  const [movementMeta,  setMovementMeta]  = useState<MovementMeta>({ total: 0, page: 1, pageSize: 50, totalPages: 1 })
+  const [branches,      setBranches]      = useState<InventoryBranch[]>([])
+  const [returnStats,   setReturnStats]   = useState<ReturnStats>(null)
   const [taxDelivery,   setTaxDelivery]   = useState({ tax: 0, delivery: 0, deliveryCount: 0 })
   const [branchFilter,  setBranchFilter]  = useState('all')
-  const [adjustModal,   setAdjustModal]   = useState(null)
-  const [adjustForm,    setAdjustForm]    = useState({ type:'add', quantity:1, unit_cost_usd:0, unit_cost_khr:0, reason:'', branch_id:'' })
-  const [moveModal,     setMoveModal]     = useState(null)
-  const [moveForm,      setMoveForm]      = useState({ mode: 'existing', destination_product_id: '', destination_name: '', quantity: 1, branch_id: '', reason: 'broken', note: '', selling_price_usd: '', special_price_usd: '', discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '' })
-  const [transferModal, setTransferModal] = useState(null)
-  const [transferForm,  setTransferForm]  = useState({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
+  const [adjustModal,   setAdjustModal]   = useState<InventoryProduct | null>(null)
+  const [adjustForm,    setAdjustForm]    = useState<AdjustForm>({ type:'add', quantity:1, unit_cost_usd:0, unit_cost_khr:0, reason:'', branch_id:'' })
+  const [moveModal,     setMoveModal]     = useState<InventoryProduct | null>(null)
+  const [moveForm,      setMoveForm]      = useState<MoveForm>({ mode: 'existing', destination_product_id: '', destination_name: '', quantity: 1, branch_id: '', reason: 'broken', note: '', selling_price_usd: '', special_price_usd: '', discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '' })
+  const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
+  const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
   const [search,        setSearch]        = useState('')
   const [searchMode, setSearchMode] = useState('AND') // 'AND' | 'OR'
   const deferredSearch = String(search || '').trim()
@@ -276,13 +431,13 @@ export default function Inventory() {
     return window.innerWidth < 640
   })
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState('all')
-  const [inventoryInitials, setInventoryInitials] = useState([])
-  const [cachedInventoryInitialOptions, setCachedInventoryInitialOptions] = useState([])
-  const [inventoryProductFilters, setInventoryProductFilters] = useState({ brands: [] })
-  const [selectedProductIds, setSelectedProductIds] = useState(() => new Set())
-  const [inventoryBatch, setInventoryBatch] = useState(null)
+  const [inventoryInitials, setInventoryInitials] = useState<LegacyInventoryRecord[]>([])
+  const [cachedInventoryInitialOptions, setCachedInventoryInitialOptions] = useState<LegacyInventoryRecord[]>([])
+  const [inventoryProductFilters, setInventoryProductFilters] = useState<{ brands: string[] }>({ brands: [] })
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(() => new Set())
+  const [inventoryBatch, setInventoryBatch] = useState<InventoryBatch>(null)
   const [batchApplying, setBatchApplying] = useState(false)
-  const [rfidStatus, setRfidStatus] = useState(null)
+  const [rfidStatus, setRfidStatus] = useState<LegacyInventoryRecord | null>(null)
   const [tab,           setTab]           = useState('products')
   const [inventorySection, setInventorySection] = useState('products')
   const [rfidSection, setRfidSection] = useState('all')
@@ -290,7 +445,7 @@ export default function Inventory() {
   const [movementUserFilter, setMovementUserFilter] = useState('all')
   const [inventoryBrandPickerOpen, setInventoryBrandPickerOpen] = useState(false)
   const [inventoryMovementUserPickerOpen, setInventoryMovementUserPickerOpen] = useState(false)
-  const [userOptions, setUserOptions] = useState([])
+  const [userOptions, setUserOptions] = useState<InventoryUserOption[]>([])
   const [movementStartDate, setMovementStartDate] = useState('')
   const [movementEndDate, setMovementEndDate] = useState('')
   const [showMovementDateFilter, setShowMovementDateFilter] = useState(false)
@@ -298,42 +453,42 @@ export default function Inventory() {
   const [movementMonthFilter, setMovementMonthFilter] = useState('all')
   const [movementGroupMode, setMovementGroupMode] = useState('time')
   const [movementSortDirection, setMovementSortDirection] = useState('desc')
-  const [selectedMovementIds, setSelectedMovementIds] = useState(() => new Set())
-  const [detailProduct, setDetailProduct] = useState(null)
-  const [expandedMovementGroups, setExpandedMovementGroups] = useState(() => new Set())
-  const [expandedMovementPages, setExpandedMovementPages] = useState({})
-  const [collapsedMovementSections, setCollapsedMovementSections] = useState(() => new Set())
-  const [collapsedInventorySections, setCollapsedInventorySections] = useState(() => new Set())
-  const [collapsedInventoryGroups, setCollapsedInventoryGroups] = useState(() => new Set())
+  const [selectedMovementIds, setSelectedMovementIds] = useState<Set<string>>(() => new Set())
+  const [detailProduct, setDetailProduct] = useState<InventoryProduct | null>(null)
+  const [expandedMovementGroups, setExpandedMovementGroups] = useState<Set<string>>(() => new Set())
+  const [expandedMovementPages, setExpandedMovementPages] = useState<Record<string, number>>({})
+  const [collapsedMovementSections, setCollapsedMovementSections] = useState<Set<string>>(() => new Set())
+  const [collapsedInventorySections, setCollapsedInventorySections] = useState<Set<string>>(() => new Set())
+  const [collapsedInventoryGroups, setCollapsedInventoryGroups] = useState<Set<string>>(() => new Set())
   const [loading,       setLoading]       = useState(true)
-  const [loadError,     setLoadError]     = useState(null)
+  const [loadError,     setLoadError]     = useState<string | null>(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
   const [moveSaving,    setMoveSaving]    = useState(false)
   const [transferSaving, setTransferSaving] = useState(false)
-  const [statDetail,    setStatDetail]    = useState(null)
+  const [statDetail,    setStatDetail]    = useState<StatDetail>(null)
   const [showImport, setShowImport] = useState(false)
-  const [inventoryReasons, setInventoryReasons] = useState([])
-  const [reasonManager, setReasonManager] = useState({ open: false, type: 'adjust' })
+  const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
+  const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
   const [savingReasons, setSavingReasons] = useState(false)
-  const movementSelectAllRef = useRef(null)
-  const inventorySelectAllRef = useRef(null)
+  const movementSelectAllRef = useRef<HTMLInputElement | null>(null)
+  const inventorySelectAllRef = useRef<HTMLInputElement | null>(null)
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
-  const loadWatchdogRef = useRef(null)
-  const loadPromiseRef = useRef(null)
-  const pendingLoadRef = useRef(null)
-  const latestLoadRef = useRef(null)
+  const loadWatchdogRef = useRef<number | null>(null)
+  const loadPromiseRef = useRef<Promise<void> | null>(null)
+  const pendingLoadRef = useRef<{ silent: boolean; options?: LoadOptions } | null>(null)
+  const latestLoadRef = useRef<((silent?: boolean, options?: LoadOptions) => Promise<void>) | null>(null)
   const inventoryReasonsLoadedRef = useRef(false)
-  const inventoryReasonsPromiseRef = useRef(null)
+  const inventoryReasonsPromiseRef = useRef<Promise<InventoryReason[]> | null>(null)
   const inventoryUsersLoadedRef = useRef(false)
-  const inventoryUsersPromiseRef = useRef(null)
+  const inventoryUsersPromiseRef = useRef<Promise<InventoryUserOption[]> | null>(null)
   const adjustStockInFlightRef = useRef(false)
   const moveStockInFlightRef = useRef(false)
   const transferStockInFlightRef = useRef(false)
   const batchInventoryInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory' })
-  const runInventoryMutation = useCallback((loader, label) => (
+  const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
     withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
   const movementTimeMode = useMemo(
@@ -371,7 +526,7 @@ export default function Inventory() {
   const summaryById = useMemo(() => new Map(
     (Array.isArray(summary) ? summary : []).map((product) => [Number(product?.id || 0), product]),
   ), [summary])
-  const getBranchLabel = useCallback((branchId, fallback = '') => (
+  const getBranchLabel = useCallback((branchId: InventoryId | null | undefined, fallback = '') => (
     branchesById.get(String(branchId))?.name || fallback || String(branchId || '')
   ), [branchesById])
 
@@ -413,7 +568,7 @@ export default function Inventory() {
   const loadInventoryReasons = useCallback(async () => {
     try {
       const result = await withLoaderTimeout(
-        () => window.api.getInventoryReasons?.() ?? Promise.resolve({ items: [] }),
+        () => getInventoryApi().getInventoryReasons?.() ?? Promise.resolve({ items: [] }),
         'Inventory reasons',
         INVENTORY_REASONS_TIMEOUT_MS,
       )
@@ -441,7 +596,7 @@ export default function Inventory() {
     if (!isAdmin) return []
     if (inventoryUsersLoadedRef.current) return userOptions
     if (inventoryUsersPromiseRef.current) return inventoryUsersPromiseRef.current
-    const promise = withLoaderTimeout(() => window.api.getUsers(), 'Inventory user filters', INVENTORY_USER_OPTIONS_TIMEOUT_MS)
+    const promise = withLoaderTimeout(() => getInventoryApi().getUsers(), 'Inventory user filters', INVENTORY_USER_OPTIONS_TIMEOUT_MS)
       .then((rows) => {
         const nextRows = Array.isArray(rows) ? rows : []
         setUserOptions(nextRows)
@@ -459,7 +614,7 @@ export default function Inventory() {
     return promise
   }, [isAdmin, userOptions])
 
-  const load = useCallback(async (silent = false, options = {}) => {
+  const load = useCallback(async (silent = false, options: LoadOptions = {}) => {
     const force = !!options?.force
     if (loadPromiseRef.current && !force) {
       const currentPending = pendingLoadRef.current || { silent: true }
@@ -472,7 +627,7 @@ export default function Inventory() {
       if (!silent) {
         setLoadError(null)
         setLoading(true)
-        window.clearTimeout(loadWatchdogRef.current)
+        if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
         if (!loadedOnceRef.current) {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -508,27 +663,27 @@ export default function Inventory() {
       try {
         const primaryLoaders = {
           branches: () => withLoaderTimeout(
-            () => window.api.getBranches(),
+            () => getInventoryApi().getBranches(),
             'Inventory branches',
             INVENTORY_BRANCHES_TIMEOUT_MS,
           ),
           ...(needsStatsData ? {
             stats: () => withLoaderTimeout(
-              () => window.api.getInventoryStats(statsQuery),
+              () => getInventoryApi().getInventoryStats(statsQuery),
               'Inventory stats',
               INVENTORY_STATS_TIMEOUT_MS,
             ),
           } : {}),
           ...(needsProductSummary ? {
             summary: () => withLoaderTimeout(
-              () => window.api.searchInventoryProducts(productQuery),
+              () => getInventoryApi().searchInventoryProducts(productQuery),
               'Inventory products',
               INVENTORY_PRODUCTS_TIMEOUT_MS,
             ),
           } : {}),
           ...(needsMovementData ? {
             movements: () => withLoaderTimeout(
-              () => window.api.getInventoryMovements({
+              () => getInventoryApi().getInventoryMovements({
                 ...branchOpts,
                 search: deferredSearch || undefined,
                 searchMode,
@@ -543,13 +698,13 @@ export default function Inventory() {
           } : {}),
           ...(needsRfidData ? {
             rfid: () => withLoaderTimeout(
-              () => (window.api.getRfidStatus ? window.api.getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
+              () => (getInventoryApi().getRfidStatus ? getInventoryApi().getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
               'Inventory RFID status',
               INVENTORY_RFID_TIMEOUT_MS,
             ),
           } : {}),
         }
-        const result = await settleLoaderMap(primaryLoaders)
+        const result = await settleLoaderMap(primaryLoaders) as LegacyInventoryRecord
         const sumResult = result.values.summary
         const statsResult = result.values.stats
         const sum = Array.isArray(sumResult) ? sumResult : (Array.isArray(sumResult?.items) ? sumResult.items : [])
@@ -558,7 +713,7 @@ export default function Inventory() {
         const brs = result.values.branches
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
+        const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError) as Error | undefined
         if (versionMismatchError) {
           setLoadError(versionMismatchError.message)
           throw versionMismatchError
@@ -628,16 +783,16 @@ export default function Inventory() {
         if (needsStatsData) {
           void settleLoaderMap({
             returns: () => withLoaderTimeout(
-              () => window.api.getReturns({ scope: 'all' }),
+              () => getInventoryApi().getReturns({ scope: 'all' }),
               'Inventory returns stats',
               INVENTORY_RETURNS_STATS_TIMEOUT_MS,
             ),
             dashboard: () => withLoaderTimeout(
-              () => window.api.getDashboard(),
+              () => getInventoryApi().getDashboard(),
               'Inventory dashboard stats',
               INVENTORY_DASHBOARD_STATS_TIMEOUT_MS,
             ),
-          }).then((secondaryResult) => {
+          }).then((secondaryResult: LegacyInventoryRecord) => {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
             const rets = secondaryResult.values.returns
             const dash = secondaryResult.values.dashboard
@@ -679,16 +834,17 @@ export default function Inventory() {
             }
           }).catch(() => {})
         }
-      } catch (e) {
+      } catch (e: unknown) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        console.warn('[Inventory] load failed:', e.message)
+        const message = e instanceof Error ? e.message : 'Failed to load inventory'
+        console.warn('[Inventory] load failed:', message)
         if (!silent && !loadedOnceRef.current) {
-          setLoadError(e.message || 'Failed to load inventory')
+          setLoadError(message)
         } else if (!silent) {
           setLoadError(tr('inventory_refresh_failed', 'Inventory could not refresh right now. Showing the latest loaded data.'))
         }
       } finally {
-        window.clearTimeout(loadWatchdogRef.current)
+        if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
         if (!silent && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
       }
     })()
@@ -733,7 +889,7 @@ export default function Inventory() {
 
   useEffect(() => {
     if (!isActive) {
-      window.clearTimeout(loadWatchdogRef.current)
+      if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
       pendingLoadRef.current = null
@@ -769,11 +925,11 @@ export default function Inventory() {
     if (ch === 'inventory' || ch === 'products' || ch === 'sales' || ch === 'returns') load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
-  const saveReasonCatalog = useCallback(async (nextItems) => {
+  const saveReasonCatalog = useCallback(async (nextItems: InventoryReason[]) => {
     setSavingReasons(true)
     try {
-      const result = await window.api.saveInventoryReasons?.(nextItems)
-      const items = Array.isArray(result?.items) ? result.items : []
+      const result = await getInventoryApi().saveInventoryReasons?.(nextItems)
+      const items = Array.isArray(result?.items) ? result.items as InventoryReason[] : []
       setInventoryReasons(items)
       return items
     } finally {
@@ -789,14 +945,14 @@ export default function Inventory() {
     setReasonDraft('')
   }, [inventoryReasons, reasonDraft, reasonManager.type, saveReasonCatalog])
 
-  const renameSavedReason = useCallback(async (entry) => {
+  const renameSavedReason = useCallback(async (entry: InventoryReason) => {
     const nextLabel = window.prompt(tr('rename_reason_prompt', 'Rename saved reason'), entry?.label || '')
     if (!nextLabel) return
     const next = inventoryReasons.map((item) => item.id === entry.id ? { ...item, label: nextLabel.trim() } : item)
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
 
-  const deleteSavedReason = useCallback(async (entry) => {
+  const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
     if (!window.confirm(tr('delete_saved_reason_confirm'))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
@@ -807,12 +963,12 @@ export default function Inventory() {
     void ensureInventoryUsersLoaded()
   }, [ensureInventoryUsersLoaded, inventorySection, isActive, isAdmin, tab])
   useEffect(() => () => {
-    window.clearTimeout(loadWatchdogRef.current)
+    if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
     loadPromiseRef.current = null
   }, [])
 
-  const getStockQty = useCallback((product) => {
+  const getStockQty = useCallback((product?: InventoryProduct | null): number => {
     if (!product) return 0
     if (branchFilter !== 'all') return product.display_quantity ?? product.stock_quantity ?? 0
     return product.stock_quantity ?? 0
@@ -835,11 +991,12 @@ export default function Inventory() {
 
   const handleAdjust = async () => {
     if (adjustSaving) return
-    const qty = parseFloat(adjustForm.quantity)
+    const qty = parseFloat(String(adjustForm.quantity))
     if (!qty || qty <= 0) return notify('Invalid quantity', 'error')
     const selectedAdjustProduct = summaryById.get(Number(adjustForm.product_id || adjustModal?.id)) || adjustModal
+    if (!selectedAdjustProduct) return notify('Select a product first', 'error')
     const previousSnapshot = cloneHistorySnapshot(selectedAdjustProduct)
-    const numericBranchId = adjustForm.branch_id ? parseInt(adjustForm.branch_id, 10) : null
+    const numericBranchId = adjustForm.branch_id ? parseInt(String(adjustForm.branch_id), 10) : null
     const selectedBranchStockById = new Map(
       (selectedAdjustProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), entry]),
     )
@@ -852,8 +1009,8 @@ export default function Inventory() {
       productName: selectedAdjustProduct.name,
       type: adjustForm.type,
       quantity: qty,
-      unitCostUsd: parseFloat(adjustForm.unit_cost_usd) || 0,
-      unitCostKhr: parseFloat(adjustForm.unit_cost_khr) || 0,
+      unitCostUsd: parseFloat(String(adjustForm.unit_cost_usd)) || 0,
+      unitCostKhr: parseFloat(String(adjustForm.unit_cost_khr)) || 0,
       reason: adjustForm.reason || '',
       branchId: numericBranchId,
       userId: user?.id,
@@ -882,7 +1039,7 @@ export default function Inventory() {
     }
     setAdjustSaving(true)
     try {
-      const res = await runInventoryMutation(() => window.api.adjustStock(adjustmentRequest), 'Adjust inventory stock')
+      const res = await runInventoryMutation(() => getInventoryApi().adjustStock(adjustmentRequest), 'Adjust inventory stock')
       if (res?.success) {
         actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
@@ -892,12 +1049,12 @@ export default function Inventory() {
               : adjustmentRequest.type === 'remove'
                 ? { ...adjustmentRequest, type: 'add', reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
                 : { ...adjustmentRequest, type: 'remove', reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-            const undoResult = await runInventoryMutation(() => window.api.adjustStock(inverseRequest), 'Undo inventory adjustment')
+            const undoResult = await runInventoryMutation(() => getInventoryApi().adjustStock(inverseRequest), 'Undo inventory adjustment')
             if (!undoResult?.success) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
             await load(true)
           },
           redo: async () => {
-            const redoResult = await runInventoryMutation(() => window.api.adjustStock({ ...adjustmentRequest, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` }), 'Redo inventory adjustment')
+            const redoResult = await runInventoryMutation(() => getInventoryApi().adjustStock({ ...adjustmentRequest, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` }), 'Redo inventory adjustment')
             if (!redoResult?.success) throw new Error(redoResult?.error || 'Failed to redo stock adjustment')
             await load(true)
           },
@@ -907,21 +1064,21 @@ export default function Inventory() {
         await load(true)
       }
       else notify(res?.error || 'Adjustment failed', 'error')
-    } catch (e) { notify(e?.message || 'Error', 'error') }
+    } catch (e: unknown) { notify(e instanceof Error ? e.message : 'Error', 'error') }
     finally {
       finishSingleAction(adjustStockInFlightRef)
       setAdjustSaving(false)
     }
   }
 
-  const openAdjust = (p) => {
+  const openAdjust = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
     setAdjustModal(p)
     const defaultBranchId = defaultBranch?.id?.toString() || ''
     setAdjustForm({ product_id: p.id, type:'add', quantity:1, unit_cost_usd: p.purchase_price_usd || p.cost_price_usd || 0, unit_cost_khr: p.purchase_price_khr || 0, reason:'', branch_id: defaultBranchId })
   }
 
-  const openMove = (p) => {
+  const openMove = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
     setMoveModal(p)
     const defaultBranchId = branchFilter !== 'all'
@@ -944,10 +1101,10 @@ export default function Inventory() {
     })
   }
 
-  const openTransfer = (p) => {
+  const openTransfer = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
     const branchStock = Array.isArray(p?.branch_stock) ? p.branch_stock : []
-    const firstStockBranch = branchStock.find((item) => Number(item?.quantity || 0) > 0)?.branch_id
+    const firstStockBranch = branchStock.find((item: LegacyInventoryRecord) => Number(item?.quantity || 0) > 0)?.branch_id
     const defaultSourceId = branchFilter !== 'all'
       ? String(branchFilter)
       : String(firstStockBranch || defaultBranch?.id || '')
@@ -963,17 +1120,17 @@ export default function Inventory() {
     })
   }
 
-  const openMovementProductDetail = useCallback(async (movement) => {
+  const openMovementProductDetail = useCallback(async (movement: InventoryMovement) => {
     const productId = Number(movement?.product_id || 0)
     const current = productId ? summaryById.get(productId) : null
     if (current) {
       setDetailProduct(current)
       return
     }
-    if (productId && window.api.getProductsByIds) {
+    if (productId && getInventoryApi().getProductsByIds) {
       try {
         const result = await withLoaderTimeout(
-          () => window.api.getProductsByIds([productId], { include: 'branch_stock,images,batches' }),
+          () => getInventoryApi().getProductsByIds([productId], { include: 'branch_stock,images,batches' }),
           'Inventory product detail',
           INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS,
         )
@@ -1001,7 +1158,7 @@ export default function Inventory() {
 
   const handleMoveStock = async () => {
     if (moveSaving || !moveModal) return
-    const qty = parseFloat(moveForm.quantity)
+    const qty = parseFloat(String(moveForm.quantity))
     if (!qty || qty <= 0) return notify(tr('invalid_quantity', 'Invalid quantity'), 'error')
     const request = {
       sourceProductId: moveModal.id,
@@ -1040,12 +1197,12 @@ export default function Inventory() {
     }
     setMoveSaving(true)
     try {
-      const result = await runInventoryMutation(() => window.api.moveStockRow(request), 'Move inventory stock')
+      const result = await runInventoryMutation(() => getInventoryApi().moveStockRow(request), 'Move inventory stock')
       if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed'))
       actionHistory.pushAction({
         label: `${tr('move_stock', 'Move stock')}: ${moveModal.name}`,
         undo: async () => {
-          const undoResult = await runInventoryMutation(() => window.api.moveStockRow({
+          const undoResult = await runInventoryMutation(() => getInventoryApi().moveStockRow({
             sourceProductId: result.destinationProductId || request.destinationProductId,
             destinationProductId: request.sourceProductId,
             branchId: request.branchId,
@@ -1056,7 +1213,7 @@ export default function Inventory() {
           await load(true)
         },
         redo: async () => {
-          const redoResult = await runInventoryMutation(() => window.api.moveStockRow(request), 'Redo inventory stock move')
+          const redoResult = await runInventoryMutation(() => getInventoryApi().moveStockRow(request), 'Redo inventory stock move')
           if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
           await load(true)
         },
@@ -1064,8 +1221,8 @@ export default function Inventory() {
       notify(tr('stock_moved', 'Stock moved'))
       setMoveModal(null)
       await load(true)
-    } catch (error) {
-      notify(error?.message || tr('stock_move_failed', 'Stock move failed'), 'error')
+    } catch (error: unknown) {
+      notify(error instanceof Error ? error.message : tr('stock_move_failed', 'Stock move failed'), 'error')
     } finally {
       finishSingleAction(moveStockInFlightRef)
       setMoveSaving(false)
@@ -1074,7 +1231,7 @@ export default function Inventory() {
 
   const handleTransferStock = async () => {
     if (transferSaving || !transferModal) return
-    const quantity = Number.parseFloat(transferForm.quantity)
+    const quantity = Number.parseFloat(String(transferForm.quantity))
     if (!transferForm.from_branch_id || !transferForm.to_branch_id) {
       notify(tr('select_transfer_branches', 'Choose both source and destination branches.'), 'error')
       return
@@ -1106,7 +1263,7 @@ export default function Inventory() {
     setTransferSaving(true)
     try {
       const previousSnapshot = cloneHistorySnapshot(transferModal)
-      const result = await runInventoryMutation(() => window.api.transferInventoryStock({
+      const result = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
         productId: transferModal.id,
         fromBranchId: transferForm.from_branch_id,
         toBranchId: transferForm.to_branch_id,
@@ -1119,7 +1276,7 @@ export default function Inventory() {
       actionHistory.pushAction({
         label: `${tr('transfer', 'Transfer')}: ${transferModal.name}`,
         undo: async () => {
-          const undoResult = await runInventoryMutation(() => window.api.transferInventoryStock({
+          const undoResult = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
             productId: transferModal.id,
             fromBranchId: transferForm.to_branch_id,
             toBranchId: transferForm.from_branch_id,
@@ -1132,7 +1289,7 @@ export default function Inventory() {
           await load(true)
         },
         redo: async () => {
-          const redoResult = await runInventoryMutation(() => window.api.transferInventoryStock({
+          const redoResult = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
             productId: transferModal.id,
             fromBranchId: transferForm.from_branch_id,
             toBranchId: transferForm.to_branch_id,
@@ -1148,8 +1305,8 @@ export default function Inventory() {
       notify(tr('stock_transferred', 'Stock transferred'))
       setTransferModal(null)
       await load(true)
-    } catch (error) {
-      notify(error?.message || tr('stock_transfer_failed', 'Stock transfer failed'), 'error')
+    } catch (error: unknown) {
+      notify(error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed'), 'error')
     } finally {
       finishSingleAction(transferStockInFlightRef)
       setTransferSaving(false)
@@ -1157,27 +1314,27 @@ export default function Inventory() {
   }
 
   // Search: comma-separated terms, AND/OR mode matching Products page behaviour
-  const searchTerms = deferredSearch.trim()
+  const searchTerms: string[] = deferredSearch.trim()
     ? (deferredSearch.includes(',') ? deferredSearch.split(',') : deferredSearch.split(/\s+/))
-        .map(s => s.trim().toLowerCase())
+        .map((s: string) => s.trim().toLowerCase())
         .filter(Boolean)
     : []
 
-  const matchesSearch = (hay) => {
+  const matchesSearch = (hay: string): boolean => {
     if (!searchTerms.length) return true
     return searchMode === 'AND'
       ? searchTerms.every(term => hay.includes(term))
       : searchTerms.some(term => hay.includes(term))
   }
 
-  const productHay = (p) =>
+  const productHay = (p: InventoryProduct): string =>
     `${p.name} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.sku||''} ${p.barcode||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
 
-  const movHay = (m) =>
+  const movHay = (m: InventoryMovement): string =>
     `${m.product_name||''} ${m.branch_name||''} ${m.reason||''} ${m.user_name||''} ${m.movement_type||''} ${m.reference_id||''} ${m.lot_code||''} ${m.expiry_date||''} ${m.created_at||''}`.toLowerCase()
 
   const hasServerBackedProductSearch = !!searchTerms.length
-  const filteredSummary = summary.filter(p => {
+  const filteredSummary = summary.filter((p: InventoryProduct) => {
     if (!hasServerBackedProductSearch && !matchesSearch(productHay(p))) return false
     if (brandFilter !== 'all' && String(p.brand || '').toLowerCase() !== brandFilter.toLowerCase()) return false
     const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
@@ -1209,12 +1366,12 @@ export default function Inventory() {
     () => inventoryProductSections.flatMap((section) => section.items),
     [inventoryProductSections],
   )
-  const visibleInventoryProductIds = useMemo(
+  const visibleInventoryProductIds = useMemo<number[]>(
     () => visibleInventoryProducts.reduce((ids, product) => {
       const id = Number(product?.id)
       if (Number.isFinite(id)) ids.push(id)
       return ids
-    }, []),
+    }, [] as number[]),
     [visibleInventoryProducts],
   )
   const visibleInventoryProductsSignature = useMemo(
@@ -1229,7 +1386,7 @@ export default function Inventory() {
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
     const media = window.matchMedia('(max-width: 639px)')
-    const syncViewport = (event) => {
+    const syncViewport = (event: MediaQueryList | MediaQueryListEvent) => {
       setIsInventoryMobileViewport(Boolean(event?.matches))
     }
     syncViewport(media)
@@ -1251,7 +1408,7 @@ export default function Inventory() {
       return
     }
     let cancelled = false
-    let nestedFrame = null
+    let nestedFrame: number | null = null
     const frame = window.requestAnimationFrame(() => {
       nestedFrame = window.requestAnimationFrame(() => {
         if (!cancelled) setInitialInventoryDesktopRevealReady(true)
@@ -1358,13 +1515,13 @@ export default function Inventory() {
     inventorySelectAllRef.current.indeterminate = selectedProductIds.size > 0 && selectedProductIds.size < visibleInventoryProducts.length
   }, [selectedProductIds.size, visibleInventoryProducts.length])
 
-  const toggleSelectedProduct = useCallback((productId) => {
+  const toggleSelectedProduct = useCallback((productId: InventoryId) => {
     const numericId = Number(productId)
     if (!Number.isFinite(numericId)) return
     setSelectedProductIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
   }, [])
 
-  const toggleSelectAllProducts = useCallback((checked) => {
+  const toggleSelectAllProducts = useCallback((checked: boolean) => {
     if (!checked) {
       setSelectedProductIds(new Set())
       return
@@ -1372,18 +1529,18 @@ export default function Inventory() {
     setSelectedProductIds(new Set(visibleInventoryProductIds))
   }, [visibleInventoryProductIds])
 
-  const selectedProducts = useMemo(
-    () => visibleInventoryProducts.filter((product) => selectedProductIds.has(Number(product.id))),
+  const selectedProducts = useMemo<InventoryProduct[]>(
+    () => visibleInventoryProducts.filter((product) => selectedProductIds.has(Number(product.id))) as InventoryProduct[],
     [selectedProductIds, visibleInventoryProducts],
   )
   const hasSelectedProducts = selectedProducts.length > 0
 
-  const buildBatchDraft = useCallback((product) => {
+  const buildBatchDraft = useCallback((product: InventoryProduct): InventoryBatchLine => {
     const defaultBranchId = branchFilter !== 'all'
       ? String(branchFilter)
       : defaultBranch?.id?.toString() || ''
     const branchStock = Array.isArray(product?.branch_stock) ? product.branch_stock : []
-    const firstStockBranch = branchStock.find((item) => Number(item?.quantity || 0) > 0)?.branch_id
+    const firstStockBranch = branchStock.find((item: LegacyInventoryRecord) => Number(item?.quantity || 0) > 0)?.branch_id
     const defaultSourceId = branchFilter !== 'all'
       ? String(branchFilter)
       : String(firstStockBranch || defaultBranch?.id || '')
@@ -1427,7 +1584,7 @@ export default function Inventory() {
     })
   }, [buildBatchDraft, ensureInventoryReasonsLoaded, selectedProducts])
 
-  const updateInventoryBatchLine = useCallback((productId, patch) => {
+  const updateInventoryBatchLine = useCallback((productId: InventoryId, patch: Partial<InventoryBatchLine>) => {
     setInventoryBatch((current) => {
       if (!current?.items?.length) return current
       return {
@@ -1441,7 +1598,7 @@ export default function Inventory() {
     })
   }, [])
 
-  const removeInventoryBatchLine = useCallback((productId) => {
+  const removeInventoryBatchLine = useCallback((productId: InventoryId) => {
     const numericId = Number(productId)
     setInventoryBatch((current) => {
       if (!current?.items?.length) return current
@@ -1464,13 +1621,13 @@ export default function Inventory() {
     }
     setBatchApplying(true)
     try {
-      const applyRun = await runConcurrentTasks(inventoryBatch.items, async (item) => {
-        const quantity = Number.parseFloat(item.quantity)
+      const applyRun = await runConcurrentTasks(inventoryBatch.items, async (item: InventoryBatchLine) => {
+        const quantity = Number.parseFloat(String(item.quantity))
         if (!Number.isFinite(quantity) || quantity <= 0) {
           throw new Error(tr('invalid_quantity', 'Invalid quantity'))
         }
         if (item.action === 'adjust') {
-          const result = await runInventoryMutation(() => window.api.adjustStock({
+          const result = await runInventoryMutation(() => getInventoryApi().adjustStock({
             productId: item.productId,
             productName: item.productName,
             type: item.adjustType,
@@ -1482,7 +1639,7 @@ export default function Inventory() {
           }), 'Batch adjust inventory stock')
           if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed'))
         } else if (item.action === 'transfer') {
-          const result = await runInventoryMutation(() => window.api.transferInventoryStock({
+          const result = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
             productId: item.productId,
             fromBranchId: item.fromBranchId,
             toBranchId: item.toBranchId,
@@ -1491,7 +1648,7 @@ export default function Inventory() {
           }), 'Batch transfer inventory stock')
           if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed'))
         } else if (item.action === 'move') {
-          const request = {
+          const request: LegacyInventoryRecord = {
             sourceProductId: item.productId,
             destinationProductId: item.moveMode === 'existing' ? Number(item.destinationProductId || 0) : null,
             branchId: item.branchId,
@@ -1510,11 +1667,11 @@ export default function Inventory() {
               discount_amount_usd: item.discountAmountUsd,
             }
           }
-          const result = await runInventoryMutation(() => window.api.moveStockRow(request), 'Batch move inventory stock')
+          const result = await runInventoryMutation(() => getInventoryApi().moveStockRow(request), 'Batch move inventory stock')
           if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed'))
         }
       })
-      const failedItems = applyRun.failures.map((entry) => ({
+      const failedItems = applyRun.failures.map((entry: LegacyInventoryRecord) => ({
         ...(entry.item || {}),
         error: entry?.error?.message || tr('save_failed', 'Save failed'),
       }))
@@ -1583,20 +1740,20 @@ export default function Inventory() {
   )
 
   const getMovementRecordCount = useCallback(
-    (group) => Math.max(0, Number(group?.recordCount || group?.items?.length || 0)),
+    (group: LegacyInventoryRecord) => Math.max(0, Number(group?.recordCount || group?.items?.length || 0)),
     [],
   )
 
   const getMovementActionGroupRecordCount = useCallback(
-    (actionGroup) => (Array.isArray(actionGroup?.items)
-      ? actionGroup.items.reduce((sum, group) => sum + getMovementRecordCount(group), 0)
+    (actionGroup: LegacyInventoryRecord) => (Array.isArray(actionGroup?.items)
+      ? actionGroup.items.reduce((sum: number, group: LegacyInventoryRecord) => sum + getMovementRecordCount(group), 0)
       : 0),
     [getMovementRecordCount],
   )
 
   const getMovementSectionRecordCount = useCallback(
-    (section) => (Array.isArray(section?.groups)
-      ? section.groups.reduce((sum, actionGroup) => sum + getMovementActionGroupRecordCount(actionGroup), 0)
+    (section: LegacyInventoryRecord) => (Array.isArray(section?.groups)
+      ? section.groups.reduce((sum: number, actionGroup: LegacyInventoryRecord) => sum + getMovementActionGroupRecordCount(actionGroup), 0)
       : 0),
     [getMovementActionGroupRecordCount],
   )
@@ -1624,7 +1781,7 @@ export default function Inventory() {
     movementSelectAllRef.current.indeterminate = selectedMovementIds.size > 0 && selectedMovementIds.size < visibleMovementGroups.length
   }, [selectedMovementIds.size, visibleMovementGroups.length])
 
-  const toggleMovementGroup = useCallback((groupId) => {
+  const toggleMovementGroup = useCallback((groupId: string) => {
     setExpandedMovementGroups((current) => {
       const next = new Set(current)
       if (next.has(groupId)) next.delete(groupId)
@@ -1634,19 +1791,19 @@ export default function Inventory() {
     setExpandedMovementPages((current) => ({ ...current, [groupId]: current[groupId] || 1 }))
   }, [])
 
-  const setExpandedMovementGroupPage = useCallback((groupId, page) => {
+  const setExpandedMovementGroupPage = useCallback((groupId: string, page: number) => {
     setExpandedMovementPages((current) => ({ ...current, [groupId]: Math.max(1, Number(page || 1) || 1) }))
   }, [])
 
-  const toggleMovementSelection = useCallback((groupId) => {
+  const toggleMovementSelection = useCallback((groupId: string) => {
     setSelectedMovementIds((current) => toggleIdSet(current, [groupId], !current.has(groupId)))
   }, [])
 
-  const toggleMovementScopeSelection = useCallback((ids, checked) => {
+  const toggleMovementScopeSelection = useCallback((ids: string[], checked: boolean) => {
     setSelectedMovementIds((current) => toggleIdSet(current, ids, checked))
   }, [])
 
-  const toggleAllMovementSelection = useCallback((checked) => {
+  const toggleAllMovementSelection = useCallback((checked: boolean) => {
     if (!checked) {
       setSelectedMovementIds(new Set())
       return
@@ -1654,7 +1811,7 @@ export default function Inventory() {
     setSelectedMovementIds(new Set(visibleMovementGroups.map((group) => group.id)))
   }, [visibleMovementGroups])
 
-  const toggleMovementSectionCollapsed = useCallback((sectionId) => {
+  const toggleMovementSectionCollapsed = useCallback((sectionId: string) => {
     setCollapsedMovementSections((current) => {
       const next = new Set(current)
       if (next.has(sectionId)) next.delete(sectionId)
@@ -1756,19 +1913,19 @@ export default function Inventory() {
   const inventoryProductSummaryLabel = totalProducts
     ? `${inventoryProductStart.toLocaleString()}-${inventoryProductEnd.toLocaleString()} / ${Number(totalProducts || 0).toLocaleString()}`
     : '0 / 0'
-  const getInventoryGroupPriceLabel = useCallback((group) => {
+  const getInventoryGroupPriceLabel = useCallback((group: LegacyInventoryRecord) => {
     const min = Number(group?.minSellingPriceUsd || 0)
     const max = Number(group?.maxSellingPriceUsd || 0)
     if (group?.hasMultipleItems && min !== max) return `${fmtUSD(min)} - ${fmtUSD(max)}`
     return fmtUSD(max || min || 0)
   }, [fmtUSD])
-  const getInventoryGroupSummaryParts = useCallback((group, { includeCount = true } = {}) => {
+  const getInventoryGroupSummaryParts = useCallback((group: LegacyInventoryRecord, { includeCount = true }: { includeCount?: boolean } = {}) => {
     const parts = [
       includeCount ? `${group?.items?.length || 0} ${(group?.items?.length || 0) === 1 ? (t('option') || 'option') : (t('options') || 'options')}` : null,
       `${group?.stockTotal || 0} ${(t('stock') || 'stock').toLowerCase()}`,
       getInventoryGroupPriceLabel(group),
     ]
-    return parts.filter(Boolean)
+    return parts.filter(Boolean) as string[]
   }, [getInventoryGroupPriceLabel, t])
   const inventoryControlLabels = useMemo(() => ({
     selected: tr('inventory_selected_count', `${selectedProducts.length} selected`),
@@ -1790,21 +1947,21 @@ export default function Inventory() {
       return next.size === current.size ? current : next
     })
   }, [inventoryProductSections])
-  const isInventorySelectionScopeFullySelected = useCallback((ids = []) => {
+  const isInventorySelectionScopeFullySelected = useCallback((ids: unknown[] = []) => {
     const normalized = normalizeFiniteIds(ids)
     return normalized.length > 0 && normalized.every((id) => selectedProductIds.has(id))
   }, [selectedProductIds])
-  const isInventorySelectionScopePartiallySelected = useCallback((ids = []) => {
+  const isInventorySelectionScopePartiallySelected = useCallback((ids: unknown[] = []) => {
     const normalized = normalizeFiniteIds(ids)
     if (!normalized.length) return false
     const selectedCount = countSelectedIds(normalized, selectedProductIds)
     return selectedCount > 0 && selectedCount < normalized.length
   }, [selectedProductIds])
-  const toggleInventorySelectionScope = useCallback((ids = [], checked) => {
+  const toggleInventorySelectionScope = useCallback((ids: unknown[] = [], checked: boolean) => {
     const normalized = normalizeFiniteIds(ids)
     setSelectedProductIds((current) => toggleIdSet(current, normalized, checked))
   }, [])
-  const toggleInventorySection = useCallback((sectionId) => {
+  const toggleInventorySection = useCallback((sectionId: string) => {
     setCollapsedInventorySections((current) => {
       const next = new Set(current)
       if (next.has(sectionId)) next.delete(sectionId)
@@ -1812,7 +1969,7 @@ export default function Inventory() {
       return next
     })
   }, [])
-  const toggleInventoryGroup = useCallback((groupKey) => {
+  const toggleInventoryGroup = useCallback((groupKey: string) => {
     setCollapsedInventoryGroups((current) => {
       const next = new Set(current)
       if (next.has(groupKey)) next.delete(groupKey)
@@ -1848,7 +2005,7 @@ export default function Inventory() {
   const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.')
   const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.')
   const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.')
-  const statsValue = (value) => (stockStatsLoaded ? value : '...')
+  const statsValue = (value: ReactNode) => (stockStatsLoaded ? value : '...')
   const inventoryStatLabels = {
     products: safeT('products', safeT('products_total', 'Products')),
     lowStock: tr('low_stock', 'Low stock'),
@@ -2031,7 +2188,7 @@ export default function Inventory() {
       ],
     },
   ]
-  const inventoryStatCards = useMemo(
+  const inventoryStatCards = useMemo<LegacyInventoryRecord[]>(
     () => [...primaryStats, ...financeStats],
     [financeStats, primaryStats],
   )
@@ -2088,7 +2245,7 @@ export default function Inventory() {
       .map((raw) => {
         return parseInventoryTimestamp(raw)
       })
-      .filter(Boolean)
+      .filter((date): date is Date => Boolean(date))
       .sort((left, right) => left.getTime() - right.getTime())
     if (!timestamps.length) {
       if (movementStartDate || movementEndDate) {
@@ -2366,7 +2523,7 @@ export default function Inventory() {
     visibleMovementRecordCount,
   ])
 
-  const buildMovementRows = useCallback((groups) => groups.map((group) => ({
+  const buildMovementRows = useCallback((groups: LegacyInventoryRecord[]) => groups.map((group: LegacyInventoryRecord) => ({
     Date: group.latest_at || '',
     Activity: group.movementLabel || '',
     Products: group.productSummary || '',
@@ -2378,8 +2535,8 @@ export default function Inventory() {
     User: group.userSummary || '',
   })), [])
 
-  const buildInventoryProductRows = useCallback((productsToExport = filteredSummary) => (
-    productsToExport.map((p) => ({
+  const buildInventoryProductRows = useCallback((productsToExport: InventoryProduct[] = filteredSummary) => (
+    productsToExport.map((p: InventoryProduct) => ({
       Name: p.name || '',
       SKU: p.sku || '',
       Category: p.category || '',
@@ -2410,12 +2567,12 @@ export default function Inventory() {
     }))
   ), [filteredSummary, getStockQty])
 
-  const exportMovementGroups = useCallback(async (groups, filePrefix = 'inventory-movements') => {
+  const exportMovementGroups = useCallback(async (groups: LegacyInventoryRecord[], filePrefix = 'inventory-movements') => {
     const { downloadCSV } = await loadInventoryExportTools()
     downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildMovementRows(groups))
   }, [buildMovementRows, exportStamp])
 
-  const exportInventorySummary = useCallback(async (productsToExport = filteredSummary, filePrefix = 'inventory') => {
+  const exportInventorySummary = useCallback(async (productsToExport: InventoryProduct[] = filteredSummary, filePrefix = 'inventory') => {
     const { downloadCSV } = await loadInventoryExportTools()
     downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildInventoryProductRows(productsToExport))
   }, [buildInventoryProductRows, exportStamp, filteredSummary])
@@ -2612,7 +2769,7 @@ export default function Inventory() {
     movementVolumeRows,
   ])
 
-  const inventoryExportItems = useMemo(() => {
+  const inventoryExportItems = useMemo<any[]>(() => {
     if (tab === 'movements') {
       return [
         { label: tr('export_full_inventory_package', 'Export full inventory package'), onClick: () => exportInventoryPackage('movements'), color: 'green' },
@@ -2717,23 +2874,25 @@ export default function Inventory() {
           label: t('activity') || 'Activity',
           options: [
             { id: 'all', label: t('all_types') || 'All types', active: movFilter === 'all', onClick: () => setMovFilter('all') },
-            ['sale', t('sale') || 'Sale'],
-            ['purchase', t('purchase') || 'Purchase'],
-            ['return', t('returns') || 'Return'],
-            ['return_reversal', t('return_type_writeoff') || 'Return reversal'],
-            ['adjustment', t('adjustment') || 'Adjustment'],
-            ['transfer', t('stock_transfer') || 'Transfer'],
-          ].slice(1).map(([value, label]) => ({
-            id: value,
-            label,
-            active: movFilter === value,
-            onClick: () => setMovFilter(movFilter === value ? 'all' : value),
-          })),
+            ...([
+              ['sale', t('sale') || 'Sale'],
+              ['purchase', t('purchase') || 'Purchase'],
+              ['return', t('returns') || 'Return'],
+              ['return_reversal', t('return_type_writeoff') || 'Return reversal'],
+              ['adjustment', t('adjustment') || 'Adjustment'],
+              ['transfer', t('stock_transfer') || 'Transfer'],
+            ] as [string, string][]).map(([value, label]) => ({
+              id: value,
+              label,
+              active: movFilter === value,
+              onClick: () => setMovFilter(movFilter === value ? 'all' : value),
+            })),
+          ],
         },
         isAdmin ? {
           id: 'movement-user',
           label: t('user') || 'User',
-          render: ({ closeMenu }) => (
+          render: ({ closeMenu }: { closeMenu: () => void }) => (
             inventoryMovementUserPickerOpen ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -2852,7 +3011,7 @@ export default function Inventory() {
       branches.length > 1 ? {
         id: 'branch',
         label: t('branch') || 'Branch',
-        render: ({ closeMenu }) => (
+        render: ({ closeMenu }: { closeMenu: () => void }) => (
           <label className="block">
             <span className="sr-only">{t('branch') || 'Branch'}</span>
             <select
@@ -2875,7 +3034,7 @@ export default function Inventory() {
       {
         id: 'group',
         label: t('groups') || 'Groups',
-        render: ({ closeMenu }) => (
+        render: ({ closeMenu }: { closeMenu: () => void }) => (
           <label className="block">
             <span className="sr-only">{t('groups') || 'Groups'}</span>
             <select
@@ -2899,7 +3058,7 @@ export default function Inventory() {
       {
         id: 'stock',
         label: t('stock_status') || 'Stock',
-        render: ({ closeMenu }) => (
+        render: ({ closeMenu }: { closeMenu: () => void }) => (
           <label className="block">
             <span className="sr-only">{t('stock_status') || 'Stock'}</span>
             <select
@@ -2922,7 +3081,7 @@ export default function Inventory() {
       inventoryBrands.length ? {
         id: 'brand',
         label: t('brand') || 'Brand',
-        render: ({ closeMenu }) => (
+        render: ({ closeMenu }: { closeMenu: () => void }) => (
           inventoryBrandPickerOpen ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -3069,7 +3228,7 @@ export default function Inventory() {
   )
   const isMovementsFirstLoad = showMovementsSection && needsMovementData && !movementsLoaded
   const isProductsFirstLoad = showProductsSection && needsProductSummary && !inventoryProductsLoaded
-  const selectInventorySection = (nextSection) => {
+  const selectInventorySection = (nextSection: string) => {
     setInventorySection(nextSection)
     if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
   }
@@ -3149,7 +3308,7 @@ export default function Inventory() {
               key={stat.id}
               type="button"
               className={`card flex min-h-[3.85rem] min-w-0 flex-col items-start self-start px-2.5 py-1.5 text-left transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
-              onClick={() => setStatDetail(stat)}
+              onClick={() => setStatDetail(stat as StatDetail)}
             >
               <div className="mb-0.5 text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
               <div className={`overflow-hidden text-ellipsis whitespace-nowrap text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>
@@ -3165,7 +3324,7 @@ export default function Inventory() {
       ) : null}
       {showInventoryTabs ? (
       <div className="mb-4 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
-        {[['products', t('products')], ['movements', t('movements')], ['rfid', 'RFID']].map(([id,label]) => (
+        {([['products', t('products') || 'Products'], ['movements', t('movements') || 'Movements'], ['rfid', 'RFID']] as [string, string][]).map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab===id ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
             {label}
@@ -3404,7 +3563,7 @@ export default function Inventory() {
               )}
             </div>
           ) : null}
-          <InventoryProductsSurface
+          <InventoryProductsSurfaceLegacy
             InventoryBatchPreview={InventoryBatchPreview}
             InventoryDiscountBadge={InventoryDiscountBadge}
             branchFilter={branchFilter}
@@ -3573,7 +3732,7 @@ export default function Inventory() {
                 </div>
               ) : null}
               <div className="grid grid-cols-3 gap-2">
-                {[[`add`, t('adjust_add')], [`remove`, t('adjust_remove')], [`set`, t('adjust_set')]].map(([v,lbl]) => (
+                {([['add', t('adjust_add') || 'Add'], ['remove', t('adjust_remove') || 'Remove'], ['set', t('adjust_set') || 'Set']] as [string, string][]).map(([v,lbl]) => (
                   <button key={v} onClick={() => setAdjustForm(f=>({...f, type:v}))}
                     className={`py-2 rounded-xl border-2 text-xs font-medium ${adjustForm.type===v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
                     {lbl}
@@ -3867,7 +4026,7 @@ export default function Inventory() {
             </div>
             <div className="modal-scroll space-y-4 p-4">
               <div className="grid grid-cols-3 gap-2">
-                {['adjust', 'transfer', 'move'].map((type) => (
+                {(['adjust', 'transfer', 'move'] as InventoryReasonType[]).map((type) => (
                   <button
                     key={type}
                     type="button"
@@ -4112,7 +4271,6 @@ export default function Inventory() {
             onMoveRow={openMove}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
-            usdSymbol={usdSymbol}
             t={t}
           />
         </Suspense>

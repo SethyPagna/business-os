@@ -40,7 +40,7 @@ await runTest('POS product cards expose discount badges before opening details',
 })
 
 await runTest('inventory keeps previous stats during partial refresh failures', () => {
-  const source = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
   assert.match(source, /const\s+\[stockStatsLoaded,\s*setStockStatsLoaded\]/)
   assert.match(source, /setStatsRefreshError/)
   assert.match(source, /if\s*\(needsStatsData\s*&&\s*statsResult\?\.item\)/)

@@ -491,10 +491,10 @@ await runTest('branch CRUD and transfer actions use shared guards and bounded mu
 })
 
 await runTest('inventory adjust, move, transfer, and batch actions use shared guards and bounded mutations', () => {
-  const source = readFrontend('src/components/inventory/Inventory.jsx')
+  const source = readFrontend('src/components/inventory/Inventory.tsx')
   const mutationLines = source
     .split('\n')
-    .filter((line) => /window\.api\.(adjustStock|moveStockRow|transferInventoryStock)\(/.test(line))
+    .filter((line) => /getInventoryApi\(\)\.(adjustStock|moveStockRow|transferInventoryStock)\(/.test(line))
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000/)
@@ -502,7 +502,7 @@ await runTest('inventory adjust, move, transfer, and batch actions use shared gu
   assert.match(source, /const moveStockInFlightRef = useRef\(false\)/)
   assert.match(source, /const transferStockInFlightRef = useRef\(false\)/)
   assert.match(source, /const batchInventoryInFlightRef = useRef\(false\)/)
-  assert.match(source, /const runInventoryMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS\)/)
+  assert.match(source, /const runInventoryMutation = useCallback\(\(loader: InventoryLoader, label: string\): Promise<any> => \([\s\S]*withLoaderTimeout\(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS\)/)
   assert.match(source, /if \(!beginSingleAction\(adjustStockInFlightRef, \{ blocked: adjustSaving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(moveStockInFlightRef, \{ blocked: moveSaving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(transferStockInFlightRef, \{ blocked: transferSaving \}\)\) return/)

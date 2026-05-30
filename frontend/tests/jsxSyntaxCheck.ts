@@ -12,19 +12,19 @@ async function listSourceFiles(dir: string): Promise<string[]> {
   const nested: string[][] = await Promise.all(entries.map(async (entry): Promise<string[]> => {
     const fullPath = path.join(dir, entry.name)
     if (entry.isDirectory()) return listSourceFiles(fullPath)
-    return /\.(jsx|js|mjs)$/.test(entry.name) ? [fullPath] : []
+    return /\.(tsx|jsx|js|mjs)$/.test(entry.name) ? [fullPath] : []
   }))
   return nested.flat()
 }
 
 const files = await listSourceFiles(srcDir)
-assert.ok(files.some((file) => file.endsWith('.jsx')), 'Expected JSX source files to check')
+assert.ok(files.length > 0, 'Expected source files to check')
 
 const failures = []
 for (const file of files) {
   try {
     const source = await readFile(file, 'utf8')
-    const loader = file.endsWith('.jsx') ? 'jsx' : 'js'
+    const loader = file.endsWith('.tsx') ? 'tsx' : file.endsWith('.jsx') ? 'jsx' : 'js'
     await transformWithEsbuild(source, file, { loader, jsx: 'automatic' })
   } catch (error) {
     failures.push(`${path.relative(root, file)}: ${error instanceof Error ? error.message : String(error)}`)
