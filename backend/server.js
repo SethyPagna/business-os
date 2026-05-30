@@ -392,7 +392,7 @@ function mountApiRoutes(target) {
   target.use('/api', require('./src/routes/users.ts'))
   target.use('/api/custom-tables', require('./src/routes/customTables.ts'))
   target.use('/api', require('./src/routes/returns.ts'))
-  const systemRouter = require('./src/routes/system')
+  const systemRouter = require('./src/routes/system/index.ts')
   target.use('/api/backups', (req, res, next) => {
     req.url = `/backups${req.url === '/' ? '' : req.url}`
     systemRouter(req, res, next)

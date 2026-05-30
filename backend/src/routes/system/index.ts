@@ -1,6 +1,6 @@
 'use strict'
 /**
- * system.js
+ * system.ts
  * Operational/system endpoints:
  * - backup export/import
  * - reset/factory-reset

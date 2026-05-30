@@ -1034,7 +1034,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
   },
   {
-    target: 'backend/src/routes/system/index.js',
+    target: 'backend/src/routes/system/index.ts',
     optimization: 'System settings writes now prepare the delete statement once beside the upsert statement, avoiding repeated statement creation when null-valued settings are removed inside the transaction.',
     rollback: 'Remove deleteSetting and inline db.prepare("DELETE FROM settings WHERE key = ?") in the null-value branch; settings write behavior remains unchanged.',
     proof: [

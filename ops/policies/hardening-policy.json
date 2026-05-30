@@ -106,7 +106,7 @@
       "name": "Non-blocking backup, Drive, and media work",
       "files": [
         {
-          "path": "backend/src/routes/system/index.js",
+          "path": "backend/src/routes/system/index.ts",
           "mustContain": ["startSystemJob('google_drive_sync'", "startSystemJob('backup_export_folder'", "startSystemJob('backup_restore_folder'", "router.post('/jobs/:id/cancel'", "withMaintenanceLock", "applyRouteRateLimit"],
           "mustNotContain": ["/backup/export", "/backup/import"]
         },

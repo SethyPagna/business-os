@@ -40,7 +40,7 @@ function main() {
     driveSync: { file: 'backend/src/services/googleDriveSync/index.ts', text: read('backend/src/services/googleDriveSync/index.ts') },
     systemJobs: { file: 'backend/src/systemJobs.ts', text: read('backend/src/systemJobs.ts') },
     maintenanceLock: { file: 'backend/src/maintenanceLock.ts', text: read('backend/src/maintenanceLock.ts') },
-    systemRoutes: { file: 'backend/src/routes/system/index.js', text: read('backend/src/routes/system/index.js') },
+    systemRoutes: { file: 'backend/src/routes/system/index.ts', text: read('backend/src/routes/system/index.ts') },
     backupUi: { file: 'frontend/src/components/utils-settings/Backup.tsx', text: read('frontend/src/components/utils-settings/Backup.tsx') },
     apiMethods: { file: 'frontend/src/api/methods.ts', text: read('frontend/src/api/methods.ts') },
     offlineApi: { file: 'frontend/src/web-api.ts', text: read('frontend/src/web-api.ts') },

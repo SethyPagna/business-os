@@ -4,7 +4,7 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 
-const source = fs.readFileSync(path.resolve(__dirname, '../src/routes/system/index.js'), 'utf8')
+const source = fs.readFileSync(path.resolve(__dirname, '../src/routes/system/index.ts'), 'utf8')
 
 assert.match(source, /function\s+getDefaultBackupDestinationDir\s*\(/)
 assert.match(source, /BUSINESS_OS_BACKUP_DIR/)

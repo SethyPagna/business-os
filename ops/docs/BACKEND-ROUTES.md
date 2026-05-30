@@ -175,7 +175,7 @@ File: `backend/src/routes/customTables.ts`
 ## System / Backup / Reset / Data Path
 
 Base: `/api/system`  
-File: `backend/src/routes/system/index.js`
+File: `backend/src/routes/system/index.ts`
 
 - `GET /audit-logs` supports server pagination, search, action/entity/date filters, and admin-only `userId`
 - `DELETE /audit-logs/retention?olderThanDays=30&confirm=1` is admin-only

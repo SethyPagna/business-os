@@ -25,7 +25,7 @@ const syncSource = fs.existsSync(path.join(__dirname, '..', 'src/routes/sync.ts'
   : ''
 const serverUtilsSource = read('src/serverUtils.ts')
 const maintenanceLockSource = read('src/maintenanceLock.ts')
-const systemRouteSource = read('src/routes/system/index.js')
+const systemRouteSource = read('src/routes/system/index.ts')
 
 runTest('auth sessions are issued as HttpOnly cookies and cleared on logout', () => {
   assert.match(sessionSource, /function setAuthSessionCookie/)

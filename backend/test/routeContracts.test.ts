@@ -125,7 +125,7 @@ runTest('units router registers lookup CRUD routes', () => {
 })
 
 runTest('system router registers Google Drive sync connect and disconnect routes', () => {
-  const router = require('../src/routes/system')
+  const router = require('../src/routes/system/index.ts')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/drive-sync/status'), 'missing /api/system/drive-sync/status')
   assert.ok(paths.includes('/drive-sync/oauth/start'), 'missing /api/system/drive-sync/oauth/start')
@@ -138,7 +138,7 @@ runTest('system router registers Google Drive sync connect and disconnect routes
 })
 
 runTest('system router registers non-blocking job and backup routes', () => {
-  const router = require('../src/routes/system')
+  const router = require('../src/routes/system/index.ts')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/jobs/:id'), 'missing /api/system/jobs/:id')
   assert.ok(paths.includes('/jobs/:id/cancel'), 'missing /api/system/jobs/:id/cancel')
@@ -149,9 +149,9 @@ runTest('system router registers non-blocking job and backup routes', () => {
 })
 
 runTest('system router exposes paged audit logs and retention cleanup', () => {
-  const router = require('../src/routes/system')
+  const router = require('../src/routes/system/index.ts')
   const paths = getRoutePaths(router)
-  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/system/index.js'), 'utf8')
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/system/index.ts'), 'utf8')
   assert.ok(paths.includes('/audit-logs'), 'missing /api/system/audit-logs')
   assert.ok(paths.includes('/audit-logs/retention'), 'missing /api/system/audit-logs/retention')
   assert.match(source, /COUNT\(\*\)[\s\S]*FROM audit_logs/)
@@ -164,7 +164,7 @@ runTest('system router exposes paged audit logs and retention cleanup', () => {
 runTest('system settings writes reuse prepared statements inside transactions', () => {
   const fs = require('fs')
   const path = require('path')
-  const source = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.ts'), 'utf8')
   assert.match(source, /const upsert = db\.prepare\(`[\s\S]*INSERT INTO settings/)
   assert.match(source, /const deleteSetting = db\.prepare\('DELETE FROM settings WHERE key = \?'\)/)
   assert.match(source, /if \(value == null\) deleteSetting\.run\(key\)/)

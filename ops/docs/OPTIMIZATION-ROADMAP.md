@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 618.
+- Latest completed implementation move in this roadmap: Move 619.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2484,7 +2484,7 @@ Cleanup checkpoint:
   audit, and imported timestamp behavior stay unchanged while per-item SQL
   setup is reduced.
 - Move 178 reuses system settings delete statements:
-  `backend/src/routes/system/index.js` now prepares the settings delete
+  `backend/src/routes/system/index.ts` now prepares the settings delete
   statement once beside the upsert statement in `writeSystemSettings()`.
   Null-valued settings still delete inside the same transaction, but repeated
   statement setup is removed.
@@ -4706,7 +4706,7 @@ Move 416 status:
 
 Move 417 status:
 - Move 417 clears the remaining backend route callback-chain scan by tightening
-  `backend/src/routes/system/index.js`. Import-stop ID messages, migration
+  `backend/src/routes/system/index.ts`. Import-stop ID messages, migration
   table counts, system setting reads/writes, scale-migration row totals,
   custom-table discovery, reset/factory-reset broadcasts, sync push response
   shaping, integrity-repair broadcasts, folder root listing, visible directory
@@ -7053,3 +7053,23 @@ Move 618 status:
   package lane. The expected generated language audit now reports
   `JavaScript: 4`, `TypeScript: 307`, and `React TSX: 107` across the active
   scan roots.
+
+Move 619 status:
+- Move 619 converts `backend/src/routes/system/index.ts` to a package-safe
+  TypeScript path. Backup export/restore job dispatch, Google Drive sync
+  controls, settings writes, reset/factory reset guards, audit-log pagination
+  and retention cleanup, runtime data-path status, integration diagnostics,
+  maintenance locks, and queue/cache/storage health reporting remain unchanged
+  on the existing CommonJS route style. Server mounting, route contracts,
+  offline security checks, backup schema and hardening checks, backup default
+  destination checks, backup reliability verification, frontend
+  action-stability checks, hardening policy, backend route docs, master plan,
+  language-runtime audit metadata, and roadmap docs now point at the explicit
+  `.ts` route path. Focused system route load, route-contract, offline
+  security, backup schema, backup hardening, backup default destination,
+  system job, backup reliability, frontend action-stability, stale-path, and
+  source-load, backend utility, schema audit, and Linux packaging proof passed.
+  `pkg` continues to warn for direct `.ts` scripts, so broader backend
+  conversions still wait for a compile/staging package lane. The expected
+  generated language audit now reports `JavaScript: 3`, `TypeScript: 308`, and
+  `React TSX: 107` across the active scan roots.

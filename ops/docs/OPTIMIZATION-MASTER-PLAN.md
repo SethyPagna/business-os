@@ -115,7 +115,7 @@ Priority areas:
 - `backend/src/routes/products.js`
 - `backend/src/routes/inventory.js`
 - `backend/src/routes/sales.ts`
-- `backend/src/routes/system/index.js`
+- `backend/src/routes/system/index.ts`
 - `backend/src/services/googleDriveSync/index.ts`
 - `backend/src/routes/contacts.ts`
 - `backend/src/routes/returns.ts`

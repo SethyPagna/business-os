@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 618 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 619 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 37`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 326`,
+  `.js: 36`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 327`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -1552,7 +1552,7 @@ Decision rule:
     per-item SQL statement setup. `backend/test/productBatchHierarchy.test.ts`
     guards the request-scoped movement statements.
 178. Reuse system settings delete statement. Done:
-    `backend/src/routes/system/index.js` now prepares the settings delete
+    `backend/src/routes/system/index.ts` now prepares the settings delete
     statement once beside the settings upsert statement inside
     `writeSystemSettings()`. Removing null-valued settings no longer rebuilds
     the same `DELETE FROM settings WHERE key = ?` statement for every entry,
@@ -3250,7 +3250,7 @@ Decision rule:
     This was a backend auth/users-route cleanup only; no folder move, schema
     migration, or language conversion was needed.
 407. Clear backend route callback-chain scan. Done:
-    `backend/src/routes/system/index.js` now uses named direct-loop helpers for
+    `backend/src/routes/system/index.ts` now uses named direct-loop helpers for
     import-stop ID messages, migration counts, settings reads/writes, row
     totals, custom-table discovery, reset/factory-reset broadcasts, sync push
     response shaping, integrity repair broadcasts, folder roots, visible
@@ -5340,6 +5340,26 @@ Decision rule:
     remain blocked on the future compile/staging lane. The expected generated
     language audit now reports `JavaScript: 4`, `TypeScript: 307`, and
     `React TSX: 107` across the active scan roots.
+
+619. Convert system route to a package-safe TypeScript path.
+    Done: `backend/src/routes/system/index.ts` keeps backup export/restore
+    job dispatch, Google Drive sync controls, settings writes, reset/factory
+    reset guards, audit-log pagination and retention cleanup, runtime data-path
+    status, integration diagnostics, maintenance locks, and queue/cache/storage
+    health reporting on the existing CommonJS route style. Server mounting,
+    route contracts, offline security checks, backup schema and hardening
+    checks, backup default destination checks, backup reliability verification,
+    frontend action-stability checks, hardening policy, backend route docs,
+    master plan, language-runtime audit metadata, and roadmap docs now point at
+    the explicit `.ts` route path. Focused system route load, route-contract,
+    offline security, backup schema, backup hardening, backup default
+    destination, system job, backup reliability, frontend action-stability,
+    stale-path, backend utility, schema audit, Linux packaging, and source-load
+    proof passed. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so broader backend conversions remain blocked on the future
+    compile/staging lane. The expected generated language audit now reports
+    `JavaScript: 3`,
+    `TypeScript: 308`, and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 
