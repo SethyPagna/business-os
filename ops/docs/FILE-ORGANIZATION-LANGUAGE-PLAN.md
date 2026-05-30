@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 573 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 574 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 60`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 303`,
+  `.js: 59`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 304`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3397,7 +3397,7 @@ Decision rule:
     cleanup only; no folder move, schema migration, or language conversion was
     needed.
 425. Tighten Postgres compatibility and cutover-readiness scans. Done:
-    `backend/src/db/postgresQueryCompat.js` and
+    `backend/src/db/postgresQueryCompat.ts` and
     `backend/src/db/cutoverReadiness.ts` now use direct-loop helpers for
     numeric field matching, row coercion, forbidden-pattern scans, blocker
     counts, summary rows, and multi-file blocker collection. SQL translation,
@@ -4705,6 +4705,20 @@ Decision rule:
     compile/staging lane. The current source extension count is `.js: 60`,
     `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 303`, `.tsx: 107` outside
     generated/runtime folders.
+574. Convert Postgres query compatibility helper to a package-safe TypeScript
+    path. Done: `backend/src/db/postgresQueryCompat.ts` keeps SQL parameter
+    translation, portable SQL normalization, INSERT OR IGNORE conversion,
+    RETURNING behavior, and row coercion unchanged while adding a JSDoc
+    translation-options contract. The Postgres adapter and focused query
+    compatibility test now import the explicit `.ts` path, and older roadmap
+    references were normalized to avoid stale path drift. Focused helper load,
+    Postgres query compatibility, Postgres database, route-contract, and
+    stale-path scans passed, as did the full backend utility suite, schema
+    audit, and Linux packaging proof. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service conversions remain blocked
+    on the future compile/staging lane. The current source extension count is
+    `.js: 59`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 304`, `.tsx: 107`
+    outside generated/runtime folders.
 
 ## Safety Gates
 

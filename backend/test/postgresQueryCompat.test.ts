@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const { coerceRow, translateSql } = require('../src/db/postgresQueryCompat')
+const { coerceRow, translateSql } = require('../src/db/postgresQueryCompat.ts')
 
 let failed = 0
 

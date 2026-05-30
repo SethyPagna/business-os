@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 573.
+- Latest completed implementation move in this roadmap: Move 574.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4881,7 +4881,7 @@ Move 434 status:
 
 Move 435 status:
 - Move 435 tightens Postgres compatibility and cutover-readiness scans in
-  `backend/src/db/postgresQueryCompat.js` and
+  `backend/src/db/postgresQueryCompat.ts` and
   `backend/src/db/cutoverReadiness.ts`. Numeric field matching, coerced-row
   materialization, forbidden-pattern scanning, blocker counting, summary row
   construction, and multi-file analysis now use named direct-loop helpers
@@ -6360,3 +6360,18 @@ Move 573 status:
   compile/staging package lane. The current source extension count is
   `.js: 60`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 303`, `.tsx: 107` outside
   generated/runtime folders.
+
+Move 574 status:
+- Move 574 converts `backend/src/db/postgresQueryCompat.ts` to a package-safe
+  TypeScript path. The helper keeps SQL parameter translation, portable SQL
+  normalization, INSERT OR IGNORE conversion, RETURNING behavior, and row
+  coercion unchanged while adding a JSDoc translation-options contract. The
+  Postgres adapter and focused query compatibility test use explicit `.ts`
+  imports, and older roadmap references were normalized to avoid stale path
+  drift. Focused helper load, Postgres query compatibility, Postgres database,
+  route-contract, and stale-path scans passed, as did the full backend utility
+  suite, schema audit, and Linux packaging proof. `pkg` continues to warn for direct `.ts` scripts,
+  so larger backend route/service conversion still waits for a compile/staging
+  package lane. The current source extension count is `.js: 59`, `.jsx: 0`,
+  `.mjs: 0`, `.cjs: 0`, `.ts: 304`, `.tsx: 107` outside generated/runtime
+  folders.

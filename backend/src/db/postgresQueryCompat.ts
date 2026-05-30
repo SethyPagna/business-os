@@ -54,6 +54,12 @@ const INSERT_TABLES_WITHOUT_ID_RETURNING = new Set([
   'settings',
 ])
 
+/**
+ * @typedef {{
+ *   mode?: 'run' | string,
+ * }} TranslateSqlOptions
+ */
+
 function countPositionalPlaceholders(sql = '') {
   let count = 0
   let quote = ''
@@ -181,6 +187,11 @@ function getInsertTableName(sql = '') {
   return String(match?.[1] || match?.[2] || '').toLowerCase()
 }
 
+/**
+ * @param {string} sql
+ * @param {unknown[] | Record<string, unknown>} [params]
+ * @param {TranslateSqlOptions} [options]
+ */
 function translateSql(sql, params = [], options = {}) {
   let normalized = normalizePortableSqlFunctions(stripTrailingSemicolon(sql))
   let isInsertOrIgnore = /\bINSERT\s+OR\s+IGNORE\s+INTO\b/i.test(normalized)
