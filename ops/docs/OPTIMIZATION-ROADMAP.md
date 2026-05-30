@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 598.
+- Latest completed implementation move in this roadmap: Move 599.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4286,7 +4286,7 @@ Move 380 status:
 
 Move 381 status:
 - Move 381 tightens the AI provider gateway and settings route in
-  `backend/src/services/aiGateway.js` and `backend/src/routes/ai.ts`.
+  `backend/src/services/aiGateway.ts` and `backend/src/routes/ai.ts`.
   Supported-model normalization, Google request content construction, Google
   response text joining, provider-list serialization, and AI response-log
   serialization now use named direct-loop helpers instead of repeated
@@ -6650,10 +6650,10 @@ Move 593 status:
   path. AI provider listing, create/update/delete, provider test status
   persistence, response-log listing, permission checks, write-conflict guards,
   auditing, broadcasts, and response serialization remain unchanged on the
-  existing CommonJS route style. The server mount and roadmap docs now point at
-  the explicit `.ts` route while the still-JavaScript AI gateway service stays
-  extensionless for its own future conversion slice. Focused route load,
-  route-contract, backend utility, schema audit, stale-path, and Linux
+  existing CommonJS route style. The server mount and roadmap docs point at
+  the explicit `.ts` route; Move 599 later converts the AI gateway service
+  itself to an explicit `.ts` path. Focused route load, route-contract,
+  backend utility, schema audit, stale-path, and Linux
   packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
   broader backend conversions still wait for a compile/staging package lane.
   The generated language audit now reports `JavaScript: 29`, `TypeScript: 282`,
@@ -6732,3 +6732,18 @@ Move 598 status:
   scripts, so broader backend conversions still wait for a compile/staging
   package lane. The generated language audit now reports `JavaScript: 24`,
   `TypeScript: 287`, and `React TSX: 107` across the active scan roots.
+
+Move 599 status:
+- Move 599 converts `backend/src/services/aiGateway.ts` to a package-safe
+  TypeScript path. Provider metadata, provider payload normalization, secret
+  encryption/decryption exports, provider row serialization, outbound URL
+  validation, HTTP error shaping, Google message conversion, chat provider
+  calls, embedding provider health checks, web-research eligibility, and safe
+  JSON parsing remain unchanged on the existing CommonJS service style. The AI
+  route and portal AI service now point at the explicit `.ts` service path.
+  Focused service load, route-contract, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The generated language audit now reports
+  `JavaScript: 23`, `TypeScript: 288`, and `React TSX: 107` across the active
+  scan roots.

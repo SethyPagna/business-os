@@ -12,7 +12,7 @@ const {
   encryptSecret,
   testProviderConfig,
   parseJsonSafe,
-} = require('../services/aiGateway')
+} = require('../services/aiGateway.ts')
 
 const router = express.Router()
 

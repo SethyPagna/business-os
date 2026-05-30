@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 598 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 599 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 46`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 317`,
+  `.js: 45`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 318`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3012,7 +3012,7 @@ Decision rule:
     cleanup only; no folder move, schema migration, or runtime conversion was
     needed.
 371. Tighten AI provider gateway and route loops. Done:
-    `backend/src/services/aiGateway.js` and `backend/src/routes/ai.ts` now use
+    `backend/src/services/aiGateway.ts` and `backend/src/routes/ai.ts` now use
     direct-loop helpers for supported-model normalization, Google message
     payloads, Google text joining, provider list serialization, and AI response
     log serialization. This was a backend service/route cleanup only; no
@@ -4969,9 +4969,9 @@ Decision rule:
     create/update/delete, provider test status persistence, response-log
     listing, permission checks, write-conflict guards, auditing, broadcasts,
     and response serialization on the existing CommonJS route style. The server
-    mount and roadmap docs now point at the explicit `.ts` route while the
-    still-JavaScript AI gateway service stays extensionless for its own future
-    conversion slice. Focused route load, route-contract, backend utility,
+    mount and roadmap docs point at the explicit `.ts` route; Move 599 later
+    converts the AI gateway service itself to an explicit `.ts` path. Focused
+    route load, route-contract, backend utility,
     schema audit, stale-path, and Linux packaging proof passed. Packaging still
     warns for direct `.ts` entries in `pkg.scripts`, so broader backend
     conversions remain blocked on the future compile/staging lane. The
@@ -5043,6 +5043,20 @@ Decision rule:
     backend conversions remain blocked on the future compile/staging lane. The
     generated language audit now reports `JavaScript: 24`, `TypeScript: 287`,
     and `React TSX: 107` across the active scan roots.
+599. Convert AI gateway service to a package-safe TypeScript path.
+    Done: `backend/src/services/aiGateway.ts` keeps provider metadata,
+    provider payload normalization, secret encryption/decryption exports,
+    provider row serialization, outbound URL validation, HTTP error shaping,
+    Google message conversion, chat provider calls, embedding provider health
+    checks, web-research eligibility, and safe JSON parsing on the existing
+    CommonJS service style. The AI route and portal AI service now point at
+    the explicit `.ts` service path. Focused service load, route-contract,
+    backend utility, schema audit, stale-path, and Linux packaging proof
+    passed. Packaging still warns for direct `.ts` entries in `pkg.scripts`,
+    so broader backend conversions remain blocked on the future
+    compile/staging lane. The generated language audit now reports
+    `JavaScript: 23`, `TypeScript: 288`, and `React TSX: 107` across the
+    active scan roots.
 
 ## Safety Gates
 
