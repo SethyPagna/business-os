@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 583 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 584 in this file.
 
 ## Goal
 
@@ -4847,6 +4847,20 @@ Decision rule:
     lane. The current source extension count is `.js: 50`, `.jsx: 0`,
     `.mjs: 0`, `.cjs: 0`, `.ts: 313`, `.tsx: 107` outside generated/runtime
     folders.
+584. Convert units lookup route to a package-safe TypeScript path.
+    Done: `backend/src/routes/units.ts` keeps unit list/create/update/delete
+    behavior, catalog text integrity checks, merge-on-duplicate rename, product
+    unit rewrites, write-conflict handling, audit entries, and sync broadcasts
+    on the existing CommonJS route style while `backend/server.js` imports the
+    explicit `.ts` route. Backend route docs and the route folder guide now
+    point at the TypeScript path, and `backend/test/routeContracts.test.ts`
+    asserts unit CRUD route registration. Focused route-contract, unit
+    route-load, backend utility, schema audit, stale-path, and Linux packaging
+    proof passed. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service conversions remain blocked
+    on the future compile/staging lane. The current source extension count is
+    `.js: 49`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 314`, `.tsx: 107`
+    outside generated/runtime folders.
 
 ## Safety Gates
 

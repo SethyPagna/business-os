@@ -40,7 +40,7 @@ File: `backend/src/routes/categories.ts`
 ## Units + Custom Fields
 
 Bases: `/api/units`, `/api/custom-fields`  
-File: `backend/src/routes/units.js`
+File: `backend/src/routes/units.ts`
 
 ## Branches and Transfers
 
