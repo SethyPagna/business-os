@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 587.
+- Latest completed implementation move in this roadmap: Move 588.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4753,7 +4753,7 @@ Move 420 status:
 Move 421 status:
 - Move 421 tightens startup/runtime infrastructure helper loops in
   `backend/src/config/index.js`, `backend/src/dataPath/index.ts`,
-  `backend/src/organizationContext/index.js`, `backend/src/settingsSnapshot.ts`,
+  `backend/src/organizationContext/index.ts`, `backend/src/settingsSnapshot.ts`,
   and `backend/src/runtimeVersion.ts`. Env candidate filtering, runtime/data
   folder creation, organization folder creation, settings snapshot sanitizing,
   first existing runtime directory selection, and source-hash file filtering
@@ -6573,3 +6573,18 @@ Move 587 status:
   scripts, so broader backend conversions still wait for a compile/staging
   package lane. The generated language audit now reports `JavaScript: 35`,
   `TypeScript: 276`, and `React TSX: 107` across the active scan roots.
+
+Move 588 status:
+- Move 588 converts `backend/src/organizationContext/index.ts` to a
+  package-safe TypeScript path. Organization lookup, search, group lookup, user
+  context joins, portal public path construction, organization filesystem layout
+  creation, metadata file writing, and storage alignment status reporting
+  remain unchanged on the existing CommonJS helper style. Auth, organizations,
+  portal, users, and system routes now require the explicit `.ts` index so
+  directory resolution does not depend on the retired `index.js` file. Focused
+  organization helper load, route-contract, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The generated language audit now reports
+  `JavaScript: 34`, `TypeScript: 277`, and `React TSX: 107` across the active
+  scan roots.

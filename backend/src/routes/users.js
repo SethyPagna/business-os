@@ -26,7 +26,7 @@ const {
   getDefaultOrganization,
   getDefaultOrganizationGroup,
   getOrganizationContextForUser,
-} = require('../organizationContext')
+} = require('../organizationContext/index.ts')
 const { assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { revokeUserSessions } = require('../sessionAuth.ts')
 

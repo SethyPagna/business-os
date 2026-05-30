@@ -8,7 +8,7 @@ const {
   getOrganizationContextForUser,
   getDefaultOrganizationGroup,
   ensureOrganizationFilesystemLayout,
-} = require('../organizationContext')
+} = require('../organizationContext/index.ts')
 
 const router = express.Router()
 

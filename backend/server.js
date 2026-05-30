@@ -42,7 +42,7 @@ const { getRuntimeVersion } = require('./src/runtimeVersion.ts')
 const { getDuckDbRuntimeStatus } = require('./src/analytics/duckdbRuntime.ts')
 const { getObjectStream, isObjectStorageEnabled } = require('./src/objectStore')
 const { getLegacyBatchBackfillStatus, scheduleLegacyBatchBackfill } = require('./src/productBatches')
-const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext')
+const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext/index.ts')
 const {
   CORS_OPTIONS,
   sanitizeRequestPayload,

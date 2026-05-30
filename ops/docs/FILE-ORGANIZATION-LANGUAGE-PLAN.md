@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 587 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 588 in this file.
 
 ## Goal
 
@@ -3285,7 +3285,7 @@ Decision rule:
     move, schema migration, or language conversion was needed.
 411. Tighten startup/runtime infrastructure helper loops. Done:
     `backend/src/config/index.js`, `backend/src/dataPath/index.ts`,
-    `backend/src/organizationContext/index.js`, `backend/src/settingsSnapshot.ts`,
+    `backend/src/organizationContext/index.ts`, `backend/src/settingsSnapshot.ts`,
     and `backend/src/runtimeVersion.ts` now use direct loops for env
     candidates, folder creation, settings snapshot sanitizing, first existing
     runtime directory selection, and source-hash file filtering. This was a
@@ -4901,6 +4901,19 @@ Decision rule:
     blocked on the future compile/staging lane. The generated language audit now
     reports `JavaScript: 35`, `TypeScript: 276`, and `React TSX: 107` across
     the active scan roots.
+588. Convert organization context helper to a package-safe TypeScript path.
+    Done: `backend/src/organizationContext/index.ts` keeps organization lookup,
+    search, group lookup, user context joins, portal public path construction,
+    organization filesystem layout creation, metadata file writing, and storage
+    alignment status reporting on the existing CommonJS helper style. Auth,
+    organizations, portal, users, and system routes now require the explicit
+    `.ts` index so directory resolution does not depend on the retired
+    `index.js` file. Focused organization helper load, route-contract, backend
+    utility, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so broader
+    backend conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 34`, `TypeScript: 277`,
+    and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 
