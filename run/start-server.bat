@@ -249,7 +249,7 @@ echo [INFO] Starting background import/media workers...
 if "!USING_PM2!"=="1" (
     call "!PM2_CMD!" stop business-os-import-worker >nul 2>&1
     call "!PM2_CMD!" delete business-os-import-worker >nul 2>&1
-    call "!PM2_CMD!" start src/workers/importWorker.js --name "business-os-import-worker" --update-env >nul 2>&1
+    call "!PM2_CMD!" start src/workers/importWorker.ts --name "business-os-import-worker" --update-env >nul 2>&1
     if errorlevel 1 (
         echo [WARN] PM2 could not start import worker. Large imports will stay queued until a worker is available.
     ) else (
@@ -257,7 +257,7 @@ if "!USING_PM2!"=="1" (
     )
     call "!PM2_CMD!" stop business-os-media-worker >nul 2>&1
     call "!PM2_CMD!" delete business-os-media-worker >nul 2>&1
-    call "!PM2_CMD!" start src/workers/mediaWorker.js --name "business-os-media-worker" --update-env >nul 2>&1
+    call "!PM2_CMD!" start src/workers/mediaWorker.ts --name "business-os-media-worker" --update-env >nul 2>&1
     if errorlevel 1 (
         echo [WARN] PM2 could not start media worker. Media optimization will stay queued until a worker is available.
     ) else (
@@ -266,13 +266,13 @@ if "!USING_PM2!"=="1" (
     call "!PM2_CMD!" save >nul 2>&1
 ) else (
     powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend[\\/]+src[\\/]+workers[\\/]+(importWorker|mediaWorker)\\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
-    powershell -Command "$argsList=@('src/workers/importWorker.js'); $p = Start-Process -FilePath 'node' -ArgumentList $argsList -WorkingDirectory '%ROOT%\backend' -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
+    powershell -Command "$argsList=@('src/workers/importWorker.ts'); $p = Start-Process -FilePath 'node' -ArgumentList $argsList -WorkingDirectory '%ROOT%\backend' -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
     if errorlevel 1 (
         echo [WARN] Background import worker launch failed.
     ) else (
         echo [OK] Import worker launched in background node mode.
     )
-    powershell -Command "$argsList=@('src/workers/mediaWorker.js'); $p = Start-Process -FilePath 'node' -ArgumentList $argsList -WorkingDirectory '%ROOT%\backend' -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
+    powershell -Command "$argsList=@('src/workers/mediaWorker.ts'); $p = Start-Process -FilePath 'node' -ArgumentList $argsList -WorkingDirectory '%ROOT%\backend' -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
     if errorlevel 1 (
         echo [WARN] Background media worker launch failed.
     ) else (

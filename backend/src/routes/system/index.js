@@ -100,7 +100,7 @@ function auditWithActorMeta(actor = {}, action, entity, entityId, detail = {}, o
     }
   )
 }
-const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
+const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.ts')
 
 function q(name) {
   return `"${String(name).replace(/"/g, '""')}"`

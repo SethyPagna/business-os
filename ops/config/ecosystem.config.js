@@ -77,7 +77,7 @@ module.exports = {
     },
     {
       name: 'business-os-import-worker',
-      script: path.join(PROJECT_ROOT, 'backend', 'src', 'workers', 'importWorker.js'),
+      script: path.join(PROJECT_ROOT, 'backend', 'src', 'workers', 'importWorker.ts'),
       cwd: PROJECT_ROOT,
       env: DEFAULT_ENV,
       node_args: '--max-old-space-size=768 --no-deprecation',
@@ -96,7 +96,7 @@ module.exports = {
     },
     {
       name: 'business-os-media-worker',
-      script: path.join(PROJECT_ROOT, 'backend', 'src', 'workers', 'mediaWorker.js'),
+      script: path.join(PROJECT_ROOT, 'backend', 'src', 'workers', 'mediaWorker.ts'),
       cwd: PROJECT_ROOT,
       env: DEFAULT_ENV,
       node_args: '--max-old-space-size=1024 --no-deprecation',

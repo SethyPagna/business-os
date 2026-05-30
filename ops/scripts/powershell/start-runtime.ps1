@@ -323,8 +323,8 @@ if ($code -ne 0) {
   if (Test-Path -LiteralPath $DockerWorkerLog) { Get-Content -LiteralPath $DockerWorkerLog -Tail 80 }
 } else {
   Write-Step 'Waiting for Docker import/media worker readiness...'
-  $importReady = Wait-WorkerServiceReady $docker 'import-worker' 'importWorker.js' $importWorkerReplicas 240 $DockerWorkerLog
-  $mediaReady = Wait-WorkerServiceReady $docker 'media-worker' 'mediaWorker.js' $mediaWorkerReplicas 240 $DockerWorkerLog
+  $importReady = Wait-WorkerServiceReady $docker 'import-worker' 'importWorker.ts' $importWorkerReplicas 240 $DockerWorkerLog
+  $mediaReady = Wait-WorkerServiceReady $docker 'media-worker' 'mediaWorker.ts' $mediaWorkerReplicas 240 $DockerWorkerLog
   if (-not $importReady -or -not $mediaReady) {
     if (Test-Path -LiteralPath $DockerWorkerLog) { Get-Content -LiteralPath $DockerWorkerLog -Tail 140 }
     Fail "Docker workers did not become ready. Large jobs would stay queued, so startup stopped. Log: $DockerWorkerLog"

@@ -7,11 +7,18 @@ const { startMediaWorker } = require('../services/mediaQueue')
 
 let shuttingDown = false
 
+/**
+ * @returns {Promise<void>}
+ */
 async function start() {
   const status = await startMediaWorker()
   console.log(`[media-worker] started (${status.driver}, queue=${status.queue}, concurrency=${status.concurrency})`)
 }
 
+/**
+ * @param {string} [signal]
+ * @returns {void}
+ */
 function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true

@@ -1,7 +1,7 @@
 'use strict'
 
 if (process.env.BUSINESS_OS_WORKER_ROLE === 'import-worker') {
-  require('./src/workers/importWorker').start().catch((error) => {
+  require('./src/workers/importWorker.ts').start().catch((error) => {
     console.error(`[import-worker] failed to start: ${error?.message || error}`)
     process.exit(1)
   })
@@ -9,7 +9,7 @@ if (process.env.BUSINESS_OS_WORKER_ROLE === 'import-worker') {
 }
 
 if (process.env.BUSINESS_OS_WORKER_ROLE === 'media-worker') {
-  require('./src/workers/mediaWorker').start().catch((error) => {
+  require('./src/workers/mediaWorker.ts').start().catch((error) => {
     console.error(`[media-worker] failed to start: ${error?.message || error}`)
     process.exit(1)
   })

@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * systemFsWorker.js
+ * systemFsWorker.ts
  *
  * Runs heavy filesystem-only system tasks in a child process so the main
  * Express server can continue serving pages while backups/data relocation run.
@@ -12,21 +12,41 @@ const path = require('path')
 
 const { copyDirectoryContents, relocateDataRoot, summarizeDataRoot, isSamePath, isSubPath } = require('./dataPath')
 
+/**
+ * @typedef {{ sourceRoot?: unknown, destinationDir?: unknown, dataFolderName?: unknown, backupVersion?: unknown, targetRoot?: unknown }} SystemFsPayload
+ * @typedef {{ ok: boolean, result?: unknown, error?: string }} WorkerResponse
+ */
+
+/**
+ * @returns {string}
+ */
 function formatBackupStamp() {
   const now = new Date()
   const pad = (value) => String(value).padStart(2, '0')
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
 }
 
+/**
+ * @param {WorkerResponse} payload
+ * @returns {void}
+ */
 function respond(payload) {
   process.stdout.write(`${JSON.stringify(payload)}\n`)
 }
 
+/**
+ * @param {unknown} message
+ * @returns {never}
+ */
 function fail(message) {
   respond({ ok: false, error: String(message || 'Worker failed') })
   process.exit(1)
 }
 
+/**
+ * @param {SystemFsPayload} [payload]
+ * @returns {{ backupRoot: string, dataRoot: string, infoPath: string, summary: unknown, copyStats: unknown }}
+ */
 function runExportFolder(payload = {}) {
   const sourceRoot = path.resolve(String(payload.sourceRoot || ''))
   const destinationDir = path.resolve(String(payload.destinationDir || ''))
@@ -67,6 +87,10 @@ function runExportFolder(payload = {}) {
   }
 }
 
+/**
+ * @param {SystemFsPayload} [payload]
+ * @returns {unknown}
+ */
 function runRelocateDataRoot(payload = {}) {
   const sourceRoot = String(payload.sourceRoot || '')
   const targetRoot = String(payload.targetRoot || '')
@@ -74,6 +98,9 @@ function runRelocateDataRoot(payload = {}) {
   return relocateDataRoot({ sourceRoot, targetRoot })
 }
 
+/**
+ * @returns {void}
+ */
 function main() {
   const action = String(process.argv[2] || '').trim()
   const payloadRaw = String(process.argv[3] || '{}')

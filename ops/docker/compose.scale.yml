@@ -283,7 +283,7 @@ services:
     cpus: "${IMPORT_WORKER_CPUS:-3.0}"
     stop_grace_period: 60s
     healthcheck:
-      test: ["CMD-SHELL", "ps -ef | grep '[s]rc/workers/importWorker.js' >/dev/null"]
+      test: ["CMD-SHELL", "ps -ef | grep '[s]rc/workers/importWorker.ts' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 18
@@ -320,7 +320,7 @@ services:
     cpus: "${MEDIA_WORKER_CPUS:-3.5}"
     stop_grace_period: 60s
     healthcheck:
-      test: ["CMD-SHELL", "ps -ef | grep '[s]rc/workers/mediaWorker.js' >/dev/null"]
+      test: ["CMD-SHELL", "ps -ef | grep '[s]rc/workers/mediaWorker.ts' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 18

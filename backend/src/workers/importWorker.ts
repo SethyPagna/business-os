@@ -7,12 +7,19 @@ const { recoverImportJobs, startImportWorkers } = require('../services/importJob
 
 let shuttingDown = false
 
+/**
+ * @returns {Promise<void>}
+ */
 async function start() {
   const status = await startImportWorkers()
   console.log(`[import-worker] started (${status.driver}, analyze=${status.queues?.analyze}, apply=${status.queues?.apply})`)
   await recoverImportJobs({ forceQueue: true })
 }
 
+/**
+ * @param {string} [signal]
+ * @returns {void}
+ */
 function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true
