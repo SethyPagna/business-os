@@ -316,7 +316,7 @@ Total folders documented: **81**
 | 20 | `settings.ts` | API route handler |
 | 21 | `sync.ts` | API route handler |
 | 22 | `units.ts` | API route handler |
-| 23 | `users.js` | API route handler |
+| 23 | `users.ts` | API route handler |
 
 
 ### 3.10 Folder: `backend/src/routes/system`

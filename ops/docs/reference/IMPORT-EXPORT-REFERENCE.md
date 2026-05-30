@@ -66,7 +66,7 @@ Code files documented: **468**
 | 54 | `backend/src/routes/sync.ts` | 7 | 1 | 3 | 1 |
 | 55 | `backend/src/routes/system/index.js` | 24 | 1 | 20 | 2 |
 | 56 | `backend/src/routes/units.ts` | 6 | 1 | 5 | 2 |
-| 57 | `backend/src/routes/users.js` | 11 | 1 | 9 | 1 |
+| 57 | `backend/src/routes/users.ts` | 11 | 1 | 9 | 1 |
 | 58 | `backend/src/runtimeCache.ts` | 2 | 1 | 1 | 4 |
 | 59 | `backend/src/runtimeState/index.ts` | 4 | 1 | 1 | 2 |
 | 60 | `backend/src/runtimeVersion.ts` | 5 | 1 | 1 | 4 |
@@ -518,7 +518,7 @@ Code files documented: **468**
   - `./src/routes/sync.ts`
   - `./src/routes/system`
   - `./src/routes/units.ts`
-  - `./src/routes/users`
+  - `./src/routes/users.ts`
   - `./src/runtimeVersion.ts`
   - `./src/serverUtils.ts`
   - `./src/services/importJobs`
@@ -566,7 +566,7 @@ Code files documented: **468**
   - `backend/src/routes/sync.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.ts`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
   - `backend/src/runtimeVersion.ts`
   - `backend/src/serverUtils.ts`
   - `backend/src/services/importJobs.js`
@@ -712,7 +712,7 @@ Code files documented: **468**
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/units.ts`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
 
 ### 3.10 `backend/src/contactOptions.ts`
 
@@ -758,7 +758,7 @@ Code files documented: **468**
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.ts`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
   - `backend/src/schemaMetadata.ts`
   - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.js`
@@ -846,7 +846,7 @@ Code files documented: **468**
   - `backend/src/routes/products.js`
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/system/index.js`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.ts`
   - `backend/test/fileAssetStorageReconcile.test.ts`
@@ -888,7 +888,7 @@ Code files documented: **468**
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.ts`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/websocket.ts`
 
@@ -1001,7 +1001,7 @@ Code files documented: **468**
   - `backend/src/routes/sync.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.ts`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
 
 ### 3.23 `backend/src/money.ts`
 
@@ -1085,7 +1085,7 @@ Code files documented: **468**
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
 
 ### 3.28 `backend/src/permissions.ts`
 
@@ -1726,7 +1726,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
 
-### 3.57 `backend/src/routes/users.js`
+### 3.57 `backend/src/routes/users.ts`
 
 - Declared exports: `module.exports`
 - Imports (11)
@@ -1943,7 +1943,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/src/routes/auth.ts`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/test/ownedGoogleAuth.test.ts`
 
@@ -2064,7 +2064,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
 - Referenced by (2)
   - `backend/src/routes/auth.ts`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
 
 ### 3.75 `backend/src/sessionAuth.ts`
 
@@ -2077,7 +2077,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/middleware.ts`
   - `backend/src/routes/auth.ts`
-  - `backend/src/routes/users.js`
+  - `backend/src/routes/users.ts`
   - `backend/src/websocket.ts`
 
 ### 3.76 `backend/src/settingsSnapshot.ts`

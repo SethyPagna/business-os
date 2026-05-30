@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **10**
+Total files documented: **9**
 
 ## 2. Symbol Count by File
 
@@ -17,9 +17,8 @@ Total files documented: **10**
 | 5 | `backend/src/routes/products.js` | 64 | 12 |
 | 6 | `backend/src/routes/sales.js` | 24 | 7 |
 | 7 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 8 | `backend/src/routes/users.js` | 26 | 16 |
-| 9 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 10 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 8 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 9 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -475,59 +474,7 @@ Total files documented: **10**
 | 37 | POST | `/open-path` | 1564 |
 | 38 | POST | `/pick-folder` | 1593 |
 
-### 3.8 `backend/src/routes/users.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `isGoogleAuthConfigured` | function | 35 |
-| 2 | `getGoogleAuthPublicConfig` | function | 39 |
-| 3 | `getClientKey` | function | 53 |
-| 4 | `parseJson` | function | 59 |
-| 5 | `normalizeLookupText` | function | 67 |
-| 6 | `normalizePhoneLookup` | function | 71 |
-| 7 | `findUserIdentityConflict` | function | 75 |
-| 8 | `getMergedPermissions` | function | 143 |
-| 9 | `isPrimaryAdmin` | function | 152 |
-| 10 | `hasAdminControl` | function | 159 |
-| 11 | `canManageTarget` | function | 172 |
-| 12 | `getActorFromRequest` | function | 185 |
-| 13 | `requireAdminControl` | function | 192 |
-| 14 | `getUserSecurityContext` | function | 205 |
-| 15 | `getUserWithRole` | function | 215 |
-| 16 | `syncLocalEmailVerification` | function | 230 |
-| 17 | `repairGoogleIdentityForUser` | function | 261 |
-| 18 | `sanitizeUserRow` | function | 290 |
-| 19 | `sanitizeUserRows` | function | 306 |
-| 20 | `isValidEmail` | function | 314 |
-| 21 | `getAuthIdentityList` | function | 319 |
-| 22 | `isUuid` | function | 325 |
-| 23 | `resolveAuthIdentityUuid` | function | 329 |
-| 24 | `findFirstUuid` | function | 337 |
-| 25 | `findProviderIdentity` | function | 344 |
-| 26 | `buildAuthMethodsPayload` | function | 352 |
-
-#### 3.8.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | GET | `/users` | 384 |
-| 2 | GET | `/users/:id/profile` | 405 |
-| 3 | GET | `/users/:id/auth-methods` | 424 |
-| 4 | POST | `/users/:id/provider-disconnect` | 454 |
-| 5 | POST | `/users/avatar-upload` | 541 |
-| 6 | POST | `/users/:id/contact-verification/request` | 553 |
-| 7 | POST | `/users/:id/contact-verification/confirm` | 557 |
-| 8 | POST | `/users` | 564 |
-| 9 | PUT | `/users/:id` | 661 |
-| 10 | PUT | `/users/:id/profile` | 781 |
-| 11 | POST | `/users/:id/change-password` | 925 |
-| 12 | POST | `/users/:id/reset-password` | 968 |
-| 13 | GET | `/roles` | 1006 |
-| 14 | POST | `/roles` | 1016 |
-| 15 | PUT | `/roles/:id` | 1034 |
-| 16 | DELETE | `/roles/:id` | 1064 |
-
-### 3.9 `backend/src/services/googleDriveSync/index.js`
+### 3.8 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -607,7 +554,7 @@ Total files documented: **10**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.10 `backend/src/services/importJobs.js`
+### 3.9 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

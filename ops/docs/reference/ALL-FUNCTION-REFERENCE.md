@@ -66,7 +66,7 @@ Code files scanned: **468**
 | 54 | `backend/src/routes/sync.ts` | 12 |
 | 55 | `backend/src/routes/system/index.js` | 44 |
 | 56 | `backend/src/routes/units.ts` | 3 |
-| 57 | `backend/src/routes/users.js` | 26 |
+| 57 | `backend/src/routes/users.ts` | 26 |
 | 58 | `backend/src/runtimeCache.ts` | 12 |
 | 59 | `backend/src/runtimeState/index.ts` | 6 |
 | 60 | `backend/src/runtimeVersion.ts` | 8 |
@@ -1586,7 +1586,7 @@ Code files scanned: **468**
 | 2 | `normalizeUnitColor` | function | 17 |
 | 3 | `updateUnitHandler` | function | 52 |
 
-### 3.57 `backend/src/routes/users.js`
+### 3.57 `backend/src/routes/users.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

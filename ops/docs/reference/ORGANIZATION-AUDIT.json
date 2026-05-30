@@ -162,7 +162,7 @@
     "backend/src/routes/returns.ts",
     "backend/src/routes/sales.js",
     "backend/src/routes/system/index.js",
-    "backend/src/routes/users.js",
+    "backend/src/routes/users.ts",
     "backend/src/services/backupPackages.ts",
     "backend/src/services/googleDriveSync/index.js",
     "backend/src/services/importJobs.js",
