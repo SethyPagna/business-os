@@ -3,7 +3,7 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6449634,
+  "totalSourceBytes": 6449643,
   "totalSourceLines": 146302,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
@@ -54,7 +54,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160901,
+      "size": 160903,
       "lines": 3880
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160901,
+      "size": 160903,
       "lines": 3880
     },
     {

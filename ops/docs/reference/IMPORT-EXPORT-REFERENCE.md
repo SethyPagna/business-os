@@ -81,7 +81,7 @@ Code files documented: **468**
 | 69 | `backend/src/services/googleOauth.js` | 2 | 1 | 1 | 4 |
 | 70 | `backend/src/services/importJobs.js` | 20 | 1 | 14 | 7 |
 | 71 | `backend/src/services/integrationDoctor.js` | 10 | 1 | 8 | 2 |
-| 72 | `backend/src/services/mediaQueue.js` | 5 | 1 | 3 | 5 |
+| 72 | `backend/src/services/mediaQueue.ts` | 5 | 1 | 3 | 5 |
 | 73 | `backend/src/services/portalAi.js` | 2 | 1 | 2 | 1 |
 | 74 | `backend/src/services/verification.js` | 2 | 1 | 1 | 2 |
 | 75 | `backend/src/sessionAuth.ts` | 2 | 1 | 1 | 4 |
@@ -688,7 +688,7 @@ Code files documented: **468**
   - `backend/src/services/googleOauth.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.js`
-  - `backend/src/services/mediaQueue.js`
+  - `backend/src/services/mediaQueue.ts`
   - `backend/src/settingsSnapshot.ts`
   - `backend/test/importJobStateMachine.test.ts`
   - `backend/test/serverUtils.test.ts`
@@ -764,7 +764,7 @@ Code files documented: **468**
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.js`
-  - `backend/src/services/mediaQueue.js`
+  - `backend/src/services/mediaQueue.ts`
   - `backend/src/services/portalAi.js`
   - `backend/src/services/verification.js`
   - `backend/src/sessionAuth.ts`
@@ -848,7 +848,7 @@ Code files documented: **468**
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/users.js`
   - `backend/src/services/importJobs.js`
-  - `backend/src/services/mediaQueue.js`
+  - `backend/src/services/mediaQueue.ts`
   - `backend/test/fileAssetStorageReconcile.test.ts`
   - `backend/test/fileAssetUsageCache.test.ts`
   - `backend/test/mediaOptimization.test.ts`
@@ -1360,14 +1360,14 @@ Code files documented: **468**
   - `../fileAssets`
   - `../helpers`
   - `../middleware`
-  - `../services/mediaQueue`
+  - `../services/mediaQueue.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-  - `backend/src/services/mediaQueue.js`
+  - `backend/src/services/mediaQueue.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1571,7 +1571,7 @@ Code files documented: **468**
   - `../runtimeCache.ts`
   - `../runtimeVersion.ts`
   - `../services/importJobs`
-  - `../services/mediaQueue`
+  - `../services/mediaQueue.ts`
   - `express`
 - Internal dependencies (8)
   - `backend/src/catalogTextIntegrity.ts`
@@ -1581,7 +1581,7 @@ Code files documented: **468**
   - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeVersion.ts`
   - `backend/src/services/importJobs.js`
-  - `backend/src/services/mediaQueue.js`
+  - `backend/src/services/mediaQueue.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1964,7 +1964,7 @@ Code files documented: **468**
   - `../productDiscounts.ts`
   - `../productImportPolicies.ts`
   - `../uploadSecurity.ts`
-  - `./mediaQueue`
+  - `./mediaQueue.ts`
   - `bullmq`
   - `crypto`
   - `fs`
@@ -1984,7 +1984,7 @@ Code files documented: **468**
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.ts`
   - `backend/src/productImportPolicies.ts`
-  - `backend/src/services/mediaQueue.js`
+  - `backend/src/services/mediaQueue.ts`
   - `backend/src/uploadSecurity.ts`
 - Referenced by (7)
   - `backend/server.js`
@@ -2022,7 +2022,7 @@ Code files documented: **468**
   - `backend/src/routes/system/index.js`
   - `backend/test/integrationDoctor.test.ts`
 
-### 3.72 `backend/src/services/mediaQueue.js`
+### 3.72 `backend/src/services/mediaQueue.ts`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -2196,10 +2196,10 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (2)
   - `../database.ts`
-  - `../services/mediaQueue`
+  - `../services/mediaQueue.ts`
 - Internal dependencies (2)
   - `backend/src/database.ts`
-  - `backend/src/services/mediaQueue.js`
+  - `backend/src/services/mediaQueue.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -2481,7 +2481,7 @@ Code files documented: **468**
   - `../src/config`
   - `../src/database.ts`
   - `../src/services/importJobs`
-  - `../src/services/mediaQueue`
+  - `../src/services/mediaQueue.ts`
   - `fs`
   - `node:assert/strict`
   - `os`
@@ -2490,7 +2490,7 @@ Code files documented: **468**
   - `backend/src/config/index.js`
   - `backend/src/database.ts`
   - `backend/src/services/importJobs.js`
-  - `backend/src/services/mediaQueue.js`
+  - `backend/src/services/mediaQueue.ts`
 - Referenced by (0)
   - none
 

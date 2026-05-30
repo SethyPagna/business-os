@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **37**
+Total files documented: **36**
 
 ## 2. Symbol Count by File
 
@@ -42,11 +42,10 @@ Total files documented: **37**
 | 30 | `backend/src/services/googleOauth.js` | 17 | 0 |
 | 31 | `backend/src/services/importJobs.js` | 175 | 0 |
 | 32 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
-| 33 | `backend/src/services/mediaQueue.js` | 10 | 0 |
-| 34 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 35 | `backend/src/services/verification.js` | 21 | 0 |
-| 36 | `backend/src/systemJobs.js` | 28 | 0 |
-| 37 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
+| 33 | `backend/src/services/portalAi.js` | 42 | 0 |
+| 34 | `backend/src/services/verification.js` | 21 | 0 |
+| 35 | `backend/src/systemJobs.js` | 28 | 0 |
+| 36 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1500,22 +1499,7 @@ Total files documented: **37**
 | 13 | `probeBackups` | function | 199 |
 | 14 | `buildIntegrationDoctor` | function | 216 |
 
-### 3.33 `backend/src/services/mediaQueue.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `wait` | function | 19 |
-| 2 | `queueDriverRequired` | function | 23 |
-| 3 | `isImportJobCancelled` | function | 27 |
-| 4 | `getMediaConnection` | function | 34 |
-| 5 | `initializeMediaQueue` | function | 47 |
-| 6 | `processMediaOptimizationJob` | function | 65 |
-| 7 | `runLocalMediaJob` | function | 119 |
-| 8 | `enqueueMediaOptimization` | function | 131 |
-| 9 | `startMediaWorker` | function | 157 |
-| 10 | `getMediaQueueStatus` | function | 181 |
-
-### 3.34 `backend/src/services/portalAi.js`
+### 3.33 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1562,7 +1546,7 @@ Total files documented: **37**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.35 `backend/src/services/verification.js`
+### 3.34 `backend/src/services/verification.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1588,7 +1572,7 @@ Total files documented: **37**
 | 20 | `sendEmail` | function | 183 |
 | 21 | `requestVerificationCode` | function | 247 |
 
-### 3.36 `backend/src/systemJobs.js`
+### 3.35 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1621,7 +1605,7 @@ Total files documented: **37**
 | 27 | `getSystemJob` | function | 432 |
 | 28 | `listSystemJobs` | function | 444 |
 
-### 3.37 `backend/src/uploadReferenceCleanup.js`
+### 3.36 `backend/src/uploadReferenceCleanup.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

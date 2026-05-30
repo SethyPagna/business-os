@@ -81,7 +81,7 @@ Code files scanned: **468**
 | 69 | `backend/src/services/googleOauth.js` | 17 |
 | 70 | `backend/src/services/importJobs.js` | 175 |
 | 71 | `backend/src/services/integrationDoctor.js` | 14 |
-| 72 | `backend/src/services/mediaQueue.js` | 10 |
+| 72 | `backend/src/services/mediaQueue.ts` | 10 |
 | 73 | `backend/src/services/portalAi.js` | 42 |
 | 74 | `backend/src/services/verification.js` | 21 |
 | 75 | `backend/src/sessionAuth.ts` | 13 |
@@ -2148,7 +2148,7 @@ Code files scanned: **468**
 | 13 | `probeBackups` | function | 199 |
 | 14 | `buildIntegrationDoctor` | function | 216 |
 
-### 3.72 `backend/src/services/mediaQueue.js`
+### 3.72 `backend/src/services/mediaQueue.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
