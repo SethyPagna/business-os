@@ -39,7 +39,7 @@ Code files scanned: **468**
 | 27 | `backend/src/organizationContext/index.ts` | 14 |
 | 28 | `backend/src/permissions.ts` | 7 |
 | 29 | `backend/src/portalUtils.ts` | 6 |
-| 30 | `backend/src/postgresDatabase.js` | 14 |
+| 30 | `backend/src/postgresDatabase.ts` | 14 |
 | 31 | `backend/src/productBatches.ts` | 34 |
 | 32 | `backend/src/productDiscounts.ts` | 9 |
 | 33 | `backend/src/productImportPolicies.ts` | 10 |
@@ -966,7 +966,7 @@ Code files scanned: **468**
 | 5 | `extractGoogleMapsEmbedUrl` | function | 78 |
 | 6 | `normalizeGoogleMapsEmbed` | function | 90 |
 
-### 3.30 `backend/src/postgresDatabase.js`
+### 3.30 `backend/src/postgresDatabase.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

@@ -39,7 +39,7 @@ Code files documented: **468**
 | 27 | `backend/src/organizationContext/index.ts` | 7 | 1 | 4 | 6 |
 | 28 | `backend/src/permissions.ts` | 0 | 1 | 0 | 4 |
 | 29 | `backend/src/portalUtils.ts` | 0 | 1 | 0 | 2 |
-| 30 | `backend/src/postgresDatabase.js` | 7 | 1 | 3 | 2 |
+| 30 | `backend/src/postgresDatabase.ts` | 7 | 1 | 3 | 2 |
 | 31 | `backend/src/productBatches.ts` | 1 | 1 | 1 | 6 |
 | 32 | `backend/src/productDiscounts.ts` | 1 | 1 | 1 | 3 |
 | 33 | `backend/src/productImportPolicies.ts` | 1 | 1 | 1 | 3 |
@@ -674,7 +674,7 @@ Code files documented: **468**
   - `backend/src/middleware.ts`
   - `backend/src/objectStore.ts`
   - `backend/src/organizationContext/index.ts`
-  - `backend/src/postgresDatabase.js`
+  - `backend/src/postgresDatabase.ts`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/products.js`
@@ -730,9 +730,9 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (1)
-  - `./postgresDatabase`
+  - `./postgresDatabase.ts`
 - Internal dependencies (1)
-  - `backend/src/postgresDatabase.js`
+  - `backend/src/postgresDatabase.ts`
 - Referenced by (40)
   - `backend/server.js`
   - `backend/src/businessMetrics.ts`
@@ -810,7 +810,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `backend/src/postgresDatabase.js`
+  - `backend/src/postgresDatabase.ts`
   - `backend/test/postgresQueryCompat.test.ts`
 
 ### 3.15 `backend/src/fileAssets.js`
@@ -1096,7 +1096,7 @@ Code files documented: **468**
   - none
 - Referenced by (4)
   - `backend/src/middleware.ts`
-  - `backend/src/postgresDatabase.js`
+  - `backend/src/postgresDatabase.ts`
   - `backend/src/routes/actionHistory.ts`
   - `backend/test/permissionPolicy.test.ts`
 
@@ -1111,7 +1111,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.js`
   - `backend/test/portalUtils.test.ts`
 
-### 3.30 `backend/src/postgresDatabase.js`
+### 3.30 `backend/src/postgresDatabase.ts`
 
 - Declared exports: `module.exports`
 - Imports (7)
@@ -2653,12 +2653,12 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../src/postgresDatabase`
+  - `../src/postgresDatabase.ts`
   - `node:assert/strict`
   - `node:fs`
   - `node:path`
 - Internal dependencies (1)
-  - `backend/src/postgresDatabase.js`
+  - `backend/src/postgresDatabase.ts`
 - Referenced by (0)
   - none
 
