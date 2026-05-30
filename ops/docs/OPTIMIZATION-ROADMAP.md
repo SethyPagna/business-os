@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 572.
+- Latest completed implementation move in this roadmap: Move 573.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4882,7 +4882,7 @@ Move 434 status:
 Move 435 status:
 - Move 435 tightens Postgres compatibility and cutover-readiness scans in
   `backend/src/db/postgresQueryCompat.js` and
-  `backend/src/db/cutoverReadiness.js`. Numeric field matching, coerced-row
+  `backend/src/db/cutoverReadiness.ts`. Numeric field matching, coerced-row
   materialization, forbidden-pattern scanning, blocker counting, summary row
   construction, and multi-file analysis now use named direct-loop helpers
   instead of callback chains. SQL translation, numeric coercion exceptions,
@@ -6345,3 +6345,18 @@ Move 572 status:
   route/service conversion still waits for a compile/staging package lane. The
   current source extension count is `.js: 61`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
   `.ts: 302`, `.tsx: 107` outside generated/runtime folders.
+
+Move 573 status:
+- Move 573 converts `backend/src/db/cutoverReadiness.ts` to a package-safe
+  TypeScript path. The helper keeps the forbidden-pattern and packaged-runtime
+  readiness report shape unchanged while adding a JSDoc options contract and
+  scanning both `.js` and `.ts` backend source files. System routes, the
+  cutover-readiness test, and the Docker release PowerShell verifier use
+  explicit `.ts` imports. Focused helper load, Postgres cutover-readiness,
+  route-contract, Docker release guardrail, and stale-path scans passed, as did
+  the full backend utility suite, schema audit, and Linux packaging proof. `pkg`
+  continues to warn for direct `.ts` scripts, so larger backend route/service
+  conversion still waits for a
+  compile/staging package lane. The current source extension count is
+  `.js: 60`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 303`, `.tsx: 107` outside
+  generated/runtime folders.

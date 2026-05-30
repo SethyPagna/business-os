@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const path = require('path')
 
-const { analyzePostgresCutoverReadiness } = require('../src/db/cutoverReadiness')
+const { analyzePostgresCutoverReadiness } = require('../src/db/cutoverReadiness.ts')
 
 let failed = 0
 

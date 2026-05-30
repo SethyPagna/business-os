@@ -33,6 +33,14 @@ const FORBIDDEN_PATTERNS = [
   },
 ]
 
+/**
+ * @typedef {{
+ *   repoRoot?: string,
+ *   srcRoot?: string,
+ *   packagedRuntime?: boolean,
+ * }} PostgresCutoverReadinessOptions
+ */
+
 function normalizeRelative(filePath) {
   return String(filePath || '').replace(/\\/g, '/')
 }
@@ -49,16 +57,16 @@ function shouldSkipDir(name) {
     || name === '.git'
 }
 
-function listJavaScriptFiles(dir) {
+function listSourceFiles(dir) {
   const files = []
   if (!fs.existsSync(dir)) return files
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (!shouldSkipDir(entry.name)) files.push(...listJavaScriptFiles(fullPath))
+      if (!shouldSkipDir(entry.name)) files.push(...listSourceFiles(fullPath))
       continue
     }
-    if (entry.isFile() && entry.name.endsWith('.js')) files.push(fullPath)
+    if (entry.isFile() && ['.js', '.ts'].includes(path.extname(entry.name))) files.push(fullPath)
   }
   return files
 }
@@ -122,18 +130,19 @@ function analyzeFiles({ repoRoot, files }) {
   return blockers
 }
 
+/** @param {PostgresCutoverReadinessOptions} [options] */
 function analyzePostgresCutoverReadiness(options = {}) {
   const repoRoot = path.resolve(options.repoRoot || path.join(__dirname, '..', '..', '..'))
   const srcRoot = path.resolve(options.srcRoot || path.join(repoRoot, 'backend', 'src'))
   const packagedRuntime = options.packagedRuntime === true || (options.packagedRuntime !== false && !!process.pkg)
-  const files = listJavaScriptFiles(srcRoot)
+  const files = listSourceFiles(srcRoot)
   let blockers = files.length === 0
     ? [{
         file: normalizeRelative(path.relative(repoRoot, srcRoot) || srcRoot),
         line: 0,
         code: 'source_unavailable',
         description: 'Final runtime readiness cannot prove retired live routes are gone because source files are not available on disk',
-        snippet: 'Source scan found no JavaScript files. Treating runtime as locked.',
+        snippet: 'Source scan found no JavaScript or TypeScript files. Treating runtime as locked.',
       }]
     : analyzeFiles({ repoRoot, files })
 

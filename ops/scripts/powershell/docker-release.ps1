@@ -305,14 +305,14 @@ function Stop-OfflineStorageWhenR2($envMap) {
 
 function Get-PostgresCutoverBlockerSummary {
   $node = Find-Executable @('node.exe', 'node') @('C:\Program Files\nodejs\node.exe')
-  $analyzer = Join-Path $Root 'backend\src\db\cutoverReadiness.js'
+  $analyzer = Join-Path $Root 'backend\src\db\cutoverReadiness.ts'
   if (-not $node -or -not (Test-Path -LiteralPath $analyzer)) {
     return ''
   }
   $rootJson = $Root | ConvertTo-Json -Compress
   $script = @"
 const root = $rootJson;
-const { analyzePostgresCutoverReadiness } = require(root + '/backend/src/db/cutoverReadiness');
+const { analyzePostgresCutoverReadiness } = require(root + '/backend/src/db/cutoverReadiness.ts');
 const report = analyzePostgresCutoverReadiness({ repoRoot: root, packagedRuntime: false });
 console.log(JSON.stringify({
   blockerCount: report.blockerCount,

@@ -75,7 +75,7 @@ const { createFinalBackupPackage, findReusableLocalBackupPackage, listBackupVers
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState/index.ts')
 const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = require('../../systemJobs')
 const { getMaintenanceLock, withMaintenanceLock } = require('../../maintenanceLock.ts')
-const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness')
+const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness.ts')
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime.ts')
 const { testObjectStore } = require('../../objectStore')
 const { buildIntegrationDoctor } = require('../../services/integrationDoctor')
