@@ -41,7 +41,7 @@ Total files documented: **531**
 | 29 | `backend/src/middleware.ts` | backend-core | 336 | 10.3 | Project source/support file |
 | 30 | `backend/src/money.ts` | backend-core | 29 | 0.8 | Project source/support file |
 | 31 | `backend/src/netSecurity.ts` | backend-core | 148 | 3.6 | Project source/support file |
-| 32 | `backend/src/objectStore.js` | backend-core | 468 | 15.1 | Project source/support file |
+| 32 | `backend/src/objectStore.ts` | backend-core | 468 | 15.1 | Project source/support file |
 | 33 | `backend/src/optionalSharp.ts` | backend-core | 32 | 0.7 | Project source/support file |
 | 34 | `backend/src/organizationContext/index.ts` | backend-core | 264 | 8.2 | Project source/support file |
 | 35 | `backend/src/permissions.ts` | backend-core | 227 | 7.0 | Project source/support file |

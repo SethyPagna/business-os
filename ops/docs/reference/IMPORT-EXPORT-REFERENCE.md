@@ -34,7 +34,7 @@ Code files documented: **468**
 | 22 | `backend/src/middleware.ts` | 10 | 1 | 7 | 24 |
 | 23 | `backend/src/money.ts` | 0 | 1 | 0 | 5 |
 | 24 | `backend/src/netSecurity.ts` | 1 | 1 | 0 | 5 |
-| 25 | `backend/src/objectStore.js` | 7 | 1 | 1 | 6 |
+| 25 | `backend/src/objectStore.ts` | 7 | 1 | 1 | 6 |
 | 26 | `backend/src/optionalSharp.ts` | 1 | 1 | 0 | 2 |
 | 27 | `backend/src/organizationContext/index.ts` | 7 | 1 | 4 | 6 |
 | 28 | `backend/src/permissions.ts` | 0 | 1 | 0 | 4 |
@@ -492,7 +492,7 @@ Code files documented: **468**
   - `./src/helpers`
   - `./src/maintenanceLock.ts`
   - `./src/middleware.ts`
-  - `./src/objectStore`
+  - `./src/objectStore.ts`
   - `./src/organizationContext/index.ts`
   - `./src/productBatches`
   - `./src/requestContext.ts`
@@ -540,7 +540,7 @@ Code files documented: **468**
   - `backend/src/helpers.js`
   - `backend/src/maintenanceLock.ts`
   - `backend/src/middleware.ts`
-  - `backend/src/objectStore.js`
+  - `backend/src/objectStore.ts`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/productBatches.js`
   - `backend/src/requestContext.ts`
@@ -672,7 +672,7 @@ Code files documented: **468**
   - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/middleware.ts`
-  - `backend/src/objectStore.js`
+  - `backend/src/objectStore.ts`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/postgresDatabase.js`
   - `backend/src/routes/auth.js`
@@ -819,7 +819,7 @@ Code files documented: **468**
 - Imports (12)
   - `./config/index.ts`
   - `./database.ts`
-  - `./objectStore`
+  - `./objectStore.ts`
   - `./optionalSharp.ts`
   - `./settingsSnapshot.ts`
   - `./uploadReferenceCleanup.ts`
@@ -832,7 +832,7 @@ Code files documented: **468**
 - Internal dependencies (7)
   - `backend/src/config/index.ts`
   - `backend/src/database.ts`
-  - `backend/src/objectStore.js`
+  - `backend/src/objectStore.ts`
   - `backend/src/optionalSharp.ts`
   - `backend/src/settingsSnapshot.ts`
   - `backend/src/uploadReferenceCleanup.ts`
@@ -1031,7 +1031,7 @@ Code files documented: **468**
   - `backend/src/services/importJobs.js`
   - `backend/test/netSecurity.test.ts`
 
-### 3.25 `backend/src/objectStore.js`
+### 3.25 `backend/src/objectStore.ts`
 
 - Declared exports: `module.exports`
 - Imports (7)
@@ -1668,7 +1668,7 @@ Code files documented: **468**
   - `../../helpers`
   - `../../maintenanceLock.ts`
   - `../../middleware.ts`
-  - `../../objectStore`
+  - `../../objectStore.ts`
   - `../../organizationContext/index.ts`
   - `../../runtimeState/index.ts`
   - `../../security.ts`
@@ -1693,7 +1693,7 @@ Code files documented: **468**
   - `backend/src/helpers.js`
   - `backend/src/maintenanceLock.ts`
   - `backend/src/middleware.ts`
-  - `backend/src/objectStore.js`
+  - `backend/src/objectStore.ts`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/security.ts`
@@ -1863,7 +1863,7 @@ Code files documented: **468**
   - `../backupSchema.ts`
   - `../config/index.ts`
   - `../database.ts`
-  - `../objectStore`
+  - `../objectStore.ts`
   - `crypto`
   - `fs`
   - `path`
@@ -1873,7 +1873,7 @@ Code files documented: **468**
   - `backend/src/backupSchema.ts`
   - `backend/src/config/index.ts`
   - `backend/src/database.ts`
-  - `backend/src/objectStore.js`
+  - `backend/src/objectStore.ts`
 - Referenced by (4)
   - `backend/src/routes/system/index.js`
   - `backend/src/services/googleDriveSync/index.js`
@@ -2002,7 +2002,7 @@ Code files documented: **468**
   - `../analytics/duckdbRuntime.ts`
   - `../config/index.ts`
   - `../database.ts`
-  - `../objectStore`
+  - `../objectStore.ts`
   - `./backupPackages`
   - `./googleDriveSync`
   - `./googleOauth.ts`
@@ -2013,7 +2013,7 @@ Code files documented: **468**
   - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/config/index.ts`
   - `backend/src/database.ts`
-  - `backend/src/objectStore.js`
+  - `backend/src/objectStore.ts`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/googleOauth.ts`
@@ -2085,12 +2085,12 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (4)
   - `./config/index.ts`
-  - `./objectStore`
+  - `./objectStore.ts`
   - `fs`
   - `path`
 - Internal dependencies (2)
   - `backend/src/config/index.ts`
-  - `backend/src/objectStore.js`
+  - `backend/src/objectStore.ts`
 - Referenced by (8)
   - `backend/src/fileAssets.js`
   - `backend/src/routes/auth.js`
