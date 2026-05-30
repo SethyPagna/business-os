@@ -41,7 +41,7 @@ const { wss_clients } = require('./src/helpers.ts')
 const { getRuntimeVersion } = require('./src/runtimeVersion.ts')
 const { getDuckDbRuntimeStatus } = require('./src/analytics/duckdbRuntime.ts')
 const { getObjectStream, isObjectStorageEnabled } = require('./src/objectStore.ts')
-const { getLegacyBatchBackfillStatus, scheduleLegacyBatchBackfill } = require('./src/productBatches')
+const { getLegacyBatchBackfillStatus, scheduleLegacyBatchBackfill } = require('./src/productBatches.ts')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext/index.ts')
 const {
   CORS_OPTIONS,

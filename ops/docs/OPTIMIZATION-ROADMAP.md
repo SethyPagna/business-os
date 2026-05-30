@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 606.
+- Latest completed implementation move in this roadmap: Move 607.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4812,7 +4812,7 @@ Move 426 status:
 
 Move 427 status:
 - Move 427 tightens product-batch stock hierarchy helpers in
-  `backend/src/productBatches.js`. Product ID normalization, placeholder
+  `backend/src/productBatches.ts`. Product ID normalization, placeholder
   construction, batch ID extraction, tracked-batch detection, product-batch
   grouping, branch rollup aggregation, legacy batch zeroing, branch quantity
   seeding, force-migration ID listing, and availability totals now use named
@@ -6863,3 +6863,19 @@ Move 606 status:
   broader backend conversions still wait for a compile/staging package lane.
   The expected generated language audit now reports `JavaScript: 16`,
   `TypeScript: 295`, and `React TSX: 107` across the active scan roots.
+
+Move 607 status:
+- Move 607 converts `backend/src/productBatches.ts` to a package-safe
+  TypeScript path. Legacy batch backfill scheduling, batch-key construction,
+  sellable-product guards, batch stock reads/writes, FEFO allocation,
+  sale/return allocation lookup and release helpers, branch rollups,
+  clone/restore behavior, and product rollup sync remain unchanged on the
+  existing CommonJS helper style. Server startup, import jobs, products,
+  inventory, sales, returns, backend source assertions, and roadmap docs now
+  point at the explicit `.ts` helper path. Focused helper load,
+  product-batch hierarchy, route-contract, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The expected generated language audit now
+  reports `JavaScript: 15`, `TypeScript: 296`, and `React TSX: 107` across the
+  active scan roots.

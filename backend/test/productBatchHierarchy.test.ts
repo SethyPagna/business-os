@@ -23,7 +23,7 @@ function readSource(relativePath) {
 
 const schema = readSource('src/db/postgresSchema.sql')
 const runtime = readSource('src/postgresDatabase.js')
-const batchHelpers = readSource('src/productBatches.js')
+const batchHelpers = readSource('src/productBatches.ts')
 const inventoryRoute = readSource('src/routes/inventory.js')
 const productsRoute = readSource('src/routes/products.js')
 const salesRoute = readSource('src/routes/sales.js')

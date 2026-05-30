@@ -14,7 +14,7 @@ const {
   migrateLegacyProductToBatches,
   restoreBatchAllocations,
   syncProductBatchRollups,
-} = require('../productBatches')
+} = require('../productBatches.ts')
 
 const router = express.Router()
 const DASHBOARD_SUMMARY_CACHE_TTL_MS = 5_000

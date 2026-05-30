@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 606 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 607 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 38`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 325`,
+  `.js: 37`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 326`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3333,7 +3333,7 @@ Decision rule:
     cleanup only; no folder move, schema migration, or language conversion was
     needed.
 417. Tighten product-batch stock hierarchy helpers. Done:
-    `backend/src/productBatches.js` now uses direct-loop helpers for product ID
+    `backend/src/productBatches.ts` now uses direct-loop helpers for product ID
     normalization, placeholder construction, batch ID extraction, tracked-batch
     detection, product-batch grouping, branch rollup aggregation, legacy batch
     zeroing, branch quantity seeding, force-migration ID listing, and
@@ -5164,6 +5164,20 @@ Decision rule:
     the future compile/staging lane. The expected generated language audit now
     reports `JavaScript: 16`, `TypeScript: 295`, and `React TSX: 107` across
     the active scan roots.
+607. Convert backend product-batch helpers to a package-safe TypeScript path.
+    Done: `backend/src/productBatches.ts` keeps legacy batch backfill
+    scheduling, batch-key construction, sellable-product guards, batch stock
+    reads/writes, FEFO allocation, sale/return allocation lookup and release
+    helpers, branch rollups, clone/restore behavior, and product rollup sync on
+    the existing CommonJS helper style. Server startup, import jobs, products,
+    inventory, sales, returns, backend source assertions, and roadmap docs now
+    point at the explicit `.ts` helper path. Focused helper load,
+    product-batch hierarchy, route-contract, backend utility, schema audit,
+    stale-path, and Linux packaging proof passed. Packaging still warns for
+    direct `.ts` entries in `pkg.scripts`, so broader backend conversions
+    remain blocked on the future compile/staging lane. The expected generated
+    language audit now reports `JavaScript: 15`, `TypeScript: 296`, and
+    `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

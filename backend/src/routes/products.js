@@ -38,7 +38,7 @@ const {
   normalizeExpiryDate,
   normalizeLotCode,
   syncProductBatchRollups,
-} = require('../productBatches')
+} = require('../productBatches.ts')
 
 const router = express.Router()
 
