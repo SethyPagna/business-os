@@ -14,7 +14,7 @@ Code files scanned: **466**
 | 2 | `backend/src/accessControl.ts` | 18 |
 | 3 | `backend/src/analytics/duckdbRuntime.js` | 3 |
 | 4 | `backend/src/authOtpGuards.ts` | 3 |
-| 5 | `backend/src/backupSchema.js` | 4 |
+| 5 | `backend/src/backupSchema.ts` | 4 |
 | 6 | `backend/src/businessMetrics.js` | 9 |
 | 7 | `backend/src/catalogTextIntegrity.ts` | 5 |
 | 8 | `backend/src/config/index.js` | 11 |
@@ -546,14 +546,14 @@ Code files scanned: **466**
 | 2 | `canManageOtpTarget` | function | 12 |
 | 3 | `requiresSelfOtpDisablePassword` | function | 23 |
 
-### 3.5 `backend/src/backupSchema.js`
+### 3.5 `backend/src/backupSchema.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `countRowsByTable` | function | 90 |
-| 2 | `countCustomTableRows` | function | 99 |
-| 3 | `buildBackupSummary` | function | 107 |
-| 4 | `buildBackupSummaryFromCounts` | function | 112 |
+| 1 | `countRowsByTable` | function | 102 |
+| 2 | `countCustomTableRows` | function | 114 |
+| 3 | `buildBackupSummary` | function | 125 |
+| 4 | `buildBackupSummaryFromCounts` | function | 133 |
 
 ### 3.6 `backend/src/businessMetrics.js`
 

@@ -14,7 +14,7 @@ Code files documented: **466**
 | 2 | `backend/src/accessControl.ts` | 1 | 1 | 1 | 4 |
 | 3 | `backend/src/analytics/duckdbRuntime.js` | 2 | 1 | 1 | 4 |
 | 4 | `backend/src/authOtpGuards.ts` | 1 | 1 | 1 | 2 |
-| 5 | `backend/src/backupSchema.js` | 0 | 1 | 0 | 3 |
+| 5 | `backend/src/backupSchema.ts` | 0 | 1 | 0 | 3 |
 | 6 | `backend/src/businessMetrics.js` | 1 | 1 | 1 | 5 |
 | 7 | `backend/src/catalogTextIntegrity.ts` | 0 | 1 | 0 | 7 |
 | 8 | `backend/src/config/index.js` | 4 | 1 | 1 | 25 |
@@ -612,7 +612,7 @@ Code files documented: **466**
   - `backend/src/routes/auth.js`
   - `backend/test/authOtpGuards.test.ts`
 
-### 3.5 `backend/src/backupSchema.js`
+### 3.5 `backend/src/backupSchema.ts`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -1650,7 +1650,7 @@ Code files documented: **466**
 - Imports (24)
   - `../../accessControl.ts`
   - `../../analytics/duckdbRuntime`
-  - `../../backupSchema`
+  - `../../backupSchema.ts`
   - `../../config`
   - `../../dataPath`
   - `../../database`
@@ -1675,7 +1675,7 @@ Code files documented: **466**
 - Internal dependencies (20)
   - `backend/src/accessControl.ts`
   - `backend/src/analytics/duckdbRuntime.js`
-  - `backend/src/backupSchema.js`
+  - `backend/src/backupSchema.ts`
   - `backend/src/config/index.js`
   - `backend/src/dataPath/index.js`
   - `backend/src/database.js`
@@ -1849,7 +1849,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (9)
-  - `../backupSchema`
+  - `../backupSchema.ts`
   - `../config`
   - `../database`
   - `../objectStore`
@@ -1859,7 +1859,7 @@ Code files documented: **466**
   - `stream`
   - `stream/promises`
 - Internal dependencies (4)
-  - `backend/src/backupSchema.js`
+  - `backend/src/backupSchema.ts`
   - `backend/src/config/index.js`
   - `backend/src/database.js`
   - `backend/src/objectStore.js`
@@ -2283,12 +2283,12 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../src/backupSchema`
+  - `../src/backupSchema.ts`
   - `node:assert/strict`
   - `node:fs`
   - `node:path`
 - Internal dependencies (1)
-  - `backend/src/backupSchema.js`
+  - `backend/src/backupSchema.ts`
 - Referenced by (0)
   - none
 
