@@ -12,7 +12,7 @@ Code files documented: **466**
 |---:|---|---:|---:|---:|---:|
 | 1 | `backend/server.js` | 47 | 0 | 40 | 0 |
 | 2 | `backend/src/accessControl.ts` | 1 | 1 | 1 | 4 |
-| 3 | `backend/src/analytics/duckdbRuntime.js` | 2 | 1 | 1 | 4 |
+| 3 | `backend/src/analytics/duckdbRuntime.ts` | 2 | 1 | 1 | 4 |
 | 4 | `backend/src/authOtpGuards.ts` | 1 | 1 | 1 | 2 |
 | 5 | `backend/src/backupSchema.ts` | 0 | 1 | 0 | 3 |
 | 6 | `backend/src/businessMetrics.ts` | 1 | 1 | 1 | 5 |
@@ -483,7 +483,7 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (47)
-  - `./src/analytics/duckdbRuntime`
+  - `./src/analytics/duckdbRuntime.ts`
   - `./src/config`
   - `./src/database.ts`
   - `./src/fileAssets`
@@ -531,7 +531,7 @@ Code files documented: **466**
   - `path`
   - `stream`
 - Internal dependencies (40)
-  - `backend/src/analytics/duckdbRuntime.js`
+  - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/config/index.js`
   - `backend/src/database.ts`
   - `backend/src/fileAssets.js`
@@ -587,7 +587,7 @@ Code files documented: **466**
   - `backend/src/routes/system/index.js`
   - `backend/test/accessControl.test.ts`
 
-### 3.3 `backend/src/analytics/duckdbRuntime.js`
+### 3.3 `backend/src/analytics/duckdbRuntime.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -667,7 +667,7 @@ Code files documented: **466**
 - Referenced by (25)
   - `backend/server.js`
   - `backend/src/accessControl.ts`
-  - `backend/src/analytics/duckdbRuntime.js`
+  - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/middleware.js`
   - `backend/src/objectStore.js`
@@ -1649,7 +1649,7 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (24)
   - `../../accessControl.ts`
-  - `../../analytics/duckdbRuntime`
+  - `../../analytics/duckdbRuntime.ts`
   - `../../backupSchema.ts`
   - `../../config`
   - `../../dataPath`
@@ -1674,7 +1674,7 @@ Code files documented: **466**
   - `path`
 - Internal dependencies (20)
   - `backend/src/accessControl.ts`
-  - `backend/src/analytics/duckdbRuntime.js`
+  - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/backupSchema.ts`
   - `backend/src/config/index.js`
   - `backend/src/dataPath/index.js`
@@ -1988,7 +1988,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (10)
-  - `../analytics/duckdbRuntime`
+  - `../analytics/duckdbRuntime.ts`
   - `../config`
   - `../database.ts`
   - `../objectStore`
@@ -1999,7 +1999,7 @@ Code files documented: **466**
   - `fs`
   - `path`
 - Internal dependencies (8)
-  - `backend/src/analytics/duckdbRuntime.js`
+  - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/config/index.js`
   - `backend/src/database.ts`
   - `backend/src/objectStore.js`
@@ -2206,10 +2206,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/analytics/duckdbRuntime`
+  - `../src/analytics/duckdbRuntime.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/analytics/duckdbRuntime.js`
+  - `backend/src/analytics/duckdbRuntime.ts`
 - Referenced by (0)
   - none
 

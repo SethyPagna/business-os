@@ -12,7 +12,7 @@ Code files scanned: **466**
 |---:|---|---:|
 | 1 | `backend/server.js` | 23 |
 | 2 | `backend/src/accessControl.ts` | 18 |
-| 3 | `backend/src/analytics/duckdbRuntime.js` | 3 |
+| 3 | `backend/src/analytics/duckdbRuntime.ts` | 3 |
 | 4 | `backend/src/authOtpGuards.ts` | 3 |
 | 5 | `backend/src/backupSchema.ts` | 4 |
 | 6 | `backend/src/businessMetrics.ts` | 9 |
@@ -530,13 +530,13 @@ Code files scanned: **466**
 | 17 | `classifyRequestAccess` | function | 170 |
 | 18 | `authorizeProtectedRequest` | function | 202 |
 
-### 3.3 `backend/src/analytics/duckdbRuntime.js`
+### 3.3 `backend/src/analytics/duckdbRuntime.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `tryRequireDuckDbPackage` | function | 14 |
-| 2 | `probeDuckDbPackage` | function | 27 |
-| 3 | `getDuckDbRuntimeStatus` | function | 56 |
+| 1 | `tryRequireDuckDbPackage` | function | 30 |
+| 2 | `probeDuckDbPackage` | function | 44 |
+| 3 | `getDuckDbRuntimeStatus` | function | 74 |
 
 ### 3.4 `backend/src/authOtpGuards.ts`
 

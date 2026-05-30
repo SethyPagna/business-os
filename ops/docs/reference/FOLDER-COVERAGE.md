@@ -221,7 +221,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `duckdbRuntime.js` | Project source/support file |
+| 1 | `duckdbRuntime.ts` | Project source/support file |
 
 
 ### 3.5 Folder: `backend/src/config`
