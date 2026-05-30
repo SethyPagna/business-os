@@ -4,21 +4,20 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **9**
+Total files documented: **8**
 
 ## 2. Symbol Count by File
 
 | No. | File | Symbols | Route handlers |
 |---:|---|---:|---:|
 | 1 | `backend/server.js` | 23 | 0 |
-| 2 | `backend/src/fileAssets.js` | 61 | 0 |
-| 3 | `backend/src/routes/inventory.js` | 32 | 16 |
-| 4 | `backend/src/routes/portal.js` | 60 | 11 |
-| 5 | `backend/src/routes/products.js` | 64 | 12 |
-| 6 | `backend/src/routes/sales.js` | 24 | 7 |
-| 7 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 8 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 9 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 2 | `backend/src/routes/inventory.js` | 32 | 16 |
+| 3 | `backend/src/routes/portal.js` | 60 | 11 |
+| 4 | `backend/src/routes/products.js` | 64 | 12 |
+| 5 | `backend/src/routes/sales.js` | 24 | 7 |
+| 6 | `backend/src/routes/system/index.js` | 44 | 38 |
+| 7 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 8 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -50,73 +49,7 @@ Total files documented: **9**
 | 22 | `registerShutdownHandlers` | function | 494 |
 | 23 | `bootstrapServer` | function | 511 |
 
-### 3.2 `backend/src/fileAssets.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `getDb` | function | 59 |
-| 2 | `buildAssetExtToMime` | function | 63 |
-| 3 | `ensureUploadsDirectory` | function | 73 |
-| 4 | `getMimeTypeFromName` | function | 77 |
-| 5 | `getMediaType` | function | 82 |
-| 6 | `sanitizeOriginalFileName` | function | 91 |
-| 7 | `preserveOriginalDisplayName` | function | 105 |
-| 8 | `buildUniqueStoredName` | function | 113 |
-| 9 | `shouldCompressImage` | function | 130 |
-| 10 | `compressBufferForAsset` | function | 136 |
-| 11 | `encodeImageCandidate` | function | 220 |
-| 12 | `readImageDimensions` | function | 249 |
-| 13 | `getFfmpegPath` | function | 262 |
-| 14 | `buildVideoOptimizationArgs` | function | 270 |
-| 15 | `optimizeStoredVideo` | function | 308 |
-| 16 | `createFileAssetRecord` | function | 374 |
-| 17 | `getFileAssetByPublicPath` | function | 454 |
-| 18 | `buildFileAssetFilterParams` | function | 463 |
-| 19 | `listAssetRows` | function | 470 |
-| 20 | `countAssetRows` | function | 495 |
-| 21 | `writeObjectBodyToFile` | function | 515 |
-| 22 | `ensureStoredAssetAvailableLocally` | function | 533 |
-| 23 | `collectUploadPathsFromValue` | function | 543 |
-| 24 | `pruneInvalidReferenceBackfillAssets` | function | 571 |
-| 25 | `collectReferencedUploadPaths` | function | 579 |
-| 26 | `add` | const arrow | 581 |
-| 27 | `ensureReferencedAssetsRegistered` | function | 592 |
-| 28 | `getUploadFilePath` | function | 625 |
-| 29 | `toUploadPublicPathFromObjectKey` | function | 630 |
-| 30 | `findUploadStorageOrphans` | function | 636 |
-| 31 | `collectTrackedUploadPublicPaths` | function | 654 |
-| 32 | `add` | const arrow | 656 |
-| 33 | `collectObjectKeys` | function | 673 |
-| 34 | `listLocalUploadFiles` | function | 682 |
-| 35 | `reconcileUploadStorage` | function | 690 |
-| 36 | `requestUploadStorageReconcile` | function | 750 |
-| 37 | `ensureFileAssetListingWarm` | function | 754 |
-| 38 | `prewarmFileAssetListing` | function | 772 |
-| 39 | `deleteAllStoredUploads` | function | 783 |
-| 40 | `buildInClausePlaceholders` | function | 804 |
-| 41 | `normalizeUniquePublicPaths` | function | 810 |
-| 42 | `createUsageMap` | function | 822 |
-| 43 | `addReferencedRowUsages` | function | 830 |
-| 44 | `buildUploadReferenceUsageMap` | function | 840 |
-| 45 | `getCachedSettingsUsageReferences` | function | 862 |
-| 46 | `getCachedSubmissionUsageReferences` | function | 882 |
-| 47 | `mergeUsageReferences` | function | 902 |
-| 48 | `collectUsagesByPublicPath` | function | 911 |
-| 49 | `addUsage` | const arrow | 917 |
-| 50 | `collectUsage` | function | 987 |
-| 51 | `resolveBrowserPublicPath` | function | 991 |
-| 52 | `serializeAssetRow` | function | 998 |
-| 53 | `serializeAssetRows` | function | 1012 |
-| 54 | `registerStoredAsset` | function | 1026 |
-| 55 | `registerUploadFromRequest` | function | 1103 |
-| 56 | `optimizeStoredAssetFromQueue` | function | 1117 |
-| 57 | `storeDataUrlAsset` | function | 1149 |
-| 58 | `backfillUploadAssets` | function | 1175 |
-| 59 | `listFileAssets` | function | 1192 |
-| 60 | `getFileAssetById` | function | 1215 |
-| 61 | `deleteFileAsset` | function | 1220 |
-
-### 3.3 `backend/src/routes/inventory.js`
+### 3.2 `backend/src/routes/inventory.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -153,7 +86,7 @@ Total files documented: **9**
 | 31 | `upsertRfidSessionItem` | function | 1278 |
 | 32 | `recordRfidEvent` | function | 1303 |
 
-#### 3.3.1 Route Handlers
+#### 3.2.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -174,7 +107,7 @@ Total files documented: **9**
 | 15 | GET | `/summary` | 1611 |
 | 16 | GET | `/movements` | 1779 |
 
-### 3.4 `backend/src/routes/portal.js`
+### 3.3 `backend/src/routes/portal.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -239,7 +172,7 @@ Total files documented: **9**
 | 59 | `applyPortalRateLimit` | function | 1006 |
 | 60 | `collectRecommendationCitations` | function | 1014 |
 
-#### 3.4.1 Route Handlers
+#### 3.3.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -255,7 +188,7 @@ Total files documented: **9**
 | 10 | GET | `/submissions/review` | 1339 |
 | 11 | PATCH | `/submissions/:id/review` | 1369 |
 
-### 3.5 `backend/src/routes/products.js`
+### 3.4 `backend/src/routes/products.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -324,7 +257,7 @@ Total files documented: **9**
 | 63 | `parseIncomingImageRefs` | const arrow | 1768 |
 | 64 | `loadCurrentGallery` | const arrow | 1804 |
 
-#### 3.5.1 Route Handlers
+#### 3.4.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -341,7 +274,7 @@ Total files documented: **9**
 | 11 | POST | `/upload-image` | 1487 |
 | 12 | POST | `/bulk-import` | 1505 |
 
-### 3.6 `backend/src/routes/sales.js`
+### 3.5 `backend/src/routes/sales.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -370,7 +303,7 @@ Total files documented: **9**
 | 23 | `fetchSaleItemsWithBranches` | function | 308 |
 | 24 | `findSaleByClientRequestId` | function | 317 |
 
-#### 3.6.1 Route Handlers
+#### 3.5.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -382,7 +315,7 @@ Total files documented: **9**
 | 6 | GET | `/dashboard` | 1106 |
 | 7 | GET | `/analytics` | 1229 |
 
-### 3.7 `backend/src/routes/system/index.js`
+### 3.6 `backend/src/routes/system/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -431,7 +364,7 @@ Total files documented: **9**
 | 43 | `listWindowsFsRoots` | const arrow | 1510 |
 | 44 | `listDriveRoots` | const arrow | 1525 |
 
-#### 3.7.1 Route Handlers
+#### 3.6.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -474,7 +407,7 @@ Total files documented: **9**
 | 37 | POST | `/open-path` | 1564 |
 | 38 | POST | `/pick-folder` | 1593 |
 
-### 3.8 `backend/src/services/googleDriveSync/index.js`
+### 3.7 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -554,7 +487,7 @@ Total files documented: **9**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.9 `backend/src/services/importJobs.js`
+### 3.8 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

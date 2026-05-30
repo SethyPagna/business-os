@@ -24,7 +24,7 @@ Code files scanned: **468**
 | 12 | `backend/src/dataPath/index.ts` | 9 |
 | 13 | `backend/src/db/cutoverReadiness.ts` | 10 |
 | 14 | `backend/src/db/postgresQueryCompat.ts` | 12 |
-| 15 | `backend/src/fileAssets.js` | 61 |
+| 15 | `backend/src/fileAssets.ts` | 61 |
 | 16 | `backend/src/helpers.ts` | 30 |
 | 17 | `backend/src/idempotency.ts` | 1 |
 | 18 | `backend/src/importCsv.ts` | 16 |
@@ -673,7 +673,7 @@ Code files scanned: **468**
 | 11 | `coerceRowValue` | function | 213 |
 | 12 | `coerceRow` | function | 226 |
 
-### 3.15 `backend/src/fileAssets.js`
+### 3.15 `backend/src/fileAssets.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

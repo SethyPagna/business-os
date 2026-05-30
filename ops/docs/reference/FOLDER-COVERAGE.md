@@ -177,7 +177,7 @@ Total folders documented: **81**
 | 6 | `conflictControl.ts` | Project source/support file |
 | 7 | `contactOptions.ts` | Project source/support file |
 | 8 | `database.ts` | Schema/migrations and DB bootstrap |
-| 9 | `fileAssets.js` | Project source/support file |
+| 9 | `fileAssets.ts` | Project source/support file |
 | 10 | `helpers.ts` | Project source/support file |
 | 11 | `idempotency.ts` | Project source/support file |
 | 12 | `importCsv.ts` | Project source/support file |

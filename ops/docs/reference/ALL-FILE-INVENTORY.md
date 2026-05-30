@@ -31,7 +31,7 @@ Total files documented: **531**
 | 19 | `backend/src/db/cutoverReadiness.ts` | backend-core | 173 | 5.5 | Project source/support file |
 | 20 | `backend/src/db/postgresQueryCompat.ts` | backend-core | 240 | 6.7 | Project source/support file |
 | 21 | `backend/src/db/postgresSchema.sql` | backend-core | 2148 | 54.6 | Project source/support file |
-| 22 | `backend/src/fileAssets.js` | backend-core | 1261 | 43.9 | Project source/support file |
+| 22 | `backend/src/fileAssets.ts` | backend-core | 1261 | 43.9 | Project source/support file |
 | 23 | `backend/src/helpers.ts` | backend-core | 625 | 21.0 | Project source/support file |
 | 24 | `backend/src/idempotency.ts` | backend-core | 14 | 0.3 | Project source/support file |
 | 25 | `backend/src/importCsv.ts` | backend-core | 343 | 8.4 | Project source/support file |

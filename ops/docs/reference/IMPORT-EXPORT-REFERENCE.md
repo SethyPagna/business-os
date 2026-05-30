@@ -24,7 +24,7 @@ Code files documented: **468**
 | 12 | `backend/src/dataPath/index.ts` | 2 | 1 | 0 | 5 |
 | 13 | `backend/src/db/cutoverReadiness.ts` | 2 | 1 | 0 | 2 |
 | 14 | `backend/src/db/postgresQueryCompat.ts` | 0 | 1 | 0 | 2 |
-| 15 | `backend/src/fileAssets.js` | 12 | 1 | 7 | 15 |
+| 15 | `backend/src/fileAssets.ts` | 12 | 1 | 7 | 15 |
 | 16 | `backend/src/helpers.ts` | 4 | 1 | 4 | 23 |
 | 17 | `backend/src/idempotency.ts` | 0 | 1 | 0 | 5 |
 | 18 | `backend/src/importCsv.ts` | 1 | 1 | 0 | 3 |
@@ -488,7 +488,7 @@ Code files documented: **468**
   - `./src/analytics/duckdbRuntime.ts`
   - `./src/config/index.ts`
   - `./src/database.ts`
-  - `./src/fileAssets`
+  - `./src/fileAssets.ts`
   - `./src/helpers.ts`
   - `./src/maintenanceLock.ts`
   - `./src/middleware.ts`
@@ -536,7 +536,7 @@ Code files documented: **468**
   - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/config/index.ts`
   - `backend/src/database.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/maintenanceLock.ts`
   - `backend/src/middleware.ts`
@@ -670,7 +670,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/src/accessControl.ts`
   - `backend/src/analytics/duckdbRuntime.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/middleware.ts`
   - `backend/src/objectStore.ts`
   - `backend/src/organizationContext/index.ts`
@@ -736,7 +736,7 @@ Code files documented: **468**
 - Referenced by (40)
   - `backend/server.js`
   - `backend/src/businessMetrics.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/productBatches.ts`
@@ -813,7 +813,7 @@ Code files documented: **468**
   - `backend/src/postgresDatabase.ts`
   - `backend/test/postgresQueryCompat.test.ts`
 
-### 3.15 `backend/src/fileAssets.js`
+### 3.15 `backend/src/fileAssets.ts`
 
 - Declared exports: `module.exports`
 - Imports (12)
@@ -961,7 +961,7 @@ Code files documented: **468**
 - Imports (10)
   - `./accessControl.ts`
   - `./config/index.ts`
-  - `./fileAssets`
+  - `./fileAssets.ts`
   - `./permissions.ts`
   - `./security.ts`
   - `./sessionAuth.ts`
@@ -972,7 +972,7 @@ Code files documented: **468**
 - Internal dependencies (7)
   - `backend/src/accessControl.ts`
   - `backend/src/config/index.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/permissions.ts`
   - `backend/src/security.ts`
   - `backend/src/sessionAuth.ts`
@@ -1046,7 +1046,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
 - Referenced by (6)
   - `backend/server.js`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/backupPackages.ts`
   - `backend/src/services/integrationDoctor.ts`
@@ -1060,7 +1060,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/uploadSecurity.ts`
 
 ### 3.27 `backend/src/organizationContext/index.ts`
@@ -1357,14 +1357,14 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (6)
   - `../conflictControl.ts`
-  - `../fileAssets`
+  - `../fileAssets.ts`
   - `../helpers.ts`
   - `../middleware.ts`
   - `../services/mediaQueue.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/middleware.ts`
   - `backend/src/services/mediaQueue.ts`
@@ -1377,7 +1377,7 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (9)
   - `../config/index.ts`
-  - `../fileAssets`
+  - `../fileAssets.ts`
   - `../helpers.ts`
   - `../middleware.ts`
   - `../services/importJobs`
@@ -1387,7 +1387,7 @@ Code files documented: **468**
   - `path`
 - Internal dependencies (5)
   - `backend/src/config/index.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/middleware.ts`
   - `backend/src/services/importJobs.js`
@@ -1464,7 +1464,7 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (13)
   - `../database.ts`
-  - `../fileAssets`
+  - `../fileAssets.ts`
   - `../helpers.ts`
   - `../initials.ts`
   - `../middleware.ts`
@@ -1478,7 +1478,7 @@ Code files documented: **468**
   - `express`
 - Internal dependencies (12)
   - `backend/src/database.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/initials.ts`
   - `backend/src/middleware.ts`
@@ -1502,7 +1502,7 @@ Code files documented: **468**
   - `../config/index.ts`
   - `../conflictControl.ts`
   - `../database.ts`
-  - `../fileAssets`
+  - `../fileAssets.ts`
   - `../helpers.ts`
   - `../idempotency.ts`
   - `../initials.ts`
@@ -1523,7 +1523,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/idempotency.ts`
   - `backend/src/initials.ts`
@@ -1616,7 +1616,7 @@ Code files documented: **468**
   - `../catalogTextIntegrity.ts`
   - `../conflictControl.ts`
   - `../database.ts`
-  - `../fileAssets`
+  - `../fileAssets.ts`
   - `../helpers.ts`
   - `../middleware.ts`
   - `../schemaMetadata.ts`
@@ -1626,7 +1626,7 @@ Code files documented: **468**
   - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/middleware.ts`
   - `backend/src/schemaMetadata.ts`
@@ -1664,7 +1664,7 @@ Code files documented: **468**
   - `../../dataPath/index.ts`
   - `../../database.ts`
   - `../../db/cutoverReadiness.ts`
-  - `../../fileAssets`
+  - `../../fileAssets.ts`
   - `../../helpers.ts`
   - `../../maintenanceLock.ts`
   - `../../middleware.ts`
@@ -1689,7 +1689,7 @@ Code files documented: **468**
   - `backend/src/dataPath/index.ts`
   - `backend/src/database.ts`
   - `backend/src/db/cutoverReadiness.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/maintenanceLock.ts`
   - `backend/src/middleware.ts`
@@ -1732,7 +1732,7 @@ Code files documented: **468**
 - Imports (11)
   - `../conflictControl.ts`
   - `../database.ts`
-  - `../fileAssets`
+  - `../fileAssets.ts`
   - `../helpers.ts`
   - `../middleware.ts`
   - `../organizationContext/index.ts`
@@ -1744,7 +1744,7 @@ Code files documented: **468**
 - Internal dependencies (9)
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/middleware.ts`
   - `backend/src/organizationContext/index.ts`
@@ -1955,7 +1955,7 @@ Code files documented: **468**
   - `../config/index.ts`
   - `../contactOptions.ts`
   - `../database.ts`
-  - `../fileAssets`
+  - `../fileAssets.ts`
   - `../helpers.ts`
   - `../importCsv.ts`
   - `../money.ts`
@@ -1976,7 +1976,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
   - `backend/src/contactOptions.ts`
   - `backend/src/database.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/importCsv.ts`
   - `backend/src/money.ts`
@@ -2028,13 +2028,13 @@ Code files documented: **468**
 - Imports (5)
   - `../config/index.ts`
   - `../database.ts`
-  - `../fileAssets`
+  - `../fileAssets.ts`
   - `bullmq`
   - `ioredis`
 - Internal dependencies (3)
   - `backend/src/config/index.ts`
   - `backend/src/database.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
 - Referenced by (5)
   - `backend/src/routes/files.ts`
   - `backend/src/routes/runtime.ts`
@@ -2092,7 +2092,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
   - `backend/src/objectStore.ts`
 - Referenced by (8)
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/routes/auth.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/portal.js`
@@ -2145,7 +2145,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/test/settingsSnapshotObjectStorage.test.ts`
 
 ### 3.81 `backend/src/uploadSecurity.ts`
@@ -2157,7 +2157,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/optionalSharp.ts`
 - Referenced by (4)
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/middleware.ts`
   - `backend/src/services/importJobs.js`
   - `backend/test/uploadSecurity.test.ts`
@@ -2363,10 +2363,10 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/fileAssets`
+  - `../src/fileAssets.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
 - Referenced by (0)
   - none
 
@@ -2375,11 +2375,11 @@ Code files documented: **468**
 - Declared exports: none detected
 - Imports (3)
   - `../src/database.ts`
-  - `../src/fileAssets`
+  - `../src/fileAssets.ts`
   - `node:assert/strict`
 - Internal dependencies (2)
   - `backend/src/database.ts`
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
 - Referenced by (0)
   - none
 
@@ -2548,11 +2548,11 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/fileAssets`
+  - `../src/fileAssets.ts`
   - `node:assert/strict`
   - `sharp`
 - Internal dependencies (1)
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
 - Referenced by (0)
   - none
 
@@ -2862,11 +2862,11 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/fileAssets`
+  - `../src/fileAssets.ts`
   - `../src/uploadSecurity.ts`
   - `node:assert/strict`
 - Internal dependencies (2)
-  - `backend/src/fileAssets.js`
+  - `backend/src/fileAssets.ts`
   - `backend/src/uploadSecurity.ts`
 - Referenced by (0)
   - none
