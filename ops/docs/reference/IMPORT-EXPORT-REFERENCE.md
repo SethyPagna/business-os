@@ -50,7 +50,7 @@ Code files documented: **468**
 | 38 | `backend/src/routes/branches.ts` | 8 | 1 | 6 | 1 |
 | 39 | `backend/src/routes/catalog.ts` | 4 | 1 | 3 | 2 |
 | 40 | `backend/src/routes/categories.ts` | 6 | 1 | 5 | 2 |
-| 41 | `backend/src/routes/contacts.js` | 6 | 1 | 5 | 1 |
+| 41 | `backend/src/routes/contacts.ts` | 6 | 1 | 5 | 1 |
 | 42 | `backend/src/routes/customTables.ts` | 6 | 1 | 5 | 1 |
 | 43 | `backend/src/routes/files.ts` | 6 | 1 | 5 | 2 |
 | 44 | `backend/src/routes/importJobs.ts` | 9 | 1 | 5 | 1 |
@@ -502,7 +502,7 @@ Code files documented: **468**
   - `./src/routes/branches.ts`
   - `./src/routes/catalog.ts`
   - `./src/routes/categories.ts`
-  - `./src/routes/contacts`
+  - `./src/routes/contacts.ts`
   - `./src/routes/customTables.ts`
   - `./src/routes/files.ts`
   - `./src/routes/importJobs.ts`
@@ -550,7 +550,7 @@ Code files documented: **468**
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
-  - `backend/src/routes/contacts.js`
+  - `backend/src/routes/contacts.ts`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.ts`
@@ -704,7 +704,7 @@ Code files documented: **468**
   - `backend/src/routes/ai.ts`
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/categories.ts`
-  - `backend/src/routes/contacts.js`
+  - `backend/src/routes/contacts.ts`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/products.js`
@@ -722,7 +722,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (3)
-  - `backend/src/routes/contacts.js`
+  - `backend/src/routes/contacts.ts`
   - `backend/src/services/importJobs.js`
   - `backend/test/contactOptions.test.ts`
 
@@ -746,7 +746,7 @@ Code files documented: **468**
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
-  - `backend/src/routes/contacts.js`
+  - `backend/src/routes/contacts.ts`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/notifications.ts`
@@ -875,7 +875,7 @@ Code files documented: **468**
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
-  - `backend/src/routes/contacts.js`
+  - `backend/src/routes/contacts.ts`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.ts`
@@ -985,7 +985,7 @@ Code files documented: **468**
   - `backend/src/routes/auth.ts`
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/categories.ts`
-  - `backend/src/routes/contacts.js`
+  - `backend/src/routes/contacts.ts`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.ts`
@@ -1314,7 +1314,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
 
-### 3.41 `backend/src/routes/contacts.js`
+### 3.41 `backend/src/routes/contacts.ts`
 
 - Declared exports: `module.exports`
 - Imports (6)

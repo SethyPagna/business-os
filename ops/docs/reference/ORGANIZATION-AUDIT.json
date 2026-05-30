@@ -155,7 +155,7 @@
     "backend/src/db/postgresSchema.sql",
     "backend/src/fileAssets.js",
     "backend/src/routes/auth.ts",
-    "backend/src/routes/contacts.js",
+    "backend/src/routes/contacts.ts",
     "backend/src/routes/inventory.js",
     "backend/src/routes/portal.js",
     "backend/src/routes/products.js",

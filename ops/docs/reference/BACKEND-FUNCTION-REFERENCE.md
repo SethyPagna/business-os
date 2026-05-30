@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **11**
+Total files documented: **10**
 
 ## 2. Symbol Count by File
 
@@ -12,15 +12,14 @@ Total files documented: **11**
 |---:|---|---:|---:|
 | 1 | `backend/server.js` | 23 | 0 |
 | 2 | `backend/src/fileAssets.js` | 61 | 0 |
-| 3 | `backend/src/routes/contacts.js` | 34 | 16 |
-| 4 | `backend/src/routes/inventory.js` | 32 | 16 |
-| 5 | `backend/src/routes/portal.js` | 60 | 11 |
-| 6 | `backend/src/routes/products.js` | 64 | 12 |
-| 7 | `backend/src/routes/sales.js` | 24 | 7 |
-| 8 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 9 | `backend/src/routes/users.js` | 26 | 16 |
-| 10 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 11 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 3 | `backend/src/routes/inventory.js` | 32 | 16 |
+| 4 | `backend/src/routes/portal.js` | 60 | 11 |
+| 5 | `backend/src/routes/products.js` | 64 | 12 |
+| 6 | `backend/src/routes/sales.js` | 24 | 7 |
+| 7 | `backend/src/routes/system/index.js` | 44 | 38 |
+| 8 | `backend/src/routes/users.js` | 26 | 16 |
+| 9 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 10 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -118,67 +117,7 @@ Total files documented: **11**
 | 60 | `getFileAssetById` | function | 1215 |
 | 61 | `deleteFileAsset` | function | 1220 |
 
-### 3.3 `backend/src/routes/contacts.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `normalizeLegacyMembershipNumber` | function | 20 |
-| 2 | `cleanMembershipNumber` | function | 26 |
-| 3 | `requireMembershipNumber` | function | 30 |
-| 4 | `assertUniqueMembershipNumber` | function | 36 |
-| 5 | `ensureMembershipNumber` | function | 50 |
-| 6 | `ensureOrGenerateMembershipNumber` | function | 55 |
-| 7 | `generateCustomerMembershipNumber` | function | 61 |
-| 8 | `normalizeFieldRule` | function | 75 |
-| 9 | `resolveFieldValue` | function | 82 |
-| 10 | `buildImportRows` | function | 93 |
-| 11 | `buildProvidedImportRows` | function | 103 |
-| 12 | `normalizeConflictMode` | function | 112 |
-| 13 | `toNumber` | function | 117 |
-| 14 | `normalizePositiveInt` | function | 122 |
-| 15 | `parseDateFilterParams` | function | 128 |
-| 16 | `buildContactListFilters` | function | 152 |
-| 17 | `buildSearchHaystack` | function | 176 |
-| 18 | `parseScopedIds` | function | 185 |
-| 19 | `addPositiveId` | function | 201 |
-| 20 | `collectPositiveIds` | function | 208 |
-| 21 | `buildSqlPlaceholders` | function | 217 |
-| 22 | `loadPointPolicy` | function | 225 |
-| 23 | `calculatePolicyPoints` | function | 253 |
-| 24 | `wantsExpandedPoints` | function | 258 |
-| 25 | `buildCustomerPointSummaries` | function | 263 |
-| 26 | `buildCustomerRowMap` | function | 336 |
-| 27 | `collectPointSummarySourceIds` | function | 345 |
-| 28 | `defaultPointSummary` | function | 356 |
-| 29 | `buildPointSummaryList` | function | 367 |
-| 30 | `attachPointSummaries` | function | 375 |
-| 31 | `collectCustomerIdsFromRows` | function | 387 |
-| 32 | `findExisting` | const arrow | 560 |
-| 33 | `findExisting` | const arrow | 775 |
-| 34 | `findExisting` | const arrow | 969 |
-
-#### 3.3.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | GET | `/customers` | 392 |
-| 2 | GET | `/customers/points-summary` | 445 |
-| 3 | POST | `/customers` | 466 |
-| 4 | PUT | `/customers/:id` | 489 |
-| 5 | DELETE | `/customers/:id` | 510 |
-| 6 | POST | `/customers/bulk-import` | 526 |
-| 7 | GET | `/suppliers` | 670 |
-| 8 | POST | `/suppliers` | 684 |
-| 9 | PUT | `/suppliers/:id` | 704 |
-| 10 | DELETE | `/suppliers/:id` | 732 |
-| 11 | POST | `/suppliers/bulk-import` | 748 |
-| 12 | GET | `/delivery-contacts` | 872 |
-| 13 | POST | `/delivery-contacts` | 886 |
-| 14 | PUT | `/delivery-contacts/:id` | 902 |
-| 15 | DELETE | `/delivery-contacts/:id` | 926 |
-| 16 | POST | `/delivery-contacts/bulk-import` | 942 |
-
-### 3.4 `backend/src/routes/inventory.js`
+### 3.3 `backend/src/routes/inventory.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -215,7 +154,7 @@ Total files documented: **11**
 | 31 | `upsertRfidSessionItem` | function | 1278 |
 | 32 | `recordRfidEvent` | function | 1303 |
 
-#### 3.4.1 Route Handlers
+#### 3.3.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -236,7 +175,7 @@ Total files documented: **11**
 | 15 | GET | `/summary` | 1611 |
 | 16 | GET | `/movements` | 1779 |
 
-### 3.5 `backend/src/routes/portal.js`
+### 3.4 `backend/src/routes/portal.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -301,7 +240,7 @@ Total files documented: **11**
 | 59 | `applyPortalRateLimit` | function | 1006 |
 | 60 | `collectRecommendationCitations` | function | 1014 |
 
-#### 3.5.1 Route Handlers
+#### 3.4.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -317,7 +256,7 @@ Total files documented: **11**
 | 10 | GET | `/submissions/review` | 1339 |
 | 11 | PATCH | `/submissions/:id/review` | 1369 |
 
-### 3.6 `backend/src/routes/products.js`
+### 3.5 `backend/src/routes/products.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -386,7 +325,7 @@ Total files documented: **11**
 | 63 | `parseIncomingImageRefs` | const arrow | 1768 |
 | 64 | `loadCurrentGallery` | const arrow | 1804 |
 
-#### 3.6.1 Route Handlers
+#### 3.5.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -403,7 +342,7 @@ Total files documented: **11**
 | 11 | POST | `/upload-image` | 1487 |
 | 12 | POST | `/bulk-import` | 1505 |
 
-### 3.7 `backend/src/routes/sales.js`
+### 3.6 `backend/src/routes/sales.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -432,7 +371,7 @@ Total files documented: **11**
 | 23 | `fetchSaleItemsWithBranches` | function | 308 |
 | 24 | `findSaleByClientRequestId` | function | 317 |
 
-#### 3.7.1 Route Handlers
+#### 3.6.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -444,7 +383,7 @@ Total files documented: **11**
 | 6 | GET | `/dashboard` | 1106 |
 | 7 | GET | `/analytics` | 1229 |
 
-### 3.8 `backend/src/routes/system/index.js`
+### 3.7 `backend/src/routes/system/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -493,7 +432,7 @@ Total files documented: **11**
 | 43 | `listWindowsFsRoots` | const arrow | 1510 |
 | 44 | `listDriveRoots` | const arrow | 1525 |
 
-#### 3.8.1 Route Handlers
+#### 3.7.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -536,7 +475,7 @@ Total files documented: **11**
 | 37 | POST | `/open-path` | 1564 |
 | 38 | POST | `/pick-folder` | 1593 |
 
-### 3.9 `backend/src/routes/users.js`
+### 3.8 `backend/src/routes/users.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -567,7 +506,7 @@ Total files documented: **11**
 | 25 | `findProviderIdentity` | function | 344 |
 | 26 | `buildAuthMethodsPayload` | function | 352 |
 
-#### 3.9.1 Route Handlers
+#### 3.8.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -588,7 +527,7 @@ Total files documented: **11**
 | 15 | PUT | `/roles/:id` | 1034 |
 | 16 | DELETE | `/roles/:id` | 1064 |
 
-### 3.10 `backend/src/services/googleDriveSync/index.js`
+### 3.9 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -668,7 +607,7 @@ Total files documented: **11**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.11 `backend/src/services/importJobs.js`
+### 3.10 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

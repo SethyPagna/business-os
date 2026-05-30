@@ -50,7 +50,7 @@ Code files scanned: **468**
 | 38 | `backend/src/routes/branches.ts` | 10 |
 | 39 | `backend/src/routes/catalog.ts` | 4 |
 | 40 | `backend/src/routes/categories.ts` | 2 |
-| 41 | `backend/src/routes/contacts.js` | 34 |
+| 41 | `backend/src/routes/contacts.ts` | 34 |
 | 42 | `backend/src/routes/customTables.ts` | 9 |
 | 43 | `backend/src/routes/files.ts` | 3 |
 | 44 | `backend/src/routes/importJobs.ts` | 16 |
@@ -1155,7 +1155,7 @@ Code files scanned: **468**
 | 1 | `normalizeLookup` | function | 12 |
 | 2 | `normalizeColor` | function | 16 |
 
-### 3.41 `backend/src/routes/contacts.js`
+### 3.41 `backend/src/routes/contacts.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
