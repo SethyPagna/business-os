@@ -63,7 +63,7 @@ Code files scanned: **468**
 | 51 | `backend/src/routes/runtime.ts` | 6 |
 | 52 | `backend/src/routes/sales.js` | 24 |
 | 53 | `backend/src/routes/settings.ts` | 8 |
-| 54 | `backend/src/routes/sync.js` | 12 |
+| 54 | `backend/src/routes/sync.ts` | 12 |
 | 55 | `backend/src/routes/system/index.js` | 44 |
 | 56 | `backend/src/routes/units.ts` | 3 |
 | 57 | `backend/src/routes/users.js` | 26 |
@@ -1512,7 +1512,7 @@ Code files scanned: **468**
 | 7 | `collectAttemptedSettings` | function | 94 |
 | 8 | `getSettingsUpdatedAt` | function | 106 |
 
-### 3.54 `backend/src/routes/sync.js`
+### 3.54 `backend/src/routes/sync.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

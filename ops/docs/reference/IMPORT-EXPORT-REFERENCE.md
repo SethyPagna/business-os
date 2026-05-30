@@ -63,7 +63,7 @@ Code files documented: **468**
 | 51 | `backend/src/routes/runtime.ts` | 9 | 1 | 8 | 2 |
 | 52 | `backend/src/routes/sales.js` | 8 | 1 | 7 | 1 |
 | 53 | `backend/src/routes/settings.ts` | 9 | 1 | 8 | 2 |
-| 54 | `backend/src/routes/sync.js` | 7 | 1 | 3 | 1 |
+| 54 | `backend/src/routes/sync.ts` | 7 | 1 | 3 | 1 |
 | 55 | `backend/src/routes/system/index.js` | 24 | 1 | 20 | 2 |
 | 56 | `backend/src/routes/units.ts` | 6 | 1 | 5 | 2 |
 | 57 | `backend/src/routes/users.js` | 11 | 1 | 9 | 1 |
@@ -515,7 +515,7 @@ Code files documented: **468**
   - `./src/routes/runtime.ts`
   - `./src/routes/sales`
   - `./src/routes/settings.ts`
-  - `./src/routes/sync`
+  - `./src/routes/sync.ts`
   - `./src/routes/system`
   - `./src/routes/units.ts`
   - `./src/routes/users`
@@ -563,7 +563,7 @@ Code files documented: **468**
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.ts`
-  - `backend/src/routes/sync.js`
+  - `backend/src/routes/sync.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
@@ -678,7 +678,7 @@ Code files documented: **468**
   - `backend/src/routes/auth.js`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/products.js`
-  - `backend/src/routes/sync.js`
+  - `backend/src/routes/sync.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeState/index.ts`
@@ -998,7 +998,7 @@ Code files documented: **468**
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.ts`
-  - `backend/src/routes/sync.js`
+  - `backend/src/routes/sync.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
@@ -1635,7 +1635,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
 
-### 3.54 `backend/src/routes/sync.js`
+### 3.54 `backend/src/routes/sync.ts`
 
 - Declared exports: `module.exports`
 - Imports (7)
@@ -1839,7 +1839,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/server.js`
-  - `backend/src/routes/sync.js`
+  - `backend/src/routes/sync.ts`
   - `backend/src/websocket.ts`
   - `backend/test/serverUtils.test.ts`
 
