@@ -30,7 +30,7 @@ File: `backend/src/routes/settings.js`
 ## Categories
 
 Base: `/api/categories`  
-File: `backend/src/routes/categories.js`
+File: `backend/src/routes/categories.ts`
 
 - `GET /`
 - `POST /`

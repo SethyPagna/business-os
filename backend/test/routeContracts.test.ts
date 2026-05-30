@@ -110,6 +110,13 @@ runTest('files router registers list, upload, and delete routes', () => {
   assert.ok(paths.includes('/:id'), 'missing /api/files/:id delete route')
 })
 
+runTest('categories router registers lookup CRUD routes', () => {
+  const router = require('../src/routes/categories.ts')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/'), 'missing /api/categories list/create route')
+  assert.ok(paths.includes('/:id'), 'missing /api/categories/:id update/delete route')
+})
+
 runTest('system router registers Google Drive sync connect and disconnect routes', () => {
   const router = require('../src/routes/system')
   const paths = getRoutePaths(router)

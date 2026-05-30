@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 582.
+- Latest completed implementation move in this roadmap: Move 583.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6499,4 +6499,19 @@ Move 582 status:
   continues to warn for direct `.ts` scripts, so larger backend route/service
   conversion still waits for a compile/staging package lane. The current source
   extension count is `.js: 51`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 312`,
+  `.tsx: 107` outside generated/runtime folders.
+
+Move 583 status:
+- Move 583 converts `backend/src/routes/categories.ts` to a package-safe
+  TypeScript path. Category list/create/update/delete behavior, catalog text
+  integrity checks, merge-on-duplicate rename, product category rewrites,
+  write-conflict handling, audit entries, and sync broadcasts remain unchanged
+  while `backend/server.js` imports the explicit `.ts` route. Backend route docs
+  and the route folder guide now point at the TypeScript path, and
+  `backend/test/routeContracts.test.ts` asserts category CRUD route
+  registration directly. Focused route-contract, category route-load, backend
+  utility, schema audit, stale-path, and Linux packaging proof passed. `pkg`
+  continues to warn for direct `.ts` scripts, so larger backend route/service
+  conversion still waits for a compile/staging package lane. The current source
+  extension count is `.js: 50`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 313`,
   `.tsx: 107` outside generated/runtime folders.
