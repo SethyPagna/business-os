@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T17:33:57.402Z
+Generated: 2026-05-30T17:42:57.801Z
 
 ## Summary
 
@@ -14,10 +14,10 @@ Generated: 2026-05-30T17:33:57.402Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 309 |
+| .ts | 310 |
 | .tsx | 107 |
 | .md | 44 |
-| .js | 43 |
+| .js | 42 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -64,10 +64,10 @@ Generated: 2026-05-30T17:33:57.402Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7966 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7969 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6453 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4809 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6468 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4822 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -88,7 +88,7 @@ Generated: 2026-05-30T17:33:57.402Z
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |
-| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1775 | ops/docs/reference |
+| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1755 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1750 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
@@ -122,6 +122,7 @@ Generated: 2026-05-30T17:33:57.402Z
 | backend/src/routes/inventory.js | 11 | backend/routes |
 | frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |
 | frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |
+| backend/test/routeContracts.test.ts | 10 | backend/test/routeContracts.test.ts |
 | frontend/src/components/contacts/Contacts.tsx | 10 | frontend/components/contacts |
 
 ## Compatibility Wrappers

@@ -311,7 +311,7 @@ Total folders documented: **81**
 | 15 | `products.js` | API route handler |
 | 16 | `README.md` | API route handler |
 | 17 | `returns.js` | API route handler |
-| 18 | `runtime.js` | API route handler |
+| 18 | `runtime.ts` | API route handler |
 | 19 | `sales.js` | API route handler |
 | 20 | `settings.js` | API route handler |
 | 21 | `sync.js` | API route handler |

@@ -60,7 +60,7 @@ Code files documented: **468**
 | 48 | `backend/src/routes/portal.js` | 13 | 1 | 12 | 2 |
 | 49 | `backend/src/routes/products.js` | 20 | 1 | 17 | 2 |
 | 50 | `backend/src/routes/returns.js` | 7 | 1 | 6 | 1 |
-| 51 | `backend/src/routes/runtime.js` | 9 | 1 | 8 | 1 |
+| 51 | `backend/src/routes/runtime.ts` | 9 | 1 | 8 | 2 |
 | 52 | `backend/src/routes/sales.js` | 8 | 1 | 7 | 1 |
 | 53 | `backend/src/routes/settings.js` | 9 | 1 | 8 | 1 |
 | 54 | `backend/src/routes/sync.js` | 7 | 1 | 3 | 1 |
@@ -136,7 +136,7 @@ Code files documented: **468**
 | 124 | `backend/test/productImportPolicies.test.ts` | 2 | 0 | 1 | 0 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 3 | 0 | 0 | 0 |
 | 126 | `backend/test/rfidRoutes.test.ts` | 3 | 0 | 0 | 0 |
-| 127 | `backend/test/routeContracts.test.ts` | 12 | 0 | 7 | 0 |
+| 127 | `backend/test/routeContracts.test.ts` | 13 | 0 | 8 | 0 |
 | 128 | `backend/test/runtimeCache.test.ts` | 5 | 0 | 1 | 0 |
 | 129 | `backend/test/runtimeVersion.test.ts` | 5 | 0 | 1 | 0 |
 | 130 | `backend/test/schemaMetadata.test.ts` | 2 | 0 | 1 | 0 |
@@ -512,7 +512,7 @@ Code files documented: **468**
   - `./src/routes/portal`
   - `./src/routes/products`
   - `./src/routes/returns`
-  - `./src/routes/runtime`
+  - `./src/routes/runtime.ts`
   - `./src/routes/sales`
   - `./src/routes/settings`
   - `./src/routes/sync`
@@ -560,7 +560,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/returns.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.js`
   - `backend/src/routes/sync.js`
@@ -651,7 +651,7 @@ Code files documented: **468**
   - `backend/src/routes/categories.js`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/products.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/routes/settings.js`
   - `backend/src/routes/units.js`
   - `backend/src/services/importJobs.js`
@@ -753,7 +753,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/returns.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.js`
   - `backend/src/routes/system/index.js`
@@ -883,7 +883,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/returns.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.js`
   - `backend/src/routes/system/index.js`
@@ -995,7 +995,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/returns.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.js`
   - `backend/src/routes/sync.js`
@@ -1557,7 +1557,7 @@ Code files documented: **468**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.51 `backend/src/routes/runtime.js`
+### 3.51 `backend/src/routes/runtime.ts`
 
 - Declared exports: `module.exports`
 - Imports (9)
@@ -1579,8 +1579,9 @@ Code files documented: **468**
   - `backend/src/runtimeVersion.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.js`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.52 `backend/src/routes/sales.js`
 
@@ -1759,7 +1760,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/helpers.js`
   - `backend/src/routes/portal.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/test/runtimeCache.test.ts`
 
 ### 3.59 `backend/src/runtimeState/index.ts`
@@ -1789,7 +1790,7 @@ Code files documented: **468**
   - `backend/package.json`
 - Referenced by (4)
   - `backend/server.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/test/runtimeVersion.test.ts`
 
@@ -1983,7 +1984,7 @@ Code files documented: **468**
 - Referenced by (7)
   - `backend/server.js`
   - `backend/src/routes/importJobs.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/integrationDoctor.js`
   - `backend/src/workers/importWorker.ts`
@@ -2031,7 +2032,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
 - Referenced by (5)
   - `backend/src/routes/files.js`
-  - `backend/src/routes/runtime.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/workers/mediaWorker.ts`
   - `backend/test/importJobStateMachine.test.ts`
@@ -2729,26 +2730,28 @@ Code files documented: **468**
 ### 3.127 `backend/test/routeContracts.test.ts`
 
 - Declared exports: none detected
-- Imports (12)
+- Imports (13)
   - `../src/routes/auth`
   - `../src/routes/catalog.ts`
   - `../src/routes/inventory`
   - `../src/routes/organizations.ts`
   - `../src/routes/portal`
   - `../src/routes/products`
+  - `../src/routes/runtime.ts`
   - `../src/routes/system`
   - `fs`
   - `node:assert/strict`
   - `node:fs`
   - `node:path`
   - `path`
-- Internal dependencies (7)
+- Internal dependencies (8)
   - `backend/src/routes/auth.js`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
+  - `backend/src/routes/runtime.ts`
   - `backend/src/routes/system/index.js`
 - Referenced by (0)
   - none

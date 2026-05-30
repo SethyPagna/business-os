@@ -60,7 +60,7 @@ Code files scanned: **468**
 | 48 | `backend/src/routes/portal.js` | 60 |
 | 49 | `backend/src/routes/products.js` | 64 |
 | 50 | `backend/src/routes/returns.js` | 10 |
-| 51 | `backend/src/routes/runtime.js` | 6 |
+| 51 | `backend/src/routes/runtime.ts` | 6 |
 | 52 | `backend/src/routes/sales.js` | 24 |
 | 53 | `backend/src/routes/settings.js` | 8 |
 | 54 | `backend/src/routes/sync.js` | 12 |
@@ -1459,7 +1459,7 @@ Code files scanned: **468**
 | 9 | `assertReturnableItems` | function | 91 |
 | 10 | `assertSupplierReturnableStock` | function | 535 |
 
-### 3.51 `backend/src/routes/runtime.js`
+### 3.51 `backend/src/routes/runtime.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
