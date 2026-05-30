@@ -15,10 +15,10 @@ export function CatalogPageProvider({ value, children }: CatalogPageProviderProp
   )
 }
 
-export function useCatalogPageContext() {
+export function useCatalogPageContext<TValue extends object = Record<string, unknown>>(): TValue {
   const context = useContext(CatalogPageContext)
   if (!context) {
     throw new Error('CatalogPageContext is not available')
   }
-  return context
+  return context as TValue
 }

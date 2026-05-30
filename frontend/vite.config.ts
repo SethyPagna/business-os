@@ -126,7 +126,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
     if (normalized.endsWith('/src/api/methods.js')) return 'app-api-methods'
     if (
-      normalized.includes('/src/components/catalog/CatalogEditorSurface.jsx')
+      normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
     ) {
       return 'catalog-editor'
     }

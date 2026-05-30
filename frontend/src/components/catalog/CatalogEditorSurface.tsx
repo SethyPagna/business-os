@@ -1,8 +1,192 @@
 import { Bot, ExternalLink, Eye, Images, Plus, Save, Search, ShoppingBag, Sparkles, Upload } from 'lucide-react'
+import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { ProductImg } from '../products/shared/primitives'
 import { useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
+import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
+
+type CatalogUploadState = ReturnType<typeof createInitialUploadState>
+type DraftPrimitive = string | number | boolean | null | undefined
+type DraftUpdateValue = string | number | boolean | null
+type EditorSectionKey = string
+type EditorSection = readonly [string, EditorSectionKey, string]
+
+type CatalogEditorDraft = Record<string, DraftPrimitive> & {
+  business_address?: string
+  business_email?: string
+  business_name?: string
+  business_phone?: string
+  customer_portal_about_content?: string
+  customer_portal_about_title?: string
+  customer_portal_address_link?: string
+  customer_portal_ai_disclaimer?: string
+  customer_portal_ai_intro?: string
+  customer_portal_ai_prompt?: string
+  customer_portal_ai_provider_id?: string | number
+  customer_portal_ai_title?: string
+  customer_portal_business_tagline?: string
+  customer_portal_cover_image?: string | null
+  customer_portal_facebook?: string
+  customer_portal_facebook_label?: string
+  customer_portal_faq_title?: string
+  customer_portal_favicon_image?: string | null
+  customer_portal_google_maps_embed?: string
+  customer_portal_grid_columns_desktop?: string | number
+  customer_portal_grid_columns_mobile?: string | number
+  customer_portal_hero_gradient_end?: string
+  customer_portal_hero_gradient_mid?: string
+  customer_portal_hero_gradient_start?: string
+  customer_portal_highlight_rank_limit?: string | number
+  customer_portal_instagram?: string
+  customer_portal_instagram_label?: string
+  customer_portal_intro?: string
+  customer_portal_language?: string
+  customer_portal_logo_fit?: string
+  customer_portal_logo_image?: string | null
+  customer_portal_logo_position_x?: string | number
+  customer_portal_logo_position_y?: string | number
+  customer_portal_logo_size?: string | number
+  customer_portal_logo_zoom?: string | number
+  customer_portal_low_stock_threshold?: string | number
+  customer_portal_out_of_stock_threshold?: string | number
+  customer_portal_path?: string
+  customer_portal_price_display?: string
+  customer_portal_promotions_intro?: string
+  customer_portal_promotions_title?: string
+  customer_portal_public_url?: string
+  customer_portal_refresh_seconds?: string | number
+  customer_portal_stock_threshold_mode?: string
+  customer_portal_submission_instructions?: string
+  customer_portal_telegram?: string
+  customer_portal_telegram_label?: string
+  customer_portal_translations?: string
+  customer_portal_website?: string
+  customer_portal_website_label?: string
+}
+
+type CatalogProductOption = {
+  id: number
+  image?: string | null
+  name?: string | null
+  subtitle?: string | null
+}
+
+type CatalogPromoItem = {
+  id: string
+  body?: string
+  ctaLabel?: string
+  eyebrow?: string
+  linkUrl?: string
+  mediaUrl?: string | null
+  subtitle?: string
+  title?: string
+}
+
+type CatalogAboutBlock = {
+  id: string
+  body?: string
+  mediaUrl?: string | null
+  title?: string
+  type?: string
+}
+
+type CatalogFaqItem = {
+  id: string
+  answer?: string
+  question?: string
+}
+
+type CatalogAiProvider = {
+  default_model?: string | null
+  id: string | number
+  name?: string | null
+  provider?: string | null
+  provider_label?: string | null
+}
+
+type CatalogReviewItem = {
+  id: string | number
+  created_at?: string | null
+  customer_name?: string | null
+  membership_number?: string | null
+  note?: string | null
+  platform?: string | null
+  review_note?: string
+  reward_points?: string | number
+  screenshots?: string[]
+}
+
+type CatalogPreviewConfig = {
+  businessName?: string
+  businessTagline?: string
+}
+
+type ReviewStatus = 'approved' | 'pending' | 'rejected'
+
+type CatalogEditorSurfaceContext = {
+  aboutBlocks: CatalogAboutBlock[]
+  activeEditorSection: EditorSectionKey
+  addAboutBlock: (type: string) => void
+  addAiFaqStarterSet: () => void
+  addFaqItem: () => void
+  addFaqStarterSet: () => void
+  addPromoItem: () => void
+  aiProviders: CatalogAiProvider[]
+  cancelPortalMediaUpload: (target: string) => void
+  clearPortalMediaTarget: (target: string) => void
+  copy: (key: string, fallback?: string, khmerFallback?: string) => string
+  draftMapEmbedUrl: string
+  dragAboutBlockId: string | null
+  dragPromoItemId: string | null
+  editorDirty: boolean
+  editorDraft: CatalogEditorDraft
+  editorSaving: boolean
+  editorSections: EditorSection[]
+  faqItems: CatalogFaqItem[]
+  formatDateTime: (value?: string | null) => string
+  generatedPublicUrl: string
+  getAboutBlockLabel: (type?: string) => string
+  getMediaUploadState: (target: string) => CatalogUploadState
+  handleReviewSubmission: (item: CatalogReviewItem, status: ReviewStatus) => void
+  moveAboutBlockBefore: (dragId: string | null, targetId: string) => void
+  movePromoItemBefore: (dragId: string | null, targetId: string) => void
+  navigateTo: (page: string) => void
+  normalizeHexColor: (value: DraftPrimitive, fallback: string) => string
+  openFilePicker: (target: string, type: string, label: string) => void
+  openPortalImage: (title: string, images: Array<string | null | undefined>, startIndex?: number) => void
+  previewConfig: CatalogPreviewConfig
+  previewSectionRef: RefObject<HTMLElement>
+  products: unknown[]
+  promoItems: CatalogPromoItem[]
+  publicPortalUrl: string
+  recommendedProductIds: number[]
+  recommendedProductOptions: CatalogProductOption[]
+  recommendedProductSearchInput: string
+  recommendedProductSearchTerm: string
+  removeAboutBlock: (id: string) => void
+  removeFaqItem: (id: string) => void
+  removePromoItem: (id: string) => void
+  reviewItems: CatalogReviewItem[]
+  reviewSavingId: string | number | null
+  savePortalDraft: () => void
+  selectedRecommendedProductOptions: CatalogProductOption[]
+  setActiveEditorSection: (section: EditorSectionKey) => void
+  setDraft: (key: string, value: DraftUpdateValue) => void
+  setDragAboutBlockId: (id: string | null) => void
+  setDragPromoItemId: (id: string | null) => void
+  setRecommendedProductSearchInput: (value: string) => void
+  setRecommendedProductSearchTerm: (value: string) => void
+  setReviewItems: Dispatch<SetStateAction<CatalogReviewItem[]>>
+  toNumber: (value: DraftPrimitive, fallback?: number) => number
+  toggleRecommendedProduct: (id: number) => void
+  updateAboutBlock: (id: string, key: keyof CatalogAboutBlock, value: string) => void
+  updateFaqItem: (id: string, key: keyof CatalogFaqItem, value: string) => void
+  updatePromoItem: (id: string, key: keyof CatalogPromoItem, value: string) => void
+  uploadAboutBlockMedia: (id: string) => void
+  uploadDraftImage: (target: string) => void
+  uploadPromoItemMedia: (id: string) => void
+}
 
 export default function CatalogEditorSurface() {
   const {
@@ -67,7 +251,7 @@ export default function CatalogEditorSurface() {
     uploadAboutBlockMedia,
     uploadDraftImage,
     uploadPromoItemMedia,
-  } = useCatalogPageContext()
+  } = useCatalogPageContext<CatalogEditorSurfaceContext>()
 
   return (
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-5 overflow-x-hidden">
@@ -289,7 +473,7 @@ export default function CatalogEditorSurface() {
                           <label key={product.id} className={`flex items-center gap-3 rounded-2xl border px-3 py-2 transition ${checked ? 'border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950/50'}`}>
                             <input type="checkbox" checked={checked} onChange={() => toggleRecommendedProduct(product.id)} />
                             <div className="h-11 w-11 overflow-hidden rounded-xl bg-slate-200 dark:bg-slate-800">
-                              {product.image ? <ProductImg src={product.image} alt={product.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-slate-400"><ShoppingBag className="h-4 w-4" /></div>}
+                              {product.image ? <ProductImg src={product.image} alt={product.name || ''} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-slate-400"><ShoppingBag className="h-4 w-4" /></div>}
                             </div>
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{product.name}</div>
@@ -556,11 +740,11 @@ export default function CatalogEditorSurface() {
                       <div className="space-y-4">
                         <div>
                           <label htmlFor={`portal-about-block-title-${block.id}`} className="block text-sm font-medium text-slate-700">{copy('sectionTitle', 'Section title')}</label>
-                          <input id={`portal-about-block-title-${block.id}`} className="input" value={block.title} onChange={(event) => updateAboutBlock(block.id, 'title', event.target.value)} />
+                          <input id={`portal-about-block-title-${block.id}`} className="input" value={block.title || ''} onChange={(event) => updateAboutBlock(block.id, 'title', event.target.value)} />
                         </div>
                         <div>
                           <label htmlFor={`portal-about-block-body-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'text' ? copy('textContent', 'Text content') : copy('captionDescription', 'Caption / description')}</label>
-                          <textarea id={`portal-about-block-body-${block.id}`} className="input resize-none" rows={block.type === 'text' ? 5 : 3} value={block.body} onChange={(event) => updateAboutBlock(block.id, 'body', event.target.value)} />
+                          <textarea id={`portal-about-block-body-${block.id}`} className="input resize-none" rows={block.type === 'text' ? 5 : 3} value={block.body || ''} onChange={(event) => updateAboutBlock(block.id, 'body', event.target.value)} />
                         </div>
                       </div>
                       <div className="space-y-3">
@@ -571,7 +755,7 @@ export default function CatalogEditorSurface() {
                           return (
                             <>
                         <label htmlFor={`portal-about-block-media-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'video' ? copy('videoUrl', 'Video URL') : copy('imageUrl', 'Image URL')}</label>
-                        <input id={`portal-about-block-media-${block.id}`} className="input" value={block.mediaUrl} placeholder={block.type === 'video' ? 'https://...' : 'https://... or upload below'} onChange={(event) => updateAboutBlock(block.id, 'mediaUrl', event.target.value)} />
+                        <input id={`portal-about-block-media-${block.id}`} className="input" value={block.mediaUrl || ''} placeholder={block.type === 'video' ? 'https://...' : 'https://... or upload below'} onChange={(event) => updateAboutBlock(block.id, 'mediaUrl', event.target.value)} />
                         <div className="flex flex-wrap gap-2">
                           <button type="button" className="btn-secondary text-sm" onClick={() => uploadAboutBlockMedia(block.id)} disabled={blockUpload.status === 'uploading'}>
                             <Upload className="mr-2 inline h-4 w-4" />
@@ -687,11 +871,11 @@ export default function CatalogEditorSurface() {
                       <div className="mt-3 grid gap-3">
                         <div>
                           <label htmlFor={`portal-faq-question-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('faqQuestion', 'Question')}</label>
-                          <input id={`portal-faq-question-${item.id}`} className="input mt-1" value={item.question} onChange={(event) => updateFaqItem(item.id, 'question', event.target.value)} />
+                          <input id={`portal-faq-question-${item.id}`} className="input mt-1" value={item.question || ''} onChange={(event) => updateFaqItem(item.id, 'question', event.target.value)} />
                         </div>
                         <div>
                           <label htmlFor={`portal-faq-answer-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('faqAnswer', 'Answer')}</label>
-                          <textarea id={`portal-faq-answer-${item.id}`} className="input mt-1 resize-none" rows={3} value={item.answer} onChange={(event) => updateFaqItem(item.id, 'answer', event.target.value)} />
+                          <textarea id={`portal-faq-answer-${item.id}`} className="input mt-1 resize-none" rows={3} value={item.answer || ''} onChange={(event) => updateFaqItem(item.id, 'answer', event.target.value)} />
                         </div>
                       </div>
                     </article>

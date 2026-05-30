@@ -11,7 +11,7 @@ import {
 } from '../src/components/catalog/portalCatalogDisplay.ts'
 
 const tailwindConfig = fs.readFileSync(new URL('../tailwind.config.ts', import.meta.url), 'utf8')
-const catalogEditorSource = fs.readFileSync(new URL('../src/components/catalog/CatalogEditorSurface.jsx', import.meta.url), 'utf8')
+const catalogEditorSource = fs.readFileSync(new URL('../src/components/catalog/CatalogEditorSurface.tsx', import.meta.url), 'utf8')
 
 let failed = 0
 
