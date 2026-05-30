@@ -65,7 +65,7 @@ Code files documented: **468**
 | 53 | `backend/src/routes/settings.js` | 9 | 1 | 8 | 1 |
 | 54 | `backend/src/routes/sync.js` | 7 | 1 | 3 | 1 |
 | 55 | `backend/src/routes/system/index.js` | 24 | 1 | 20 | 2 |
-| 56 | `backend/src/routes/units.js` | 6 | 1 | 5 | 1 |
+| 56 | `backend/src/routes/units.ts` | 6 | 1 | 5 | 2 |
 | 57 | `backend/src/routes/users.js` | 11 | 1 | 9 | 1 |
 | 58 | `backend/src/runtimeCache.ts` | 2 | 1 | 1 | 4 |
 | 59 | `backend/src/runtimeState/index.ts` | 4 | 1 | 1 | 2 |
@@ -136,7 +136,7 @@ Code files documented: **468**
 | 124 | `backend/test/productImportPolicies.test.ts` | 2 | 0 | 1 | 0 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 3 | 0 | 0 | 0 |
 | 126 | `backend/test/rfidRoutes.test.ts` | 3 | 0 | 0 | 0 |
-| 127 | `backend/test/routeContracts.test.ts` | 16 | 0 | 11 | 0 |
+| 127 | `backend/test/routeContracts.test.ts` | 17 | 0 | 12 | 0 |
 | 128 | `backend/test/runtimeCache.test.ts` | 5 | 0 | 1 | 0 |
 | 129 | `backend/test/runtimeVersion.test.ts` | 5 | 0 | 1 | 0 |
 | 130 | `backend/test/schemaMetadata.test.ts` | 2 | 0 | 1 | 0 |
@@ -517,7 +517,7 @@ Code files documented: **468**
   - `./src/routes/settings`
   - `./src/routes/sync`
   - `./src/routes/system`
-  - `./src/routes/units`
+  - `./src/routes/units.ts`
   - `./src/routes/users`
   - `./src/runtimeVersion.ts`
   - `./src/serverUtils`
@@ -565,7 +565,7 @@ Code files documented: **468**
   - `backend/src/routes/settings.js`
   - `backend/src/routes/sync.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/routes/units.js`
+  - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
   - `backend/src/runtimeVersion.ts`
   - `backend/src/serverUtils.js`
@@ -653,7 +653,7 @@ Code files documented: **468**
   - `backend/src/routes/products.js`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/settings.js`
-  - `backend/src/routes/units.js`
+  - `backend/src/routes/units.ts`
   - `backend/src/services/importJobs.js`
 
 ### 3.8 `backend/src/config/index.js`
@@ -711,7 +711,7 @@ Code files documented: **468**
   - `backend/src/routes/returns.js`
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.js`
-  - `backend/src/routes/units.js`
+  - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
 
 ### 3.10 `backend/src/contactOptions.ts`
@@ -757,7 +757,7 @@ Code files documented: **468**
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/routes/units.js`
+  - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
   - `backend/src/schemaMetadata.ts`
   - `backend/src/services/backupPackages.js`
@@ -887,7 +887,7 @@ Code files documented: **468**
   - `backend/src/routes/sales.js`
   - `backend/src/routes/settings.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/routes/units.js`
+  - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/websocket.ts`
@@ -1000,7 +1000,7 @@ Code files documented: **468**
   - `backend/src/routes/settings.js`
   - `backend/src/routes/sync.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/routes/units.js`
+  - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
 
 ### 3.23 `backend/src/money.ts`
@@ -1705,7 +1705,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
 
-### 3.56 `backend/src/routes/units.js`
+### 3.56 `backend/src/routes/units.ts`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -1721,8 +1721,9 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.57 `backend/src/routes/users.js`
 
@@ -2733,7 +2734,7 @@ Code files documented: **468**
 ### 3.127 `backend/test/routeContracts.test.ts`
 
 - Declared exports: none detected
-- Imports (16)
+- Imports (17)
   - `../src/routes/auth`
   - `../src/routes/catalog.ts`
   - `../src/routes/categories.ts`
@@ -2745,12 +2746,13 @@ Code files documented: **468**
   - `../src/routes/products`
   - `../src/routes/runtime.ts`
   - `../src/routes/system`
+  - `../src/routes/units.ts`
   - `fs`
   - `node:assert/strict`
   - `node:fs`
   - `node:path`
   - `path`
-- Internal dependencies (11)
+- Internal dependencies (12)
   - `backend/src/routes/auth.js`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
@@ -2762,6 +2764,7 @@ Code files documented: **468**
   - `backend/src/routes/products.js`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/system/index.js`
+  - `backend/src/routes/units.ts`
 - Referenced by (0)
   - none
 

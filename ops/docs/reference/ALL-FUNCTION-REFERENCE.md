@@ -65,7 +65,7 @@ Code files scanned: **468**
 | 53 | `backend/src/routes/settings.js` | 8 |
 | 54 | `backend/src/routes/sync.js` | 12 |
 | 55 | `backend/src/routes/system/index.js` | 44 |
-| 56 | `backend/src/routes/units.js` | 3 |
+| 56 | `backend/src/routes/units.ts` | 3 |
 | 57 | `backend/src/routes/users.js` | 26 |
 | 58 | `backend/src/runtimeCache.ts` | 12 |
 | 59 | `backend/src/runtimeState/index.ts` | 6 |
@@ -1578,7 +1578,7 @@ Code files scanned: **468**
 | 43 | `listWindowsFsRoots` | const arrow | 1510 |
 | 44 | `listDriveRoots` | const arrow | 1525 |
 
-### 3.56 `backend/src/routes/units.js`
+### 3.56 `backend/src/routes/units.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

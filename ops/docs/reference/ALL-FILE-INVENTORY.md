@@ -74,7 +74,7 @@ Total files documented: **531**
 | 62 | `backend/src/routes/settings.js` | backend-routes | 210 | 7.3 | API route handler |
 | 63 | `backend/src/routes/sync.js` | backend-routes | 301 | 13.3 | API route handler |
 | 64 | `backend/src/routes/system/index.js` | backend-routes | 1659 | 65.3 | API route handler |
-| 65 | `backend/src/routes/units.js` | backend-routes | 151 | 5.9 | API route handler |
+| 65 | `backend/src/routes/units.ts` | backend-routes | 151 | 5.9 | API route handler |
 | 66 | `backend/src/routes/users.js` | backend-routes | 1086 | 44.5 | API route handler |
 | 67 | `backend/src/runtimeCache.ts` | backend-core | 248 | 6.1 | Project source/support file |
 | 68 | `backend/src/runtimeState/index.ts` | backend-core | 97 | 2.7 | Project source/support file |
@@ -146,7 +146,7 @@ Total files documented: **531**
 | 134 | `backend/test/productImportPolicies.test.ts` | backend-root | 72 | 3.0 | Project source/support file |
 | 135 | `backend/test/productSearchPagination.test.ts` | backend-root | 19 | 1.6 | Project source/support file |
 | 136 | `backend/test/rfidRoutes.test.ts` | backend-root | 59 | 3.0 | Project source/support file |
-| 137 | `backend/test/routeContracts.test.ts` | backend-root | 300 | 16.1 | Project source/support file |
+| 137 | `backend/test/routeContracts.test.ts` | backend-root | 307 | 16.5 | Project source/support file |
 | 138 | `backend/test/runtimeCache.test.ts` | backend-root | 65 | 2.0 | Project source/support file |
 | 139 | `backend/test/runtimeVersion.test.ts` | backend-root | 51 | 1.4 | Project source/support file |
 | 140 | `backend/test/schemaMetadata.test.ts` | backend-root | 117 | 3.9 | Project source/support file |
