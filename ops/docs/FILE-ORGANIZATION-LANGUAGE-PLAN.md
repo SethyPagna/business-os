@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 599 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 600 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 45`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 318`,
+  `.js: 44`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 319`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -5057,6 +5057,21 @@ Decision rule:
     compile/staging lane. The generated language audit now reports
     `JavaScript: 23`, `TypeScript: 288`, and `React TSX: 107` across the
     active scan roots.
+600. Convert legacy Firebase auth service to a package-safe TypeScript path.
+    Done: `backend/src/services/firebaseAuth.ts` keeps Firebase Identity
+    Toolkit capability checks, service-account JSON/file/base64/env fallback
+    loading, Google service JWT signing, OAuth access-token caching, provider
+    error normalization, public/admin Firebase request wrappers, email/E.164
+    normalization, user create/update, password update, active-state update,
+    and password verification on the existing CommonJS service style. The
+    services folder guide now points at the explicit `.ts` service path while
+    preserving the note that this is legacy rollback/reference code, not the
+    active auth route. Focused service load, route-contract, backend utility,
+    schema audit, stale-path, and Linux packaging proof passed. Packaging still
+    warns for direct `.ts` entries in `pkg.scripts`, so broader backend
+    conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 22`, `TypeScript: 289`,
+    and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

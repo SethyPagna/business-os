@@ -12,7 +12,7 @@ Routes call service functions as dependency boundaries. The service owns provide
   - owned Google/Gmail OAuth start, callback, linking, and unlinking helpers
   - keeps Business OS Postgres as the identity and permission authority
 
-- `firebaseAuth.js`
+- `firebaseAuth.ts`
   - legacy Firebase Identity Toolkit integration kept for migration rollback/reference
   - no longer used by the active auth routes
 

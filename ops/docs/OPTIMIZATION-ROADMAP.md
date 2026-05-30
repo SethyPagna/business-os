@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 599.
+- Latest completed implementation move in this roadmap: Move 600.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6746,4 +6746,21 @@ Move 599 status:
   direct `.ts` scripts, so broader backend conversions still wait for a
   compile/staging package lane. The generated language audit now reports
   `JavaScript: 23`, `TypeScript: 288`, and `React TSX: 107` across the active
+  scan roots.
+
+Move 600 status:
+- Move 600 converts `backend/src/services/firebaseAuth.ts` to a package-safe
+  TypeScript path. Firebase Identity Toolkit capability checks,
+  service-account JSON/file/base64/env fallback loading, Google service JWT
+  signing, OAuth access-token caching, provider error normalization,
+  public/admin Firebase request wrappers, email/E.164 normalization, user
+  create/update, password update, active-state update, and password
+  verification remain unchanged on the existing CommonJS service style. The
+  services folder guide now points at the explicit `.ts` service path while
+  preserving the note that this is legacy rollback/reference code, not the
+  active auth route. Focused service load, route-contract, backend utility,
+  schema audit, stale-path, and Linux packaging proof passed. `pkg` continues
+  to warn for direct `.ts` scripts, so broader backend conversions still wait
+  for a compile/staging package lane. The generated language audit now reports
+  `JavaScript: 22`, `TypeScript: 289`, and `React TSX: 107` across the active
   scan roots.
