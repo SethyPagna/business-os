@@ -74,7 +74,7 @@ runTest('schema keeps legacy Supabase column unused and adds Google identity col
 })
 
 runTest('integration doctor and Docker release report Google login without Supabase env', () => {
-  const doctor = read('backend/src/services/integrationDoctor.js')
+  const doctor = read('backend/src/services/integrationDoctor.ts')
   const compose = read('ops/docker/compose.release.yml')
   const release = read('ops/scripts/powershell/docker-release.ps1')
   assert.doesNotMatch(doctor, /supabase/i)

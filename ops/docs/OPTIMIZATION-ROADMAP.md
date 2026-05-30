@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 595.
+- Latest completed implementation move in this roadmap: Move 596.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4149,7 +4149,7 @@ Move 369 status:
 Move 370 status:
 - Move 370 tightens the owned Google OAuth and integration doctor origin
   checklist path in `backend/src/services/googleOauth.ts` and
-  `backend/src/services/integrationDoctor.js`. Origin normalization now uses
+  `backend/src/services/integrationDoctor.ts`. Origin normalization now uses
   direct loops with stable de-duplication, Google login callback URI assembly
   is shared through one callback-path helper, and latest verified release
   backup directory discovery no longer uses `filter()`/`map()` chains.
@@ -4919,7 +4919,7 @@ Move 438 status:
 
 Move 439 status:
 - Move 439 clears the remaining backend source callback-chain scan in
-  `backend/src/importCsv.ts`, `backend/src/services/integrationDoctor.js`, and
+  `backend/src/importCsv.ts`, `backend/src/services/integrationDoctor.ts`, and
   `backend/src/services/googleDriveSync/index.js`. CSV row-content checks,
   integration critical-check aggregation, and Google Drive canonical layout
   detection now use named direct-loop predicates. CSV parsing, Khmer text
@@ -6688,3 +6688,17 @@ Move 595 status:
   compile/staging package lane. The generated language audit now reports
   `JavaScript: 27`, `TypeScript: 284`, and `React TSX: 107` across the active
   scan roots.
+
+Move 596 status:
+- Move 596 converts `backend/src/services/integrationDoctor.ts` to a
+  package-safe TypeScript path. Database, object-storage, queue, analytics,
+  Google Drive, Google login, backup, runtime-data, secret-redaction, OAuth
+  checklist, and restore-needed report behavior remain unchanged on the
+  existing CommonJS service style. The system route and owned integration
+  tests now point at the explicit `.ts` service path, and the owned Google auth
+  source check reads the TypeScript file. Focused integration doctor and owned
+  Google auth tests, route-contract, backend utility, schema audit, stale-path,
+  and Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The generated language audit now reports `JavaScript: 26`,
+  `TypeScript: 285`, and `React TSX: 107` across the active scan roots.

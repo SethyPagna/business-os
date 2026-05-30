@@ -78,7 +78,7 @@ const { getMaintenanceLock, withMaintenanceLock } = require('../../maintenanceLo
 const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness.ts')
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime.ts')
 const { testObjectStore } = require('../../objectStore')
-const { buildIntegrationDoctor } = require('../../services/integrationDoctor')
+const { buildIntegrationDoctor } = require('../../services/integrationDoctor.ts')
 const { deleteAllStoredUploads, requestUploadStorageReconcile } = require('../../fileAssets')
 
 const router = express.Router()

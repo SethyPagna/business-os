@@ -5,7 +5,7 @@ const assert = require('node:assert/strict')
 const {
   buildExpectedOauthChecklist,
   redactPresence,
-} = require('../src/services/integrationDoctor')
+} = require('../src/services/integrationDoctor.ts')
 
 let failed = 0
 
