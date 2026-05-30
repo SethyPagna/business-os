@@ -5963,3 +5963,15 @@ Move 547 status:
   quick-add and checkout guards, cart branch validation, grouped product
   cards, promotion/special price handling, and source guard behavior unchanged
   while centralizing POS runtime calls behind typed `getPosApi()` access.
+
+Move 548 status:
+- Move 548 converts the catalog editor surface to
+  `frontend/src/components/catalog/CatalogEditorSurface.tsx`. The typed
+  boundary now covers the catalog page context value, draft settings record,
+  editor sections, recommended-product options, promo/about/FAQ/review rows,
+  upload state, preview config, drag/drop ids, media picker/gallery callbacks,
+  draft writes, and review submission statuses. The move keeps the
+  extensionless catalog lazy import, catalog-editor Vite chunk, portal grid
+  source checks, media upload controls, drag/drop reorder flows, review queue
+  actions, and public portal editor behavior unchanged while making
+  `useCatalogPageContext<T>()` explicit for typed context consumers.

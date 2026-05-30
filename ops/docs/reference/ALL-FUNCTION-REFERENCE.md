@@ -165,10 +165,10 @@ Code files scanned: **466**
 | 153 | `frontend/src/components/branches/Branches.tsx` | 15 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
-| 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
+| 156 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
-| 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 2 |
+| 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
 | 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 6 |
@@ -3342,11 +3342,11 @@ Code files scanned: **466**
 | 5 | `loadStock` | function | 146 |
 | 6 | `handleTransfer` | const arrow | 194 |
 
-### 3.156 `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+### 3.156 `frontend/src/components/catalog/CatalogEditorSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `CatalogEditorSurface` | export default function | 7 |
+| 1 | `CatalogEditorSurface` | export default function | 191 |
 
 ### 3.157 `frontend/src/components/catalog/CatalogImageField.tsx`
 
@@ -3479,7 +3479,6 @@ Code files scanned: **466**
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `CatalogPageProvider` | export function | 10 |
-| 2 | `useCatalogPageContext` | export function | 18 |
 
 ### 3.160 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
 

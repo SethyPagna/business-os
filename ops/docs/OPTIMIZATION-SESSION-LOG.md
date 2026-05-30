@@ -1176,3 +1176,29 @@ Use this shape for future entries:
   follow-up. The fresh local production build hash is `bd5c1f96afecd8fd`, and
   the live report is
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`.
+
+- change: converted the catalog editor surface to TSX with typed catalog page
+  context access, draft settings payloads, editor section tuples,
+  recommended-product options, promotion/about/FAQ/review rows, upload state,
+  preview config, drag/drop helpers, media picker/gallery callbacks, and review
+  submission statuses
+- affected files:
+  `frontend/src/components/catalog/CatalogEditorSurface.tsx`,
+  `frontend/src/components/catalog/CatalogPageContext.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/portalCatalogDisplay.test.ts`
+- route or API target: customer portal editor display settings, recommended
+  products, promotions, about blocks, FAQ, AI/provider settings, public link
+  settings, business/contact/media settings, submission settings, and review
+  queue actions
+- keeper or rollback: keeper; catalog display/editor/content/language/translate
+  tests, frontend typecheck, full frontend utility suite, JSX scan, and
+  production build passed before reference refresh
+- route-scoped result: source/test/script scans found no old catalog editor JSX
+  filename references in frontend source or frontend tests and no
+  `any`/suppression escape hatches in the converted editor surface. Remaining
+  JSX shells are Inventory, Products, and Catalog page.
+- warm whole-app result: fresh local production build hash is
+  `756d985623fba5b1`. Live-suite rerun is pending for this move; the previous
+  broad Phase 8.4 UI suite passed, and the public Cloudflare portal remains a
+  known tunnel/public follow-up until remote rendering is repaired.

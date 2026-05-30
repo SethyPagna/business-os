@@ -22,10 +22,10 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/pos/POS.tsx` | 117.4 | 2218 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 115.1 | 2304 |
 | `frontend/src/api/methods.js` | 102.6 | 2346 |
+| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 102.5 | 1479 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 101.0 | 2144 |
 | `backend/src/routes/products.js` | 99.1 | 2218 |
 | `frontend/src/components/products/Products.jsx` | 96.3 | 2006 |
-| `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 95.9 | 1295 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 85.1 | 1846 |
 | `backend/src/routes/inventory.js` | 83.8 | 1881 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 78.5 | 1732 |
@@ -64,11 +64,11 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/sales.js` | 1573 | 64.6 |
 | `frontend/src/App.tsx` | 1572 | 60.1 |
 | `backend/src/services/googleDriveSync/index.js` | 1564 | 57.8 |
+| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1479 | 102.5 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
 | `backend/src/routes/portal.js` | 1407 | 51.4 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 1311 | 67.7 |
-| `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1295 | 95.9 |
 
 ## 4. Largest Built Chunks
 
@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-DPW38Rmi.js` | 185.7 |
+| `frontend/dist/assets/catalog-DmZbr3ch.js` | 185.7 |
 | `frontend/dist/assets/index-DQztsXP7.css` | 151.6 |
-| `frontend/dist/assets/Inventory-BsPjlAu0.js` | 143.7 |
-| `frontend/dist/assets/index-Dv6iEkPK.js` | 128.5 |
+| `frontend/dist/assets/Inventory-CYIBocsQ.js` | 143.7 |
+| `frontend/dist/assets/index-DR3BkXA5.js` | 128.5 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/app-shared-C_vdX0xO.js` | 94.1 |
-| `frontend/dist/assets/Products-RUdGe4Kz.js` | 90.6 |
-| `frontend/dist/assets/POS-CvvGAZQ1.js` | 76.5 |
+| `frontend/dist/assets/app-shared-M5OxqaMb.js` | 94.1 |
+| `frontend/dist/assets/Products-BKH7bvkP.js` | 90.6 |
+| `frontend/dist/assets/POS-BTveZPEA.js` | 76.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-CzUAXTok.js` | 70.7 |
-| `frontend/dist/assets/catalog-editor-BIrQiVnh.js` | 70.4 |
-| `frontend/dist/assets/BulkImportModal-CEfRZ1-9.js` | 68.2 |
-| `frontend/dist/assets/catalog-preview-CAQbhdVm.js` | 64.3 |
-| `frontend/dist/assets/app-api-methods-CMLZ7HyJ.js` | 60.1 |
-| `frontend/dist/assets/Backup-fuRH0pSB.js` | 57.9 |
+| `frontend/dist/assets/Dashboard-Cs_6lhZL.js` | 70.7 |
+| `frontend/dist/assets/catalog-editor-CPEa8ugz.js` | 70.5 |
+| `frontend/dist/assets/BulkImportModal-DImAKeTP.js` | 68.2 |
+| `frontend/dist/assets/catalog-preview-DeO2mA_A.js` | 64.3 |
+| `frontend/dist/assets/app-api-methods-DcR4IvHA.js` | 60.1 |
+| `frontend/dist/assets/Backup-Ba5DKwOK.js` | 57.9 |
 | `frontend/dist/assets/vendor-lucide-B4xjFBi_.js` | 52.5 |
-| `frontend/dist/assets/Settings-BN-ZBAlc.js` | 52.2 |
-| `frontend/dist/assets/Users-dB_gC4Jy.js` | 40.3 |
-| `frontend/dist/assets/Branches-EF8O0OfL.js` | 38.0 |
-| `frontend/dist/assets/ReceiptSettings-DSF59ZiA.js` | 37.0 |
-| `frontend/dist/assets/app-api-hFttTb5a.js` | 37.0 |
-| `frontend/dist/assets/Sales-DuoL8fKx.js` | 35.1 |
+| `frontend/dist/assets/Settings-DrsGLL6u.js` | 52.2 |
+| `frontend/dist/assets/Users-BVptLvwM.js` | 40.3 |
+| `frontend/dist/assets/Branches-D6BcL6Jg.js` | 38.0 |
+| `frontend/dist/assets/ReceiptSettings-BFjtf_mQ.js` | 37.0 |
+| `frontend/dist/assets/app-api-0SiS6hmU.js` | 37.0 |
+| `frontend/dist/assets/Sales-D6FZIPu_.js` | 35.1 |
 
 ## 5. Notes
 

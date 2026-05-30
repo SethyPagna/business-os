@@ -733,7 +733,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `CatalogEditorSurface.jsx` | UI component/page |
+| 1 | `CatalogEditorSurface.tsx` | UI component/page |
 | 2 | `CatalogImageField.tsx` | UI component/page |
 | 3 | `CatalogPage.jsx` | UI component/page |
 | 4 | `CatalogPageContext.tsx` | UI component/page |

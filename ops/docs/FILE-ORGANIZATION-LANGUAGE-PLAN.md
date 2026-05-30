@@ -4353,6 +4353,18 @@ Decision rule:
     typed `getPosApi()` calls. The current source extension count is `.js: 95`,
     `.jsx: 4`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 103` outside
     generated/runtime folders.
+548. Convert the catalog editor surface to TSX. Done:
+    `frontend/src/components/catalog/CatalogEditorSurface.tsx` now types the
+    catalog editor context boundary, draft settings payload, editor section
+    tuples, recommended-product options, promotion/about/FAQ/review rows,
+    upload states, preview config, drag/drop helpers, review status actions,
+    and media picker/gallery callbacks. The conversion keeps the extensionless
+    catalog lazy import, dedicated `catalog-editor` build chunk, portal grid
+    source checks, drag/drop ordering, media upload controls, review queue
+    actions, and public portal editor behavior intact while allowing typed
+    consumers of `useCatalogPageContext<T>()`. The current source extension
+    count is `.js: 95`, `.jsx: 3`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`,
+    `.tsx: 104` outside generated/runtime folders.
 
 ## Safety Gates
 

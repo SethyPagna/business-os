@@ -16,7 +16,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `bd5c1f96afecd8fd`
+  `756d985623fba5b1`
 
 Latest verified reports:
 
@@ -124,6 +124,11 @@ Recent route-level win:
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary
+- Catalog editor surface is now
+  `frontend/src/components/catalog/CatalogEditorSurface.tsx` with typed editor
+  context, draft settings, promo/about/FAQ/review rows, upload state,
+  recommended-product options, preview config, drag/drop helpers, and review
+  submission statuses.
 - core frontend transport modules are now TypeScript:
   `frontend/src/api/http.ts`, `frontend/src/api/websocket.ts`,
   `frontend/src/api/localDb.ts`, and `frontend/src/web-api.ts`
@@ -181,8 +186,9 @@ Recent route-level win:
 ## Next Best Moves
 
 1. Convert the remaining JSX shells in measured slices: Inventory, Products,
-   POS, Catalog page, and Catalog editor. Inventory or POS are the next
-   highest user-visible candidates; Products is the broadest table workflow.
+   and Catalog page. Inventory is the largest operational shell, Products is
+   the broadest table workflow, and Catalog page is the remaining public portal
+   shell.
 2. Split `frontend/src/api/methods.js` into typed sections or convert bounded
    helper clusters first; it remains the next high-impact API gateway target.
 3. Update source-inspection tests and ops verification scripts whenever a real

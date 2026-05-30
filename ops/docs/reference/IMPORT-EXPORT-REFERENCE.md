@@ -165,7 +165,7 @@ Code files documented: **466**
 | 153 | `frontend/src/components/branches/Branches.tsx` | 13 | 1 | 11 | 1 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 | 1 | 1 | 1 |
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 3 | 1 | 2 | 1 |
-| 156 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 5 | 1 | 4 | 1 |
+| 156 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 7 | 1 | 5 | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 2 | 1 | 1 | 1 |
 | 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 12 | 1 | 11 | 1 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 | 2 | 0 | 2 |
@@ -329,7 +329,7 @@ Code files documented: **466**
 | 317 | `frontend/src/utils/index.ts` | 0 | 0 | 0 | 0 |
 | 318 | `frontend/src/utils/initials.ts` | 0 | 7 | 0 | 7 |
 | 319 | `frontend/src/utils/loaders.ts` | 0 | 9 | 0 | 20 |
-| 320 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 3 |
+| 320 | `frontend/src/utils/mediaUpload.ts` | 1 | 5 | 1 | 4 |
 | 321 | `frontend/src/utils/permissions.ts` | 0 | 1 | 0 | 2 |
 | 322 | `frontend/src/utils/pricing.ts` | 0 | 8 | 0 | 17 |
 | 323 | `frontend/src/utils/printReceipt.ts` | 1 | 12 | 1 | 2 |
@@ -3246,20 +3246,23 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/branches/Branches.tsx`
 
-### 3.156 `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+### 3.156 `frontend/src/components/catalog/CatalogEditorSurface.tsx`
 
 - Declared exports: `function`
-- Imports (5)
+- Imports (7)
+  - `../../utils/mediaUpload.ts`
   - `../products/shared/primitives`
   - `./CatalogImageField`
   - `./CatalogPageContext`
   - `./catalogUi`
   - `lucide-react`
-- Internal dependencies (4)
+  - `react`
+- Internal dependencies (5)
   - `frontend/src/components/catalog/CatalogImageField.tsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
   - `frontend/src/components/catalog/catalogUi.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
+  - `frontend/src/utils/mediaUpload.ts`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
@@ -3272,7 +3275,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/utils/mediaUpload.ts`
 - Referenced by (1)
-  - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+  - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
 
 ### 3.158 `frontend/src/components/catalog/CatalogPage.jsx`
 
@@ -3292,7 +3295,7 @@ Code files documented: **466**
   - `react`
 - Internal dependencies (11)
   - `frontend/src/AppContext.tsx`
-  - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+  - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
@@ -3313,7 +3316,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+  - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
 ### 3.160 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
@@ -3375,7 +3378,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (4)
-  - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+  - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
@@ -4606,7 +4609,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/utils/publicAssetUrls.ts`
 - Referenced by (9)
-  - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+  - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
@@ -6083,7 +6086,8 @@ Code files documented: **466**
   - `./publicAssetUrls.ts`
 - Internal dependencies (1)
   - `frontend/src/utils/publicAssetUrls.ts`
-- Referenced by (3)
+- Referenced by (4)
+  - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
   - `frontend/src/components/catalog/CatalogImageField.tsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/tests/mediaUploadHelpers.test.ts`

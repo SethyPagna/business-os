@@ -22,7 +22,7 @@ Total files documented: **193**
 | 10 | `frontend/src/components/branches/Branches.tsx` | 15 |
 | 11 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
 | 12 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
-| 13 | `frontend/src/components/catalog/CatalogEditorSurface.jsx` | 1 |
+| 13 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1 |
 | 14 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 15 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
 | 16 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
@@ -620,11 +620,11 @@ Total files documented: **193**
 | 5 | `loadStock` | function | 146 |
 | 6 | `handleTransfer` | const arrow | 194 |
 
-### 3.13 `frontend/src/components/catalog/CatalogEditorSurface.jsx`
+### 3.13 `frontend/src/components/catalog/CatalogEditorSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `CatalogEditorSurface` | component/function | 7 |
+| 1 | `CatalogEditorSurface` | component/function | 191 |
 
 ### 3.14 `frontend/src/components/catalog/CatalogImageField.tsx`
 
