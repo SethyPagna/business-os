@@ -77,7 +77,7 @@ Total folders documented: **81**
 | 65 | `frontend/tests` | Project folder | 76 | 0 |
 | 66 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
 | 67 | `ops/scripts/architecture` | Project folder | 4 | 0 |
-| 68 | `ops/scripts/backend` | Project folder | 4 | 0 |
+| 68 | `ops/scripts/backend` | Project folder | 5 | 0 |
 | 69 | `ops/scripts/frontend` | Project folder | 3 | 0 |
 | 70 | `ops/scripts/lib` | Project folder | 2 | 0 |
 | 71 | `ops/scripts/powershell` | Project folder | 8 | 0 |
@@ -1482,17 +1482,18 @@ Total folders documented: **81**
 ### 3.68 Folder: `ops/scripts/backend`
 
 - Purpose: Project folder
-- Direct files: **4**
+- Direct files: **5**
 - Direct subfolders: **0**
 
 #### 3.68.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `schema-audit.ts` | Project source/support file |
-| 2 | `schema-primary-key-preflight.ts` | Project source/support file |
-| 3 | `schema-primary-key-rollback.sql` | Project source/support file |
-| 4 | `verify-data-integrity.ts` | Project source/support file |
+| 1 | `build-package-stage.ts` | Project source/support file |
+| 2 | `schema-audit.ts` | Project source/support file |
+| 3 | `schema-primary-key-preflight.ts` | Project source/support file |
+| 4 | `schema-primary-key-rollback.sql` | Project source/support file |
+| 5 | `verify-data-integrity.ts` | Project source/support file |
 
 
 ### 3.69 Folder: `ops/scripts/frontend`

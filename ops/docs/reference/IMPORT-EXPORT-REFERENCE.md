@@ -4,7 +4,7 @@ Auto-generated import/export and dependency-link coverage for frontend/backend c
 
 ## 1. Coverage Summary
 
-Code files documented: **468**
+Code files documented: **469**
 
 ## 2. Dependency Matrix
 
@@ -425,59 +425,60 @@ Code files documented: **468**
 | 413 | `ops/scripts/architecture/language-runtime-audit.ts` | 4 | 0 | 2 | 0 |
 | 414 | `ops/scripts/architecture/organization-audit.ts` | 4 | 0 | 2 | 0 |
 | 415 | `ops/scripts/architecture/phase29-audit.ts` | 5 | 0 | 2 | 0 |
-| 416 | `ops/scripts/backend/schema-audit.ts` | 2 | 0 | 0 | 0 |
-| 417 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
-| 418 | `ops/scripts/backend/verify-data-integrity.ts` | 3 | 0 | 0 | 0 |
-| 419 | `ops/scripts/frontend/verify-i18n.ts` | 2 | 0 | 1 | 0 |
-| 420 | `ops/scripts/frontend/verify-performance.ts` | 3 | 0 | 0 | 0 |
-| 421 | `ops/scripts/frontend/verify-ui.ts` | 3 | 0 | 1 | 0 |
-| 422 | `ops/scripts/lib/fs-utils.ts` | 2 | 1 | 0 | 13 |
-| 423 | `ops/scripts/lib/report-utils.ts` | 1 | 1 | 0 | 5 |
-| 424 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 4 | 0 | 1 | 0 |
-| 425 | `ops/scripts/runtime/audits/audit-auth.ts` | 0 | 4 | 0 | 18 |
-| 426 | `ops/scripts/runtime/audits/audit-manifest.ts` | 0 | 7 | 0 | 3 |
-| 427 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
-| 428 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 9 | 0 | 3 | 0 |
-| 429 | `ops/scripts/runtime/audits/full-app-audit.ts` | 9 | 0 | 3 | 0 |
-| 430 | `ops/scripts/runtime/browser-action-smoke.ts` | 8 | 0 | 3 | 0 |
-| 431 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
-| 432 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 3 | 0 | 0 | 0 |
-| 433 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 4 | 0 | 1 | 0 |
-| 434 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 4 | 0 | 0 | 0 |
-| 435 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 0 | 7 | 0 | 14 |
-| 436 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 437 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 6 | 0 | 2 | 0 |
-| 438 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 439 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 440 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 4 | 0 | 0 | 0 |
-| 441 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 442 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 443 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 444 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 445 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 446 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 447 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 448 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 4 | 0 | 0 | 0 |
-| 449 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 450 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 6 | 0 | 2 | 0 |
-| 451 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 6 | 0 | 2 | 0 |
-| 452 | `ops/scripts/runtime/smoke/check-public-url.ts` | 2 | 0 | 0 | 0 |
-| 453 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
-| 454 | `ops/scripts/runtime/smoke/live-smoke.ts` | 5 | 0 | 0 | 0 |
-| 455 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 2 | 0 | 0 | 0 |
-| 456 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 3 | 0 | 0 | 0 |
-| 457 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 3 | 0 | 0 | 0 |
-| 458 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 3 | 0 | 0 | 0 |
-| 459 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 3 | 0 | 0 | 0 |
-| 460 | `ops/scripts/runtime/storage/prune-storage.ts` | 4 | 0 | 0 | 0 |
-| 461 | `ops/scripts/runtime/storage/restore-candidates.ts` | 2 | 0 | 0 | 0 |
-| 462 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 3 | 0 | 0 | 0 |
-| 463 | `ops/scripts/verification/verify-backup-reliability.ts` | 3 | 0 | 1 | 0 |
-| 464 | `ops/scripts/verification/verify-docker-release.ts` | 3 | 0 | 1 | 0 |
-| 465 | `ops/scripts/verification/verify-hardening-policy.ts` | 4 | 0 | 1 | 0 |
-| 466 | `ops/scripts/verification/verify-runtime-deps.ts` | 3 | 0 | 1 | 0 |
-| 467 | `ops/scripts/verification/verify-scale-services.ts` | 4 | 0 | 1 | 0 |
-| 468 | `ops/scripts/verification/verify-secret-hygiene.ts` | 4 | 0 | 1 | 0 |
+| 416 | `ops/scripts/backend/build-package-stage.ts` | 2 | 0 | 0 | 0 |
+| 417 | `ops/scripts/backend/schema-audit.ts` | 2 | 0 | 0 | 0 |
+| 418 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
+| 419 | `ops/scripts/backend/verify-data-integrity.ts` | 3 | 0 | 0 | 0 |
+| 420 | `ops/scripts/frontend/verify-i18n.ts` | 2 | 0 | 1 | 0 |
+| 421 | `ops/scripts/frontend/verify-performance.ts` | 3 | 0 | 0 | 0 |
+| 422 | `ops/scripts/frontend/verify-ui.ts` | 3 | 0 | 1 | 0 |
+| 423 | `ops/scripts/lib/fs-utils.ts` | 2 | 1 | 0 | 13 |
+| 424 | `ops/scripts/lib/report-utils.ts` | 1 | 1 | 0 | 5 |
+| 425 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 4 | 0 | 1 | 0 |
+| 426 | `ops/scripts/runtime/audits/audit-auth.ts` | 0 | 4 | 0 | 18 |
+| 427 | `ops/scripts/runtime/audits/audit-manifest.ts` | 0 | 7 | 0 | 3 |
+| 428 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
+| 429 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 9 | 0 | 3 | 0 |
+| 430 | `ops/scripts/runtime/audits/full-app-audit.ts` | 9 | 0 | 3 | 0 |
+| 431 | `ops/scripts/runtime/browser-action-smoke.ts` | 8 | 0 | 3 | 0 |
+| 432 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
+| 433 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 3 | 0 | 0 | 0 |
+| 434 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 4 | 0 | 1 | 0 |
+| 435 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 4 | 0 | 0 | 0 |
+| 436 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 0 | 7 | 0 | 14 |
+| 437 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 438 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 6 | 0 | 2 | 0 |
+| 439 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 440 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 441 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 4 | 0 | 0 | 0 |
+| 442 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 443 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 444 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 445 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 446 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 447 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 448 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 449 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 4 | 0 | 0 | 0 |
+| 450 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 451 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 6 | 0 | 2 | 0 |
+| 452 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 6 | 0 | 2 | 0 |
+| 453 | `ops/scripts/runtime/smoke/check-public-url.ts` | 2 | 0 | 0 | 0 |
+| 454 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 0 | 0 | 0 | 0 |
+| 455 | `ops/scripts/runtime/smoke/live-smoke.ts` | 5 | 0 | 0 | 0 |
+| 456 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 2 | 0 | 0 | 0 |
+| 457 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 3 | 0 | 0 | 0 |
+| 458 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 3 | 0 | 0 | 0 |
+| 459 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 3 | 0 | 0 | 0 |
+| 460 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 3 | 0 | 0 | 0 |
+| 461 | `ops/scripts/runtime/storage/prune-storage.ts` | 4 | 0 | 0 | 0 |
+| 462 | `ops/scripts/runtime/storage/restore-candidates.ts` | 2 | 0 | 0 | 0 |
+| 463 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 3 | 0 | 0 | 0 |
+| 464 | `ops/scripts/verification/verify-backup-reliability.ts` | 3 | 0 | 1 | 0 |
+| 465 | `ops/scripts/verification/verify-docker-release.ts` | 3 | 0 | 1 | 0 |
+| 466 | `ops/scripts/verification/verify-hardening-policy.ts` | 4 | 0 | 1 | 0 |
+| 467 | `ops/scripts/verification/verify-runtime-deps.ts` | 3 | 0 | 1 | 0 |
+| 468 | `ops/scripts/verification/verify-scale-services.ts` | 4 | 0 | 1 | 0 |
+| 469 | `ops/scripts/verification/verify-secret-hygiene.ts` | 4 | 0 | 1 | 0 |
 
 ## 3. Detailed File Dependency Commentary
 
@@ -7219,7 +7220,18 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.416 `ops/scripts/backend/schema-audit.ts`
+### 3.416 `ops/scripts/backend/build-package-stage.ts`
+
+- Declared exports: none detected
+- Imports (2)
+  - `fs`
+  - `path`
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.417 `ops/scripts/backend/schema-audit.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7230,7 +7242,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.417 `ops/scripts/backend/schema-primary-key-preflight.ts`
+### 3.418 `ops/scripts/backend/schema-primary-key-preflight.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7242,7 +7254,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.418 `ops/scripts/backend/verify-data-integrity.ts`
+### 3.419 `ops/scripts/backend/verify-data-integrity.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7254,7 +7266,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.419 `ops/scripts/frontend/verify-i18n.ts`
+### 3.420 `ops/scripts/frontend/verify-i18n.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7265,7 +7277,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.420 `ops/scripts/frontend/verify-performance.ts`
+### 3.421 `ops/scripts/frontend/verify-performance.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7277,7 +7289,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.421 `ops/scripts/frontend/verify-ui.ts`
+### 3.422 `ops/scripts/frontend/verify-ui.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7289,7 +7301,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.422 `ops/scripts/lib/fs-utils.ts`
+### 3.423 `ops/scripts/lib/fs-utils.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -7312,7 +7324,7 @@ Code files documented: **468**
   - `ops/scripts/verification/verify-scale-services.ts`
   - `ops/scripts/verification/verify-secret-hygiene.ts`
 
-### 3.423 `ops/scripts/lib/report-utils.ts`
+### 3.424 `ops/scripts/lib/report-utils.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -7326,7 +7338,7 @@ Code files documented: **468**
   - `ops/scripts/architecture/phase29-audit.ts`
   - `ops/scripts/runtime/audits/audit-report-html.ts`
 
-### 3.424 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
+### 3.425 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7339,7 +7351,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.425 `ops/scripts/runtime/audits/audit-auth.ts`
+### 3.426 `ops/scripts/runtime/audits/audit-auth.ts`
 
 - Declared exports: `applySessionToPlaywrightContext`, `buildBrowserStorageState`, `hydratePlaywrightPage`, `loginWithFetch`
 - Imports (0)
@@ -7366,7 +7378,7 @@ Code files documented: **468**
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
-### 3.426 `ops/scripts/runtime/audits/audit-manifest.ts`
+### 3.427 `ops/scripts/runtime/audits/audit-manifest.ts`
 
 - Declared exports: `ADMIN_ROUTES`, `FULL_AUDIT_ROUTES`, `PUBLIC_ROUTES`, `ROUTE_MANIFEST`, `getAuditProfiles`, `getRouteManifest`, `resolveAuditRoutes`
 - Imports (0)
@@ -7378,7 +7390,7 @@ Code files documented: **468**
   - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
 
-### 3.427 `ops/scripts/runtime/audits/audit-report-html.ts`
+### 3.428 `ops/scripts/runtime/audits/audit-report-html.ts`
 
 - Declared exports: `writeBrowserActionHtmlReport`, `writeDeepAuditHtmlReport`, `writeFullAuditHtmlReport`
 - Imports (4)
@@ -7393,7 +7405,7 @@ Code files documented: **468**
   - `ops/scripts/runtime/audits/full-app-audit.ts`
   - `ops/scripts/runtime/browser-action-smoke.ts`
 
-### 3.428 `ops/scripts/runtime/audits/deep-live-audit.ts`
+### 3.429 `ops/scripts/runtime/audits/deep-live-audit.ts`
 
 - Declared exports: none detected
 - Imports (9)
@@ -7413,7 +7425,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.429 `ops/scripts/runtime/audits/full-app-audit.ts`
+### 3.430 `ops/scripts/runtime/audits/full-app-audit.ts`
 
 - Declared exports: none detected
 - Imports (9)
@@ -7433,7 +7445,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.430 `ops/scripts/runtime/browser-action-smoke.ts`
+### 3.431 `ops/scripts/runtime/browser-action-smoke.ts`
 
 - Declared exports: none detected
 - Imports (8)
@@ -7452,7 +7464,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.431 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
+### 3.432 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7465,7 +7477,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.432 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts`
+### 3.433 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7477,7 +7489,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.433 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
+### 3.434 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7490,7 +7502,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.434 `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts`
+### 3.435 `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7503,7 +7515,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.435 `ops/scripts/runtime/live-checks/live-check-utils.ts`
+### 3.436 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
 - Declared exports: `attachConsoleCollector`, `closeTopModal`, `isIgnoredConsole`, `latestObservedStatus`, `readJson`, `readJsonStatus`, `waitForRead`
 - Imports (0)
@@ -7526,7 +7538,7 @@ Code files documented: **468**
   - `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
   - `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
-### 3.436 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
+### 3.437 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7542,7 +7554,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.437 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
+### 3.438 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7558,7 +7570,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.438 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
+### 3.439 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7574,7 +7586,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.439 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
+### 3.440 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7590,7 +7602,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.440 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
+### 3.441 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7603,7 +7615,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.441 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
+### 3.442 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7619,7 +7631,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.442 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
+### 3.443 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7635,7 +7647,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.443 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
+### 3.444 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7651,7 +7663,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.444 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
+### 3.445 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7667,7 +7679,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.445 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
+### 3.446 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7683,7 +7695,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.446 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
+### 3.447 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7699,7 +7711,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.447 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
+### 3.448 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7715,7 +7727,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.448 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
+### 3.449 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7728,7 +7740,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.449 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
+### 3.450 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7744,7 +7756,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.450 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
+### 3.451 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7760,7 +7772,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.451 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
+### 3.452 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 - Declared exports: none detected
 - Imports (6)
@@ -7776,7 +7788,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.452 `ops/scripts/runtime/smoke/check-public-url.ts`
+### 3.453 `ops/scripts/runtime/smoke/check-public-url.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7787,7 +7799,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.453 `ops/scripts/runtime/smoke/check-route-contract.ts`
+### 3.454 `ops/scripts/runtime/smoke/check-route-contract.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -7797,7 +7809,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.454 `ops/scripts/runtime/smoke/live-smoke.ts`
+### 3.455 `ops/scripts/runtime/smoke/live-smoke.ts`
 
 - Declared exports: none detected
 - Imports (5)
@@ -7811,7 +7823,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.455 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
+### 3.456 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7822,7 +7834,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.456 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
+### 3.457 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7834,7 +7846,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.457 `ops/scripts/runtime/storage/cleanup-test-data.ts`
+### 3.458 `ops/scripts/runtime/storage/cleanup-test-data.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7846,7 +7858,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.458 `ops/scripts/runtime/storage/dataset-readiness.ts`
+### 3.459 `ops/scripts/runtime/storage/dataset-readiness.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7858,7 +7870,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.459 `ops/scripts/runtime/storage/post-live-hygiene.ts`
+### 3.460 `ops/scripts/runtime/storage/post-live-hygiene.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7870,7 +7882,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.460 `ops/scripts/runtime/storage/prune-storage.ts`
+### 3.461 `ops/scripts/runtime/storage/prune-storage.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7883,7 +7895,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.461 `ops/scripts/runtime/storage/restore-candidates.ts`
+### 3.462 `ops/scripts/runtime/storage/restore-candidates.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7894,7 +7906,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.462 `ops/scripts/runtime/storage/restore-rehearsal.ts`
+### 3.463 `ops/scripts/runtime/storage/restore-rehearsal.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7906,7 +7918,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.463 `ops/scripts/verification/verify-backup-reliability.ts`
+### 3.464 `ops/scripts/verification/verify-backup-reliability.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7918,7 +7930,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.464 `ops/scripts/verification/verify-docker-release.ts`
+### 3.465 `ops/scripts/verification/verify-docker-release.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7930,7 +7942,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.465 `ops/scripts/verification/verify-hardening-policy.ts`
+### 3.466 `ops/scripts/verification/verify-hardening-policy.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7943,7 +7955,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.466 `ops/scripts/verification/verify-runtime-deps.ts`
+### 3.467 `ops/scripts/verification/verify-runtime-deps.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7955,7 +7967,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.467 `ops/scripts/verification/verify-scale-services.ts`
+### 3.468 `ops/scripts/verification/verify-scale-services.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7968,7 +7980,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.468 `ops/scripts/verification/verify-secret-hygiene.ts`
+### 3.469 `ops/scripts/verification/verify-secret-hygiene.ts`
 
 - Declared exports: none detected
 - Imports (4)

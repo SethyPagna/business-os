@@ -2,13 +2,13 @@
   "summary": "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json",
   "status": "passed",
   "failures": [],
-  "requiredFiles": 30,
+  "requiredFiles": 32,
   "missingRequiredFiles": [],
   "releaseWrappers": 8,
   "retiredArtifactsPresent": [],
   "dockerignoreRequiredEntries": 12,
   "dockerignoreCoverageMissing": [],
-  "gitignoreRequiredEntries": 4,
+  "gitignoreRequiredEntries": 5,
   "gitignoreCoverageMissing": [],
   "pruneRequiredEntries": 4,
   "pruneCoverageMissing": [],
@@ -28,6 +28,15 @@
       "buildManifest": true,
       "serviceWorker": true
     }
+  },
+  "packageStageCoverage": {
+    "scriptPresent": true,
+    "buildScriptUsesStage": true,
+    "stageIgnored": true,
+    "stageRewritesRuntimeRequires": true,
+    "stageRenamesTsToJs": true,
+    "stageRejectsUnexpectedDeletes": true,
+    "stagePackageScriptsAreJavaScript": true
   },
   "cloudflareRuntimeCoverage": {
     "mode": "local-runtime-and-cloudflare-retention-guardrail",
