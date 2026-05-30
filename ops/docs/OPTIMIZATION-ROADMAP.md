@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 592.
+- Latest completed implementation move in this roadmap: Move 593.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4286,7 +4286,7 @@ Move 380 status:
 
 Move 381 status:
 - Move 381 tightens the AI provider gateway and settings route in
-  `backend/src/services/aiGateway.js` and `backend/src/routes/ai.js`.
+  `backend/src/services/aiGateway.js` and `backend/src/routes/ai.ts`.
   Supported-model normalization, Google request content construction, Google
   response text joining, provider-list serialization, and AI response-log
   serialization now use named direct-loop helpers instead of repeated
@@ -6643,4 +6643,18 @@ Move 592 status:
   packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
   broader backend conversions still wait for a compile/staging package lane.
   The generated language audit now reports `JavaScript: 30`, `TypeScript: 281`,
+  and `React TSX: 107` across the active scan roots.
+
+Move 593 status:
+- Move 593 converts `backend/src/routes/ai.ts` to a package-safe TypeScript
+  path. AI provider listing, create/update/delete, provider test status
+  persistence, response-log listing, permission checks, write-conflict guards,
+  auditing, broadcasts, and response serialization remain unchanged on the
+  existing CommonJS route style. The server mount and roadmap docs now point at
+  the explicit `.ts` route while the still-JavaScript AI gateway service stays
+  extensionless for its own future conversion slice. Focused route load,
+  route-contract, backend utility, schema audit, stale-path, and Linux
+  packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
+  broader backend conversions still wait for a compile/staging package lane.
+  The generated language audit now reports `JavaScript: 29`, `TypeScript: 282`,
   and `React TSX: 107` across the active scan roots.
