@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **16**
+Total files documented: **15**
 
 ## 2. Symbol Count by File
 
@@ -25,7 +25,6 @@ Total files documented: **16**
 | 13 | `backend/src/services/backupPackages.js` | 59 | 0 |
 | 14 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
 | 15 | `backend/src/services/importJobs.js` | 175 | 0 |
-| 16 | `backend/src/services/portalAi.js` | 42 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1018,51 +1017,4 @@ Total files documented: **16**
 | 173 | `buildErrorsCsv` | function | 3831 |
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
-
-### 3.16 `backend/src/services/portalAi.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `trim` | function | 15 |
-| 2 | `toNumber` | function | 19 |
-| 3 | `tokenize` | function | 24 |
-| 4 | `nowMs` | function | 36 |
-| 5 | `getProviderPriority` | function | 40 |
-| 6 | `getProviderCapacity` | function | 45 |
-| 7 | `getProviderMaxInputChars` | function | 50 |
-| 8 | `getProviderMaxCompletionTokens` | function | 55 |
-| 9 | `getProviderTimeoutMs` | function | 60 |
-| 10 | `getProviderCooldownMs` | function | 65 |
-| 11 | `getRuntimeState` | function | 71 |
-| 12 | `pruneProviderState` | function | 86 |
-| 13 | `keepRecentTimestamps` | function | 92 |
-| 14 | `pruneVisitorActivity` | function | 100 |
-| 15 | `registerVisitorActivity` | function | 108 |
-| 16 | `countActiveVisitors` | function | 118 |
-| 17 | `getVisitorMinuteCount` | function | 123 |
-| 18 | `summarizeProfile` | function | 130 |
-| 19 | `sanitizeQuestion` | function | 140 |
-| 20 | `scoreProduct` | function | 144 |
-| 21 | `buildQueryTermSet` | function | 176 |
-| 22 | `productMatchesPreference` | function | 185 |
-| 23 | `toPromptCandidate` | function | 195 |
-| 24 | `selectCandidateProducts` | function | 212 |
-| 25 | `buildPrompt` | function | 236 |
-| 26 | `takeTrimmedStrings` | function | 266 |
-| 27 | `normalizeCitations` | function | 277 |
-| 28 | `buildRecommendationPayloads` | function | 293 |
-| 29 | `parseAssistantPayload` | function | 322 |
-| 30 | `listEnabledChatProviders` | function | 351 |
-| 31 | `chooseProviderForAttempt` | function | 373 |
-| 32 | `markProviderStart` | function | 395 |
-| 33 | `markProviderSuccess` | function | 403 |
-| 34 | `markProviderFailure` | function | 410 |
-| 35 | `sumProviderCapacity` | function | 418 |
-| 36 | `buildProviderUsageItems` | function | 426 |
-| 37 | `getPortalAiUsageStatus` | function | 445 |
-| 38 | `minProviderInputChars` | function | 460 |
-| 39 | `hasAnyProfileValue` | function | 468 |
-| 40 | `productsById` | function | 475 |
-| 41 | `remainingProviders` | function | 483 |
-| 42 | `generatePortalAiResponse` | function | 491 |
 

@@ -82,7 +82,7 @@ Code files scanned: **468**
 | 70 | `backend/src/services/importJobs.js` | 175 |
 | 71 | `backend/src/services/integrationDoctor.ts` | 14 |
 | 72 | `backend/src/services/mediaQueue.ts` | 10 |
-| 73 | `backend/src/services/portalAi.js` | 42 |
+| 73 | `backend/src/services/portalAi.ts` | 42 |
 | 74 | `backend/src/services/verification.ts` | 21 |
 | 75 | `backend/src/sessionAuth.ts` | 13 |
 | 76 | `backend/src/settingsSnapshot.ts` | 12 |
@@ -2163,7 +2163,7 @@ Code files scanned: **468**
 | 9 | `startMediaWorker` | function | 157 |
 | 10 | `getMediaQueueStatus` | function | 181 |
 
-### 3.73 `backend/src/services/portalAi.js`
+### 3.73 `backend/src/services/portalAi.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

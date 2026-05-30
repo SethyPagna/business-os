@@ -82,7 +82,7 @@ Code files documented: **468**
 | 70 | `backend/src/services/importJobs.js` | 20 | 1 | 14 | 7 |
 | 71 | `backend/src/services/integrationDoctor.ts` | 10 | 1 | 8 | 2 |
 | 72 | `backend/src/services/mediaQueue.ts` | 5 | 1 | 3 | 5 |
-| 73 | `backend/src/services/portalAi.js` | 2 | 1 | 2 | 1 |
+| 73 | `backend/src/services/portalAi.ts` | 2 | 1 | 2 | 1 |
 | 74 | `backend/src/services/verification.ts` | 2 | 1 | 1 | 2 |
 | 75 | `backend/src/sessionAuth.ts` | 2 | 1 | 1 | 4 |
 | 76 | `backend/src/settingsSnapshot.ts` | 4 | 1 | 2 | 8 |
@@ -765,7 +765,7 @@ Code files documented: **468**
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/services/mediaQueue.ts`
-  - `backend/src/services/portalAi.js`
+  - `backend/src/services/portalAi.ts`
   - `backend/src/services/verification.ts`
   - `backend/src/sessionAuth.ts`
   - `backend/src/systemJobs.ts`
@@ -1473,7 +1473,7 @@ Code files documented: **468**
   - `../portalUtils.ts`
   - `../runtimeCache.ts`
   - `../security.ts`
-  - `../services/portalAi`
+  - `../services/portalAi.ts`
   - `../settingsSnapshot.ts`
   - `express`
 - Internal dependencies (12)
@@ -1487,7 +1487,7 @@ Code files documented: **468**
   - `backend/src/portalUtils.ts`
   - `backend/src/runtimeCache.ts`
   - `backend/src/security.ts`
-  - `backend/src/services/portalAi.js`
+  - `backend/src/services/portalAi.ts`
   - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
   - `backend/server.js`
@@ -1854,7 +1854,7 @@ Code files documented: **468**
   - `backend/src/security.ts`
 - Referenced by (2)
   - `backend/src/routes/ai.ts`
-  - `backend/src/services/portalAi.js`
+  - `backend/src/services/portalAi.ts`
 
 ### 3.65 `backend/src/services/backupPackages.js`
 
@@ -2042,7 +2042,7 @@ Code files documented: **468**
   - `backend/src/workers/mediaWorker.ts`
   - `backend/test/importJobStateMachine.test.ts`
 
-### 3.73 `backend/src/services/portalAi.js`
+### 3.73 `backend/src/services/portalAi.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
