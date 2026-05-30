@@ -55,7 +55,7 @@ runTest('inventory movements accept large page sizes and use text-safe created_a
 
 runTest('sales and returns stock upserts qualify branch_stock quantity for Postgres', () => {
   const salesSource = readSource('src/routes/sales.js')
-  const returnsSource = readSource('src/routes/returns.js')
+  const returnsSource = readSource('src/routes/returns.ts')
 
   assert.match(salesSource, /GREATEST\(0,\s*branch_stock\.quantity\s*-\s*CAST\(\?\s+AS numeric\)\)/, 'sales stock deduction should qualify branch_stock.quantity')
   assert.match(salesSource, /SET quantity = branch_stock\.quantity \+ excluded\.quantity/, 'sales stock restoration should use excluded.quantity')

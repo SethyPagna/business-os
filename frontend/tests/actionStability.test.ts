@@ -123,7 +123,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   const editReturn = readFrontend('src/components/returns/EditReturnModal.tsx')
   const supplierReturn = readFrontend('src/components/returns/NewSupplierReturnModal.tsx')
   const methods = readFrontend('src/api/methods.ts')
-  const returnsRoute = readRepo('backend/src/routes/returns.js')
+  const returnsRoute = readRepo('backend/src/routes/returns.ts')
 
   for (const source of [newReturn, editReturn, supplierReturn]) {
     assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)

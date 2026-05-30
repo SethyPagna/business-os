@@ -157,7 +157,7 @@ File: `backend/src/routes/users.js`
 ## Returns
 
 Base: `/api`  
-File: `backend/src/routes/returns.js`
+File: `backend/src/routes/returns.ts`
 
 - `GET /returns`
 - `GET /returns/:id`

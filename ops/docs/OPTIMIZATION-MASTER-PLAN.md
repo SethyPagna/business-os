@@ -118,7 +118,7 @@ Priority areas:
 - `backend/src/routes/system/index.js`
 - `backend/src/services/googleDriveSync/index.js`
 - `backend/src/routes/contacts.js`
-- `backend/src/routes/returns.js`
+- `backend/src/routes/returns.ts`
 
 Preferred tactics:
 

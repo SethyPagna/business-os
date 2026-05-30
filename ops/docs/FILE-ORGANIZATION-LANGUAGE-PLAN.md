@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 611 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 612 in this file.
 
 ## Goal
 
@@ -2926,7 +2926,7 @@ Decision rule:
     route cleanup only; no folder move, schema migration, or runtime conversion
     was needed.
 357. Tighten backend returns stock-flow loops. Done:
-    `backend/src/routes/returns.js` now builds returns search/items payloads,
+    `backend/src/routes/returns.ts` now builds returns search/items payloads,
     product metadata maps, supplier totals/lookups, return allocation
     movements, edit reversals/restocks, and sale return-status recalculation
     with direct loops. This was a backend route cleanup only; no folder move,
@@ -5232,6 +5232,20 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The expected
     generated language audit now reports `JavaScript: 11`, `TypeScript: 300`,
     and `React TSX: 107` across the active scan roots.
+612. Convert returns route to a package-safe TypeScript path.
+    Done: `backend/src/routes/returns.ts` keeps customer and supplier return
+    creation, item allocation reversal, branch stock deduction/restoration,
+    batch rollups, conflict checks, idempotency checks, audit/action history,
+    return search, and include-items payload construction on the existing
+    CommonJS route style. Server mounting, source-level batch/portal/action
+    stability assertions, route docs, generated naming guide, master plan, and
+    roadmap docs now point at the explicit `.ts` route path. Focused returns,
+    route-contract, portal inventory, product-batch, frontend action-stability,
+    backend utility, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so broader
+    backend conversions remain blocked on the future compile/staging lane. The
+    expected generated language audit now reports `JavaScript: 10`,
+    `TypeScript: 301`, and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

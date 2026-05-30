@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 611.
+- Latest completed implementation move in this roadmap: Move 612.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4108,7 +4108,7 @@ Move 366 status:
 
 Move 367 status:
 - Move 367 tightens the backend returns stock-flow path in
-  `backend/src/routes/returns.js`. Return search token parsing, include-items
+  `backend/src/routes/returns.ts`. Return search token parsing, include-items
   response assembly, customer-return product metadata prefetch, restored
   return allocation movement writes, supplier-return total-cost accumulation,
   supplier product-name lookup, supplier allocation/movement writes, edit
@@ -6939,3 +6939,19 @@ Move 611 status:
   broader backend conversions still wait for a compile/staging package lane.
   The expected generated language audit now reports `JavaScript: 11`,
   `TypeScript: 300`, and `React TSX: 107` across the active scan roots.
+
+Move 612 status:
+- Move 612 converts `backend/src/routes/returns.ts` to a package-safe
+  TypeScript path. Customer and supplier return creation, item allocation
+  reversal, branch stock deduction/restoration, batch rollups, conflict checks,
+  idempotency checks, audit/action history, return search, and include-items
+  payload construction remain unchanged on the existing CommonJS route style.
+  Server mounting, source-level batch/portal/action stability assertions, route
+  docs, generated naming guide, master plan, and roadmap docs now point at the
+  explicit `.ts` route path. Focused returns, route-contract, portal inventory,
+  product-batch, frontend action-stability, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The expected generated language audit now
+  reports `JavaScript: 10`, `TypeScript: 301`, and `React TSX: 107` across the
+  active scan roots.

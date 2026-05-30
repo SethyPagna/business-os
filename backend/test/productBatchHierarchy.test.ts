@@ -27,7 +27,7 @@ const batchHelpers = readSource('src/productBatches.ts')
 const inventoryRoute = readSource('src/routes/inventory.js')
 const productsRoute = readSource('src/routes/products.js')
 const salesRoute = readSource('src/routes/sales.js')
-const returnsRoute = readSource('src/routes/returns.js')
+const returnsRoute = readSource('src/routes/returns.ts')
 const importJobs = readSource('src/services/importJobs.js')
 const metrics = readSource('src/businessMetrics.ts')
 
