@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 547 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 553 in this file.
 
 ## Goal
 
@@ -8,25 +8,18 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 
 ## Current Shape
 
-- Frontend source: 195 files under `frontend/src`.
-  - 9 `.jsx`
-  - 1 `.js`
-  - 80 `.ts` including declaration files
-  - 98 `.tsx`
-  - 1 `.mts`
-  - 2 `.json`
-  - 3 `.md`
-  - 1 `.css`
-- Frontend tests: 76 focused test files under `frontend/tests`.
-  - 76 `.ts`
-- Backend source: 87 files under `backend/src`.
-  - 83 `.js`
-  - 1 `.sql`
-  - 3 `.md`
-- Backend tests: 50 `.ts` files under `backend/test`.
-- Runtime/ops scripts: 60 `.ts`, 8 `.ps1`, and 1 `.sql` under `ops/scripts`.
-- TypeScript is strict for converted frontend source and the first converted `frontend/tests/**/*.ts` files.
-- React type packages are not currently declared in `frontend/package.json`, so large `.jsx` to `.tsx` conversion needs a dependency/setup phase first.
+- Current source extension baseline outside generated/runtime/vendor folders:
+  `.js: 93`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 270`,
+  `.tsx: 107`.
+- Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
+  backend/runtime/config/static-public code that still needs package-aware
+  conversion slices.
+- Backend source conversion has started with small CommonJS-compatible `.ts`
+  helpers that Node 24 can load directly; every backend conversion must update
+  release packaging before deleting the old `.js` path.
+- TypeScript is strict for converted frontend source and focused converted
+  tests. Backend `.ts` source currently uses Node 24 type stripping and
+  CommonJS exports until the broader backend build lane is converted.
 - End-state target: no first-party `.js`, `.jsx`, `.mjs`, or `.cjs` remains outside generated/runtime/vendor folders. Every conversion slice must update imports, scripts, docs, and verification references before deleting the old path.
 
 ## Organization Principles
@@ -4414,6 +4407,18 @@ Decision rule:
     marker. The current source extension count is `.js: 94`, `.jsx: 0`,
     `.mjs: 0`, `.cjs: 0`, `.ts: 269`, `.tsx: 107` outside generated/runtime
     folders.
+553. Convert the backend initials helper to a package-safe TypeScript path.
+    Done: `backend/src/initials.ts` now owns Khmer initial ordering,
+    classifier return unions, row aggregation input, and aggregate output with
+    JSDoc types while preserving valid JavaScript syntax and the CommonJS
+    export surface used by backend routes. Product, inventory, portal, and
+    focused test imports now point at the explicit `.ts` module, and
+    `backend/package.json` includes `src/**/*.ts` in the Linux packaging script
+    list so the converted helper is not omitted from packaged builds. The
+    focused test also uses ASCII Unicode escapes for Khmer assertions to avoid
+    terminal encoding drift. The current source extension count is `.js: 93`,
+    `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 270`, `.tsx: 107` outside
+    generated/runtime folders.
 
 ## Safety Gates
 

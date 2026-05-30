@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 552.
+- Latest completed implementation move in this roadmap: Move 553.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6038,3 +6038,16 @@ Move 552 status:
   marker. The current source extension count is `.js: 94`, `.jsx: 0`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 269`, `.tsx: 107` outside generated/runtime
   folders.
+
+Move 553 status:
+- Move 553 starts the backend source TypeScript lane by converting
+  `backend/src/initials.ts` into a package-safe `.ts` module. The helper now
+  carries JSDoc classifier, aggregation row, aggregate result, and Khmer order
+  map types while retaining valid JavaScript syntax and the CommonJS export
+  shape required by current backend routes. Inventory, portal, products, and
+  focused tests import the explicit `.ts` path, and the backend Linux packaging
+  script list now includes `src/**/*.ts` alongside remaining JavaScript. The
+  focused initials test also uses ASCII Unicode escapes for Khmer assertions so
+  the test remains stable across Windows consoles and generated docs. The
+  current source extension count is `.js: 93`, `.jsx: 0`, `.mjs: 0`,
+  `.cjs: 0`, `.ts: 270`, `.tsx: 107` outside generated/runtime folders.
