@@ -1,10 +1,12 @@
 'use strict'
 
+/** @param {unknown} value @param {number} [fallback] @returns {number} */
 function toFiniteNumber(value, fallback = 0) {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
 }
 
+/** @param {unknown} value @param {number} [decimals] @returns {number} */
 function roundUpToDecimals(value, decimals = 2) {
   const num = toFiniteNumber(value, 0)
   const factor = 10 ** decimals
@@ -14,6 +16,7 @@ function roundUpToDecimals(value, decimals = 2) {
   return Math.floor(scaled + epsilon) / factor
 }
 
+/** @param {unknown} value @param {number} [fallback] @returns {number} */
 function normalizePriceValue(value, fallback = 0) {
   return roundUpToDecimals(toFiniteNumber(value, fallback), 2)
 }

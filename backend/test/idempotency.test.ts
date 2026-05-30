@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const { normalizeClientRequestId } = require('../src/idempotency')
+const { normalizeClientRequestId } = require('../src/idempotency.ts')
 
 let failed = 0
 

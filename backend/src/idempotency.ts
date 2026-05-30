@@ -1,5 +1,6 @@
 'use strict'
 
+/** @param {unknown} value @returns {string | null} */
 function normalizeClientRequestId(value) {
   const normalized = String(value || '').trim()
   if (!normalized) return null

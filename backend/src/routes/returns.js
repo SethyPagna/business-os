@@ -4,7 +4,7 @@ const { db }  = require('../database')
 const { ok, err, audit, recordActionHistory, broadcast, getSafeCostPrice } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
-const { normalizeClientRequestId } = require('../idempotency')
+const { normalizeClientRequestId } = require('../idempotency.ts')
 const {
   allocateProductBatches,
   getAvailableProductQuantity,

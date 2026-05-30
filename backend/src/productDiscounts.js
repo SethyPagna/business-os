@@ -1,6 +1,6 @@
 'use strict'
 
-const { normalizePriceValue } = require('./money')
+const { normalizePriceValue } = require('./money.ts')
 
 const DISCOUNT_TYPES = new Set(['percent', 'fixed'])
 const DEFAULT_BADGE_COLOR = '#e11d48'

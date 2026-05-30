@@ -1,6 +1,6 @@
 'use strict'
 
-const { normalizePriceValue } = require('./money')
+const { normalizePriceValue } = require('./money.ts')
 
 const KHMER_ZERO = 0x17E0
 const ARABIC_INDIC_ZERO = 0x0660
