@@ -989,7 +989,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
   },
   {
-    target: 'backend/src/routes/portal.js',
+    target: 'backend/src/routes/portal.ts',
     optimization: 'Portal catalog products now share one image and branch-stock materialization helper plus one payload decorator across full catalog and paged search responses.',
     rollback: 'Inline the image-map, branch-stock-map, gallery, and badge decoration blocks separately in getPortalProducts and getPortalCatalogProductPage again; public catalog response fields remain unchanged.',
     proof: [

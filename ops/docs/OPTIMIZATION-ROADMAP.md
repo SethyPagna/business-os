@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 615.
+- Latest completed implementation move in this roadmap: Move 616.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2466,7 +2466,7 @@ Cleanup checkpoint:
   structure, and the language/runtime audit records the completed data-path
   optimization plus rollback path.
 - Move 175 consolidates the portal catalog product data flow:
-  `backend/src/routes/portal.js` now shares one helper for product image and
+  `backend/src/routes/portal.ts` now shares one helper for product image and
   branch-stock materialization and one helper for gallery/badge payload
   decoration across full catalog and paged search responses. The route stays in
   Node.js because it is request/response shaping, but the duplicate
@@ -4395,7 +4395,7 @@ Move 389 status:
 
 Move 390 status:
 - Move 390 tightens customer portal config normalization helpers in
-  `backend/src/routes/portal.js`. FAQ normalization now stops after the
+  `backend/src/routes/portal.ts`. FAQ normalization now stops after the
   accepted 24 public entries without building intermediate mapped/filtered
   arrays, portal translation and recommended-product ID normalization now use
   direct loops, and the portal settings map uses a direct row loop. Public
@@ -4407,7 +4407,7 @@ Move 390 status:
 
 Move 391 status:
 - Move 391 tightens customer portal product asset and payload materialization in
-  `backend/src/routes/portal.js`. Product ID collection, SQL placeholder
+  `backend/src/routes/portal.ts`. Product ID collection, SQL placeholder
   construction, image-map assembly, branch-stock-map assembly, and final
   portal payload list decoration now use named direct-loop helpers instead of
   callback chains, while preserving the shared asset query path, image gallery
@@ -4420,7 +4420,7 @@ Move 391 status:
 
 Move 392 status:
 - Move 392 tightens customer portal loyalty point summarization in
-  `backend/src/routes/portal.js`. `summarizePoints()` now walks sales, returns,
+  `backend/src/routes/portal.ts`. `summarizePoints()` now walks sales, returns,
   and approved share submissions with one direct pass per input list instead of
   building filtered arrays and reducing eligible sales twice. Earned,
   deducted, redeemed, rewarded, balance, redeemable units, next-redeem math,
@@ -4431,7 +4431,7 @@ Move 392 status:
 
 Move 393 status:
 - Move 393 tightens customer portal catalog search/filter parsing in
-  `backend/src/routes/portal.js`. Search-term splitting, filter-value
+  `backend/src/routes/portal.ts`. Search-term splitting, filter-value
   splitting, branch ID parsing, named SQL placeholder construction,
   brand/category filter assembly, and stock-state normalization now use named
   direct-loop helpers instead of callback chains. Query limits, NFC
@@ -4442,7 +4442,7 @@ Move 393 status:
 
 Move 394 status:
 - Move 394 tightens customer portal catalog metadata assembly in
-  `backend/src/routes/portal.js`. Distinct brand/category row extraction,
+  `backend/src/routes/portal.ts`. Distinct brand/category row extraction,
   product-brand metadata extraction, persisted library-brand normalization, and
   merged brand de-duplication now use named direct-loop helpers instead of
   `map()`/`filter()` chains and spread-based `Set` construction. Category
@@ -4453,7 +4453,7 @@ Move 394 status:
 
 Move 395 status:
 - Move 395 tightens customer portal membership lookup and submission review
-  response shaping in `backend/src/routes/portal.js`. Membership SQL clause
+  response shaping in `backend/src/routes/portal.ts`. Membership SQL clause
   wrapping, share-submission screenshot normalization, and membership totals
   now use shared direct-loop helpers instead of callback chains and repeated
   `reduce()` passes. Customer matching, empty-clause fallback to `FALSE`,
@@ -4466,7 +4466,7 @@ Move 395 status:
 
 Move 396 status:
 - Move 396 tightens customer portal screenshot and AI citation collection in
-  `backend/src/routes/portal.js`. Screenshot sanitization now uses a bounded
+  `backend/src/routes/portal.ts`. Screenshot sanitization now uses a bounded
   direct loop that stops at the existing eight-entry cap while preserving
   trimming, blank rejection, 2 MB entry-size rejection, and safe media-reference
   checks. Portal AI recommendation citations now use a direct nested loop
@@ -4476,7 +4476,7 @@ Move 396 status:
 
 Move 397 status:
 - Move 397 tightens customer portal product signal ranking in
-  `backend/src/routes/portal.js`. Product rank map construction, sale metric
+  `backend/src/routes/portal.ts`. Product rank map construction, sale metric
   ingestion, return metric ingestion, net signal row collection, new-arrival
   rank construction, and recommended-product rank construction now use named
   direct-loop helpers instead of `map()`/`filter()`/`forEach()` chains and
@@ -4901,7 +4901,7 @@ Move 436 status:
 Move 437 status:
 - Move 437 tightens small route predicate helpers in
   `backend/src/routes/branches.ts`, `backend/src/routes/inventory.js`,
-  `backend/src/routes/portal.js`, `backend/src/routes/settings.ts`, and
+  `backend/src/routes/portal.ts`, `backend/src/routes/settings.ts`, and
   `backend/src/routes/sync.ts`. Paged branch-stock query detection, inventory
   stats filter detection, portal AI profile preference checks, suspicious brand
   option checks, sync conflict detection, and replay success checks now use
@@ -6999,3 +6999,20 @@ Move 615 status:
   backend conversions still wait for a compile/staging package lane. The
   expected generated language audit now reports `JavaScript: 7`,
   `TypeScript: 304`, and `React TSX: 107` across the active scan roots.
+
+Move 616 status:
+- Move 616 converts `backend/src/routes/portal.ts` to a package-safe
+  TypeScript path. Public portal configuration, customer-safe catalog payloads,
+  paged catalog search, recommendation and initial filters, membership lookup
+  summaries, points rollups, AI responses, submission screenshot
+  materialization, review workflows, rate limiting, and object-storage-aware
+  media sanitization remain unchanged on the existing CommonJS route style.
+  Server mounting, route contracts, portal regression checks, backup hardening
+  checks, backend route docs, language-runtime audit metadata, and roadmap docs
+  now point at the explicit `.ts` route path. Focused portal route load,
+  route-contract, portal regression, backup performance hardening, backend
+  utility, schema audit, stale-path, and Linux packaging proof passed. `pkg`
+  continues to warn for direct `.ts` scripts, so broader backend conversions
+  still wait for a compile/staging package lane. The expected generated
+  language audit now reports `JavaScript: 6`, `TypeScript: 305`, and
+  `React TSX: 107` across the active scan roots.

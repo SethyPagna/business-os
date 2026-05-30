@@ -104,7 +104,7 @@ File: `backend/src/routes/catalog.ts`
 ## Customer Portal (public + admin review endpoints)
 
 Base: `/api/portal`  
-File: `backend/src/routes/portal.js`
+File: `backend/src/routes/portal.ts`
 
 - `GET /config`
 - `GET /catalog/meta`

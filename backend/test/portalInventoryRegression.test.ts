@@ -22,7 +22,7 @@ function readSource(relativePath) {
 }
 
 runTest('portal membership lookup builds customer match clauses without nullable parameter type checks', () => {
-  const source = readSource('src/routes/portal.js')
+  const source = readSource('src/routes/portal.ts')
   assert.match(source, /const salesWhere = \[\]/, 'membership route should build sales clauses dynamically')
   assert.match(source, /const returnsWhere = \[\]/, 'membership route should build return clauses dynamically')
   assert.match(source, /const submissionWhere = \[\]/, 'membership route should build submission clauses dynamically')
@@ -37,7 +37,7 @@ runTest('portal membership lookup builds customer match clauses without nullable
 })
 
 runTest('portal catalog product payloads share image and branch-stock materialization', () => {
-  const source = readSource('src/routes/portal.js')
+  const source = readSource('src/routes/portal.ts')
   assert.match(source, /function getPortalProductAssets\(productIds\) \{/, 'portal route should centralize product asset queries')
   assert.match(source, /function buildPortalProductPayload\(product, signals, assets\) \{/, 'portal route should centralize product payload decoration')
   assert.match(source, /function buildPortalProductPayloads\(products, signals, assets\) \{[\s\S]*buildPortalProductPayload\(product, signals, assets\)/, 'portal route should share direct-loop payload list decoration')

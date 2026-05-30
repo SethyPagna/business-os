@@ -25,7 +25,7 @@ runTest('customer membership auto-generation uses the LCMN prefix', () => {
 })
 
 runTest('portal membership lookup handles new members without raw route failures', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/routes/portal.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/portal.ts'), 'utf8')
   const routeStart = source.indexOf("router.get('/membership/:membershipNumber'")
   assert.ok(routeStart >= 0, 'missing membership route')
   const routeEnd = source.indexOf("router.post('/submissions'", routeStart)

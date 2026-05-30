@@ -57,8 +57,8 @@ runTest('inventory movement history allows large import batches', () => {
 })
 
 runTest('portal router registers required public catalog search route', () => {
-  const router = require('../src/routes/portal')
-  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/portal.js'), 'utf8')
+  const router = require('../src/routes/portal.ts')
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/portal.ts'), 'utf8')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/catalog/products/search'), 'missing /api/portal/catalog/products/search')
   assert.ok(paths.indexOf('/catalog/products/search') > paths.indexOf('/catalog/products'), 'public search route should be explicit and registered')

@@ -22,7 +22,7 @@ Route files sit behind the shared middleware stack from `server.js`, so by the t
 - `sales.js` - sale creation, status changes, dashboard analytics
 - `returns.ts` - customer and supplier return workflows
 - `contacts.ts` - customers, suppliers, delivery contacts
-- `portal.js` - public customer portal config, membership lookup, review submissions
+- `portal.ts` - public customer portal config, membership lookup, review submissions
 - `settings.ts` - settings read/write APIs
 - `system.js` - backup, import/export, reset, integrity, data-path tools
 - `branches.ts`, `categories.ts`, `units.ts`, `customTables.ts`, `catalog.ts` - supporting domain endpoints

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 615 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 616 in this file.
 
 ## Goal
 
@@ -1528,7 +1528,7 @@ Decision rule:
     and `language-runtime-audit.ts` records the completed SQL/data-path slice
     with rollback and proof commands.
 175. Consolidate portal catalog product payload assembly. Done:
-    `backend/src/routes/portal.js` now uses `getPortalProductAssets()` and
+    `backend/src/routes/portal.ts` now uses `getPortalProductAssets()` and
     `buildPortalProductPayload()` for both the full customer-safe catalog and
     paged catalog search. Image gallery loading, branch-stock grouping, fallback
     image selection, and highlight badge decoration now have one route-local
@@ -3068,48 +3068,48 @@ Decision rule:
     cleanup only; no folder move, schema migration, or runtime conversion was
     needed.
 380. Tighten customer portal config normalization loops. Done:
-    `backend/src/routes/portal.js` now normalizes FAQ items, portal translation
+    `backend/src/routes/portal.ts` now normalizes FAQ items, portal translation
     blocks, recommended product IDs, and settings rows with direct loops while
     preserving the public portal config contract. This was a backend route
     cleanup only; no folder move, schema migration, or runtime conversion was
     needed.
 381. Tighten customer portal product materialization loops. Done:
-    `backend/src/routes/portal.js` now uses named direct-loop helpers for
+    `backend/src/routes/portal.ts` now uses named direct-loop helpers for
     portal product ID collection, SQL placeholder construction, image/branch
     asset maps, and final payload list decoration. This was a backend route and
     regression-test cleanup only; no folder move, schema migration, or runtime
     conversion was needed.
 382. Tighten customer portal loyalty point summary loops. Done:
-    `backend/src/routes/portal.js` now summarizes earned, deducted, redeemed,
+    `backend/src/routes/portal.ts` now summarizes earned, deducted, redeemed,
     and rewarded portal points with direct loops instead of filtered/reduced
     callback chains. This was a backend route cleanup only; no folder move,
     schema migration, or runtime conversion was needed.
 383. Tighten customer portal catalog search/filter parsing loops. Done:
-    `backend/src/routes/portal.js` now parses search terms, filter values,
+    `backend/src/routes/portal.ts` now parses search terms, filter values,
     branch IDs, named placeholders, brand/category filters, and stock states
     with direct-loop helpers while preserving the public catalog query
     contract. This was a backend route cleanup only; no folder move, schema
     migration, or runtime conversion was needed.
 384. Tighten customer portal catalog metadata loops. Done:
-    `backend/src/routes/portal.js` now extracts distinct metadata rows,
+    `backend/src/routes/portal.ts` now extracts distinct metadata rows,
     normalizes persisted brand options, and de-duplicates merged brands with
     direct-loop helpers while preserving catalog metadata output. This was a
     backend route cleanup only; no folder move, schema migration, or runtime
     conversion was needed.
 385. Tighten customer portal membership/submission response loops. Done:
-    `backend/src/routes/portal.js` now wraps membership SQL clauses, normalizes
+    `backend/src/routes/portal.ts` now wraps membership SQL clauses, normalizes
     share-submission screenshot rows, and summarizes membership totals with
     direct-loop helpers while preserving the public membership and review
     response contracts. This was a backend route and regression-test cleanup
     only; no folder move, schema migration, or runtime conversion was needed.
 386. Tighten customer portal screenshot and AI citation loops. Done:
-    `backend/src/routes/portal.js` now sanitizes portal submission screenshots
+    `backend/src/routes/portal.ts` now sanitizes portal submission screenshots
     and collects AI recommendation citations with bounded direct-loop helpers
     while preserving media safety checks and AI response/log payloads. This was
     a backend route cleanup only; no folder move, schema migration, or runtime
     conversion was needed.
 387. Tighten customer portal product signal ranking loops. Done:
-    `backend/src/routes/portal.js` now builds portal product rank maps, net
+    `backend/src/routes/portal.ts` now builds portal product rank maps, net
     sale/return signal rows, new-arrival ranks, and recommended-product ranks
     with named direct-loop helpers while preserving catalog badge behavior.
     This was a backend route cleanup only; no folder move, schema migration, or
@@ -3415,7 +3415,7 @@ Decision rule:
     migration, or language conversion was needed.
 427. Tighten small route predicate helpers. Done:
     `backend/src/routes/branches.ts`, `backend/src/routes/inventory.js`,
-    `backend/src/routes/portal.js`, `backend/src/routes/settings.ts`, and
+    `backend/src/routes/portal.ts`, `backend/src/routes/settings.ts`, and
     `backend/src/routes/sync.ts` now use named direct-loop helpers for paged
     branch-stock query detection, inventory stats filters, portal AI profile
     preferences, suspicious brand option checks, sync conflict detection, and
@@ -5288,6 +5288,23 @@ Decision rule:
     the future compile/staging lane. The expected generated language audit now
     reports `JavaScript: 7`, `TypeScript: 304`, and `React TSX: 107` across the
     active scan roots.
+
+616. Convert public portal route to a package-safe TypeScript path.
+    Done: `backend/src/routes/portal.ts` keeps public portal configuration,
+    customer-safe catalog payloads, paged catalog search, recommendation and
+    initial filters, membership lookup summaries, points rollups, AI responses,
+    submission screenshot materialization, review workflows, rate limiting, and
+    object-storage-aware media sanitization on the existing CommonJS route
+    style. Server mounting, route contracts, portal regression checks, backup
+    hardening checks, backend route docs, language-runtime audit metadata, and
+    roadmap docs now point at the explicit `.ts` route path. Focused portal
+    route load, route-contract, portal regression, backup performance
+    hardening, backend utility, schema audit, stale-path, and Linux packaging
+    proof passed. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so broader backend conversions remain blocked on the future
+    compile/staging lane. The expected generated language audit now reports
+    `JavaScript: 6`, `TypeScript: 305`, and `React TSX: 107` across the active
+    scan roots.
 
 ## Safety Gates
 
