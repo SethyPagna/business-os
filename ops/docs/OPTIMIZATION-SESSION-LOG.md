@@ -1027,3 +1027,41 @@ Use this shape for future entries:
 - follow-up insight: Settings is the third utils-settings shell moved to TSX;
   the remaining larger JSX shells are POS, Products, Dashboard, Inventory,
   Catalog page/editor, and App/AppContext.
+
+- change: converted the dashboard shell to TSX with typed dashboard summary
+  and analytics payloads, period/payment/branch/hour rows, product stock
+  alerts, customer/product/sale detail rows, app/sync context access, range
+  and granularity state, chart/top mode unions, KPI detail modal payloads,
+  export dependency loading, and local dashboard API gateway calls
+- affected files:
+  `frontend/src/components/dashboard/Dashboard.tsx`,
+  `frontend/tests/backupJobs.test.ts`,
+  `frontend/tests/dashboardDataReliability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Dashboard KPI cards, revenue/profit/transaction
+  analytics, stock alerts, sales/customer/product/hour detail modals,
+  compact range/chart controls, CSV/report/package export, and inventory
+  stock-alert handoff surfaces
+- keeper or rollback: keeper; focused typecheck, JSX, dashboard reliability,
+  performance loading UX, backup jobs, frontend utility suite, UI audit,
+  production build, organization audit, schema audit, generated reference
+  refresh, Phase 29 repeat audits, Phase 8.4 live suite, and prune checks
+  passed
+- route-scoped result: focused TSX source checks passed; source/test/script
+  scans found no old Dashboard JSX filename references in frontend source,
+  frontend tests, or ops scripts and no `any` escape hatches in the converted
+  Dashboard shell. Direct dashboard `window.api` reads are now contained behind
+  the typed `getDashboardApi()` gateway.
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up. The
+  running app still served frontend hash `55cf7b8ef08a4b8d`; the fresh local
+  production build hash is `84dc0e2e87e5f5d0`. Live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T02-58-54-887Z/report.json`.
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,232 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: Dashboard is now off the JSX backlog; the remaining JSX
+  shells are Inventory, Products, POS, Catalog page/editor, App, and
+  AppContext.

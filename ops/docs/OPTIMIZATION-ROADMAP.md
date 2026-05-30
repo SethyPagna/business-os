@@ -5912,3 +5912,16 @@ Move 543 status:
   cancellation/cleanup behavior, section navigation source checks, and admin
   media guard behavior unchanged while centralizing direct `window.api`
   settings access behind `getSettingsApi()`.
+
+Move 544 status:
+- Move 544 converts the dashboard shell to
+  `frontend/src/components/dashboard/Dashboard.tsx`. The typed boundary now
+  covers dashboard summary and analytics payloads, period/payment/branch/hour
+  rows, stock alert products, customer/product/sale detail rows, app/sync
+  context access, range and granularity state, chart/top mode unions, KPI
+  detail modal payloads, export dependency loading, and the local dashboard API
+  gateway. The move keeps the extensionless app lazy import, summary/analytics
+  timeout contracts, stale-data handling, compact range/chart controls,
+  stock-alert inventory handoff, dashboard export flows, and dashboard source
+  guard behavior unchanged while centralizing direct `window.api` dashboard
+  reads behind `getDashboardApi()`.

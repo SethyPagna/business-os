@@ -1,6 +1,6 @@
 ﻿# File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 543 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 544 in this file.
 
 ## Goal
 
@@ -4301,6 +4301,19 @@ Decision rule:
     `window.api` settings access behind `getSettingsApi()`. The current source
     extension count is `.js: 95`, `.jsx: 8`, `.mjs: 0`, `.cjs: 0`,
     `.ts: 268`, `.tsx: 99` outside generated/runtime folders.
+544. Convert the dashboard shell to TSX. Done:
+    `frontend/src/components/dashboard/Dashboard.tsx` now types dashboard
+    summary and analytics payloads, period/payment/branch/hour rows, product
+    stock alerts, customer/product/sale detail rows, app/sync context access,
+    range and granularity state, chart/top mode unions, KPI detail modal
+    payloads, export dependency loading, and the local dashboard API gateway.
+    The conversion keeps the extensionless app lazy import, summary and
+    analytics timeout contracts, stale-data handling, compact range/chart
+    controls, stock-alert inventory handoff, dashboard export flows, and
+    dashboard source checks intact while centralizing direct `window.api`
+    dashboard reads behind `getDashboardApi()`. The current source extension
+    count is `.js: 95`, `.jsx: 7`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`,
+    `.tsx: 100` outside generated/runtime folders.
 
 ## Safety Gates
 

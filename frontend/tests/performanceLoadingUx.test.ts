@@ -4,7 +4,7 @@ import fs from 'node:fs'
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', import.meta.url), 'utf8')
-const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.jsx', import.meta.url), 'utf8')
+const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
@@ -350,12 +350,12 @@ assert.match(
 )
 assert.match(
   dashboard,
-  /withLoaderTimeout\(\(\) => window\.api\.getDashboard\(\), label, DASHBOARD_SUMMARY_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => getDashboardApi\(\)\.getDashboard\(\), label, DASHBOARD_SUMMARY_TIMEOUT_MS\)/,
   'dashboard summary should timeout slow summary reads',
 )
 assert.match(
   dashboard,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getAnalytics\(\{ startDate: start, endDate: end, granularity: gran \}\),\s*'Dashboard analytics',\s*DASHBOARD_ANALYTICS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getDashboardApi\(\)\.getAnalytics\(\{ startDate: start, endDate: end, granularity: gran \}\),\s*'Dashboard analytics',\s*DASHBOARD_ANALYTICS_TIMEOUT_MS,\s*\)/,
   'dashboard analytics should timeout slow analytics reads',
 )
 assert.doesNotMatch(

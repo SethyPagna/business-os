@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import type { ReactNode } from 'react'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
@@ -18,12 +19,233 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 
+type TranslateFn = (key: string) => string
+type FormatMoneyFn = (value: unknown) => string
+type NavigateFn = (page: string) => void
+type EntityId = string | number
+type DashboardRangeId = 'today' | '7d' | 'month' | 'year' | 'custom'
+type DashboardGranularity = 'day' | 'week' | 'month'
+type DashboardChartMode = 'revenue' | 'profit' | 'volume'
+type DashboardTopMode = 'revenue' | 'qty'
+type InventoryStockFocus = 'all' | 'low' | 'out'
+type DashboardMetricValue = string | number | boolean | null | undefined
+type DashboardMetricMap = Record<string, number | undefined>
+type CsvRow = Record<string, unknown>
+type DashboardExportItem = 'divider' | {
+  label: ReactNode
+  onClick?: () => void
+  color?: string
+  disabled?: boolean
+}
+
+interface AppUser {
+  id?: EntityId
+  username?: string
+  email?: string
+}
+
+interface AppContextValue {
+  t: TranslateFn
+  fmtUSD: FormatMoneyFn
+  fmtKHR: FormatMoneyFn
+  navigateTo: NavigateFn
+  user?: AppUser | null
+}
+
+interface SyncContextValue {
+  syncChannel?: {
+    channel?: string
+    ts?: string | number
+  } | null
+}
+
+interface DashboardProduct {
+  id?: EntityId
+  product_id?: EntityId
+  product_name?: string
+  name?: string
+  category?: string
+  unit?: string
+  stock_quantity?: number
+  low_stock_threshold?: number
+  out_of_stock_threshold?: number
+  qty_sold?: number
+  revenue_usd?: number
+  expiry_date?: string
+  days_until_expiry?: number
+  insightType?: string
+  rank?: number
+  [key: string]: unknown
+}
+
+interface DashboardCustomer {
+  customer_name?: string
+  sale_count?: number
+  gross_revenue_usd?: number
+  store_discount_usd?: number
+  membership_discount_usd?: number
+  total_refund_usd?: number
+  net_revenue_usd?: number
+  rank?: number
+  [key: string]: unknown
+}
+
+interface DashboardSaleItem {
+  name?: string
+  product_name?: string
+  qty?: number
+  quantity?: number
+  price?: number
+  total?: number
+}
+
+interface DashboardSale {
+  id?: EntityId
+  receipt_number?: string
+  created_at?: string
+  sale_status?: string
+  branch_name?: string
+  customer_name?: string
+  total?: number
+  total_usd?: number
+  total_khr?: number
+  items?: DashboardSaleItem[]
+  [key: string]: unknown
+}
+
+interface DashboardPeriodRow {
+  date?: string
+  period?: string
+  revenue_usd?: number
+  gross_sales_usd?: number
+  discount_usd?: number
+  tax_usd?: number
+  delivery_usd?: number
+  refund_usd?: number
+  profit_usd?: number
+  cost_usd?: number
+  tx_count?: number
+  refunds_usd?: number
+  count?: number
+  [key: string]: unknown
+}
+
+interface DashboardPaymentRow {
+  method?: string
+  payment_method?: string
+  revenue_usd?: number
+  count?: number
+  [key: string]: unknown
+}
+
+interface DashboardBranchRow {
+  branch_id?: EntityId
+  branch_name?: string
+  revenue_usd?: number
+  tx_count?: number
+  count?: number
+  [key: string]: unknown
+}
+
+interface DashboardHourRow {
+  hour: number | string
+  count?: number
+  revenue_usd?: number
+}
+
+interface DashboardSummary {
+  today_count: number
+  today_total: number
+  today_total_khr: number
+  today_return_count: number
+  today_return_usd: number
+  all_total: number
+  all_total_khr: number
+  cost_in: number
+  cost_out: number
+  cost_in_khr: number
+  cost_out_khr: number
+  product_count: number
+  in_stock_count: number
+  low_stock_count: number
+  out_of_stock_count: number
+  stock_value_usd: number
+  stock_value_khr: number
+  low_stock: DashboardProduct[]
+  out_of_stock: DashboardProduct[]
+  expiring_products: DashboardProduct[]
+  expiring_count: number
+  recent_sales: DashboardSale[]
+  low_stock_preview_limit?: number
+  out_of_stock_preview_limit?: number
+  low_stock_preview_truncated?: boolean
+  out_of_stock_preview_truncated?: boolean
+  [key: string]: unknown
+}
+
+interface DashboardAnalytics {
+  totals: DashboardMetricMap
+  prevTotals: DashboardMetricMap
+  periodReturns: DashboardMetricMap
+  periodSupplierReturns: DashboardMetricMap
+  periodData: DashboardPeriodRow[]
+  byPayment: DashboardPaymentRow[]
+  byBranch: DashboardBranchRow[]
+  topProducts: DashboardProduct[]
+  topProductsQty: DashboardProduct[]
+  topCustomers: DashboardCustomer[]
+  hourlyDist: DashboardHourRow[]
+  [key: string]: unknown
+}
+
+interface DashboardFilterPrefs {
+  rangeId: DashboardRangeId
+  customStart: string
+  customEnd: string
+  granularity: DashboardGranularity
+}
+
+interface DashboardRangePreset {
+  id: DashboardRangeId
+  label: string
+  getRange: (() => { start: string; end: string; gran: DashboardGranularity }) | null
+}
+
+interface KpiDetail {
+  id: string
+  label: ReactNode
+  value?: ReactNode
+  sub?: ReactNode
+  details?: Array<{ label: ReactNode; value: ReactNode }>
+}
+
+interface DashboardApi {
+  getDashboard: () => Promise<unknown>
+  getAnalytics: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
+}
+
+type DashboardExportDeps = typeof import('../../utils/csv') &
+  typeof import('../../utils/exportReports') &
+  typeof import('../../utils/exportPackage')
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+
+function getDashboardApi(): DashboardApi {
+  return (window as unknown as { api: DashboardApi }).api
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
 const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`
 const DASHBOARD_CHART_POINT_LIMIT = 180
 const DASHBOARD_SUMMARY_TIMEOUT_MS = 30000
 const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000
-const EMPTY_DASHBOARD_SUMMARY = {
+const EMPTY_DASHBOARD_SUMMARY: DashboardSummary = {
   today_count: 0,
   today_total: 0,
   today_total_khr: 0,
@@ -47,7 +269,7 @@ const EMPTY_DASHBOARD_SUMMARY = {
   expiring_count: 0,
   recent_sales: [],
 }
-const EMPTY_DASHBOARD_ANALYTICS = {
+const EMPTY_DASHBOARD_ANALYTICS: DashboardAnalytics = {
   totals: {},
   prevTotals: {},
   periodReturns: {},
@@ -62,12 +284,12 @@ const EMPTY_DASHBOARD_ANALYTICS = {
 }
 const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 
-function getDashboardFilterStorageKey(user) {
+function getDashboardFilterStorageKey(user?: AppUser | null): string {
   const userKey = user?.id || user?.username || user?.email || 'guest'
   return `${DASHBOARD_FILTER_STORAGE_PREFIX}${userKey}`
 }
 
-function readDashboardFilterPrefs(storageKeys) {
+function readDashboardFilterPrefs(storageKeys: string | string[]): DashboardFilterPrefs | null {
   if (typeof window === 'undefined') return null
   try {
     const keys = Array.isArray(storageKeys)
@@ -91,94 +313,103 @@ function readDashboardFilterPrefs(storageKeys) {
   }
 }
 
-function downsampleChartRows(rows = [], limit = DASHBOARD_CHART_POINT_LIMIT) {
+function downsampleChartRows(rows: DashboardPeriodRow[] = [], limit = DASHBOARD_CHART_POINT_LIMIT): DashboardPeriodRow[] {
   const list = Array.isArray(rows) ? rows.filter(Boolean) : []
   if (list.length <= limit) return list
   const step = Math.ceil(list.length / limit)
-  const sampled = []
+  const sampled: DashboardPeriodRow[] = []
   for (let index = 0; index < list.length; index += 1) {
     if (index === 0 || index === list.length - 1 || index % step === 0) sampled.push(list[index])
   }
   return sampled
 }
 
-function normalizeDashboardRangeId(rangeId) {
+function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId {
   if (rangeId === '30d') return 'month'
   if (rangeId === '90d') return 'year'
-  return rangeId
+  if (rangeId === 'today' || rangeId === '7d' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
+  return 'month'
 }
 
-function compactDashboardMetaParts(parts = []) {
+function normalizeDashboardGranularity(value: unknown): DashboardGranularity {
+  return value === 'week' || value === 'month' ? value : 'day'
+}
+
+function compactDashboardMetaParts(parts: unknown[] = []): string[] {
   return parts
     .map((part) => (typeof part === 'string' ? part.trim() : ''))
     .filter((part) => part && part !== '-' && part !== '--')
 }
 
-function formatDashboardHourLabel(hourValue) {
+function formatDashboardHourLabel(hourValue: unknown): string {
   const hour = ((Number(hourValue) % 24) + 24) % 24
   if (hour === 0) return '12 AM'
   if (hour === 12) return '12 PM'
   return hour < 12 ? `${hour} AM` : `${hour - 12} PM`
 }
 
-function getSaleStatusTone(status) {
+function getSaleStatusTone(status: unknown): string {
   const key = String(status || '').toLowerCase()
   if (key === 'refunded' || key === 'returned') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
   if (key === 'pending' || key === 'draft') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
   return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
 }
 
-function isDashboardSummaryPayload(value) {
+function isDashboardSummaryPayload(value: unknown): value is DashboardSummary {
   if (!value || typeof value !== 'object') return false
+  const payload = value as Partial<DashboardSummary>
   return (
-    Number.isFinite(Number(value.product_count))
-    || Number.isFinite(Number(value.stock_value_usd))
-    || Array.isArray(value.recent_sales)
-    || Array.isArray(value.low_stock)
-    || Array.isArray(value.out_of_stock)
+    Number.isFinite(Number(payload.product_count))
+    || Number.isFinite(Number(payload.stock_value_usd))
+    || Array.isArray(payload.recent_sales)
+    || Array.isArray(payload.low_stock)
+    || Array.isArray(payload.out_of_stock)
   )
 }
 
-function isDashboardAnalyticsPayload(value) {
+function isDashboardAnalyticsPayload(value: unknown): value is DashboardAnalytics {
   if (!value || typeof value !== 'object') return false
+  const payload = value as Partial<DashboardAnalytics>
   return (
-    Array.isArray(value.periodData)
-    || Array.isArray(value.byPayment)
-    || Array.isArray(value.byBranch)
-    || Array.isArray(value.topProducts)
-    || Array.isArray(value.topCustomers)
-    || (value.totals && typeof value.totals === 'object')
+    Array.isArray(payload.periodData)
+    || Array.isArray(payload.byPayment)
+    || Array.isArray(payload.byBranch)
+    || Array.isArray(payload.topProducts)
+    || Array.isArray(payload.topCustomers)
+    || Boolean(payload.totals && typeof payload.totals === 'object')
   )
 }
 
-function normalizeDashboardSummaryPayload(value) {
+function normalizeDashboardSummaryPayload(value: unknown): DashboardSummary | null {
   if (!value || typeof value !== 'object') return null
+  const payload = value as Partial<DashboardSummary>
   return {
     ...EMPTY_DASHBOARD_SUMMARY,
-    ...value,
-    low_stock: Array.isArray(value.low_stock) ? value.low_stock : [],
-    out_of_stock: Array.isArray(value.out_of_stock) ? value.out_of_stock : [],
-    expiring_products: Array.isArray(value.expiring_products) ? value.expiring_products : [],
-    recent_sales: Array.isArray(value.recent_sales) ? value.recent_sales : [],
+    ...payload,
+    low_stock: Array.isArray(payload.low_stock) ? payload.low_stock : [],
+    out_of_stock: Array.isArray(payload.out_of_stock) ? payload.out_of_stock : [],
+    expiring_products: Array.isArray(payload.expiring_products) ? payload.expiring_products : [],
+    recent_sales: Array.isArray(payload.recent_sales) ? payload.recent_sales : [],
   }
 }
 
-function normalizeDashboardAnalyticsPayload(value) {
+function normalizeDashboardAnalyticsPayload(value: unknown): DashboardAnalytics | null {
   if (!value || typeof value !== 'object') return null
+  const payload = value as Partial<DashboardAnalytics>
   return {
     ...EMPTY_DASHBOARD_ANALYTICS,
-    ...value,
-    totals: value.totals && typeof value.totals === 'object' ? value.totals : {},
-    prevTotals: value.prevTotals && typeof value.prevTotals === 'object' ? value.prevTotals : {},
-    periodReturns: value.periodReturns && typeof value.periodReturns === 'object' ? value.periodReturns : {},
-    periodSupplierReturns: value.periodSupplierReturns && typeof value.periodSupplierReturns === 'object' ? value.periodSupplierReturns : {},
-    periodData: Array.isArray(value.periodData) ? value.periodData : [],
-    byPayment: Array.isArray(value.byPayment) ? value.byPayment : [],
-    byBranch: Array.isArray(value.byBranch) ? value.byBranch : [],
-    topProducts: Array.isArray(value.topProducts) ? value.topProducts : [],
-    topProductsQty: Array.isArray(value.topProductsQty) ? value.topProductsQty : [],
-    topCustomers: Array.isArray(value.topCustomers) ? value.topCustomers : [],
-    hourlyDist: Array.isArray(value.hourlyDist) ? value.hourlyDist : [],
+    ...payload,
+    totals: payload.totals && typeof payload.totals === 'object' ? payload.totals : {},
+    prevTotals: payload.prevTotals && typeof payload.prevTotals === 'object' ? payload.prevTotals : {},
+    periodReturns: payload.periodReturns && typeof payload.periodReturns === 'object' ? payload.periodReturns : {},
+    periodSupplierReturns: payload.periodSupplierReturns && typeof payload.periodSupplierReturns === 'object' ? payload.periodSupplierReturns : {},
+    periodData: Array.isArray(payload.periodData) ? payload.periodData : [],
+    byPayment: Array.isArray(payload.byPayment) ? payload.byPayment : [],
+    byBranch: Array.isArray(payload.byBranch) ? payload.byBranch : [],
+    topProducts: Array.isArray(payload.topProducts) ? payload.topProducts : [],
+    topProductsQty: Array.isArray(payload.topProductsQty) ? payload.topProductsQty : [],
+    topCustomers: Array.isArray(payload.topCustomers) ? payload.topCustomers : [],
+    hourlyDist: Array.isArray(payload.hourlyDist) ? payload.hourlyDist : [],
   }
 }
 
@@ -187,16 +418,16 @@ export default function Dashboard() {
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('dashboard')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const translateOr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const translateOr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
     if (value && value !== key && !isBrokenLocalizedString(value)) return value
     const safeKm = fallbackKm && !isBrokenLocalizedString(fallbackKm) ? fallbackKm : fallbackEn
     return isKhmer ? safeKm : fallbackEn
-  }
+  }, [isKhmer, t])
   const exportLabel = translateOr('export', 'Export')
   const refreshLabel = translateOr('refresh', 'Refresh')
   const dayLabel = translateOr('day', 'Day')
-  const priceCsv = useCallback((value) => formatPriceNumber(value || 0), [])
+  const priceCsv = useCallback((value: unknown) => formatPriceNumber(value || 0), [])
   const dashboardFilterStorageKey = useMemo(() => getDashboardFilterStorageKey(user), [user?.email, user?.id, user?.username])
   const dashboardFilterStorageKeys = useMemo(
     () => [dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY],
@@ -208,7 +439,7 @@ export default function Dashboard() {
   )
 
   // Range presets use t() for labels inside the component so t() is in scope.
-  const RANGE_PRESETS = [
+  const RANGE_PRESETS: DashboardRangePreset[] = [
     { id: 'today',  label: t('range_today'),      getRange: () => ({ start: todayStr(), end: todayStr(), gran: 'day' }) },
     { id: '7d',     label: t('range_7d'),          getRange: () => ({ start: offsetDate(-6), end: todayStr(), gran: 'day' }) },
     { id: 'month',  label: t('range_this_month'),  getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`, end: todayStr(), gran: 'day' } } },
@@ -216,37 +447,37 @@ export default function Dashboard() {
     { id: 'custom', label: t('range_custom'),      getRange: null },
   ]
 
-  const [summary, setSummary]     = useState(null)
-  const [analytics, setAnalytics] = useState(null)
+  const [summary, setSummary]     = useState<DashboardSummary | null>(null)
+  const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
   const [loading, setLoading]     = useState(true)
   const [aLoading, setALoading]   = useState(true)
   const [silentRefresh, setSilentRefresh] = useState(false)
   const [summaryError, setSummaryError] = useState('')
   const [analyticsError, setAnalyticsError] = useState('')
-  const [rangeId, setRangeId]     = useState(() => normalizeDashboardRangeId(initialFilterPrefs?.rangeId || 'month'))
+  const [rangeId, setRangeId]     = useState<DashboardRangeId>(() => normalizeDashboardRangeId(initialFilterPrefs?.rangeId || 'month'))
   const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.customStart || offsetDate(-29))
   const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.customEnd || todayStr())
-  const [granularity, setGranularity] = useState(() => initialFilterPrefs?.granularity || 'day')
-  const [activeChart, setActiveChart] = useState('revenue')
-  const [topMode, setTopMode]         = useState('revenue')
+  const [granularity, setGranularity] = useState<DashboardGranularity>(() => normalizeDashboardGranularity(initialFilterPrefs?.granularity || 'day'))
+  const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
+  const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [showAllCustomers, setShowAllCustomers] = useState(false)
   const [showAllProducts, setShowAllProducts]   = useState(false)
-  const [customerDetail, setCustomerDetail]     = useState(null)
-  const [productDetail, setProductDetail]       = useState(null)
+  const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
+  const [productDetail, setProductDetail]       = useState<DashboardProduct | null>(null)
   const [showAllBranches, setShowAllBranches]   = useState(false)
   const [showAllHours, setShowAllHours]         = useState(false)
   const [showAllLowStock, setShowAllLowStock]   = useState(false)
   const [showAllOutStock, setShowAllOutStock]   = useState(false)
   const [showAllExpiring, setShowAllExpiring]   = useState(false)
   const [recentSalesOpen, setRecentSalesOpen]   = useState(false)
-  const [recentSaleDetail, setRecentSaleDetail] = useState(null)
-  const [kpiDetail, setKpiDetail]               = useState(null)
+  const [recentSaleDetail, setRecentSaleDetail] = useState<DashboardSale | null>(null)
+  const [kpiDetail, setKpiDetail]               = useState<KpiDetail | null>(null)
   const summaryRequestRef = useRef(0)
   const analyticsRequestRef = useRef(0)
   const refreshRequestRef = useRef(0)
   const analyticsLoadingRef = useRef(true)
   const filterStorageKeyRef = useRef(dashboardFilterStorageKey)
-  const dashboardExportDepsPromiseRef = useRef(null)
+  const dashboardExportDepsPromiseRef = useRef<Promise<DashboardExportDeps> | null>(null)
 
   const loadDashboardExportDeps = useCallback(() => {
     if (!dashboardExportDepsPromiseRef.current) {
@@ -263,12 +494,12 @@ export default function Dashboard() {
     return dashboardExportDepsPromiseRef.current
   }, [])
 
-  const setAnalyticsLoading = useCallback((value) => {
+  const setAnalyticsLoading = useCallback((value: boolean) => {
     analyticsLoadingRef.current = value
     setALoading(value)
   }, [])
 
-  const openInventoryOverview = useCallback((stockState = 'all') => {
+  const openInventoryOverview = useCallback((stockState: InventoryStockFocus = 'all') => {
     if (typeof window !== 'undefined') {
       window.sessionStorage.setItem(DASHBOARD_INVENTORY_FOCUS_KEY, JSON.stringify({
         section: 'products',
@@ -283,11 +514,11 @@ export default function Dashboard() {
   const loadSummary = useCallback(async ({
     label = 'Dashboard summary',
     markLoading = false,
-  } = {}) => {
+  }: { label?: string; markLoading?: boolean } = {}) => {
     const requestId = beginTrackedRequest(summaryRequestRef)
     if (markLoading) setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => window.api.getDashboard(), label, DASHBOARD_SUMMARY_TIMEOUT_MS)
+      const data = await withLoaderTimeout(() => getDashboardApi().getDashboard(), label, DASHBOARD_SUMMARY_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       const normalized = normalizeDashboardSummaryPayload(data)
       if (!normalized || !isDashboardSummaryPayload(normalized)) {
@@ -302,8 +533,8 @@ export default function Dashboard() {
         setSummaryError('Please sign in again to continue.')
         return null
       }
-      console.error('[Dashboard] getDashboard failed:', error.message)
-      setSummaryError(error?.message || 'Dashboard summary failed to load.')
+      console.error('[Dashboard] getDashboard failed:', getErrorMessage(error, 'Dashboard summary failed to load.'))
+      setSummaryError(getErrorMessage(error, 'Dashboard summary failed to load.'))
       return null
     } finally {
       if (markLoading && isTrackedRequestCurrent(summaryRequestRef, requestId)) {
@@ -312,17 +543,19 @@ export default function Dashboard() {
     }
   }, [])
 
-  const loadAnalytics = useCallback(async ({ silent = false } = {}) => {
+  const loadAnalytics = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const requestId = beginTrackedRequest(analyticsRequestRef)
     const shouldClearLoading = !silent || analyticsLoadingRef.current
     if (!silent) setAnalyticsLoading(true)
-    let start, end, gran
+    let start: string
+    let end: string
+    let gran: DashboardGranularity
     const preset = RANGE_PRESETS.find(r => r.id === rangeId)
     if (preset?.getRange) { const r = preset.getRange(); start = r.start; end = r.end; gran = r.gran }
     else { start = customStart; end = customEnd; gran = granularity }
     try {
       const data = await withLoaderTimeout(
-        () => window.api.getAnalytics({ startDate: start, endDate: end, granularity: gran }),
+        () => getDashboardApi().getAnalytics({ startDate: start, endDate: end, granularity: gran }),
         'Dashboard analytics',
         DASHBOARD_ANALYTICS_TIMEOUT_MS,
       )
@@ -340,8 +573,8 @@ export default function Dashboard() {
         setAnalyticsError('Please sign in again to continue.')
         return null
       }
-      console.error('[Dashboard] getAnalytics failed:', error.message)
-      setAnalyticsError(error?.message || 'Dashboard analytics failed to load.')
+      console.error('[Dashboard] getAnalytics failed:', getErrorMessage(error, 'Dashboard analytics failed to load.'))
+      setAnalyticsError(getErrorMessage(error, 'Dashboard analytics failed to load.'))
       return null
     } finally {
       if (shouldClearLoading && isTrackedRequestCurrent(analyticsRequestRef, requestId)) {
@@ -357,7 +590,7 @@ export default function Dashboard() {
     setRangeId(normalizeDashboardRangeId(nextPrefs?.rangeId || 'month'))
     setCustomStart(nextPrefs?.customStart || offsetDate(-29))
     setCustomEnd(nextPrefs?.customEnd || todayStr())
-    setGranularity(nextPrefs?.granularity || 'day')
+    setGranularity(normalizeDashboardGranularity(nextPrefs?.granularity || 'day'))
   }, [dashboardFilterStorageKey])
 
   useEffect(() => {
@@ -433,7 +666,7 @@ export default function Dashboard() {
   const analyticsUnavailable = !analyticsReady && !aLoading
   const staleSummaryNotice = summaryReady && summaryError
   const staleAnalyticsNotice = analyticsReady && analyticsError
-  const calcTrend = (curr, prev) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
+  const calcTrend = (curr: number, prev: number) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
   const aRevenue  = analytics?.totals?.revenue_usd || 0
   const aGrossSales = analytics?.totals?.gross_sales_usd || 0
   const aDiscounts = analytics?.totals?.discount_usd || 0
@@ -507,14 +740,14 @@ export default function Dashboard() {
   const pendingStatusLabel = translateOr('pending', 'Pending')
   const refundedStatusLabel = translateOr('refunded', 'Refunded')
 
-  const formatSaleStatus = useCallback((status) => {
+  const formatSaleStatus = useCallback((status: unknown) => {
     const key = String(status || '').toLowerCase()
     if (key === 'refunded' || key === 'returned') return refundedStatusLabel
     if (key === 'pending' || key === 'draft') return pendingStatusLabel
     return completedStatusLabel
   }, [completedStatusLabel, pendingStatusLabel, refundedStatusLabel])
 
-  const openHourDetail = useCallback((hourStat, rank = null) => {
+  const openHourDetail = useCallback((hourStat: DashboardHourRow | null | undefined, rank: number | null = null) => {
     if (!hourStat) return
     setKpiDetail({
       id: `hour-${hourStat.hour}`,
@@ -525,7 +758,7 @@ export default function Dashboard() {
         { label: translateOr('transactions', 'Transactions'), value: Number(hourStat.count || 0) },
         { label: translateOr('revenue', 'Revenue'), value: fmtUSD(hourStat.revenue_usd || 0) },
         rank ? { label: translateOr('rank', 'Rank'), value: `#${rank}` } : null,
-      ].filter(Boolean),
+      ].filter(Boolean) as Array<{ label: ReactNode; value: ReactNode }>,
     })
   }, [fmtUSD, translateOr])
 
@@ -886,7 +1119,7 @@ export default function Dashboard() {
     const branchRows   = buildDashboardBranchRows().map((row) => ({ Section: 'Branches', ...row }))
     const lowRows      = buildDashboardLowStockRows().map((row) => ({ Section: 'Low Stock', ...row }))
     const outRows      = buildDashboardOutStockRows().map((row) => ({ Section: 'Out Of Stock', ...row }))
-    const all = [...manifestRows, ...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows, ...outRows]
+    const all: CsvRow[] = [...manifestRows, ...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows, ...outRows]
     const keys = [...new Set(all.flatMap(r=>Object.keys(r)))]
     downloadCSV(`dashboard-full-${exportStamp}.csv`, all.map(r=>Object.fromEntries(keys.map(k=>[k,r[k]??'']))))
   }, [
@@ -1111,7 +1344,7 @@ export default function Dashboard() {
     topMode,
   ])
 
-  const dashboardExportItems = useMemo(() => [
+  const dashboardExportItems = useMemo<DashboardExportItem[]>(() => [
     { label: t('export_dashboard_package') || 'Export dashboard package', onClick: exportDashboardPackage, color: 'green' },
     { label: t('export_all_report'), onClick: buildExportAll, color: 'green' },
     { label: t('export_kpi_summary'), onClick: async () => {
@@ -1307,7 +1540,7 @@ export default function Dashboard() {
                 aria-label="Dashboard period granularity"
                 className="input min-h-10 w-full py-2 text-sm sm:w-28"
                 value={granularity}
-                onChange={e => setGranularity(e.target.value)}
+                onChange={e => setGranularity(normalizeDashboardGranularity(e.target.value))}
               >
                 <option value="day">{dayLabel}</option>
                 <option value="week">{t('this_week')}</option>
@@ -1366,7 +1599,11 @@ export default function Dashboard() {
             <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">{t('analytics')}</h2>
             <div className="inline-flex w-full max-w-full rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90 sm:w-auto">
               <div className="flex min-w-0 gap-1 overflow-x-auto">
-              {[['revenue', revenueFlowLabel],['profit', t('profit_vs_cogs')],['volume', salesCountLabel]].map(([id,lbl]) => (
+              {([
+                ['revenue', revenueFlowLabel],
+                ['profit', t('profit_vs_cogs')],
+                ['volume', salesCountLabel],
+              ] satisfies Array<[DashboardChartMode, string]>).map(([id,lbl]) => (
                 <button key={id} onClick={() => setActiveChart(id)}
                   className={`min-h-7 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${activeChart===id ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-slate-700 dark:text-white dark:ring-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white'}`}>
                   {lbl}
@@ -1487,7 +1724,10 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('top_products')}</h2>
             <div className="flex gap-1">
-              {[['revenue',`$ ${t('revenue')}`],['qty',t('quantity')]].map(([m,lbl]) => (
+              {([
+                ['revenue', `$ ${t('revenue')}`],
+                ['qty', t('quantity')],
+              ] satisfies Array<[DashboardTopMode, string]>).map(([m,lbl]) => (
                 <button key={m} onClick={() => setTopMode(m)}
                   className={`min-h-10 rounded-lg px-4 py-2 text-sm font-semibold sm:text-[15px] ${topMode===m ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
                   {lbl}
@@ -1503,7 +1743,7 @@ export default function Dashboard() {
                 {topList.length === 0 ? <p className="text-xs text-gray-400 text-center py-4">{t('no_data')}</p>
                 : (showAllProducts ? topList : topList.slice(0,4)).map((p,i) => {
                   const maxVal = topMode==='qty' ? topList[0]?.qty_sold||1 : topList[0]?.revenue_usd||1
-                  const val    = topMode==='qty' ? p.qty_sold : p.revenue_usd
+                  const val    = topMode==='qty' ? p.qty_sold || 0 : p.revenue_usd || 0
                   const pct    = (val/maxVal*100).toFixed(0)
                   return (
                     <button
@@ -1560,7 +1800,7 @@ export default function Dashboard() {
                         <div className="space-y-1.5">
                           {visible.map((c,i) => {
                             const maxRev = customers[0]?.net_revenue_usd || 1
-                            const pct = Math.max(2,(c.net_revenue_usd/maxRev*100)).toFixed(0)
+                            const pct = Math.max(2,((c.net_revenue_usd || 0)/maxRev*100)).toFixed(0)
                             return (
                               <button
                                 key={i}
@@ -1574,7 +1814,7 @@ export default function Dashboard() {
                                       <span className="text-gray-400 w-4 text-right">{i+1}.</span>
                                       <span className="text-gray-700 dark:text-gray-300 truncate max-w-36">{c.customer_name}</span>
                                     </div>
-                                    <span className="font-medium text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd)}</span>
+                                    <span className="font-medium text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</span>
                                   </div>
                                   <div className="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden ml-5">
                                     <div className="h-full bg-green-500 rounded-full" style={{ width:`${pct}%` }} />
@@ -1611,25 +1851,26 @@ export default function Dashboard() {
           {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
             <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
           ) : (() => {
-            const hourly = analytics?.hourlyDist || []
+            const hourly: DashboardHourRow[] = analytics?.hourlyDist || []
             const tzOff  = -(new Date().getTimezoneOffset())/60
-            const merged = {}
+            const merged: Record<number, DashboardHourRow> = {}
             hourly.forEach(h => {
-              const lh = ((Math.round(parseInt(h.hour,10)+tzOff))%24+24)%24
+              const lh = ((Math.round(Number.parseInt(String(h.hour),10)+tzOff))%24+24)%24
               if (!merged[lh]) merged[lh] = { hour:lh, count:0, revenue_usd:0 }
-              merged[lh].count       += Number(h.count)||0
-              merged[lh].revenue_usd += parseFloat(h.revenue_usd)||0
+              const bucket = merged[lh]
+              bucket.count = (bucket.count || 0) + (Number(h.count)||0)
+              bucket.revenue_usd = (bucket.revenue_usd || 0) + (Number.parseFloat(String(h.revenue_usd || 0))||0)
             })
-            const maxCount   = Math.max(...Object.values(merged).map(h=>h.count), 1)
+            const maxCount   = Math.max(...Object.values(merged).map(h=>h.count || 0), 1)
             const allHours   = Array.from({length:24},(_,i) => merged[i]||{hour:i,count:0,revenue_usd:0})
-            const sortedBusy = Object.values(merged).filter(h=>h.count>0).sort((a,b)=>b.count-a.count)
+            const sortedBusy = Object.values(merged).filter(h=>(h.count || 0)>0).sort((a,b)=>(b.count || 0)-(a.count || 0))
             const visH = showAllHours ? sortedBusy : sortedBusy.slice(0,3)
             return (
               <>
                 <div className="relative mb-3">
                   <div className="grid gap-px" style={{ gridTemplateColumns:'repeat(24,1fr)' }}>
                     {allHours.map(h => {
-                      const op = h.count===0 ? 0.06 : 0.12+h.count/maxCount*0.88
+                      const op = (h.count || 0)===0 ? 0.06 : 0.12+(h.count || 0)/maxCount*0.88
                       return (
                         <button
                           key={h.hour}
@@ -1708,7 +1949,7 @@ export default function Dashboard() {
           {(summary?.low_stock?.length||0) > 5 && !lowStockPreviewTruncated && (
             <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
               <button onClick={() => setShowAllLowStock(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
-                {showAllLowStock ? t('show_less') : `${t('view_all')} ${summary.low_stock.length} ${t('items')}`}
+                {showAllLowStock ? t('show_less') : `${t('view_all')} ${summary!.low_stock.length} ${t('items')}`}
               </button>
             </div>
           )}
@@ -1753,7 +1994,7 @@ export default function Dashboard() {
           {(summary?.out_of_stock?.length||0) > 5 && !outOfStockPreviewTruncated && (
             <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
               <button onClick={() => setShowAllOutStock(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
-                {showAllOutStock ? t('show_less') : `${t('view_all')} ${summary.out_of_stock.length} ${t('items')}`}
+                {showAllOutStock ? t('show_less') : `${t('view_all')} ${summary!.out_of_stock.length} ${t('items')}`}
               </button>
             </div>
           )}
@@ -1774,7 +2015,7 @@ export default function Dashboard() {
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>
             {(summary?.expiring_products?.length||0) > 0 && (
-              <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-medium">{summary.expiring_products.length}</span>
+              <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-medium">{summary!.expiring_products.length}</span>
             )}
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1795,7 +2036,7 @@ export default function Dashboard() {
           {(summary?.expiring_products?.length||0) > 5 && (
             <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
               <button onClick={() => setShowAllExpiring(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
-                {showAllExpiring ? t('show_less') : `${t('view_all')} ${summary.expiring_products.length} ${t('items')}`}
+                {showAllExpiring ? t('show_less') : `${t('view_all')} ${summary!.expiring_products.length} ${t('items')}`}
               </button>
             </div>
           )}
@@ -1824,7 +2065,7 @@ export default function Dashboard() {
                   </div>
                   <div className="flex-shrink-0 text-right">
                     <span className="font-semibold text-green-600">{fmtUSD(s.total_usd||s.total||0)}</span>
-                    {s.total_khr > 0 && <div className="text-xs text-gray-400">{fmtKHR(s.total_khr)}</div>}
+                    {(s.total_khr || 0) > 0 && <div className="text-xs text-gray-400">{fmtKHR(s.total_khr || 0)}</div>}
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(s.sale_status)}`}>
                       {formatSaleStatus(s.sale_status)}
                     </div>
@@ -1871,7 +2112,7 @@ export default function Dashboard() {
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>
                       {formatSaleStatus(sale.sale_status)}
                     </div>
-                    {sale.total_khr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sale.total_khr)}</div> : null}
+                    {(sale.total_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sale.total_khr || 0)}</div> : null}
                   </div>
                 </button>
               ))}
@@ -1891,15 +2132,15 @@ export default function Dashboard() {
               <button onClick={() => setRecentSaleDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">Close</button>
             </div>
             <div className="p-4 space-y-2 overflow-y-auto">
-              {[
+              {([
                 { label: t('date') || 'Date', value: fmtTime(recentSaleDetail.created_at) },
                 { label: t('status') || 'Status', value: formatSaleStatus(recentSaleDetail.sale_status) },
                 { label: t('branch') || 'Branch', value: recentSaleDetail.branch_name || '--' },
                 { label: t('customer') || 'Customer', value: recentSaleDetail.customer_name || '--' },
                 { label: t('total') || 'Total', value: fmtUSD(recentSaleDetail.total_usd || recentSaleDetail.total || 0) },
-                recentSaleDetail.total_khr > 0 ? { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr) } : null,
-              ].filter(Boolean).map((item) => (
-                <div key={item.label} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
+                (recentSaleDetail.total_khr || 0) > 0 ? { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr || 0) } : null,
+              ] as Array<{ label: ReactNode; value: ReactNode } | null>).filter((item): item is { label: ReactNode; value: ReactNode } => Boolean(item)).map((item, index) => (
+                <div key={String(item.label || index)} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
                   <div className="text-[11px] uppercase tracking-wide text-gray-400">{item.label}</div>
                   <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{item.value}</div>
                 </div>
@@ -2017,7 +2258,7 @@ export default function Dashboard() {
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 flex justify-between items-center">
                 <span className="text-xs text-gray-500">{t('avg_order_value')}</span>
                 <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                  {fmtUSD(customerDetail.sale_count > 0 ? customerDetail.net_revenue_usd/customerDetail.sale_count : 0)}
+                  {fmtUSD((customerDetail.sale_count || 0) > 0 ? (customerDetail.net_revenue_usd || 0)/(customerDetail.sale_count || 1) : 0)}
                 </span>
               </div>
               <p className="text-[10px] text-gray-400 text-center">{t('net_revenue_desc')}</p>

@@ -127,7 +127,7 @@ await (async function notificationsUseIconsAndKeepUnavailableAlerts() {
 })()
 
 await (async function dashboardShouldKeepOutOfStockInsideProductTotalsKpi() {
-  const source = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
   assert.match(source, /id:\s*'products'/)
   assert.match(source, /lowStockCount/)
   assert.match(source, /outOfStockCount/)

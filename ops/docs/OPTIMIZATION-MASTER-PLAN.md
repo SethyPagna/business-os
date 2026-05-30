@@ -90,7 +90,7 @@ Priority surfaces:
 - `Inventory.jsx`
 - `Products.jsx`
 - `POS.jsx`
-- `Dashboard.jsx`
+- `Dashboard.tsx`
 - `CatalogPage.jsx`
 - `Settings.tsx`
 - `Backup.tsx`
