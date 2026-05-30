@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 585 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 586 in this file.
 
 ## Goal
 
@@ -4875,6 +4875,19 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The
     generated language audit now reports `JavaScript: 37`, `TypeScript: 274`,
     and `React TSX: 107` across the active scan roots.
+586. Convert session auth helper to a package-safe TypeScript path.
+    Done: `backend/src/sessionAuth.ts` keeps cookie-only session transport,
+    session expiry selection, secure-cookie detection, token hashing, presented
+    cookie parsing, session lookup, last-seen updates, session revocation, and
+    user-session revocation on the existing CommonJS helper style. Middleware,
+    WebSocket, auth route, user route, offline security tests, and the hardening
+    policy now point at the explicit `.ts` helper. Focused session helper load,
+    offline security, WebSocket, route-contract, backend utility, schema audit,
+    stale-path, and Linux packaging proof passed. Packaging still warns for
+    direct `.ts` entries in `pkg.scripts`, so broader backend conversions remain
+    blocked on the future compile/staging lane. The generated language audit now
+    reports `JavaScript: 36`, `TypeScript: 275`, and `React TSX: 107` across
+    the active scan roots.
 
 ## Safety Gates
 

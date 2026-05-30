@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 585.
+- Latest completed implementation move in this roadmap: Move 586.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6545,3 +6545,17 @@ Move 585 status:
   conversion still waits for a compile/staging package lane. The generated
   language audit now reports `JavaScript: 37`, `TypeScript: 274`, and
   `React TSX: 107` across the active scan roots.
+
+Move 586 status:
+- Move 586 converts `backend/src/sessionAuth.ts` to a package-safe TypeScript
+  path. Cookie-only session transport, session expiry selection, secure-cookie
+  detection, token hashing, presented cookie parsing, session lookup, last-seen
+  updates, session revocation, and user-session revocation remain unchanged on
+  the existing CommonJS helper style. Middleware, WebSocket, auth route, user
+  route, offline security tests, and the hardening policy now point at the
+  explicit `.ts` helper. Focused session helper load, offline security,
+  WebSocket, route-contract, backend utility, schema audit, stale-path, and
+  Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The generated language audit now reports `JavaScript: 36`,
+  `TypeScript: 275`, and `React TSX: 107` across the active scan roots.

@@ -7,7 +7,7 @@ const { UPLOADS_PATH } = require('./config')
 const { authorizeProtectedRequest, isPublicApiRequest } = require('./accessControl.ts')
 const { buildUniqueStoredName, compressBufferForAsset, getMediaType, sanitizeOriginalFileName } = require('./fileAssets')
 const { hasPermissionValue } = require('./permissions.ts')
-const { getSessionUser } = require('./sessionAuth')
+const { getSessionUser } = require('./sessionAuth.ts')
 const { checkRateLimit } = require('./security.ts')
 const { validateUploadedPath, validateUploadedBuffer } = require('./uploadSecurity.ts')
 

@@ -54,7 +54,7 @@ const {
   revokeAuthSession,
   revokeUserSessions,
   SESSION_ROTATION_GRACE_MS,
-} = require('../sessionAuth')
+} = require('../sessionAuth.ts')
 const {
   findOrganizationByLookup,
   getDefaultOrganization,

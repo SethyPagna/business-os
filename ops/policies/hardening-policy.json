@@ -8,7 +8,7 @@
       "name": "Cookie-only session transport",
       "files": [
         {
-          "path": "backend/src/sessionAuth.js",
+          "path": "backend/src/sessionAuth.ts",
           "mustContain": ["setAuthSessionCookie", "httpOnly: true", "sameSite: 'lax'", "secure: isSecureRequest"],
           "mustNotContain": ["x-auth-session", "authorization", "searchParams.get('token')"]
         },

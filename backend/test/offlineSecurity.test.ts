@@ -18,7 +18,7 @@ function runTest(name, fn) {
 }
 
 const authSource = read('src/routes/auth.js')
-const sessionSource = read('src/sessionAuth.js')
+const sessionSource = read('src/sessionAuth.ts')
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8')
 const syncSource = fs.existsSync(path.join(__dirname, '..', 'src/routes/sync.js'))
   ? read('src/routes/sync.js')
