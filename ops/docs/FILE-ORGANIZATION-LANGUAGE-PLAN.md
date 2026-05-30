@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 597 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 598 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 47`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 316`,
+  `.js: 46`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 317`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3029,7 +3029,7 @@ Decision rule:
     suspicious-text sampling. This was a backend route cleanup only; no folder
     move, schema migration, or runtime conversion was needed.
 374. Tighten offline sync digest and normalization loops. Done:
-    `backend/src/routes/sync.js` now uses explicit ordered loops for stable
+    `backend/src/routes/sync.ts` now uses explicit ordered loops for stable
     payload stringification and one direct-loop helper for outbox operation
     normalization. This was a backend route cleanup only; no folder move,
     schema migration, or runtime conversion was needed.
@@ -3416,7 +3416,7 @@ Decision rule:
 427. Tighten small route predicate helpers. Done:
     `backend/src/routes/branches.js`, `backend/src/routes/inventory.js`,
     `backend/src/routes/portal.js`, `backend/src/routes/settings.ts`, and
-    `backend/src/routes/sync.js` now use named direct-loop helpers for paged
+    `backend/src/routes/sync.ts` now use named direct-loop helpers for paged
     branch-stock query detection, inventory stats filters, portal AI profile
     preferences, suspicious brand option checks, sync conflict detection, and
     replay success checks. Route registration, validation messages, conflict
@@ -5030,6 +5030,19 @@ Decision rule:
     broader backend conversions remain blocked on the future compile/staging
     lane. The generated language audit now reports `JavaScript: 25`,
     `TypeScript: 286`, and `React TSX: 107` across the active scan roots.
+598. Convert offline sync route to a package-safe TypeScript path.
+    Done: `backend/src/routes/sync.ts` keeps outbox digest validation, stable
+    payload stringification, allowlisted replay targets, write-conflict
+    rejection, Cloudflare Access diagnostics, chunked offline file upload
+    manifests, per-chunk hash validation, upload completion assembly, and
+    upload-buffer validation on the existing CommonJS route style. The server
+    mount and offline-security source assertions now point at the explicit
+    `.ts` route. Focused route load, route-contract, offline-security, backend
+    utility, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so broader
+    backend conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 24`, `TypeScript: 287`,
+    and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

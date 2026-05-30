@@ -20,8 +20,8 @@ function runTest(name, fn) {
 const authSource = read('src/routes/auth.js')
 const sessionSource = read('src/sessionAuth.ts')
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8')
-const syncSource = fs.existsSync(path.join(__dirname, '..', 'src/routes/sync.js'))
-  ? read('src/routes/sync.js')
+const syncSource = fs.existsSync(path.join(__dirname, '..', 'src/routes/sync.ts'))
+  ? read('src/routes/sync.ts')
   : ''
 const serverUtilsSource = read('src/serverUtils.js')
 const maintenanceLockSource = read('src/maintenanceLock.ts')
@@ -41,7 +41,7 @@ runTest('auth sessions are issued as HttpOnly cookies and cleared on logout', ()
 })
 
 runTest('generic sync outbox endpoint is mounted and only accepts allowlisted operation ids', () => {
-  assert.match(serverSource, /target\.use\('\/api\/sync', require\('\.\/src\/routes\/sync'\)\)/)
+  assert.match(serverSource, /target\.use\('\/api\/sync', require\('\.\/src\/routes\/sync\.ts'\)\)/)
   assert.match(syncSource, /const OUTBOX_OPERATION_MAP =/)
   assert.match(syncSource, /products\.create/)
   assert.match(syncSource, /returns\.create/)

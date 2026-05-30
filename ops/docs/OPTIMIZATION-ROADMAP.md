@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 597.
+- Latest completed implementation move in this roadmap: Move 598.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4324,7 +4324,7 @@ Move 383 status:
 
 Move 384 status:
 - Move 384 tightens offline sync outbox normalization and digest helpers in
-  `backend/src/routes/sync.js`. Stable payload stringification now uses
+  `backend/src/routes/sync.ts`. Stable payload stringification now uses
   explicit ordered loops for arrays and sorted object keys, and outbox batch
   normalization now uses one direct-loop helper instead of a route-local
   `map()` pass. Payload digest semantics, object-key ordering, array ordering,
@@ -4902,7 +4902,7 @@ Move 437 status:
 - Move 437 tightens small route predicate helpers in
   `backend/src/routes/branches.js`, `backend/src/routes/inventory.js`,
   `backend/src/routes/portal.js`, `backend/src/routes/settings.ts`, and
-  `backend/src/routes/sync.js`. Paged branch-stock query detection, inventory
+  `backend/src/routes/sync.ts`. Paged branch-stock query detection, inventory
   stats filter detection, portal AI profile preference checks, suspicious brand
   option checks, sync conflict detection, and replay success checks now use
   named direct-loop helpers instead of callback predicates. Route registration,
@@ -6718,3 +6718,17 @@ Move 597 status:
   compile/staging package lane. The generated language audit now reports
   `JavaScript: 25`, `TypeScript: 286`, and `React TSX: 107` across the active
   scan roots.
+
+Move 598 status:
+- Move 598 converts `backend/src/routes/sync.ts` to a package-safe TypeScript
+  path. Outbox digest validation, stable payload stringification, allowlisted
+  replay targets, write-conflict rejection, Cloudflare Access diagnostics,
+  chunked offline file upload manifests, per-chunk hash validation, upload
+  completion assembly, and upload-buffer validation remain unchanged on the
+  existing CommonJS route style. The server mount and offline-security source
+  assertions now point at the explicit `.ts` route. Focused route load,
+  route-contract, offline-security, backend utility, schema audit, stale-path,
+  and Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The generated language audit now reports `JavaScript: 24`,
+  `TypeScript: 287`, and `React TSX: 107` across the active scan roots.
