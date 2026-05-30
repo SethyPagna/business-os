@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **12**
+Total files documented: **11**
 
 ## 2. Symbol Count by File
 
@@ -16,12 +16,11 @@ Total files documented: **12**
 | 4 | `backend/src/routes/inventory.js` | 32 | 16 |
 | 5 | `backend/src/routes/portal.js` | 60 | 11 |
 | 6 | `backend/src/routes/products.js` | 64 | 12 |
-| 7 | `backend/src/routes/returns.js` | 10 | 5 |
-| 8 | `backend/src/routes/sales.js` | 24 | 7 |
-| 9 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 10 | `backend/src/routes/users.js` | 26 | 16 |
-| 11 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 12 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 7 | `backend/src/routes/sales.js` | 24 | 7 |
+| 8 | `backend/src/routes/system/index.js` | 44 | 38 |
+| 9 | `backend/src/routes/users.js` | 26 | 16 |
+| 10 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 11 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -404,32 +403,7 @@ Total files documented: **12**
 | 11 | POST | `/upload-image` | 1487 |
 | 12 | POST | `/bulk-import` | 1505 |
 
-### 3.7 `backend/src/routes/returns.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `deductBranchStock` | function | 24 |
-| 2 | `restoreBranchStock` | function | 32 |
-| 3 | `normalizeMovementProductName` | function | 43 |
-| 4 | `refreshProductStockQuantity` | function | 54 |
-| 5 | `refreshProductStockQuantities` | function | 58 |
-| 6 | `normalizeScope` | function | 68 |
-| 7 | `toNumber` | function | 76 |
-| 8 | `findReturnByClientRequestId` | function | 81 |
-| 9 | `assertReturnableItems` | function | 91 |
-| 10 | `assertSupplierReturnableStock` | function | 535 |
-
-#### 3.7.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | GET | `/returns` | 165 |
-| 2 | GET | `/returns/:id` | 224 |
-| 3 | POST | `/returns` | 232 |
-| 4 | POST | `/returns/supplier` | 552 |
-| 5 | PATCH | `/returns/:id` | 792 |
-
-### 3.8 `backend/src/routes/sales.js`
+### 3.7 `backend/src/routes/sales.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -458,7 +432,7 @@ Total files documented: **12**
 | 23 | `fetchSaleItemsWithBranches` | function | 308 |
 | 24 | `findSaleByClientRequestId` | function | 317 |
 
-#### 3.8.1 Route Handlers
+#### 3.7.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -470,7 +444,7 @@ Total files documented: **12**
 | 6 | GET | `/dashboard` | 1106 |
 | 7 | GET | `/analytics` | 1229 |
 
-### 3.9 `backend/src/routes/system/index.js`
+### 3.8 `backend/src/routes/system/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -519,7 +493,7 @@ Total files documented: **12**
 | 43 | `listWindowsFsRoots` | const arrow | 1510 |
 | 44 | `listDriveRoots` | const arrow | 1525 |
 
-#### 3.9.1 Route Handlers
+#### 3.8.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -562,7 +536,7 @@ Total files documented: **12**
 | 37 | POST | `/open-path` | 1564 |
 | 38 | POST | `/pick-folder` | 1593 |
 
-### 3.10 `backend/src/routes/users.js`
+### 3.9 `backend/src/routes/users.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -593,7 +567,7 @@ Total files documented: **12**
 | 25 | `findProviderIdentity` | function | 344 |
 | 26 | `buildAuthMethodsPayload` | function | 352 |
 
-#### 3.10.1 Route Handlers
+#### 3.9.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -614,7 +588,7 @@ Total files documented: **12**
 | 15 | PUT | `/roles/:id` | 1034 |
 | 16 | DELETE | `/roles/:id` | 1064 |
 
-### 3.11 `backend/src/services/googleDriveSync/index.js`
+### 3.10 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -694,7 +668,7 @@ Total files documented: **12**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.12 `backend/src/services/importJobs.js`
+### 3.11 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

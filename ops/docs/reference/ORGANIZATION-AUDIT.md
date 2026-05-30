@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T22:10:51.195Z
+Generated: 2026-05-30T22:18:15.583Z
 
 ## Summary
 
@@ -14,12 +14,12 @@ Generated: 2026-05-30T22:10:51.195Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 341 |
+| .ts | 342 |
 | .tsx | 107 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
-| .js | 11 |
+| .js | 10 |
 | .ps1 | 8 |
 | .sh | 3 |
 | .sql | 2 |
@@ -65,9 +65,9 @@ Generated: 2026-05-30T22:10:51.195Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7984 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6942 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6958 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5254 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5268 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |

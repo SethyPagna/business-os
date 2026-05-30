@@ -59,7 +59,7 @@ Code files scanned: **468**
 | 47 | `backend/src/routes/organizations.ts` | 0 |
 | 48 | `backend/src/routes/portal.js` | 60 |
 | 49 | `backend/src/routes/products.js` | 64 |
-| 50 | `backend/src/routes/returns.js` | 10 |
+| 50 | `backend/src/routes/returns.ts` | 10 |
 | 51 | `backend/src/routes/runtime.ts` | 6 |
 | 52 | `backend/src/routes/sales.js` | 24 |
 | 53 | `backend/src/routes/settings.ts` | 8 |
@@ -1444,7 +1444,7 @@ Code files scanned: **468**
 | 63 | `parseIncomingImageRefs` | const arrow | 1768 |
 | 64 | `loadCurrentGallery` | const arrow | 1804 |
 
-### 3.50 `backend/src/routes/returns.js`
+### 3.50 `backend/src/routes/returns.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

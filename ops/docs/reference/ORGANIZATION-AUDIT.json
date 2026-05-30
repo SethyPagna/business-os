@@ -159,7 +159,7 @@
     "backend/src/routes/inventory.js",
     "backend/src/routes/portal.js",
     "backend/src/routes/products.js",
-    "backend/src/routes/returns.js",
+    "backend/src/routes/returns.ts",
     "backend/src/routes/sales.js",
     "backend/src/routes/system/index.js",
     "backend/src/routes/users.js",

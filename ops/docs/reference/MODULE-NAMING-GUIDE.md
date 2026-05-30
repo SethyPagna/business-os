@@ -10,11 +10,11 @@ This guide standardizes module naming without breaking existing imports immediat
 
 ## Backend Naming Pattern
 
-- Route files: `<domain>Routes.js`
-  - Example: current `backend/src/routes/returns.js` -> target alias name `returnsRoutes.js`
-- Service files: `<domain>Service.js`
-  - Example: `verification.js` -> target alias `verificationService.js`
-- Utility files: `<domain>Utils.js` or `<domain>Helpers.js`
+- Route files: `<domain>Routes.ts`
+  - Example: current `backend/src/routes/returns.ts` -> target alias name `returnsRoutes.ts`
+- Service files: `<domain>Service.ts`
+  - Example: `verification.ts` -> target alias `verificationService.ts`
+- Utility files: `<domain>Utils.ts` or `<domain>Helpers.ts`
 
 ## Frontend Naming Pattern
 
