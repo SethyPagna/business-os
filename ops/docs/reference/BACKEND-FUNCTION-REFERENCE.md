@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **43**
+Total files documented: **42**
 
 ## 2. Symbol Count by File
 
@@ -29,30 +29,29 @@ Total files documented: **43**
 | 17 | `backend/src/routes/files.js` | 3 | 3 |
 | 18 | `backend/src/routes/importJobs.js` | 16 | 17 |
 | 19 | `backend/src/routes/inventory.js` | 32 | 16 |
-| 20 | `backend/src/routes/notifications.js` | 27 | 1 |
-| 21 | `backend/src/routes/portal.js` | 60 | 11 |
-| 22 | `backend/src/routes/products.js` | 64 | 12 |
-| 23 | `backend/src/routes/returns.js` | 10 | 5 |
-| 24 | `backend/src/routes/sales.js` | 24 | 7 |
-| 25 | `backend/src/routes/settings.js` | 8 | 3 |
-| 26 | `backend/src/routes/sync.js` | 12 | 4 |
-| 27 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 28 | `backend/src/routes/units.js` | 3 | 0 |
-| 29 | `backend/src/routes/users.js` | 26 | 16 |
-| 30 | `backend/src/serverUtils.js` | 26 | 0 |
-| 31 | `backend/src/services/aiGateway.js` | 17 | 0 |
-| 32 | `backend/src/services/backupPackages.js` | 59 | 0 |
-| 33 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
-| 34 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 35 | `backend/src/services/googleOauth.js` | 17 | 0 |
-| 36 | `backend/src/services/importJobs.js` | 175 | 0 |
-| 37 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
-| 38 | `backend/src/services/mediaQueue.js` | 10 | 0 |
-| 39 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 40 | `backend/src/services/verification.js` | 21 | 0 |
-| 41 | `backend/src/sessionAuth.js` | 13 | 0 |
-| 42 | `backend/src/systemJobs.js` | 28 | 0 |
-| 43 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
+| 20 | `backend/src/routes/portal.js` | 60 | 11 |
+| 21 | `backend/src/routes/products.js` | 64 | 12 |
+| 22 | `backend/src/routes/returns.js` | 10 | 5 |
+| 23 | `backend/src/routes/sales.js` | 24 | 7 |
+| 24 | `backend/src/routes/settings.js` | 8 | 3 |
+| 25 | `backend/src/routes/sync.js` | 12 | 4 |
+| 26 | `backend/src/routes/system/index.js` | 44 | 38 |
+| 27 | `backend/src/routes/units.js` | 3 | 0 |
+| 28 | `backend/src/routes/users.js` | 26 | 16 |
+| 29 | `backend/src/serverUtils.js` | 26 | 0 |
+| 30 | `backend/src/services/aiGateway.js` | 17 | 0 |
+| 31 | `backend/src/services/backupPackages.js` | 59 | 0 |
+| 32 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
+| 33 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 34 | `backend/src/services/googleOauth.js` | 17 | 0 |
+| 35 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 36 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
+| 37 | `backend/src/services/mediaQueue.js` | 10 | 0 |
+| 38 | `backend/src/services/portalAi.js` | 42 | 0 |
+| 39 | `backend/src/services/verification.js` | 21 | 0 |
+| 40 | `backend/src/sessionAuth.js` | 13 | 0 |
+| 41 | `backend/src/systemJobs.js` | 28 | 0 |
+| 42 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -690,45 +689,7 @@ Total files documented: **43**
 | 15 | GET | `/summary` | 1611 |
 | 16 | GET | `/movements` | 1779 |
 
-### 3.20 `backend/src/routes/notifications.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `normalizeBoolean` | function | 26 |
-| 2 | `toNumber` | function | 34 |
-| 3 | `pruneNotificationSummaryCache` | function | 39 |
-| 4 | `getNotificationSummaryCacheKey` | function | 47 |
-| 5 | `cloneNotificationSummaryPayload` | function | 60 |
-| 6 | `getCachedNotificationSummary` | function | 64 |
-| 7 | `setCachedNotificationSummary` | function | 73 |
-| 8 | `buildPlaceholders` | function | 80 |
-| 9 | `rowsToSettingMap` | function | 88 |
-| 10 | `joinNotificationSummary` | function | 96 |
-| 11 | `loadNotificationPreferences` | function | 104 |
-| 12 | `loadPointPolicy` | function | 127 |
-| 13 | `calculatePolicyPoints` | function | 152 |
-| 14 | `buildInventoryItems` | function | 157 |
-| 15 | `buildInventorySection` | function | 186 |
-| 16 | `buildExpiryItems` | function | 209 |
-| 17 | `buildExpirySection` | function | 229 |
-| 18 | `buildSalesItems` | function | 251 |
-| 19 | `buildSalesSection` | function | 280 |
-| 20 | `rowsByCustomerId` | function | 326 |
-| 21 | `buildLoyaltyMatches` | function | 334 |
-| 22 | `buildLoyaltyItems` | function | 357 |
-| 23 | `buildLoyaltySection` | function | 376 |
-| 24 | `buildPortalItems` | function | 435 |
-| 25 | `buildPortalSection` | function | 452 |
-| 26 | `buildSystemSection` | function | 480 |
-| 27 | `sumSectionCounts` | function | 510 |
-
-#### 3.20.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | GET | `/summary` | 518 |
-
-### 3.21 `backend/src/routes/portal.js`
+### 3.20 `backend/src/routes/portal.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -793,7 +754,7 @@ Total files documented: **43**
 | 59 | `applyPortalRateLimit` | function | 1006 |
 | 60 | `collectRecommendationCitations` | function | 1014 |
 
-#### 3.21.1 Route Handlers
+#### 3.20.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -809,7 +770,7 @@ Total files documented: **43**
 | 10 | GET | `/submissions/review` | 1339 |
 | 11 | PATCH | `/submissions/:id/review` | 1369 |
 
-### 3.22 `backend/src/routes/products.js`
+### 3.21 `backend/src/routes/products.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -878,7 +839,7 @@ Total files documented: **43**
 | 63 | `parseIncomingImageRefs` | const arrow | 1768 |
 | 64 | `loadCurrentGallery` | const arrow | 1804 |
 
-#### 3.22.1 Route Handlers
+#### 3.21.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -895,7 +856,7 @@ Total files documented: **43**
 | 11 | POST | `/upload-image` | 1487 |
 | 12 | POST | `/bulk-import` | 1505 |
 
-### 3.23 `backend/src/routes/returns.js`
+### 3.22 `backend/src/routes/returns.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -910,7 +871,7 @@ Total files documented: **43**
 | 9 | `assertReturnableItems` | function | 91 |
 | 10 | `assertSupplierReturnableStock` | function | 535 |
 
-#### 3.23.1 Route Handlers
+#### 3.22.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -920,7 +881,7 @@ Total files documented: **43**
 | 4 | POST | `/returns/supplier` | 552 |
 | 5 | PATCH | `/returns/:id` | 792 |
 
-### 3.24 `backend/src/routes/sales.js`
+### 3.23 `backend/src/routes/sales.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -949,7 +910,7 @@ Total files documented: **43**
 | 23 | `fetchSaleItemsWithBranches` | function | 308 |
 | 24 | `findSaleByClientRequestId` | function | 317 |
 
-#### 3.24.1 Route Handlers
+#### 3.23.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -961,7 +922,7 @@ Total files documented: **43**
 | 6 | GET | `/dashboard` | 1106 |
 | 7 | GET | `/analytics` | 1229 |
 
-### 3.25 `backend/src/routes/settings.js`
+### 3.24 `backend/src/routes/settings.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -974,7 +935,7 @@ Total files documented: **43**
 | 7 | `collectAttemptedSettings` | function | 94 |
 | 8 | `getSettingsUpdatedAt` | function | 106 |
 
-#### 3.25.1 Route Handlers
+#### 3.24.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -982,7 +943,7 @@ Total files documented: **43**
 | 2 | GET | `/meta` | 126 |
 | 3 | POST | `/` | 133 |
 
-### 3.26 `backend/src/routes/sync.js`
+### 3.25 `backend/src/routes/sync.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -999,7 +960,7 @@ Total files documented: **43**
 | 11 | `getUploadDir` | function | 218 |
 | 12 | `readManifest` | function | 222 |
 
-#### 3.26.1 Route Handlers
+#### 3.25.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -1008,7 +969,7 @@ Total files documented: **43**
 | 3 | POST | `/files/chunks/:uploadId/chunk` | 249 |
 | 4 | POST | `/files/chunks/:uploadId/complete` | 275 |
 
-### 3.27 `backend/src/routes/system/index.js`
+### 3.26 `backend/src/routes/system/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1057,7 +1018,7 @@ Total files documented: **43**
 | 43 | `listWindowsFsRoots` | const arrow | 1510 |
 | 44 | `listDriveRoots` | const arrow | 1525 |
 
-#### 3.27.1 Route Handlers
+#### 3.26.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -1100,7 +1061,7 @@ Total files documented: **43**
 | 37 | POST | `/open-path` | 1564 |
 | 38 | POST | `/pick-folder` | 1593 |
 
-### 3.28 `backend/src/routes/units.js`
+### 3.27 `backend/src/routes/units.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1108,7 +1069,7 @@ Total files documented: **43**
 | 2 | `normalizeUnitColor` | function | 17 |
 | 3 | `updateUnitHandler` | function | 52 |
 
-### 3.29 `backend/src/routes/users.js`
+### 3.28 `backend/src/routes/users.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1139,7 +1100,7 @@ Total files documented: **43**
 | 25 | `findProviderIdentity` | function | 344 |
 | 26 | `buildAuthMethodsPayload` | function | 352 |
 
-#### 3.29.1 Route Handlers
+#### 3.28.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
@@ -1160,7 +1121,7 @@ Total files documented: **43**
 | 15 | PUT | `/roles/:id` | 1034 |
 | 16 | DELETE | `/roles/:id` | 1064 |
 
-### 3.30 `backend/src/serverUtils.js`
+### 3.29 `backend/src/serverUtils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1191,7 +1152,7 @@ Total files documented: **43**
 | 25 | `setUploadStaticHeaders` | function | 368 |
 | 26 | `mapServerError` | function | 378 |
 
-### 3.31 `backend/src/services/aiGateway.js`
+### 3.30 `backend/src/services/aiGateway.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1213,7 +1174,7 @@ Total files documented: **43**
 | 16 | `callChatProvider` | function | 218 |
 | 17 | `testProviderConfig` | function | 307 |
 
-### 3.32 `backend/src/services/backupPackages.js`
+### 3.31 `backend/src/services/backupPackages.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1277,7 +1238,7 @@ Total files documented: **43**
 | 58 | `listLocalBackupVersions` | function | 971 |
 | 59 | `listBackupVersions` | function | 1003 |
 
-### 3.33 `backend/src/services/firebaseAuth.js`
+### 3.32 `backend/src/services/firebaseAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1304,7 +1265,7 @@ Total files documented: **43**
 | 21 | `setAuthUserActive` | function | 342 |
 | 22 | `verifyPasswordWithFirebase` | function | 355 |
 
-### 3.34 `backend/src/services/googleDriveSync/index.js`
+### 3.33 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1384,7 +1345,7 @@ Total files documented: **43**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.35 `backend/src/services/googleOauth.js`
+### 3.34 `backend/src/services/googleOauth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1406,7 +1367,7 @@ Total files documented: **43**
 | 16 | `exchangeGoogleOauthCode` | function | 196 |
 | 17 | `getGoogleUserFromTokens` | function | 219 |
 
-### 3.36 `backend/src/services/importJobs.js`
+### 3.35 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1586,7 +1547,7 @@ Total files documented: **43**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.37 `backend/src/services/integrationDoctor.js`
+### 3.36 `backend/src/services/integrationDoctor.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1605,7 +1566,7 @@ Total files documented: **43**
 | 13 | `probeBackups` | function | 199 |
 | 14 | `buildIntegrationDoctor` | function | 216 |
 
-### 3.38 `backend/src/services/mediaQueue.js`
+### 3.37 `backend/src/services/mediaQueue.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1620,7 +1581,7 @@ Total files documented: **43**
 | 9 | `startMediaWorker` | function | 157 |
 | 10 | `getMediaQueueStatus` | function | 181 |
 
-### 3.39 `backend/src/services/portalAi.js`
+### 3.38 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1667,7 +1628,7 @@ Total files documented: **43**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.40 `backend/src/services/verification.js`
+### 3.39 `backend/src/services/verification.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1693,7 +1654,7 @@ Total files documented: **43**
 | 20 | `sendEmail` | function | 183 |
 | 21 | `requestVerificationCode` | function | 247 |
 
-### 3.41 `backend/src/sessionAuth.js`
+### 3.40 `backend/src/sessionAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1711,7 +1672,7 @@ Total files documented: **43**
 | 12 | `revokeAuthSession` | function | 175 |
 | 13 | `revokeUserSessions` | function | 187 |
 
-### 3.42 `backend/src/systemJobs.js`
+### 3.41 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1744,7 +1705,7 @@ Total files documented: **43**
 | 27 | `getSystemJob` | function | 432 |
 | 28 | `listSystemJobs` | function | 444 |
 
-### 3.43 `backend/src/uploadReferenceCleanup.js`
+### 3.42 `backend/src/uploadReferenceCleanup.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

@@ -55,7 +55,7 @@ Code files documented: **468**
 | 43 | `backend/src/routes/files.js` | 6 | 1 | 5 | 1 |
 | 44 | `backend/src/routes/importJobs.js` | 9 | 1 | 5 | 1 |
 | 45 | `backend/src/routes/inventory.js` | 12 | 1 | 11 | 2 |
-| 46 | `backend/src/routes/notifications.js` | 5 | 1 | 4 | 2 |
+| 46 | `backend/src/routes/notifications.ts` | 5 | 1 | 4 | 3 |
 | 47 | `backend/src/routes/organizations.ts` | 3 | 1 | 2 | 2 |
 | 48 | `backend/src/routes/portal.js` | 13 | 1 | 12 | 2 |
 | 49 | `backend/src/routes/products.js` | 20 | 1 | 17 | 2 |
@@ -136,7 +136,7 @@ Code files documented: **468**
 | 124 | `backend/test/productImportPolicies.test.ts` | 2 | 0 | 1 | 0 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 3 | 0 | 0 | 0 |
 | 126 | `backend/test/rfidRoutes.test.ts` | 3 | 0 | 0 | 0 |
-| 127 | `backend/test/routeContracts.test.ts` | 13 | 0 | 8 | 0 |
+| 127 | `backend/test/routeContracts.test.ts` | 14 | 0 | 9 | 0 |
 | 128 | `backend/test/runtimeCache.test.ts` | 5 | 0 | 1 | 0 |
 | 129 | `backend/test/runtimeVersion.test.ts` | 5 | 0 | 1 | 0 |
 | 130 | `backend/test/schemaMetadata.test.ts` | 2 | 0 | 1 | 0 |
@@ -507,7 +507,7 @@ Code files documented: **468**
   - `./src/routes/files`
   - `./src/routes/importJobs`
   - `./src/routes/inventory`
-  - `./src/routes/notifications`
+  - `./src/routes/notifications.ts`
   - `./src/routes/organizations.ts`
   - `./src/routes/portal`
   - `./src/routes/products`
@@ -555,7 +555,7 @@ Code files documented: **468**
   - `backend/src/routes/files.js`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/inventory.js`
-  - `backend/src/routes/notifications.js`
+  - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
@@ -636,7 +636,7 @@ Code files documented: **468**
 - Referenced by (5)
   - `backend/src/routes/branches.js`
   - `backend/src/routes/inventory.js`
-  - `backend/src/routes/notifications.js`
+  - `backend/src/routes/notifications.ts`
   - `backend/src/routes/products.js`
   - `backend/src/routes/sales.js`
 
@@ -749,7 +749,7 @@ Code files documented: **468**
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.js`
   - `backend/src/routes/inventory.js`
-  - `backend/src/routes/notifications.js`
+  - `backend/src/routes/notifications.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/returns.js`
@@ -990,7 +990,7 @@ Code files documented: **468**
   - `backend/src/routes/files.js`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/inventory.js`
-  - `backend/src/routes/notifications.js`
+  - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
@@ -1424,7 +1424,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
 
-### 3.46 `backend/src/routes/notifications.js`
+### 3.46 `backend/src/routes/notifications.ts`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -1438,9 +1438,10 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/middleware.js`
   - `backend/src/services/googleDriveSync/index.js`
-- Referenced by (2)
+- Referenced by (3)
   - `backend/server.js`
   - `backend/test/notificationSummaryCache.test.ts`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.47 `backend/src/routes/organizations.ts`
 
@@ -1913,7 +1914,7 @@ Code files documented: **468**
   - `backend/src/services/googleDriveSync/versioning.ts`
 - Referenced by (4)
   - `backend/src/helpers.js`
-  - `backend/src/routes/notifications.js`
+  - `backend/src/routes/notifications.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/integrationDoctor.js`
 
@@ -2566,10 +2567,10 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/routes/notifications`
+  - `../src/routes/notifications.ts`
   - `assert`
 - Internal dependencies (1)
-  - `backend/src/routes/notifications.js`
+  - `backend/src/routes/notifications.ts`
 - Referenced by (0)
   - none
 
@@ -2730,10 +2731,11 @@ Code files documented: **468**
 ### 3.127 `backend/test/routeContracts.test.ts`
 
 - Declared exports: none detected
-- Imports (13)
+- Imports (14)
   - `../src/routes/auth`
   - `../src/routes/catalog.ts`
   - `../src/routes/inventory`
+  - `../src/routes/notifications.ts`
   - `../src/routes/organizations.ts`
   - `../src/routes/portal`
   - `../src/routes/products`
@@ -2744,10 +2746,11 @@ Code files documented: **468**
   - `node:fs`
   - `node:path`
   - `path`
-- Internal dependencies (8)
+- Internal dependencies (9)
   - `backend/src/routes/auth.js`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/inventory.js`
+  - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`

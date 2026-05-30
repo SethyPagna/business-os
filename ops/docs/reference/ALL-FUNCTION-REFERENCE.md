@@ -55,7 +55,7 @@ Code files scanned: **468**
 | 43 | `backend/src/routes/files.js` | 3 |
 | 44 | `backend/src/routes/importJobs.js` | 16 |
 | 45 | `backend/src/routes/inventory.js` | 32 |
-| 46 | `backend/src/routes/notifications.js` | 27 |
+| 46 | `backend/src/routes/notifications.ts` | 27 |
 | 47 | `backend/src/routes/organizations.ts` | 0 |
 | 48 | `backend/src/routes/portal.js` | 60 |
 | 49 | `backend/src/routes/products.js` | 64 |
@@ -1274,7 +1274,7 @@ Code files scanned: **468**
 | 31 | `upsertRfidSessionItem` | function | 1278 |
 | 32 | `recordRfidEvent` | function | 1303 |
 
-### 3.46 `backend/src/routes/notifications.js`
+### 3.46 `backend/src/routes/notifications.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
