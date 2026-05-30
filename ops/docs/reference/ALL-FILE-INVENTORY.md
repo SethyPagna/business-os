@@ -217,7 +217,7 @@ Total files documented: **529**
 | 205 | `frontend/src/components/dashboard/charts/index.ts` | frontend-ui | 5 | 0.2 | UI component/page |
 | 206 | `frontend/src/components/dashboard/charts/LineChart.tsx` | frontend-ui | 245 | 9.6 | UI component/page |
 | 207 | `frontend/src/components/dashboard/charts/NoData.tsx` | frontend-ui | 15 | 0.4 | UI component/page |
-| 208 | `frontend/src/components/dashboard/Dashboard.jsx` | frontend-ui | 2063 | 107.5 | UI component/page |
+| 208 | `frontend/src/components/dashboard/Dashboard.tsx` | frontend-ui | 2304 | 115.1 | UI component/page |
 | 209 | `frontend/src/components/dashboard/MiniStat.tsx` | frontend-ui | 53 | 2.0 | UI component/page |
 | 210 | `frontend/src/components/files/FilePickerModal.tsx` | frontend-ui | 333 | 13.7 | UI component/page |
 | 211 | `frontend/src/components/files/FilesPage.tsx` | frontend-ui | 1192 | 53.7 | UI component/page |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.4 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.5 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |

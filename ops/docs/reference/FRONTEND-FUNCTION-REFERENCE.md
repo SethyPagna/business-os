@@ -51,7 +51,7 @@ Total files documented: **193**
 | 39 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
 | 40 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 7 |
 | 41 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
-| 42 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
+| 42 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
 | 43 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
 | 44 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
 | 45 | `frontend/src/components/files/FilesPage.tsx` | 27 |
@@ -1037,26 +1037,28 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `NoData` | component/function | 7 |
 
-### 3.42 `frontend/src/components/dashboard/Dashboard.jsx`
+### 3.42 `frontend/src/components/dashboard/Dashboard.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getDashboardFilterStorageKey` | function | 65 |
-| 2 | `readDashboardFilterPrefs` | function | 70 |
-| 3 | `downsampleChartRows` | function | 94 |
-| 4 | `normalizeDashboardRangeId` | function | 105 |
-| 5 | `compactDashboardMetaParts` | function | 111 |
-| 6 | `formatDashboardHourLabel` | function | 117 |
-| 7 | `getSaleStatusTone` | function | 124 |
-| 8 | `isDashboardSummaryPayload` | function | 131 |
-| 9 | `isDashboardAnalyticsPayload` | function | 142 |
-| 10 | `normalizeDashboardSummaryPayload` | function | 154 |
-| 11 | `normalizeDashboardAnalyticsPayload` | function | 166 |
-| 12 | `Dashboard` | component/function | 185 |
-| 13 | `translateOr` | const arrow | 190 |
-| 14 | `calcTrend` | const arrow | 436 |
-| 15 | `rangeLabel` | const arrow | 480 |
-| 16 | `periodShort` | const arrow | 486 |
+| 1 | `getDashboardApi` | function | 235 |
+| 2 | `getErrorMessage` | function | 239 |
+| 3 | `getDashboardFilterStorageKey` | function | 287 |
+| 4 | `readDashboardFilterPrefs` | function | 292 |
+| 5 | `downsampleChartRows` | function | 316 |
+| 6 | `normalizeDashboardRangeId` | function | 327 |
+| 7 | `normalizeDashboardGranularity` | function | 334 |
+| 8 | `compactDashboardMetaParts` | function | 338 |
+| 9 | `formatDashboardHourLabel` | function | 344 |
+| 10 | `getSaleStatusTone` | function | 351 |
+| 11 | `isDashboardSummaryPayload` | function | 358 |
+| 12 | `isDashboardAnalyticsPayload` | function | 370 |
+| 13 | `normalizeDashboardSummaryPayload` | function | 383 |
+| 14 | `normalizeDashboardAnalyticsPayload` | function | 396 |
+| 15 | `Dashboard` | component/function | 416 |
+| 16 | `calcTrend` | const arrow | 669 |
+| 17 | `rangeLabel` | const arrow | 713 |
+| 18 | `periodShort` | const arrow | 719 |
 
 ### 3.43 `frontend/src/components/dashboard/MiniStat.tsx`
 

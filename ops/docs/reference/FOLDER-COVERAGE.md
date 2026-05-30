@@ -799,7 +799,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `Dashboard.jsx` | UI component/page |
+| 1 | `Dashboard.tsx` | UI component/page |
 | 2 | `MiniStat.tsx` | UI component/page |
 
 

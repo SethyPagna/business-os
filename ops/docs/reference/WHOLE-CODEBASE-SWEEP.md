@@ -118,7 +118,7 @@ Largest tracked source/hotspot areas by file count:
 - `frontend/public/scanbot-web-sdk` is large but tracked and required by scanner
   flows. Do not delete unless scanner replacement is implemented and verified.
 - The largest maintainable source modules remain `Inventory.jsx`,
-  `importJobs.js`, `CatalogPage.jsx`, `Dashboard.jsx`, `Products.jsx`,
+  `importJobs.js`, `CatalogPage.jsx`, `Dashboard.tsx`, `Products.jsx`,
   `products.js`, `POS.jsx`, and `inventory.js`.
 
 ## Repeat Loop
