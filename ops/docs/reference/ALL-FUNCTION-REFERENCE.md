@@ -70,7 +70,7 @@ Code files scanned: **466**
 | 58 | `backend/src/runtimeCache.js` | 12 |
 | 59 | `backend/src/runtimeState/index.ts` | 6 |
 | 60 | `backend/src/runtimeVersion.js` | 8 |
-| 61 | `backend/src/schemaMetadata.js` | 9 |
+| 61 | `backend/src/schemaMetadata.ts` | 9 |
 | 62 | `backend/src/security.js` | 14 |
 | 63 | `backend/src/serverUtils.js` | 26 |
 | 64 | `backend/src/services/aiGateway.js` | 17 |
@@ -1657,19 +1657,19 @@ Code files scanned: **466**
 | 7 | `readFrontendBuildInfoFromRoot` | function | 88 |
 | 8 | `getRuntimeVersion` | function | 123 |
 
-### 3.61 `backend/src/schemaMetadata.js`
+### 3.61 `backend/src/schemaMetadata.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeName` | function | 8 |
-| 2 | `columnKey` | function | 12 |
-| 3 | `normalizeNames` | function | 16 |
-| 4 | `normalizeColumnRows` | function | 25 |
-| 5 | `candidateKey` | function | 34 |
-| 6 | `listColumns` | function | 38 |
-| 7 | `hasColumn` | function | 48 |
-| 8 | `firstExistingColumn` | function | 68 |
-| 9 | `markColumnPresent` | function | 95 |
+| 1 | `normalizeName` | function | 16 |
+| 2 | `columnKey` | function | 25 |
+| 3 | `normalizeNames` | function | 33 |
+| 4 | `normalizeColumnRows` | function | 46 |
+| 5 | `candidateKey` | function | 60 |
+| 6 | `listColumns` | function | 68 |
+| 7 | `hasColumn` | function | 83 |
+| 8 | `firstExistingColumn` | function | 108 |
+| 9 | `markColumnPresent` | function | 140 |
 
 ### 3.62 `backend/src/security.js`
 

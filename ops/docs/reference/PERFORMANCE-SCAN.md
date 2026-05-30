@@ -375,7 +375,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   refresh the cache when managed custom tables or `updated_at` columns are
   created, removing repeated schema lookups from custom-table edit flows.
 - Move 289 consolidates the route-local metadata caches into
-  `backend/src/schemaMetadata.js`, so settings, product imports, branch and
+  `backend/src/schemaMetadata.ts`, so settings, product imports, branch and
   inventory transfers, and custom tables share one bounded process cache while
   preserving each route's ordered fallback choices.
 - Move 293 adds a route-contract guard that scans production route files and

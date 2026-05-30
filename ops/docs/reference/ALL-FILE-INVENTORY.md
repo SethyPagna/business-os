@@ -79,7 +79,7 @@ Total files documented: **529**
 | 67 | `backend/src/runtimeCache.js` | backend-core | 187 | 5.1 | Project source/support file |
 | 68 | `backend/src/runtimeState/index.ts` | backend-core | 97 | 2.7 | Project source/support file |
 | 69 | `backend/src/runtimeVersion.js` | backend-core | 134 | 3.7 | Project source/support file |
-| 70 | `backend/src/schemaMetadata.js` | backend-core | 110 | 3.0 | Project source/support file |
+| 70 | `backend/src/schemaMetadata.ts` | backend-core | 155 | 3.7 | Project source/support file |
 | 71 | `backend/src/security.js` | backend-core | 215 | 6.4 | Project source/support file |
 | 72 | `backend/src/serverUtils.js` | backend-core | 431 | 15.5 | Project source/support file |
 | 73 | `backend/src/services/aiGateway.js` | backend-services | 364 | 13.6 | Integration/service layer |

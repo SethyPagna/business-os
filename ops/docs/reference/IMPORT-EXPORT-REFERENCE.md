@@ -70,7 +70,7 @@ Code files documented: **466**
 | 58 | `backend/src/runtimeCache.js` | 2 | 1 | 1 | 4 |
 | 59 | `backend/src/runtimeState/index.ts` | 4 | 1 | 1 | 2 |
 | 60 | `backend/src/runtimeVersion.js` | 5 | 1 | 1 | 4 |
-| 61 | `backend/src/schemaMetadata.js` | 1 | 1 | 1 | 6 |
+| 61 | `backend/src/schemaMetadata.ts` | 1 | 1 | 1 | 6 |
 | 62 | `backend/src/security.js` | 1 | 1 | 0 | 7 |
 | 63 | `backend/src/serverUtils.js` | 1 | 1 | 1 | 4 |
 | 64 | `backend/src/services/aiGateway.js` | 2 | 1 | 2 | 2 |
@@ -759,7 +759,7 @@ Code files documented: **466**
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.js`
   - `backend/src/routes/users.js`
-  - `backend/src/schemaMetadata.js`
+  - `backend/src/schemaMetadata.ts`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/importJobs.js`
@@ -1265,7 +1265,7 @@ Code files documented: **466**
   - `../database`
   - `../helpers`
   - `../middleware`
-  - `../schemaMetadata`
+  - `../schemaMetadata.ts`
   - `crypto`
   - `express`
 - Internal dependencies (6)
@@ -1274,7 +1274,7 @@ Code files documented: **466**
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-  - `backend/src/schemaMetadata.js`
+  - `backend/src/schemaMetadata.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1339,14 +1339,14 @@ Code files documented: **466**
   - `../database`
   - `../helpers`
   - `../middleware`
-  - `../schemaMetadata`
+  - `../schemaMetadata.ts`
   - `express`
 - Internal dependencies (5)
   - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-  - `backend/src/schemaMetadata.js`
+  - `backend/src/schemaMetadata.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1405,7 +1405,7 @@ Code files documented: **466**
   - `../money.ts`
   - `../productBatches`
   - `../productDiscounts.ts`
-  - `../schemaMetadata`
+  - `../schemaMetadata.ts`
   - `express`
 - Internal dependencies (11)
   - `backend/src/businessMetrics.js`
@@ -1418,7 +1418,7 @@ Code files documented: **466**
   - `backend/src/money.ts`
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.ts`
-  - `backend/src/schemaMetadata.js`
+  - `backend/src/schemaMetadata.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1507,7 +1507,7 @@ Code files documented: **466**
   - `../productBatches`
   - `../productDiscounts.ts`
   - `../productImportPolicies.ts`
-  - `../schemaMetadata`
+  - `../schemaMetadata.ts`
   - `../settingsSnapshot`
   - `express`
   - `fs`
@@ -1528,7 +1528,7 @@ Code files documented: **466**
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.ts`
   - `backend/src/productImportPolicies.ts`
-  - `backend/src/schemaMetadata.js`
+  - `backend/src/schemaMetadata.ts`
   - `backend/src/settingsSnapshot.js`
 - Referenced by (2)
   - `backend/server.js`
@@ -1613,7 +1613,7 @@ Code files documented: **466**
   - `../fileAssets`
   - `../helpers`
   - `../middleware`
-  - `../schemaMetadata`
+  - `../schemaMetadata.ts`
   - `../settingsSnapshot`
   - `express`
 - Internal dependencies (8)
@@ -1623,7 +1623,7 @@ Code files documented: **466**
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-  - `backend/src/schemaMetadata.js`
+  - `backend/src/schemaMetadata.ts`
   - `backend/src/settingsSnapshot.js`
 - Referenced by (1)
   - `backend/server.js`
@@ -1791,7 +1791,7 @@ Code files documented: **466**
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/test/runtimeVersion.test.ts`
 
-### 3.61 `backend/src/schemaMetadata.js`
+### 3.61 `backend/src/schemaMetadata.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -2778,10 +2778,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/schemaMetadata`
+  - `../src/schemaMetadata.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/schemaMetadata.js`
+  - `backend/src/schemaMetadata.ts`
 - Referenced by (0)
   - none
 
