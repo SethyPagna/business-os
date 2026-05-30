@@ -25,7 +25,7 @@ Total folders documented: **81**
 | 13 | `backend/src/services/googleDriveSync` | Provider/service integrations | 2 | 0 |
 | 14 | `backend/src/storage` | Backend runtime core | 1 | 0 |
 | 15 | `backend/src/workers` | Backend runtime core | 2 | 0 |
-| 16 | `backend/test` | Project folder | 50 | 0 |
+| 16 | `backend/test` | Project folder | 51 | 0 |
 | 17 | `frontend` | Frontend project root | 8 | 3 |
 | 18 | `frontend/public` | Project folder | 6 | 1 |
 | 19 | `frontend/public/scanbot-web-sdk` | Project folder | 0 | 1 |
@@ -200,7 +200,7 @@ Total folders documented: **81**
 | 29 | `runtimeCache.ts` | Project source/support file |
 | 30 | `runtimeVersion.ts` | Project source/support file |
 | 31 | `schemaMetadata.ts` | Project source/support file |
-| 32 | `security.js` | Project source/support file |
+| 32 | `security.ts` | Project source/support file |
 | 33 | `serverUtils.js` | Project source/support file |
 | 34 | `sessionAuth.js` | Project source/support file |
 | 35 | `settingsSnapshot.ts` | Project source/support file |
@@ -417,7 +417,7 @@ Total folders documented: **81**
 ### 3.16 Folder: `backend/test`
 
 - Purpose: Project folder
-- Direct files: **50**
+- Direct files: **51**
 - Direct subfolders: **0**
 
 #### 3.16.2 Files
@@ -470,10 +470,11 @@ Total folders documented: **81**
 | 44 | `runtimeCache.test.ts` | Project source/support file |
 | 45 | `runtimeVersion.test.ts` | Project source/support file |
 | 46 | `schemaMetadata.test.ts` | Project source/support file |
-| 47 | `serverUtils.test.ts` | Project source/support file |
-| 48 | `settingsSnapshotObjectStorage.test.ts` | Project source/support file |
-| 49 | `systemJobs.test.ts` | Project source/support file |
-| 50 | `uploadSecurity.test.ts` | Project source/support file |
+| 47 | `security.test.ts` | Project source/support file |
+| 48 | `serverUtils.test.ts` | Project source/support file |
+| 49 | `settingsSnapshotObjectStorage.test.ts` | Project source/support file |
+| 50 | `systemJobs.test.ts` | Project source/support file |
+| 51 | `uploadSecurity.test.ts` | Project source/support file |
 
 
 ### 3.17 Folder: `frontend`

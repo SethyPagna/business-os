@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6448736,
-  "totalSourceLines": 146259,
+  "totalSourceBytes": 6449465,
+  "totalSourceLines": 146297,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -134,7 +134,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66871,
+      "size": 66873,
       "lines": 1659
     },
     {
@@ -159,7 +159,7 @@
     },
     {
       "file": "backend/src/services/googleDriveSync/index.js",
-      "size": 59163,
+      "size": 59165,
       "lines": 1564
     },
     {
@@ -246,7 +246,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66871,
+      "size": 66873,
       "lines": 1659
     },
     {
@@ -266,7 +266,7 @@
     },
     {
       "file": "backend/src/services/googleDriveSync/index.js",
-      "size": 59163,
+      "size": 59165,
       "lines": 1564
     },
     {
@@ -281,7 +281,7 @@
     },
     {
       "file": "backend/src/routes/portal.js",
-      "size": 52685,
+      "size": 52687,
       "lines": 1407
     },
     {
