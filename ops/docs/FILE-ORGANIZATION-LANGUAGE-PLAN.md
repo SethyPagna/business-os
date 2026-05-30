@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 567 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 568 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 68`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 295`,
+  `.js: 66`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 297`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3309,7 +3309,7 @@ Decision rule:
     conversion was needed.
 414. Tighten schema/security/runtime helper loops. Done:
     `backend/src/schemaMetadata.ts`, `backend/src/middleware.js`,
-    `backend/src/security.js`, `backend/src/netSecurity.js`, and
+    `backend/src/security.js`, `backend/src/netSecurity.ts`, and
     `backend/src/storage/organizationFolders.js` now use direct-loop helpers
     for column candidates, permission keys, any-permission checks,
     rate/abuse timestamp pruning, private IPv4 parsing, blocked host suffixes,
@@ -3389,7 +3389,7 @@ Decision rule:
     migration, or language conversion was needed.
 424. Tighten small security and maintenance predicates. Done:
     `backend/src/accessControl.ts`, `backend/src/maintenanceLock.js`, and
-    `backend/src/uploadSecurity.js` now use direct-loop helpers or named
+    `backend/src/uploadSecurity.ts` now use direct-loop helpers or named
     predicates for public API allowlist matching, maintenance-lock write
     allowlisting, read-only method checks, and upload magic-byte matching.
     Public route behavior, maintenance 423 responses, upload type detection,
@@ -4615,6 +4615,22 @@ Decision rule:
     on the future compile/staging lane. The current source extension count is
     `.js: 68`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 295`, `.tsx: 107`
     outside generated/runtime folders.
+568. Convert backend network and upload security helpers to package-safe
+    TypeScript paths. Done: `backend/src/netSecurity.ts` now owns outbound URL,
+    blocked-host, and safe external image reference checks with JSDoc URL option
+    contracts, and `backend/src/uploadSecurity.ts` now owns buffer kind,
+    uploaded file-kind, image metadata, and upload validation checks with JSDoc
+    uploaded-file contracts. File assets, middleware, AI gateway, import jobs,
+    portal/products routes, and focused security tests now target explicit
+    `.ts` paths. Focused net-security, upload-security, route-contract,
+    offline-security, upload-reference, import-decision, and performance
+    verifier checks passed, as did the full backend utility suite, schema
+    audit, and Linux packaging proof.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so larger
+    backend route/service conversions remain blocked on the future
+    compile/staging lane. The current source extension count is `.js: 66`,
+    `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 297`, `.tsx: 107` outside
+    generated/runtime folders.
 
 ## Safety Gates
 

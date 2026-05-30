@@ -5,7 +5,7 @@ const {
   detectBufferKind,
   getExpectedUploadedKind,
   validateUploadedBuffer,
-} = require('../src/uploadSecurity')
+} = require('../src/uploadSecurity.ts')
 const { sanitizeOriginalFileName } = require('../src/fileAssets')
 
 let failed = 0

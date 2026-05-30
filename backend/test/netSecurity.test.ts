@@ -5,7 +5,7 @@ const {
   assertSafeOutboundUrl,
   isBlockedHostname,
   isSafeExternalImageReference,
-} = require('../src/netSecurity')
+} = require('../src/netSecurity.ts')
 
 let failed = 0
 

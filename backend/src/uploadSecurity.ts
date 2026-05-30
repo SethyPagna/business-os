@@ -9,6 +9,10 @@ const MAX_IMAGE_DIMENSION = 12_000
 const MAX_IMAGE_PIXELS = 40_000_000
 const MAX_IMAGE_FRAMES = 120
 
+/**
+ * @param {Buffer} buffer
+ * @param {number[]} bytes
+ */
 function bufferStartsWith(buffer, bytes = []) {
   for (let index = 0; index < bytes.length; index += 1) {
     if (buffer[index] !== bytes[index]) return false
@@ -16,6 +20,9 @@ function bufferStartsWith(buffer, bytes = []) {
   return true
 }
 
+/**
+ * @param {unknown} buffer
+ */
 function isLikelyCsvBuffer(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) return false
   let invalidControls = 0
@@ -29,6 +36,9 @@ function isLikelyCsvBuffer(buffer) {
   return invalidControls === 0 && separators > 0
 }
 
+/**
+ * @param {unknown} buffer
+ */
 function detectBufferKind(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) return 'unknown'
   if (bufferStartsWith(buffer, [0xFF, 0xD8, 0xFF])) return 'image'
@@ -43,6 +53,13 @@ function detectBufferKind(buffer) {
   return 'unknown'
 }
 
+/**
+ * @typedef {{ mimetype?: string, originalname?: string, filename?: string }} UploadedFileLike
+ */
+
+/**
+ * @param {UploadedFileLike} file
+ */
 function getExpectedUploadedKind(file = {}) {
   const mime = String(file?.mimetype || '').toLowerCase()
   const name = String(file?.originalname || file?.filename || '').toLowerCase()
@@ -52,6 +69,9 @@ function getExpectedUploadedKind(file = {}) {
   return 'unknown'
 }
 
+/**
+ * @param {Buffer | string} bufferOrPath
+ */
 async function validateImageMetadata(bufferOrPath) {
   if (!sharp) return
   const metadata = await sharp(bufferOrPath, { animated: true, limitInputPixels: MAX_IMAGE_PIXELS }).metadata()
@@ -66,6 +86,10 @@ async function validateImageMetadata(bufferOrPath) {
   }
 }
 
+/**
+ * @param {Buffer} buffer
+ * @param {UploadedFileLike} file
+ */
 async function validateUploadedBuffer(buffer, file = {}) {
   const expectedKind = getExpectedUploadedKind(file)
   const actualKind = detectBufferKind(buffer)
@@ -77,6 +101,10 @@ async function validateUploadedBuffer(buffer, file = {}) {
   }
 }
 
+/**
+ * @param {string} filePath
+ * @param {UploadedFileLike} file
+ */
 async function validateUploadedPath(filePath, file = {}) {
   const buffer = fs.readFileSync(filePath)
   await validateUploadedBuffer(buffer, file)

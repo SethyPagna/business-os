@@ -1,7 +1,7 @@
 'use strict'
 
 const { encryptSecret, decryptSecret } = require('../security')
-const { assertSafeOutboundUrl } = require('../netSecurity')
+const { assertSafeOutboundUrl } = require('../netSecurity.ts')
 
 function nowIso() {
   return new Date().toISOString()

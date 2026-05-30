@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 567.
+- Latest completed implementation move in this roadmap: Move 568.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4782,7 +4782,7 @@ Move 423 status:
 Move 424 status:
 - Move 424 tightens schema/security/runtime helper loops in
   `backend/src/schemaMetadata.ts`, `backend/src/middleware.js`,
-  `backend/src/security.js`, `backend/src/netSecurity.js`, and
+  `backend/src/security.js`, `backend/src/netSecurity.ts`, and
   `backend/src/storage/organizationFolders.js`. Column candidate
   normalization, column presence caching, permission key collection,
   any-permission checks, rate/abuse timestamp pruning, private IPv4 parsing,
@@ -4873,7 +4873,7 @@ Move 433 status:
 Move 434 status:
 - Move 434 tightens small security and maintenance predicates in
   `backend/src/accessControl.ts`, `backend/src/maintenanceLock.js`, and
-  `backend/src/uploadSecurity.js`. Public API allowlist matching,
+  `backend/src/uploadSecurity.ts`. Public API allowlist matching,
   maintenance-lock write allowlisting, read-only method checks, and upload
   magic-byte matching now use direct loops or named predicates instead of
   callback chains. Public route allowlisting, maintenance 423 behavior, upload
@@ -6266,3 +6266,21 @@ Move 567 status:
   route/service conversion still waits for a compile/staging package lane. The
   current source extension count is `.js: 68`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
   `.ts: 295`, `.tsx: 107` outside generated/runtime folders.
+
+Move 568 status:
+- Move 568 converts `backend/src/netSecurity.ts` and
+  `backend/src/uploadSecurity.ts` to package-safe TypeScript paths. Network
+  security now carries JSDoc URL option contracts for outbound URL validation,
+  blocked-host checks, and safe external image references. Upload security now
+  carries uploaded-file contracts for buffer kind detection, file-kind
+  expectations, image metadata checks, and upload validation. File assets,
+  middleware, AI gateway, import jobs, portal/products routes, and focused
+  security tests use explicit `.ts` paths. Focused net-security,
+  upload-security, route-contract, offline-security, upload-reference,
+  import-decision, and performance verifier checks passed, as did the full
+  backend utility suite, schema audit, and Linux packaging proof. `pkg`
+  continues to warn for direct `.ts` scripts, so
+  larger backend route/service conversion still waits for a compile/staging
+  package lane. The current source extension count is `.js: 66`, `.jsx: 0`,
+  `.mjs: 0`, `.cjs: 0`, `.ts: 297`, `.tsx: 107` outside generated/runtime
+  folders.

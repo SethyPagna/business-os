@@ -9,7 +9,7 @@ const { buildUniqueStoredName, compressBufferForAsset, getMediaType, sanitizeOri
 const { hasPermissionValue } = require('./permissions')
 const { getSessionUser } = require('./sessionAuth')
 const { checkRateLimit } = require('./security')
-const { validateUploadedPath, validateUploadedBuffer } = require('./uploadSecurity')
+const { validateUploadedPath, validateUploadedBuffer } = require('./uploadSecurity.ts')
 
 function authToken(req, res, next) {
   const sessionUser = getSessionUser(req)

@@ -23,14 +23,23 @@ const BLOCKED_SUFFIXES = [
 const IMAGE_REF_RE = /\.(png|jpe?g|webp|gif|bmp)(\?.*)?$/i
 const ALLOWED_DATA_IMAGE_RE = /^data:image\/(png|jpeg|jpg|webp|gif|bmp);base64,/i
 
+/**
+ * @param {unknown} value
+ */
 function trim(value) {
   return String(value || '').trim()
 }
 
+/**
+ * @param {unknown} hostname
+ */
 function normalizeHostname(hostname) {
   return trim(hostname).toLowerCase().replace(/\.+$/, '')
 }
 
+/**
+ * @param {unknown} hostname
+ */
 function isPrivateIpv4(hostname) {
   const parts = []
   for (const part of normalizeHostname(hostname).split('.')) {
@@ -49,6 +58,9 @@ function isPrivateIpv4(hostname) {
   return false
 }
 
+/**
+ * @param {unknown} hostname
+ */
 function isPrivateIpv6(hostname) {
   const value = normalizeHostname(hostname)
   return (
@@ -60,6 +72,9 @@ function isPrivateIpv6(hostname) {
   )
 }
 
+/**
+ * @param {unknown} hostname
+ */
 function isBlockedHostname(hostname) {
   const normalized = normalizeHostname(hostname)
   if (!normalized) return true
@@ -73,6 +88,14 @@ function isBlockedHostname(hostname) {
   return false
 }
 
+/**
+ * @typedef {{ allowedProtocols?: string[] }} SafeOutboundUrlOptions
+ */
+
+/**
+ * @param {unknown} rawUrl
+ * @param {SafeOutboundUrlOptions} options
+ */
 function assertSafeOutboundUrl(rawUrl, options = {}) {
   const value = trim(rawUrl)
   if (!value) throw new Error('A valid URL is required')
@@ -101,6 +124,9 @@ function assertSafeOutboundUrl(rawUrl, options = {}) {
   return parsed.toString()
 }
 
+/**
+ * @param {unknown} value
+ */
 function isSafeExternalImageReference(value) {
   const raw = trim(value)
   if (!raw) return false
