@@ -25,7 +25,7 @@ Code files scanned: **468**
 | 13 | `backend/src/db/cutoverReadiness.ts` | 10 |
 | 14 | `backend/src/db/postgresQueryCompat.ts` | 12 |
 | 15 | `backend/src/fileAssets.js` | 61 |
-| 16 | `backend/src/helpers.js` | 30 |
+| 16 | `backend/src/helpers.ts` | 30 |
 | 17 | `backend/src/idempotency.ts` | 1 |
 | 18 | `backend/src/importCsv.ts` | 16 |
 | 19 | `backend/src/importParsing.ts` | 6 |
@@ -739,7 +739,7 @@ Code files scanned: **468**
 | 60 | `getFileAssetById` | function | 1215 |
 | 61 | `deleteFileAsset` | function | 1220 |
 
-### 3.16 `backend/src/helpers.js`
+### 3.16 `backend/src/helpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
