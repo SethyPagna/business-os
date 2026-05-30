@@ -161,7 +161,7 @@ Code files documented: **466**
 | 149 | `frontend/src/app/appShellUtils.ts` | 0 | 16 | 0 | 5 |
 | 150 | `frontend/src/app/publicErrorRecovery.ts` | 0 | 3 | 0 | 1 |
 | 151 | `frontend/src/AppContext.jsx` | 14 | 5 | 13 | 52 |
-| 152 | `frontend/src/components/auth/Login.jsx` | 5 | 1 | 4 | 1 |
+| 152 | `frontend/src/components/auth/Login.tsx` | 5 | 1 | 4 | 1 |
 | 153 | `frontend/src/components/branches/Branches.tsx` | 13 | 1 | 11 | 1 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 | 1 | 1 | 1 |
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 3 | 1 | 2 | 1 |
@@ -3032,7 +3032,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/app/publicErrorRecovery.ts`
-  - `frontend/src/components/auth/Login.jsx`
+  - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/Contacts.tsx`
@@ -3119,7 +3119,7 @@ Code files documented: **466**
   - `frontend/src/web-api.ts`
 - Referenced by (52)
   - `frontend/src/App.jsx`
-  - `frontend/src/components/auth/Login.jsx`
+  - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/branches/BranchForm.tsx`
   - `frontend/src/components/branches/TransferModal.tsx`
@@ -3171,11 +3171,11 @@ Code files documented: **466**
   - `frontend/src/index.tsx`
   - `frontend/src/utils/actionHistory.ts`
 
-### 3.152 `frontend/src/components/auth/Login.jsx`
+### 3.152 `frontend/src/components/auth/Login.tsx`
 
 - Declared exports: `function`
 - Imports (5)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../constants`
   - `../../utils/deviceInfo.ts`
   - `../shared/QuickPreferenceToggles`
@@ -5339,7 +5339,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.jsx`
 - Referenced by (3)
   - `frontend/src/App.jsx`
-  - `frontend/src/components/auth/Login.jsx`
+  - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
 
 ### 3.277 `frontend/src/components/shared/SectionSwitcher.tsx`
@@ -5609,7 +5609,7 @@ Code files documented: **466**
   - `frontend/src/api/methods.js`
   - `frontend/src/api/websocket.ts`
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/auth/Login.jsx`
+  - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/platform/runtime/clientRuntime.ts`
   - `frontend/src/web-api.ts`
@@ -5896,7 +5896,7 @@ Code files documented: **466**
   - `frontend/src/api/http.ts`
   - `frontend/src/api/methods.js`
   - `frontend/src/AppContext.jsx`
-  - `frontend/src/components/auth/Login.jsx`
+  - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/tests/deviceInfo.test.ts`

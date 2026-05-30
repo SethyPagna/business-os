@@ -705,7 +705,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `Login.jsx` | UI component/page |
+| 1 | `Login.tsx` | UI component/page |
 
 
 ### 3.28 Folder: `frontend/src/components/branches`

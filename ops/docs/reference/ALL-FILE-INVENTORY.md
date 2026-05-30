@@ -184,7 +184,7 @@ Total files documented: **529**
 | 172 | `frontend/src/app/appShellUtils.ts` | frontend-core | 159 | 5.2 | Project source/support file |
 | 173 | `frontend/src/app/publicErrorRecovery.ts` | frontend-core | 35 | 1.3 | Project source/support file |
 | 174 | `frontend/src/AppContext.jsx` | frontend-core | 1610 | 64.3 | Global app state/context provider |
-| 175 | `frontend/src/components/auth/Login.jsx` | frontend-ui | 1084 | 49.4 | UI component/page |
+| 175 | `frontend/src/components/auth/Login.tsx` | frontend-ui | 1245 | 53.8 | UI component/page |
 | 176 | `frontend/src/components/branches/Branches.tsx` | frontend-ui | 1076 | 49.6 | UI component/page |
 | 177 | `frontend/src/components/branches/BranchForm.tsx` | frontend-ui | 202 | 6.4 | UI component/page |
 | 178 | `frontend/src/components/branches/TransferModal.tsx` | frontend-ui | 415 | 16.0 | UI component/page |

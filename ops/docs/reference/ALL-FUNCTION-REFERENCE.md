@@ -161,7 +161,7 @@ Code files scanned: **466**
 | 149 | `frontend/src/app/appShellUtils.ts` | 10 |
 | 150 | `frontend/src/app/publicErrorRecovery.ts` | 4 |
 | 151 | `frontend/src/AppContext.jsx` | 41 |
-| 152 | `frontend/src/components/auth/Login.jsx` | 23 |
+| 152 | `frontend/src/components/auth/Login.tsx` | 23 |
 | 153 | `frontend/src/components/branches/Branches.tsx` | 15 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
@@ -3272,33 +3272,33 @@ Code files scanned: **466**
 | 40 | `useSync` | const arrow | 1598 |
 | 41 | `useT` | const arrow | 1601 |
 
-### 3.152 `frontend/src/components/auth/Login.jsx`
+### 3.152 `frontend/src/components/auth/Login.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readPendingOauthLogin` | function | 27 |
-| 2 | `clearPendingOauthLogin` | function | 41 |
-| 3 | `readOauthCallbackResult` | function | 47 |
-| 4 | `clearOauthCallbackResult` | function | 58 |
-| 5 | `OauthButton` | function | 64 |
-| 6 | `ModeBackButton` | function | 78 |
-| 7 | `Login` | export default function | 91 |
-| 8 | `tr` | const arrow | 93 |
-| 9 | `rememberOrganization` | const arrow | 162 |
-| 10 | `loadCapabilities` | const arrow | 198 |
-| 11 | `bootstrap` | const arrow | 218 |
-| 12 | `clearCallbackUrl` | const arrow | 297 |
-| 13 | `run` | const arrow | 302 |
-| 14 | `rememberedOrg` | const arrow | 357 |
-| 15 | `getDeviceContext` | const arrow | 409 |
-| 16 | `handleLogin` | const arrow | 411 |
-| 17 | `handleOtp` | const arrow | 441 |
-| 18 | `handleOtpInput` | const arrow | 475 |
-| 19 | `handleResetWithOtp` | const arrow | 480 |
-| 20 | `handleResetWithEmail` | const arrow | 517 |
-| 21 | `handleCompleteEmailReset` | const arrow | 546 |
-| 22 | `handleStartOauth` | const arrow | 579 |
-| 23 | `closeAuxMode` | const arrow | 627 |
+| 1 | `getAuthApi` | function | 178 |
+| 2 | `getErrorMessage` | function | 183 |
+| 3 | `readPendingOauthLogin` | function | 187 |
+| 4 | `clearPendingOauthLogin` | function | 201 |
+| 5 | `readOauthCallbackResult` | function | 207 |
+| 6 | `clearOauthCallbackResult` | function | 218 |
+| 7 | `OauthButton` | function | 224 |
+| 8 | `ModeBackButton` | function | 238 |
+| 9 | `Login` | export default function | 251 |
+| 10 | `rememberOrganization` | const arrow | 323 |
+| 11 | `loadCapabilities` | const arrow | 359 |
+| 12 | `bootstrap` | const arrow | 379 |
+| 13 | `clearCallbackUrl` | const arrow | 458 |
+| 14 | `run` | const arrow | 463 |
+| 15 | `rememberedOrg` | const arrow | 518 |
+| 16 | `handleLogin` | const arrow | 572 |
+| 17 | `handleOtp` | const arrow | 602 |
+| 18 | `handleOtpInput` | const arrow | 636 |
+| 19 | `handleResetWithOtp` | const arrow | 641 |
+| 20 | `handleResetWithEmail` | const arrow | 678 |
+| 21 | `handleCompleteEmailReset` | const arrow | 707 |
+| 22 | `handleStartOauth` | const arrow | 740 |
+| 23 | `closeAuxMode` | const arrow | 788 |
 
 ### 3.153 `frontend/src/components/branches/Branches.tsx`
 

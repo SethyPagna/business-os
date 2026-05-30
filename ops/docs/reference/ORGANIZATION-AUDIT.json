@@ -171,7 +171,7 @@
     "frontend/src/AppContext.jsx",
     "frontend/src/api/http.ts",
     "frontend/src/api/methods.js",
-    "frontend/src/components/auth/Login.jsx",
+    "frontend/src/components/auth/Login.tsx",
     "frontend/src/components/branches/Branches.tsx",
     "frontend/src/components/catalog/CatalogEditorSurface.jsx",
     "frontend/src/components/catalog/CatalogPage.jsx",

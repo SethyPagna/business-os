@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T00:13:37.406Z",
+  "generatedAt": "2026-05-30T00:32:03.404Z",
   "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
   "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
   "measurementMode": "bounded-parallel-targets",
@@ -9,9 +9,9 @@
   "fileStatConcurrency": 32,
   "targets": 15,
   "existingTargets": 8,
-  "totalBytes": 540023212,
-  "protectedBytes": 215889760,
-  "cleanupCandidateBytes": 324133452,
+  "totalBytes": 540023308,
+  "protectedBytes": 215889894,
+  "cleanupCandidateBytes": 324133414,
   "nestedTargetOverlaps": [
     {
       "parent": "business-os-data",
@@ -31,9 +31,9 @@
     }
   ],
   "nestedOverlapBytes": 15496556,
-  "adjustedTotalBytes": 524526656,
-  "adjustedProtectedBytes": 200393204,
-  "adjustedCleanupCandidateBytes": 324133452,
+  "adjustedTotalBytes": 524526752,
+  "adjustedProtectedBytes": 200393338,
+  "adjustedCleanupCandidateBytes": 324133414,
   "largestProtectedTargets": [
     {
       "path": "business-os-data",
@@ -45,7 +45,7 @@
     },
     {
       "path": "ops/runtime",
-      "bytes": 37085834,
+      "bytes": 37085968,
       "files": 415,
       "folders": 57,
       "category": "runtime state",
@@ -87,7 +87,7 @@
     },
     {
       "path": "frontend/dist",
-      "bytes": 31633460,
+      "bytes": 31633422,
       "files": 120,
       "folders": 6,
       "category": "build output",
@@ -105,7 +105,7 @@
   "slowestTargetMeasurements": [
     {
       "path": "backend/node_modules",
-      "measureMs": 776,
+      "measureMs": 797,
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
@@ -114,7 +114,7 @@
     },
     {
       "path": "frontend/node_modules",
-      "measureMs": 481,
+      "measureMs": 458,
       "bytes": 158132222,
       "files": 11264,
       "folders": 986,
@@ -123,7 +123,7 @@
     },
     {
       "path": "ops/node_modules",
-      "measureMs": 36,
+      "measureMs": 40,
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
@@ -132,8 +132,8 @@
     },
     {
       "path": "ops/runtime",
-      "measureMs": 21,
-      "bytes": 37085834,
+      "measureMs": 23,
+      "bytes": 37085968,
       "files": 415,
       "folders": 57,
       "category": "runtime state",
@@ -150,8 +150,8 @@
     },
     {
       "path": "frontend/dist",
-      "measureMs": 3,
-      "bytes": 31633460,
+      "measureMs": 2,
+      "bytes": 31633422,
       "files": 120,
       "folders": 6,
       "category": "build output",
@@ -184,7 +184,7 @@
       "targets": 3
     },
     "retention": {
-      "bytes": 37085834,
+      "bytes": 37085968,
       "files": 415,
       "folders": 57,
       "targets": 1
@@ -202,7 +202,7 @@
       "targets": 1
     },
     "regenerable": {
-      "bytes": 31633460,
+      "bytes": 31633422,
       "files": 120,
       "folders": 6,
       "targets": 1
@@ -264,7 +264,7 @@
       "bytes": 158132222,
       "files": 11264,
       "folders": 986,
-      "measureMs": 481,
+      "measureMs": 458,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -278,7 +278,7 @@
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
-      "measureMs": 776,
+      "measureMs": 797,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -289,10 +289,10 @@
     {
       "path": "ops/runtime",
       "exists": true,
-      "bytes": 37085834,
+      "bytes": 37085968,
       "files": 415,
       "folders": 57,
-      "measureMs": 21,
+      "measureMs": 23,
       "category": "runtime state",
       "disposition": "retention",
       "protected": true,
@@ -303,10 +303,10 @@
     {
       "path": "frontend/dist",
       "exists": true,
-      "bytes": 31633460,
+      "bytes": 31633422,
       "files": 120,
       "folders": 6,
-      "measureMs": 3,
+      "measureMs": 2,
       "category": "build output",
       "disposition": "regenerable",
       "protected": false,
@@ -334,7 +334,7 @@
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
-      "measureMs": 36,
+      "measureMs": 40,
       "category": "dependencies",
       "disposition": "safe cleanup",
       "protected": false,
