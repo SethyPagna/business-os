@@ -51,7 +51,7 @@ Code files documented: **468**
 | 39 | `backend/src/routes/catalog.ts` | 4 | 1 | 3 | 2 |
 | 40 | `backend/src/routes/categories.ts` | 6 | 1 | 5 | 2 |
 | 41 | `backend/src/routes/contacts.js` | 6 | 1 | 5 | 1 |
-| 42 | `backend/src/routes/customTables.js` | 6 | 1 | 5 | 1 |
+| 42 | `backend/src/routes/customTables.ts` | 6 | 1 | 5 | 1 |
 | 43 | `backend/src/routes/files.ts` | 6 | 1 | 5 | 2 |
 | 44 | `backend/src/routes/importJobs.js` | 9 | 1 | 5 | 1 |
 | 45 | `backend/src/routes/inventory.js` | 12 | 1 | 11 | 2 |
@@ -503,7 +503,7 @@ Code files documented: **468**
   - `./src/routes/catalog.ts`
   - `./src/routes/categories.ts`
   - `./src/routes/contacts`
-  - `./src/routes/customTables`
+  - `./src/routes/customTables.ts`
   - `./src/routes/files.ts`
   - `./src/routes/importJobs`
   - `./src/routes/inventory`
@@ -551,7 +551,7 @@ Code files documented: **468**
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
-  - `backend/src/routes/customTables.js`
+  - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/inventory.js`
@@ -705,7 +705,7 @@ Code files documented: **468**
   - `backend/src/routes/branches.js`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
-  - `backend/src/routes/customTables.js`
+  - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/products.js`
   - `backend/src/routes/returns.js`
@@ -747,7 +747,7 @@ Code files documented: **468**
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
-  - `backend/src/routes/customTables.js`
+  - `backend/src/routes/customTables.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/portal.js`
@@ -876,7 +876,7 @@ Code files documented: **468**
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
-  - `backend/src/routes/customTables.js`
+  - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/inventory.js`
@@ -986,7 +986,7 @@ Code files documented: **468**
   - `backend/src/routes/branches.js`
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/contacts.js`
-  - `backend/src/routes/customTables.js`
+  - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/inventory.js`
@@ -1333,7 +1333,7 @@ Code files documented: **468**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.42 `backend/src/routes/customTables.js`
+### 3.42 `backend/src/routes/customTables.ts`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -1808,7 +1808,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
 - Referenced by (6)
   - `backend/src/routes/branches.js`
-  - `backend/src/routes/customTables.js`
+  - `backend/src/routes/customTables.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/settings.ts`

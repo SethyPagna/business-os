@@ -301,7 +301,7 @@ Total folders documented: **81**
 | 5 | `catalog.ts` | API route handler |
 | 6 | `categories.ts` | API route handler |
 | 7 | `contacts.js` | API route handler |
-| 8 | `customTables.js` | API route handler |
+| 8 | `customTables.ts` | API route handler |
 | 9 | `files.ts` | API route handler |
 | 10 | `importJobs.js` | API route handler |
 | 11 | `inventory.js` | API route handler |

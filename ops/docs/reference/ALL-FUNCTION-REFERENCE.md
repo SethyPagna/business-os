@@ -51,7 +51,7 @@ Code files scanned: **468**
 | 39 | `backend/src/routes/catalog.ts` | 4 |
 | 40 | `backend/src/routes/categories.ts` | 2 |
 | 41 | `backend/src/routes/contacts.js` | 34 |
-| 42 | `backend/src/routes/customTables.js` | 9 |
+| 42 | `backend/src/routes/customTables.ts` | 9 |
 | 43 | `backend/src/routes/files.ts` | 3 |
 | 44 | `backend/src/routes/importJobs.js` | 16 |
 | 45 | `backend/src/routes/inventory.js` | 32 |
@@ -1194,7 +1194,7 @@ Code files scanned: **468**
 | 33 | `findExisting` | const arrow | 775 |
 | 34 | `findExisting` | const arrow | 969 |
 
-### 3.42 `backend/src/routes/customTables.js`
+### 3.42 `backend/src/routes/customTables.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
