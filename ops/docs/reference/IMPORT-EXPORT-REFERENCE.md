@@ -84,7 +84,7 @@ Code files documented: **468**
 | 72 | `backend/src/services/mediaQueue.js` | 5 | 1 | 3 | 5 |
 | 73 | `backend/src/services/portalAi.js` | 2 | 1 | 2 | 1 |
 | 74 | `backend/src/services/verification.js` | 2 | 1 | 1 | 2 |
-| 75 | `backend/src/sessionAuth.js` | 2 | 1 | 1 | 4 |
+| 75 | `backend/src/sessionAuth.ts` | 2 | 1 | 1 | 4 |
 | 76 | `backend/src/settingsSnapshot.ts` | 4 | 1 | 2 | 8 |
 | 77 | `backend/src/storage/organizationFolders.ts` | 2 | 1 | 0 | 2 |
 | 78 | `backend/src/systemFsWorker.ts` | 3 | 0 | 1 | 0 |
@@ -767,7 +767,7 @@ Code files documented: **468**
   - `backend/src/services/mediaQueue.js`
   - `backend/src/services/portalAi.js`
   - `backend/src/services/verification.js`
-  - `backend/src/sessionAuth.js`
+  - `backend/src/sessionAuth.ts`
   - `backend/src/systemJobs.js`
   - `backend/src/workers/importWorker.ts`
   - `backend/src/workers/mediaWorker.ts`
@@ -964,7 +964,7 @@ Code files documented: **468**
   - `./fileAssets`
   - `./permissions.ts`
   - `./security.ts`
-  - `./sessionAuth`
+  - `./sessionAuth.ts`
   - `./uploadSecurity.ts`
   - `fs`
   - `multer`
@@ -975,7 +975,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/permissions.ts`
   - `backend/src/security.ts`
-  - `backend/src/sessionAuth.js`
+  - `backend/src/sessionAuth.ts`
   - `backend/src/uploadSecurity.ts`
 - Referenced by (24)
   - `backend/server.js`
@@ -1231,7 +1231,7 @@ Code files documented: **468**
   - `../security.ts`
   - `../services/googleOauth`
   - `../services/verification`
-  - `../sessionAuth`
+  - `../sessionAuth.ts`
   - `../settingsSnapshot.ts`
   - `bcryptjs`
   - `crypto`
@@ -1250,7 +1250,7 @@ Code files documented: **468**
   - `backend/src/security.ts`
   - `backend/src/services/googleOauth.js`
   - `backend/src/services/verification.js`
-  - `backend/src/sessionAuth.js`
+  - `backend/src/sessionAuth.ts`
   - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
   - `backend/server.js`
@@ -1738,7 +1738,7 @@ Code files documented: **468**
   - `../organizationContext`
   - `../services/googleOauth`
   - `../services/verification`
-  - `../sessionAuth`
+  - `../sessionAuth.ts`
   - `bcryptjs`
   - `express`
 - Internal dependencies (9)
@@ -1750,7 +1750,7 @@ Code files documented: **468**
   - `backend/src/organizationContext/index.js`
   - `backend/src/services/googleOauth.js`
   - `backend/src/services/verification.js`
-  - `backend/src/sessionAuth.js`
+  - `backend/src/sessionAuth.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -2066,7 +2066,7 @@ Code files documented: **468**
   - `backend/src/routes/auth.js`
   - `backend/src/routes/users.js`
 
-### 3.75 `backend/src/sessionAuth.js`
+### 3.75 `backend/src/sessionAuth.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2168,13 +2168,13 @@ Code files documented: **468**
 - Imports (5)
   - `./helpers`
   - `./serverUtils`
-  - `./sessionAuth`
+  - `./sessionAuth.ts`
   - `http`
   - `ws`
 - Internal dependencies (3)
   - `backend/src/helpers.js`
   - `backend/src/serverUtils.js`
-  - `backend/src/sessionAuth.js`
+  - `backend/src/sessionAuth.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/websocket.test.ts`

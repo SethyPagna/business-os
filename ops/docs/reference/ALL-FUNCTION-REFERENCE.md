@@ -84,7 +84,7 @@ Code files scanned: **468**
 | 72 | `backend/src/services/mediaQueue.js` | 10 |
 | 73 | `backend/src/services/portalAi.js` | 42 |
 | 74 | `backend/src/services/verification.js` | 21 |
-| 75 | `backend/src/sessionAuth.js` | 13 |
+| 75 | `backend/src/sessionAuth.ts` | 13 |
 | 76 | `backend/src/settingsSnapshot.ts` | 12 |
 | 77 | `backend/src/storage/organizationFolders.ts` | 5 |
 | 78 | `backend/src/systemFsWorker.ts` | 7 |
@@ -2236,7 +2236,7 @@ Code files scanned: **468**
 | 20 | `sendEmail` | function | 183 |
 | 21 | `requestVerificationCode` | function | 247 |
 
-### 3.75 `backend/src/sessionAuth.js`
+### 3.75 `backend/src/sessionAuth.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

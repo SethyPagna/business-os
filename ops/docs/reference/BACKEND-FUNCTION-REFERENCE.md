@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **38**
+Total files documented: **37**
 
 ## 2. Symbol Count by File
 
@@ -45,9 +45,8 @@ Total files documented: **38**
 | 33 | `backend/src/services/mediaQueue.js` | 10 | 0 |
 | 34 | `backend/src/services/portalAi.js` | 42 | 0 |
 | 35 | `backend/src/services/verification.js` | 21 | 0 |
-| 36 | `backend/src/sessionAuth.js` | 13 | 0 |
-| 37 | `backend/src/systemJobs.js` | 28 | 0 |
-| 38 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
+| 36 | `backend/src/systemJobs.js` | 28 | 0 |
+| 37 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1589,25 +1588,7 @@ Total files documented: **38**
 | 20 | `sendEmail` | function | 183 |
 | 21 | `requestVerificationCode` | function | 247 |
 
-### 3.36 `backend/src/sessionAuth.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `getDb` | function | 14 |
-| 2 | `hashToken` | function | 18 |
-| 3 | `buildSessionExpiry` | function | 22 |
-| 4 | `createAuthSession` | function | 38 |
-| 5 | `isSecureRequest` | function | 59 |
-| 6 | `buildSessionCookieOptions` | function | 69 |
-| 7 | `setAuthSessionCookie` | function | 79 |
-| 8 | `clearAuthSessionCookie` | function | 85 |
-| 9 | `buildRevocationTimestamp` | function | 95 |
-| 10 | `getPresentedSessionToken` | function | 100 |
-| 11 | `getSessionUser` | function | 112 |
-| 12 | `revokeAuthSession` | function | 175 |
-| 13 | `revokeUserSessions` | function | 187 |
-
-### 3.37 `backend/src/systemJobs.js`
+### 3.36 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1640,7 +1621,7 @@ Total files documented: **38**
 | 27 | `getSystemJob` | function | 432 |
 | 28 | `listSystemJobs` | function | 444 |
 
-### 3.38 `backend/src/uploadReferenceCleanup.js`
+### 3.37 `backend/src/uploadReferenceCleanup.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

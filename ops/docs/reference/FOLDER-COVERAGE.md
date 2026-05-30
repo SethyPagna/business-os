@@ -202,7 +202,7 @@ Total folders documented: **81**
 | 31 | `schemaMetadata.ts` | Project source/support file |
 | 32 | `security.ts` | Project source/support file |
 | 33 | `serverUtils.js` | Project source/support file |
-| 34 | `sessionAuth.js` | Project source/support file |
+| 34 | `sessionAuth.ts` | Project source/support file |
 | 35 | `settingsSnapshot.ts` | Project source/support file |
 | 36 | `systemFsWorker.ts` | Project source/support file |
 | 37 | `systemJobs.js` | Project source/support file |

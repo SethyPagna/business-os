@@ -94,7 +94,7 @@ Total files documented: **531**
 | 82 | `backend/src/services/portalAi.js` | backend-services | 621 | 21.7 | Integration/service layer |
 | 83 | `backend/src/services/README.md` | backend-services | 29 | 1.0 | Integration/service layer |
 | 84 | `backend/src/services/verification.js` | backend-services | 272 | 8.4 | Integration/service layer |
-| 85 | `backend/src/sessionAuth.js` | backend-core | 215 | 6.8 | Project source/support file |
+| 85 | `backend/src/sessionAuth.ts` | backend-core | 215 | 6.8 | Project source/support file |
 | 86 | `backend/src/settingsSnapshot.ts` | backend-core | 181 | 5.0 | Project source/support file |
 | 87 | `backend/src/storage/organizationFolders.ts` | backend-core | 59 | 2.0 | Project source/support file |
 | 88 | `backend/src/systemFsWorker.ts` | backend-core | 122 | 3.6 | Project source/support file |
