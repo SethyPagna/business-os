@@ -52,7 +52,7 @@ Total files documented: **531**
 | 40 | `backend/src/productImportPolicies.ts` | backend-core | 174 | 5.4 | Project source/support file |
 | 41 | `backend/src/README.md` | backend-core | 12 | 0.7 | Documentation |
 | 42 | `backend/src/requestContext.ts` | backend-core | 65 | 1.7 | Project source/support file |
-| 43 | `backend/src/routes/actionHistory.js` | backend-routes | 256 | 9.0 | API route handler |
+| 43 | `backend/src/routes/actionHistory.ts` | backend-routes | 256 | 9.0 | API route handler |
 | 44 | `backend/src/routes/ai.js` | backend-routes | 270 | 9.2 | API route handler |
 | 45 | `backend/src/routes/auth.js` | backend-routes | 1148 | 40.6 | API route handler |
 | 46 | `backend/src/routes/branches.js` | backend-routes | 452 | 19.7 | API route handler |

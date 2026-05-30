@@ -44,7 +44,7 @@ Code files documented: **468**
 | 32 | `backend/src/productDiscounts.ts` | 1 | 1 | 1 | 3 |
 | 33 | `backend/src/productImportPolicies.ts` | 1 | 1 | 1 | 3 |
 | 34 | `backend/src/requestContext.ts` | 1 | 1 | 0 | 2 |
-| 35 | `backend/src/routes/actionHistory.js` | 5 | 1 | 4 | 1 |
+| 35 | `backend/src/routes/actionHistory.ts` | 5 | 1 | 4 | 1 |
 | 36 | `backend/src/routes/ai.js` | 6 | 1 | 5 | 1 |
 | 37 | `backend/src/routes/auth.js` | 18 | 1 | 13 | 2 |
 | 38 | `backend/src/routes/branches.js` | 8 | 1 | 6 | 1 |
@@ -496,7 +496,7 @@ Code files documented: **468**
   - `./src/organizationContext/index.ts`
   - `./src/productBatches`
   - `./src/requestContext.ts`
-  - `./src/routes/actionHistory`
+  - `./src/routes/actionHistory.ts`
   - `./src/routes/ai`
   - `./src/routes/auth`
   - `./src/routes/branches`
@@ -544,7 +544,7 @@ Code files documented: **468**
   - `backend/src/organizationContext/index.ts`
   - `backend/src/productBatches.js`
   - `backend/src/requestContext.ts`
-  - `backend/src/routes/actionHistory.js`
+  - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
@@ -740,7 +740,7 @@ Code files documented: **468**
   - `backend/src/helpers.js`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/productBatches.js`
-  - `backend/src/routes/actionHistory.js`
+  - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
@@ -869,7 +869,7 @@ Code files documented: **468**
   - `backend/src/services/googleDriveSync/index.js`
 - Referenced by (23)
   - `backend/server.js`
-  - `backend/src/routes/actionHistory.js`
+  - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
@@ -980,7 +980,7 @@ Code files documented: **468**
 - Referenced by (24)
   - `backend/server.js`
   - `backend/src/authOtpGuards.ts`
-  - `backend/src/routes/actionHistory.js`
+  - `backend/src/routes/actionHistory.ts`
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
@@ -1097,7 +1097,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/middleware.js`
   - `backend/src/postgresDatabase.js`
-  - `backend/src/routes/actionHistory.js`
+  - `backend/src/routes/actionHistory.ts`
   - `backend/test/permissionPolicy.test.ts`
 
 ### 3.29 `backend/src/portalUtils.ts`
@@ -1180,7 +1180,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/src/helpers.js`
 
-### 3.35 `backend/src/routes/actionHistory.js`
+### 3.35 `backend/src/routes/actionHistory.ts`
 
 - Declared exports: `module.exports`
 - Imports (5)

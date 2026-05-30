@@ -294,7 +294,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `actionHistory.js` | API route handler |
+| 1 | `actionHistory.ts` | API route handler |
 | 2 | `ai.js` | API route handler |
 | 3 | `auth.js` | API route handler |
 | 4 | `branches.js` | API route handler |

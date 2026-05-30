@@ -44,7 +44,7 @@ Code files scanned: **468**
 | 32 | `backend/src/productDiscounts.ts` | 9 |
 | 33 | `backend/src/productImportPolicies.ts` | 10 |
 | 34 | `backend/src/requestContext.ts` | 5 |
-| 35 | `backend/src/routes/actionHistory.js` | 12 |
+| 35 | `backend/src/routes/actionHistory.ts` | 12 |
 | 36 | `backend/src/routes/ai.js` | 3 |
 | 37 | `backend/src/routes/auth.js` | 31 |
 | 38 | `backend/src/routes/branches.js` | 10 |
@@ -1063,7 +1063,7 @@ Code files scanned: **468**
 | 4 | `requestContextMiddleware` | function | 51 |
 | 5 | `getRequestMeta` | function | 57 |
 
-### 3.35 `backend/src/routes/actionHistory.js`
+### 3.35 `backend/src/routes/actionHistory.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
