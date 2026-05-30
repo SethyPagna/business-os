@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 581 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 582 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 52`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 311`,
+  `.js: 51`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 312`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4815,6 +4815,23 @@ Decision rule:
     on the future compile/staging lane. The current source extension count is
     `.js: 52`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 311`, `.tsx: 107`
     outside generated/runtime folders.
+582. Convert files API route to a package-safe TypeScript path.
+    Done: `backend/src/routes/files.ts` keeps file listing, upload, media
+    optimization enqueueing, write-conflict delete handling, rate limiting,
+    synchronous image compression, and upload validation on the existing
+    CommonJS route style while `backend/server.js` imports the explicit `.ts`
+    route. The hardening policy and media contract tests now point at the
+    TypeScript path, and `backend/test/routeContracts.test.ts` asserts the
+    list, upload, and delete route registrations. Focused route-contract,
+    media-contract, route-load, backend utility, schema audit, stale-path, and
+    Linux packaging proof passed. The older temp-server file-route flow remains
+    environment-blocked in this shell because the Postgres-only runtime needs
+    the native libpq bridge available inside the scaled runtime container.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so larger
+    backend route/service conversions remain blocked on the future
+    compile/staging lane. The current source extension count is `.js: 51`,
+    `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 312`, `.tsx: 107` outside
+    generated/runtime folders.
 
 ## Safety Gates
 

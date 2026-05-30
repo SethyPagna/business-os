@@ -129,7 +129,7 @@
           "mustContain": ["system_busy", "maintenanceWriteGuard", "423"]
         },
         {
-          "path": "backend/src/routes/files.js",
+          "path": "backend/src/routes/files.ts",
           "mustContain": ["routeRateLimit", "validateUploadedFile", "compressUpload"]
         },
         {

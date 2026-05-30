@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 581.
+- Latest completed implementation move in this roadmap: Move 582.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6483,3 +6483,20 @@ Move 581 status:
   count is `.js: 52`, `.jsx: 0`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 311`, `.tsx: 107` outside generated/runtime
   folders.
+
+Move 582 status:
+- Move 582 converts `backend/src/routes/files.ts` to a package-safe TypeScript
+  path. File listing, upload, media optimization enqueueing, write-conflict
+  delete handling, rate limiting, synchronous image compression, and upload
+  validation remain unchanged while `backend/server.js` imports the explicit
+  `.ts` route. The hardening policy and media contract tests now point at the
+  TypeScript path, and `backend/test/routeContracts.test.ts` asserts list,
+  upload, and delete route registration directly. Focused route-contract,
+  media-contract, route-load, backend utility, schema audit, stale-path, and
+  Linux packaging proof passed. The older temp-server file-route flow remains
+  environment-blocked in this shell because the Postgres-only runtime needs the
+  native libpq bridge available inside the scaled runtime container. `pkg`
+  continues to warn for direct `.ts` scripts, so larger backend route/service
+  conversion still waits for a compile/staging package lane. The current source
+  extension count is `.js: 51`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 312`,
+  `.tsx: 107` outside generated/runtime folders.

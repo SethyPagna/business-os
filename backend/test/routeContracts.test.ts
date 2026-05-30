@@ -102,6 +102,14 @@ runTest('notifications router registers summary route', () => {
   assert.ok(paths.includes('/summary'), 'missing /api/notifications/summary')
 })
 
+runTest('files router registers list, upload, and delete routes', () => {
+  const router = require('../src/routes/files.ts')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/'), 'missing /api/files list route')
+  assert.ok(paths.includes('/upload'), 'missing /api/files/upload')
+  assert.ok(paths.includes('/:id'), 'missing /api/files/:id delete route')
+})
+
 runTest('system router registers Google Drive sync connect and disconnect routes', () => {
   const router = require('../src/routes/system')
   const paths = getRoutePaths(router)

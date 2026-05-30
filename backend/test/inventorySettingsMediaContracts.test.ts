@@ -39,7 +39,7 @@ runTest('settings conflicts return settings-specific structured payload with cur
 })
 
 runTest('file upload route compresses images immediately and only defers video optimization', () => {
-  const routeSource = readSource('src/routes/files.js')
+  const routeSource = readSource('src/routes/files.ts')
   const assetSource = readSource('src/fileAssets.js')
   assert.match(routeSource, /validateUploadedFile,\s*compressUpload/, 'upload route must run synchronous image compression middleware')
   assert.match(routeSource, /enqueueMediaOptimization/, 'upload route must enqueue optimization')
