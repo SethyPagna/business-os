@@ -48,7 +48,7 @@ Code files scanned: **467**
 | 36 | `backend/src/routes/ai.js` | 3 |
 | 37 | `backend/src/routes/auth.js` | 31 |
 | 38 | `backend/src/routes/branches.js` | 10 |
-| 39 | `backend/src/routes/catalog.js` | 4 |
+| 39 | `backend/src/routes/catalog.ts` | 4 |
 | 40 | `backend/src/routes/categories.js` | 2 |
 | 41 | `backend/src/routes/contacts.js` | 34 |
 | 42 | `backend/src/routes/customTables.js` | 9 |
@@ -1138,7 +1138,7 @@ Code files scanned: **467**
 | 9 | `buildBranchStockWhere` | function | 69 |
 | 10 | `hasPagedStockQuery` | function | 93 |
 
-### 3.39 `backend/src/routes/catalog.js`
+### 3.39 `backend/src/routes/catalog.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

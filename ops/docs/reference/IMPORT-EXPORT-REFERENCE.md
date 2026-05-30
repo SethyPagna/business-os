@@ -48,7 +48,7 @@ Code files documented: **467**
 | 36 | `backend/src/routes/ai.js` | 6 | 1 | 5 | 1 |
 | 37 | `backend/src/routes/auth.js` | 18 | 1 | 13 | 2 |
 | 38 | `backend/src/routes/branches.js` | 8 | 1 | 6 | 1 |
-| 39 | `backend/src/routes/catalog.js` | 4 | 1 | 3 | 1 |
+| 39 | `backend/src/routes/catalog.ts` | 4 | 1 | 3 | 2 |
 | 40 | `backend/src/routes/categories.js` | 6 | 1 | 5 | 1 |
 | 41 | `backend/src/routes/contacts.js` | 6 | 1 | 5 | 1 |
 | 42 | `backend/src/routes/customTables.js` | 6 | 1 | 5 | 1 |
@@ -136,7 +136,7 @@ Code files documented: **467**
 | 124 | `backend/test/productImportPolicies.test.ts` | 2 | 0 | 1 | 0 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 3 | 0 | 0 | 0 |
 | 126 | `backend/test/rfidRoutes.test.ts` | 3 | 0 | 0 | 0 |
-| 127 | `backend/test/routeContracts.test.ts` | 11 | 0 | 6 | 0 |
+| 127 | `backend/test/routeContracts.test.ts` | 12 | 0 | 7 | 0 |
 | 128 | `backend/test/runtimeCache.test.ts` | 5 | 0 | 1 | 0 |
 | 129 | `backend/test/runtimeVersion.test.ts` | 5 | 0 | 1 | 0 |
 | 130 | `backend/test/schemaMetadata.test.ts` | 2 | 0 | 1 | 0 |
@@ -499,7 +499,7 @@ Code files documented: **467**
   - `./src/routes/ai`
   - `./src/routes/auth`
   - `./src/routes/branches`
-  - `./src/routes/catalog`
+  - `./src/routes/catalog.ts`
   - `./src/routes/categories`
   - `./src/routes/contacts`
   - `./src/routes/customTables`
@@ -547,7 +547,7 @@ Code files documented: **467**
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
-  - `backend/src/routes/catalog.js`
+  - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.js`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.js`
@@ -743,7 +743,7 @@ Code files documented: **467**
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
-  - `backend/src/routes/catalog.js`
+  - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.js`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.js`
@@ -872,7 +872,7 @@ Code files documented: **467**
   - `backend/src/routes/ai.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/branches.js`
-  - `backend/src/routes/catalog.js`
+  - `backend/src/routes/catalog.ts`
   - `backend/src/routes/categories.js`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.js`
@@ -1277,7 +1277,7 @@ Code files documented: **467**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.39 `backend/src/routes/catalog.js`
+### 3.39 `backend/src/routes/catalog.ts`
 
 - Declared exports: `module.exports`
 - Imports (4)
@@ -1289,8 +1289,9 @@ Code files documented: **467**
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
   - `backend/src/settingsSnapshot.ts`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.40 `backend/src/routes/categories.js`
 
@@ -2086,7 +2087,7 @@ Code files documented: **467**
 - Referenced by (8)
   - `backend/src/fileAssets.js`
   - `backend/src/routes/auth.js`
-  - `backend/src/routes/catalog.js`
+  - `backend/src/routes/catalog.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/settings.js`
@@ -2726,8 +2727,9 @@ Code files documented: **467**
 ### 3.127 `backend/test/routeContracts.test.ts`
 
 - Declared exports: none detected
-- Imports (11)
+- Imports (12)
   - `../src/routes/auth`
+  - `../src/routes/catalog.ts`
   - `../src/routes/inventory`
   - `../src/routes/organizations.ts`
   - `../src/routes/portal`
@@ -2738,8 +2740,9 @@ Code files documented: **467**
   - `node:fs`
   - `node:path`
   - `path`
-- Internal dependencies (6)
+- Internal dependencies (7)
   - `backend/src/routes/auth.js`
+  - `backend/src/routes/catalog.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.js`
