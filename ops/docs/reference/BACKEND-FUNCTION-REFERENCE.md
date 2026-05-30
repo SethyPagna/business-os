@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **21**
+Total files documented: **20**
 
 ## 2. Symbol Count by File
 
@@ -26,11 +26,10 @@ Total files documented: **21**
 | 14 | `backend/src/routes/sales.js` | 24 | 7 |
 | 15 | `backend/src/routes/system/index.js` | 44 | 38 |
 | 16 | `backend/src/routes/users.js` | 26 | 16 |
-| 17 | `backend/src/serverUtils.js` | 26 | 0 |
-| 18 | `backend/src/services/backupPackages.js` | 59 | 0 |
-| 19 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 20 | `backend/src/services/importJobs.js` | 175 | 0 |
-| 21 | `backend/src/services/portalAi.js` | 42 | 0 |
+| 17 | `backend/src/services/backupPackages.js` | 59 | 0 |
+| 18 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 19 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 20 | `backend/src/services/portalAi.js` | 42 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -847,38 +846,7 @@ Total files documented: **21**
 | 15 | PUT | `/roles/:id` | 1034 |
 | 16 | DELETE | `/roles/:id` | 1064 |
 
-### 3.17 `backend/src/serverUtils.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `buildOriginFromParts` | function | 13 |
-| 2 | `parseOriginHost` | function | 24 |
-| 3 | `normalizeConfiguredHost` | function | 34 |
-| 4 | `getConfiguredPublicHosts` | function | 44 |
-| 5 | `getConfiguredCustomerPortalHosts` | function | 55 |
-| 6 | `isConfiguredCustomerPortalHost` | function | 67 |
-| 7 | `isAllowedRequestOrigin` | function | 77 |
-| 8 | `isAllowedWebSocketOrigin` | function | 86 |
-| 9 | `hostIsLoopbackPair` | function | 103 |
-| 10 | `getTrustedDocumentOrigins` | function | 108 |
-| 11 | `addOrigin` | const arrow | 110 |
-| 12 | `buildPermissionsPolicy` | function | 139 |
-| 13 | `getCloudflareAccessDiagnostics` | function | 166 |
-| 14 | `sanitizeObjectKeys` | function | 192 |
-| 15 | `sanitizeStringValue` | function | 215 |
-| 16 | `sanitizeRequestPayload` | function | 221 |
-| 17 | `sanitizeDeepStrings` | function | 228 |
-| 18 | `isApiOrHealthPath` | function | 245 |
-| 19 | `isSpaFallbackEligible` | function | 249 |
-| 20 | `setNoStoreHeaders` | function | 257 |
-| 21 | `setHtmlNoCacheHeaders` | function | 263 |
-| 22 | `isCustomerPortalRoutePath` | function | 270 |
-| 23 | `setTunnelSecurityHeaders` | function | 275 |
-| 24 | `setFrontendStaticHeaders` | function | 318 |
-| 25 | `setUploadStaticHeaders` | function | 368 |
-| 26 | `mapServerError` | function | 378 |
-
-### 3.18 `backend/src/services/backupPackages.js`
+### 3.17 `backend/src/services/backupPackages.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -942,7 +910,7 @@ Total files documented: **21**
 | 58 | `listLocalBackupVersions` | function | 971 |
 | 59 | `listBackupVersions` | function | 1003 |
 
-### 3.19 `backend/src/services/googleDriveSync/index.js`
+### 3.18 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1022,7 +990,7 @@ Total files documented: **21**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.20 `backend/src/services/importJobs.js`
+### 3.19 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1202,7 +1170,7 @@ Total files documented: **21**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.21 `backend/src/services/portalAi.js`
+### 3.20 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

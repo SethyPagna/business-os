@@ -201,7 +201,7 @@ Total folders documented: **81**
 | 30 | `runtimeVersion.ts` | Project source/support file |
 | 31 | `schemaMetadata.ts` | Project source/support file |
 | 32 | `security.ts` | Project source/support file |
-| 33 | `serverUtils.js` | Project source/support file |
+| 33 | `serverUtils.ts` | Project source/support file |
 | 34 | `sessionAuth.ts` | Project source/support file |
 | 35 | `settingsSnapshot.ts` | Project source/support file |
 | 36 | `systemFsWorker.ts` | Project source/support file |

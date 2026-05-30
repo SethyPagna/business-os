@@ -81,7 +81,7 @@ Total files documented: **531**
 | 69 | `backend/src/runtimeVersion.ts` | backend-core | 176 | 4.4 | Project source/support file |
 | 70 | `backend/src/schemaMetadata.ts` | backend-core | 155 | 3.7 | Project source/support file |
 | 71 | `backend/src/security.ts` | backend-core | 253 | 7.1 | Project source/support file |
-| 72 | `backend/src/serverUtils.js` | backend-core | 431 | 15.5 | Project source/support file |
+| 72 | `backend/src/serverUtils.ts` | backend-core | 431 | 15.5 | Project source/support file |
 | 73 | `backend/src/services/aiGateway.ts` | backend-services | 364 | 13.6 | Integration/service layer |
 | 74 | `backend/src/services/backupPackages.js` | backend-services | 1060 | 36.3 | Integration/service layer |
 | 75 | `backend/src/services/firebaseAuth.ts` | backend-services | 384 | 14.3 | Integration/service layer |

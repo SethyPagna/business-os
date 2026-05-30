@@ -72,7 +72,7 @@ Code files documented: **468**
 | 60 | `backend/src/runtimeVersion.ts` | 5 | 1 | 1 | 4 |
 | 61 | `backend/src/schemaMetadata.ts` | 1 | 1 | 1 | 6 |
 | 62 | `backend/src/security.ts` | 1 | 1 | 0 | 7 |
-| 63 | `backend/src/serverUtils.js` | 1 | 1 | 1 | 4 |
+| 63 | `backend/src/serverUtils.ts` | 1 | 1 | 1 | 4 |
 | 64 | `backend/src/services/aiGateway.ts` | 2 | 1 | 2 | 2 |
 | 65 | `backend/src/services/backupPackages.js` | 9 | 1 | 4 | 4 |
 | 66 | `backend/src/services/firebaseAuth.ts` | 2 | 1 | 0 | 0 |
@@ -520,7 +520,7 @@ Code files documented: **468**
   - `./src/routes/units.ts`
   - `./src/routes/users`
   - `./src/runtimeVersion.ts`
-  - `./src/serverUtils`
+  - `./src/serverUtils.ts`
   - `./src/services/importJobs`
   - `./src/websocket.ts`
   - `./src/workers/importWorker.ts`
@@ -568,7 +568,7 @@ Code files documented: **468**
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
   - `backend/src/runtimeVersion.ts`
-  - `backend/src/serverUtils.js`
+  - `backend/src/serverUtils.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/websocket.ts`
   - `backend/src/workers/importWorker.ts`
@@ -682,7 +682,7 @@ Code files documented: **468**
   - `backend/src/routes/system/index.js`
   - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeState/index.ts`
-  - `backend/src/serverUtils.js`
+  - `backend/src/serverUtils.ts`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/googleOauth.ts`
@@ -1641,7 +1641,7 @@ Code files documented: **468**
 - Imports (7)
   - `../config/index.ts`
   - `../middleware.ts`
-  - `../serverUtils`
+  - `../serverUtils.ts`
   - `crypto`
   - `express`
   - `fs`
@@ -1649,7 +1649,7 @@ Code files documented: **468**
 - Internal dependencies (3)
   - `backend/src/config/index.ts`
   - `backend/src/middleware.ts`
-  - `backend/src/serverUtils.js`
+  - `backend/src/serverUtils.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1830,7 +1830,7 @@ Code files documented: **468**
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/test/security.test.ts`
 
-### 3.63 `backend/src/serverUtils.js`
+### 3.63 `backend/src/serverUtils.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -2167,13 +2167,13 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (5)
   - `./helpers`
-  - `./serverUtils`
+  - `./serverUtils.ts`
   - `./sessionAuth.ts`
   - `http`
   - `ws`
 - Internal dependencies (3)
   - `backend/src/helpers.js`
-  - `backend/src/serverUtils.js`
+  - `backend/src/serverUtils.ts`
   - `backend/src/sessionAuth.ts`
 - Referenced by (2)
   - `backend/server.js`
@@ -2826,11 +2826,11 @@ Code files documented: **468**
 - Declared exports: none detected
 - Imports (3)
   - `../src/config/index.ts`
-  - `../src/serverUtils`
+  - `../src/serverUtils.ts`
   - `node:assert/strict`
 - Internal dependencies (2)
   - `backend/src/config/index.ts`
-  - `backend/src/serverUtils.js`
+  - `backend/src/serverUtils.ts`
 - Referenced by (0)
   - none
 

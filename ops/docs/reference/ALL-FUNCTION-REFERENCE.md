@@ -72,7 +72,7 @@ Code files scanned: **468**
 | 60 | `backend/src/runtimeVersion.ts` | 8 |
 | 61 | `backend/src/schemaMetadata.ts` | 9 |
 | 62 | `backend/src/security.ts` | 14 |
-| 63 | `backend/src/serverUtils.js` | 26 |
+| 63 | `backend/src/serverUtils.ts` | 26 |
 | 64 | `backend/src/services/aiGateway.ts` | 17 |
 | 65 | `backend/src/services/backupPackages.js` | 59 |
 | 66 | `backend/src/services/firebaseAuth.ts` | 22 |
@@ -1691,7 +1691,7 @@ Code files scanned: **468**
 | 13 | `recordAbuseFailure` | function | 211 |
 | 14 | `clearAbuseFailure` | function | 235 |
 
-### 3.63 `backend/src/serverUtils.js`
+### 3.63 `backend/src/serverUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
