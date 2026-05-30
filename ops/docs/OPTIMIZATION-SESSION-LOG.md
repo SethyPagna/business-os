@@ -9,7 +9,7 @@ This is a concise running log of what actually happened in recent sessions.
 ### Accepted
 
 - Notification summary server-side cache
-  - area: `backend/src/routes/notifications.js`
+  - area: `backend/src/routes/notifications.ts`
   - result: kept
   - note: `/api/notifications/summary` now reuses a short-lived cache keyed by
     effective access and preferences, which removed the shared inventory-side

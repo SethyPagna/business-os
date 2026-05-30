@@ -21,7 +21,7 @@ const NOTIFICATION_SETTING_KEYS = [
   'notifications_loyalty_threshold',
   'notifications_realert_minutes',
 ]
-const NOTIFICATION_SUMMARY_SEPARATOR = ' • '
+const NOTIFICATION_SUMMARY_SEPARATOR = ' - '
 
 function normalizeBoolean(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 580.
+- Latest completed implementation move in this roadmap: Move 581.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4185,7 +4185,7 @@ Move 372 status:
 
 Move 373 status:
 - Move 373 tightens the notification summary route in
-  `backend/src/routes/notifications.js`. Notification settings placeholder
+  `backend/src/routes/notifications.ts`. Notification settings placeholder
   construction, settings row map assembly, point-policy settings map assembly,
   inventory alert item assembly, expiry alert item/count assembly, and unread
   count summing now use direct loops and named helpers instead of repeated
@@ -4199,7 +4199,7 @@ Move 373 status:
 
 Move 374 status:
 - Move 374 continues the notification summary cleanup in
-  `backend/src/routes/notifications.js`. Loyalty sales/refund/reward aggregate
+  `backend/src/routes/notifications.ts`. Loyalty sales/refund/reward aggregate
   rows now build customer maps with direct loops, loyalty threshold matching
   now computes balances inside one direct loop, and the capped loyalty
   notification item payload now uses a bounded direct loop instead of
@@ -4210,7 +4210,7 @@ Move 374 status:
 
 Move 375 status:
 - Move 375 completes the next notification summary item-construction cleanup
-  in `backend/src/routes/notifications.js`. Awaiting-payment and
+  in `backend/src/routes/notifications.ts`. Awaiting-payment and
   awaiting-delivery sales notification items now use one direct-loop helper,
   and pending customer portal submission items now use a direct-loop helper
   instead of inline `map()` response construction. Sales notification counts,
@@ -4221,7 +4221,7 @@ Move 375 status:
 
 Move 376 status:
 - Move 376 completes the notification summary loop and encoding cleanup in
-  `backend/src/routes/notifications.js`. Inventory, expiry, and sales summary
+  `backend/src/routes/notifications.ts`. Inventory, expiry, and sales summary
   strings now use one direct-loop `joinNotificationSummary()` helper and one
   `NOTIFICATION_SUMMARY_SEPARATOR` constant instead of three repeated
   `filter(Boolean).join(...)` passes. Sales and portal notification metadata
@@ -6464,4 +6464,22 @@ Move 580 status:
   conversion still waits for a compile/staging package lane. The current source
   extension count is `.js: 53`, `.jsx: 0`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 310`, `.tsx: 107` outside generated/runtime
+  folders.
+
+Move 581 status:
+- Move 581 converts `backend/src/routes/notifications.ts` to a package-safe
+  TypeScript path. Notification summary cache behavior, effective-permission
+  cache keys, inventory/expiry/sales/loyalty/portal/system section builders,
+  and the `_test` cache hook remain unchanged while `backend/server.js` imports
+  the explicit `.ts` route. The notification summary separator now uses a
+  plain ASCII separator to avoid glyph/encoding drift in generated labels.
+  `backend/test/notificationSummaryCache.test.ts`,
+  `backend/test/productExpiry.test.ts`, and
+  `backend/test/routeContracts.test.ts` now cover the TypeScript route.
+  Focused notification cache, product-expiry, route-contract, backend utility,
+  schema audit, stale-path, and Linux packaging proof passed. `pkg` continues
+  to warn for direct `.ts` scripts, so larger backend route/service conversion
+  still waits for a compile/staging package lane. The current source extension
+  count is `.js: 52`, `.jsx: 0`,
+  `.mjs: 0`, `.cjs: 0`, `.ts: 311`, `.tsx: 107` outside generated/runtime
   folders.

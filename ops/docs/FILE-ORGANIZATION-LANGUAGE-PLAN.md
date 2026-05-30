@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 580 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 581 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 53`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 310`,
+  `.js: 52`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 311`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -2962,25 +2962,25 @@ Decision rule:
     This was a backend route cleanup only; no folder move, schema migration,
     or runtime conversion was needed.
 363. Tighten notification summary loops. Done:
-    `backend/src/routes/notifications.js` now builds notification settings
+    `backend/src/routes/notifications.ts` now builds notification settings
     placeholders, settings maps, inventory alert items, expiry alert items and
     counts, and unread counts with direct loops and named helpers. Existing
     mojibake summary separator strings were left untouched to avoid accidental
     re-encoding. This was a backend route cleanup only; no folder move, schema
     migration, or runtime conversion was needed.
 364. Tighten notification loyalty loops. Done:
-    `backend/src/routes/notifications.js` now builds loyalty customer aggregate
+    `backend/src/routes/notifications.ts` now builds loyalty customer aggregate
     maps, threshold matches, and capped loyalty item payloads with direct
     loops while preserving point policy math and sorting. This was a backend
     route cleanup only; no folder move, schema migration, or runtime
     conversion was needed.
 365. Tighten notification sales and portal item loops. Done:
-    `backend/src/routes/notifications.js` now builds awaiting-payment,
+    `backend/src/routes/notifications.ts` now builds awaiting-payment,
     awaiting-delivery, and pending portal submission notification item payloads
     with direct-loop helpers. This was a backend route cleanup only; no folder
     move, schema migration, or runtime conversion was needed.
 366. Tighten notification summary separator loops. Done:
-    `backend/src/routes/notifications.js` now uses one notification separator
+    `backend/src/routes/notifications.ts` now uses one notification separator
     constant and one direct-loop summary join helper for inventory, expiry,
     and sales summaries, and sales/portal metadata use the same separator.
     This was a backend route cleanup only; no folder move, schema migration,
@@ -4799,6 +4799,21 @@ Decision rule:
     `pkg.scripts`, so larger backend route/service conversions remain blocked
     on the future compile/staging lane. The current source extension count is
     `.js: 53`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 310`, `.tsx: 107`
+    outside generated/runtime folders.
+581. Convert notifications summary route to a package-safe TypeScript path.
+    Done: `backend/src/routes/notifications.ts` keeps the notification summary
+    sections, effective-permission cache key, inventory/expiry/sales/loyalty/
+    portal/system builders, and cache test hook on the existing CommonJS route
+    style while `backend/server.js` imports the explicit `.ts` route. The
+    notification summary separator now uses a plain ASCII separator so
+    generated notification text avoids glyph/encoding drift. The notification
+    cache, product-expiry, and route-contract tests now point at or assert the
+    TypeScript route. Focused notification cache, product-expiry,
+    route-contract, backend utility, schema audit, stale-path, and Linux
+    packaging proof passed. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service conversions remain blocked
+    on the future compile/staging lane. The current source extension count is
+    `.js: 52`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 311`, `.tsx: 107`
     outside generated/runtime folders.
 
 ## Safety Gates

@@ -96,6 +96,12 @@ runTest('runtime router registers version and diagnostics routes', () => {
   assert.ok(paths.includes('/catalog-integrity'), 'missing /api/runtime/catalog-integrity')
 })
 
+runTest('notifications router registers summary route', () => {
+  const router = require('../src/routes/notifications.ts')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/summary'), 'missing /api/notifications/summary')
+})
+
 runTest('system router registers Google Drive sync connect and disconnect routes', () => {
   const router = require('../src/routes/system')
   const paths = getRoutePaths(router)

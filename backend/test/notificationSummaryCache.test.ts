@@ -2,7 +2,7 @@
 
 const assert = require('assert')
 
-const notificationsRoute = require('../src/routes/notifications')
+const notificationsRoute = require('../src/routes/notifications.ts')
 
 const {
   NOTIFICATION_SUMMARY_CACHE_TTL_MS,
