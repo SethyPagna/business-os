@@ -6527,6 +6527,6 @@ Move 584 status:
   directly. Focused route-contract, unit route-load, backend utility, schema
   audit, stale-path, and Linux packaging proof passed. `pkg` continues to warn
   for direct `.ts` scripts, so larger backend route/service conversion still
-  waits for a compile/staging package lane. The current source extension count
-  is `.js: 49`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 314`, `.tsx: 107`
-  outside generated/runtime folders.
+  waits for a compile/staging package lane. The generated language audit now
+  reports `JavaScript: 38`, `TypeScript: 273`, and `React TSX: 107` across the
+  active scan roots.

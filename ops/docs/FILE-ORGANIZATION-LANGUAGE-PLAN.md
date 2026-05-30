@@ -4858,9 +4858,9 @@ Decision rule:
     route-load, backend utility, schema audit, stale-path, and Linux packaging
     proof passed. Packaging still warns for direct `.ts` entries in
     `pkg.scripts`, so larger backend route/service conversions remain blocked
-    on the future compile/staging lane. The current source extension count is
-    `.js: 49`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 314`, `.tsx: 107`
-    outside generated/runtime folders.
+    on the future compile/staging lane. The generated language audit now
+    reports `JavaScript: 38`, `TypeScript: 273`, and `React TSX: 107` across
+    the active scan roots.
 
 ## Safety Gates
 
