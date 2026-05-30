@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 566.
+- Latest completed implementation move in this roadmap: Move 567.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4762,7 +4762,7 @@ Move 421 status:
   ordering remain unchanged.
 
 Move 422 status:
-- Move 422 tightens CSV import parsing in `backend/src/importCsv.js`.
+- Move 422 tightens CSV import parsing in `backend/src/importCsv.ts`.
   Delimiter detection, header normalization, parsed row materialization,
   streaming header setup, row-content checks, and CSV value-to-row projection
   now use direct-loop helpers instead of `map()`/`filter()`/`forEach()` chains.
@@ -4919,7 +4919,7 @@ Move 438 status:
 
 Move 439 status:
 - Move 439 clears the remaining backend source callback-chain scan in
-  `backend/src/importCsv.js`, `backend/src/services/integrationDoctor.js`, and
+  `backend/src/importCsv.ts`, `backend/src/services/integrationDoctor.js`, and
   `backend/src/services/googleDriveSync/index.js`. CSV row-content checks,
   integration critical-check aggregation, and Google Drive canonical layout
   detection now use named direct-loop predicates. CSV parsing, Khmer text
@@ -6248,3 +6248,21 @@ Move 566 status:
   still waits for a compile/staging package lane. The current source extension
   count is `.js: 70`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 293`, `.tsx: 107`
   outside generated/runtime folders.
+
+Move 567 status:
+- Move 567 converts `backend/src/importCsv.ts` and
+  `backend/src/importParsing.ts` to package-safe TypeScript paths. The CSV
+  helper now carries JSDoc CSV option/row contracts for delimiter detection,
+  row parsing, streaming batch parsing, and key normalization, while the import
+  parsing helper carries number option contracts for localized numeric text and
+  money normalization. The duplicated `hasDelimitedRowContent` helper was
+  removed while preserving behavior. Import-job services, product import
+  policies, import CSV tests, import scale smoke tests, and the performance
+  verifier use explicit `.ts` paths. Focused import CSV, import-scale,
+  import-policy, import-decision, route-contract, performance verifier, and
+  full-automation checks passed, as did the full backend utility suite, schema
+  audit, and Linux packaging proof. `pkg` continues to warn for direct `.ts`
+  scripts, so larger backend
+  route/service conversion still waits for a compile/staging package lane. The
+  current source extension count is `.js: 68`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
+  `.ts: 295`, `.tsx: 107` outside generated/runtime folders.

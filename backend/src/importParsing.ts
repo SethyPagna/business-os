@@ -6,6 +6,10 @@ const KHMER_ZERO = 0x17E0
 const ARABIC_INDIC_ZERO = 0x0660
 const EXTENDED_ARABIC_INDIC_ZERO = 0x06F0
 
+/**
+ * @typedef {{ allowNegative?: boolean, field?: string, strict?: boolean }} ImportNumberOptions
+ */
+
 function normalizeDigit(char) {
   const code = char.charCodeAt(0)
   if (code >= KHMER_ZERO && code <= KHMER_ZERO + 9) return String(code - KHMER_ZERO)
@@ -14,6 +18,9 @@ function normalizeDigit(char) {
   return char
 }
 
+/**
+ * @param {unknown} value
+ */
 function normalizeNumericText(value) {
   return String(value ?? '')
     .replace(/[\u17E0-\u17E9\u0660-\u0669\u06F0-\u06F9]/g, normalizeDigit)
@@ -21,6 +28,9 @@ function normalizeNumericText(value) {
     .trim()
 }
 
+/**
+ * @param {unknown} value
+ */
 function removeCurrencyNoise(value) {
   return normalizeNumericText(value)
     .replace(/[\u17DB$€£¥₩฿]|(?:usd|khr|riel|reil|dollar|dollars)/gi, '')
@@ -28,6 +38,9 @@ function removeCurrencyNoise(value) {
     .trim()
 }
 
+/**
+ * @param {unknown} value
+ */
 function normalizeNumberSeparators(value) {
   let text = removeCurrencyNoise(value)
   if (!text) return ''
@@ -62,6 +75,11 @@ function normalizeNumberSeparators(value) {
   return `${negative ? '-' : ''}${normalized}`
 }
 
+/**
+ * @param {unknown} value
+ * @param {number} fallbackValue
+ * @param {ImportNumberOptions} options
+ */
 function parseImportNumericValue(value, fallbackValue = 0, { allowNegative = false, field = 'number', strict = false } = {}) {
   if (value === undefined || value === null || String(value).trim() === '') return fallbackValue
   const normalized = normalizeNumberSeparators(value)
@@ -77,6 +95,10 @@ function parseImportNumericValue(value, fallbackValue = 0, { allowNegative = fal
   return parsed
 }
 
+/**
+ * @param {unknown} value
+ * @param {number} fallbackValue
+ */
 function normalizeImportMoney(value, fallbackValue = 0) {
   return normalizePriceValue(parseImportNumericValue(value, fallbackValue))
 }

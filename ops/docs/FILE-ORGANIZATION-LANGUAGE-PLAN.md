@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 566 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 567 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 70`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 293`,
+  `.js: 68`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 295`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3292,7 +3292,7 @@ Decision rule:
     backend infrastructure utility cleanup only; no folder move, schema
     migration, or language conversion was needed.
 412. Tighten CSV import parsing loops. Done:
-    `backend/src/importCsv.js` now uses direct-loop helpers for delimiter
+    `backend/src/importCsv.ts` now uses direct-loop helpers for delimiter
     detection, header normalization, parsed row materialization, streaming
     header setup, row-content checks, and CSV value-to-row projection. BOM
     handling, delimiter priority, quote/CRLF parsing, Khmer text and digit
@@ -3432,7 +3432,7 @@ Decision rule:
     media/storage cleanup only; no folder move, schema migration, or language
     conversion was needed.
 429. Clear remaining backend source callback-chain scan. Done:
-    `backend/src/importCsv.js`, `backend/src/services/integrationDoctor.js`,
+    `backend/src/importCsv.ts`, `backend/src/services/integrationDoctor.js`,
     and `backend/src/services/googleDriveSync/index.js` now use named
     direct-loop predicates for CSV row-content checks, integration
     critical-check aggregation, and Google Drive canonical layout detection.
@@ -4598,6 +4598,23 @@ Decision rule:
     route/service conversions remain blocked on the future compile/staging
     lane. The current source extension count is `.js: 70`, `.jsx: 0`, `.mjs: 0`,
     `.cjs: 0`, `.ts: 293`, `.tsx: 107` outside generated/runtime folders.
+567. Convert backend import CSV and numeric parsing helpers to package-safe
+    TypeScript paths. Done: `backend/src/importCsv.ts` now owns delimiter
+    detection, row parsing, streaming batch parsing, and CSV key normalization
+    with JSDoc CSV option/row contracts, and `backend/src/importParsing.ts`
+    now owns localized numeric text and money import normalization with JSDoc
+    number option contracts. The duplicated `hasDelimitedRowContent` helper was
+    removed while preserving behavior. Import-job services, product import
+    policies, import CSV tests, import scale smoke tests, and the performance
+    verifier now target explicit `.ts` paths. Focused import CSV,
+    import-scale, import-policy, import-decision, route-contract, performance
+    verifier, and full-automation checks passed, as did the full backend utility
+    suite, schema audit, and Linux packaging proof. Packaging still warns for
+    direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service conversions remain blocked
+    on the future compile/staging lane. The current source extension count is
+    `.js: 68`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 295`, `.tsx: 107`
+    outside generated/runtime folders.
 
 ## Safety Gates
 

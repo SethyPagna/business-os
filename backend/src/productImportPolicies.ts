@@ -1,6 +1,6 @@
 'use strict'
 
-const { parseImportNumericValue } = require('./importParsing')
+const { parseImportNumericValue } = require('./importParsing.ts')
 
 /**
  * @typedef {'keep_existing' | 'use_imported' | 'merge_blank_only' | 'clear_value' | 'append_unique'} ImportFieldRule

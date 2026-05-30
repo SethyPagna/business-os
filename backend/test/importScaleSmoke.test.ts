@@ -4,8 +4,8 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { parseCsvRowBatchesFromFile } = require('../src/importCsv')
-const { normalizeImportMoney } = require('../src/importParsing')
+const { parseCsvRowBatchesFromFile } = require('../src/importCsv.ts')
+const { normalizeImportMoney } = require('../src/importParsing.ts')
 
 let failed = 0
 

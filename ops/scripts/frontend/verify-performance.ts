@@ -101,7 +101,7 @@ assert(apiMethods.includes("const settingsResponse = await apiFetch('GET', '/api
 assert(!apiMethods.includes("apiFetch('GET', '/api/settings/meta')"), 'Settings reads must not add a redundant /api/settings/meta waterfall.')
 assert(read(path.join(SRC_ROOT, 'utils', 'csv.ts')).includes('UTF8_BOM'), 'CSV downloads/templates must include UTF-8 BOM for Khmer Excel compatibility.')
 
-const backendImportCsv = read(path.join(PROJECT_ROOT, 'backend', 'src', 'importCsv.js'))
+const backendImportCsv = read(path.join(PROJECT_ROOT, 'backend', 'src', 'importCsv.ts'))
 const backendImportJobs = read(path.join(PROJECT_ROOT, 'backend', 'src', 'services', 'importJobs.js'))
 const backendPackage = read(path.join(PROJECT_ROOT, 'backend', 'package.json'))
 assert(backendImportCsv.includes('parseCsvRowBatchesFromFile'), 'Backend imports must expose a streaming CSV batch reader.')

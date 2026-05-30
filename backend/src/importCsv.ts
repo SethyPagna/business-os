@@ -6,10 +6,19 @@ const KHMER_ZERO = 0x17E0
 const ARABIC_INDIC_ZERO = 0x0660
 const EXTENDED_ARABIC_INDIC_ZERO = 0x06F0
 
+/**
+ * @typedef {{ delimiter?: string }} CsvParseOptions
+ * @typedef {{ delimiter?: string, batchSize?: string | number, highWaterMark?: number }} CsvBatchOptions
+ * @typedef {Record<string, unknown> & { _rowNumber?: number }} ParsedCsvRow
+ */
+
 function stripBom(value) {
   return String(value || '').replace(/^\uFEFF/, '')
 }
 
+/**
+ * @param {string} char
+ */
 function normalizeDigit(char) {
   const code = char.charCodeAt(0)
   if (code >= KHMER_ZERO && code <= KHMER_ZERO + 9) return String(code - KHMER_ZERO)
@@ -18,6 +27,9 @@ function normalizeDigit(char) {
   return char
 }
 
+/**
+ * @param {unknown} value
+ */
 function normalizeNumericText(value) {
   return String(value ?? '')
     .replace(/[\u17E0-\u17E9\u0660-\u0669\u06F0-\u06F9]/g, normalizeDigit)
@@ -25,6 +37,10 @@ function normalizeNumericText(value) {
     .trim()
 }
 
+/**
+ * @param {unknown} line
+ * @param {string} delimiter
+ */
 function countDelimiter(line, delimiter) {
   let count = 0
   let inQuotes = false
@@ -44,6 +60,9 @@ function countDelimiter(line, delimiter) {
   return count
 }
 
+/**
+ * @param {unknown} text
+ */
 function detectCsvDelimiter(text) {
   const firstLine = stripBom(text).split(/\r?\n/, 1)[0] || ''
   const delimiters = [',', '\t', ';']
@@ -59,6 +78,10 @@ function detectCsvDelimiter(text) {
   return bestDelimiter
 }
 
+/**
+ * @param {unknown} text
+ * @param {CsvParseOptions} options
+ */
 function parseDelimitedRows(text, { delimiter = detectCsvDelimiter(text) } = {}) {
   const source = stripBom(String(text || ''))
   const rows = []
@@ -104,13 +127,6 @@ function parseDelimitedRows(text, { delimiter = detectCsvDelimiter(text) } = {})
   return rows
 }
 
-function hasDelimitedRowContent(row = []) {
-  for (const value of row) {
-    if (String(value || '').trim() !== '') return true
-  }
-  return false
-}
-
 function normalizeCsvKey(value) {
   return stripBom(value)
     .trim()
@@ -119,6 +135,9 @@ function normalizeCsvKey(value) {
     .toLowerCase()
 }
 
+/**
+ * @param {unknown[]} values
+ */
 function normalizeCsvHeaders(values = []) {
   const headers = []
   for (const value of values || []) {
@@ -127,6 +146,9 @@ function normalizeCsvHeaders(values = []) {
   return headers
 }
 
+/**
+ * @param {unknown[]} values
+ */
 function hasDelimitedRowContent(values = []) {
   for (const value of values || []) {
     if (String(value || '').trim() !== '') return true
@@ -134,6 +156,9 @@ function hasDelimitedRowContent(values = []) {
   return false
 }
 
+/**
+ * @param {ParsedCsvRow} row
+ */
 function hasParsedCsvRowContent(row = {}) {
   for (const [key, value] of Object.entries(row || {})) {
     if (key !== '_rowNumber' && String(value || '').trim() !== '') return true
@@ -141,6 +166,9 @@ function hasParsedCsvRowContent(row = {}) {
   return false
 }
 
+/**
+ * @param {unknown[][]} rows
+ */
 function buildParsedCsvRows(rows = []) {
   const parsedRows = []
   const headers = normalizeCsvHeaders(rows[0] || [])
@@ -151,6 +179,10 @@ function buildParsedCsvRows(rows = []) {
   return parsedRows
 }
 
+/**
+ * @param {unknown} text
+ * @param {CsvParseOptions} options
+ */
 function parseCsvRows(text, options = {}) {
   const delimiter = options.delimiter || detectCsvDelimiter(text)
   const rows = parseDelimitedRows(text, { delimiter })
@@ -158,6 +190,9 @@ function parseCsvRows(text, options = {}) {
   return buildParsedCsvRows(rows)
 }
 
+/**
+ * @param {string} filePath
+ */
 async function detectCsvDelimiterFromFile(filePath) {
   const handle = await fs.promises.open(filePath, 'r')
   try {
@@ -169,6 +204,11 @@ async function detectCsvDelimiterFromFile(filePath) {
   }
 }
 
+/**
+ * @param {unknown[]} values
+ * @param {string[]} headers
+ * @param {number} rowNumber
+ */
 function csvValuesToRow(values, headers, rowNumber) {
   const row = { _rowNumber: rowNumber }
   for (let headerIndex = 0; headerIndex < headers.length; headerIndex += 1) {
@@ -180,10 +220,17 @@ function csvValuesToRow(values, headers, rowNumber) {
   return row
 }
 
+/**
+ * @param {unknown} values
+ */
 function hasCsvContent(values) {
   return Array.isArray(values) && hasDelimitedRowContent(values)
 }
 
+/**
+ * @param {string} filePath
+ * @param {CsvBatchOptions} options
+ */
 async function* parseCsvRowBatchesFromFile(filePath, options = {}) {
   const delimiter = options.delimiter || await detectCsvDelimiterFromFile(filePath)
   const batchSize = Math.max(1, Math.min(5000, Number(options.batchSize || 250)))
