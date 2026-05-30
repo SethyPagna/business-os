@@ -257,7 +257,7 @@ runTest('production routes do not bypass shared schema metadata cache', () => {
 runTest('activity routes include admin-only user filters for attribution review', () => {
   const fs = require('fs')
   const path = require('path')
-  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.js'), 'utf8')
+  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.ts'), 'utf8')
   const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
   const actionHistorySource = fs.readFileSync(path.join(__dirname, '../src/routes/actionHistory.ts'), 'utf8')
   assert.match(salesSource, /cashier_id\s*=\s*\?/)
@@ -281,7 +281,7 @@ runTest('upload serving is local-first with bounded object-store fallback', () =
 runTest('sales search uses joined customer membership data instead of a missing sales column', () => {
   const fs = require('fs')
   const path = require('path')
-  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.js'), 'utf8')
+  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.ts'), 'utf8')
   assert.match(salesSource, /MAX\(c\.membership_number\)\s+AS customer_membership_number/)
   assert.match(salesSource, /lower\(COALESCE\(c\.membership_number, ''\)\) LIKE \?/)
   assert.doesNotMatch(salesSource, /lower\(COALESCE\(s\.customer_membership_number, ''\)\) LIKE \?/)
@@ -290,7 +290,7 @@ runTest('sales search uses joined customer membership data instead of a missing 
 runTest('sales export product summary groups every selected product identity column', () => {
   const fs = require('fs')
   const path = require('path')
-  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.js'), 'utf8')
+  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.ts'), 'utf8')
   assert.match(salesSource, /SELECT si\.product_name,\s*si\.product_id,[\s\S]*GROUP BY si\.product_name,\s*si\.product_id ORDER BY revenue_usd DESC/)
   assert.doesNotMatch(salesSource, /SELECT si\.product_name,\s*si\.product_id,[\s\S]*GROUP BY si\.product_name ORDER BY revenue_usd DESC/)
 })

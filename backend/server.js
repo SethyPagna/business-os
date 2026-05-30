@@ -387,7 +387,7 @@ function mountApiRoutes(target) {
   target.use('/api/runtime', require('./src/routes/runtime.ts'))
   target.use('/api/inventory', require('./src/routes/inventory'))
   target.use('/api/sync', require('./src/routes/sync.ts'))
-  target.use('/api', require('./src/routes/sales'))
+  target.use('/api', require('./src/routes/sales.ts'))
   target.use('/api', require('./src/routes/contacts.ts'))
   target.use('/api', require('./src/routes/users.ts'))
   target.use('/api/custom-tables', require('./src/routes/customTables.ts'))

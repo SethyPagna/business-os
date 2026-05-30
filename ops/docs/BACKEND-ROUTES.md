@@ -126,7 +126,7 @@ File: `backend/src/routes/inventory.js`
 ## Sales + Dashboard + Analytics
 
 Base: `/api`  
-File: `backend/src/routes/sales.js`
+File: `backend/src/routes/sales.ts`
 
 - `POST /sales`
 - `PATCH /sales/:id/status`

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 617.
+- Latest completed implementation move in this roadmap: Move 618.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2478,7 +2478,7 @@ Cleanup checkpoint:
   is now a direct map lookup instead of a repeated active-product scan, keeping
   the same name-based behavior while improving large image-import batches.
 - Move 177 reuses sale creation movement statements:
-  `backend/src/routes/sales.js` now prepares the inventory-movement insert and
+  `backend/src/routes/sales.ts` now prepares the inventory-movement insert and
   optional imported timestamp update once per sale creation transaction instead
   of inside each sold-item allocation block. Batch allocation, stock movement,
   audit, and imported timestamp behavior stay unchanged while per-item SQL
@@ -4072,7 +4072,7 @@ Move 364 status:
 - Move 364 closes the simple product import-signature projection cleanup and
   starts the backend sales checkout hot-path cleanup. `backend/src/routes/products.js`
   now builds import-detail signature parts with a direct loop, and
-  `backend/src/routes/sales.js` now builds active-branch context, normalizes
+  `backend/src/routes/sales.ts` now builds active-branch context, normalizes
   sale items, summarizes sale branches, dedupes checkout product IDs, maps
   product metadata, migrates product batches, and writes sale batch
   allocations/movements with direct loops. Import signature behavior, checkout
@@ -4084,7 +4084,7 @@ Move 364 status:
 
 Move 365 status:
 - Move 365 continues the backend sales hot-path cleanup in
-  `backend/src/routes/sales.js`. Sale status transition stock deduction and
+  `backend/src/routes/sales.ts`. Sale status transition stock deduction and
   restoration now write batch allocations and inventory movements with direct
   loops, and `/api/sales` search token parsing plus response payload assembly
   now avoid callback chains. Status transition rules, stock availability
@@ -4096,7 +4096,7 @@ Move 365 status:
 
 Move 366 status:
 - Move 366 tightens the backend sales export/report path in
-  `backend/src/routes/sales.js`. Export row hydration, item COGS calculation,
+  `backend/src/routes/sales.ts`. Export row hydration, item COGS calculation,
   completed-sale accounting totals, sales-detail payload construction, CSV row
   generation, and CSV summary line construction now use direct loops instead
   of repeated `map()`, `filter()`, and `reduce()` passes. Export period logic,
@@ -4671,14 +4671,14 @@ Move 413 status:
 
 Move 414 status:
 - Move 414 tightens sale stock availability sampling in
-  `backend/src/routes/sales.js`. The insufficient-stock error path now uses
+  `backend/src/routes/sales.ts`. The insufficient-stock error path now uses
   `findSaleItemForProduct()` instead of an inline `find()` callback when
   choosing the product name to display in validation errors. Required quantity
   aggregation, branch scoping, available-stock checks, error wording,
   product-name fallback, stock deduction, and sales route contracts remain
   unchanged. A callback-chain scan now reports no `map()`, `filter()`,
   `forEach()`, `reduce()`, `find()`, or `Array.from()` hits in
-  `backend/src/routes/sales.js`.
+  `backend/src/routes/sales.ts`.
 
 Move 415 status:
 - Move 415 tightens contact import, search, scoped-ID, and point-summary
@@ -7034,3 +7034,22 @@ Move 617 status:
   compile/staging package lane. The expected generated language audit now
   reports `JavaScript: 5`, `TypeScript: 306`, and `React TSX: 107` across the
   active scan roots.
+
+Move 618 status:
+- Move 618 converts `backend/src/routes/sales.ts` to a package-safe TypeScript
+  path. Sale creation, POS idempotency, stock availability checks, batch
+  allocation persistence, status transition stock restoration/deduction,
+  customer assignment, dashboard summary and analytics caching,
+  product/customer/branch export hydration, COGS calculation, and
+  action-history/audit broadcasts remain unchanged on the existing CommonJS
+  route style. Server mounting, route contracts, product expiry checks, product
+  batch hierarchy checks, portal regression checks, frontend action-stability
+  checks, backend route docs, master plan, language-runtime audit metadata, and
+  roadmap docs now point at the explicit `.ts` route path. Focused sales route
+  load, route-contract, product expiry, product batch, portal regression,
+  frontend action-stability, backend utility, schema audit, stale-path, and
+  Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The expected generated language audit now reports
+  `JavaScript: 4`, `TypeScript: 307`, and `React TSX: 107` across the active
+  scan roots.

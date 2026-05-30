@@ -33,7 +33,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 await runTest('POS checkout keeps client, API, and backend duplicate guards', () => {
   const pos = readFrontend('src/components/pos/POS.tsx')
   const methods = readFrontend('src/api/methods.ts')
-  const salesRoute = readRepo('backend/src/routes/sales.js')
+  const salesRoute = readRepo('backend/src/routes/sales.ts')
 
   assert.match(pos, /if \(loading \|\| checkoutInFlightRef\.current\) return/)
   assert.match(pos, /checkoutInFlightRef\.current = true[\s\S]*setLoading\(true\)/)
