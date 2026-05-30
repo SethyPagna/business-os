@@ -847,7 +847,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `DualMoney.tsx` | UI component/page |
-| 2 | `Inventory.jsx` | UI component/page |
+| 2 | `Inventory.tsx` | UI component/page |
 | 3 | `InventoryImportModal.tsx` | UI component/page |
 | 4 | `inventoryImportWorker.ts` | UI component/page |
 | 5 | `InventoryMovementsSurface.tsx` | UI component/page |

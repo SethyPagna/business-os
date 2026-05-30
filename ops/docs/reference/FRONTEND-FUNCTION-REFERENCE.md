@@ -58,7 +58,7 @@ Total files documented: **193**
 | 46 | `frontend/src/components/files/FilesProvidersTab.tsx` | 2 |
 | 47 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
 | 48 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
-| 49 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
+| 49 | `frontend/src/components/inventory/Inventory.tsx` | 23 |
 | 50 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
 | 51 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
 | 52 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
@@ -1136,37 +1136,33 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `DualMoney` | component/function | 8 |
 
-### 3.49 `frontend/src/components/inventory/Inventory.jsx`
+### 3.49 `frontend/src/components/inventory/Inventory.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `reuseSetWhenUnchanged` | function | 52 |
-| 2 | `normalizeFiniteIdsFrom` | function | 61 |
-| 3 | `normalizeFiniteIds` | function | 69 |
-| 4 | `countActiveFlags` | function | 73 |
-| 5 | `countSelectedIds` | function | 81 |
-| 6 | `renderDestinationProductOptions` | function | 89 |
-| 7 | `limitInventorySectionsForMobile` | function | 100 |
-| 8 | `priceCsv` | function | 127 |
-| 9 | `parseInventoryTimestamp` | function | 131 |
-| 10 | `InventoryDiscountBadge` | function | 145 |
-| 11 | `InventoryBatchPreview` | function | 156 |
-| 12 | `label` | const arrow | 158 |
-| 13 | `loadInventoryExportTools` | function | 213 |
-| 14 | `Inventory` | component/function | 228 |
-| 15 | `promise` | const arrow | 471 |
-| 16 | `handleAdjust` | const arrow | 836 |
-| 17 | `openAdjust` | const arrow | 917 |
-| 18 | `openMove` | const arrow | 924 |
-| 19 | `openTransfer` | const arrow | 947 |
-| 20 | `handleMoveStock` | const arrow | 1002 |
-| 21 | `handleTransferStock` | const arrow | 1075 |
-| 22 | `matchesSearch` | const arrow | 1166 |
-| 23 | `productHay` | const arrow | 1173 |
-| 24 | `movHay` | const arrow | 1176 |
-| 25 | `syncViewport` | const arrow | 1232 |
-| 26 | `statsValue` | const arrow | 1851 |
-| 27 | `selectInventorySection` | const arrow | 3072 |
+| 1 | `getInventoryApi` | function | 180 |
+| 2 | `normalizeFiniteIds` | function | 214 |
+| 3 | `countActiveFlags` | function | 218 |
+| 4 | `countSelectedIds` | function | 226 |
+| 5 | `renderDestinationProductOptions` | function | 234 |
+| 6 | `limitInventorySectionsForMobile` | function | 245 |
+| 7 | `priceCsv` | function | 272 |
+| 8 | `parseInventoryTimestamp` | function | 276 |
+| 9 | `InventoryDiscountBadge` | function | 290 |
+| 10 | `InventoryBatchPreview` | function | 301 |
+| 11 | `label` | const arrow | 313 |
+| 12 | `loadInventoryExportTools` | function | 368 |
+| 13 | `Inventory` | component/function | 383 |
+| 14 | `promise` | const arrow | 626 |
+| 15 | `handleAdjust` | const arrow | 992 |
+| 16 | `openAdjust` | const arrow | 1074 |
+| 17 | `openMove` | const arrow | 1081 |
+| 18 | `openTransfer` | const arrow | 1104 |
+| 19 | `handleMoveStock` | const arrow | 1159 |
+| 20 | `handleTransferStock` | const arrow | 1232 |
+| 21 | `syncViewport` | const arrow | 1389 |
+| 22 | `statsValue` | const arrow | 2008 |
+| 23 | `selectInventorySection` | const arrow | 3231 |
 
 ### 3.50 `frontend/src/components/inventory/InventoryImportModal.tsx`
 

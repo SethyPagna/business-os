@@ -438,7 +438,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   is unused.
 - Move 150 converts the inventory movement group helper to TypeScript while
   preserving the old `.js` wrapper. Cleanup must keep `movementGroups.js` until
-  `Inventory.jsx` and focused movement-group tests intentionally move to a new
+  `Inventory.tsx` and focused movement-group tests intentionally move to a new
   public boundary or the wrapper audit proves it is unused.
 - Move 151 converts the POS core helper to TypeScript while preserving the old
   `.mjs` wrapper. Cleanup must keep `posCore.mjs` until `POS.tsx` and focused

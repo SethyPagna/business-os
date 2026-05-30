@@ -201,7 +201,7 @@ Code files scanned: **466**
 | 189 | `frontend/src/components/files/FilesProvidersTab.tsx` | 2 |
 | 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
 | 191 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
-| 192 | `frontend/src/components/inventory/Inventory.jsx` | 27 |
+| 192 | `frontend/src/components/inventory/Inventory.tsx` | 27 |
 | 193 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
 | 194 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
 | 195 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
@@ -3915,7 +3915,7 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `DualMoney` | export default function | 8 |
 
-### 3.192 `frontend/src/components/inventory/Inventory.jsx`
+### 3.192 `frontend/src/components/inventory/Inventory.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 529.
+- Latest completed implementation move in this roadmap: Move 551.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -992,7 +992,7 @@ Current checkpoint:
   at `ops/docs/reference/ORGANIZATION-AUDIT.md`. Latest organization audit
   scanned 345 files across `frontend/src`, `backend/src`, `ops/scripts`, and
   `ops/docs`; it found 57 files above 700 lines and identifies
-  `frontend/src/components/inventory/Inventory.jsx`,
+  `frontend/src/components/inventory/Inventory.tsx`,
   `backend/src/services/importJobs.js`, `frontend/src/components/catalog/CatalogPage.tsx`,
   `frontend/src/components/products/Products.tsx`, and `frontend/src/api/methods.js`
   as high-value split candidates.
@@ -3404,7 +3404,7 @@ Cleanup checkpoint:
   product and branch array scans from the active checkout path while preserving
   cart-line identity, stock validation, and branch-aware error copy.
 - Move 308 indexes inventory branch labels and product summary lookups:
-  `Inventory.jsx` now builds `branchesById`, `summaryById`, and `getBranchLabel`
+  `Inventory.tsx` now builds `branchesById`, `summaryById`, and `getBranchLabel`
   once from loaded data. RFID status labels, export metadata, branch comparison
   rows, adjustment target snapshots, adjustment header quantities, and movement
   product detail opening now use indexed lookups instead of repeated branch or
@@ -3419,7 +3419,7 @@ Cleanup checkpoint:
   still comparing stable runtime-version guardrail source wiring across repeat
   cycles.
 - Move 310 indexes inventory transfer branch defaults:
-  `Inventory.jsx` now precomputes `defaultTransferDestinationBySourceId` once
+  `Inventory.tsx` now precomputes `defaultTransferDestinationBySourceId` once
   per branch list and validates transfer source/destination ids through
   `branchesById`. Single transfer and batch-transfer draft creation no longer
   repeat branch-list scans for each opened product or selected row.
@@ -3429,12 +3429,12 @@ Cleanup checkpoint:
   refunds, restock count, and item quantities without repeated `filter()` and
   `reduce()` passes over the same response.
 - Move 312 indexes inventory adjustment branch stock per submit:
-  `Inventory.jsx` now builds `selectedBranchStockById` once for the selected
+  `Inventory.tsx` now builds `selectedBranchStockById` once for the selected
   adjustment product and reuses the resolved branch-stock row for undo quantity
   capture and remove-stock validation. This avoids duplicate branch-stock scans
   in adjustment writes while preserving the same undo/redo behavior.
 - Move 313 makes Inventory visible stats single-pass:
-  `Inventory.jsx` now builds one memoized `visibleInventoryStats` accumulator
+  `Inventory.tsx` now builds one memoized `visibleInventoryStats` accumulator
   across `filteredSummary` and reuses it for visible stock value, low/out/in
   stock counts, net sold, revenue, COGS, and discount fallbacks. This removes
   repeated visible-product `filter()` / `reduce()` passes from the stat-card
@@ -3458,23 +3458,23 @@ Cleanup checkpoint:
   review surface no longer filters the same conflict list separately for each
   badge count, and `productImportPlanner.test.ts` guards the single-pass shape.
 - Move 317 precomputes Inventory visible product IDs:
-  `frontend/src/components/inventory/Inventory.jsx` now builds one memoized
+  `frontend/src/components/inventory/Inventory.tsx` now builds one memoized
   `visibleInventoryProductIds` list from `visibleInventoryProducts` and reuses
   it for selection cleanup, select-all, and the visible-list signature. This
   trims repeated `map().filter()` passes in the Inventory product-selection
   workflow while preserving the existing React/JavaScript surface.
 - Move 318 centralizes Inventory selection-scope ID normalization:
-  `frontend/src/components/inventory/Inventory.jsx` now uses one
+  `frontend/src/components/inventory/Inventory.tsx` now uses one
   `normalizeFiniteIds()` helper for section/group selection checks and toggles.
   This keeps scope checkbox reads and writes on the same single-pass numeric-ID
   path instead of repeating `ids.map(...).filter(...)` in each handler.
 - Move 319 removes Inventory active-filter count allocations:
-  `frontend/src/components/inventory/Inventory.jsx` now uses one
+  `frontend/src/components/inventory/Inventory.tsx` now uses one
   `countActiveFlags()` helper for RFID, movement, and product filter badge
   counts. This replaces small `[].filter(Boolean).length` allocations in the
   filter render path with a direct counter loop.
 - Move 320 reuses Inventory selection helpers for partial counts and retries:
-  `frontend/src/components/inventory/Inventory.jsx` now shares
+  `frontend/src/components/inventory/Inventory.tsx` now shares
   `normalizeFiniteIdsFrom()` and `countSelectedIds()` across selection-scope
   checks, toggles, and batch failure recovery. This removes the remaining
   filtered selected-ID allocation and one-off failed-item ID normalization path.
@@ -3536,7 +3536,7 @@ Safety gates:
 
 Move 321 status:
 - Move 321 removes Inventory destination-selector filter allocations:
-  `frontend/src/components/inventory/Inventory.jsx` now shares
+  `frontend/src/components/inventory/Inventory.tsx` now shares
   `renderDestinationProductOptions()` for the single move modal and batch move
   lines. The helper skips the current product inline while mapping options, so
   large destination lists avoid allocating `summary.filter(...).map(...)`
@@ -6008,4 +6008,20 @@ Move 550 status:
   actions unchanged while replacing direct catalog `window.api` calls with
   `getCatalogApi()`. The current source extension count is `.js: 95`,
   `.jsx: 1`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 106` outside
+  generated/runtime folders.
+
+Move 551 status:
+- Move 551 converts the inventory page shell to
+  `frontend/src/components/inventory/Inventory.tsx`. The typed boundary now
+  covers inventory products, branch rows, movement rows, saved reasons, stat
+  details, batch stock sessions, filter state, RFID status reads, app/sync
+  context access, and the local inventory API gateway for bounded stats,
+  product, movement, branch, RFID, detail, and stock-mutation calls. The move
+  keeps the extensionless app lazy import, inventory surface imports, product
+  and movement selection helpers, RFID and import flows, undo/redo stock
+  history, loader timeout contracts, same-tick stock mutation guards, and
+  source-inspection tests unchanged while replacing direct inventory
+  `window.api` calls with `getInventoryApi()`. This completes the frontend
+  JSX-to-TSX source lane: the current source extension count is `.js: 95`,
+  `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 107` outside
   generated/runtime folders.

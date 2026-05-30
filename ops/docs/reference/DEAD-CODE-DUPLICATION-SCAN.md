@@ -465,7 +465,7 @@ Move 150 converts the inventory movement group helper to TypeScript while
 preserving `movementGroups.js` as an intentional compatibility wrapper.
 Timestamp normalization, movement grouping, transfer display totals,
 pagination, and search haystacks stay centralized instead of duplicating
-movement aggregation logic inside `Inventory.jsx`.
+movement aggregation logic inside `Inventory.tsx`.
 
 Move 151 converts the POS core helper to TypeScript while preserving
 `posCore.mjs` as an intentional compatibility wrapper. Product grouping,
@@ -479,7 +479,7 @@ matching stay centralized instead of duplicating checkout logic inside
 | --- | --- | --- |
 | `ops/scripts/runtime` | Many audit/check scripts with overlapping setup/report behavior. | Shared helper extraction or folder move plus `rg` old-path scan and live-check pass. |
 | `ops/scripts/powershell` | Runtime/release orchestration overlaps in setup/start/release flows. | Preserve `run` wrappers; verify `run\verify-local.bat` and Docker doctor paths. |
-| `frontend/src/components/inventory/Inventory.jsx` | Large component and likely repeated transforms. | Helper extraction tests and Inventory Playwright checks. |
+| `frontend/src/components/inventory/Inventory.tsx` | Large component and likely repeated transforms. | Helper extraction tests and Inventory Playwright checks. |
 | `backend/src/services/importJobs.js` | Large import pipeline with queue, CSV, image, and policy branches. | Import tests plus live import smoke. |
 | `frontend/src/components/catalog/CatalogPage.tsx` | Large mixed admin/public/editor surface. | Catalog helper tests plus public portal check. |
 | `frontend/src/api/methods.js` | Large API method registry. | API contract/source tests and app bootstrap check. |

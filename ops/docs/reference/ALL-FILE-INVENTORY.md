@@ -224,7 +224,7 @@ Total files documented: **529**
 | 212 | `frontend/src/components/files/FilesProvidersTab.tsx` | frontend-ui | 335 | 19.5 | UI component/page |
 | 213 | `frontend/src/components/files/FilesResponsesTab.tsx` | frontend-ui | 197 | 11.0 | UI component/page |
 | 214 | `frontend/src/components/inventory/DualMoney.tsx` | frontend-ui | 16 | 0.4 | UI component/page |
-| 215 | `frontend/src/components/inventory/Inventory.jsx` | frontend-ui | 4123 | 208.9 | UI component/page |
+| 215 | `frontend/src/components/inventory/Inventory.tsx` | frontend-ui | 4123 | 208.9 | UI component/page |
 | 216 | `frontend/src/components/inventory/InventoryImportModal.tsx` | frontend-ui | 299 | 13.0 | UI component/page |
 | 217 | `frontend/src/components/inventory/inventoryImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 218 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | frontend-ui | 674 | 38.5 | UI component/page |

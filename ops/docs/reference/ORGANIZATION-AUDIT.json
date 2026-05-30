@@ -184,7 +184,7 @@
     "frontend/src/components/custom-tables/CustomTables.tsx",
     "frontend/src/components/dashboard/Dashboard.tsx",
     "frontend/src/components/files/FilesPage.tsx",
-    "frontend/src/components/inventory/Inventory.jsx",
+    "frontend/src/components/inventory/Inventory.tsx",
     "frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx",
     "frontend/src/components/pos/POS.tsx",
     "frontend/src/components/products/Products.tsx",

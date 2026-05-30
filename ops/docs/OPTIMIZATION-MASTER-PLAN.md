@@ -87,7 +87,7 @@ Status target: `in progress`
 
 Priority surfaces:
 
-- `Inventory.jsx`
+- `Inventory.tsx`
 - `Products.tsx`
 - `POS.tsx`
 - `Dashboard.tsx`
