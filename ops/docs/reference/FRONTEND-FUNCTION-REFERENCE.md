@@ -150,7 +150,7 @@ Total files documented: **193**
 | 138 | `frontend/src/components/users/UserProfileModal.tsx` | 14 |
 | 139 | `frontend/src/components/users/Users.tsx` | 18 |
 | 140 | `frontend/src/components/utils-settings/AuditLog.tsx` | 18 |
-| 141 | `frontend/src/components/utils-settings/Backup.jsx` | 30 |
+| 141 | `frontend/src/components/utils-settings/Backup.tsx` | 34 |
 | 142 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
 | 143 | `frontend/src/components/utils-settings/index.ts` | 0 |
 | 144 | `frontend/src/components/utils-settings/OtpModal.tsx` | 4 |
@@ -2150,40 +2150,44 @@ Total files documented: **193**
 | 17 | `AuditLog` | component/function | 274 |
 | 18 | `sessionEntryLabel` | function | 668 |
 
-### 3.141 `frontend/src/components/utils-settings/Backup.jsx`
+### 3.141 `frontend/src/components/utils-settings/Backup.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `PathActionButton` | function | 79 |
-| 2 | `PrimaryActionButton` | function | 91 |
-| 3 | `formatElapsed` | function | 103 |
-| 4 | `JobProgressCard` | function | 112 |
-| 5 | `DoctorStatusPill` | function | 172 |
-| 6 | `IntegrationDoctorCard` | function | 196 |
-| 7 | `useCopy` | function | 302 |
-| 8 | `formatDateTime` | function | 318 |
-| 9 | `formatBytes` | function | 333 |
-| 10 | `yieldToBrowser` | function | 342 |
-| 11 | `getJobSignature` | function | 350 |
-| 12 | `startJobWatcher` | function | 369 |
-| 13 | `stop` | const arrow | 385 |
-| 14 | `scheduleTick` | const arrow | 391 |
-| 15 | `tick` | const arrow | 397 |
-| 16 | `SectionChip` | function | 454 |
-| 17 | `secondsToSyncMinutes` | function | 476 |
-| 18 | `minutesToSyncSeconds` | function | 485 |
-| 19 | `GoogleDriveSyncSection` | function | 493 |
-| 20 | `handler` | const arrow | 615 |
-| 21 | `savePreferences` | const arrow | 700 |
-| 22 | `connectGoogleDrive` | const arrow | 730 |
-| 23 | `syncNow` | const arrow | 775 |
-| 24 | `disconnect` | const arrow | 812 |
-| 25 | `forgetCredentials` | const arrow | 837 |
-| 26 | `BackupOverview` | function | 1067 |
-| 27 | `Backup` | component/function | 1134 |
-| 28 | `showBackupSection` | const arrow | 1149 |
-| 29 | `handleFolderExport` | const arrow | 1172 |
-| 30 | `handleFolderImport` | const arrow | 1241 |
+| 1 | `getBackupApi` | function | 228 |
+| 2 | `getErrorMessage` | function | 232 |
+| 3 | `unwrapJob` | function | 236 |
+| 4 | `isBackupSectionId` | function | 263 |
+| 5 | `PathActionButton` | function | 312 |
+| 6 | `PrimaryActionButton` | function | 324 |
+| 7 | `formatElapsed` | function | 336 |
+| 8 | `JobProgressCard` | function | 345 |
+| 9 | `DoctorStatusPill` | function | 405 |
+| 10 | `IntegrationDoctorCard` | function | 429 |
+| 11 | `useCopy` | function | 535 |
+| 12 | `formatDateTime` | function | 551 |
+| 13 | `formatBytes` | function | 567 |
+| 14 | `yieldToBrowser` | function | 576 |
+| 15 | `getJobSignature` | function | 584 |
+| 16 | `startJobWatcher` | function | 603 |
+| 17 | `stop` | const arrow | 619 |
+| 18 | `scheduleTick` | const arrow | 625 |
+| 19 | `tick` | const arrow | 631 |
+| 20 | `SectionChip` | function | 688 |
+| 21 | `secondsToSyncMinutes` | function | 710 |
+| 22 | `minutesToSyncSeconds` | function | 719 |
+| 23 | `GoogleDriveSyncSection` | function | 727 |
+| 24 | `handler` | const arrow | 849 |
+| 25 | `savePreferences` | const arrow | 934 |
+| 26 | `connectGoogleDrive` | const arrow | 964 |
+| 27 | `syncNow` | const arrow | 1009 |
+| 28 | `disconnect` | const arrow | 1046 |
+| 29 | `forgetCredentials` | const arrow | 1071 |
+| 30 | `BackupOverview` | function | 1301 |
+| 31 | `Backup` | component/function | 1373 |
+| 32 | `showBackupSection` | const arrow | 1388 |
+| 33 | `handleFolderExport` | const arrow | 1414 |
+| 34 | `handleFolderImport` | const arrow | 1483 |
 
 ### 3.142 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
 

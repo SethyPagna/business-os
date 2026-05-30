@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T01:50:23.296Z",
+  "generatedAt": "2026-05-30T02:14:43.024Z",
   "report": "ops/docs/reference/PHASE29-AUDIT.md",
   "summary": "ops/docs/reference/PHASE29-AUDIT.json",
   "policy": "ops/automation/business-os-automation.json",
@@ -14,83 +14,83 @@
   "failures": 0,
   "failedChecks": [],
   "durationSummary": {
-    "totalMs": 5431,
+    "totalMs": 5562,
     "byCheck": [
       {
         "label": "Generated bulk audit",
         "runs": 3,
-        "totalMs": 2460,
-        "maxMs": 842,
-        "averageMs": 820
+        "totalMs": 2518,
+        "maxMs": 866,
+        "averageMs": 839
       },
       {
         "label": "Organization audit",
         "runs": 3,
-        "totalMs": 797,
-        "maxMs": 275,
-        "averageMs": 266
+        "totalMs": 803,
+        "maxMs": 279,
+        "averageMs": 268
       },
       {
         "label": "Language/runtime audit",
         "runs": 3,
-        "totalMs": 607,
-        "maxMs": 214,
+        "totalMs": 605,
+        "maxMs": 219,
         "averageMs": 202
       },
       {
         "label": "Performance/code-flow scan",
         "runs": 3,
-        "totalMs": 453,
-        "maxMs": 158,
-        "averageMs": 151
+        "totalMs": 513,
+        "maxMs": 179,
+        "averageMs": 171
       },
       {
         "label": "Schema audit",
         "runs": 3,
-        "totalMs": 381,
-        "maxMs": 139,
+        "totalMs": 380,
+        "maxMs": 133,
         "averageMs": 127
       },
       {
         "label": "Runtime dependency guardrail",
         "runs": 3,
-        "totalMs": 371,
-        "maxMs": 138,
-        "averageMs": 124
+        "totalMs": 374,
+        "maxMs": 135,
+        "averageMs": 125
       },
       {
         "label": "Docker release guardrail",
         "runs": 3,
-        "totalMs": 362,
-        "maxMs": 126,
-        "averageMs": 121
+        "totalMs": 369,
+        "maxMs": 129,
+        "averageMs": 123
       }
     ],
     "slowestRuns": [
       {
         "cycle": 1,
         "label": "Generated bulk audit",
-        "durationMs": 842
-      },
-      {
-        "cycle": 3,
-        "label": "Generated bulk audit",
-        "durationMs": 821
+        "durationMs": 866
       },
       {
         "cycle": 2,
         "label": "Generated bulk audit",
-        "durationMs": 797
+        "durationMs": 850
+      },
+      {
+        "cycle": 3,
+        "label": "Generated bulk audit",
+        "durationMs": 802
       },
       {
         "cycle": 3,
         "label": "Organization audit",
-        "durationMs": 275
+        "durationMs": 279
       },
       {
-        "cycle": 1,
+        "cycle": 2,
         "label": "Organization audit",
-        "durationMs": 268
+        "durationMs": 267
       }
     ]
   },
@@ -105,15 +105,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 540023767
+            "value": 540024068
           },
           {
             "cycle": 2,
-            "value": 540023767
+            "value": 540024068
           },
           {
             "cycle": 3,
-            "value": 540023767
+            "value": 540024068
           }
         ]
       },
@@ -124,15 +124,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 215889927
+            "value": 215890046
           },
           {
             "cycle": 2,
-            "value": 215889927
+            "value": 215890046
           },
           {
             "cycle": 3,
-            "value": 215889927
+            "value": 215890046
           }
         ]
       },
@@ -143,15 +143,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 324133840
+            "value": 324134022
           },
           {
             "cycle": 2,
-            "value": 324133840
+            "value": 324134022
           },
           {
             "cycle": 3,
-            "value": 324133840
+            "value": 324134022
           }
         ]
       },
@@ -200,15 +200,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 524527211
+            "value": 524527512
           },
           {
             "cycle": 2,
-            "value": 524527211
+            "value": 524527512
           },
           {
             "cycle": 3,
-            "value": 524527211
+            "value": 524527512
           }
         ]
       },
@@ -219,15 +219,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 200393371
+            "value": 200393490
           },
           {
             "cycle": 2,
-            "value": 200393371
+            "value": 200393490
           },
           {
             "cycle": 3,
-            "value": 200393371
+            "value": 200393490
           }
         ]
       },
@@ -238,15 +238,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 324133840
+            "value": 324134022
           },
           {
             "cycle": 2,
-            "value": 324133840
+            "value": 324134022
           },
           {
             "cycle": 3,
-            "value": 324133840
+            "value": 324134022
           }
         ]
       },
@@ -257,15 +257,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[{\"path\":\"business-os-data\",\"bytes\":163307370,\"files\":52,\"folders\":35,\"category\":\"business data\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime\",\"bytes\":37086001,\"files\":415,\"folders\":57,\"category\":\"runtime state\",\"disposition\":\"retention\"},{\"path\":\"business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads\",\"bytes\":15495843,\"files\":12,\"folders\":1,\"category\":\"business uploads\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime/secrets\",\"bytes\":713,\"files\":4,\"folders\":1,\"category\":\"secrets\",\"disposition\":\"preserve\"}]"
+            "value": "[{\"path\":\"business-os-data\",\"bytes\":163307370,\"files\":52,\"folders\":35,\"category\":\"business data\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime\",\"bytes\":37086120,\"files\":415,\"folders\":57,\"category\":\"runtime state\",\"disposition\":\"retention\"},{\"path\":\"business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads\",\"bytes\":15495843,\"files\":12,\"folders\":1,\"category\":\"business uploads\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime/secrets\",\"bytes\":713,\"files\":4,\"folders\":1,\"category\":\"secrets\",\"disposition\":\"preserve\"}]"
           },
           {
             "cycle": 2,
-            "value": "[{\"path\":\"business-os-data\",\"bytes\":163307370,\"files\":52,\"folders\":35,\"category\":\"business data\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime\",\"bytes\":37086001,\"files\":415,\"folders\":57,\"category\":\"runtime state\",\"disposition\":\"retention\"},{\"path\":\"business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads\",\"bytes\":15495843,\"files\":12,\"folders\":1,\"category\":\"business uploads\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime/secrets\",\"bytes\":713,\"files\":4,\"folders\":1,\"category\":\"secrets\",\"disposition\":\"preserve\"}]"
+            "value": "[{\"path\":\"business-os-data\",\"bytes\":163307370,\"files\":52,\"folders\":35,\"category\":\"business data\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime\",\"bytes\":37086120,\"files\":415,\"folders\":57,\"category\":\"runtime state\",\"disposition\":\"retention\"},{\"path\":\"business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads\",\"bytes\":15495843,\"files\":12,\"folders\":1,\"category\":\"business uploads\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime/secrets\",\"bytes\":713,\"files\":4,\"folders\":1,\"category\":\"secrets\",\"disposition\":\"preserve\"}]"
           },
           {
             "cycle": 3,
-            "value": "[{\"path\":\"business-os-data\",\"bytes\":163307370,\"files\":52,\"folders\":35,\"category\":\"business data\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime\",\"bytes\":37086001,\"files\":415,\"folders\":57,\"category\":\"runtime state\",\"disposition\":\"retention\"},{\"path\":\"business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads\",\"bytes\":15495843,\"files\":12,\"folders\":1,\"category\":\"business uploads\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime/secrets\",\"bytes\":713,\"files\":4,\"folders\":1,\"category\":\"secrets\",\"disposition\":\"preserve\"}]"
+            "value": "[{\"path\":\"business-os-data\",\"bytes\":163307370,\"files\":52,\"folders\":35,\"category\":\"business data\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime\",\"bytes\":37086120,\"files\":415,\"folders\":57,\"category\":\"runtime state\",\"disposition\":\"retention\"},{\"path\":\"business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads\",\"bytes\":15495843,\"files\":12,\"folders\":1,\"category\":\"business uploads\",\"disposition\":\"preserve\"},{\"path\":\"ops/runtime/secrets\",\"bytes\":713,\"files\":4,\"folders\":1,\"category\":\"secrets\",\"disposition\":\"preserve\"}]"
           }
         ]
       },
@@ -276,15 +276,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":158132222,\"files\":11264,\"folders\":986,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31633848,\"files\":120,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
+            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":158132222,\"files\":11264,\"folders\":986,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31634030,\"files\":120,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
           },
           {
             "cycle": 2,
-            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":158132222,\"files\":11264,\"folders\":986,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31633848,\"files\":120,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
+            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":158132222,\"files\":11264,\"folders\":986,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31634030,\"files\":120,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
           },
           {
             "cycle": 3,
-            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":158132222,\"files\":11264,\"folders\":986,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31633848,\"files\":120,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
+            "value": "[{\"path\":\"frontend/node_modules\",\"bytes\":158132222,\"files\":11264,\"folders\":986,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"backend/node_modules\",\"bytes\":120569968,\"files\":8618,\"folders\":1654,\"category\":\"dependencies\",\"disposition\":\"reinstallable\"},{\"path\":\"frontend/dist\",\"bytes\":31634030,\"files\":120,\"folders\":6,\"category\":\"build output\",\"disposition\":\"regenerable\"},{\"path\":\"ops/node_modules\",\"bytes\":13797802,\"files\":605,\"folders\":71,\"category\":\"dependencies\",\"disposition\":\"safe cleanup\"}]"
           }
         ]
       },
@@ -295,15 +295,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":37086001,\"files\":415,\"folders\":57,\"targets\":1},\"reinstallable\":{\"bytes\":278702190,\"files\":19882,\"folders\":2640,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31633848,\"files\":120,\"folders\":6,\"targets\":1}}"
+            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":37086120,\"files\":415,\"folders\":57,\"targets\":1},\"reinstallable\":{\"bytes\":278702190,\"files\":19882,\"folders\":2640,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31634030,\"files\":120,\"folders\":6,\"targets\":1}}"
           },
           {
             "cycle": 2,
-            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":37086001,\"files\":415,\"folders\":57,\"targets\":1},\"reinstallable\":{\"bytes\":278702190,\"files\":19882,\"folders\":2640,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31633848,\"files\":120,\"folders\":6,\"targets\":1}}"
+            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":37086120,\"files\":415,\"folders\":57,\"targets\":1},\"reinstallable\":{\"bytes\":278702190,\"files\":19882,\"folders\":2640,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31634030,\"files\":120,\"folders\":6,\"targets\":1}}"
           },
           {
             "cycle": 3,
-            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":37086001,\"files\":415,\"folders\":57,\"targets\":1},\"reinstallable\":{\"bytes\":278702190,\"files\":19882,\"folders\":2640,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31633848,\"files\":120,\"folders\":6,\"targets\":1}}"
+            "value": "{\"preserve\":{\"bytes\":178803926,\"files\":68,\"folders\":37,\"targets\":3},\"retention\":{\"bytes\":37086120,\"files\":415,\"folders\":57,\"targets\":1},\"reinstallable\":{\"bytes\":278702190,\"files\":19882,\"folders\":2640,\"targets\":2},\"safe cleanup\":{\"bytes\":13797802,\"files\":605,\"folders\":71,\"targets\":1},\"regenerable\":{\"bytes\":31634030,\"files\":120,\"folders\":6,\"targets\":1}}"
           }
         ]
       },
@@ -789,15 +789,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.tsx\",\"frontend/src/components/branches/Branches.tsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.tsx\",\"frontend/src/components/contacts/DeliveryTab.tsx\",\"frontend/src/components/contacts/SuppliersTab.tsx\",\"frontend/src/components/custom-tables/CustomTables.tsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.tsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.tsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/products/lookups/ManageBrandsModal.tsx\",\"frontend/src/components/returns/Returns.tsx\",\"frontend/src/components/sales/Sales.tsx\",\"frontend/src/components/server/ServerPage.tsx\",\"frontend/src/components/users/UserProfileModal.tsx\",\"frontend/src/components/users/Users.tsx\",\"frontend/src/components/utils-settings/AuditLog.tsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/OPTIMIZATION-SESSION-LOG.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
+            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.tsx\",\"frontend/src/components/branches/Branches.tsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.tsx\",\"frontend/src/components/contacts/DeliveryTab.tsx\",\"frontend/src/components/contacts/SuppliersTab.tsx\",\"frontend/src/components/custom-tables/CustomTables.tsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.tsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.tsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/products/lookups/ManageBrandsModal.tsx\",\"frontend/src/components/returns/Returns.tsx\",\"frontend/src/components/sales/Sales.tsx\",\"frontend/src/components/server/ServerPage.tsx\",\"frontend/src/components/users/UserProfileModal.tsx\",\"frontend/src/components/users/Users.tsx\",\"frontend/src/components/utils-settings/AuditLog.tsx\",\"frontend/src/components/utils-settings/Backup.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/OPTIMIZATION-SESSION-LOG.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
           },
           {
             "cycle": 2,
-            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.tsx\",\"frontend/src/components/branches/Branches.tsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.tsx\",\"frontend/src/components/contacts/DeliveryTab.tsx\",\"frontend/src/components/contacts/SuppliersTab.tsx\",\"frontend/src/components/custom-tables/CustomTables.tsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.tsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.tsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/products/lookups/ManageBrandsModal.tsx\",\"frontend/src/components/returns/Returns.tsx\",\"frontend/src/components/sales/Sales.tsx\",\"frontend/src/components/server/ServerPage.tsx\",\"frontend/src/components/users/UserProfileModal.tsx\",\"frontend/src/components/users/Users.tsx\",\"frontend/src/components/utils-settings/AuditLog.tsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/OPTIMIZATION-SESSION-LOG.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
+            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.tsx\",\"frontend/src/components/branches/Branches.tsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.tsx\",\"frontend/src/components/contacts/DeliveryTab.tsx\",\"frontend/src/components/contacts/SuppliersTab.tsx\",\"frontend/src/components/custom-tables/CustomTables.tsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.tsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.tsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/products/lookups/ManageBrandsModal.tsx\",\"frontend/src/components/returns/Returns.tsx\",\"frontend/src/components/sales/Sales.tsx\",\"frontend/src/components/server/ServerPage.tsx\",\"frontend/src/components/users/UserProfileModal.tsx\",\"frontend/src/components/users/Users.tsx\",\"frontend/src/components/utils-settings/AuditLog.tsx\",\"frontend/src/components/utils-settings/Backup.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/OPTIMIZATION-SESSION-LOG.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
           },
           {
             "cycle": 3,
-            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.tsx\",\"frontend/src/components/branches/Branches.tsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.tsx\",\"frontend/src/components/contacts/DeliveryTab.tsx\",\"frontend/src/components/contacts/SuppliersTab.tsx\",\"frontend/src/components/custom-tables/CustomTables.tsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.tsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.tsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/products/lookups/ManageBrandsModal.tsx\",\"frontend/src/components/returns/Returns.tsx\",\"frontend/src/components/sales/Sales.tsx\",\"frontend/src/components/server/ServerPage.tsx\",\"frontend/src/components/users/UserProfileModal.tsx\",\"frontend/src/components/users/Users.tsx\",\"frontend/src/components/utils-settings/AuditLog.tsx\",\"frontend/src/components/utils-settings/Backup.jsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/OPTIMIZATION-SESSION-LOG.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
+            "value": "[\"backend/src/db/postgresSchema.sql\",\"backend/src/fileAssets.js\",\"backend/src/routes/auth.js\",\"backend/src/routes/contacts.js\",\"backend/src/routes/inventory.js\",\"backend/src/routes/portal.js\",\"backend/src/routes/products.js\",\"backend/src/routes/returns.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/routes/users.js\",\"backend/src/services/backupPackages.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"backend/test/fullAutomation.test.ts\",\"frontend/src/App.jsx\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/http.ts\",\"frontend/src/api/methods.js\",\"frontend/src/components/auth/Login.tsx\",\"frontend/src/components/branches/Branches.tsx\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"frontend/src/components/catalog/portalContentI18n.ts\",\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"frontend/src/components/contacts/CustomersTab.tsx\",\"frontend/src/components/contacts/DeliveryTab.tsx\",\"frontend/src/components/contacts/SuppliersTab.tsx\",\"frontend/src/components/custom-tables/CustomTables.tsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/files/FilesPage.tsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/forms/ProductForm.tsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/products/lookups/ManageBrandsModal.tsx\",\"frontend/src/components/returns/Returns.tsx\",\"frontend/src/components/sales/Sales.tsx\",\"frontend/src/components/server/ServerPage.tsx\",\"frontend/src/components/users/UserProfileModal.tsx\",\"frontend/src/components/users/Users.tsx\",\"frontend/src/components/utils-settings/AuditLog.tsx\",\"frontend/src/components/utils-settings/Backup.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"frontend/src/styles/main.css\",\"frontend/src/utils/printReceipt.ts\",\"frontend/src/web-api.ts\",\"frontend/tests/actionStability.test.ts\",\"frontend/tests/performanceLoadingUx.test.ts\",\"ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md\",\"ops/docs/OPTIMIZATION-ROADMAP.md\",\"ops/docs/OPTIMIZATION-SESSION-LOG.md\",\"ops/docs/reference/ACTION-STABILITY-INVENTORY.md\",\"ops/docs/reference/ALL-FUNCTION-REFERENCE.md\",\"ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/CLEANUP-SWEEP.md\",\"ops/docs/reference/FOLDER-COVERAGE.md\",\"ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md\",\"ops/docs/reference/IMPORT-EXPORT-REFERENCE.md\",\"ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json\",\"ops/docs/reference/PERFORMANCE-SCAN.md\",\"ops/docs/reference/PHASE29-AUDIT.json\",\"ops/docs/reference/TRANSLATION-REFERENCE.md\",\"ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md\",\"ops/docs/whole-app-hardening.md\",\"ops/scripts/architecture/language-runtime-audit.ts\",\"ops/scripts/powershell/docker-release.ps1\",\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"ops/scripts/runtime/browser-action-smoke.ts\",\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\"]"
           }
         ]
       },
@@ -1302,15 +1302,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 6341571
+            "value": 6349707
           },
           {
             "cycle": 2,
-            "value": 6341571
+            "value": 6349707
           },
           {
             "cycle": 3,
-            "value": 6341571
+            "value": 6349707
           }
         ]
       },
@@ -1321,15 +1321,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": 143100
+            "value": 143342
           },
           {
             "cycle": 2,
-            "value": 143100
+            "value": 143342
           },
           {
             "cycle": 3,
-            "value": 143100
+            "value": 143342
           }
         ]
       },
@@ -1397,15 +1397,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[\"backend/src/routes/inventory.js\",\"backend/src/routes/products.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/methods.js\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"ops/scripts/architecture/language-runtime-audit.ts\"]"
+            "value": "[\"backend/src/routes/inventory.js\",\"backend/src/routes/products.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/methods.js\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/utils-settings/Backup.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"ops/scripts/architecture/language-runtime-audit.ts\"]"
           },
           {
             "cycle": 2,
-            "value": "[\"backend/src/routes/inventory.js\",\"backend/src/routes/products.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/methods.js\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"ops/scripts/architecture/language-runtime-audit.ts\"]"
+            "value": "[\"backend/src/routes/inventory.js\",\"backend/src/routes/products.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/methods.js\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/utils-settings/Backup.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"ops/scripts/architecture/language-runtime-audit.ts\"]"
           },
           {
             "cycle": 3,
-            "value": "[\"backend/src/routes/inventory.js\",\"backend/src/routes/products.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/methods.js\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"ops/scripts/architecture/language-runtime-audit.ts\"]"
+            "value": "[\"backend/src/routes/inventory.js\",\"backend/src/routes/products.js\",\"backend/src/routes/sales.js\",\"backend/src/routes/system/index.js\",\"backend/src/services/googleDriveSync/index.js\",\"backend/src/services/importJobs.js\",\"frontend/src/AppContext.jsx\",\"frontend/src/api/methods.js\",\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"frontend/src/components/catalog/CatalogPage.jsx\",\"frontend/src/components/dashboard/Dashboard.jsx\",\"frontend/src/components/inventory/Inventory.jsx\",\"frontend/src/components/pos/POS.jsx\",\"frontend/src/components/products/Products.jsx\",\"frontend/src/components/products/import/BulkImportModal.tsx\",\"frontend/src/components/utils-settings/Backup.tsx\",\"frontend/src/components/utils-settings/Settings.jsx\",\"frontend/src/lang/en.json\",\"frontend/src/lang/km.json\",\"ops/scripts/architecture/language-runtime-audit.ts\"]"
           }
         ]
       },
@@ -1416,15 +1416,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[\"frontend/dist/assets/catalog-BlxlyOOC.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
+            "value": "[\"frontend/dist/assets/catalog-gVDrQngb.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
           },
           {
             "cycle": 2,
-            "value": "[\"frontend/dist/assets/catalog-BlxlyOOC.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
+            "value": "[\"frontend/dist/assets/catalog-gVDrQngb.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
           },
           {
             "cycle": 3,
-            "value": "[\"frontend/dist/assets/catalog-BlxlyOOC.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
+            "value": "[\"frontend/dist/assets/catalog-gVDrQngb.js\",\"frontend/dist/assets/index-DQztsXP7.css\",\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\"]"
           }
         ]
       },
@@ -1435,15 +1435,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"frontend/src/components/utils-settings/Backup.jsx\",\"size\":72240,\"lines\":1490},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/utils-settings/AuditLog.tsx\",\"size\":60569,\"lines\":1292},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\",\"size\":58141,\"lines\":865},{\"file\":\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"size\":57665,\"lines\":1081}]"
+            "value": "[{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"frontend/src/components/utils-settings/Backup.tsx\",\"size\":80381,\"lines\":1732},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/utils-settings/AuditLog.tsx\",\"size\":60569,\"lines\":1292},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\",\"size\":58141,\"lines\":865},{\"file\":\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"size\":57665,\"lines\":1081}]"
           },
           {
             "cycle": 2,
-            "value": "[{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"frontend/src/components/utils-settings/Backup.jsx\",\"size\":72240,\"lines\":1490},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/utils-settings/AuditLog.tsx\",\"size\":60569,\"lines\":1292},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\",\"size\":58141,\"lines\":865},{\"file\":\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"size\":57665,\"lines\":1081}]"
+            "value": "[{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"frontend/src/components/utils-settings/Backup.tsx\",\"size\":80381,\"lines\":1732},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/utils-settings/AuditLog.tsx\",\"size\":60569,\"lines\":1292},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\",\"size\":58141,\"lines\":865},{\"file\":\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"size\":57665,\"lines\":1081}]"
           },
           {
             "cycle": 3,
-            "value": "[{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"frontend/src/components/utils-settings/Backup.jsx\",\"size\":72240,\"lines\":1490},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/utils-settings/AuditLog.tsx\",\"size\":60569,\"lines\":1292},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\",\"size\":58141,\"lines\":865},{\"file\":\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"size\":57665,\"lines\":1081}]"
+            "value": "[{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"frontend/src/components/utils-settings/Backup.tsx\",\"size\":80381,\"lines\":1732},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/utils-settings/AuditLog.tsx\",\"size\":60569,\"lines\":1292},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/live-checks/phase84-ui-live-check.ts\",\"size\":58141,\"lines\":865},{\"file\":\"frontend/src/components/catalog/CatalogSecondaryTabs.tsx\",\"size\":57665,\"lines\":1081}]"
           }
         ]
       },
@@ -1454,15 +1454,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"frontend/src/components/utils-settings/Backup.jsx\",\"size\":72240,\"lines\":1490},{\"file\":\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"size\":56588,\"lines\":1463},{\"file\":\"backend/src/routes/portal.js\",\"size\":52672,\"lines\":1407},{\"file\":\"frontend/src/App.jsx\",\"size\":54429,\"lines\":1387},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295}]"
+            "value": "[{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Backup.tsx\",\"size\":80381,\"lines\":1732},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"size\":56588,\"lines\":1463},{\"file\":\"backend/src/routes/portal.js\",\"size\":52672,\"lines\":1407},{\"file\":\"frontend/src/App.jsx\",\"size\":54429,\"lines\":1387},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295}]"
           },
           {
             "cycle": 2,
-            "value": "[{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"frontend/src/components/utils-settings/Backup.jsx\",\"size\":72240,\"lines\":1490},{\"file\":\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"size\":56588,\"lines\":1463},{\"file\":\"backend/src/routes/portal.js\",\"size\":52672,\"lines\":1407},{\"file\":\"frontend/src/App.jsx\",\"size\":54429,\"lines\":1387},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295}]"
+            "value": "[{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Backup.tsx\",\"size\":80381,\"lines\":1732},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"size\":56588,\"lines\":1463},{\"file\":\"backend/src/routes/portal.js\",\"size\":52672,\"lines\":1407},{\"file\":\"frontend/src/App.jsx\",\"size\":54429,\"lines\":1387},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295}]"
           },
           {
             "cycle": 3,
-            "value": "[{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"frontend/src/components/utils-settings/Backup.jsx\",\"size\":72240,\"lines\":1490},{\"file\":\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"size\":56588,\"lines\":1463},{\"file\":\"backend/src/routes/portal.js\",\"size\":52672,\"lines\":1407},{\"file\":\"frontend/src/App.jsx\",\"size\":54429,\"lines\":1387},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295}]"
+            "value": "[{\"file\":\"frontend/src/components/inventory/Inventory.jsx\",\"size\":213963,\"lines\":4123},{\"file\":\"backend/src/services/importJobs.js\",\"size\":160882,\"lines\":3880},{\"file\":\"frontend/src/components/catalog/CatalogPage.jsx\",\"size\":142536,\"lines\":3218},{\"file\":\"frontend/src/lang/km.json\",\"size\":252664,\"lines\":2730},{\"file\":\"frontend/src/lang/en.json\",\"size\":137737,\"lines\":2721},{\"file\":\"frontend/src/api/methods.js\",\"size\":105075,\"lines\":2346},{\"file\":\"backend/src/routes/products.js\",\"size\":101435,\"lines\":2218},{\"file\":\"frontend/src/components/products/import/BulkImportModal.tsx\",\"size\":103434,\"lines\":2144},{\"file\":\"frontend/src/components/dashboard/Dashboard.jsx\",\"size\":110049,\"lines\":2063},{\"file\":\"frontend/src/components/products/Products.jsx\",\"size\":98640,\"lines\":2006},{\"file\":\"frontend/src/components/pos/POS.jsx\",\"size\":110197,\"lines\":1919},{\"file\":\"backend/src/routes/inventory.js\",\"size\":85838,\"lines\":1881},{\"file\":\"frontend/src/components/utils-settings/Backup.tsx\",\"size\":80381,\"lines\":1732},{\"file\":\"frontend/src/components/utils-settings/Settings.jsx\",\"size\":82550,\"lines\":1730},{\"file\":\"backend/src/routes/system/index.js\",\"size\":66845,\"lines\":1659},{\"file\":\"frontend/src/AppContext.jsx\",\"size\":65798,\"lines\":1610},{\"file\":\"ops/scripts/architecture/language-runtime-audit.ts\",\"size\":70024,\"lines\":1596},{\"file\":\"backend/src/routes/sales.js\",\"size\":66182,\"lines\":1573},{\"file\":\"backend/src/services/googleDriveSync/index.js\",\"size\":59146,\"lines\":1564},{\"file\":\"ops/scripts/runtime/audits/deep-live-audit.ts\",\"size\":56588,\"lines\":1463},{\"file\":\"backend/src/routes/portal.js\",\"size\":52672,\"lines\":1407},{\"file\":\"frontend/src/App.jsx\",\"size\":54429,\"lines\":1387},{\"file\":\"frontend/src/components/catalog/portalLanguagePacks.ts\",\"size\":64016,\"lines\":1349},{\"file\":\"frontend/src/components/users/UserProfileModal.tsx\",\"size\":69278,\"lines\":1311},{\"file\":\"frontend/src/components/catalog/CatalogEditorSurface.jsx\",\"size\":98244,\"lines\":1295}]"
           }
         ]
       },
@@ -1473,15 +1473,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"size\":289241,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-BlxlyOOC.js\",\"size\":190194,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-Dk73H2RJ.js\",\"size\":147103,\"lines\":0},{\"file\":\"frontend/dist/assets/index-N1kPBks1.js\",\"size\":131110,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-DrsP6QOU.js\",\"size\":96284,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-D5Eiielq.js\",\"size\":92778,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-DYDLksgA.js\",\"size\":76815,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-Br3G1BdP.js\",\"size\":72120,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-Cs3Wj-Nx.js\",\"size\":71864,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-CsMT5l9p.js\",\"size\":69885,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-PB7_8kv4.js\",\"size\":65811,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-xnUoufkI.js\",\"size\":61527,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-h4bGTWXT.js\",\"size\":59057,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-B4xjFBi_.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-KrIcYc8b.js\",\"size\":53063,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-irp_-dFH.js\",\"size\":41256,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-D5qCmOPg.js\",\"size\":38915,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-DP7TXkJg.js\",\"size\":37913,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-D8lH9Jlg.js\",\"size\":37878,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-Dw_RGz5S.js\",\"size\":35928,\"lines\":0}]"
+            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"size\":289241,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-gVDrQngb.js\",\"size\":190194,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-zL-nq7IG.js\",\"size\":147103,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DPvqFDbp.js\",\"size\":131110,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-bPFlU1sU.js\",\"size\":96284,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-Ctd_hSKV.js\",\"size\":92778,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-3_6YUtNw.js\",\"size\":76815,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-W2SauZJZ.js\",\"size\":72120,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-B3ruz-OQ.js\",\"size\":71864,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-CJ7Gg1Vt.js\",\"size\":69885,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-BcjTn6pP.js\",\"size\":65811,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-1AUWZg9s.js\",\"size\":61527,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-C-O1zpb1.js\",\"size\":59239,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-B4xjFBi_.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-D3CYAoiq.js\",\"size\":53063,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-BLBtnd-9.js\",\"size\":41256,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-CHk98LeC.js\",\"size\":38915,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-TzSp_G_y.js\",\"size\":37913,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-ml03l04d.js\",\"size\":37878,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-BcA8fRo0.js\",\"size\":35928,\"lines\":0}]"
           },
           {
             "cycle": 2,
-            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"size\":289241,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-BlxlyOOC.js\",\"size\":190194,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-Dk73H2RJ.js\",\"size\":147103,\"lines\":0},{\"file\":\"frontend/dist/assets/index-N1kPBks1.js\",\"size\":131110,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-DrsP6QOU.js\",\"size\":96284,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-D5Eiielq.js\",\"size\":92778,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-DYDLksgA.js\",\"size\":76815,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-Br3G1BdP.js\",\"size\":72120,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-Cs3Wj-Nx.js\",\"size\":71864,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-CsMT5l9p.js\",\"size\":69885,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-PB7_8kv4.js\",\"size\":65811,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-xnUoufkI.js\",\"size\":61527,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-h4bGTWXT.js\",\"size\":59057,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-B4xjFBi_.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-KrIcYc8b.js\",\"size\":53063,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-irp_-dFH.js\",\"size\":41256,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-D5qCmOPg.js\",\"size\":38915,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-DP7TXkJg.js\",\"size\":37913,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-D8lH9Jlg.js\",\"size\":37878,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-Dw_RGz5S.js\",\"size\":35928,\"lines\":0}]"
+            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"size\":289241,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-gVDrQngb.js\",\"size\":190194,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-zL-nq7IG.js\",\"size\":147103,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DPvqFDbp.js\",\"size\":131110,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-bPFlU1sU.js\",\"size\":96284,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-Ctd_hSKV.js\",\"size\":92778,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-3_6YUtNw.js\",\"size\":76815,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-W2SauZJZ.js\",\"size\":72120,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-B3ruz-OQ.js\",\"size\":71864,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-CJ7Gg1Vt.js\",\"size\":69885,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-BcjTn6pP.js\",\"size\":65811,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-1AUWZg9s.js\",\"size\":61527,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-C-O1zpb1.js\",\"size\":59239,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-B4xjFBi_.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-D3CYAoiq.js\",\"size\":53063,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-BLBtnd-9.js\",\"size\":41256,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-CHk98LeC.js\",\"size\":38915,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-TzSp_G_y.js\",\"size\":37913,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-ml03l04d.js\",\"size\":37878,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-BcA8fRo0.js\",\"size\":35928,\"lines\":0}]"
           },
           {
             "cycle": 3,
-            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"size\":289241,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-BlxlyOOC.js\",\"size\":190194,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-Dk73H2RJ.js\",\"size\":147103,\"lines\":0},{\"file\":\"frontend/dist/assets/index-N1kPBks1.js\",\"size\":131110,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-DrsP6QOU.js\",\"size\":96284,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-D5Eiielq.js\",\"size\":92778,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-DYDLksgA.js\",\"size\":76815,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-Br3G1BdP.js\",\"size\":72120,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-Cs3Wj-Nx.js\",\"size\":71864,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-CsMT5l9p.js\",\"size\":69885,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-PB7_8kv4.js\",\"size\":65811,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-xnUoufkI.js\",\"size\":61527,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-h4bGTWXT.js\",\"size\":59057,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-B4xjFBi_.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-KrIcYc8b.js\",\"size\":53063,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-irp_-dFH.js\",\"size\":41256,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-D5qCmOPg.js\",\"size\":38915,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-DP7TXkJg.js\",\"size\":37913,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-D8lH9Jlg.js\",\"size\":37878,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-Dw_RGz5S.js\",\"size\":35928,\"lines\":0}]"
+            "value": "[{\"file\":\"frontend/dist/assets/vendor-zxing-BxcS2Ffh.js\",\"size\":446639,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-km-c87vG7oG.js\",\"size\":289241,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-react-DKmwvaIJ.js\",\"size\":212166,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-gVDrQngb.js\",\"size\":190194,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DQztsXP7.css\",\"size\":155279,\"lines\":0},{\"file\":\"frontend/dist/assets/Inventory-zL-nq7IG.js\",\"size\":147103,\"lines\":0},{\"file\":\"frontend/dist/assets/index-DPvqFDbp.js\",\"size\":131110,\"lines\":0},{\"file\":\"frontend/dist/assets/lang-en-CsN37MFf.js\",\"size\":128218,\"lines\":0},{\"file\":\"frontend/dist/assets/app-shared-bPFlU1sU.js\",\"size\":96284,\"lines\":0},{\"file\":\"frontend/dist/assets/Products-Ctd_hSKV.js\",\"size\":92778,\"lines\":0},{\"file\":\"frontend/dist/assets/POS-3_6YUtNw.js\",\"size\":76815,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-dexie-2jmnBxhj.js\",\"size\":74288,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-editor-W2SauZJZ.js\",\"size\":72120,\"lines\":0},{\"file\":\"frontend/dist/assets/Dashboard-B3ruz-OQ.js\",\"size\":71864,\"lines\":0},{\"file\":\"frontend/dist/assets/BulkImportModal-CJ7Gg1Vt.js\",\"size\":69885,\"lines\":0},{\"file\":\"frontend/dist/assets/catalog-preview-BcjTn6pP.js\",\"size\":65811,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-methods-1AUWZg9s.js\",\"size\":61527,\"lines\":0},{\"file\":\"frontend/dist/assets/Backup-C-O1zpb1.js\",\"size\":59239,\"lines\":0},{\"file\":\"frontend/dist/assets/vendor-lucide-B4xjFBi_.js\",\"size\":53758,\"lines\":0},{\"file\":\"frontend/dist/assets/Settings-D3CYAoiq.js\",\"size\":53063,\"lines\":0},{\"file\":\"frontend/dist/assets/Users-BLBtnd-9.js\",\"size\":41256,\"lines\":0},{\"file\":\"frontend/dist/assets/Branches-CHk98LeC.js\",\"size\":38915,\"lines\":0},{\"file\":\"frontend/dist/assets/ReceiptSettings-TzSp_G_y.js\",\"size\":37913,\"lines\":0},{\"file\":\"frontend/dist/assets/app-api-ml03l04d.js\",\"size\":37878,\"lines\":0},{\"file\":\"frontend/dist/assets/Sales-BcA8fRo0.js\",\"size\":35928,\"lines\":0}]"
           }
         ]
       },
@@ -1758,15 +1758,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[[\"TypeScript\",225],[\"React TSX\",97],[\"JavaScript\",84],[\"Windows batch\",16],[\"React JSX\",10],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"TypeScript\",225],[\"React TSX\",98],[\"JavaScript\",84],[\"Windows batch\",16],[\"React JSX\",9],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           },
           {
             "cycle": 2,
-            "value": "[[\"TypeScript\",225],[\"React TSX\",97],[\"JavaScript\",84],[\"Windows batch\",16],[\"React JSX\",10],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"TypeScript\",225],[\"React TSX\",98],[\"JavaScript\",84],[\"Windows batch\",16],[\"React JSX\",9],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           },
           {
             "cycle": 3,
-            "value": "[[\"TypeScript\",225],[\"React TSX\",97],[\"JavaScript\",84],[\"Windows batch\",16],[\"React JSX\",10],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
+            "value": "[[\"TypeScript\",225],[\"React TSX\",98],[\"JavaScript\",84],[\"Windows batch\",16],[\"React JSX\",9],[\"PowerShell\",8],[\"Shell\",3],[\"JSON\",2],[\"SQL\",2],[\"CSS\",1]]"
           }
         ]
       },
@@ -1777,15 +1777,15 @@
         "values": [
           {
             "cycle": 1,
-            "value": "[[\".ts\",225],[\".tsx\",97],[\".js\",84],[\".bat\",16],[\".jsx\",10],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".ts\",225],[\".tsx\",98],[\".js\",84],[\".bat\",16],[\".jsx\",9],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           },
           {
             "cycle": 2,
-            "value": "[[\".ts\",225],[\".tsx\",97],[\".js\",84],[\".bat\",16],[\".jsx\",10],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".ts\",225],[\".tsx\",98],[\".js\",84],[\".bat\",16],[\".jsx\",9],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           },
           {
             "cycle": 3,
-            "value": "[[\".ts\",225],[\".tsx\",97],[\".js\",84],[\".bat\",16],[\".jsx\",10],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
+            "value": "[[\".ts\",225],[\".tsx\",98],[\".js\",84],[\".bat\",16],[\".jsx\",9],[\".ps1\",8],[\".sh\",3],[\".json\",2],[\".sql\",2],[\".css\",1]]"
           }
         ]
       },
@@ -2595,14 +2595,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 842,
+      "durationMs": 866,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-30T01:50:18.993Z",
+        "generatedAt": "2026-05-30T02:14:38.619Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -2612,9 +2612,9 @@
         "fileStatConcurrency": 32,
         "targets": 15,
         "existingTargets": 8,
-        "totalBytes": 540023767,
-        "protectedBytes": 215889927,
-        "cleanupCandidateBytes": 324133840,
+        "totalBytes": 540024068,
+        "protectedBytes": 215890046,
+        "cleanupCandidateBytes": 324134022,
         "nestedTargetOverlaps": [
           {
             "parent": "business-os-data",
@@ -2634,9 +2634,9 @@
           }
         ],
         "nestedOverlapBytes": 15496556,
-        "adjustedTotalBytes": 524527211,
-        "adjustedProtectedBytes": 200393371,
-        "adjustedCleanupCandidateBytes": 324133840,
+        "adjustedTotalBytes": 524527512,
+        "adjustedProtectedBytes": 200393490,
+        "adjustedCleanupCandidateBytes": 324134022,
         "largestProtectedTargets": [
           {
             "path": "business-os-data",
@@ -2648,7 +2648,7 @@
           },
           {
             "path": "ops/runtime",
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "category": "runtime state",
@@ -2690,7 +2690,7 @@
           },
           {
             "path": "frontend/dist",
-            "bytes": 31633848,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "category": "build output",
@@ -2708,7 +2708,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 699,
+            "measureMs": 707,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -2717,7 +2717,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 435,
+            "measureMs": 455,
             "bytes": 158132222,
             "files": 11264,
             "folders": 986,
@@ -2736,7 +2736,7 @@
           {
             "path": "ops/runtime",
             "measureMs": 22,
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "category": "runtime state",
@@ -2744,7 +2744,7 @@
           },
           {
             "path": "business-os-data",
-            "measureMs": 10,
+            "measureMs": 9,
             "bytes": 163307370,
             "files": 52,
             "folders": 35,
@@ -2753,8 +2753,8 @@
           },
           {
             "path": "frontend/dist",
-            "measureMs": 4,
-            "bytes": 31633848,
+            "measureMs": 3,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "category": "build output",
@@ -2787,7 +2787,7 @@
             "targets": 3
           },
           "retention": {
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "targets": 1
@@ -2805,7 +2805,7 @@
             "targets": 1
           },
           "regenerable": {
-            "bytes": 31633848,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "targets": 1
@@ -3032,7 +3032,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 158,
+      "durationMs": 179,
       "command": "node.exe ops/scripts/docs/performance-scan.ts",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -3043,8 +3043,8 @@
         "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
         "sourceFiles": 351,
         "distAssets": 84,
-        "totalSourceBytes": 6341571,
-        "totalSourceLines": 143100,
+        "totalSourceBytes": 6349707,
+        "totalSourceLines": 143342,
         "largestSourceFile": "frontend/src/lang/km.json",
         "largestSourceFileBytes": 252664,
         "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -3067,13 +3067,14 @@
           "frontend/src/components/pos/POS.jsx",
           "frontend/src/components/products/Products.jsx",
           "frontend/src/components/products/import/BulkImportModal.tsx",
+          "frontend/src/components/utils-settings/Backup.tsx",
           "frontend/src/components/utils-settings/Settings.jsx",
           "frontend/src/lang/en.json",
           "frontend/src/lang/km.json",
           "ops/scripts/architecture/language-runtime-audit.ts"
         ],
         "oversizedBuiltChunks": [
-          "frontend/dist/assets/catalog-BlxlyOOC.js",
+          "frontend/dist/assets/catalog-gVDrQngb.js",
           "frontend/dist/assets/index-DQztsXP7.css",
           "frontend/dist/assets/lang-km-c87vG7oG.js",
           "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
@@ -3151,9 +3152,9 @@
             "lines": 1730
           },
           {
-            "file": "frontend/src/components/utils-settings/Backup.jsx",
-            "size": 72240,
-            "lines": 1490
+            "file": "frontend/src/components/utils-settings/Backup.tsx",
+            "size": 80381,
+            "lines": 1732
           },
           {
             "file": "ops/scripts/architecture/language-runtime-audit.ts",
@@ -3268,6 +3269,11 @@
             "lines": 1881
           },
           {
+            "file": "frontend/src/components/utils-settings/Backup.tsx",
+            "size": 80381,
+            "lines": 1732
+          },
+          {
             "file": "frontend/src/components/utils-settings/Settings.jsx",
             "size": 82550,
             "lines": 1730
@@ -3296,11 +3302,6 @@
             "file": "backend/src/services/googleDriveSync/index.js",
             "size": 59146,
             "lines": 1564
-          },
-          {
-            "file": "frontend/src/components/utils-settings/Backup.jsx",
-            "size": 72240,
-            "lines": 1490
           },
           {
             "file": "ops/scripts/runtime/audits/deep-live-audit.ts",
@@ -3350,7 +3351,7 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-BlxlyOOC.js",
+            "file": "frontend/dist/assets/catalog-gVDrQngb.js",
             "size": 190194,
             "lines": 0
           },
@@ -3360,12 +3361,12 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Inventory-Dk73H2RJ.js",
+            "file": "frontend/dist/assets/Inventory-zL-nq7IG.js",
             "size": 147103,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/index-N1kPBks1.js",
+            "file": "frontend/dist/assets/index-DPvqFDbp.js",
             "size": 131110,
             "lines": 0
           },
@@ -3375,17 +3376,17 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-shared-DrsP6QOU.js",
+            "file": "frontend/dist/assets/app-shared-bPFlU1sU.js",
             "size": 96284,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Products-D5Eiielq.js",
+            "file": "frontend/dist/assets/Products-Ctd_hSKV.js",
             "size": 92778,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/POS-DYDLksgA.js",
+            "file": "frontend/dist/assets/POS-3_6YUtNw.js",
             "size": 76815,
             "lines": 0
           },
@@ -3395,33 +3396,33 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-editor-Br3G1BdP.js",
+            "file": "frontend/dist/assets/catalog-editor-W2SauZJZ.js",
             "size": 72120,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Dashboard-Cs3Wj-Nx.js",
+            "file": "frontend/dist/assets/Dashboard-B3ruz-OQ.js",
             "size": 71864,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/BulkImportModal-CsMT5l9p.js",
+            "file": "frontend/dist/assets/BulkImportModal-CJ7Gg1Vt.js",
             "size": 69885,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-preview-PB7_8kv4.js",
+            "file": "frontend/dist/assets/catalog-preview-BcjTn6pP.js",
             "size": 65811,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-methods-xnUoufkI.js",
+            "file": "frontend/dist/assets/app-api-methods-1AUWZg9s.js",
             "size": 61527,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Backup-h4bGTWXT.js",
-            "size": 59057,
+            "file": "frontend/dist/assets/Backup-C-O1zpb1.js",
+            "size": 59239,
             "lines": 0
           },
           {
@@ -3430,32 +3431,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Settings-KrIcYc8b.js",
+            "file": "frontend/dist/assets/Settings-D3CYAoiq.js",
             "size": 53063,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Users-irp_-dFH.js",
+            "file": "frontend/dist/assets/Users-BLBtnd-9.js",
             "size": 41256,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Branches-D5qCmOPg.js",
+            "file": "frontend/dist/assets/Branches-CHk98LeC.js",
             "size": 38915,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/ReceiptSettings-DP7TXkJg.js",
+            "file": "frontend/dist/assets/ReceiptSettings-TzSp_G_y.js",
             "size": 37913,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-D8lH9Jlg.js",
+            "file": "frontend/dist/assets/app-api-ml03l04d.js",
             "size": 37878,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Sales-Dw_RGz5S.js",
+            "file": "frontend/dist/assets/Sales-BcA8fRo0.js",
             "size": 35928,
             "lines": 0
           }
@@ -3472,14 +3473,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 214,
+      "durationMs": 219,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.ts",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-30T01:50:19.501Z",
+        "generatedAt": "2026-05-30T02:14:39.152Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -3505,7 +3506,7 @@
           ],
           [
             "React TSX",
-            97
+            98
           ],
           [
             "JavaScript",
@@ -3517,7 +3518,7 @@
           ],
           [
             "React JSX",
-            10
+            9
           ],
           [
             "PowerShell",
@@ -3547,7 +3548,7 @@
           ],
           [
             ".tsx",
-            97
+            98
           ],
           [
             ".js",
@@ -3559,7 +3560,7 @@
           ],
           [
             ".jsx",
-            10
+            9
           ],
           [
             ".ps1",
@@ -5298,7 +5299,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 122,
+      "durationMs": 129,
       "command": "node.exe ops/scripts/verification/verify-docker-release.ts",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -5440,7 +5441,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 120,
+      "durationMs": 135,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.ts",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -5521,7 +5522,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 268,
+      "durationMs": 257,
       "command": "node.exe ops/scripts/architecture/organization-audit.ts",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",
@@ -5726,7 +5727,7 @@
           "frontend/src/components/users/UserProfileModal.tsx",
           "frontend/src/components/users/Users.tsx",
           "frontend/src/components/utils-settings/AuditLog.tsx",
-          "frontend/src/components/utils-settings/Backup.jsx",
+          "frontend/src/components/utils-settings/Backup.tsx",
           "frontend/src/components/utils-settings/Settings.jsx",
           "frontend/src/lang/en.json",
           "frontend/src/lang/km.json",
@@ -5767,14 +5768,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 797,
+      "durationMs": 850,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-30T01:50:20.690Z",
+        "generatedAt": "2026-05-30T02:14:40.396Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -5784,9 +5785,9 @@
         "fileStatConcurrency": 32,
         "targets": 15,
         "existingTargets": 8,
-        "totalBytes": 540023767,
-        "protectedBytes": 215889927,
-        "cleanupCandidateBytes": 324133840,
+        "totalBytes": 540024068,
+        "protectedBytes": 215890046,
+        "cleanupCandidateBytes": 324134022,
         "nestedTargetOverlaps": [
           {
             "parent": "business-os-data",
@@ -5806,9 +5807,9 @@
           }
         ],
         "nestedOverlapBytes": 15496556,
-        "adjustedTotalBytes": 524527211,
-        "adjustedProtectedBytes": 200393371,
-        "adjustedCleanupCandidateBytes": 324133840,
+        "adjustedTotalBytes": 524527512,
+        "adjustedProtectedBytes": 200393490,
+        "adjustedCleanupCandidateBytes": 324134022,
         "largestProtectedTargets": [
           {
             "path": "business-os-data",
@@ -5820,7 +5821,7 @@
           },
           {
             "path": "ops/runtime",
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "category": "runtime state",
@@ -5862,7 +5863,7 @@
           },
           {
             "path": "frontend/dist",
-            "bytes": 31633848,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "category": "build output",
@@ -5880,7 +5881,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 665,
+            "measureMs": 710,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -5889,7 +5890,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 423,
+            "measureMs": 429,
             "bytes": 158132222,
             "files": 11264,
             "folders": 986,
@@ -5908,7 +5909,7 @@
           {
             "path": "ops/runtime",
             "measureMs": 22,
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "category": "runtime state",
@@ -5926,7 +5927,7 @@
           {
             "path": "frontend/dist",
             "measureMs": 2,
-            "bytes": 31633848,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "category": "build output",
@@ -5959,7 +5960,7 @@
             "targets": 3
           },
           "retention": {
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "targets": 1
@@ -5977,7 +5978,7 @@
             "targets": 1
           },
           "regenerable": {
-            "bytes": 31633848,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "targets": 1
@@ -6025,7 +6026,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 139,
+      "durationMs": 122,
       "command": "node.exe ops/scripts/backend/schema-audit.ts",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -6204,7 +6205,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 146,
+      "durationMs": 165,
       "command": "node.exe ops/scripts/docs/performance-scan.ts",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -6215,8 +6216,8 @@
         "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
         "sourceFiles": 351,
         "distAssets": 84,
-        "totalSourceBytes": 6341571,
-        "totalSourceLines": 143100,
+        "totalSourceBytes": 6349707,
+        "totalSourceLines": 143342,
         "largestSourceFile": "frontend/src/lang/km.json",
         "largestSourceFileBytes": 252664,
         "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -6239,13 +6240,14 @@
           "frontend/src/components/pos/POS.jsx",
           "frontend/src/components/products/Products.jsx",
           "frontend/src/components/products/import/BulkImportModal.tsx",
+          "frontend/src/components/utils-settings/Backup.tsx",
           "frontend/src/components/utils-settings/Settings.jsx",
           "frontend/src/lang/en.json",
           "frontend/src/lang/km.json",
           "ops/scripts/architecture/language-runtime-audit.ts"
         ],
         "oversizedBuiltChunks": [
-          "frontend/dist/assets/catalog-BlxlyOOC.js",
+          "frontend/dist/assets/catalog-gVDrQngb.js",
           "frontend/dist/assets/index-DQztsXP7.css",
           "frontend/dist/assets/lang-km-c87vG7oG.js",
           "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
@@ -6323,9 +6325,9 @@
             "lines": 1730
           },
           {
-            "file": "frontend/src/components/utils-settings/Backup.jsx",
-            "size": 72240,
-            "lines": 1490
+            "file": "frontend/src/components/utils-settings/Backup.tsx",
+            "size": 80381,
+            "lines": 1732
           },
           {
             "file": "ops/scripts/architecture/language-runtime-audit.ts",
@@ -6440,6 +6442,11 @@
             "lines": 1881
           },
           {
+            "file": "frontend/src/components/utils-settings/Backup.tsx",
+            "size": 80381,
+            "lines": 1732
+          },
+          {
             "file": "frontend/src/components/utils-settings/Settings.jsx",
             "size": 82550,
             "lines": 1730
@@ -6468,11 +6475,6 @@
             "file": "backend/src/services/googleDriveSync/index.js",
             "size": 59146,
             "lines": 1564
-          },
-          {
-            "file": "frontend/src/components/utils-settings/Backup.jsx",
-            "size": 72240,
-            "lines": 1490
           },
           {
             "file": "ops/scripts/runtime/audits/deep-live-audit.ts",
@@ -6522,7 +6524,7 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-BlxlyOOC.js",
+            "file": "frontend/dist/assets/catalog-gVDrQngb.js",
             "size": 190194,
             "lines": 0
           },
@@ -6532,12 +6534,12 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Inventory-Dk73H2RJ.js",
+            "file": "frontend/dist/assets/Inventory-zL-nq7IG.js",
             "size": 147103,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/index-N1kPBks1.js",
+            "file": "frontend/dist/assets/index-DPvqFDbp.js",
             "size": 131110,
             "lines": 0
           },
@@ -6547,17 +6549,17 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-shared-DrsP6QOU.js",
+            "file": "frontend/dist/assets/app-shared-bPFlU1sU.js",
             "size": 96284,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Products-D5Eiielq.js",
+            "file": "frontend/dist/assets/Products-Ctd_hSKV.js",
             "size": 92778,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/POS-DYDLksgA.js",
+            "file": "frontend/dist/assets/POS-3_6YUtNw.js",
             "size": 76815,
             "lines": 0
           },
@@ -6567,33 +6569,33 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-editor-Br3G1BdP.js",
+            "file": "frontend/dist/assets/catalog-editor-W2SauZJZ.js",
             "size": 72120,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Dashboard-Cs3Wj-Nx.js",
+            "file": "frontend/dist/assets/Dashboard-B3ruz-OQ.js",
             "size": 71864,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/BulkImportModal-CsMT5l9p.js",
+            "file": "frontend/dist/assets/BulkImportModal-CJ7Gg1Vt.js",
             "size": 69885,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-preview-PB7_8kv4.js",
+            "file": "frontend/dist/assets/catalog-preview-BcjTn6pP.js",
             "size": 65811,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-methods-xnUoufkI.js",
+            "file": "frontend/dist/assets/app-api-methods-1AUWZg9s.js",
             "size": 61527,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Backup-h4bGTWXT.js",
-            "size": 59057,
+            "file": "frontend/dist/assets/Backup-C-O1zpb1.js",
+            "size": 59239,
             "lines": 0
           },
           {
@@ -6602,32 +6604,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Settings-KrIcYc8b.js",
+            "file": "frontend/dist/assets/Settings-D3CYAoiq.js",
             "size": 53063,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Users-irp_-dFH.js",
+            "file": "frontend/dist/assets/Users-BLBtnd-9.js",
             "size": 41256,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Branches-D5qCmOPg.js",
+            "file": "frontend/dist/assets/Branches-CHk98LeC.js",
             "size": 38915,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/ReceiptSettings-DP7TXkJg.js",
+            "file": "frontend/dist/assets/ReceiptSettings-TzSp_G_y.js",
             "size": 37913,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-D8lH9Jlg.js",
+            "file": "frontend/dist/assets/app-api-ml03l04d.js",
             "size": 37878,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Sales-Dw_RGz5S.js",
+            "file": "frontend/dist/assets/Sales-BcA8fRo0.js",
             "size": 35928,
             "lines": 0
           }
@@ -6644,14 +6646,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 189,
+      "durationMs": 198,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.ts",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-30T01:50:21.175Z",
+        "generatedAt": "2026-05-30T02:14:40.893Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -6677,7 +6679,7 @@
           ],
           [
             "React TSX",
-            97
+            98
           ],
           [
             "JavaScript",
@@ -6689,7 +6691,7 @@
           ],
           [
             "React JSX",
-            10
+            9
           ],
           [
             "PowerShell",
@@ -6719,7 +6721,7 @@
           ],
           [
             ".tsx",
-            97
+            98
           ],
           [
             ".js",
@@ -6731,7 +6733,7 @@
           ],
           [
             ".jsx",
-            10
+            9
           ],
           [
             ".ps1",
@@ -8470,7 +8472,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 114,
+      "durationMs": 121,
       "command": "node.exe ops/scripts/verification/verify-docker-release.ts",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -8612,7 +8614,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 113,
+      "durationMs": 115,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.ts",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -8693,7 +8695,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 254,
+      "durationMs": 267,
       "command": "node.exe ops/scripts/architecture/organization-audit.ts",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",
@@ -8898,7 +8900,7 @@
           "frontend/src/components/users/UserProfileModal.tsx",
           "frontend/src/components/users/Users.tsx",
           "frontend/src/components/utils-settings/AuditLog.tsx",
-          "frontend/src/components/utils-settings/Backup.jsx",
+          "frontend/src/components/utils-settings/Backup.tsx",
           "frontend/src/components/utils-settings/Settings.jsx",
           "frontend/src/lang/en.json",
           "frontend/src/lang/km.json",
@@ -8939,14 +8941,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 821,
+      "durationMs": 802,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-30T01:50:22.365Z",
+        "generatedAt": "2026-05-30T02:14:42.082Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -8956,9 +8958,9 @@
         "fileStatConcurrency": 32,
         "targets": 15,
         "existingTargets": 8,
-        "totalBytes": 540023767,
-        "protectedBytes": 215889927,
-        "cleanupCandidateBytes": 324133840,
+        "totalBytes": 540024068,
+        "protectedBytes": 215890046,
+        "cleanupCandidateBytes": 324134022,
         "nestedTargetOverlaps": [
           {
             "parent": "business-os-data",
@@ -8978,9 +8980,9 @@
           }
         ],
         "nestedOverlapBytes": 15496556,
-        "adjustedTotalBytes": 524527211,
-        "adjustedProtectedBytes": 200393371,
-        "adjustedCleanupCandidateBytes": 324133840,
+        "adjustedTotalBytes": 524527512,
+        "adjustedProtectedBytes": 200393490,
+        "adjustedCleanupCandidateBytes": 324134022,
         "largestProtectedTargets": [
           {
             "path": "business-os-data",
@@ -8992,7 +8994,7 @@
           },
           {
             "path": "ops/runtime",
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "category": "runtime state",
@@ -9034,7 +9036,7 @@
           },
           {
             "path": "frontend/dist",
-            "bytes": 31633848,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "category": "build output",
@@ -9052,7 +9054,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 680,
+            "measureMs": 671,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -9061,7 +9063,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 434,
+            "measureMs": 423,
             "bytes": 158132222,
             "files": 11264,
             "folders": 986,
@@ -9070,7 +9072,7 @@
           },
           {
             "path": "ops/node_modules",
-            "measureMs": 33,
+            "measureMs": 35,
             "bytes": 13797802,
             "files": 605,
             "folders": 71,
@@ -9080,7 +9082,7 @@
           {
             "path": "ops/runtime",
             "measureMs": 21,
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "category": "runtime state",
@@ -9098,28 +9100,28 @@
           {
             "path": "frontend/dist",
             "measureMs": 3,
-            "bytes": 31633848,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "category": "build output",
             "protected": false
           },
           {
-            "path": "business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads",
-            "measureMs": 3,
-            "bytes": 15495843,
-            "files": 12,
-            "folders": 1,
-            "category": "business uploads",
-            "protected": true
-          },
-          {
             "path": "ops/runtime/secrets",
-            "measureMs": 1,
+            "measureMs": 3,
             "bytes": 713,
             "files": 4,
             "folders": 1,
             "category": "secrets",
+            "protected": true
+          },
+          {
+            "path": "business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads",
+            "measureMs": 2,
+            "bytes": 15495843,
+            "files": 12,
+            "folders": 1,
+            "category": "business uploads",
             "protected": true
           }
         ],
@@ -9131,7 +9133,7 @@
             "targets": 3
           },
           "retention": {
-            "bytes": 37086001,
+            "bytes": 37086120,
             "files": 415,
             "folders": 57,
             "targets": 1
@@ -9149,7 +9151,7 @@
             "targets": 1
           },
           "regenerable": {
-            "bytes": 31633848,
+            "bytes": 31634030,
             "files": 120,
             "folders": 6,
             "targets": 1
@@ -9197,7 +9199,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 117,
+      "durationMs": 133,
       "command": "node.exe ops/scripts/backend/schema-audit.ts",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -9376,7 +9378,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 149,
+      "durationMs": 169,
       "command": "node.exe ops/scripts/docs/performance-scan.ts",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -9387,8 +9389,8 @@
         "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
         "sourceFiles": 351,
         "distAssets": 84,
-        "totalSourceBytes": 6341571,
-        "totalSourceLines": 143100,
+        "totalSourceBytes": 6349707,
+        "totalSourceLines": 143342,
         "largestSourceFile": "frontend/src/lang/km.json",
         "largestSourceFileBytes": 252664,
         "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.jsx",
@@ -9411,13 +9413,14 @@
           "frontend/src/components/pos/POS.jsx",
           "frontend/src/components/products/Products.jsx",
           "frontend/src/components/products/import/BulkImportModal.tsx",
+          "frontend/src/components/utils-settings/Backup.tsx",
           "frontend/src/components/utils-settings/Settings.jsx",
           "frontend/src/lang/en.json",
           "frontend/src/lang/km.json",
           "ops/scripts/architecture/language-runtime-audit.ts"
         ],
         "oversizedBuiltChunks": [
-          "frontend/dist/assets/catalog-BlxlyOOC.js",
+          "frontend/dist/assets/catalog-gVDrQngb.js",
           "frontend/dist/assets/index-DQztsXP7.css",
           "frontend/dist/assets/lang-km-c87vG7oG.js",
           "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
@@ -9495,9 +9498,9 @@
             "lines": 1730
           },
           {
-            "file": "frontend/src/components/utils-settings/Backup.jsx",
-            "size": 72240,
-            "lines": 1490
+            "file": "frontend/src/components/utils-settings/Backup.tsx",
+            "size": 80381,
+            "lines": 1732
           },
           {
             "file": "ops/scripts/architecture/language-runtime-audit.ts",
@@ -9612,6 +9615,11 @@
             "lines": 1881
           },
           {
+            "file": "frontend/src/components/utils-settings/Backup.tsx",
+            "size": 80381,
+            "lines": 1732
+          },
+          {
             "file": "frontend/src/components/utils-settings/Settings.jsx",
             "size": 82550,
             "lines": 1730
@@ -9640,11 +9648,6 @@
             "file": "backend/src/services/googleDriveSync/index.js",
             "size": 59146,
             "lines": 1564
-          },
-          {
-            "file": "frontend/src/components/utils-settings/Backup.jsx",
-            "size": 72240,
-            "lines": 1490
           },
           {
             "file": "ops/scripts/runtime/audits/deep-live-audit.ts",
@@ -9694,7 +9697,7 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-BlxlyOOC.js",
+            "file": "frontend/dist/assets/catalog-gVDrQngb.js",
             "size": 190194,
             "lines": 0
           },
@@ -9704,12 +9707,12 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Inventory-Dk73H2RJ.js",
+            "file": "frontend/dist/assets/Inventory-zL-nq7IG.js",
             "size": 147103,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/index-N1kPBks1.js",
+            "file": "frontend/dist/assets/index-DPvqFDbp.js",
             "size": 131110,
             "lines": 0
           },
@@ -9719,17 +9722,17 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-shared-DrsP6QOU.js",
+            "file": "frontend/dist/assets/app-shared-bPFlU1sU.js",
             "size": 96284,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Products-D5Eiielq.js",
+            "file": "frontend/dist/assets/Products-Ctd_hSKV.js",
             "size": 92778,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/POS-DYDLksgA.js",
+            "file": "frontend/dist/assets/POS-3_6YUtNw.js",
             "size": 76815,
             "lines": 0
           },
@@ -9739,33 +9742,33 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-editor-Br3G1BdP.js",
+            "file": "frontend/dist/assets/catalog-editor-W2SauZJZ.js",
             "size": 72120,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Dashboard-Cs3Wj-Nx.js",
+            "file": "frontend/dist/assets/Dashboard-B3ruz-OQ.js",
             "size": 71864,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/BulkImportModal-CsMT5l9p.js",
+            "file": "frontend/dist/assets/BulkImportModal-CJ7Gg1Vt.js",
             "size": 69885,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-preview-PB7_8kv4.js",
+            "file": "frontend/dist/assets/catalog-preview-BcjTn6pP.js",
             "size": 65811,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-methods-xnUoufkI.js",
+            "file": "frontend/dist/assets/app-api-methods-1AUWZg9s.js",
             "size": 61527,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Backup-h4bGTWXT.js",
-            "size": 59057,
+            "file": "frontend/dist/assets/Backup-C-O1zpb1.js",
+            "size": 59239,
             "lines": 0
           },
           {
@@ -9774,32 +9777,32 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Settings-KrIcYc8b.js",
+            "file": "frontend/dist/assets/Settings-D3CYAoiq.js",
             "size": 53063,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Users-irp_-dFH.js",
+            "file": "frontend/dist/assets/Users-BLBtnd-9.js",
             "size": 41256,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Branches-D5qCmOPg.js",
+            "file": "frontend/dist/assets/Branches-CHk98LeC.js",
             "size": 38915,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/ReceiptSettings-DP7TXkJg.js",
+            "file": "frontend/dist/assets/ReceiptSettings-TzSp_G_y.js",
             "size": 37913,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-api-D8lH9Jlg.js",
+            "file": "frontend/dist/assets/app-api-ml03l04d.js",
             "size": 37878,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Sales-Dw_RGz5S.js",
+            "file": "frontend/dist/assets/Sales-BcA8fRo0.js",
             "size": 35928,
             "lines": 0
           }
@@ -9816,14 +9819,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 204,
+      "durationMs": 188,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.ts",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-05-30T01:50:22.844Z",
+        "generatedAt": "2026-05-30T02:14:42.582Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -9849,7 +9852,7 @@
           ],
           [
             "React TSX",
-            97
+            98
           ],
           [
             "JavaScript",
@@ -9861,7 +9864,7 @@
           ],
           [
             "React JSX",
-            10
+            9
           ],
           [
             "PowerShell",
@@ -9891,7 +9894,7 @@
           ],
           [
             ".tsx",
-            97
+            98
           ],
           [
             ".js",
@@ -9903,7 +9906,7 @@
           ],
           [
             ".jsx",
-            10
+            9
           ],
           [
             ".ps1",
@@ -11642,7 +11645,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 126,
+      "durationMs": 119,
       "command": "node.exe ops/scripts/verification/verify-docker-release.ts",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -11784,7 +11787,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 138,
+      "durationMs": 124,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.ts",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -11865,7 +11868,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 275,
+      "durationMs": 279,
       "command": "node.exe ops/scripts/architecture/organization-audit.ts",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",
@@ -12070,7 +12073,7 @@
           "frontend/src/components/users/UserProfileModal.tsx",
           "frontend/src/components/users/Users.tsx",
           "frontend/src/components/utils-settings/AuditLog.tsx",
-          "frontend/src/components/utils-settings/Backup.jsx",
+          "frontend/src/components/utils-settings/Backup.tsx",
           "frontend/src/components/utils-settings/Settings.jsx",
           "frontend/src/lang/en.json",
           "frontend/src/lang/km.json",

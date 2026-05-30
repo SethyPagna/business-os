@@ -1205,7 +1205,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `AuditLog.tsx` | UI component/page |
-| 2 | `Backup.jsx` | UI component/page |
+| 2 | `Backup.tsx` | UI component/page |
 | 3 | `FontFamilyPicker.tsx` | UI component/page |
 | 4 | `index.ts` | UI component/page |
 | 5 | `OtpModal.tsx` | UI component/page |

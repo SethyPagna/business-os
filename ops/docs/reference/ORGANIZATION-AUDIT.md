@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T01:50:23.241Z
+Generated: 2026-05-30T02:14:42.971Z
 
 ## Summary
 
@@ -15,12 +15,12 @@ Generated: 2026-05-30T01:50:23.241Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 97 |
+| .tsx | 98 |
 | .js | 84 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
-| .jsx | 10 |
+| .jsx | 9 |
 | .ps1 | 8 |
 | .sh | 3 |
 | .sql | 2 |
@@ -65,17 +65,17 @@ Generated: 2026-05-30T01:50:23.241Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 12112 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 12115 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7923 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6883 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5889 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4299 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6887 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5902 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4310 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2650 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2654 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
@@ -89,12 +89,12 @@ Generated: 2026-05-30T01:50:23.241Z
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1815 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1748 | ops/docs/reference |
+| frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1610 | frontend/src/AppContext.jsx |
 | ops/scripts/architecture/language-runtime-audit.ts | 1596 | ops/scripts/architecture |
 | backend/src/routes/sales.js | 1573 | backend/routes |
-| backend/src/services/googleDriveSync/index.js | 1564 | backend/services |
 
 ## Relative Import Hotspots
 

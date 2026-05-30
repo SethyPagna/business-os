@@ -197,7 +197,7 @@
     "frontend/src/components/users/UserProfileModal.tsx",
     "frontend/src/components/users/Users.tsx",
     "frontend/src/components/utils-settings/AuditLog.tsx",
-    "frontend/src/components/utils-settings/Backup.jsx",
+    "frontend/src/components/utils-settings/Backup.tsx",
     "frontend/src/components/utils-settings/Settings.jsx",
     "frontend/src/lang/en.json",
     "frontend/src/lang/km.json",
