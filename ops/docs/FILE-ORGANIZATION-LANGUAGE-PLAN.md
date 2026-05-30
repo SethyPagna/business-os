@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 576 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 577 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 57`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 306`,
+  `.js: 56`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 307`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4750,6 +4750,19 @@ Decision rule:
     remain blocked on the future compile/staging lane. The current source
     extension count is `.js: 57`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 306`,
     `.tsx: 107` outside generated/runtime folders.
+577. Convert organizations route to a package-safe TypeScript path. Done:
+    `backend/src/routes/organizations.ts` keeps bootstrap, organization search,
+    and current organization context responses unchanged while making the
+    route entrypoint explicit for the backend server and route-contract tests.
+    `backend/test/routeContracts.test.ts` now asserts the `/bootstrap`,
+    `/search`, and `/current` organization routes directly. Focused route
+    contracts, organization route load, auth/security-adjacent smoke, and
+    stale-path scans passed, as did the full backend utility suite, schema
+    audit, and Linux packaging proof. Packaging still warns for direct `.ts` entries in
+    `pkg.scripts`, so larger backend route/service conversions remain blocked
+    on the future compile/staging lane. The current source extension count is
+    `.js: 56`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 307`, `.tsx: 107`
+    outside generated/runtime folders.
 
 ## Safety Gates
 

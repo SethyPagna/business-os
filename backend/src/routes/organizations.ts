@@ -12,6 +12,11 @@ const {
 
 const router = express.Router()
 
+/**
+ * Organization bootstrap, lookup, and current-context routes share the same
+ * filesystem layout helper so local and packaged runtimes resolve data roots
+ * through one boundary.
+ */
 router.get('/bootstrap', (_req, res) => {
   const organization = getDefaultOrganization()
   const storage = organization ? ensureOrganizationFilesystemLayout(organization) : null

@@ -73,6 +73,14 @@ runTest('auth router registers Google OAuth start and completion routes', () => 
   assert.ok(paths.includes('/oauth/complete'), 'missing /api/auth/oauth/complete')
 })
 
+runTest('organizations router registers bootstrap, search, and current context routes', () => {
+  const router = require('../src/routes/organizations.ts')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/bootstrap'), 'missing /api/organizations/bootstrap')
+  assert.ok(paths.includes('/search'), 'missing /api/organizations/search')
+  assert.ok(paths.includes('/current'), 'missing /api/organizations/current')
+})
+
 runTest('system router registers Google Drive sync connect and disconnect routes', () => {
   const router = require('../src/routes/system')
   const paths = getRoutePaths(router)

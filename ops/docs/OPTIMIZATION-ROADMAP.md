@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 576.
+- Latest completed implementation move in this roadmap: Move 577.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6407,3 +6407,18 @@ Move 576 status:
   route/service conversion still waits for a compile/staging package lane. The
   current source extension count is `.js: 57`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
   `.ts: 306`, `.tsx: 107` outside generated/runtime folders.
+
+Move 577 status:
+- Move 577 converts `backend/src/routes/organizations.ts` to a package-safe
+  TypeScript path. Bootstrap, organization search, and current organization
+  context responses remain unchanged while the backend server and
+  route-contract tests now import the explicit `.ts` route entrypoint.
+  `backend/test/routeContracts.test.ts` asserts the `/bootstrap`, `/search`,
+  and `/current` organization routes directly. Focused route contracts,
+  organization route load, auth/security-adjacent smoke, and stale-path scans
+  passed, as did the full backend utility suite, schema audit, and Linux
+  packaging proof. `pkg`
+  continues to warn for direct `.ts` scripts, so larger backend route/service
+  conversion still waits for a compile/staging package lane. The current source
+  extension count is `.js: 56`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 307`,
+  `.tsx: 107` outside generated/runtime folders.
