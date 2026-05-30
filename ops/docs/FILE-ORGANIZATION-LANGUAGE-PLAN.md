@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 555 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 556 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 89`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 274`,
+  `.js: 87`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 276`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4442,6 +4442,19 @@ Decision rule:
     future compile/staging lane replaces direct `pkg.scripts` parsing. The
     current source extension count is `.js: 89`, `.jsx: 0`, `.mjs: 0`,
     `.cjs: 0`, `.ts: 274`, `.tsx: 107` outside generated/runtime folders.
+556. Convert backend request context and organization folder helpers to
+    package-safe TypeScript paths. Done: `backend/src/requestContext.ts` now
+    owns request metadata extraction, header cleanup, middleware assignment,
+    and per-request metadata reads with JSDoc request/meta contracts, and
+    `backend/src/storage/organizationFolders.ts` now owns organization folder
+    label/path/public-id helpers with string/path result contracts. Server,
+    helper, config, and organization-context imports now target explicit `.ts`
+    paths. Focused server/route/data/runtime/automation tests, the full backend
+    utility suite, and Linux packaging proof passed; packaging still warns for
+    direct `.ts` entries in `pkg.scripts`, so larger backend route/service
+    conversions remain blocked on the future compile/staging lane. The current
+    source extension count is `.js: 87`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
+    `.ts: 276`, `.tsx: 107` outside generated/runtime folders.
 
 ## Safety Gates
 
