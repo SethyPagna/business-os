@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **34**
+Total files documented: **33**
 
 ## 2. Symbol Count by File
 
@@ -42,8 +42,7 @@ Total files documented: **34**
 | 30 | `backend/src/services/importJobs.js` | 175 | 0 |
 | 31 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
 | 32 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 33 | `backend/src/services/verification.js` | 21 | 0 |
-| 34 | `backend/src/systemJobs.js` | 28 | 0 |
+| 33 | `backend/src/systemJobs.js` | 28 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1525,33 +1524,7 @@ Total files documented: **34**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.33 `backend/src/services/verification.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `nowMs` | function | 8 |
-| 2 | `toIso` | function | 12 |
-| 3 | `parseBool` | function | 16 |
-| 4 | `isEmailProviderConfigured` | function | 23 |
-| 5 | `getVerificationCapabilities` | function | 30 |
-| 6 | `normalizeEmail` | function | 37 |
-| 7 | `normalizePhone` | function | 44 |
-| 8 | `maskDestination` | function | 52 |
-| 9 | `generateCode` | function | 65 |
-| 10 | `hashCode` | function | 69 |
-| 11 | `resolveChannel` | function | 73 |
-| 12 | `getDestinationForChannel` | function | 83 |
-| 13 | `cleanupExpiredCodes` | function | 88 |
-| 14 | `invalidateActiveCodes` | function | 96 |
-| 15 | `createVerificationRecord` | function | 109 |
-| 16 | `findActiveCode` | function | 136 |
-| 17 | `consumeCode` | function | 151 |
-| 18 | `verifyCode` | function | 155 |
-| 19 | `messageForPurpose` | function | 164 |
-| 20 | `sendEmail` | function | 183 |
-| 21 | `requestVerificationCode` | function | 247 |
-
-### 3.34 `backend/src/systemJobs.js`
+### 3.33 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

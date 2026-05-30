@@ -83,7 +83,7 @@ Code files documented: **468**
 | 71 | `backend/src/services/integrationDoctor.js` | 10 | 1 | 8 | 2 |
 | 72 | `backend/src/services/mediaQueue.ts` | 5 | 1 | 3 | 5 |
 | 73 | `backend/src/services/portalAi.js` | 2 | 1 | 2 | 1 |
-| 74 | `backend/src/services/verification.js` | 2 | 1 | 1 | 2 |
+| 74 | `backend/src/services/verification.ts` | 2 | 1 | 1 | 2 |
 | 75 | `backend/src/sessionAuth.ts` | 2 | 1 | 1 | 4 |
 | 76 | `backend/src/settingsSnapshot.ts` | 4 | 1 | 2 | 8 |
 | 77 | `backend/src/storage/organizationFolders.ts` | 2 | 1 | 0 | 2 |
@@ -766,7 +766,7 @@ Code files documented: **468**
   - `backend/src/services/integrationDoctor.js`
   - `backend/src/services/mediaQueue.ts`
   - `backend/src/services/portalAi.js`
-  - `backend/src/services/verification.js`
+  - `backend/src/services/verification.ts`
   - `backend/src/sessionAuth.ts`
   - `backend/src/systemJobs.js`
   - `backend/src/workers/importWorker.ts`
@@ -1230,7 +1230,7 @@ Code files documented: **468**
   - `../runtimeState/index.ts`
   - `../security.ts`
   - `../services/googleOauth`
-  - `../services/verification`
+  - `../services/verification.ts`
   - `../sessionAuth.ts`
   - `../settingsSnapshot.ts`
   - `bcryptjs`
@@ -1249,7 +1249,7 @@ Code files documented: **468**
   - `backend/src/runtimeState/index.ts`
   - `backend/src/security.ts`
   - `backend/src/services/googleOauth.js`
-  - `backend/src/services/verification.js`
+  - `backend/src/services/verification.ts`
   - `backend/src/sessionAuth.ts`
   - `backend/src/settingsSnapshot.ts`
 - Referenced by (2)
@@ -1737,7 +1737,7 @@ Code files documented: **468**
   - `../middleware`
   - `../organizationContext/index.ts`
   - `../services/googleOauth`
-  - `../services/verification`
+  - `../services/verification.ts`
   - `../sessionAuth.ts`
   - `bcryptjs`
   - `express`
@@ -1749,7 +1749,7 @@ Code files documented: **468**
   - `backend/src/middleware.js`
   - `backend/src/organizationContext/index.ts`
   - `backend/src/services/googleOauth.js`
-  - `backend/src/services/verification.js`
+  - `backend/src/services/verification.ts`
   - `backend/src/sessionAuth.ts`
 - Referenced by (1)
   - `backend/server.js`
@@ -2054,7 +2054,7 @@ Code files documented: **468**
 - Referenced by (1)
   - `backend/src/routes/portal.js`
 
-### 3.74 `backend/src/services/verification.js`
+### 3.74 `backend/src/services/verification.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)

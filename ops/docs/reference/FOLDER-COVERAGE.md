@@ -370,7 +370,7 @@ Total folders documented: **81**
 | 7 | `mediaQueue.ts` | Integration/service layer |
 | 8 | `portalAi.js` | Integration/service layer |
 | 9 | `README.md` | Integration/service layer |
-| 10 | `verification.js` | Integration/service layer |
+| 10 | `verification.ts` | Integration/service layer |
 
 
 ### 3.13 Folder: `backend/src/services/googleDriveSync`

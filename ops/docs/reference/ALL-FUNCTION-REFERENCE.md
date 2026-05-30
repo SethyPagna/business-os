@@ -83,7 +83,7 @@ Code files scanned: **468**
 | 71 | `backend/src/services/integrationDoctor.js` | 14 |
 | 72 | `backend/src/services/mediaQueue.ts` | 10 |
 | 73 | `backend/src/services/portalAi.js` | 42 |
-| 74 | `backend/src/services/verification.js` | 21 |
+| 74 | `backend/src/services/verification.ts` | 21 |
 | 75 | `backend/src/sessionAuth.ts` | 13 |
 | 76 | `backend/src/settingsSnapshot.ts` | 12 |
 | 77 | `backend/src/storage/organizationFolders.ts` | 5 |
@@ -2210,7 +2210,7 @@ Code files scanned: **468**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.74 `backend/src/services/verification.js`
+### 3.74 `backend/src/services/verification.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
