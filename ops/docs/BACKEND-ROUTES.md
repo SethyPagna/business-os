@@ -139,7 +139,7 @@ File: `backend/src/routes/sales.js`
 ## Contacts
 
 Base: `/api`  
-File: `backend/src/routes/contacts.js`
+File: `backend/src/routes/contacts.ts`
 
 - Customers (`/customers`, `/customers/:id`, bulk import)
 - Suppliers (`/suppliers`, `/suppliers/:id`, bulk import)

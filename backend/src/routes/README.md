@@ -21,7 +21,7 @@ Route files sit behind the shared middleware stack from `server.js`, so by the t
 - `inventory.js` - adjustments, movement history, inventory summaries
 - `sales.js` - sale creation, status changes, dashboard analytics
 - `returns.ts` - customer and supplier return workflows
-- `contacts.js` - customers, suppliers, delivery contacts
+- `contacts.ts` - customers, suppliers, delivery contacts
 - `portal.js` - public customer portal config, membership lookup, review submissions
 - `settings.ts` - settings read/write APIs
 - `system.js` - backup, import/export, reset, integrity, data-path tools

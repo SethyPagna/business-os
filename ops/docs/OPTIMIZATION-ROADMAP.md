@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 612.
+- Latest completed implementation move in this roadmap: Move 613.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4386,7 +4386,7 @@ Move 388 status:
 
 Move 389 status:
 - Move 389 tightens the contacts point-policy settings helper in
-  `backend/src/routes/contacts.js`. The point policy settings map now uses a
+  `backend/src/routes/contacts.ts`. The point policy settings map now uses a
   direct loop instead of a `forEach()` callback while preserving the settings
   query, point-basis defaults, USD/KHR point calculations, customer point
   summary behavior, and existing customer points pagination work already
@@ -4682,7 +4682,7 @@ Move 414 status:
 
 Move 415 status:
 - Move 415 tightens contact import, search, scoped-ID, and point-summary
-  helpers in `backend/src/routes/contacts.js`. Provided import rows, search
+  helpers in `backend/src/routes/contacts.ts`. Provided import rows, search
   haystack SQL, scoped customer ID parsing, point-summary scope placeholders,
   customer summary row maps, summary source ID collection, customer response
   decoration, and point-summary list responses now use named direct-loop
@@ -4691,7 +4691,7 @@ Move 415 status:
   points policy math, summary defaults, paged customer responses, and
   points-summary API behavior remain unchanged. A callback-chain scan now
   reports no `map()`, `filter()`, `forEach()`, `reduce()`, `find()`,
-  `flatMap()`, or `Array.from()` hits in `backend/src/routes/contacts.js`.
+  `flatMap()`, or `Array.from()` hits in `backend/src/routes/contacts.ts`.
 
 Move 416 status:
 - Move 416 tightens the remaining small auth/user route callback scans.
@@ -6955,3 +6955,17 @@ Move 612 status:
   compile/staging package lane. The expected generated language audit now
   reports `JavaScript: 10`, `TypeScript: 301`, and `React TSX: 107` across the
   active scan roots.
+
+Move 613 status:
+- Move 613 converts `backend/src/routes/contacts.ts` to a package-safe
+  TypeScript path. Customer, supplier, delivery contact, membership-number,
+  import-policy, point-policy, search, and contact-option behavior remain
+  unchanged on the existing CommonJS route style. Server mounting,
+  membership-prefix source assertions, route docs, master plan, and roadmap
+  docs now point at the explicit `.ts` route path. Focused contacts route load,
+  backup hardening, route-contract, backend utility, schema audit, stale-path,
+  and Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The expected generated language audit now reports
+  `JavaScript: 9`, `TypeScript: 302`, and `React TSX: 107` across the active
+  scan roots.

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 612 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 613 in this file.
 
 ## Goal
 
@@ -3062,7 +3062,7 @@ Decision rule:
     backend route cleanup only; no folder move, schema migration, or runtime
     conversion was needed.
 379. Tighten contacts point-policy settings loop. Done:
-    `backend/src/routes/contacts.js` now builds the point-policy settings map
+    `backend/src/routes/contacts.ts` now builds the point-policy settings map
     with a direct loop instead of a callback chain while preserving customer
     point policy defaults and summary behavior. This was a backend route
     cleanup only; no folder move, schema migration, or runtime conversion was
@@ -3233,7 +3233,7 @@ Decision rule:
     a backend sales-route cleanup only; no folder move, schema migration, or
     language conversion was needed.
 405. Tighten contact import, search, scoped-ID, and point-summary helpers.
-    Done: `backend/src/routes/contacts.js` now shares direct-loop helpers for
+    Done: `backend/src/routes/contacts.ts` now shares direct-loop helpers for
     provided import row shaping, searchable-field haystacks, scoped customer
     ID parsing, point-summary scope placeholders, customer row maps, point
     summary defaults, and response decoration. A callback scan now reports no
@@ -5246,6 +5246,19 @@ Decision rule:
     backend conversions remain blocked on the future compile/staging lane. The
     expected generated language audit now reports `JavaScript: 10`,
     `TypeScript: 301`, and `React TSX: 107` across the active scan roots.
+
+613. Convert contacts route to a package-safe TypeScript path.
+    Done: `backend/src/routes/contacts.ts` keeps customer, supplier, delivery
+    contact, membership-number, import-policy, point-policy, search, and
+    contact-option behavior on the existing CommonJS route style. Server
+    mounting, membership-prefix source assertions, route docs, master plan, and
+    roadmap docs now point at the explicit `.ts` route path. Focused contacts
+    route load, backup hardening, route-contract, backend utility, schema
+    audit, stale-path, and Linux packaging proof passed. Packaging still warns
+    for direct `.ts` entries in `pkg.scripts`, so broader backend conversions
+    remain blocked on the future compile/staging lane. The expected generated
+    language audit now reports `JavaScript: 9`, `TypeScript: 302`, and
+    `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 
