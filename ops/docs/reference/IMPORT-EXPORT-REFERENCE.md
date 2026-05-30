@@ -15,7 +15,7 @@ Code files documented: **466**
 | 3 | `backend/src/analytics/duckdbRuntime.js` | 2 | 1 | 1 | 4 |
 | 4 | `backend/src/authOtpGuards.ts` | 1 | 1 | 1 | 2 |
 | 5 | `backend/src/backupSchema.ts` | 0 | 1 | 0 | 3 |
-| 6 | `backend/src/businessMetrics.js` | 1 | 1 | 1 | 5 |
+| 6 | `backend/src/businessMetrics.ts` | 1 | 1 | 1 | 5 |
 | 7 | `backend/src/catalogTextIntegrity.ts` | 0 | 1 | 0 | 7 |
 | 8 | `backend/src/config/index.js` | 4 | 1 | 1 | 25 |
 | 9 | `backend/src/conflictControl.ts` | 0 | 1 | 0 | 12 |
@@ -624,7 +624,7 @@ Code files documented: **466**
   - `backend/src/services/backupPackages.js`
   - `backend/test/backupSchema.test.ts`
 
-### 3.6 `backend/src/businessMetrics.js`
+### 3.6 `backend/src/businessMetrics.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -733,7 +733,7 @@ Code files documented: **466**
   - `backend/src/postgresDatabase.js`
 - Referenced by (40)
   - `backend/server.js`
-  - `backend/src/businessMetrics.js`
+  - `backend/src/businessMetrics.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/organizationContext/index.js`
@@ -1258,7 +1258,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (8)
-  - `../businessMetrics`
+  - `../businessMetrics.ts`
   - `../conflictControl.ts`
   - `../database`
   - `../helpers`
@@ -1267,7 +1267,7 @@ Code files documented: **466**
   - `crypto`
   - `express`
 - Internal dependencies (6)
-  - `backend/src/businessMetrics.js`
+  - `backend/src/businessMetrics.ts`
   - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
@@ -1393,7 +1393,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (12)
-  - `../businessMetrics`
+  - `../businessMetrics.ts`
   - `../catalogTextIntegrity.ts`
   - `../database`
   - `../helpers`
@@ -1406,7 +1406,7 @@ Code files documented: **466**
   - `../schemaMetadata.ts`
   - `express`
 - Internal dependencies (11)
-  - `backend/src/businessMetrics.js`
+  - `backend/src/businessMetrics.ts`
   - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
@@ -1425,13 +1425,13 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (5)
-  - `../businessMetrics`
+  - `../businessMetrics.ts`
   - `../database`
   - `../middleware`
   - `../services/googleDriveSync`
   - `express`
 - Internal dependencies (4)
-  - `backend/src/businessMetrics.js`
+  - `backend/src/businessMetrics.ts`
   - `backend/src/database.js`
   - `backend/src/middleware.js`
   - `backend/src/services/googleDriveSync/index.js`
@@ -1490,7 +1490,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (20)
-  - `../businessMetrics`
+  - `../businessMetrics.ts`
   - `../catalogTextIntegrity.ts`
   - `../config`
   - `../conflictControl.ts`
@@ -1511,7 +1511,7 @@ Code files documented: **466**
   - `fs`
   - `path`
 - Internal dependencies (17)
-  - `backend/src/businessMetrics.js`
+  - `backend/src/businessMetrics.ts`
   - `backend/src/catalogTextIntegrity.ts`
   - `backend/src/config/index.js`
   - `backend/src/conflictControl.ts`
@@ -1582,7 +1582,7 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (8)
-  - `../businessMetrics`
+  - `../businessMetrics.ts`
   - `../conflictControl.ts`
   - `../database`
   - `../helpers`
@@ -1591,7 +1591,7 @@ Code files documented: **466**
   - `../productBatches`
   - `express`
 - Internal dependencies (7)
-  - `backend/src/businessMetrics.js`
+  - `backend/src/businessMetrics.ts`
   - `backend/src/conflictControl.ts`
   - `backend/src/database.js`
   - `backend/src/helpers.js`

@@ -15,7 +15,7 @@ Code files scanned: **466**
 | 3 | `backend/src/analytics/duckdbRuntime.js` | 3 |
 | 4 | `backend/src/authOtpGuards.ts` | 3 |
 | 5 | `backend/src/backupSchema.ts` | 4 |
-| 6 | `backend/src/businessMetrics.js` | 9 |
+| 6 | `backend/src/businessMetrics.ts` | 9 |
 | 7 | `backend/src/catalogTextIntegrity.ts` | 5 |
 | 8 | `backend/src/config/index.js` | 11 |
 | 9 | `backend/src/conflictControl.ts` | 6 |
@@ -555,19 +555,19 @@ Code files scanned: **466**
 | 3 | `buildBackupSummary` | function | 125 |
 | 4 | `buildBackupSummaryFromCounts` | function | 133 |
 
-### 3.6 `backend/src/businessMetrics.js`
+### 3.6 `backend/src/businessMetrics.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `sellableProductWhere` | function | 5 |
-| 2 | `effectiveCostExpr` | function | 12 |
-| 3 | `stockQuantityExpr` | function | 18 |
-| 4 | `normalizeMetricRow` | function | 22 |
-| 5 | `getStockMetrics` | function | 34 |
-| 6 | `getLowStockProducts` | function | 69 |
-| 7 | `getOutOfStockProducts` | function | 83 |
-| 8 | `getStockAlertProducts` | function | 96 |
-| 9 | `getExpiringProducts` | function | 118 |
+| 1 | `sellableProductWhere` | function | 14 |
+| 2 | `effectiveCostExpr` | function | 25 |
+| 3 | `stockQuantityExpr` | function | 34 |
+| 4 | `normalizeMetricRow` | function | 41 |
+| 5 | `getStockMetrics` | function | 56 |
+| 6 | `getLowStockProducts` | function | 94 |
+| 7 | `getOutOfStockProducts` | function | 111 |
+| 8 | `getStockAlertProducts` | function | 127 |
+| 9 | `getExpiringProducts` | function | 152 |
 
 ### 3.7 `backend/src/catalogTextIntegrity.ts`
 

@@ -21,7 +21,7 @@ Total files documented: **529**
 | 9 | `backend/src/analytics/duckdbRuntime.js` | backend-core | 91 | 2.7 | Project source/support file |
 | 10 | `backend/src/authOtpGuards.ts` | backend-core | 34 | 1.2 | Project source/support file |
 | 11 | `backend/src/backupSchema.ts` | backend-core | 165 | 3.8 | Project source/support file |
-| 12 | `backend/src/businessMetrics.js` | backend-core | 158 | 6.1 | Project source/support file |
+| 12 | `backend/src/businessMetrics.ts` | backend-core | 192 | 7.0 | Project source/support file |
 | 13 | `backend/src/catalogTextIntegrity.ts` | backend-core | 96 | 3.0 | Project source/support file |
 | 14 | `backend/src/config/index.js` | backend-core | 303 | 12.3 | Project source/support file |
 | 15 | `backend/src/conflictControl.ts` | backend-core | 117 | 3.4 | Project source/support file |

@@ -172,7 +172,7 @@ Total folders documented: **81**
 | 1 | `accessControl.ts` | Project source/support file |
 | 2 | `authOtpGuards.ts` | Project source/support file |
 | 3 | `backupSchema.ts` | Project source/support file |
-| 4 | `businessMetrics.js` | Project source/support file |
+| 4 | `businessMetrics.ts` | Project source/support file |
 | 5 | `catalogTextIntegrity.ts` | Project source/support file |
 | 6 | `conflictControl.ts` | Project source/support file |
 | 7 | `contactOptions.ts` | Project source/support file |
