@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 586.
+- Latest completed implementation move in this roadmap: Move 587.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6559,3 +6559,17 @@ Move 586 status:
   scripts, so broader backend conversions still wait for a compile/staging
   package lane. The generated language audit now reports `JavaScript: 36`,
   `TypeScript: 275`, and `React TSX: 107` across the active scan roots.
+
+Move 587 status:
+- Move 587 converts `backend/src/services/mediaQueue.ts` to a package-safe
+  TypeScript path. BullMQ initialization, Redis connection probing,
+  cancellation-aware media optimization, import-file status updates, local
+  fallback execution, enqueueing, worker startup, and queue status reporting
+  remain unchanged on the existing CommonJS service style. Runtime, file upload,
+  import job, media worker, and import job state-machine callers now point at
+  the explicit `.ts` service. Focused media queue load, import job
+  state-machine, route-contract, backend utility, schema audit, stale-path, and
+  Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so broader backend conversions still wait for a compile/staging
+  package lane. The generated language audit now reports `JavaScript: 35`,
+  `TypeScript: 276`, and `React TSX: 107` across the active scan roots.

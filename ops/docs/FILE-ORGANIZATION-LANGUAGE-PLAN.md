@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 586 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 587 in this file.
 
 ## Goal
 
@@ -4887,6 +4887,19 @@ Decision rule:
     direct `.ts` entries in `pkg.scripts`, so broader backend conversions remain
     blocked on the future compile/staging lane. The generated language audit now
     reports `JavaScript: 36`, `TypeScript: 275`, and `React TSX: 107` across
+    the active scan roots.
+587. Convert media queue service to a package-safe TypeScript path.
+    Done: `backend/src/services/mediaQueue.ts` keeps BullMQ initialization,
+    Redis connection probing, cancellation-aware media optimization, import-file
+    status updates, local fallback execution, enqueueing, worker startup, and
+    queue status reporting on the existing CommonJS service style. Runtime,
+    file upload, import job, media worker, and import job state-machine callers
+    now point at the explicit `.ts` service. Focused media queue load, import
+    job state-machine, route-contract, backend utility, schema audit,
+    stale-path, and Linux packaging proof passed. Packaging still warns for
+    direct `.ts` entries in `pkg.scripts`, so broader backend conversions remain
+    blocked on the future compile/staging lane. The generated language audit now
+    reports `JavaScript: 35`, `TypeScript: 276`, and `React TSX: 107` across
     the active scan roots.
 
 ## Safety Gates

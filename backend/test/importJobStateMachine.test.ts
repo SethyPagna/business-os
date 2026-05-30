@@ -28,7 +28,7 @@ const {
   updateImportJobDecisions,
   updateJob,
 } = require('../src/services/importJobs')
-const { processMediaOptimizationJob } = require('../src/services/mediaQueue')
+const { processMediaOptimizationJob } = require('../src/services/mediaQueue.ts')
 
 let failed = 0
 

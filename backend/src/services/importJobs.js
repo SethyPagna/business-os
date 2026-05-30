@@ -24,7 +24,7 @@ const { isSafeExternalImageReference } = require('../netSecurity.ts')
 const { normalizePriceValue } = require('../money.ts')
 const { normalizeProductDiscount } = require('../productDiscounts.ts')
 const { normalizeCsvKey, parseCsvRowBatchesFromFile } = require('../importCsv.ts')
-const { enqueueMediaOptimization } = require('./mediaQueue')
+const { enqueueMediaOptimization } = require('./mediaQueue.ts')
 const { buildImportedContactState, cleanText } = require('../contactOptions.ts')
 const {
   hasImportValue,
