@@ -120,7 +120,7 @@ Backend:
 - `backend/src/routes/returns.js` normalizes `client_request_id` for customer
   and supplier returns and handles duplicate-key retry results.
 - `backend/src/systemJobs.js` dedupes active jobs by `dedupeKey`.
-- `backend/src/routes/system/index.js` uses stable dedupe keys for Google Drive
+- `backend/src/routes/system/index.ts` uses stable dedupe keys for Google Drive
   sync, backup export, and backup restore jobs.
 
 ## Priority Action Matrix
@@ -134,7 +134,7 @@ Backend:
 | Product media upload | `frontend/src/components/products/forms/ProductForm.tsx`, `frontend/src/api/methods.ts`, `backend/src/routes/products.js` | Duplicate media, broken primary image | `saving`, `imageUploading`, synchronous upload/save refs, live-server write requirement | Add failure recovery check |
 | Catalog/public media | `frontend/src/components/catalog/CatalogPage.tsx`, `frontend/src/components/catalog/CatalogEditorSurface.tsx`, `frontend/src/components/catalog/CatalogImageField.tsx` | Broken public media refs | per-block upload status, per-target synchronous upload guard | Add path ownership and retry checks |
 | File library upload/delete | `frontend/src/components/files/FilePickerModal.tsx`, `frontend/src/components/files/FilesPage.jsx`, `backend/src/routes/files.js` | Duplicate assets, wrong delete | `uploading`, delete id state, synchronous upload/delete refs | Add live file-picker Playwright check |
-| Backup export/restore | `frontend/src/components/utils-settings/Backup.tsx`, `backend/src/routes/system/index.js`, `backend/src/systemJobs.js` | Data loss, duplicate destructive jobs | `loading`, active job disable, backend dedupe key | Keep regression proving UI + backend job dedupe |
+| Backup export/restore | `frontend/src/components/utils-settings/Backup.tsx`, `backend/src/routes/system/index.ts`, `backend/src/systemJobs.js` | Data loss, duplicate destructive jobs | `loading`, active job disable, backend dedupe key | Keep regression proving UI + backend job dedupe |
 | Settings save | `frontend/src/components/utils-settings/Settings.tsx`, `frontend/src/AppContext.tsx`, `backend/src/routes/settings.js` | Lost config, stale overwrite | write conflict helpers, upload wait check, synchronous save/upload refs, API save queue | Add stale-conflict Playwright check |
 | Profile/avatar save | `frontend/src/components/users/UserProfileModal.tsx`, `frontend/src/api/methods.ts` | Duplicate avatar upload, stale profile | `savingProfile`, `savingPassword`, `uploadingAvatar`, synchronous refs, loader timeout | Add disconnected-server recovery check |
 

@@ -329,7 +329,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `index.js` | API route handler |
+| 1 | `index.ts` | API route handler |
 
 
 ### 3.11 Folder: `backend/src/runtimeState`

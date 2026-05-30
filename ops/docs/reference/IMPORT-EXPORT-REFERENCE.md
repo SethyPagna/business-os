@@ -64,7 +64,7 @@ Code files documented: **468**
 | 52 | `backend/src/routes/sales.ts` | 8 | 1 | 7 | 1 |
 | 53 | `backend/src/routes/settings.ts` | 9 | 1 | 8 | 2 |
 | 54 | `backend/src/routes/sync.ts` | 7 | 1 | 3 | 1 |
-| 55 | `backend/src/routes/system/index.js` | 24 | 1 | 20 | 2 |
+| 55 | `backend/src/routes/system/index.ts` | 24 | 1 | 20 | 2 |
 | 56 | `backend/src/routes/units.ts` | 6 | 1 | 5 | 2 |
 | 57 | `backend/src/routes/users.ts` | 11 | 1 | 9 | 1 |
 | 58 | `backend/src/runtimeCache.ts` | 2 | 1 | 1 | 4 |
@@ -516,7 +516,7 @@ Code files documented: **468**
   - `./src/routes/sales.ts`
   - `./src/routes/settings.ts`
   - `./src/routes/sync.ts`
-  - `./src/routes/system`
+  - `./src/routes/system/index.ts`
   - `./src/routes/units.ts`
   - `./src/routes/users.ts`
   - `./src/runtimeVersion.ts`
@@ -564,7 +564,7 @@ Code files documented: **468**
   - `backend/src/routes/sales.ts`
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/sync.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.ts`
   - `backend/src/runtimeVersion.ts`
@@ -586,7 +586,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/middleware.ts`
   - `backend/src/routes/auth.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/test/accessControl.test.ts`
 
 ### 3.3 `backend/src/analytics/duckdbRuntime.ts`
@@ -599,7 +599,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/server.js`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/test/analyticsRuntime.test.ts`
 
@@ -622,7 +622,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (3)
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/backupPackages.ts`
   - `backend/test/backupSchema.test.ts`
 
@@ -679,7 +679,7 @@ Code files documented: **468**
   - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/products.js`
   - `backend/src/routes/sync.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/serverUtils.ts`
@@ -756,7 +756,7 @@ Code files documented: **468**
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.ts`
   - `backend/src/routes/settings.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.ts`
   - `backend/src/schemaMetadata.ts`
@@ -785,7 +785,7 @@ Code files documented: **468**
   - none
 - Referenced by (5)
   - `backend/src/organizationContext/index.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/systemFsWorker.ts`
   - `backend/test/dataPath.test.ts`
@@ -799,7 +799,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/test/postgresCutoverReadiness.test.ts`
 
 ### 3.14 `backend/src/db/postgresQueryCompat.ts`
@@ -845,7 +845,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.ts`
   - `backend/src/routes/products.js`
   - `backend/src/routes/settings.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/routes/users.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.ts`
@@ -886,7 +886,7 @@ Code files documented: **468**
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.ts`
   - `backend/src/routes/settings.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.ts`
   - `backend/src/services/importJobs.js`
@@ -952,7 +952,7 @@ Code files documented: **468**
   - none
 - Referenced by (3)
   - `backend/server.js`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/googleDriveSync/index.ts`
 
 ### 3.22 `backend/src/middleware.ts`
@@ -999,7 +999,7 @@ Code files documented: **468**
   - `backend/src/routes/sales.ts`
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/sync.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.ts`
 
@@ -1047,7 +1047,7 @@ Code files documented: **468**
 - Referenced by (6)
   - `backend/server.js`
   - `backend/src/fileAssets.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/backupPackages.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/settingsSnapshot.ts`
@@ -1084,7 +1084,7 @@ Code files documented: **468**
   - `backend/src/routes/auth.ts`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/routes/users.ts`
 
 ### 3.28 `backend/src/permissions.ts`
@@ -1653,7 +1653,7 @@ Code files documented: **468**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.55 `backend/src/routes/system/index.js`
+### 3.55 `backend/src/routes/system/index.ts`
 
 - Declared exports: `module.exports`
 - Imports (24)
@@ -1780,7 +1780,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
 - Referenced by (2)
   - `backend/src/routes/auth.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
 
 ### 3.60 `backend/src/runtimeVersion.ts`
 
@@ -1825,7 +1825,7 @@ Code files documented: **468**
   - `backend/src/middleware.ts`
   - `backend/src/routes/auth.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/aiGateway.ts`
   - `backend/src/services/googleDriveSync/index.ts`
   - `backend/test/security.test.ts`
@@ -1875,7 +1875,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/objectStore.ts`
 - Referenced by (4)
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/test/backupRetention.test.ts`
@@ -1919,7 +1919,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/helpers.ts`
   - `backend/src/routes/notifications.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/integrationDoctor.ts`
 
 ### 3.68 `backend/src/services/googleDriveSync/versioning.ts`
@@ -1990,7 +1990,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/runtime.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/workers/importWorker.ts`
   - `backend/test/importJobStateMachine.test.ts`
@@ -2019,7 +2019,7 @@ Code files documented: **468**
   - `backend/src/services/googleOauth.ts`
   - `backend/src/services/importJobs.js`
 - Referenced by (2)
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/test/integrationDoctor.test.ts`
 
 ### 3.72 `backend/src/services/mediaQueue.ts`
@@ -2134,7 +2134,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/database.ts`
 - Referenced by (2)
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/test/systemJobs.test.ts`
 
 ### 3.80 `backend/src/uploadReferenceCleanup.ts`
@@ -2747,7 +2747,7 @@ Code files documented: **468**
   - `../src/routes/products`
   - `../src/routes/runtime.ts`
   - `../src/routes/settings.ts`
-  - `../src/routes/system`
+  - `../src/routes/system/index.ts`
   - `../src/routes/units.ts`
   - `fs`
   - `node:assert/strict`
@@ -2766,7 +2766,7 @@ Code files documented: **468**
   - `backend/src/routes/products.js`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/settings.ts`
-  - `backend/src/routes/system/index.js`
+  - `backend/src/routes/system/index.ts`
   - `backend/src/routes/units.ts`
 - Referenced by (0)
   - none

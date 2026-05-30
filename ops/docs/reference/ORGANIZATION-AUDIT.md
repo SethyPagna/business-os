@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T23:07:40.063Z
+Generated: 2026-05-30T23:16:30.886Z
 
 ## Summary
 
@@ -14,13 +14,13 @@ Generated: 2026-05-30T23:07:40.063Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 348 |
+| .ts | 349 |
 | .tsx | 107 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
-| .js | 4 |
+| .js | 3 |
 | .sh | 3 |
 | .sql | 2 |
 | .css | 1 |
@@ -65,9 +65,9 @@ Generated: 2026-05-30T23:07:40.063Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7984 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7056 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7076 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5362 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5382 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -90,7 +90,7 @@ Generated: 2026-05-30T23:07:40.063Z
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1750 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
-| backend/src/routes/system/index.js | 1659 | backend/routes |
+| backend/src/routes/system/index.ts | 1659 | backend/routes |
 | ops/scripts/architecture/language-runtime-audit.ts | 1596 | ops/scripts/architecture |
 | backend/src/routes/sales.ts | 1573 | backend/routes |
 | frontend/src/App.tsx | 1572 | frontend/src/App.tsx |
@@ -104,7 +104,7 @@ Generated: 2026-05-30T23:07:40.063Z
 | frontend/src/components/inventory/Inventory.tsx | 29 | frontend/components/inventory |
 | frontend/src/components/dashboard/Dashboard.tsx | 21 | frontend/components/dashboard |
 | frontend/src/components/sales/Sales.tsx | 21 | frontend/components/sales |
-| backend/src/routes/system/index.js | 20 | backend/routes |
+| backend/src/routes/system/index.ts | 20 | backend/routes |
 | frontend/src/components/pos/POS.tsx | 20 | frontend/components/pos |
 | frontend/src/components/catalog/CatalogPage.tsx | 19 | frontend/components/catalog |
 | frontend/src/components/contacts/CustomersTab.tsx | 18 | frontend/components/contacts |

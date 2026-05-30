@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T23:07:39.645Z",
+  "generatedAt": "2026-05-30T23:16:30.446Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      307
+      308
     ],
     [
       "React TSX",
@@ -37,7 +37,7 @@
     ],
     [
       "JavaScript",
-      4
+      3
     ],
     [
       "Shell",
@@ -59,7 +59,7 @@
   "extensionCounts": [
     [
       ".ts",
-      307
+      308
     ],
     [
       ".tsx",
@@ -75,7 +75,7 @@
     ],
     [
       ".js",
-      4
+      3
     ],
     [
       ".sh",
@@ -1762,7 +1762,7 @@
       "covered": true
     },
     {
-      "target": "backend/src/routes/system/index.js",
+      "target": "backend/src/routes/system/index.ts",
       "optimization": "System settings writes now prepare the delete statement once beside the upsert statement, avoiding repeated statement creation when null-valued settings are removed inside the transaction.",
       "rollback": "Remove deleteSetting and inline db.prepare(\"DELETE FROM settings WHERE key = ?\") in the null-value branch; settings write behavior remains unchanged.",
       "proof": [

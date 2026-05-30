@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-30T23:07:39.645Z
+Generated: 2026-05-30T23:16:30.446Z
 
 ## Summary
 
@@ -22,11 +22,11 @@ Generated: 2026-05-30T23:07:39.645Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 307 |
+| TypeScript | 308 |
 | React TSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
-| JavaScript | 4 |
+| JavaScript | 3 |
 | Shell | 3 |
 | JSON | 2 |
 | SQL | 2 |
@@ -161,7 +161,7 @@ Generated: 2026-05-30T23:07:39.645Z
 | `backend/src/routes/portal.ts` | yes | Portal catalog products now share one image and branch-stock materialization helper plus one payload decorator across full catalog and paged search responses. | Inline the image-map, branch-stock-map, gallery, and badge decoration blocks separately in getPortalProducts and getPortalCatalogProductPage again; public catalog response fields remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\portalInventoryRegression.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
 | `backend/src/routes/products.js` | yes | Image-only bulk import now builds one normalized product-name map before processing uploaded image filenames, replacing a full active-product scan for every image. | Remove productsByImageBaseName and return to allProducts.find inside the image loop; image matching behavior remains name-based. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\productSearchPagination.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
 | `backend/src/routes/sales.ts` | yes | Sale creation now prepares the inventory movement insert and optional movement timestamp update once per transaction instead of rebuilding those statements for every sold item. | Move insertSaleMovement and updateSaleMovementCreatedAt back into the per-item allocation block; sale item, batch allocation, movement, and imported timestamp behavior remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\productBatchHierarchy.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
-| `backend/src/routes/system/index.js` | yes | System settings writes now prepare the delete statement once beside the upsert statement, avoiding repeated statement creation when null-valued settings are removed inside the transaction. | Remove deleteSetting and inline db.prepare("DELETE FROM settings WHERE key = ?") in the null-value branch; settings write behavior remains unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\routeContracts.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
+| `backend/src/routes/system/index.ts` | yes | System settings writes now prepare the delete statement once beside the upsert statement, avoiding repeated statement creation when null-valued settings are removed inside the transaction. | Remove deleteSetting and inline db.prepare("DELETE FROM settings WHERE key = ?") in the null-value branch; settings write behavior remains unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node backend\test\routeContracts.test.ts`<br>`node ops\scripts\backend\schema-audit.ts` |
 
 ## Runtime Policy
 

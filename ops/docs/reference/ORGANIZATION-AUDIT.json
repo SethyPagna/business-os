@@ -161,7 +161,7 @@
     "backend/src/routes/products.js",
     "backend/src/routes/returns.ts",
     "backend/src/routes/sales.ts",
-    "backend/src/routes/system/index.js",
+    "backend/src/routes/system/index.ts",
     "backend/src/routes/users.ts",
     "backend/src/services/backupPackages.ts",
     "backend/src/services/googleDriveSync/index.ts",

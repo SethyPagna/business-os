@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **5**
+Total files documented: **4**
 
 ## 2. Symbol Count by File
 
@@ -13,8 +13,7 @@ Total files documented: **5**
 | 1 | `backend/server.js` | 23 | 0 |
 | 2 | `backend/src/routes/inventory.js` | 32 | 16 |
 | 3 | `backend/src/routes/products.js` | 64 | 12 |
-| 4 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 5 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 4 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -190,99 +189,7 @@ Total files documented: **5**
 | 11 | POST | `/upload-image` | 1487 |
 | 12 | POST | `/bulk-import` | 1505 |
 
-### 3.4 `backend/src/routes/system/index.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `auditWithActorMeta` | function | 87 |
-| 2 | `q` | function | 105 |
-| 3 | `buildSqlPlaceholders` | function | 109 |
-| 4 | `joinRemainingImportJobIds` | function | 117 |
-| 5 | `collectSystemSettingKeys` | function | 125 |
-| 6 | `buildSettingsMap` | function | 133 |
-| 7 | `buildSystemSettingEntries` | function | 141 |
-| 8 | `sumNumericValues` | function | 149 |
-| 9 | `getCustomTableNames` | function | 157 |
-| 10 | `broadcastMany` | function | 166 |
-| 11 | `dropCustomTables` | function | 172 |
-| 12 | `clearTables` | function | 179 |
-| 13 | `collectAppliedOperationIds` | function | 185 |
-| 14 | `collectSortedSetValues` | function | 193 |
-| 15 | `buildFolderEntries` | function | 202 |
-| 16 | `buildExistingFavoriteFolders` | function | 214 |
-| 17 | `listVisibleDirectories` | function | 226 |
-| 18 | `buildPickerScript` | function | 237 |
-| 19 | `getClientKey` | function | 252 |
-| 20 | `applyRouteRateLimit` | function | 258 |
-| 21 | `stopImportsBeforeDestructiveAction` | function | 270 |
-| 22 | `runFsWorker` | function | 285 |
-| 23 | `finish` | const arrow | 297 |
-| 24 | `getHostUiAvailability` | function | 341 |
-| 25 | `buildRequestBaseUrl` | function | 350 |
-| 26 | `resolveDriveRedirectUri` | function | 357 |
-| 27 | `getSafeTableCount` | function | 364 |
-| 28 | `buildMigrationTableCounts` | function | 372 |
-| 29 | `safeJsonParse` | function | 392 |
-| 30 | `readSystemSettings` | function | 401 |
-| 31 | `writeSystemSettings` | function | 409 |
-| 32 | `getMigrationSafetyBackupDestination` | function | 425 |
-| 33 | `getMigrationSafetyState` | function | 429 |
-| 34 | `createMigrationSafetyBackup` | function | 451 |
-| 35 | `runMigrationSafetyDriveSync` | function | 468 |
-| 36 | `runMigrationSafetyAutomation` | function | 506 |
-| 37 | `buildScaleMigrationStatus` | function | 521 |
-| 38 | `readFinalBackupManifest` | function | 590 |
-| 39 | `getDefaultBackupDestinationDir` | function | 594 |
-| 40 | `createFolderBackup` | function | 600 |
-| 41 | `restoreFolderBackup` | function | 637 |
-| 42 | `sendBackupVersions` | function | 1007 |
-| 43 | `listWindowsFsRoots` | const arrow | 1510 |
-| 44 | `listDriveRoots` | const arrow | 1525 |
-
-#### 3.4.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | GET | `/audit-logs` | 682 |
-| 2 | DELETE | `/audit-logs/retention` | 744 |
-| 3 | GET | `/debug/log` | 767 |
-| 4 | GET | `/config` | 773 |
-| 5 | GET | `/drive-sync/status` | 811 |
-| 6 | GET | `/jobs/:id` | 817 |
-| 7 | GET | `/jobs` | 823 |
-| 8 | POST | `/jobs/:id/cancel` | 827 |
-| 9 | POST | `/drive-sync/preferences` | 833 |
-| 10 | POST | `/drive-sync/oauth/start` | 844 |
-| 11 | GET | `/drive-sync/oauth/callback` | 888 |
-| 12 | POST | `/drive-sync/disconnect` | 916 |
-| 13 | POST | `/drive-sync/forget-credentials` | 925 |
-| 14 | POST | `/drive-sync/jobs` | 942 |
-| 15 | POST | `/drive-sync/sync-now` | 972 |
-| 16 | GET | `/backups/versions` | 1020 |
-| 17 | GET | `/backups/versions/list` | 1021 |
-| 18 | GET | `/backups/:id` | 1023 |
-| 19 | GET | `/object-storage/doctor` | 1029 |
-| 20 | POST | `/object-storage/test-write` | 1037 |
-| 21 | GET | `/integration-doctor` | 1045 |
-| 22 | POST | `/backups` | 1058 |
-| 23 | POST | `/backups/:id/restore` | 1106 |
-| 24 | POST | `/reset-data` | 1131 |
-| 25 | POST | `/factory-reset` | 1191 |
-| 26 | POST | `/sync/push` | 1236 |
-| 27 | GET | `/verify-integrity` | 1246 |
-| 28 | POST | `/repair-integrity` | 1275 |
-| 29 | GET | `/data-path` | 1305 |
-| 30 | GET | `/storage-mode` | 1326 |
-| 31 | GET | `/scale-migration/status` | 1361 |
-| 32 | POST | `/scale-migration/prepare` | 1370 |
-| 33 | POST | `/scale-migration/run` | 1400 |
-| 34 | POST | `/data-path` | 1418 |
-| 35 | DELETE | `/data-path` | 1477 |
-| 36 | POST | `/browse-dir` | 1507 |
-| 37 | POST | `/open-path` | 1564 |
-| 38 | POST | `/pick-folder` | 1593 |
-
-### 3.5 `backend/src/services/importJobs.js`
+### 3.4 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

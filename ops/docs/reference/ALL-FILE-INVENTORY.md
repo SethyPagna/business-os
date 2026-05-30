@@ -73,7 +73,7 @@ Total files documented: **531**
 | 61 | `backend/src/routes/sales.ts` | backend-routes | 1573 | 64.6 | API route handler |
 | 62 | `backend/src/routes/settings.ts` | backend-routes | 210 | 7.3 | API route handler |
 | 63 | `backend/src/routes/sync.ts` | backend-routes | 301 | 13.3 | API route handler |
-| 64 | `backend/src/routes/system/index.js` | backend-routes | 1659 | 65.3 | API route handler |
+| 64 | `backend/src/routes/system/index.ts` | backend-routes | 1659 | 65.3 | API route handler |
 | 65 | `backend/src/routes/units.ts` | backend-routes | 151 | 5.9 | API route handler |
 | 66 | `backend/src/routes/users.ts` | backend-routes | 1086 | 44.5 | API route handler |
 | 67 | `backend/src/runtimeCache.ts` | backend-core | 248 | 6.2 | Project source/support file |

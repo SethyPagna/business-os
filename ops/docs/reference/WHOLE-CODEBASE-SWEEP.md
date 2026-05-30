@@ -663,7 +663,7 @@ stock movement, audit, and imported timestamp semantics intact while removing
 per-item statement setup.
 
 Move 178 completes the next system route data-path slice in
-`backend/src/routes/system/index.js`. `writeSystemSettings()` now prepares the
+`backend/src/routes/system/index.ts`. `writeSystemSettings()` now prepares the
 settings delete statement once beside the settings upsert statement, so removing
 null-valued settings inside the transaction no longer rebuilds the same DELETE
 statement for each entry.

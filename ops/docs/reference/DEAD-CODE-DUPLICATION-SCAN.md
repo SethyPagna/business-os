@@ -518,7 +518,7 @@ matching stay centralized instead of duplicating checkout logic inside
   `backend/src/routes/sales.ts`; sold item allocations now reuse the same
   request-scoped movement insert and timestamp-update statements.
 - Move 178 removes repeated settings delete statement setup from
-  `backend/src/routes/system/index.js`; null-valued settings now use the same
+  `backend/src/routes/system/index.ts`; null-valued settings now use the same
   prepared delete statement inside `writeSystemSettings()`.
 - Move 179 removes a duplicate audit pathway from the language/runtime queue:
   `ops/scripts/architecture/language-runtime-audit.mjs` no longer appears as a

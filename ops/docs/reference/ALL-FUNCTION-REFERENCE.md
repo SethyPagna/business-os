@@ -64,7 +64,7 @@ Code files scanned: **468**
 | 52 | `backend/src/routes/sales.ts` | 24 |
 | 53 | `backend/src/routes/settings.ts` | 8 |
 | 54 | `backend/src/routes/sync.ts` | 12 |
-| 55 | `backend/src/routes/system/index.js` | 44 |
+| 55 | `backend/src/routes/system/index.ts` | 44 |
 | 56 | `backend/src/routes/units.ts` | 3 |
 | 57 | `backend/src/routes/users.ts` | 26 |
 | 58 | `backend/src/runtimeCache.ts` | 12 |
@@ -1529,7 +1529,7 @@ Code files scanned: **468**
 | 11 | `getUploadDir` | function | 218 |
 | 12 | `readManifest` | function | 222 |
 
-### 3.55 `backend/src/routes/system/index.js`
+### 3.55 `backend/src/routes/system/index.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
