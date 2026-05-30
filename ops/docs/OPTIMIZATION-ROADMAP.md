@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 556.
+- Latest completed implementation move in this roadmap: Move 557.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6094,3 +6094,20 @@ Move 556 status:
   still waits for a compile/staging package lane. The current source extension
   count is `.js: 87`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 276`,
   `.tsx: 107` outside generated/runtime folders.
+
+Move 557 status:
+- Move 557 converts `backend/src/catalogTextIntegrity.ts` and
+  `backend/src/conflictControl.ts` to package-safe TypeScript paths. Catalog
+  text integrity now carries JSDoc contracts for normalization options,
+  suspicious-field records, and option-list normalization while preserving the
+  Khmer/mojibake protection used by products, inventory, settings, imports, and
+  runtime checks. Conflict control now carries JSDoc contracts for updated-at
+  records and JSON conflict responses while preserving structured
+  write-conflict/settings-conflict payloads. Affected route/service imports and
+  the settings/media source contract test use explicit `.ts` paths. Focused
+  route/import/product/settings tests, the full backend utility suite, and
+  Linux packaging proof passed. `pkg` continues to warn for direct `.ts`
+  scripts, so larger backend route/service conversion still waits for a
+  compile/staging package lane. The current source extension count is `.js: 85`,
+  `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 278`, `.tsx: 107` outside
+  generated/runtime folders.

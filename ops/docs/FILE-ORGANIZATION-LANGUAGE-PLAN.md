@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 556 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 557 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 87`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 276`,
+  `.js: 85`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 278`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4455,6 +4455,22 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The current
     source extension count is `.js: 87`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
     `.ts: 276`, `.tsx: 107` outside generated/runtime folders.
+557. Convert backend catalog text integrity and write-conflict helpers to
+    package-safe TypeScript paths. Done: `backend/src/catalogTextIntegrity.ts`
+    now owns Khmer-safe catalog text normalization, mojibake/question-mark
+    detection, suspicious-field listing, and option-list normalization with
+    JSDoc text option and record contracts. `backend/src/conflictControl.ts`
+    now owns updated-at conflict detection and structured conflict responses
+    with JSDoc conflict record/JSON response contracts. Category, unit,
+    product, inventory, settings, runtime, import-job, and write-conflict route
+    imports now target explicit `.ts` paths, and the settings/media contract
+    source test now reads the converted helper. Focused route/import/product/
+    settings tests, the full backend utility suite, and Linux packaging proof
+    passed; packaging still warns for direct `.ts` entries in `pkg.scripts`, so
+    larger backend route/service conversions remain blocked on the future
+    compile/staging lane. The current source extension count is `.js: 85`,
+    `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 278`, `.tsx: 107` outside
+    generated/runtime folders.
 
 ## Safety Gates
 

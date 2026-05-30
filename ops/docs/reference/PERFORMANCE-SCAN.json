@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6428378,
-  "totalSourceLines": 145304,
+  "totalSourceBytes": 6429931,
+  "totalSourceLines": 145368,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -54,7 +54,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160884,
+      "size": 160887,
       "lines": 3880
     },
     {
@@ -99,7 +99,7 @@
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 101441,
+      "size": 101447,
       "lines": 2218
     },
     {
@@ -109,7 +109,7 @@
     },
     {
       "file": "backend/src/routes/inventory.js",
-      "size": 85844,
+      "size": 85847,
       "lines": 1881
     },
     {
@@ -139,7 +139,7 @@
     },
     {
       "file": "backend/src/routes/sales.js",
-      "size": 66184,
+      "size": 66187,
       "lines": 1573
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160884,
+      "size": 160887,
       "lines": 3880
     },
     {
@@ -216,7 +216,7 @@
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 101441,
+      "size": 101447,
       "lines": 2218
     },
     {
@@ -226,7 +226,7 @@
     },
     {
       "file": "backend/src/routes/inventory.js",
-      "size": 85844,
+      "size": 85847,
       "lines": 1881
     },
     {
@@ -256,7 +256,7 @@
     },
     {
       "file": "backend/src/routes/sales.js",
-      "size": 66184,
+      "size": 66187,
       "lines": 1573
     },
     {

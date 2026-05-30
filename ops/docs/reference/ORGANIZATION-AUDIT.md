@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T08:45:15.534Z
+Generated: 2026-05-30T08:54:36.980Z
 
 ## Summary
 
@@ -14,9 +14,9 @@ Generated: 2026-05-30T08:45:15.534Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 274 |
+| .ts | 276 |
 | .tsx | 107 |
-| .js | 76 |
+| .js | 74 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -66,8 +66,8 @@ Generated: 2026-05-30T08:45:15.534Z
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7933 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6911 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6097 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4477 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6114 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4493 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -78,9 +78,9 @@ Generated: 2026-05-30T08:45:15.534Z
 | frontend/src/api/methods.ts | 2349 | frontend/api |
 | frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
-| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2234 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
 | frontend/src/components/pos/POS.tsx | 2218 | frontend/components/pos |
+| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2211 | ops/docs/reference |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
