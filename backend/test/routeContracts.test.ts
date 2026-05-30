@@ -223,7 +223,7 @@ runTest('product import route caches settings updated_at schema metadata', () =>
 runTest('custom tables route caches managed column metadata', () => {
   const fs = require('fs')
   const path = require('path')
-  const source = fs.readFileSync(path.join(__dirname, '../src/routes/customTables.js'), 'utf8')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/customTables.ts'), 'utf8')
   assert.match(source, /const \{ hasColumn, markColumnPresent \} = require\('\.\.\/schemaMetadata\.ts'\)/)
   assert.match(source, /return hasColumn\(tableName, columnName\)/)
   assert.match(source, /markColumnPresent\(tableName, 'updated_at'\)/)

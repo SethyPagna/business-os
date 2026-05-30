@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 593.
+- Latest completed implementation move in this roadmap: Move 594.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4122,7 +4122,7 @@ Move 367 status:
 
 Move 368 status:
 - Move 368 tightens the backend custom-table dynamic SQL path in
-  `backend/src/routes/customTables.js`. Table display-name humanization,
+  `backend/src/routes/customTables.ts`. Table display-name humanization,
   schema normalization, custom-table list payloads, DDL column construction,
   row insert column/placeholders/value construction, and row update set/value
   construction now use direct loops instead of callback chains. The cleanup
@@ -6658,3 +6658,18 @@ Move 593 status:
   broader backend conversions still wait for a compile/staging package lane.
   The generated language audit now reports `JavaScript: 29`, `TypeScript: 282`,
   and `React TSX: 107` across the active scan roots.
+
+Move 594 status:
+- Move 594 converts `backend/src/routes/customTables.ts` to a package-safe
+  TypeScript path. Custom-table listing, table creation, dynamic table
+  row-versioning, schema normalization, row create/update/delete, write-conflict
+  checks, audit entries, broadcasts, and dynamic `ct_*` table documentation
+  remain unchanged on the existing CommonJS route style. The server mount,
+  route-contract source probe, backend route docs, route folder guide, schema
+  relationship note, and roadmap docs now point at the explicit `.ts` route.
+  Focused route load, route-contract, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The generated language audit now reports
+  `JavaScript: 28`, `TypeScript: 283`, and `React TSX: 107` across the active
+  scan roots.

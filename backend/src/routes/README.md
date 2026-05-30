@@ -25,7 +25,7 @@ Route files sit behind the shared middleware stack from `server.js`, so by the t
 - `portal.js` - public customer portal config, membership lookup, review submissions
 - `settings.ts` - settings read/write APIs
 - `system.js` - backup, import/export, reset, integrity, data-path tools
-- `branches.js`, `categories.ts`, `units.ts`, `customTables.js`, `catalog.ts` - supporting domain endpoints
+- `branches.js`, `categories.ts`, `units.ts`, `customTables.ts`, `catalog.ts` - supporting domain endpoints
 
 ## Route Handler Checklist
 

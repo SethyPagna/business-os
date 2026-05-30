@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 593 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 594 in this file.
 
 ## Goal
 
@@ -2445,7 +2445,7 @@ Decision rule:
     2.503 GB of builder cache while preserving images, volumes, uploads,
     secrets, and retained backup packages.
 286. Cache custom-table managed-column metadata. Done:
-    `backend/src/routes/customTables.js` now caches stable custom-table
+    `backend/src/routes/customTables.ts` now caches stable custom-table
     `information_schema.columns` probes by table and column name for the
     process lifetime, while refreshing the cache when the route creates a
     managed table or adds the `updated_at` versioning column. This removes
@@ -2932,7 +2932,7 @@ Decision rule:
     with direct loops. This was a backend route cleanup only; no folder move,
     schema migration, or runtime conversion was needed.
 358. Tighten backend custom-table dynamic SQL loops. Done:
-    `backend/src/routes/customTables.js` now normalizes schemas, builds custom
+    `backend/src/routes/customTables.ts` now normalizes schemas, builds custom
     table payloads, DDL columns, insert columns/placeholders/values, and update
     set/value lists with direct loops and one shared ignored-field set. This
     was a backend route cleanup only; no folder move, schema migration, or
@@ -4976,6 +4976,19 @@ Decision rule:
     warns for direct `.ts` entries in `pkg.scripts`, so broader backend
     conversions remain blocked on the future compile/staging lane. The
     generated language audit now reports `JavaScript: 29`, `TypeScript: 282`,
+    and `React TSX: 107` across the active scan roots.
+594. Convert custom tables route to a package-safe TypeScript path.
+    Done: `backend/src/routes/customTables.ts` keeps custom-table listing,
+    table creation, dynamic table row-versioning, schema normalization, row
+    create/update/delete, write-conflict checks, audit entries, broadcasts, and
+    dynamic `ct_*` table documentation on the existing CommonJS route style.
+    The server mount, route-contract source probe, backend route docs, route
+    folder guide, schema relationship note, and roadmap docs now point at the
+    explicit `.ts` route. Focused route load, route-contract, backend utility,
+    schema audit, stale-path, and Linux packaging proof passed. Packaging still
+    warns for direct `.ts` entries in `pkg.scripts`, so broader backend
+    conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 28`, `TypeScript: 283`,
     and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates

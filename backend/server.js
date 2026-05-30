@@ -390,7 +390,7 @@ function mountApiRoutes(target) {
   target.use('/api', require('./src/routes/sales'))
   target.use('/api', require('./src/routes/contacts'))
   target.use('/api', require('./src/routes/users'))
-  target.use('/api/custom-tables', require('./src/routes/customTables'))
+  target.use('/api/custom-tables', require('./src/routes/customTables.ts'))
   target.use('/api', require('./src/routes/returns'))
   const systemRouter = require('./src/routes/system')
   target.use('/api/backups', (req, res, next) => {

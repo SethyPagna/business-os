@@ -168,7 +168,7 @@ File: `backend/src/routes/returns.js`
 ## Custom Tables
 
 Base: `/api/custom-tables`  
-File: `backend/src/routes/customTables.js`
+File: `backend/src/routes/customTables.ts`
 
 - table metadata CRUD and row CRUD for runtime `ct_*` tables.
 
