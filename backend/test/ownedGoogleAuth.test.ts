@@ -22,7 +22,7 @@ function runTest(name, fn) {
 }
 
 runTest('owned Google OAuth service exposes only Business OS callbacks', () => {
-  const googleOauth = require('../src/services/googleOauth')
+  const googleOauth = require('../src/services/googleOauth.ts')
   const config = googleOauth.getGoogleLoginPublicConfig()
   assert.equal(config.clientId, '784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com')
   assert.equal(config.enabled, true)

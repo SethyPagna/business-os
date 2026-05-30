@@ -39,7 +39,7 @@ const {
   getGoogleUserFromTokens,
   normalizeReturnTarget,
   verifyState,
-} = require('../services/googleOauth')
+} = require('../services/googleOauth.ts')
 const {
   getVerificationCapabilities,
   normalizeEmail,

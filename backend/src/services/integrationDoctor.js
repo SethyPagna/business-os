@@ -36,7 +36,7 @@ const {
   appendCallbackPath,
   getGoogleLoginOrigins,
   getGoogleLoginPublicConfig,
-} = require('./googleOauth')
+} = require('./googleOauth.ts')
 const { initializeBullQueue, getQueueStatus } = require('./importJobs')
 const { listBackupVersions } = require('./backupPackages')
 const { testObjectStore } = require('../objectStore')

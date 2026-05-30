@@ -20,7 +20,7 @@ const { db } = require('../database.ts')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit, getAuditActor } = require('../middleware')
 const { registerUploadFromRequest } = require('../fileAssets')
-const { getGoogleLoginPublicConfig } = require('../services/googleOauth')
+const { getGoogleLoginPublicConfig } = require('../services/googleOauth.ts')
 const { normalizeEmail, normalizePhone } = require('../services/verification.ts')
 const {
   getDefaultOrganization,

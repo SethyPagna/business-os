@@ -8,7 +8,7 @@ Routes call service functions as dependency boundaries. The service owns provide
 
 ## Files
 
-- `googleOauth.js`
+- `googleOauth.ts`
   - owned Google/Gmail OAuth start, callback, linking, and unlinking helpers
   - keeps Business OS Postgres as the identity and permission authority
 

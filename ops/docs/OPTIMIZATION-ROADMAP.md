@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 590.
+- Latest completed implementation move in this roadmap: Move 591.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4148,7 +4148,7 @@ Move 369 status:
 
 Move 370 status:
 - Move 370 tightens the owned Google OAuth and integration doctor origin
-  checklist path in `backend/src/services/googleOauth.js` and
+  checklist path in `backend/src/services/googleOauth.ts` and
   `backend/src/services/integrationDoctor.js`. Origin normalization now uses
   direct loops with stable de-duplication, Google login callback URI assembly
   is shared through one callback-path helper, and latest verified release
@@ -6615,4 +6615,19 @@ Move 590 status:
   direct `.ts` scripts, so broader backend conversions still wait for a
   compile/staging package lane. The generated language audit now reports
   `JavaScript: 32`, `TypeScript: 279`, and `React TSX: 107` across the active
+  scan roots.
+
+Move 591 status:
+- Move 591 converts `backend/src/services/googleOauth.ts` to a package-safe
+  TypeScript path. Google login public config, return-target normalization,
+  OAuth state signing/verification, OAuth start URL construction, token
+  exchange, profile fetch, and disabled-runtime behavior remain unchanged on
+  the existing CommonJS service style. Auth, users, integration-doctor, and
+  owned Google auth tests now point at the explicit `.ts` service, and the
+  backend service index doc names the TypeScript file. Focused OAuth helper
+  load, route-contract, owned Google auth, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The generated language audit now reports
+  `JavaScript: 31`, `TypeScript: 280`, and `React TSX: 107` across the active
   scan roots.

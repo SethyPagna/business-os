@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 590 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 591 in this file.
 
 ## Goal
 
@@ -2944,7 +2944,7 @@ Decision rule:
     This was a backend route cleanup only; no folder move, schema migration,
     or runtime conversion was needed.
 360. Tighten owned Google OAuth and integration doctor origin loops. Done:
-    `backend/src/services/googleOauth.js` now builds normalized origin and
+    `backend/src/services/googleOauth.ts` now builds normalized origin and
     callback URI lists with direct loops, and
     `backend/src/services/integrationDoctor.js` reuses that login callback
     helper while discovering verified release-backup folders with direct
@@ -4939,6 +4939,19 @@ Decision rule:
     remain blocked on the future compile/staging lane. The generated language
     audit now reports `JavaScript: 32`, `TypeScript: 279`, and `React TSX: 107`
     across the active scan roots.
+591. Convert owned Google OAuth service to a package-safe TypeScript path.
+    Done: `backend/src/services/googleOauth.ts` keeps Google login public
+    config, return-target normalization, OAuth state signing/verification,
+    OAuth start URL construction, code exchange, profile fetch, and disabled
+    runtime behavior on the existing CommonJS service style. Auth, users,
+    integration-doctor, and owned Google auth tests now point at the explicit
+    `.ts` service, and the backend service index doc names the TypeScript file.
+    Focused OAuth helper load, route-contract, owned Google auth, backend
+    utility, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so broader
+    backend conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 31`, `TypeScript: 280`,
+    and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates
 
