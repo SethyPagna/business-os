@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-29T23:56:50.565Z
+Generated: 2026-05-30T00:13:38.387Z
 
 ## Summary
 
@@ -15,11 +15,11 @@ Generated: 2026-05-29T23:56:50.565Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 91 |
+| .tsx | 92 |
 | .js | 84 |
 | .md | 44 |
 | .bat | 16 |
-| .jsx | 16 |
+| .jsx | 15 |
 | .json | 14 |
 | .ps1 | 8 |
 | .sh | 3 |
@@ -67,15 +67,15 @@ Generated: 2026-05-29T23:56:50.565Z
 | --- | --- | --- |
 | ops/docs/reference/PHASE29-AUDIT.json | 12112 | ops/docs/reference |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7923 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6886 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5818 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4238 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6888 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5830 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4250 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2653 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2655 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
@@ -121,7 +121,7 @@ Generated: 2026-05-29T23:56:50.565Z
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
 | frontend/src/components/utils-settings/Settings.jsx | 12 | frontend/components/utils-settings |
 | backend/src/routes/inventory.js | 11 | backend/routes |
-| frontend/src/components/files/FilesPage.jsx | 11 | frontend/components/files |
+| frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |
 | frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |
 | frontend/src/components/contacts/Contacts.tsx | 10 | frontend/components/contacts |
 

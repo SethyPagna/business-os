@@ -197,7 +197,7 @@ Code files documented: **466**
 | 185 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 | 1 | 14 | 1 |
 | 186 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 | 1 | 0 | 1 |
 | 187 | `frontend/src/components/files/FilePickerModal.tsx` | 4 | 1 | 3 | 5 |
-| 188 | `frontend/src/components/files/FilesPage.jsx` | 11 | 1 | 10 | 1 |
+| 188 | `frontend/src/components/files/FilesPage.tsx` | 11 | 1 | 10 | 1 |
 | 189 | `frontend/src/components/files/FilesProvidersTab.tsx` | 1 | 1 | 0 | 1 |
 | 190 | `frontend/src/components/files/FilesResponsesTab.tsx` | 0 | 1 | 0 | 1 |
 | 191 | `frontend/src/components/inventory/DualMoney.tsx` | 0 | 1 | 0 | 1 |
@@ -3037,7 +3037,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
@@ -3134,7 +3134,7 @@ Code files documented: **466**
   - `frontend/src/components/dashboard/charts/NoData.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
@@ -3826,11 +3826,11 @@ Code files documented: **466**
   - `frontend/src/components/products/import/BulkImportModal.tsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
 
-### 3.188 `frontend/src/components/files/FilesPage.jsx`
+### 3.188 `frontend/src/components/files/FilesPage.tsx`
 
 - Declared exports: `function`
 - Imports (11)
-  - `../../AppContext`
+  - `../../AppContext.jsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/historyHelpers.ts`
@@ -3863,7 +3863,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
 
 ### 3.190 `frontend/src/components/files/FilesResponsesTab.tsx`
 
@@ -3873,7 +3873,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
 
 ### 3.191 `frontend/src/components/inventory/DualMoney.tsx`
 
@@ -5083,7 +5083,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
@@ -5262,7 +5262,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/dashboard/Dashboard.jsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/pos/POS.jsx`
@@ -5284,7 +5284,7 @@ Code files documented: **466**
 - Referenced by (6)
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/server/ServerPage.tsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
@@ -5717,7 +5717,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
@@ -5757,7 +5757,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
@@ -5998,7 +5998,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/custom-tables/CustomTables.tsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/Products.jsx`
@@ -6167,7 +6167,7 @@ Code files documented: **466**
 - Referenced by (7)
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
-  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/helpers/productGalleryHelpers.ts`
   - `frontend/src/components/products/shared/primitives.tsx`

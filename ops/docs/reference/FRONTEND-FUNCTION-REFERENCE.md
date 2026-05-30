@@ -54,7 +54,7 @@ Total files documented: **193**
 | 42 | `frontend/src/components/dashboard/Dashboard.jsx` | 16 |
 | 43 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
 | 44 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
-| 45 | `frontend/src/components/files/FilesPage.jsx` | 25 |
+| 45 | `frontend/src/components/files/FilesPage.tsx` | 27 |
 | 46 | `frontend/src/components/files/FilesProvidersTab.tsx` | 2 |
 | 47 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
 | 48 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
@@ -1077,35 +1077,37 @@ Total files documented: **193**
 | 7 | `handleUpload` | function | 173 |
 | 8 | `handleDelete` | function | 215 |
 
-### 3.45 `frontend/src/components/files/FilesPage.jsx`
+### 3.45 `frontend/src/components/files/FilesPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `loadFilesProvidersTab` | const arrow | 29 |
-| 2 | `loadFilesResponsesTab` | const arrow | 30 |
-| 3 | `AssetPreview` | function | 42 |
-| 4 | `AssetCardSkeleton` | function | 65 |
-| 5 | `formatDateTime` | function | 91 |
-| 6 | `formatFileSize` | function | 101 |
-| 7 | `emptyProviderForm` | function | 109 |
-| 8 | `compactTabLabel` | function | 132 |
-| 9 | `getDefaultFilesPageSize` | function | 138 |
-| 10 | `downloadAssetFile` | function | 143 |
-| 11 | `FilesPage` | component/function | 155 |
-| 12 | `tr` | const arrow | 195 |
-| 13 | `handleUpload` | function | 431 |
-| 14 | `handleDeleteAsset` | function | 454 |
-| 15 | `toggleAssetSelection` | function | 482 |
-| 16 | `toggleSelectAllAssets` | function | 493 |
-| 17 | `handleCopySelectedPaths` | function | 500 |
-| 18 | `handleDownloadSelected` | function | 515 |
-| 19 | `handleDeleteSelectedAssets` | function | 523 |
-| 20 | `startCreateProvider` | function | 569 |
-| 21 | `startEditProvider` | function | 585 |
-| 22 | `saveProvider` | function | 610 |
-| 23 | `testProvider` | function | 694 |
-| 24 | `removeProvider` | function | 715 |
-| 25 | `tabButton` | const arrow | 736 |
+| 1 | `loadFilesProvidersTab` | const arrow | 30 |
+| 2 | `loadFilesResponsesTab` | const arrow | 31 |
+| 3 | `getFilesApi` | function | 225 |
+| 4 | `getErrorMessage` | function | 229 |
+| 5 | `hasMojibake` | function | 233 |
+| 6 | `sanitizeFallback` | function | 237 |
+| 7 | `AssetPreview` | function | 241 |
+| 8 | `AssetCardSkeleton` | function | 264 |
+| 9 | `formatDateTime` | function | 290 |
+| 10 | `formatFileSize` | function | 300 |
+| 11 | `emptyProviderForm` | function | 308 |
+| 12 | `compactTabLabel` | function | 331 |
+| 13 | `getDefaultFilesPageSize` | function | 337 |
+| 14 | `downloadAssetFile` | function | 342 |
+| 15 | `FilesPage` | component/function | 354 |
+| 16 | `handleUpload` | function | 632 |
+| 17 | `handleDeleteAsset` | function | 655 |
+| 18 | `toggleAssetSelection` | function | 683 |
+| 19 | `toggleSelectAllAssets` | function | 694 |
+| 20 | `handleCopySelectedPaths` | function | 701 |
+| 21 | `handleDownloadSelected` | function | 716 |
+| 22 | `handleDeleteSelectedAssets` | function | 724 |
+| 23 | `startCreateProvider` | function | 770 |
+| 24 | `startEditProvider` | function | 786 |
+| 25 | `saveProvider` | function | 811 |
+| 26 | `testProvider` | function | 895 |
+| 27 | `removeProvider` | function | 916 |
 
 ### 3.46 `frontend/src/components/files/FilesProvidersTab.tsx`
 

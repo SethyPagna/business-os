@@ -183,7 +183,7 @@
     "frontend/src/components/contacts/SuppliersTab.tsx",
     "frontend/src/components/custom-tables/CustomTables.tsx",
     "frontend/src/components/dashboard/Dashboard.jsx",
-    "frontend/src/components/files/FilesPage.jsx",
+    "frontend/src/components/files/FilesPage.tsx",
     "frontend/src/components/inventory/Inventory.jsx",
     "frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx",
     "frontend/src/components/pos/POS.jsx",
