@@ -362,7 +362,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `aiGateway.ts` | Integration/service layer |
-| 2 | `backupPackages.js` | Integration/service layer |
+| 2 | `backupPackages.ts` | Integration/service layer |
 | 3 | `firebaseAuth.ts` | Integration/service layer |
 | 4 | `googleOauth.ts` | Integration/service layer |
 | 5 | `importJobs.js` | Integration/service layer |

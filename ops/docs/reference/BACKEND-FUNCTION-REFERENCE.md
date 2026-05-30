@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **14**
+Total files documented: **13**
 
 ## 2. Symbol Count by File
 
@@ -21,9 +21,8 @@ Total files documented: **14**
 | 9 | `backend/src/routes/sales.js` | 24 | 7 |
 | 10 | `backend/src/routes/system/index.js` | 44 | 38 |
 | 11 | `backend/src/routes/users.js` | 26 | 16 |
-| 12 | `backend/src/services/backupPackages.js` | 59 | 0 |
-| 13 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 14 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 12 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 13 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -674,71 +673,7 @@ Total files documented: **14**
 | 15 | PUT | `/roles/:id` | 1034 |
 | 16 | DELETE | `/roles/:id` | 1064 |
 
-### 3.12 `backend/src/services/backupPackages.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `readCachedBackupVersions` | function | 30 |
-| 2 | `writeCachedBackupVersions` | function | 39 |
-| 3 | `clearBackupVersionCaches` | function | 53 |
-| 4 | `getDb` | function | 58 |
-| 5 | `q` | function | 62 |
-| 6 | `nowSafeId` | function | 66 |
-| 7 | `sha256` | function | 70 |
-| 8 | `createSha256` | function | 74 |
-| 9 | `sha256File` | function | 78 |
-| 10 | `readTableRows` | function | 88 |
-| 11 | `yieldToEventLoop` | function | 105 |
-| 12 | `throwIfAborted` | function | 109 |
-| 13 | `collectSetValues` | function | 117 |
-| 14 | `startWorkerPromises` | function | 125 |
-| 15 | `getManagedWritableState` | function | 133 |
-| 16 | `writeStream` | function | 164 |
-| 17 | `closeWriteStream` | function | 178 |
-| 18 | `handleFinish` | const arrow | 182 |
-| 19 | `handleError` | const arrow | 187 |
-| 20 | `cleanup` | const arrow | 191 |
-| 21 | `createProgressReporter` | function | 201 |
-| 22 | `getSafeTableCount` | function | 240 |
-| 23 | `streamBackupDataFile` | function | 248 |
-| 24 | `buildObjectManifest` | function | 308 |
-| 25 | `buildPackageMetadata` | function | 326 |
-| 26 | `writeTextFileWithChecksum` | function | 380 |
-| 27 | `writeJsonLinesFileWithChecksum` | function | 385 |
-| 28 | `uploadPackageFile` | function | 398 |
-| 29 | `writeAndUploadMetadataFiles` | function | 418 |
-| 30 | `retryOperation` | function | 444 |
-| 31 | `writeDestinationChunk` | function | 459 |
-| 32 | `endDestination` | function | 472 |
-| 33 | `handleFinish` | const arrow | 476 |
-| 34 | `handleError` | const arrow | 481 |
-| 35 | `cleanup` | const arrow | 485 |
-| 36 | `copyOnePackageObject` | function | 495 |
-| 37 | `abortCopy` | const arrow | 507 |
-| 38 | `copyPackageObjects` | function | 534 |
-| 39 | `worker` | function | 543 |
-| 40 | `createFinalBackupPackage` | function | 585 |
-| 41 | `validateLocalBackupPackage` | function | 700 |
-| 42 | `getLocalBackupRoot` | function | 724 |
-| 43 | `isDockerReleaseBackupRoot` | function | 729 |
-| 44 | `isLocalBackupDirectoryName` | function | 734 |
-| 45 | `listLocalBackupDirectories` | function | 740 |
-| 46 | `getDirectoryBytes` | function | 761 |
-| 47 | `planBackupPackageRetention` | function | 787 |
-| 48 | `pruneLocalBackupVersions` | function | 807 |
-| 49 | `groupRemoteBackupObjects` | function | 833 |
-| 50 | `packageIds` | function | 855 |
-| 51 | `summarizeRemovedRemotePackages` | function | 863 |
-| 52 | `collectRemoteDeleteKeys` | function | 878 |
-| 53 | `sortBackupVersionsByPackageId` | function | 888 |
-| 54 | `pruneRemoteBackupVersions` | function | 894 |
-| 55 | `pruneBackupVersions` | function | 918 |
-| 56 | `readReusableLocalBackupPackage` | function | 935 |
-| 57 | `findReusableLocalBackupPackage` | function | 960 |
-| 58 | `listLocalBackupVersions` | function | 971 |
-| 59 | `listBackupVersions` | function | 1003 |
-
-### 3.13 `backend/src/services/googleDriveSync/index.js`
+### 3.12 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -818,7 +753,7 @@ Total files documented: **14**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.14 `backend/src/services/importJobs.js`
+### 3.13 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

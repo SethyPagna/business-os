@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-30T21:52:58.385Z
+Generated: 2026-05-30T22:02:01.659Z
 
 ## Summary
 
@@ -22,10 +22,10 @@ Generated: 2026-05-30T21:52:58.385Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 298 |
+| TypeScript | 299 |
 | React TSX | 107 |
 | Windows batch | 16 |
-| JavaScript | 13 |
+| JavaScript | 12 |
 | PowerShell | 8 |
 | Shell | 3 |
 | JSON | 2 |
@@ -79,7 +79,7 @@ Generated: 2026-05-30T21:52:58.385Z
 | Web Worker extraction | `frontend/src/components/contacts/ContactImportModal.tsx` | yes | yes `frontend/tests/contactImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
 | Completed Web Worker extraction | `frontend/src/components/inventory/InventoryImportModal.tsx` | yes | yes `frontend/tests/inventoryImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
 | Completed Web Worker extraction | `frontend/src/components/sales/SalesImportModal.tsx` | yes | yes `frontend/tests/salesImportWorker.test.ts`<br>yes `frontend/tests/actionStability.test.ts`<br>yes `frontend/tests/performanceLoadingUx.test.ts` | yes | npm.cmd --prefix frontend run test:utils plus focused Playwright import flow |
-| SQL/DuckDB/data-path optimization | `backend/src/services/backupPackages.js` | yes | yes `backend/test/backupPerformanceHardening.test.ts`<br>yes `backend/test/backupRetention.test.ts`<br>yes `backend/test/backupSchema.test.ts` | yes | npm.cmd --prefix backend run test:utils |
+| SQL/DuckDB/data-path optimization | `backend/src/services/backupPackages.ts` | yes | yes `backend/test/backupPerformanceHardening.test.ts`<br>yes `backend/test/backupRetention.test.ts`<br>yes `backend/test/backupSchema.test.ts` | yes | npm.cmd --prefix backend run test:utils |
 
 ## Converted TypeScript Slices
 
@@ -151,7 +151,7 @@ Generated: 2026-05-30T21:52:58.385Z
 
 | Target | Exists | Optimization | Rollback | Proof |
 | --- | --- | --- | --- | --- |
-| `backend/src/services/backupPackages.js` | yes | Backup table streaming now prefers keyset pagination on id and keeps LIMIT/OFFSET as the compatibility fallback. | Revert readTableRows to OFFSET-only paging; streamed checksum/package format remains unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.ts`<br>`backend/test/backupPerformanceHardening.test.ts keyset guard` |
+| `backend/src/services/backupPackages.ts` | yes | Backup table streaming now prefers keyset pagination on id and keeps LIMIT/OFFSET as the compatibility fallback. | Revert readTableRows to OFFSET-only paging; streamed checksum/package format remains unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.ts`<br>`backend/test/backupPerformanceHardening.test.ts keyset guard` |
 | `backend/src/services/importJobs.js` | yes | Product import apply now caches same-name product lookups and supplier lookups per job, then updates the in-memory product cache when rows create or update products. | Remove getProductsByNameForImport, rememberProductForImport, supplierMap, and return to per-row database lookups; import job schema and row decisions remain unchanged. | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.ts`<br>`backend/test/importDecisionIntegrity.test.ts cache guards` |
 | `ops/scripts/backend/schema-audit.ts` | yes | Schema audit now parses ALTER TABLE primary-key constraints in a single pre-pass map before walking CREATE TABLE bodies, avoiding one whole-schema regex scan per table. | Restore parsePrimaryKey to run a table-specific ALTER TABLE regex against the full schema text for every parsed table; generated report fields remain unchanged. | `node ops\scripts\backend\schema-audit.ts`<br>`Measure-Command { node ops\scripts\backend\schema-audit.ts | Out-Null }`<br>`npm.cmd --prefix ops run phase29:audit:repeat` |
 | `ops/scripts/backend/schema-primary-key-preflight.ts` | yes | Primary-key preflight now materializes table row/null metrics, duplicate-key counts, and unique-index names once in shared CTEs, then reuses those values in the read-only JSON report. | Restore the per-field COUNT and pg_index subqueries inside each json_build_object table block; the output schema remains unchanged. | `npm.cmd --prefix ops run schema-pk-preflight`<br>`node ops\scripts\backend\schema-audit.ts`<br>`npm.cmd --prefix backend run test:utils`<br>`npm.cmd --prefix ops run phase29:audit:repeat` |

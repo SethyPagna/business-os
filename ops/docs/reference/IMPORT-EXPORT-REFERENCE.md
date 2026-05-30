@@ -74,7 +74,7 @@ Code files documented: **468**
 | 62 | `backend/src/security.ts` | 1 | 1 | 0 | 7 |
 | 63 | `backend/src/serverUtils.ts` | 1 | 1 | 1 | 4 |
 | 64 | `backend/src/services/aiGateway.ts` | 2 | 1 | 2 | 2 |
-| 65 | `backend/src/services/backupPackages.js` | 9 | 1 | 4 | 4 |
+| 65 | `backend/src/services/backupPackages.ts` | 9 | 1 | 4 | 4 |
 | 66 | `backend/src/services/firebaseAuth.ts` | 2 | 1 | 0 | 0 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 12 | 1 | 8 | 4 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 0 | 1 | 0 | 2 |
@@ -623,7 +623,7 @@ Code files documented: **468**
   - none
 - Referenced by (3)
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/backupPackages.js`
+  - `backend/src/services/backupPackages.ts`
   - `backend/test/backupSchema.test.ts`
 
 ### 3.6 `backend/src/businessMetrics.ts`
@@ -683,7 +683,7 @@ Code files documented: **468**
   - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/serverUtils.ts`
-  - `backend/src/services/backupPackages.js`
+  - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/googleOauth.ts`
   - `backend/src/services/importJobs.js`
@@ -760,7 +760,7 @@ Code files documented: **468**
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.js`
   - `backend/src/schemaMetadata.ts`
-  - `backend/src/services/backupPackages.js`
+  - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.ts`
@@ -1048,7 +1048,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/src/fileAssets.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/backupPackages.js`
+  - `backend/src/services/backupPackages.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/settingsSnapshot.ts`
 
@@ -1672,7 +1672,7 @@ Code files documented: **468**
   - `../../organizationContext/index.ts`
   - `../../runtimeState/index.ts`
   - `../../security.ts`
-  - `../../services/backupPackages`
+  - `../../services/backupPackages.ts`
   - `../../services/googleDriveSync`
   - `../../services/importJobs`
   - `../../services/integrationDoctor.ts`
@@ -1697,7 +1697,7 @@ Code files documented: **468**
   - `backend/src/organizationContext/index.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/security.ts`
-  - `backend/src/services/backupPackages.js`
+  - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.ts`
@@ -1856,7 +1856,7 @@ Code files documented: **468**
   - `backend/src/routes/ai.ts`
   - `backend/src/services/portalAi.ts`
 
-### 3.65 `backend/src/services/backupPackages.js`
+### 3.65 `backend/src/services/backupPackages.ts`
 
 - Declared exports: `module.exports`
 - Imports (9)
@@ -1901,7 +1901,7 @@ Code files documented: **468**
   - `../../maintenanceLock.ts`
   - `../../runtimeVersion.ts`
   - `../../security.ts`
-  - `../backupPackages`
+  - `../backupPackages.ts`
   - `./versioning.ts`
   - `crypto`
   - `fs`
@@ -1914,7 +1914,7 @@ Code files documented: **468**
   - `backend/src/maintenanceLock.ts`
   - `backend/src/runtimeVersion.ts`
   - `backend/src/security.ts`
-  - `backend/src/services/backupPackages.js`
+  - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/versioning.ts`
 - Referenced by (4)
   - `backend/src/helpers.ts`
@@ -2003,7 +2003,7 @@ Code files documented: **468**
   - `../config/index.ts`
   - `../database.ts`
   - `../objectStore.ts`
-  - `./backupPackages`
+  - `./backupPackages.ts`
   - `./googleDriveSync`
   - `./googleOauth.ts`
   - `./importJobs`
@@ -2014,7 +2014,7 @@ Code files documented: **468**
   - `backend/src/config/index.ts`
   - `backend/src/database.ts`
   - `backend/src/objectStore.ts`
-  - `backend/src/services/backupPackages.js`
+  - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/googleOauth.ts`
   - `backend/src/services/importJobs.js`
@@ -2281,13 +2281,13 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (5)
-  - `../src/services/backupPackages`
+  - `../src/services/backupPackages.ts`
   - `node:assert/strict`
   - `node:fs`
   - `node:os`
   - `node:path`
 - Internal dependencies (1)
-  - `backend/src/services/backupPackages.js`
+  - `backend/src/services/backupPackages.ts`
 - Referenced by (0)
   - none
 

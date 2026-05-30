@@ -74,7 +74,7 @@ Code files scanned: **468**
 | 62 | `backend/src/security.ts` | 14 |
 | 63 | `backend/src/serverUtils.ts` | 26 |
 | 64 | `backend/src/services/aiGateway.ts` | 17 |
-| 65 | `backend/src/services/backupPackages.js` | 59 |
+| 65 | `backend/src/services/backupPackages.ts` | 59 |
 | 66 | `backend/src/services/firebaseAuth.ts` | 22 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 75 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
@@ -1744,7 +1744,7 @@ Code files scanned: **468**
 | 16 | `callChatProvider` | function | 218 |
 | 17 | `testProviderConfig` | function | 307 |
 
-### 3.65 `backend/src/services/backupPackages.js`
+### 3.65 `backend/src/services/backupPackages.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
