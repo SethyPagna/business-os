@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../src/portalUtils')
+const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../src/portalUtils.ts')
 
 let failed = 0
 

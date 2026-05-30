@@ -8,10 +8,18 @@ const { DATA_ROOT } = require('../config')
 const RUNTIME_META_DIR = path.join(DATA_ROOT, 'meta')
 const RUNTIME_STATE_FILE = path.join(RUNTIME_META_DIR, 'runtime-state.json')
 
+/**
+ * @typedef {{ storageVersion: number, updatedAt: string | null, reason: string }} RuntimeState
+ * @typedef {{ serverStartTime: null, storageVersion: string, updatedAt: string | null, dataRootKey: string, organizationPublicId: string | null }} RuntimeDescriptor
+ */
+
 function ensureRuntimeMetaDir() {
   fs.mkdirSync(RUNTIME_META_DIR, { recursive: true })
 }
 
+/**
+ * @returns {RuntimeState}
+ */
 function readRuntimeState() {
   try {
     ensureRuntimeMetaDir()
@@ -29,12 +37,19 @@ function readRuntimeState() {
   }
 }
 
+/**
+ * @param {RuntimeState} state
+ * @returns {RuntimeState}
+ */
 function writeRuntimeState(state) {
   ensureRuntimeMetaDir()
   fs.writeFileSync(RUNTIME_STATE_FILE, JSON.stringify(state, null, 2), 'utf8')
   return state
 }
 
+/**
+ * @returns {RuntimeState}
+ */
 function getRuntimeState() {
   const state = readRuntimeState()
   if (fs.existsSync(RUNTIME_STATE_FILE)) return state
@@ -45,6 +60,10 @@ function getRuntimeState() {
   })
 }
 
+/**
+ * @param {string} [reason]
+ * @returns {RuntimeState}
+ */
 function bumpStorageVersion(reason = 'mutation') {
   const current = readRuntimeState()
   return writeRuntimeState({
@@ -54,6 +73,10 @@ function bumpStorageVersion(reason = 'mutation') {
   })
 }
 
+/**
+ * @param {unknown} [organizationPublicId]
+ * @returns {RuntimeDescriptor}
+ */
 function buildRuntimeDescriptor(organizationPublicId = '') {
   const state = getRuntimeState()
   return {

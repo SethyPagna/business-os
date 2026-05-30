@@ -2,10 +2,24 @@
 
 const ABOUT_BLOCK_TYPES = new Set(['text', 'image', 'video'])
 
+/**
+ * @typedef {{ id?: unknown, type?: unknown, title?: unknown, body?: unknown, mediaUrl?: unknown }} AboutBlockInput
+ * @typedef {{ id: unknown, type: string, title: string, body: string, mediaUrl: string }} AboutBlock
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function toTrimmedString(value) {
   return String(value || '').trim()
 }
 
+/**
+ * @param {unknown} value
+ * @param {unknown} fallback
+ * @returns {unknown}
+ */
 function safeJsonParse(value, fallback) {
   try {
     return JSON.parse(value)
@@ -14,6 +28,11 @@ function safeJsonParse(value, fallback) {
   }
 }
 
+/**
+ * @param {unknown} type
+ * @param {AboutBlockInput} [overrides]
+ * @returns {AboutBlock}
+ */
 function createAboutBlock(type, overrides = {}) {
   const blockType = ABOUT_BLOCK_TYPES.has(type) ? type : 'text'
   return {
@@ -25,6 +44,10 @@ function createAboutBlock(type, overrides = {}) {
   }
 }
 
+/**
+ * @param {unknown} value
+ * @returns {AboutBlock[]}
+ */
 function normalizeAboutBlocks(value) {
   const source = Array.isArray(value)
     ? value
@@ -48,6 +71,10 @@ function normalizeAboutBlocks(value) {
   return blocks
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function extractGoogleMapsEmbedUrl(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
@@ -56,6 +83,10 @@ function extractGoogleMapsEmbedUrl(value) {
   return raw
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeGoogleMapsEmbed(value) {
   const raw = extractGoogleMapsEmbedUrl(value)
   if (!raw) return ''

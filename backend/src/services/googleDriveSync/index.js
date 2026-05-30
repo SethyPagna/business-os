@@ -21,7 +21,7 @@ const {
   selectExpiredDriveSyncVersions,
 } = require('./versioning')
 const { createFinalBackupPackage, findReusableLocalBackupPackage } = require('../backupPackages')
-const { isMaintenanceLocked, getMaintenanceLock } = require('../../maintenanceLock')
+const { isMaintenanceLocked, getMaintenanceLock } = require('../../maintenanceLock.ts')
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3'

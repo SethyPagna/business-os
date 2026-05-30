@@ -39,7 +39,7 @@ function main() {
     backupPackages: { file: 'backend/src/services/backupPackages.js', text: read('backend/src/services/backupPackages.js') },
     driveSync: { file: 'backend/src/services/googleDriveSync/index.js', text: read('backend/src/services/googleDriveSync/index.js') },
     systemJobs: { file: 'backend/src/systemJobs.js', text: read('backend/src/systemJobs.js') },
-    maintenanceLock: { file: 'backend/src/maintenanceLock.js', text: read('backend/src/maintenanceLock.js') },
+    maintenanceLock: { file: 'backend/src/maintenanceLock.ts', text: read('backend/src/maintenanceLock.ts') },
     systemRoutes: { file: 'backend/src/routes/system/index.js', text: read('backend/src/routes/system/index.js') },
     backupUi: { file: 'frontend/src/components/utils-settings/Backup.tsx', text: read('frontend/src/components/utils-settings/Backup.tsx') },
     apiMethods: { file: 'frontend/src/api/methods.ts', text: read('frontend/src/api/methods.ts') },

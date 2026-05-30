@@ -1,19 +1,39 @@
 'use strict'
 
+/**
+ * @typedef {{ id?: unknown, reason?: unknown, label?: unknown, ownerJobId?: unknown }} MaintenanceLockInput
+ * @typedef {{ id: string, reason: string, label: string, ownerJobId: string, createdAt: string }} MaintenanceLock
+ * @typedef {{ method?: unknown, originalUrl?: unknown, url?: unknown }} MaintenanceRequest
+ * @typedef {{ status(code: number): { json(payload: Record<string, unknown>): unknown } }} JsonResponse
+ */
+
 let activeLock = null
 
+/**
+ * @returns {string}
+ */
 function nowIso() {
   return new Date().toISOString()
 }
 
+/**
+ * @returns {MaintenanceLock | null}
+ */
 function getMaintenanceLock() {
   return activeLock ? { ...activeLock } : null
 }
 
+/**
+ * @returns {boolean}
+ */
 function isMaintenanceLocked() {
   return !!activeLock
 }
 
+/**
+ * @param {MaintenanceLockInput} [input]
+ * @returns {MaintenanceLock}
+ */
 function acquireMaintenanceLock(input = {}) {
   if (activeLock) return { ...activeLock }
   activeLock = {
@@ -26,6 +46,10 @@ function acquireMaintenanceLock(input = {}) {
   return { ...activeLock }
 }
 
+/**
+ * @param {unknown} [id]
+ * @returns {boolean}
+ */
 function releaseMaintenanceLock(id = '') {
   if (!activeLock) return false
   const safeId = String(id || '').trim()
@@ -34,6 +58,11 @@ function releaseMaintenanceLock(id = '') {
   return true
 }
 
+/**
+ * @param {MaintenanceLockInput} input
+ * @param {(lock: MaintenanceLock) => unknown | Promise<unknown>} worker
+ * @returns {Promise<unknown>}
+ */
 function withMaintenanceLock(input, worker) {
   const lock = acquireMaintenanceLock(input)
   return Promise.resolve()
@@ -43,10 +72,18 @@ function withMaintenanceLock(input, worker) {
     })
 }
 
+/**
+ * @param {string} method
+ * @returns {boolean}
+ */
 function isReadOnlyMethod(method) {
   return method === 'GET' || method === 'HEAD' || method === 'OPTIONS'
 }
 
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
 function isMaintenanceWriteAllowed(path) {
   const allowedPrefixes = [
     '/api/auth/logout',
@@ -63,6 +100,12 @@ function isMaintenanceWriteAllowed(path) {
   return false
 }
 
+/**
+ * @param {MaintenanceRequest} req
+ * @param {JsonResponse} res
+ * @param {() => unknown} next
+ * @returns {unknown}
+ */
 function maintenanceWriteGuard(req, res, next) {
   if (!activeLock) return next()
   const method = String(req.method || 'GET').toUpperCase()
