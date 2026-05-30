@@ -12,7 +12,7 @@ const {
   parseImportContactOptions,
   parseStoredContactOptions,
   serializeContactOptions,
-} = require('../contactOptions')
+} = require('../contactOptions.ts')
 
 const router = express.Router()
 const MEMBERSHIP_NUMBER_PREFIX = 'LCMN'

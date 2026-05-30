@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 559 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 560 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 79`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 284`,
+  `.js: 76`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 287`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3277,7 +3277,7 @@ Decision rule:
     and locale sorting remain unchanged. This was a backend utility cleanup
     only; no folder move, schema migration, or language conversion was needed.
 410. Tighten contact option normalization helpers. Done:
-    `backend/src/contactOptions.js` now uses direct-loop helpers for stored
+    `backend/src/contactOptions.ts` now uses direct-loop helpers for stored
     structured options, legacy string options, fallback options, serialization
     cleanup, primary option selection, and data checks. The three-option cap,
     address-vs-area rules, default labels, legacy migration behavior, and JSON
@@ -3300,7 +3300,7 @@ Decision rule:
     unchanged. This was a backend parser cleanup only; no folder move, schema
     migration, or language conversion was needed.
 413. Tighten product import policy list helpers. Done:
-    `backend/src/productImportPolicies.js` now uses direct-loop helpers for
+    `backend/src/productImportPolicies.ts` now uses direct-loop helpers for
     array/JSON/string list normalization, lowercase uniqueness set
     construction, and append-unique merging. JSON-array support,
     `|`/`;`/newline splitting, case-insensitive de-duplication, imported item
@@ -4505,6 +4505,21 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The current
     source extension count is `.js: 79`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
     `.ts: 284`, `.tsx: 107` outside generated/runtime folders.
+560. Convert backend import/product normalization helpers to package-safe
+    TypeScript paths. Done: `backend/src/contactOptions.ts` now owns structured
+    contact option normalization with JSDoc mode/source/normalized-option
+    contracts; `backend/src/productImportPolicies.ts` now owns numeric, flag,
+    field-rule, append-unique, and image-conflict import policy helpers with
+    explicit rule-mode contracts; and `backend/src/productDiscounts.ts` now owns
+    discount normalization and active-price calculation with JSDoc product
+    discount contracts. Contacts routes, product/inventory routes, import-job
+    services, and focused backend tests now target explicit `.ts` paths.
+    Focused contact/import-policy/route/product/import-decision checks, the full
+    backend utility suite, and Linux packaging proof passed. Packaging still
+    warns for direct `.ts` entries in `pkg.scripts`, so larger backend
+    route/service conversions remain blocked on the future compile/staging lane.
+    The current source extension count is `.js: 76`, `.jsx: 0`, `.mjs: 0`,
+    `.cjs: 0`, `.ts: 287`, `.tsx: 107` outside generated/runtime folders.
 
 ## Safety Gates
 

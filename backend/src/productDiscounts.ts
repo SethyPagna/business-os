@@ -5,6 +5,39 @@ const { normalizePriceValue } = require('./money.ts')
 const DISCOUNT_TYPES = new Set(['percent', 'fixed'])
 const DEFAULT_BADGE_COLOR = '#e11d48'
 
+/**
+ * @typedef {'percent' | 'fixed'} ProductDiscountType
+ * @typedef {{
+ *   discount_enabled?: unknown,
+ *   discount_type?: unknown,
+ *   discount_percent?: unknown,
+ *   discount_amount_usd?: unknown,
+ *   discount_amount_khr?: unknown,
+ *   discount_label?: unknown,
+ *   discount_badge_color?: unknown,
+ *   discount_starts_at?: unknown,
+ *   discount_ends_at?: unknown,
+ *   selling_price_usd?: unknown,
+ *   selling_price_khr?: unknown,
+ * }} ProductDiscountSource
+ * @typedef {{
+ *   discount_enabled: number,
+ *   discount_type: ProductDiscountType,
+ *   discount_percent: number,
+ *   discount_amount_usd: number,
+ *   discount_amount_khr: number,
+ *   discount_label: string,
+ *   discount_badge_color: string,
+ *   discount_starts_at: string | null,
+ *   discount_ends_at: string | null,
+ * }} NormalizedProductDiscount
+ */
+
+/**
+ * @param {unknown} value
+ * @param {number} [fallback]
+ * @returns {0 | 1}
+ */
 function normalizeBooleanFlag(value, fallback = 0) {
   if (value === undefined || value === null || value === '') return fallback ? 1 : 0
   if (typeof value === 'boolean') return value ? 1 : 0
@@ -14,22 +47,39 @@ function normalizeBooleanFlag(value, fallback = 0) {
   return Number(value) ? 1 : 0
 }
 
+/**
+ * @param {unknown} value
+ * @returns {number}
+ */
 function normalizePercent(value) {
   const num = Number(value)
   if (!Number.isFinite(num)) return 0
   return Math.min(100, Math.max(0, Math.ceil((num * 100) - 1e-9) / 100))
 }
 
+/**
+ * @param {unknown} value
+ * @returns {ProductDiscountType}
+ */
 function normalizeDiscountType(value) {
   const raw = String(value || '').trim().toLowerCase()
   return DISCOUNT_TYPES.has(raw) ? raw : 'percent'
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} [fallback]
+ * @returns {string}
+ */
 function normalizeHexColor(value, fallback = DEFAULT_BADGE_COLOR) {
   const raw = String(value || '').trim()
   return /^#[0-9a-f]{6}$/i.test(raw) ? raw : fallback
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
 function normalizeDateText(value) {
   const raw = String(value || '').trim()
   if (!raw) return null
@@ -38,10 +88,21 @@ function normalizeDateText(value) {
   return raw
 }
 
+/**
+ * @param {Record<string, unknown>} source
+ * @param {string} key
+ * @param {unknown} fallback
+ * @returns {unknown}
+ */
 function pick(source, key, fallback) {
   return Object.prototype.hasOwnProperty.call(source || {}, key) ? source[key] : fallback
 }
 
+/**
+ * @param {ProductDiscountSource} [source]
+ * @param {ProductDiscountSource} [fallback]
+ * @returns {NormalizedProductDiscount}
+ */
 function normalizeProductDiscount(source = {}, fallback = {}) {
   const type = normalizeDiscountType(pick(source, 'discount_type', fallback.discount_type))
   const amountUsd = normalizePriceValue(pick(source, 'discount_amount_usd', fallback.discount_amount_usd) || 0)
@@ -64,6 +125,11 @@ function normalizeProductDiscount(source = {}, fallback = {}) {
   }
 }
 
+/**
+ * @param {ProductDiscountSource} [product]
+ * @param {Date | string | number} [now]
+ * @returns {boolean}
+ */
 function isDiscountActive(product = {}, now = new Date()) {
   if (!normalizeBooleanFlag(product.discount_enabled, 0)) return false
   const type = normalizeDiscountType(product.discount_type)
@@ -78,6 +144,11 @@ function isDiscountActive(product = {}, now = new Date()) {
   return true
 }
 
+/**
+ * @param {ProductDiscountSource} [product]
+ * @param {number} [exchangeRate]
+ * @returns {{ active: boolean, applied_price_usd: number, applied_price_khr: number, discount_amount_usd: number, discount_amount_khr: number, percent_off: number }}
+ */
 function calculateDiscountedPrice(product = {}, exchangeRate = 4100) {
   const sellingUsd = normalizePriceValue(product.selling_price_usd || 0)
   const sellingKhr = normalizePriceValue(product.selling_price_khr || (sellingUsd * exchangeRate))

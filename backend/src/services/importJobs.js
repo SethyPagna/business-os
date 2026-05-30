@@ -22,17 +22,17 @@ const { buildUniqueStoredName, registerStoredAsset, sanitizeOriginalFileName } =
 const { validateUploadedPath } = require('../uploadSecurity')
 const { isSafeExternalImageReference } = require('../netSecurity')
 const { normalizePriceValue } = require('../money.ts')
-const { normalizeProductDiscount } = require('../productDiscounts')
+const { normalizeProductDiscount } = require('../productDiscounts.ts')
 const { normalizeCsvKey, parseCsvRowBatchesFromFile } = require('../importCsv')
 const { enqueueMediaOptimization } = require('./mediaQueue')
-const { buildImportedContactState, cleanText } = require('../contactOptions')
+const { buildImportedContactState, cleanText } = require('../contactOptions.ts')
 const {
   hasImportValue,
   normalizeImageConflictMode,
   parseImportFlag,
   parseImportNumber,
   resolveImportValue,
-} = require('../productImportPolicies')
+} = require('../productImportPolicies.ts')
 const {
   increaseProductBatchStock,
   migrateLegacyProductToBatches,

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 559.
+- Latest completed implementation move in this roadmap: Move 560.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4743,7 +4743,7 @@ Move 419 status:
 
 Move 420 status:
 - Move 420 tightens contact option normalization in
-  `backend/src/contactOptions.js`. Stored structured options, legacy string
+  `backend/src/contactOptions.ts`. Stored structured options, legacy string
   options, fallback options, serialization cleanup, primary-option selection,
   and option data checks now use direct-loop helpers instead of
   `map()`/`filter()`/`find()` chains. The three-option cap, address-vs-area
@@ -4772,7 +4772,7 @@ Move 422 status:
 
 Move 423 status:
 - Move 423 tightens product import policy list helpers in
-  `backend/src/productImportPolicies.js`. Array/JSON/string list
+  `backend/src/productImportPolicies.ts`. Array/JSON/string list
   normalization, lowercase uniqueness set construction, and append-unique
   merging now use direct-loop helpers instead of `map()`/`filter()`/`forEach()`
   chains. JSON-array support, `|`/`;`/newline splitting, case-insensitive
@@ -6146,3 +6146,19 @@ Move 559 status:
   still waits for a compile/staging package lane. The current source extension
   count is `.js: 79`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 284`,
   `.tsx: 107` outside generated/runtime folders.
+
+Move 560 status:
+- Move 560 converts `backend/src/contactOptions.ts`,
+  `backend/src/productImportPolicies.ts`, and
+  `backend/src/productDiscounts.ts` to package-safe TypeScript paths. Contact
+  option normalization now carries JSDoc mode/source/normalized-option
+  contracts, import policy helpers now carry numeric/flag/field-rule/
+  append-unique/image-conflict contracts, and product discount helpers now carry
+  discount-source and normalized-discount contracts. Contacts routes,
+  product/inventory routes, import-job services, and focused backend tests use
+  explicit `.ts` paths. Focused contact/import-policy/route/product/
+  import-decision checks, the full backend utility suite, and Linux packaging
+  proof passed. `pkg` continues to warn for direct `.ts` scripts, so larger
+  backend route/service conversion still waits for a compile/staging package
+  lane. The current source extension count is `.js: 76`, `.jsx: 0`, `.mjs: 0`,
+  `.cjs: 0`, `.ts: 287`, `.tsx: 107` outside generated/runtime folders.

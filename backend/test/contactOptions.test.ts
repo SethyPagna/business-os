@@ -7,7 +7,7 @@ const {
   parseImportContactOptions,
   parseStoredContactOptions,
   serializeContactOptions,
-} = require('../src/contactOptions')
+} = require('../src/contactOptions.ts')
 
 let failed = 0
 

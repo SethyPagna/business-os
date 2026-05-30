@@ -8,7 +8,7 @@ const {
   parseImportFlag,
   parseImportNumber,
   resolveImportValue,
-} = require('../src/productImportPolicies')
+} = require('../src/productImportPolicies.ts')
 
 let failed = 0
 

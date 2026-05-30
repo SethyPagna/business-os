@@ -2,6 +2,18 @@
 
 const { parseImportNumericValue } = require('./importParsing')
 
+/**
+ * @typedef {'keep_existing' | 'use_imported' | 'merge_blank_only' | 'clear_value' | 'append_unique'} ImportFieldRule
+ * @typedef {'keep_existing' | 'append_csv' | 'replace_with_csv'} ImageConflictMode
+ */
+
+/**
+ * @param {Record<string, unknown> | null | undefined} row
+ * @param {string} field
+ * @param {number} fallbackValue
+ * @param {{ allowNegative?: boolean }} [options]
+ * @returns {number}
+ */
 function parseImportNumber(row, field, fallbackValue, { allowNegative = false } = {}) {
   return parseImportNumericValue(row?.[field], fallbackValue, {
     allowNegative,
@@ -10,6 +22,12 @@ function parseImportNumber(row, field, fallbackValue, { allowNegative = false } 
   })
 }
 
+/**
+ * @param {Record<string, unknown> | null | undefined} row
+ * @param {string} field
+ * @param {number} [fallbackValue]
+ * @returns {0 | 1 | number}
+ */
 function parseImportFlag(row, field, fallbackValue = 0) {
   const raw = row?.[field]
   if (raw === undefined || raw === null || String(raw).trim() === '') return fallbackValue
@@ -19,11 +37,21 @@ function parseImportFlag(row, field, fallbackValue = 0) {
   return fallbackValue
 }
 
+/**
+ * @param {Record<string, unknown> | null | undefined} row
+ * @param {string} field
+ * @returns {boolean}
+ */
 function hasImportValue(row, field) {
   const raw = row?.[field]
   return !(raw === undefined || raw === null || String(raw).trim() === '')
 }
 
+/**
+ * @param {unknown} value
+ * @param {ImportFieldRule} fallback
+ * @returns {ImportFieldRule}
+ */
 function normalizeFieldRule(value, fallback) {
   const rule = String(value || fallback || '').trim().toLowerCase()
   return ['keep_existing', 'use_imported', 'merge_blank_only', 'clear_value', 'append_unique'].includes(rule)
@@ -31,6 +59,10 @@ function normalizeFieldRule(value, fallback) {
     : fallback
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string[]}
+ */
 function splitUniqueImportValues(value) {
   if (Array.isArray(value)) return collectImportListValues(value)
   const raw = String(value ?? '').trim()
@@ -44,6 +76,10 @@ function splitUniqueImportValues(value) {
   return collectImportListValues(raw.split(/[|;\n]/))
 }
 
+/**
+ * @param {unknown[]} [values]
+ * @returns {string[]}
+ */
 function collectImportListValues(values = []) {
   const items = []
   for (const item of Array.isArray(values) ? values : []) {
@@ -53,6 +89,10 @@ function collectImportListValues(values = []) {
   return items
 }
 
+/**
+ * @param {string[]} [values]
+ * @returns {Set<string>}
+ */
 function buildLowercaseSet(values = []) {
   const seen = new Set()
   for (const value of values || []) {
@@ -61,6 +101,12 @@ function buildLowercaseSet(values = []) {
   return seen
 }
 
+/**
+ * @param {unknown} existingValue
+ * @param {unknown} incomingValue
+ * @param {boolean} hasIncomingValue
+ * @returns {unknown}
+ */
 function appendUniqueImportValue(existingValue, incomingValue, hasIncomingValue) {
   if (!hasIncomingValue) return existingValue
   const existingItems = splitUniqueImportValues(existingValue)
@@ -78,6 +124,14 @@ function appendUniqueImportValue(existingValue, incomingValue, hasIncomingValue)
   return merged.join(' | ')
 }
 
+/**
+ * @param {unknown} existingValue
+ * @param {unknown} incomingValue
+ * @param {boolean} hasIncomingValue
+ * @param {unknown} rule
+ * @param {ImportFieldRule} [fallbackRule]
+ * @returns {unknown}
+ */
 function resolveImportValue(existingValue, incomingValue, hasIncomingValue, rule, fallbackRule = 'use_imported') {
   const effectiveRule = normalizeFieldRule(rule, fallbackRule)
   if (effectiveRule === 'keep_existing') return existingValue
@@ -92,6 +146,12 @@ function resolveImportValue(existingValue, incomingValue, hasIncomingValue, rule
   return hasIncomingValue ? incomingValue : existingValue
 }
 
+/**
+ * @param {unknown} mode
+ * @param {unknown} action
+ * @param {boolean} hasIncomingImages
+ * @returns {ImageConflictMode}
+ */
 function normalizeImageConflictMode(mode, action, hasIncomingImages) {
   const value = String(mode || '').trim().toLowerCase()
   if (value === 'keep' || value === 'keep_existing') return 'keep_existing'

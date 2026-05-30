@@ -12,7 +12,7 @@ const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWrit
 const { sanitizeMediaList } = require('../settingsSnapshot')
 const { normalizeClientRequestId } = require('../idempotency.ts')
 const { normalizePriceValue } = require('../money.ts')
-const { normalizeProductDiscount } = require('../productDiscounts')
+const { normalizeProductDiscount } = require('../productDiscounts.ts')
 const { hasColumn } = require('../schemaMetadata')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')
 const { getStockMetrics } = require('../businessMetrics')
@@ -29,7 +29,7 @@ const {
   parseImportFlag,
   parseImportNumber,
   resolveImportValue,
-} = require('../productImportPolicies')
+} = require('../productImportPolicies.ts')
 const {
   createOrFindProductBatch,
   increaseProductBatchStock,
