@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **64**
+Total files documented: **63**
 
 ## 2. Symbol Count by File
 
@@ -54,26 +54,25 @@ Total files documented: **64**
 | 42 | `backend/src/routes/system/index.js` | 44 | 38 |
 | 43 | `backend/src/routes/units.js` | 3 | 0 |
 | 44 | `backend/src/routes/users.js` | 26 | 16 |
-| 45 | `backend/src/runtimeCache.js` | 12 | 0 |
-| 46 | `backend/src/security.js` | 14 | 0 |
-| 47 | `backend/src/serverUtils.js` | 26 | 0 |
-| 48 | `backend/src/services/aiGateway.js` | 17 | 0 |
-| 49 | `backend/src/services/backupPackages.js` | 59 | 0 |
-| 50 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
-| 51 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 52 | `backend/src/services/googleDriveSync/versioning.js` | 7 | 0 |
-| 53 | `backend/src/services/googleOauth.js` | 17 | 0 |
-| 54 | `backend/src/services/importJobs.js` | 175 | 0 |
-| 55 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
-| 56 | `backend/src/services/mediaQueue.js` | 10 | 0 |
-| 57 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 58 | `backend/src/services/verification.js` | 21 | 0 |
-| 59 | `backend/src/sessionAuth.js` | 13 | 0 |
-| 60 | `backend/src/settingsSnapshot.js` | 12 | 0 |
-| 61 | `backend/src/systemJobs.js` | 28 | 0 |
-| 62 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
-| 63 | `backend/src/uploadSecurity.js` | 7 | 0 |
-| 64 | `backend/src/websocket.js` | 1 | 0 |
+| 45 | `backend/src/security.js` | 14 | 0 |
+| 46 | `backend/src/serverUtils.js` | 26 | 0 |
+| 47 | `backend/src/services/aiGateway.js` | 17 | 0 |
+| 48 | `backend/src/services/backupPackages.js` | 59 | 0 |
+| 49 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
+| 50 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
+| 51 | `backend/src/services/googleDriveSync/versioning.js` | 7 | 0 |
+| 52 | `backend/src/services/googleOauth.js` | 17 | 0 |
+| 53 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 54 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
+| 55 | `backend/src/services/mediaQueue.js` | 10 | 0 |
+| 56 | `backend/src/services/portalAi.js` | 42 | 0 |
+| 57 | `backend/src/services/verification.js` | 21 | 0 |
+| 58 | `backend/src/sessionAuth.js` | 13 | 0 |
+| 59 | `backend/src/settingsSnapshot.js` | 12 | 0 |
+| 60 | `backend/src/systemJobs.js` | 28 | 0 |
+| 61 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
+| 62 | `backend/src/uploadSecurity.js` | 7 | 0 |
+| 63 | `backend/src/websocket.js` | 1 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1389,24 +1388,7 @@ Total files documented: **64**
 | 15 | PUT | `/roles/:id` | 1034 |
 | 16 | DELETE | `/roles/:id` | 1064 |
 
-### 3.45 `backend/src/runtimeCache.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `enabled` | function | 17 |
-| 2 | `namespacedKey` | function | 21 |
-| 3 | `getClient` | function | 26 |
-| 4 | `getJson` | function | 64 |
-| 5 | `setJson` | function | 77 |
-| 6 | `getOrSetJson` | function | 90 |
-| 7 | `deleteByPrefix` | function | 98 |
-| 8 | `deletePrefixesInOrder` | function | 117 |
-| 9 | `prefixesForChannel` | function | 125 |
-| 10 | `invalidateForChannel` | function | 146 |
-| 11 | `pingRuntimeCache` | function | 155 |
-| 12 | `getRuntimeCacheStatus` | function | 166 |
-
-### 3.46 `backend/src/security.js`
+### 3.45 `backend/src/security.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1425,7 +1407,7 @@ Total files documented: **64**
 | 13 | `recordAbuseFailure` | function | 173 |
 | 14 | `clearAbuseFailure` | function | 197 |
 
-### 3.47 `backend/src/serverUtils.js`
+### 3.46 `backend/src/serverUtils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1456,7 +1438,7 @@ Total files documented: **64**
 | 25 | `setUploadStaticHeaders` | function | 368 |
 | 26 | `mapServerError` | function | 378 |
 
-### 3.48 `backend/src/services/aiGateway.js`
+### 3.47 `backend/src/services/aiGateway.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1478,7 +1460,7 @@ Total files documented: **64**
 | 16 | `callChatProvider` | function | 218 |
 | 17 | `testProviderConfig` | function | 307 |
 
-### 3.49 `backend/src/services/backupPackages.js`
+### 3.48 `backend/src/services/backupPackages.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1542,7 +1524,7 @@ Total files documented: **64**
 | 58 | `listLocalBackupVersions` | function | 971 |
 | 59 | `listBackupVersions` | function | 1003 |
 
-### 3.50 `backend/src/services/firebaseAuth.js`
+### 3.49 `backend/src/services/firebaseAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1569,7 +1551,7 @@ Total files documented: **64**
 | 21 | `setAuthUserActive` | function | 342 |
 | 22 | `verifyPasswordWithFirebase` | function | 355 |
 
-### 3.51 `backend/src/services/googleDriveSync/index.js`
+### 3.50 `backend/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1649,7 +1631,7 @@ Total files documented: **64**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.52 `backend/src/services/googleDriveSync/versioning.js`
+### 3.51 `backend/src/services/googleDriveSync/versioning.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1661,7 +1643,7 @@ Total files documented: **64**
 | 6 | `selectDateExpiredVersions` | function | 81 |
 | 7 | `selectExpiredDriveSyncVersions` | function | 92 |
 
-### 3.53 `backend/src/services/googleOauth.js`
+### 3.52 `backend/src/services/googleOauth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1683,7 +1665,7 @@ Total files documented: **64**
 | 16 | `exchangeGoogleOauthCode` | function | 196 |
 | 17 | `getGoogleUserFromTokens` | function | 219 |
 
-### 3.54 `backend/src/services/importJobs.js`
+### 3.53 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1863,7 +1845,7 @@ Total files documented: **64**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.55 `backend/src/services/integrationDoctor.js`
+### 3.54 `backend/src/services/integrationDoctor.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1882,7 +1864,7 @@ Total files documented: **64**
 | 13 | `probeBackups` | function | 199 |
 | 14 | `buildIntegrationDoctor` | function | 216 |
 
-### 3.56 `backend/src/services/mediaQueue.js`
+### 3.55 `backend/src/services/mediaQueue.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1897,7 +1879,7 @@ Total files documented: **64**
 | 9 | `startMediaWorker` | function | 157 |
 | 10 | `getMediaQueueStatus` | function | 181 |
 
-### 3.57 `backend/src/services/portalAi.js`
+### 3.56 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1944,7 +1926,7 @@ Total files documented: **64**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.58 `backend/src/services/verification.js`
+### 3.57 `backend/src/services/verification.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1970,7 +1952,7 @@ Total files documented: **64**
 | 20 | `sendEmail` | function | 183 |
 | 21 | `requestVerificationCode` | function | 247 |
 
-### 3.59 `backend/src/sessionAuth.js`
+### 3.58 `backend/src/sessionAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1988,7 +1970,7 @@ Total files documented: **64**
 | 12 | `revokeAuthSession` | function | 175 |
 | 13 | `revokeUserSessions` | function | 187 |
 
-### 3.60 `backend/src/settingsSnapshot.js`
+### 3.59 `backend/src/settingsSnapshot.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2005,7 +1987,7 @@ Total files documented: **64**
 | 11 | `sanitizeSettingsSnapshot` | function | 104 |
 | 12 | `sanitizeSettingsSnapshotAsync` | function | 112 |
 
-### 3.61 `backend/src/systemJobs.js`
+### 3.60 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2038,7 +2020,7 @@ Total files documented: **64**
 | 27 | `getSystemJob` | function | 432 |
 | 28 | `listSystemJobs` | function | 444 |
 
-### 3.62 `backend/src/uploadReferenceCleanup.js`
+### 3.61 `backend/src/uploadReferenceCleanup.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2046,7 +2028,7 @@ Total files documented: **64**
 | 2 | `repairMissingUploadReferences` | function | 22 |
 | 3 | `repairMissingUploadReferencesAsync` | function | 134 |
 
-### 3.63 `backend/src/uploadSecurity.js`
+### 3.62 `backend/src/uploadSecurity.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2058,7 +2040,7 @@ Total files documented: **64**
 | 6 | `validateUploadedBuffer` | function | 69 |
 | 7 | `validateUploadedPath` | function | 80 |
 
-### 3.64 `backend/src/websocket.js`
+### 3.63 `backend/src/websocket.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

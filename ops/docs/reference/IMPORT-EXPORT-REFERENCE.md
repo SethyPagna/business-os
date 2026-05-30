@@ -67,7 +67,7 @@ Code files documented: **466**
 | 55 | `backend/src/routes/system/index.js` | 24 | 1 | 20 | 2 |
 | 56 | `backend/src/routes/units.js` | 6 | 1 | 5 | 1 |
 | 57 | `backend/src/routes/users.js` | 11 | 1 | 9 | 1 |
-| 58 | `backend/src/runtimeCache.js` | 2 | 1 | 1 | 4 |
+| 58 | `backend/src/runtimeCache.ts` | 2 | 1 | 1 | 4 |
 | 59 | `backend/src/runtimeState/index.ts` | 4 | 1 | 1 | 2 |
 | 60 | `backend/src/runtimeVersion.ts` | 5 | 1 | 1 | 4 |
 | 61 | `backend/src/schemaMetadata.ts` | 1 | 1 | 1 | 6 |
@@ -680,7 +680,7 @@ Code files documented: **466**
   - `backend/src/routes/products.js`
   - `backend/src/routes/sync.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/runtimeCache.js`
+  - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/serverUtils.js`
   - `backend/src/services/backupPackages.js`
@@ -860,12 +860,12 @@ Code files documented: **466**
 - Imports (4)
   - `./database`
   - `./requestContext.ts`
-  - `./runtimeCache`
+  - `./runtimeCache.ts`
   - `./services/googleDriveSync`
 - Internal dependencies (4)
   - `backend/src/database.js`
   - `backend/src/requestContext.ts`
-  - `backend/src/runtimeCache.js`
+  - `backend/src/runtimeCache.ts`
   - `backend/src/services/googleDriveSync/index.js`
 - Referenced by (23)
   - `backend/server.js`
@@ -1466,7 +1466,7 @@ Code files documented: **466**
   - `../netSecurity`
   - `../organizationContext`
   - `../portalUtils.ts`
-  - `../runtimeCache`
+  - `../runtimeCache.ts`
   - `../security`
   - `../services/portalAi`
   - `../settingsSnapshot`
@@ -1480,7 +1480,7 @@ Code files documented: **466**
   - `backend/src/netSecurity.js`
   - `backend/src/organizationContext/index.js`
   - `backend/src/portalUtils.ts`
-  - `backend/src/runtimeCache.js`
+  - `backend/src/runtimeCache.ts`
   - `backend/src/security.js`
   - `backend/src/services/portalAi.js`
   - `backend/src/settingsSnapshot.js`
@@ -1563,7 +1563,7 @@ Code files documented: **466**
   - `../database`
   - `../helpers`
   - `../middleware`
-  - `../runtimeCache`
+  - `../runtimeCache.ts`
   - `../runtimeVersion.ts`
   - `../services/importJobs`
   - `../services/mediaQueue`
@@ -1573,7 +1573,7 @@ Code files documented: **466**
   - `backend/src/database.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-  - `backend/src/runtimeCache.js`
+  - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeVersion.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.js`
@@ -1746,7 +1746,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.58 `backend/src/runtimeCache.js`
+### 3.58 `backend/src/runtimeCache.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2750,13 +2750,13 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (5)
-  - `../src/runtimeCache`
+  - `../src/runtimeCache.ts`
   - `fs`
   - `node:assert/strict`
   - `os`
   - `path`
 - Internal dependencies (1)
-  - `backend/src/runtimeCache.js`
+  - `backend/src/runtimeCache.ts`
 - Referenced by (0)
   - none
 

@@ -67,7 +67,7 @@ Code files scanned: **466**
 | 55 | `backend/src/routes/system/index.js` | 44 |
 | 56 | `backend/src/routes/units.js` | 3 |
 | 57 | `backend/src/routes/users.js` | 26 |
-| 58 | `backend/src/runtimeCache.js` | 12 |
+| 58 | `backend/src/runtimeCache.ts` | 12 |
 | 59 | `backend/src/runtimeState/index.ts` | 6 |
 | 60 | `backend/src/runtimeVersion.ts` | 8 |
 | 61 | `backend/src/schemaMetadata.ts` | 9 |
@@ -1616,22 +1616,22 @@ Code files scanned: **466**
 | 25 | `findProviderIdentity` | function | 344 |
 | 26 | `buildAuthMethodsPayload` | function | 352 |
 
-### 3.58 `backend/src/runtimeCache.js`
+### 3.58 `backend/src/runtimeCache.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `enabled` | function | 17 |
-| 2 | `namespacedKey` | function | 21 |
-| 3 | `getClient` | function | 26 |
-| 4 | `getJson` | function | 64 |
-| 5 | `setJson` | function | 77 |
-| 6 | `getOrSetJson` | function | 90 |
-| 7 | `deleteByPrefix` | function | 98 |
-| 8 | `deletePrefixesInOrder` | function | 117 |
-| 9 | `prefixesForChannel` | function | 125 |
-| 10 | `invalidateForChannel` | function | 146 |
-| 11 | `pingRuntimeCache` | function | 155 |
-| 12 | `getRuntimeCacheStatus` | function | 166 |
+| 1 | `enabled` | function | 32 |
+| 2 | `namespacedKey` | function | 40 |
+| 3 | `getClient` | function | 48 |
+| 4 | `getJson` | function | 90 |
+| 5 | `setJson` | function | 109 |
+| 6 | `getOrSetJson` | function | 129 |
+| 7 | `deleteByPrefix` | function | 141 |
+| 8 | `deletePrefixesInOrder` | function | 164 |
+| 9 | `prefixesForChannel` | function | 176 |
+| 10 | `invalidateForChannel` | function | 201 |
+| 11 | `pingRuntimeCache` | function | 213 |
+| 12 | `getRuntimeCacheStatus` | function | 227 |
 
 ### 3.59 `backend/src/runtimeState/index.ts`
 
