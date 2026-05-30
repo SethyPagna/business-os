@@ -10,7 +10,7 @@ const {
   NON_BACKUP_TABLES,
   buildBackupSummary,
   buildBackupSummaryFromCounts,
-} = require('../src/backupSchema')
+} = require('../src/backupSchema.ts')
 
 let failed = 0
 

@@ -16,7 +16,7 @@ This document is the working relational schema map for Business OS. It was built
 - `backend/src/systemJobs.js`
 - `backend/src/routes/**/*.js`
 - `backend/src/services/**/*.js`
-- `backend/src/backupSchema.js`
+- `backend/src/backupSchema.ts`
 - `frontend/src/api/localDb.ts`
 - `frontend/src/api/methods.ts`
 - runtime configuration in `ops/docker/compose.scale.yml`
@@ -59,7 +59,7 @@ conversion:
    polymorphic references, JSON schemas, backup coverage, restore behavior, and
    delete behavior.
 5. Cross-check this document against `backend/src/db/postgresSchema.sql`,
-   runtime DDL, `backupSchema.js`, route/service joins, frontend API/Dexie, and
+   runtime DDL, `backupSchema.ts`, route/service joins, frontend API/Dexie, and
    generated `SCHEMA-AUDIT.md`.
 6. Re-scan missed implicit schemas: settings payloads, action-history payloads,
    audit payloads, custom fields/tables, import job JSON, AI logs, media/file
@@ -96,7 +96,7 @@ are present.
 | Entity catalog and attributes | This document plus `backend/src/db/postgresSchema.sql` | `ops/docs/reference/SCHEMA-AUDIT.md` |
 | Implicit relationships | Route/service joins, `*_id` filters, manual cascade code | `ops/docs/reference/WHOLE-CODEBASE-SWEEP.md` |
 | JSON/text schemas | Settings, action history, audit logs, imports, AI logs, custom fields | `ops/docs/reference/SCHEMA-AUDIT.md` |
-| Backup and restore coverage | `backend/src/backupSchema.js`, backup tests, runtime backup roots | `ops/docs/reference/CLEANUP-SWEEP.md` and `SCHEMA-AUDIT.md` |
+| Backup and restore coverage | `backend/src/backupSchema.ts`, backup tests, runtime backup roots | `ops/docs/reference/CLEANUP-SWEEP.md` and `SCHEMA-AUDIT.md` |
 | Orphan-check backlog | Schema recommendations and integrity scripts | `ops/docs/reference/SCHEMA-AUDIT.md` |
 | Index/FK/constraint recommendations | Phase 6 and Phase 29 recommendation matrix | `ops/docs/OPTIMIZATION-ROADMAP.md` |
 

@@ -87,6 +87,18 @@ const NON_BACKUP_TABLES = [
   'system_jobs',
 ]
 
+/**
+ * @typedef {Record<string, unknown[]>} BackupTableRows
+ * @typedef {Record<string, number>} BackupTableCounts
+ * @typedef {{ path?: string }} BackupUpload
+ * @typedef {{ tables?: BackupTableRows, uploads?: BackupUpload[], customTableRows?: BackupTableRows }} BackupSummaryInput
+ * @typedef {{ tableCounts?: BackupTableCounts, uploads?: BackupUpload[], customTableRows?: BackupTableRows }} BackupSummaryCountInput
+ */
+
+/**
+ * @param {BackupTableRows} tables
+ * @returns {BackupTableCounts}
+ */
 function countRowsByTable(tables = {}) {
   const counts = {}
   for (const tableName of BACKUP_TABLES) {
@@ -96,6 +108,9 @@ function countRowsByTable(tables = {}) {
   return counts
 }
 
+/**
+ * @param {BackupTableRows} customTableRows
+ */
 function countCustomTableRows(customTableRows = {}) {
   let total = 0
   for (const rows of Object.values(customTableRows || {})) {
@@ -104,11 +119,17 @@ function countCustomTableRows(customTableRows = {}) {
   return total
 }
 
+/**
+ * @param {BackupSummaryInput} input
+ */
 function buildBackupSummary({ tables = {}, uploads = [], customTableRows = {} } = {}) {
   const tableCounts = countRowsByTable(tables)
   return buildBackupSummaryFromCounts({ tableCounts, uploads, customTableRows })
 }
 
+/**
+ * @param {BackupSummaryCountInput} input
+ */
 function buildBackupSummaryFromCounts({ tableCounts = {}, uploads = [], customTableRows = {} } = {}) {
   const normalizedCounts = {}
   let tableRowCount = 0

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 564.
+- Latest completed implementation move in this roadmap: Move 565.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -1788,7 +1788,7 @@ Required sweep loop:
   schema, route SQL, service SQL, Dexie stores, Redis queues/cache,
   object-storage references, custom tables, and JSON/text payload columns.
 - 29.4 Relationship verification: cross-check `SCHEMA-RELATIONSHIPS.md`
-  against `backend/src/db/postgresSchema.sql`, runtime DDL, `backupSchema.js`,
+  against `backend/src/db/postgresSchema.sql`, runtime DDL, `backupSchema.ts`,
   route/service joins, frontend API/Dexie, and generated `SCHEMA-AUDIT.md`.
 - 29.5 Loop/function audit: scan loops, nested loops, repeated `O(n*m)`
   transforms, broad refreshes, repeated API waterfalls, oversized modules, and
@@ -4733,7 +4733,7 @@ Move 418 status:
 
 Move 419 status:
 - Move 419 tightens backup summary and catalog text utility loops in
-  `backend/src/backupSchema.js` and `backend/src/catalogTextIntegrity.js`.
+  `backend/src/backupSchema.ts` and `backend/src/catalogTextIntegrity.js`.
   Backup table row counts, custom-table row totals, normalized backup counts,
   suspicious catalog field detection, and normalized option-list de-duplication
   now use direct loops instead of `reduce()`/`map()`/`filter()`/`forEach()` or
@@ -6218,3 +6218,17 @@ Move 564 status:
   current source extension count is
   `.js: 72`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 291`, `.tsx: 107`
   outside generated/runtime folders.
+
+Move 565 status:
+- Move 565 converts `backend/src/backupSchema.ts` to a package-safe TypeScript
+  path. The backup schema helper now carries JSDoc row/count/upload summary
+  contracts while preserving backup version, backup table coverage, restore
+  clear order, non-backup table exclusions, and summary totals. System backup
+  routes, backup package services, backup schema tests, schema relationship
+  docs, and schema audit source loading use explicit `.ts` paths. Focused
+  backup-schema, backup-performance, backup-retention, route-contract,
+  schema-audit, and full-automation checks passed, as did the full backend
+  utility suite and Linux packaging proof. `pkg` continues to warn for direct
+  `.ts` scripts, so larger backend route/service conversion still waits for a
+  compile/staging package lane. The current source extension count is `.js: 71`, `.jsx: 0`, `.mjs: 0`,
+  `.cjs: 0`, `.ts: 292`, `.tsx: 107` outside generated/runtime folders.
