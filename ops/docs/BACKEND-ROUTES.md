@@ -148,7 +148,7 @@ File: `backend/src/routes/contacts.ts`
 ## Users and Roles
 
 Base: `/api`  
-File: `backend/src/routes/users.js`
+File: `backend/src/routes/users.ts`
 
 - Users CRUD + profile + password + contact verification
 - Role CRUD

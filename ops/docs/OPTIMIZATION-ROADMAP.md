@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 613.
+- Latest completed implementation move in this roadmap: Move 614.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4172,7 +4172,7 @@ Move 371 status:
 Move 372 status:
 - Move 372 tightens the action history and user list response projection
   paths in `backend/src/routes/actionHistory.ts` and
-  `backend/src/routes/users.js`. Action-history row serialization and user
+  `backend/src/routes/users.ts`. Action-history row serialization and user
   row sanitization now use direct-loop helper functions instead of endpoint
   `rows.map(...)` calls, keeping response shaping named and easier to profile.
   Action history ownership filters, sensitive-history checks, user permission
@@ -4697,12 +4697,12 @@ Move 416 status:
 - Move 416 tightens the remaining small auth/user route callback scans.
   Password-reset redirect selection in `backend/src/routes/auth.ts` now uses
   `findFirstHttpUrl()`, while provider identity UUID and linked-provider
-  selection in `backend/src/routes/users.js` now use `findFirstUuid()` and
+  selection in `backend/src/routes/users.ts` now use `findFirstUuid()` and
   `findProviderIdentity()`. Redirect priority, URL validation, UUID trimming,
   provider-name normalization, unlink guard behavior, and auth/user route
   contracts remain unchanged. Callback scans now report no `map()`, `filter()`,
   `forEach()`, `reduce()`, `find()`, `flatMap()`, or `Array.from()` hits in
-  `backend/src/routes/auth.ts` or `backend/src/routes/users.js`.
+  `backend/src/routes/auth.ts` or `backend/src/routes/users.ts`.
 
 Move 417 status:
 - Move 417 clears the remaining backend route callback-chain scan by tightening
@@ -6969,3 +6969,17 @@ Move 613 status:
   package lane. The expected generated language audit now reports
   `JavaScript: 9`, `TypeScript: 302`, and `React TSX: 107` across the active
   scan roots.
+
+Move 614 status:
+- Move 614 converts `backend/src/routes/users.ts` to a package-safe TypeScript
+  path. User lifecycle, role lifecycle, self-service profile/password updates,
+  avatar upload hardening, Google linked identity synchronization,
+  admin-control safeguards, and session revocation remain unchanged on the
+  existing CommonJS route style. Server mounting, hardening policy, route docs,
+  and roadmap docs now point at the explicit `.ts` route path. Focused users
+  route load, route-contract, hardening policy, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The expected generated language audit now
+  reports `JavaScript: 8`, `TypeScript: 303`, and `React TSX: 107` across the
+  active scan roots.

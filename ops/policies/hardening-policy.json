@@ -137,7 +137,7 @@
           "mustContain": ["products:upload_image", "validateUploadedFile", "compressUpload"]
         },
         {
-          "path": "backend/src/routes/users.js",
+          "path": "backend/src/routes/users.ts",
           "mustContain": ["users:avatar_upload", "validateUploadedFile", "compressUpload"]
         }
       ]

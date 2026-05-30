@@ -1,6 +1,6 @@
 'use strict'
 /**
- * users.js
+ * users.ts
  * User/role management and profile security routes.
  *
  * Responsibilities:

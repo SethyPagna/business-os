@@ -15,7 +15,7 @@ Route files sit behind the shared middleware stack from `server.js`, so by the t
 ## Domain Ownership
 
 - `auth.ts` - login, OTP, password reset, verification capabilities
-- `users.js` - users, roles, profile, contact verification
+- `users.ts` - users, roles, profile, contact verification
 - `products.js` - product CRUD, variants, images, bulk import
 - `importJobs.ts` - asynchronous CSV/TSV and media import jobs
 - `inventory.js` - adjustments, movement history, inventory summaries
