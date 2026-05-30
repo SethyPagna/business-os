@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **7**
+Total files documented: **6**
 
 ## 2. Symbol Count by File
 
@@ -15,8 +15,7 @@ Total files documented: **7**
 | 3 | `backend/src/routes/products.js` | 64 | 12 |
 | 4 | `backend/src/routes/sales.js` | 24 | 7 |
 | 5 | `backend/src/routes/system/index.js` | 44 | 38 |
-| 6 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 7 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 6 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -325,87 +324,7 @@ Total files documented: **7**
 | 37 | POST | `/open-path` | 1564 |
 | 38 | POST | `/pick-folder` | 1593 |
 
-### 3.6 `backend/src/services/googleDriveSync/index.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `nowIso` | function | 80 |
-| 2 | `trim` | function | 84 |
-| 3 | `toBool` | function | 88 |
-| 4 | `clamp` | function | 96 |
-| 5 | `escapeDriveQueryValue` | function | 102 |
-| 6 | `buildPlaceholders` | function | 106 |
-| 7 | `readSettingsMap` | function | 114 |
-| 8 | `writeSettingsMap` | function | 125 |
-| 9 | `clearDriveSyncMappings` | function | 147 |
-| 10 | `resetDriveSyncRootState` | function | 151 |
-| 11 | `getDriveSyncConfig` | function | 161 |
-| 12 | `getDriveSyncEntriesMap` | function | 197 |
-| 13 | `hasCanonicalDriveLayout` | function | 210 |
-| 14 | `upsertDriveSyncEntry` | function | 218 |
-| 15 | `deleteDriveSyncEntry` | function | 255 |
-| 16 | `deleteDriveSyncEntriesUnder` | function | 259 |
-| 17 | `inferMimeType` | function | 266 |
-| 18 | `hashFile` | function | 281 |
-| 19 | `hashFileMany` | function | 291 |
-| 20 | `yieldToEventLoop` | function | 315 |
-| 21 | `sleep` | function | 319 |
-| 22 | `buildAccessTokenKey` | function | 323 |
-| 23 | `clearCachedAccessToken` | function | 330 |
-| 24 | `describeFetchFailure` | function | 337 |
-| 25 | `joinNonEmptyParts` | function | 351 |
-| 26 | `fetchWithTimeout` | function | 359 |
-| 27 | `exchangeRefreshToken` | function | 386 |
-| 28 | `exchangeAuthorizationCode` | function | 428 |
-| 29 | `driveApiRequest` | function | 451 |
-| 30 | `driveApiUpload` | function | 468 |
-| 31 | `fetchDriveUserProfile` | function | 484 |
-| 32 | `findDriveItem` | function | 499 |
-| 33 | `findDriveItems` | function | 504 |
-| 34 | `listDriveChildren` | function | 519 |
-| 35 | `getDriveFileIfExists` | function | 528 |
-| 36 | `removeDuplicateDriveItems` | function | 540 |
-| 37 | `buildSortedDirectoryList` | function | 552 |
-| 38 | `getNonFolderDriveItems` | function | 561 |
-| 39 | `getFirstNonFolderDriveItem` | function | 571 |
-| 40 | `buildLiveSyncPathSet` | function | 578 |
-| 41 | `selectStaleDriveMappings` | function | 589 |
-| 42 | `createDriveFolder` | function | 598 |
-| 43 | `ensureRootFolder` | function | 610 |
-| 44 | `ensureDriveVersionFolder` | function | 629 |
-| 45 | `writeSnapshotManifest` | function | 676 |
-| 46 | `buildManagedSnapshotRoot` | function | 710 |
-| 47 | `ensureSnapshotLayout` | function | 714 |
-| 48 | `shouldSkipSnapshotFile` | function | 720 |
-| 49 | `createDataRootSnapshot` | function | 727 |
-| 50 | `collectSnapshotItems` | function | 769 |
-| 51 | `ensureRemoteDirectories` | function | 819 |
-| 52 | `updateRuntimeUploadProgress` | function | 870 |
-| 53 | `clearRuntimeUploadProgress` | function | 877 |
-| 54 | `initiateDriveResumableSession` | function | 884 |
-| 55 | `queryResumableOffset` | function | 912 |
-| 56 | `isInvalidUploadRequest` | function | 940 |
-| 57 | `isDriveNotFoundError` | function | 944 |
-| 58 | `isDriveWriteAccessError` | function | 948 |
-| 59 | `canRecoverDriveItemWrite` | function | 956 |
-| 60 | `putResumableChunk` | function | 960 |
-| 61 | `uploadDriveFileResumable` | function | 995 |
-| 62 | `uploadDriveFile` | function | 1069 |
-| 63 | `updateDriveFile` | function | 1074 |
-| 64 | `removeDriveFile` | function | 1079 |
-| 65 | `runDriveSync` | function | 1091 |
-| 66 | `runDriveSyncInternal` | function | 1102 |
-| 67 | `scheduleDriveSync` | function | 1341 |
-| 68 | `getDriveSyncStatus` | function | 1363 |
-| 69 | `beginGoogleDriveOAuth` | function | 1412 |
-| 70 | `prunePendingOauthStates` | function | 1436 |
-| 71 | `finalizeGoogleDriveOAuth` | function | 1443 |
-| 72 | `saveDriveSyncPreferences` | function | 1486 |
-| 73 | `disconnectDriveSync` | function | 1507 |
-| 74 | `forgetDriveSyncCredentials` | function | 1527 |
-| 75 | `schedulePeriodicDriveSync` | function | 1535 |
-
-### 3.7 `backend/src/services/importJobs.js`
+### 3.6 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

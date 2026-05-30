@@ -85,7 +85,7 @@ Total files documented: **531**
 | 73 | `backend/src/services/aiGateway.ts` | backend-services | 364 | 13.6 | Integration/service layer |
 | 74 | `backend/src/services/backupPackages.ts` | backend-services | 1060 | 36.3 | Integration/service layer |
 | 75 | `backend/src/services/firebaseAuth.ts` | backend-services | 384 | 14.3 | Integration/service layer |
-| 76 | `backend/src/services/googleDriveSync/index.js` | backend-services | 1564 | 57.8 | Integration/service layer |
+| 76 | `backend/src/services/googleDriveSync/index.ts` | backend-services | 1564 | 57.8 | Integration/service layer |
 | 77 | `backend/src/services/googleDriveSync/versioning.ts` | backend-services | 135 | 4.0 | Integration/service layer |
 | 78 | `backend/src/services/googleOauth.ts` | backend-services | 252 | 8.8 | Integration/service layer |
 | 79 | `backend/src/services/importJobs.js` | backend-services | 3880 | 157.1 | Integration/service layer |

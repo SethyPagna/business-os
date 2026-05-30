@@ -164,7 +164,7 @@
     "backend/src/routes/system/index.js",
     "backend/src/routes/users.ts",
     "backend/src/services/backupPackages.ts",
-    "backend/src/services/googleDriveSync/index.js",
+    "backend/src/services/googleDriveSync/index.ts",
     "backend/src/services/importJobs.js",
     "backend/test/fullAutomation.test.ts",
     "frontend/src/App.tsx",

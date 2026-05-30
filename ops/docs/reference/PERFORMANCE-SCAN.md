@@ -37,7 +37,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
 | `frontend/src/App.tsx` | 60.4 | 1572 |
 | `frontend/src/components/utils-settings/AuditLog.tsx` | 59.1 | 1292 |
-| `backend/src/services/googleDriveSync/index.js` | 57.8 | 1564 |
+| `backend/src/services/googleDriveSync/index.ts` | 57.8 | 1564 |
 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 56.8 | 865 |
 
 ## 3. Largest Source Files (by lines)
@@ -63,7 +63,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1596 | 68.4 |
 | `backend/src/routes/sales.js` | 1573 | 64.6 |
 | `frontend/src/App.tsx` | 1572 | 60.4 |
-| `backend/src/services/googleDriveSync/index.js` | 1564 | 57.8 |
+| `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1479 | 102.5 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
 | `backend/src/routes/portal.ts` | 1407 | 51.5 |

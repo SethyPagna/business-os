@@ -383,7 +383,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `index.js` | Integration/service layer |
+| 1 | `index.ts` | Integration/service layer |
 | 2 | `versioning.ts` | Integration/service layer |
 
 

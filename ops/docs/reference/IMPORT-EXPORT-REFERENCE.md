@@ -76,7 +76,7 @@ Code files documented: **468**
 | 64 | `backend/src/services/aiGateway.ts` | 2 | 1 | 2 | 2 |
 | 65 | `backend/src/services/backupPackages.ts` | 9 | 1 | 4 | 4 |
 | 66 | `backend/src/services/firebaseAuth.ts` | 2 | 1 | 0 | 0 |
-| 67 | `backend/src/services/googleDriveSync/index.js` | 12 | 1 | 8 | 4 |
+| 67 | `backend/src/services/googleDriveSync/index.ts` | 12 | 1 | 8 | 4 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 0 | 1 | 0 | 2 |
 | 69 | `backend/src/services/googleOauth.ts` | 2 | 1 | 1 | 4 |
 | 70 | `backend/src/services/importJobs.js` | 20 | 1 | 14 | 7 |
@@ -684,7 +684,7 @@ Code files documented: **468**
   - `backend/src/runtimeState/index.ts`
   - `backend/src/serverUtils.ts`
   - `backend/src/services/backupPackages.ts`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/services/googleOauth.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.ts`
@@ -761,7 +761,7 @@ Code files documented: **468**
   - `backend/src/routes/users.ts`
   - `backend/src/schemaMetadata.ts`
   - `backend/src/services/backupPackages.ts`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/services/mediaQueue.ts`
@@ -786,7 +786,7 @@ Code files documented: **468**
 - Referenced by (5)
   - `backend/src/organizationContext/index.ts`
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/systemFsWorker.ts`
   - `backend/test/dataPath.test.ts`
 
@@ -861,12 +861,12 @@ Code files documented: **468**
   - `./database.ts`
   - `./requestContext.ts`
   - `./runtimeCache.ts`
-  - `./services/googleDriveSync`
+  - `./services/googleDriveSync/index.ts`
 - Internal dependencies (4)
   - `backend/src/database.ts`
   - `backend/src/requestContext.ts`
   - `backend/src/runtimeCache.ts`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
 - Referenced by (23)
   - `backend/server.js`
   - `backend/src/routes/actionHistory.ts`
@@ -953,7 +953,7 @@ Code files documented: **468**
 - Referenced by (3)
   - `backend/server.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
 
 ### 3.22 `backend/src/middleware.ts`
 
@@ -1433,13 +1433,13 @@ Code files documented: **468**
   - `../businessMetrics.ts`
   - `../database.ts`
   - `../middleware.ts`
-  - `../services/googleDriveSync`
+  - `../services/googleDriveSync/index.ts`
   - `express`
 - Internal dependencies (4)
   - `backend/src/businessMetrics.ts`
   - `backend/src/database.ts`
   - `backend/src/middleware.ts`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
 - Referenced by (3)
   - `backend/server.js`
   - `backend/test/notificationSummaryCache.test.ts`
@@ -1673,7 +1673,7 @@ Code files documented: **468**
   - `../../runtimeState/index.ts`
   - `../../security.ts`
   - `../../services/backupPackages.ts`
-  - `../../services/googleDriveSync`
+  - `../../services/googleDriveSync/index.ts`
   - `../../services/importJobs`
   - `../../services/integrationDoctor.ts`
   - `../../systemJobs.ts`
@@ -1698,7 +1698,7 @@ Code files documented: **468**
   - `backend/src/runtimeState/index.ts`
   - `backend/src/security.ts`
   - `backend/src/services/backupPackages.ts`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/systemJobs.ts`
@@ -1796,7 +1796,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/server.js`
   - `backend/src/routes/runtime.ts`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/test/runtimeVersion.test.ts`
 
 ### 3.61 `backend/src/schemaMetadata.ts`
@@ -1827,7 +1827,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/aiGateway.ts`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/test/security.test.ts`
 
 ### 3.63 `backend/src/serverUtils.ts`
@@ -1876,7 +1876,7 @@ Code files documented: **468**
   - `backend/src/objectStore.ts`
 - Referenced by (4)
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/test/backupRetention.test.ts`
 
@@ -1891,7 +1891,7 @@ Code files documented: **468**
 - Referenced by (0)
   - none
 
-### 3.67 `backend/src/services/googleDriveSync/index.js`
+### 3.67 `backend/src/services/googleDriveSync/index.ts`
 
 - Declared exports: `module.exports`
 - Imports (12)
@@ -1930,7 +1930,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/test/googleDriveSyncVersioning.test.ts`
 
 ### 3.69 `backend/src/services/googleOauth.ts`
@@ -2004,7 +2004,7 @@ Code files documented: **468**
   - `../database.ts`
   - `../objectStore.ts`
   - `./backupPackages.ts`
-  - `./googleDriveSync`
+  - `./googleDriveSync/index.ts`
   - `./googleOauth.ts`
   - `./importJobs`
   - `fs`
@@ -2015,7 +2015,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/objectStore.ts`
   - `backend/src/services/backupPackages.ts`
-  - `backend/src/services/googleDriveSync/index.js`
+  - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/services/googleOauth.ts`
   - `backend/src/services/importJobs.js`
 - Referenced by (2)

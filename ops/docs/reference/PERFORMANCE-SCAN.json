@@ -3,7 +3,7 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6449994,
+  "totalSourceBytes": 6450025,
   "totalSourceLines": 146302,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
@@ -16,7 +16,7 @@
     "backend/src/routes/products.js",
     "backend/src/routes/sales.js",
     "backend/src/routes/system/index.js",
-    "backend/src/services/googleDriveSync/index.js",
+    "backend/src/services/googleDriveSync/index.ts",
     "backend/src/services/importJobs.js",
     "frontend/src/App.tsx",
     "frontend/src/AppContext.tsx",
@@ -134,7 +134,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66904,
+      "size": 66912,
       "lines": 1659
     },
     {
@@ -158,7 +158,7 @@
       "lines": 1292
     },
     {
-      "file": "backend/src/services/googleDriveSync/index.js",
+      "file": "backend/src/services/googleDriveSync/index.ts",
       "size": 59175,
       "lines": 1564
     },
@@ -246,7 +246,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66904,
+      "size": 66912,
       "lines": 1659
     },
     {
@@ -265,7 +265,7 @@
       "lines": 1572
     },
     {
-      "file": "backend/src/services/googleDriveSync/index.js",
+      "file": "backend/src/services/googleDriveSync/index.ts",
       "size": 59175,
       "lines": 1564
     },

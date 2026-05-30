@@ -76,7 +76,7 @@ Code files scanned: **468**
 | 64 | `backend/src/services/aiGateway.ts` | 17 |
 | 65 | `backend/src/services/backupPackages.ts` | 59 |
 | 66 | `backend/src/services/firebaseAuth.ts` | 22 |
-| 67 | `backend/src/services/googleDriveSync/index.js` | 75 |
+| 67 | `backend/src/services/googleDriveSync/index.ts` | 75 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
 | 69 | `backend/src/services/googleOauth.ts` | 17 |
 | 70 | `backend/src/services/importJobs.js` | 175 |
@@ -1835,7 +1835,7 @@ Code files scanned: **468**
 | 21 | `setAuthUserActive` | function | 342 |
 | 22 | `verifyPasswordWithFirebase` | function | 355 |
 
-### 3.67 `backend/src/services/googleDriveSync/index.js`
+### 3.67 `backend/src/services/googleDriveSync/index.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
