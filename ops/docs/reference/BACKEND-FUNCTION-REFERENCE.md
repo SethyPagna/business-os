@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **35**
+Total files documented: **34**
 
 ## 2. Symbol Count by File
 
@@ -44,7 +44,6 @@ Total files documented: **35**
 | 32 | `backend/src/services/portalAi.js` | 42 | 0 |
 | 33 | `backend/src/services/verification.js` | 21 | 0 |
 | 34 | `backend/src/systemJobs.js` | 28 | 0 |
-| 35 | `backend/src/uploadReferenceCleanup.js` | 3 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1584,12 +1583,4 @@ Total files documented: **35**
 | 26 | `cancelSystemJob` | function | 415 |
 | 27 | `getSystemJob` | function | 432 |
 | 28 | `listSystemJobs` | function | 444 |
-
-### 3.35 `backend/src/uploadReferenceCleanup.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `safeJsonArray` | function | 13 |
-| 2 | `repairMissingUploadReferences` | function | 22 |
-| 3 | `repairMissingUploadReferencesAsync` | function | 134 |
 

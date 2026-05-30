@@ -89,7 +89,7 @@ Code files scanned: **468**
 | 77 | `backend/src/storage/organizationFolders.ts` | 5 |
 | 78 | `backend/src/systemFsWorker.ts` | 7 |
 | 79 | `backend/src/systemJobs.js` | 28 |
-| 80 | `backend/src/uploadReferenceCleanup.js` | 3 |
+| 80 | `backend/src/uploadReferenceCleanup.ts` | 3 |
 | 81 | `backend/src/uploadSecurity.ts` | 7 |
 | 82 | `backend/src/websocket.ts` | 1 |
 | 83 | `backend/src/workers/importWorker.ts` | 2 |
@@ -2326,7 +2326,7 @@ Code files scanned: **468**
 | 27 | `getSystemJob` | function | 432 |
 | 28 | `listSystemJobs` | function | 444 |
 
-### 3.80 `backend/src/uploadReferenceCleanup.js`
+### 3.80 `backend/src/uploadReferenceCleanup.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

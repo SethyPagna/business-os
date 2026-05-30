@@ -89,7 +89,7 @@ Code files documented: **468**
 | 77 | `backend/src/storage/organizationFolders.ts` | 2 | 1 | 0 | 2 |
 | 78 | `backend/src/systemFsWorker.ts` | 3 | 0 | 1 | 0 |
 | 79 | `backend/src/systemJobs.js` | 2 | 1 | 1 | 2 |
-| 80 | `backend/src/uploadReferenceCleanup.js` | 1 | 1 | 1 | 2 |
+| 80 | `backend/src/uploadReferenceCleanup.ts` | 1 | 1 | 1 | 2 |
 | 81 | `backend/src/uploadSecurity.ts` | 2 | 1 | 1 | 4 |
 | 82 | `backend/src/websocket.ts` | 5 | 1 | 3 | 2 |
 | 83 | `backend/src/workers/importWorker.ts` | 2 | 1 | 2 | 1 |
@@ -822,7 +822,7 @@ Code files documented: **468**
   - `./objectStore`
   - `./optionalSharp.ts`
   - `./settingsSnapshot.ts`
-  - `./uploadReferenceCleanup`
+  - `./uploadReferenceCleanup.ts`
   - `./uploadSecurity.ts`
   - `child_process`
   - `crypto`
@@ -835,7 +835,7 @@ Code files documented: **468**
   - `backend/src/objectStore.js`
   - `backend/src/optionalSharp.ts`
   - `backend/src/settingsSnapshot.ts`
-  - `backend/src/uploadReferenceCleanup.js`
+  - `backend/src/uploadReferenceCleanup.ts`
   - `backend/src/uploadSecurity.ts`
 - Referenced by (15)
   - `backend/server.js`
@@ -2098,7 +2098,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/settings.ts`
-  - `backend/src/uploadReferenceCleanup.js`
+  - `backend/src/uploadReferenceCleanup.ts`
   - `backend/test/settingsSnapshotObjectStorage.test.ts`
 
 ### 3.77 `backend/src/storage/organizationFolders.ts`
@@ -2137,7 +2137,7 @@ Code files documented: **468**
   - `backend/src/routes/system/index.js`
   - `backend/test/systemJobs.test.ts`
 
-### 3.80 `backend/src/uploadReferenceCleanup.js`
+### 3.80 `backend/src/uploadReferenceCleanup.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -2839,11 +2839,11 @@ Code files documented: **468**
 - Declared exports: none detected
 - Imports (3)
   - `../src/settingsSnapshot.ts`
-  - `../src/uploadReferenceCleanup`
+  - `../src/uploadReferenceCleanup.ts`
   - `node:assert/strict`
 - Internal dependencies (2)
   - `backend/src/settingsSnapshot.ts`
-  - `backend/src/uploadReferenceCleanup.js`
+  - `backend/src/uploadReferenceCleanup.ts`
 - Referenced by (0)
   - none
 
