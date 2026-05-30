@@ -118,7 +118,7 @@ Largest tracked source/hotspot areas by file count:
 - `frontend/public/scanbot-web-sdk` is large but tracked and required by scanner
   flows. Do not delete unless scanner replacement is implemented and verified.
 - The largest maintainable source modules remain `Inventory.tsx`,
-  `importJobs.js`, `CatalogPage.tsx`, `Dashboard.tsx`, `Products.tsx`,
+  `importJobs.ts`, `CatalogPage.tsx`, `Dashboard.tsx`, `Products.tsx`,
   `products.ts`, `POS.tsx`, and `inventory.ts`.
 
 ## Repeat Loop
@@ -591,7 +591,7 @@ a new standalone Worker slice, because the heavy product/contact/inventory/
 sales import surfaces already run through focused workers.
 
 Move 168 completes the first import-job data-path optimization.
-`backend/src/services/importJobs.js` now caches product rows by normalized name
+`backend/src/services/importJobs.ts` now caches product rows by normalized name
 inside the product import context and caches supplier lookups for the same job.
 `rememberProductForImport()` keeps the product cache current when an import row
 creates or updates a product, so repeated same-name variant and merge rows do

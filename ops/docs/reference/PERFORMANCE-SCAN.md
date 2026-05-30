@@ -16,7 +16,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 |---|---:|---:|
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
 | `frontend/src/components/inventory/Inventory.tsx` | 216.0 | 4281 |
-| `backend/src/services/importJobs.js` | 157.1 | 3880 |
+| `backend/src/services/importJobs.ts` | 157.1 | 3880 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 148.3 | 3396 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
 | `frontend/src/components/pos/POS.tsx` | 117.4 | 2218 |
@@ -45,7 +45,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | File | Lines | Size (KB) |
 |---|---:|---:|
 | `frontend/src/components/inventory/Inventory.tsx` | 4281 | 216.0 |
-| `backend/src/services/importJobs.js` | 3880 | 157.1 |
+| `backend/src/services/importJobs.ts` | 3880 | 157.1 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 3396 | 148.3 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
@@ -896,14 +896,14 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   callbacks. Same-name product signature matching now uses a shared direct
   helper across review, preflight, and apply paths, while ZIP extraction
   selection uses a direct unprocessed-file helper. The only remaining callback
-  chain in `importJobs.js` is a suspicious-catalog warning text pipeline left
+  chain in `importJobs.ts` is a suspicious-catalog warning text pipeline left
   for a separate semantic cleanup pass.
 - Move 411 clears the final import-service callback chain. Brand-option
   cleanup after product imports now uses a direct helper to normalize values,
   drop blanks, and reject suspicious catalog text before the existing
   de-duplication step. A callback-chain scan now reports no `map()`,
   `filter()`, `forEach()`, `reduce()`, `find()`, or `Array.from()` hits in
-  `backend/src/services/importJobs.js`.
+  `backend/src/services/importJobs.ts`.
 - Move 412 tightens product-route branch, import-signature, and sorted-map
   helpers. Default branch selection, branch lookups, bounded set
   materialization, category usage sorting, clean brand sorting, and product

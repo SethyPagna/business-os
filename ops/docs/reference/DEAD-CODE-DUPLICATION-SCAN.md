@@ -109,7 +109,7 @@ compatibility boundary for tests and legacy imports. `backupPackages.js` also
 keeps its fallback `LIMIT/OFFSET` query intentionally so non-`id` tables can
 still stream safely while `id` tables use the faster keyset path.
 
-Move 168 records the product import caches in `backend/src/services/importJobs.js`
+Move 168 records the product import caches in `backend/src/services/importJobs.ts`
 as intentional data-path state, not redundant maps. `productRowsByName` avoids
 repeating the same product-name query for every row in a same-name import
 family, `supplierMap` avoids repeated supplier existence checks, and
@@ -480,7 +480,7 @@ matching stay centralized instead of duplicating checkout logic inside
 | `ops/scripts/runtime` | Many audit/check scripts with overlapping setup/report behavior. | Shared helper extraction or folder move plus `rg` old-path scan and live-check pass. |
 | `ops/scripts/powershell` | Runtime/release orchestration overlaps in setup/start/release flows. | Preserve `run` wrappers; verify `run\verify-local.bat` and Docker doctor paths. |
 | `frontend/src/components/inventory/Inventory.tsx` | Large component and likely repeated transforms. | Helper extraction tests and Inventory Playwright checks. |
-| `backend/src/services/importJobs.js` | Large import pipeline with queue, CSV, image, and policy branches. | Import tests plus live import smoke. |
+| `backend/src/services/importJobs.ts` | Large import pipeline with queue, CSV, image, and policy branches. | Import tests plus live import smoke. |
 | `frontend/src/components/catalog/CatalogPage.tsx` | Large mixed admin/public/editor surface. | Catalog helper tests plus public portal check. |
 | `frontend/src/api/methods.ts` | Large API method registry. | API contract/source tests and app bootstrap check. |
 | `backend/src/routes/products.ts` and `backend/src/routes/inventory.ts` | Query-heavy route files. | Route contract tests, schema audit, product/inventory live checks. |

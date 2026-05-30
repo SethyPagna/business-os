@@ -79,7 +79,7 @@ Code files documented: **468**
 | 67 | `backend/src/services/googleDriveSync/index.ts` | 12 | 1 | 8 | 4 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 0 | 1 | 0 | 2 |
 | 69 | `backend/src/services/googleOauth.ts` | 2 | 1 | 1 | 4 |
-| 70 | `backend/src/services/importJobs.js` | 20 | 1 | 14 | 7 |
+| 70 | `backend/src/services/importJobs.ts` | 20 | 1 | 14 | 7 |
 | 71 | `backend/src/services/integrationDoctor.ts` | 10 | 1 | 8 | 2 |
 | 72 | `backend/src/services/mediaQueue.ts` | 5 | 1 | 3 | 5 |
 | 73 | `backend/src/services/portalAi.ts` | 2 | 1 | 2 | 1 |
@@ -521,7 +521,7 @@ Code files documented: **468**
   - `./src/routes/users.ts`
   - `./src/runtimeVersion.ts`
   - `./src/serverUtils.ts`
-  - `./src/services/importJobs`
+  - `./src/services/importJobs.ts`
   - `./src/websocket.ts`
   - `./src/workers/importWorker.ts`
   - `./src/workers/mediaWorker.ts`
@@ -569,7 +569,7 @@ Code files documented: **468**
   - `backend/src/routes/users.ts`
   - `backend/src/runtimeVersion.ts`
   - `backend/src/serverUtils.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/websocket.ts`
   - `backend/src/workers/importWorker.ts`
   - `backend/src/workers/mediaWorker.ts`
@@ -654,7 +654,7 @@ Code files documented: **468**
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/units.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
 
 ### 3.8 `backend/src/config/index.ts`
 
@@ -686,7 +686,7 @@ Code files documented: **468**
   - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/services/googleOauth.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/services/mediaQueue.ts`
   - `backend/src/settingsSnapshot.ts`
@@ -723,7 +723,7 @@ Code files documented: **468**
   - none
 - Referenced by (3)
   - `backend/src/routes/contacts.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/test/contactOptions.test.ts`
 
 ### 3.11 `backend/src/database.ts`
@@ -762,7 +762,7 @@ Code files documented: **468**
   - `backend/src/schemaMetadata.ts`
   - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/services/mediaQueue.ts`
   - `backend/src/services/portalAi.ts`
@@ -847,7 +847,7 @@ Code files documented: **468**
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/system/index.ts`
   - `backend/src/routes/users.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/services/mediaQueue.ts`
   - `backend/test/fileAssetStorageReconcile.test.ts`
   - `backend/test/fileAssetUsageCache.test.ts`
@@ -889,7 +889,7 @@ Code files documented: **468**
   - `backend/src/routes/system/index.ts`
   - `backend/src/routes/units.ts`
   - `backend/src/routes/users.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/websocket.ts`
 
 ### 3.17 `backend/src/idempotency.ts`
@@ -914,7 +914,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (3)
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/test/importCsv.test.ts`
   - `backend/test/importScaleSmoke.test.ts`
 
@@ -1015,7 +1015,7 @@ Code files documented: **468**
   - `backend/src/productDiscounts.ts`
   - `backend/src/routes/inventory.ts`
   - `backend/src/routes/products.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
 
 ### 3.24 `backend/src/netSecurity.ts`
 
@@ -1028,7 +1028,7 @@ Code files documented: **468**
   - `backend/src/routes/portal.ts`
   - `backend/src/routes/products.ts`
   - `backend/src/services/aiGateway.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/test/netSecurity.test.ts`
 
 ### 3.25 `backend/src/objectStore.ts`
@@ -1143,7 +1143,7 @@ Code files documented: **468**
   - `backend/src/routes/products.ts`
   - `backend/src/routes/returns.ts`
   - `backend/src/routes/sales.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
 
 ### 3.32 `backend/src/productDiscounts.ts`
 
@@ -1155,7 +1155,7 @@ Code files documented: **468**
 - Referenced by (3)
   - `backend/src/routes/inventory.ts`
   - `backend/src/routes/products.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
 
 ### 3.33 `backend/src/productImportPolicies.ts`
 
@@ -1166,7 +1166,7 @@ Code files documented: **468**
   - `backend/src/importParsing.ts`
 - Referenced by (3)
   - `backend/src/routes/products.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/test/productImportPolicies.test.ts`
 
 ### 3.34 `backend/src/requestContext.ts`
@@ -1380,7 +1380,7 @@ Code files documented: **468**
   - `../fileAssets.ts`
   - `../helpers.ts`
   - `../middleware.ts`
-  - `../services/importJobs`
+  - `../services/importJobs.ts`
   - `express`
   - `fs`
   - `multer`
@@ -1390,7 +1390,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.ts`
   - `backend/src/helpers.ts`
   - `backend/src/middleware.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -1570,7 +1570,7 @@ Code files documented: **468**
   - `../middleware.ts`
   - `../runtimeCache.ts`
   - `../runtimeVersion.ts`
-  - `../services/importJobs`
+  - `../services/importJobs.ts`
   - `../services/mediaQueue.ts`
   - `express`
 - Internal dependencies (8)
@@ -1580,7 +1580,7 @@ Code files documented: **468**
   - `backend/src/middleware.ts`
   - `backend/src/runtimeCache.ts`
   - `backend/src/runtimeVersion.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/services/mediaQueue.ts`
 - Referenced by (2)
   - `backend/server.js`
@@ -1674,7 +1674,7 @@ Code files documented: **468**
   - `../../security.ts`
   - `../../services/backupPackages.ts`
   - `../../services/googleDriveSync/index.ts`
-  - `../../services/importJobs`
+  - `../../services/importJobs.ts`
   - `../../services/integrationDoctor.ts`
   - `../../systemJobs.ts`
   - `child_process`
@@ -1699,7 +1699,7 @@ Code files documented: **468**
   - `backend/src/security.ts`
   - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/services/integrationDoctor.ts`
   - `backend/src/systemJobs.ts`
 - Referenced by (2)
@@ -1947,7 +1947,7 @@ Code files documented: **468**
   - `backend/src/services/integrationDoctor.ts`
   - `backend/test/ownedGoogleAuth.test.ts`
 
-### 3.70 `backend/src/services/importJobs.js`
+### 3.70 `backend/src/services/importJobs.ts`
 
 - Declared exports: `module.exports`
 - Imports (20)
@@ -2006,7 +2006,7 @@ Code files documented: **468**
   - `./backupPackages.ts`
   - `./googleDriveSync/index.ts`
   - `./googleOauth.ts`
-  - `./importJobs`
+  - `./importJobs.ts`
   - `fs`
   - `path`
 - Internal dependencies (8)
@@ -2017,7 +2017,7 @@ Code files documented: **468**
   - `backend/src/services/backupPackages.ts`
   - `backend/src/services/googleDriveSync/index.ts`
   - `backend/src/services/googleOauth.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
 - Referenced by (2)
   - `backend/src/routes/system/index.ts`
   - `backend/test/integrationDoctor.test.ts`
@@ -2038,7 +2038,7 @@ Code files documented: **468**
 - Referenced by (5)
   - `backend/src/routes/files.ts`
   - `backend/src/routes/runtime.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/workers/mediaWorker.ts`
   - `backend/test/importJobStateMachine.test.ts`
 
@@ -2159,7 +2159,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/fileAssets.ts`
   - `backend/src/middleware.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/test/uploadSecurity.test.ts`
 
 ### 3.82 `backend/src/websocket.ts`
@@ -2184,10 +2184,10 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (2)
   - `../database.ts`
-  - `../services/importJobs`
+  - `../services/importJobs.ts`
 - Internal dependencies (2)
   - `backend/src/database.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
 - Referenced by (1)
   - `backend/server.js`
 
@@ -2480,7 +2480,7 @@ Code files documented: **468**
 - Imports (8)
   - `../src/config/index.ts`
   - `../src/database.ts`
-  - `../src/services/importJobs`
+  - `../src/services/importJobs.ts`
   - `../src/services/mediaQueue.ts`
   - `fs`
   - `node:assert/strict`
@@ -2489,7 +2489,7 @@ Code files documented: **468**
 - Internal dependencies (4)
   - `backend/src/config/index.ts`
   - `backend/src/database.ts`
-  - `backend/src/services/importJobs.js`
+  - `backend/src/services/importJobs.ts`
   - `backend/src/services/mediaQueue.ts`
 - Referenced by (0)
   - none

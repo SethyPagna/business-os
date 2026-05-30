@@ -3,7 +3,7 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6450020,
+  "totalSourceBytes": 6450029,
   "totalSourceLines": 146302,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
@@ -17,7 +17,7 @@
     "backend/src/routes/sales.ts",
     "backend/src/routes/system/index.ts",
     "backend/src/services/googleDriveSync/index.ts",
-    "backend/src/services/importJobs.js",
+    "backend/src/services/importJobs.ts",
     "frontend/src/App.tsx",
     "frontend/src/AppContext.tsx",
     "frontend/src/api/methods.ts",
@@ -53,7 +53,7 @@
       "lines": 4281
     },
     {
-      "file": "backend/src/services/importJobs.js",
+      "file": "backend/src/services/importJobs.ts",
       "size": 160917,
       "lines": 3880
     },
@@ -124,7 +124,7 @@
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 70017,
+      "size": 70016,
       "lines": 1596
     },
     {
@@ -134,7 +134,7 @@
     },
     {
       "file": "backend/src/routes/system/index.ts",
-      "size": 66911,
+      "size": 66913,
       "lines": 1659
     },
     {
@@ -175,7 +175,7 @@
       "lines": 4281
     },
     {
-      "file": "backend/src/services/importJobs.js",
+      "file": "backend/src/services/importJobs.ts",
       "size": 160917,
       "lines": 3880
     },
@@ -246,12 +246,12 @@
     },
     {
       "file": "backend/src/routes/system/index.ts",
-      "size": 66911,
+      "size": 66913,
       "lines": 1659
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 70017,
+      "size": 70016,
       "lines": 1596
     },
     {

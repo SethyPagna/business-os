@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T23:36:35.153Z
+Generated: 2026-05-30T23:46:47.443Z
 
 ## Summary
 
@@ -14,7 +14,7 @@ Generated: 2026-05-30T23:36:35.153Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 351 |
+| .ts | 352 |
 | .tsx | 107 |
 | .md | 44 |
 | .bat | 16 |
@@ -23,7 +23,6 @@ Generated: 2026-05-30T23:36:35.153Z
 | .sh | 3 |
 | .sql | 2 |
 | .css | 1 |
-| .js | 1 |
 
 ## Largest Areas
 
@@ -65,11 +64,11 @@ Generated: 2026-05-30T23:36:35.153Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7984 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7116 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7137 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5422 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5444 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
-| backend/src/services/importJobs.js | 3880 | backend/services |
+| backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3271 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
@@ -87,7 +86,7 @@ Generated: 2026-05-30T23:36:35.153Z
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
-| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |
+| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1799 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1750 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |
@@ -113,7 +112,7 @@ Generated: 2026-05-30T23:36:35.153Z
 | frontend/src/components/contacts/DeliveryTab.tsx | 17 | frontend/components/contacts |
 | frontend/src/components/contacts/SuppliersTab.tsx | 17 | frontend/components/contacts |
 | backend/test/routeContracts.test.ts | 15 | backend/test/routeContracts.test.ts |
-| backend/src/services/importJobs.js | 14 | backend/services |
+| backend/src/services/importJobs.ts | 14 | backend/services |
 | frontend/src/AppContext.tsx | 14 | frontend/src/AppContext.tsx |
 | backend/src/routes/auth.ts | 13 | backend/routes |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |

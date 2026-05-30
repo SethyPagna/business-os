@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T23:36:34.701Z",
+  "generatedAt": "2026-05-30T23:46:47.013Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      310
+      311
     ],
     [
       "React TSX",
@@ -50,16 +50,12 @@
     [
       "CSS",
       1
-    ],
-    [
-      "JavaScript",
-      1
     ]
   ],
   "extensionCounts": [
     [
       ".ts",
-      310
+      311
     ],
     [
       ".tsx",
@@ -87,10 +83,6 @@
     ],
     [
       ".css",
-      1
-    ],
-    [
-      ".js",
       1
     ]
   ],
@@ -1504,7 +1496,7 @@
       "covered": true
     },
     {
-      "target": "backend/src/services/importJobs.js",
+      "target": "backend/src/services/importJobs.ts",
       "optimization": "Product import apply now caches same-name product lookups and supplier lookups per job, then updates the in-memory product cache when rows create or update products.",
       "rollback": "Remove getProductsByNameForImport, rememberProductForImport, supplierMap, and return to per-row database lookups; import job schema and row decisions remain unchanged.",
       "proof": [

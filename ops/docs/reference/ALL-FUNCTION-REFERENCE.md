@@ -79,7 +79,7 @@ Code files scanned: **468**
 | 67 | `backend/src/services/googleDriveSync/index.ts` | 75 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
 | 69 | `backend/src/services/googleOauth.ts` | 17 |
-| 70 | `backend/src/services/importJobs.js` | 175 |
+| 70 | `backend/src/services/importJobs.ts` | 175 |
 | 71 | `backend/src/services/integrationDoctor.ts` | 14 |
 | 72 | `backend/src/services/mediaQueue.ts` | 10 |
 | 73 | `backend/src/services/portalAi.ts` | 42 |
@@ -1949,7 +1949,7 @@ Code files scanned: **468**
 | 16 | `exchangeGoogleOauthCode` | function | 196 |
 | 17 | `getGoogleUserFromTokens` | function | 219 |
 
-### 3.70 `backend/src/services/importJobs.js`
+### 3.70 `backend/src/services/importJobs.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
