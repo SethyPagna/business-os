@@ -175,7 +175,7 @@
     "frontend/src/components/branches/Branches.tsx",
     "frontend/src/components/catalog/CatalogEditorSurface.jsx",
     "frontend/src/components/catalog/CatalogPage.jsx",
-    "frontend/src/components/catalog/CatalogSecondaryTabs.jsx",
+    "frontend/src/components/catalog/CatalogSecondaryTabs.tsx",
     "frontend/src/components/catalog/portalContentI18n.ts",
     "frontend/src/components/catalog/portalLanguagePacks.ts",
     "frontend/src/components/contacts/CustomersTab.tsx",

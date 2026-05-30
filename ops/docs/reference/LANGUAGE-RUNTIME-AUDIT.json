@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T00:32:03.934Z",
+  "generatedAt": "2026-05-30T00:46:03.619Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -25,7 +25,7 @@
     ],
     [
       "React TSX",
-      93
+      94
     ],
     [
       "JavaScript",
@@ -37,7 +37,7 @@
     ],
     [
       "React JSX",
-      14
+      13
     ],
     [
       "PowerShell",
@@ -67,7 +67,7 @@
     ],
     [
       ".tsx",
-      93
+      94
     ],
     [
       ".js",
@@ -79,7 +79,7 @@
     ],
     [
       ".jsx",
-      14
+      13
     ],
     [
       ".ps1",

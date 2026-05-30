@@ -171,7 +171,7 @@ Code files documented: **466**
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 | 2 | 0 | 2 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 6 | 1 | 4 | 1 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 8 | 1 | 6 | 1 |
-| 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 2 | 1 | 1 | 1 |
+| 162 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 2 | 1 | 1 | 1 |
 | 163 | `frontend/src/components/catalog/catalogUi.tsx` | 1 | 3 | 0 | 4 |
 | 164 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 1 | 7 | 1 | 1 |
 | 165 | `frontend/src/components/catalog/portalContentI18n.ts` | 1 | 6 | 1 | 0 |
@@ -3294,7 +3294,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
-  - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
+  - `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
   - `frontend/src/components/catalog/catalogUi.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
@@ -3354,7 +3354,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.162 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
+### 3.162 `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3376,7 +3376,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
-  - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
+  - `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
 
 ### 3.164 `frontend/src/components/catalog/portalCatalogDisplay.ts`
 

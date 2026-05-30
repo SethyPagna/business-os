@@ -28,7 +28,7 @@ Total files documented: **193**
 | 16 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
 | 17 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
 | 18 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
-| 19 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 6 |
+| 19 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 6 |
 | 20 | `frontend/src/components/catalog/catalogUi.tsx` | 1 |
 | 21 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 2 |
 | 22 | `frontend/src/components/catalog/portalContentI18n.ts` | 14 |
@@ -768,16 +768,16 @@ Total files documented: **193**
 | 3 | `getProductInitial` | function | 129 |
 | 4 | `CatalogProductsSection` | component/function | 137 |
 
-### 3.19 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
+### 3.19 `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizePortalColor` | function | 25 |
-| 2 | `CatalogMembershipSection` | function | 30 |
-| 3 | `CatalogAboutSection` | function | 376 |
-| 4 | `CatalogFaqSection` | function | 590 |
-| 5 | `CatalogAiSection` | function | 644 |
-| 6 | `CatalogSecondaryTabs` | component/function | 830 |
+| 1 | `normalizePortalColor` | function | 269 |
+| 2 | `CatalogMembershipSection` | function | 274 |
+| 3 | `CatalogAboutSection` | function | 620 |
+| 4 | `CatalogFaqSection` | function | 834 |
+| 5 | `CatalogAiSection` | function | 888 |
+| 6 | `CatalogSecondaryTabs` | component/function | 1074 |
 
 ### 3.20 `frontend/src/components/catalog/catalogUi.tsx`
 
