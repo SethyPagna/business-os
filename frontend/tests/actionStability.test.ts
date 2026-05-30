@@ -703,10 +703,10 @@ await runTest('files AI provider actions use shared guards and bounded mutations
 })
 
 await runTest('users and roles security mutations use shared guards and bounded mutations', () => {
-  const source = readFrontend('src/components/users/Users.jsx')
+  const source = readFrontend('src/components/users/Users.tsx')
   const mutationLines = source
     .split('\n')
-    .filter((line) => /window\.api\.(createUser|updateUser|changeUserPassword|createRole|updateRole|deleteRole)\(/.test(line))
+    .filter((line) => /getUsersApi\(\)\.(createUser|updateUser|changeUserPassword|createRole|updateRole|deleteRole)\(/.test(line))
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const USER_MUTATION_TIMEOUT_MS = 12000/)
@@ -715,8 +715,8 @@ await runTest('users and roles security mutations use shared guards and bounded 
   assert.match(source, /const passwordInFlightRef = useRef\(false\)/)
   assert.match(source, /const saveRoleInFlightRef = useRef\(false\)/)
   assert.match(source, /const deleteRoleInFlightRef = useRef\(false\)/)
-  assert.match(source, /const runUserMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, USER_MUTATION_TIMEOUT_MS\)/)
-  assert.match(source, /const runRoleMutation = useCallback\(\(loader, label\) => \([\s\S]*withLoaderTimeout\(loader, label, ROLE_MUTATION_TIMEOUT_MS\)/)
+  assert.match(source, /const runUserMutation = useCallback\(\(loader: \(\) => Promise<MutationResult>, label: string\) => \([\s\S]*withLoaderTimeout\(loader, label, USER_MUTATION_TIMEOUT_MS\)/)
+  assert.match(source, /const runRoleMutation = useCallback\(\(loader: \(\) => Promise<MutationResult>, label: string\) => \([\s\S]*withLoaderTimeout\(loader, label, ROLE_MUTATION_TIMEOUT_MS\)/)
   assert.match(source, /if \(!beginSingleAction\(saveUserInFlightRef, \{ blocked: saving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(passwordInFlightRef, \{ blocked: passwordSaving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(saveRoleInFlightRef, \{ blocked: saving \}\)\) return/)

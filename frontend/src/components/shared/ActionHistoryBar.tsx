@@ -26,7 +26,7 @@ type ActionHistory = {
   userOptions?: UserOption[]
   canUndo?: boolean
   canRedo?: boolean
-  busy?: boolean
+  busy?: boolean | string
   lastUndoLabel?: string
   lastRedoLabel?: string
   undo: (id?: string | number) => void

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { MutableRefObject } from 'react'
 import { CircleUserRound, UserPlus } from 'lucide-react'
 import Modal from '../shared/Modal'
-import PortalMenu from '../shared/PortalMenu'
+import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { fmtDate } from '../../utils/formatters'
-import { useApp, useSync } from '../../AppContext'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
 import PermissionEditor, { PERMISSION_DEFS } from './PermissionEditor'
 import UserDetailSheet from './UserDetailSheet'
 import UserProfileModal from './UserProfileModal'
@@ -19,6 +20,155 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 
+type EntityId = number | string
+type UsersTab = 'users' | 'roles'
+type UsersModal = 'editUser' | 'editRole' | 'resetPw' | 'userDetail' | null
+type TranslateFn = (key: string) => string
+type NotifyFn = (message: string, tone?: string) => void
+type PermissionState = Record<string, boolean>
+
+interface CurrentUser {
+  id?: EntityId | null
+  name?: string | null
+}
+
+interface AppContextValue {
+  t: TranslateFn
+  notify: NotifyFn
+  hasPermission: (permission: string) => boolean
+  user?: CurrentUser | null
+}
+
+interface SyncContextValue {
+  syncChannel?: {
+    channel?: string | null
+    ts?: string | number | null
+  } | null
+}
+
+interface UserRecord extends Record<string, unknown> {
+  id: EntityId
+  name?: string
+  username?: string
+  phone?: string | null
+  email?: string | null
+  avatar_path?: string | null
+  role_id?: EntityId | null
+  role_name?: string | null
+  is_active?: boolean | number
+  otp_enabled?: boolean | number
+  created_at?: string | number | Date | null
+  updated_at?: string | null
+  has_admin_access?: boolean | number | null
+}
+
+interface RoleRecord extends Record<string, unknown> {
+  id: EntityId
+  name?: string
+  permissions?: string | Record<string, unknown> | null
+  is_system?: boolean | number | null
+  updated_at?: string | null
+}
+
+interface UserFormState {
+  name: string
+  username: string
+  phone: string
+  email: string
+  avatar_path: string
+  password: string
+  role_id: EntityId | ''
+  is_active: number
+}
+
+interface RoleFormState {
+  name: string
+  permissions: PermissionState
+}
+
+interface PasswordFormState {
+  currentPassword: string
+  newPassword: string
+  confirmPassword: string
+}
+
+interface MutationResult {
+  success?: boolean
+  error?: string
+  id?: EntityId
+  data?: { id?: EntityId } | null
+  item?: { id?: EntityId } | null
+}
+
+type UserWritePayload = Record<string, unknown> & {
+  name: string
+  username: string
+  phone: string
+  email: string
+  avatar_path: string
+  role_id: EntityId | null
+  is_active: boolean | number
+}
+
+interface UsersApi {
+  getUsers: () => Promise<unknown>
+  getRoles: () => Promise<unknown>
+  createUser: (payload: UserWritePayload & { password: string }) => Promise<MutationResult>
+  updateUser: (id: EntityId, payload: UserWritePayload) => Promise<MutationResult>
+  changeUserPassword: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
+  createRole: (payload: Record<string, unknown>) => Promise<MutationResult>
+  updateRole: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
+  deleteRole: (id: EntityId, payload?: Record<string, unknown>) => Promise<MutationResult>
+}
+
+interface ThreeDotProps {
+  onDetails: () => void
+  onEdit: () => void
+  onResetPw: () => void
+  canManage: boolean
+}
+
+const useApp = useAppHook as () => AppContextValue
+const useSync = useSyncHook as () => SyncContextValue
+
+function getUsersApi(): UsersApi {
+  if (typeof window === 'undefined' || !window.api) throw new Error('Users API is not available.')
+  return window.api as UsersApi
+}
+
+function normalizeUsers(value: unknown): UserRecord[] {
+  return Array.isArray(value) ? value as UserRecord[] : []
+}
+
+function normalizeRoles(value: unknown): RoleRecord[] {
+  return Array.isArray(value) ? value as RoleRecord[] : []
+}
+
+function normalizePermissionState(value: unknown): PermissionState {
+  if (typeof value === 'string') {
+    try {
+      return normalizePermissionState(JSON.parse(value || '{}'))
+    } catch {
+      return {}
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.entries(value as Record<string, unknown>).reduce<PermissionState>((permissions, [key, enabled]) => {
+    permissions[key] = Boolean(enabled)
+    return permissions
+  }, {})
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function clearTimeoutRef(ref: MutableRefObject<number | null>): void {
+  if (ref.current == null) return
+  window.clearTimeout(ref.current)
+  ref.current = null
+}
+
 /**
  * 1. Users Page Module
  * 1.1 Purpose
@@ -30,9 +180,9 @@ import {
 /**
  * 1.2 Shared UI Helpers
  */
-function ThreeDot({ onDetails, onEdit, onResetPw, canManage }) {
+function ThreeDot({ onDetails, onEdit, onResetPw, canManage }: ThreeDotProps) {
   const { t } = useApp()
-  const items = [
+  const items: Array<PortalMenuItem | null> = [
     { label: t('view_details') || 'View details', onClick: onDetails },
     canManage ? { label: t('edit') || 'Edit', onClick: onEdit, color: 'blue' } : null,
     canManage ? { label: t('change_password') || 'Change password', onClick: onResetPw, color: 'blue' } : null,
@@ -46,7 +196,7 @@ function ThreeDot({ onDetails, onEdit, onResetPw, canManage }) {
   )
 }
 
-const INITIAL_USER_FORM = {
+const INITIAL_USER_FORM: UserFormState = {
   name: '',
   username: '',
   phone: '',
@@ -57,7 +207,7 @@ const INITIAL_USER_FORM = {
   is_active: 1,
 }
 
-const INITIAL_ROLE_FORM = {
+const INITIAL_ROLE_FORM: RoleFormState = {
   name: '',
   permissions: {},
 }
@@ -69,7 +219,7 @@ const ROLE_MUTATION_TIMEOUT_MS = 12000
 /**
  * 1.2.1 Render-safe fallback for nullable contact values.
  */
-function formatContactValue(value) {
+function formatContactValue(value: unknown): string {
   const text = String(value || '').trim()
   return text || 'N/A'
 }
@@ -118,33 +268,33 @@ export default function Users() {
   const isActive = useIsPageActive('users')
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
-  const loadWatchdogRef = useRef(null)
-  const loadPromiseRef = useRef(null)
+  const loadWatchdogRef = useRef<number | null>(null)
+  const loadPromiseRef = useRef<Promise<void> | null>(null)
   const rolesLoadedOnceRef = useRef(false)
   const rolesRequestRef = useRef(0)
-  const rolesPromiseRef = useRef(null)
-  const tr = useCallback((key, fallback) => {
+  const rolesPromiseRef = useRef<Promise<void> | null>(null)
+  const tr = useCallback((key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
   }, [t])
 
-  const [users, setUsers] = useState([])
-  const [roles, setRoles] = useState([])
-  const [tab, setTab] = useState('users')
-  const [modal, setModal] = useState(null)
-  const [selectedUser, setSelectedUser] = useState(null)
-  const [selectedRole, setSelectedRole] = useState(null)
+  const [users, setUsers] = useState<UserRecord[]>([])
+  const [roles, setRoles] = useState<RoleRecord[]>([])
+  const [tab, setTab] = useState<UsersTab>('users')
+  const [modal, setModal] = useState<UsersModal>(null)
+  const [selectedUser, setSelectedUser] = useState<UserRecord | null>(null)
+  const [selectedRole, setSelectedRole] = useState<RoleRecord | null>(null)
   const [search, setSearch] = useState('')
-  const [userForm, setUserForm] = useState(INITIAL_USER_FORM)
-  const [roleForm, setRoleForm] = useState(INITIAL_ROLE_FORM)
-  const [passwordForm, setPasswordForm] = useState({
+  const [userForm, setUserForm] = useState<UserFormState>(INITIAL_USER_FORM)
+  const [roleForm, setRoleForm] = useState<RoleFormState>(INITIAL_ROLE_FORM)
+  const [passwordForm, setPasswordForm] = useState<PasswordFormState>({
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
   })
   const [saving, setSaving] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
-  const [deletingRoleId, setDeletingRoleId] = useState(null)
+  const [deletingRoleId, setDeletingRoleId] = useState<EntityId | null>(null)
   const saveUserInFlightRef = useRef(false)
   const passwordInFlightRef = useRef(false)
   const saveRoleInFlightRef = useRef(false)
@@ -152,12 +302,12 @@ export default function Users() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [rolesLoading, setRolesLoading] = useState(false)
-  const [loadError, setLoadError] = useState(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const actionHistory = useActionHistory({ limit: 3, notify })
-  const runUserMutation = useCallback((loader, label) => (
+  const runUserMutation = useCallback((loader: () => Promise<MutationResult>, label: string) => (
     withLoaderTimeout(loader, label, USER_MUTATION_TIMEOUT_MS)
   ), [])
-  const runRoleMutation = useCallback((loader, label) => (
+  const runRoleMutation = useCallback((loader: () => Promise<MutationResult>, label: string) => (
     withLoaderTimeout(loader, label, ROLE_MUTATION_TIMEOUT_MS)
   ), [])
 
@@ -167,7 +317,7 @@ export default function Users() {
    * 2.2 `canManageTargetUser` blocks peer-admin edits while preserving self actions.
    */
   const canManage = hasPermission('all')
-  const canManageTargetUser = (targetUser) => {
+  const canManageTargetUser = (targetUser: UserRecord | null | undefined): boolean => {
     if (!canManage || !targetUser) return false
     if (Number(targetUser.id) === Number(currentUser?.id)) return true
     return !targetUser.has_admin_access
@@ -176,7 +326,7 @@ export default function Users() {
   const syncChannelName = String(syncChannel?.channel || '')
   const syncTimestamp = Number(syncChannel?.ts || 0)
 
-  const loadRoles = useCallback(async ({ silent = rolesLoadedOnceRef.current } = {}) => {
+  const loadRoles = useCallback(async ({ silent = rolesLoadedOnceRef.current }: { silent?: boolean } = {}): Promise<void> => {
     if (rolesPromiseRef.current) return rolesPromiseRef.current
     const requestId = beginTrackedRequest(rolesRequestRef)
     const promise = (async () => {
@@ -191,14 +341,14 @@ export default function Users() {
         setRolesLoading(true)
       }
       try {
-        const nextRoles = await withLoaderTimeout(() => window.api.getRoles(), 'Roles list', ROLES_LIST_TIMEOUT_MS)
+        const nextRoles = await withLoaderTimeout(() => getUsersApi().getRoles(), 'Roles list', ROLES_LIST_TIMEOUT_MS)
         if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
-        setRoles(Array.isArray(nextRoles) ? nextRoles : [])
+        setRoles(normalizeRoles(nextRoles))
         rolesLoadedOnceRef.current = true
       } catch (error) {
         if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
         if (tab === 'roles') {
-          notify(error?.message || tr('roles_load_failed', 'Failed to load roles'), 'warning')
+          notify(getErrorMessage(error, tr('roles_load_failed', 'Failed to load roles')), 'warning')
         }
       } finally {
         if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
@@ -214,7 +364,7 @@ export default function Users() {
     return wrappedPromise
   }, [canManage, notify, tab, tr])
 
-  const load = useCallback(async ({ silent = loadedOnceRef.current } = {}) => {
+  const load = useCallback(async ({ silent = loadedOnceRef.current }: { silent?: boolean } = {}): Promise<void> => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
@@ -227,7 +377,7 @@ export default function Users() {
         loadedOnceRef.current = true
         return
       }
-      window.clearTimeout(loadWatchdogRef.current)
+      clearTimeoutRef(loadWatchdogRef)
       if (!silent || !loadedOnceRef.current) {
         setLoading(true)
         setLoadError(null)
@@ -239,37 +389,37 @@ export default function Users() {
       }
       try {
         const usersResult = await Promise.allSettled([
-          withLoaderTimeout(() => window.api.getUsers(), 'Users list', USERS_LIST_TIMEOUT_MS),
+          withLoaderTimeout(() => getUsersApi().getUsers(), 'Users list', USERS_LIST_TIMEOUT_MS),
         ])
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
         const nextUsers = usersResult[0]?.status === 'fulfilled' && Array.isArray(usersResult[0]?.value)
-          ? usersResult[0].value
+          ? normalizeUsers(usersResult[0].value)
           : null
 
         if (nextUsers) setUsers(nextUsers)
         else if (!loadedOnceRef.current) setUsers([])
         if (nextUsers === null) {
-          const firstError = usersResult[0]?.reason
-          throw new Error(firstError?.message || tr('users_load_failed', 'Failed to load users'))
+          const firstError = usersResult[0]?.status === 'rejected' ? usersResult[0].reason : null
+          throw new Error(getErrorMessage(firstError, tr('users_load_failed', 'Failed to load users')))
         }
 
         loadedOnceRef.current = true
         setLoadError(null)
       } catch (error) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        const nextMessage = error?.message || tr('users_load_failed', 'Failed to load users')
+        const nextMessage = getErrorMessage(error, tr('users_load_failed', 'Failed to load users'))
         if (!loadedOnceRef.current) {
           setLoadError(nextMessage)
           notify(nextMessage, 'error')
         } else {
           const refreshMessage = tr('users_refresh_failed', 'Unable to refresh users right now. Showing the latest loaded data.')
-          setLoadError((current) => current || refreshMessage)
-          notify(refreshMessage, 'warning')
-        }
-      } finally {
-        window.clearTimeout(loadWatchdogRef.current)
+        setLoadError((current) => current || refreshMessage)
+        notify(refreshMessage, 'warning')
+      }
+    } finally {
+        clearTimeoutRef(loadWatchdogRef)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setLoading(false)
       }
@@ -285,7 +435,7 @@ export default function Users() {
 
   useEffect(() => {
       if (!isActive) {
-      window.clearTimeout(loadWatchdogRef.current)
+      clearTimeoutRef(loadWatchdogRef)
       invalidateTrackedRequest(loadRequestRef)
       invalidateTrackedRequest(rolesRequestRef)
       loadPromiseRef.current = null
@@ -311,7 +461,7 @@ export default function Users() {
     loadRoles({ silent: rolesLoadedOnceRef.current })
   }, [isActive, loadRoles, tab])
   useEffect(() => () => {
-    window.clearTimeout(loadWatchdogRef.current)
+    clearTimeoutRef(loadWatchdogRef)
     invalidateTrackedRequest(loadRequestRef)
     invalidateTrackedRequest(rolesRequestRef)
     loadPromiseRef.current = null
@@ -339,7 +489,7 @@ export default function Users() {
     setModal('editUser')
   }
 
-  const openEditUser = async (user) => {
+  const openEditUser = async (user: UserRecord): Promise<void> => {
     if (!canManage) return notify(t('no_permission') || 'No permission', 'error')
     if (!canManageTargetUser(user)) return notify(tr('cannot_manage_admin_account', 'You cannot modify another admin account.'), 'error')
     if (!rolesLoadedOnceRef.current && !roles.length) {
@@ -366,27 +516,23 @@ export default function Users() {
     setModal('editRole')
   }
 
-  const openEditRole = (role) => {
+  const openEditRole = (role: RoleRecord): void => {
     if (!canManage) return notify(t('no_permission') || 'No permission', 'error')
     if (role?.is_system) return notify(tr('system_role_edit_locked', 'System roles cannot be edited here.'), 'error')
     setSelectedRole(role)
     setRoleForm({
       name: role.name || '',
-      permissions: typeof role.permissions === 'string' ? JSON.parse(role.permissions || '{}') : (role.permissions || {}),
+      permissions: normalizePermissionState(role.permissions),
     })
     setModal('editRole')
   }
 
-  const getRolePermissions = (role) => {
-    try {
-      const value = typeof role?.permissions === 'string' ? JSON.parse(role.permissions || '{}') : (role?.permissions || {})
-      return Object.keys(value).filter((key) => value[key])
-    } catch (_) {
-      return []
-    }
+  const getRolePermissions = (role: RoleRecord | null | undefined): string[] => {
+    const value = normalizePermissionState(role?.permissions)
+    return Object.keys(value).filter((key) => value[key])
   }
 
-  const getPermissionSummary = (role) => {
+  const getPermissionSummary = (role: RoleRecord): string => {
     const keys = getRolePermissions(role)
     if (!keys.length) return tr('no_permissions', 'No permissions')
     if (keys.includes('all')) return tr('full_access', 'Full access')
@@ -398,7 +544,7 @@ export default function Users() {
       .join(', ')
   }
 
-  const buildUserWritePayload = useCallback((account = {}, overrides = {}) => ({
+  const buildUserWritePayload = useCallback((account: Partial<UserRecord> = {}, overrides: Partial<UserRecord> & { delete_user?: boolean | number } = {}): UserWritePayload => ({
     name: String(overrides.name ?? account.name ?? '').trim(),
     username: String(overrides.username ?? account.username ?? '').trim(),
     phone: String(overrides.phone ?? account.phone ?? '').trim(),
@@ -411,9 +557,9 @@ export default function Users() {
     ...(overrides.delete_user ? { delete_user: 1 } : {}),
   }), [currentUser?.id, currentUser?.name])
 
-  const buildRoleWritePayload = useCallback((role = {}) => ({
+  const buildRoleWritePayload = useCallback((role: Partial<RoleRecord> = {}): Record<string, unknown> => ({
     name: String(role.name || '').trim(),
-    permissions: typeof role.permissions === 'string' ? JSON.parse(role.permissions || '{}') : (role.permissions || {}),
+    permissions: normalizePermissionState(role.permissions),
     userId: currentUser?.id,
     userName: currentUser?.name,
   }), [currentUser?.id, currentUser?.name])
@@ -455,8 +601,8 @@ export default function Users() {
       }
 
       const result = selectedUser
-        ? await runUserMutation(() => window.api.updateUser(selectedUser.id, payload), 'Update user')
-        : await runUserMutation(() => window.api.createUser({ ...payload, password: userForm.password }), 'Create user')
+        ? await runUserMutation(() => getUsersApi().updateUser(selectedUser.id, payload), 'Update user')
+        : await runUserMutation(() => getUsersApi().createUser({ ...payload, password: userForm.password }), 'Create user')
 
       if (result?.success === false) {
         notify(result.error || 'Failed to save user', 'error')
@@ -469,12 +615,12 @@ export default function Users() {
         actionHistory.pushAction({
           label: `Edit user ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const undoResult = await runUserMutation(() => window.api.updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot)), 'Undo user update')
+            const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot)), 'Undo user update')
             if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore user')
             await load({ silent: true })
           },
           redo: async () => {
-            const redoResult = await runUserMutation(() => window.api.updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot)), 'Redo user update')
+            const redoResult = await runUserMutation(() => getUsersApi().updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot)), 'Redo user update')
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply user changes')
             await load({ silent: true })
           },
@@ -487,7 +633,7 @@ export default function Users() {
       setUserForm(INITIAL_USER_FORM)
       await load()
     } catch (error) {
-      notify(error?.message || 'Failed to save user', 'error')
+      notify(getErrorMessage(error, 'Failed to save user'), 'error')
     } finally {
       finishSingleAction(saveUserInFlightRef)
       setSaving(false)
@@ -525,7 +671,7 @@ export default function Users() {
 
     setPasswordSaving(true)
     try {
-      const result = await runUserMutation(() => window.api.changeUserPassword(selectedUser.id, {
+      const result = await runUserMutation(() => getUsersApi().changeUserPassword(selectedUser.id, {
         currentPassword: allowAdminOverride ? undefined : currentPassword,
         newPassword,
         adminOverride: allowAdminOverride,
@@ -544,7 +690,7 @@ export default function Users() {
       })
       setModal(null)
     } catch (error) {
-      notify(error?.message || 'Failed to change password', 'error')
+      notify(getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       finishSingleAction(passwordInFlightRef)
       setPasswordSaving(false)
@@ -568,8 +714,8 @@ export default function Users() {
         userName: currentUser?.name,
       }
       const result = selectedRole
-        ? await runRoleMutation(() => window.api.updateRole(selectedRole.id, payload), 'Update role')
-        : await runRoleMutation(() => window.api.createRole(payload), 'Create role')
+        ? await runRoleMutation(() => getUsersApi().updateRole(selectedRole.id, payload), 'Update role')
+        : await runRoleMutation(() => getUsersApi().createRole(payload), 'Create role')
 
       if (result?.success === false) {
         notify(result.error || 'Failed to save role', 'error')
@@ -582,12 +728,12 @@ export default function Users() {
         actionHistory.pushAction({
           label: `Edit role ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const undoResult = await runRoleMutation(() => window.api.updateRole(previousSnapshot.id, buildRoleWritePayload(previousSnapshot)), 'Undo role update')
+            const undoResult = await runRoleMutation(() => getUsersApi().updateRole(previousSnapshot.id, buildRoleWritePayload(previousSnapshot)), 'Undo role update')
             if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
             await load({ silent: true })
           },
           redo: async () => {
-            const redoResult = await runRoleMutation(() => window.api.updateRole(nextSnapshot.id, buildRoleWritePayload(nextSnapshot)), 'Redo role update')
+            const redoResult = await runRoleMutation(() => getUsersApi().updateRole(nextSnapshot.id, buildRoleWritePayload(nextSnapshot)), 'Redo role update')
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply role changes')
             await load({ silent: true })
           },
@@ -599,12 +745,12 @@ export default function Users() {
           actionHistory.pushAction({
             label: `Add role ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              const undoResult = await runRoleMutation(() => window.api.deleteRole(createdRoleId, { userId: currentUser?.id, userName: currentUser?.name }), 'Undo role creation')
+              const undoResult = await runRoleMutation(() => getUsersApi().deleteRole(createdRoleId, { userId: currentUser?.id, userName: currentUser?.name }), 'Undo role creation')
               if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to undo role creation')
               await load({ silent: true })
             },
             redo: async () => {
-              const redoResult = await runRoleMutation(() => window.api.createRole(buildRoleWritePayload(createdSnapshot)), 'Redo role creation')
+              const redoResult = await runRoleMutation(() => getUsersApi().createRole(buildRoleWritePayload(createdSnapshot)), 'Redo role creation')
               if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to recreate role')
               createdRoleId = extractHistoryResultId(redoResult)
               await load({ silent: true })
@@ -619,19 +765,19 @@ export default function Users() {
       setRoleForm(INITIAL_ROLE_FORM)
       await load()
     } catch (error) {
-      notify(error?.message || 'Failed to save role', 'error')
+      notify(getErrorMessage(error, 'Failed to save role'), 'error')
     } finally {
       finishSingleAction(saveRoleInFlightRef)
       setSaving(false)
     }
   }
 
-  const handleDeleteRole = async (role) => {
+  const handleDeleteRole = async (role: RoleRecord): Promise<void> => {
     if (!canManage) return notify('No permission', 'error')
     if (role?.is_system) return notify(tr('system_role_edit_locked', 'System roles cannot be edited here.'), 'error')
     const assignedCount = users.filter((user) => Number(user.role_id) === Number(role.id)).length
     if (assignedCount > 0) {
-      notify(tr('users_assigned_count', '{n} user(s) still assigned').replace('{n}', assignedCount), 'error')
+      notify(tr('users_assigned_count', '{n} user(s) still assigned').replace('{n}', String(assignedCount)), 'error')
       return
     }
     if (!beginSingleAction(deleteRoleInFlightRef, { blocked: deletingRoleId != null, value: role.id })) return
@@ -643,7 +789,7 @@ export default function Users() {
     setDeletingRoleId(role.id)
     try {
       const snapshot = cloneHistorySnapshot(role)
-      const result = await runRoleMutation(() => window.api.deleteRole(role.id, {
+      const result = await runRoleMutation(() => getUsersApi().deleteRole(role.id, {
         userId: currentUser?.id,
         userName: currentUser?.name,
       }), 'Delete role')
@@ -655,7 +801,7 @@ export default function Users() {
       actionHistory.pushAction({
         label: `Delete role ${snapshot.name || ''}`.trim(),
         undo: async () => {
-          const undoResult = await runRoleMutation(() => window.api.createRole(buildRoleWritePayload(snapshot)), 'Undo role deletion')
+          const undoResult = await runRoleMutation(() => getUsersApi().createRole(buildRoleWritePayload(snapshot)), 'Undo role deletion')
           if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
           restoredRoleId = extractHistoryResultId(undoResult)
           await load({ silent: true })
@@ -663,7 +809,7 @@ export default function Users() {
         redo: async () => {
           const targetId = restoredRoleId || Number(snapshot.id || 0)
           if (!targetId) return
-          const redoResult = await runRoleMutation(() => window.api.deleteRole(targetId, { userId: currentUser?.id, userName: currentUser?.name }), 'Redo role deletion')
+          const redoResult = await runRoleMutation(() => getUsersApi().deleteRole(targetId, { userId: currentUser?.id, userName: currentUser?.name }), 'Redo role deletion')
           if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to delete role again')
           await load({ silent: true })
         },
@@ -671,7 +817,7 @@ export default function Users() {
       notify(tr('role_deleted', 'Role deleted'), 'success')
       await load()
     } catch (error) {
-      notify(error?.message || 'Failed to delete role', 'error')
+      notify(getErrorMessage(error, 'Failed to delete role'), 'error')
     } finally {
       finishSingleAction(deleteRoleInFlightRef)
       setDeletingRoleId(null)
@@ -714,7 +860,7 @@ export default function Users() {
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id)}
+            onClick={() => setTab(id as UsersTab)}
             className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
           >
             {label}
@@ -854,7 +1000,7 @@ export default function Users() {
                     <div className="mb-2 flex flex-wrap items-center gap-2">
                       <span className="text-base font-semibold text-gray-900 dark:text-white">{role.name}</span>
                       {role.is_system ? <span className="badge-blue text-xs">{tr('system_role', 'System')}</span> : <span className="badge-green text-xs">{tr('custom_role', 'Custom')}</span>}
-                      <span className="text-xs text-gray-400">{tr('users_assigned_count', '{n} user(s) still assigned').replace('{n}', assignedCount)}</span>
+                      <span className="text-xs text-gray-400">{tr('users_assigned_count', '{n} user(s) still assigned').replace('{n}', String(assignedCount))}</span>
                     </div>
                     <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">{getPermissionSummary(role)}</p>
                     <div className="flex flex-wrap gap-1">
@@ -868,7 +1014,7 @@ export default function Users() {
                   </div>
                   {canManage ? (
                     <div className="flex gap-2">
-                      <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => openEditRole(role)} disabled={role.is_system}>{t('edit') || 'Edit'}</button>
+                      <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => openEditRole(role)} disabled={Boolean(role.is_system)}>{t('edit') || 'Edit'}</button>
                       {!role.is_system ? <button type="button" className="btn-danger px-3 py-1 text-xs" onClick={() => handleDeleteRole(role)} disabled={deletingRoleId === role.id}>{deletingRoleId === role.id ? (t('loading') || 'Deleting...') : (t('delete') || 'Delete')}</button> : null}
                     </div>
                   ) : null}

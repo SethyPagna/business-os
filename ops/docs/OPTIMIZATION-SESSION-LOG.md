@@ -833,3 +833,37 @@ Use this shape for future entries:
 - follow-up insight: Catalog secondary tabs now have typed customer portal
   payloads; Users remains the next smaller JSX conversion candidate before
   POS, Products, Dashboard, and Inventory.
+
+- change: converted the users administration shell to TSX with typed user
+  rows, role rows, user/role/password form state, app/sync context access,
+  local users API gateway calls, mutation result payloads, modal/tab state,
+  loading watchdog timers, permission maps, and undo/redo payload construction
+- affected files:
+  `frontend/src/components/users/Users.tsx`,
+  `frontend/src/components/users/UserDetailSheet.tsx`,
+  `frontend/src/utils/actionHistory.ts`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`
+- route or API target: Users and Roles administration, profile modal handoff,
+  user detail sheet handoff, password reset, role create/update/delete, and
+  user/role undo-redo actions
+- keeper or rollback: keeper; focused typecheck, JSX, action stability,
+  performance loading UX, frontend/backend utility suites, UI audit,
+  production build, organization audit, schema audit, Phase 29 repeat audit,
+  and Phase 8.4 live suite passed
+- route-scoped result: focused typecheck, JSX, action stability, and
+  performance loading UX checks passed; broad frontend/backend utility suites,
+  UI audit, production build, organization audit, schema audit, generated
+  reference refresh, and Phase 29 repeat audit also passed
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up. The
+  running app still served frontend hash `55cf7b8ef08a4b8d`; the fresh local
+  production build hash is `a59e1ee721a5d5bc`.
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 219,989 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: Users now has a typed admin boundary; User Profile Modal
+  remains the next users-folder JSX target before the larger POS, Products,
+  Dashboard, and Inventory shells.

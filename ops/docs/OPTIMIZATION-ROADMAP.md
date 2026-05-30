@@ -5850,3 +5850,15 @@ Move 538 status:
   Catalog page lazy import, catalog preview chunking rule, portal UI verifier
   coverage, membership lookup, About, FAQ, and AI assistant surfaces
   unchanged.
+
+Move 539 status:
+- Move 539 converts the users administration shell to
+  `frontend/src/components/users/Users.tsx`. The typed boundary now covers
+  user rows, role rows, user/role/password form state, app/sync context
+  access, the local users API gateway, mutation result payloads, modal/tab
+  state, loading watchdog timers, permission maps, and undo/redo payload
+  construction. The move keeps the extensionless app lazy import, users/roles
+  load timeout contracts, same-tick user/password/role/delete guards, profile
+  modal handoff, user detail sheet handoff, and action/performance source
+  guard behavior unchanged while tightening shared action-history and
+  user-detail nullability types exposed by the conversion.

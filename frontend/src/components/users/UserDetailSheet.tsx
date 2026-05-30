@@ -5,21 +5,21 @@ type TranslateFunction = (key: string) => string
 
 type UserRole = {
   id: string | number
-  name?: string
+  name?: string | null
   permissions?: string | Record<string, unknown> | null
 }
 
 type UserDetail = {
   role_id?: string | number | null
-  role_name?: string
-  phone?: string
-  email?: string
-  is_active?: boolean
-  otp_enabled?: boolean
+  role_name?: string | null
+  phone?: string | null
+  email?: string | null
+  is_active?: boolean | number
+  otp_enabled?: boolean | number
   created_at?: string | number | Date | null
-  avatar_path?: string
-  name?: string
-  username?: string
+  avatar_path?: string | null
+  name?: string | null
+  username?: string | null
 }
 
 type PermissionDefinition = {
@@ -81,7 +81,7 @@ export default function UserDetailSheet({ user, roles, canManage, onEdit, onRese
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-              {user.avatar_path ? <img src={user.avatar_path} alt={user.name} className="h-10 w-10 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
+              {user.avatar_path ? <img src={user.avatar_path} alt={user.name || 'Avatar'} className="h-10 w-10 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
             </div>
             <div>
               <div className="font-bold text-gray-900 dark:text-white">{user.name}</div>

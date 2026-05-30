@@ -15,11 +15,13 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
+- latest production build hash from `npm.cmd --prefix frontend run build`:
+  `a59e1ee721a5d5bc`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T00-42-03-197Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T01-08-21-495Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -79,6 +81,10 @@ Recent route-level win:
   copy functions, preview config, membership data, share submissions, about
   blocks, FAQ items, assistant profile, assistant references, and assistant
   recommendations.
+- Users administration is now `frontend/src/components/users/Users.tsx` with
+  typed user rows, role rows, form state, API gateway calls, modal/tab state,
+  loading watchdog timers, permission maps, mutation results, and undo/redo
+  payload construction.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary

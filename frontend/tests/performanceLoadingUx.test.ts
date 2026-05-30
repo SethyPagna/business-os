@@ -46,7 +46,7 @@ const productLookupSnapshots = fs.readFileSync(new URL('../src/components/produc
 const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.tsx', import.meta.url), 'utf8')
 const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePickerModal.tsx', import.meta.url), 'utf8')
 const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.tsx', import.meta.url), 'utf8')
-const usersPage = fs.readFileSync(new URL('../src/components/users/Users.jsx', import.meta.url), 'utf8')
+const usersPage = fs.readFileSync(new URL('../src/components/users/Users.tsx', import.meta.url), 'utf8')
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
@@ -1170,12 +1170,12 @@ assert.match(
 )
 assert.match(
   usersPage,
-  /withLoaderTimeout\(\(\) => window\.api\.getUsers\(\), 'Users list', USERS_LIST_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => getUsersApi\(\)\.getUsers\(\), 'Users list', USERS_LIST_TIMEOUT_MS\)/,
   'users list should timeout slow user reads',
 )
 assert.match(
   usersPage,
-  /withLoaderTimeout\(\(\) => window\.api\.getRoles\(\), 'Roles list', ROLES_LIST_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => getUsersApi\(\)\.getRoles\(\), 'Roles list', ROLES_LIST_TIMEOUT_MS\)/,
   'roles list should timeout slow role reads',
 )
 assert.doesNotMatch(

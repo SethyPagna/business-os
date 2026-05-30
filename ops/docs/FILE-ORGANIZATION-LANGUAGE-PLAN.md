@@ -1,6 +1,6 @@
 ﻿# File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 529 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 539 in this file.
 
 ## Goal
 
@@ -8,11 +8,11 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 
 ## Current Shape
 
-- Frontend source: 195 files under `frontend/src`.
-  - 51 `.jsx`
+- Frontend source: 196 files under `frontend/src`.
+  - 12 `.jsx`
   - 1 `.js`
-  - 80 `.ts`
-  - 56 `.tsx`
+  - 81 `.ts` including declaration files
+  - 95 `.tsx`
   - 1 `.mts`
   - 2 `.json`
   - 3 `.md`
@@ -4246,6 +4246,16 @@ Decision rule:
     tab-dispatch props. The conversion keeps the extensionless Catalog page
     lazy import, catalog preview chunking rule, portal UI verifier coverage,
     membership lookup, About, FAQ, and AI assistant surfaces intact.
+539. Convert the users administration shell to TSX. Done:
+    `frontend/src/components/users/Users.tsx` now types user rows, role rows,
+    form state, password state, app/sync context access, the local users API
+    gateway, mutation result payloads, modal/tab state, loading watchdog
+    timers, permission maps, and undo/redo payload construction. The
+    conversion keeps the extensionless app lazy import, users/roles load
+    timeout contracts, same-tick user/password/role/delete guards, profile
+    modal handoff, user detail sheet handoff, and source-inspection tests
+    intact while tightening the shared action-history and user-detail null
+    boundaries surfaced by the TSX migration.
 
 ## Safety Gates
 

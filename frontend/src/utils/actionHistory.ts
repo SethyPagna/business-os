@@ -49,8 +49,16 @@ type ActionHistoryEntry = {
 }
 
 type ServerHistoryItem = {
-  label?: unknown
+  id?: string | number
+  label?: string
+  status?: string
   [key: string]: unknown
+}
+
+type UserOption = {
+  id: string | number
+  name?: string
+  username?: string
 }
 
 type ActionHistoryOptions = {
@@ -67,7 +75,7 @@ type ActionHistoryApi = {
     limit: number,
     options: { all?: number; userId?: string },
   ) => Promise<{ items?: ServerHistoryItem[] }>
-  getUsers?: () => Promise<unknown[]>
+  getUsers?: () => Promise<UserOption[]>
   createActionHistory?: (payload: Record<string, unknown>) => Promise<{ id?: ActionHistoryId }>
   undoActionHistory?: (id: ActionHistoryId) => Promise<unknown>
   redoActionHistory?: (id: ActionHistoryId) => Promise<unknown>
@@ -125,7 +133,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   const [serverItems, setServerItems] = useState<ServerHistoryItem[]>([])
   const [busy, setBusy] = useState<ActionDirection | ''>('')
   const [userFilter, setUserFilter] = useState('all')
-  const [userOptions, setUserOptions] = useState<unknown[]>([])
+  const [userOptions, setUserOptions] = useState<UserOption[]>([])
   const historyRequestRef = useRef(0)
   const usersRequestRef = useRef(0)
   const isAdmin = useMemo(() => {
@@ -212,9 +220,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     return nextEntry
   }, [limit, refreshServerItems, scope])
 
-  const runEntry = useCallback(async (direction: ActionDirection, entryId: string | null = null): Promise<boolean> => {
+  const runEntry = useCallback(async (direction: ActionDirection, entryId: string | number | null = null): Promise<boolean> => {
     const source = direction === 'undo' ? undoStack : redoStack
-    const entry = entryId ? source.find((item) => item.id === entryId) : source[source.length - 1]
+    const entry = entryId ? source.find((item) => String(item.id) === String(entryId)) : source[source.length - 1]
     if (!entry || busy) return false
     const action = direction === 'undo' ? entry.undo : entry.redo
     if (typeof action !== 'function') return false
@@ -260,8 +268,8 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     }
   }, [busy, limit, notify, redoStack, refreshServerItems, undoStack])
 
-  const undo = useCallback((entryId: string | null = null) => runEntry('undo', entryId), [runEntry])
-  const redo = useCallback((entryId: string | null = null) => runEntry('redo', entryId), [runEntry])
+  const undo = useCallback((entryId: string | number | null = null) => runEntry('undo', entryId), [runEntry])
+  const redo = useCallback((entryId: string | number | null = null) => runEntry('redo', entryId), [runEntry])
 
   return useMemo(() => ({
     busy,
