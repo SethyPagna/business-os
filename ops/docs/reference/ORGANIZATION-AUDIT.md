@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T12:06:28.061Z
+Generated: 2026-05-30T16:33:55.509Z
 
 ## Summary
 
@@ -14,9 +14,9 @@ Generated: 2026-05-30T12:06:28.061Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 300 |
+| .ts | 301 |
 | .tsx | 107 |
-| .js | 50 |
+| .js | 49 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -66,8 +66,8 @@ Generated: 2026-05-30T12:06:28.061Z
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7934 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6917 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6348 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4713 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6363 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4727 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -85,7 +85,7 @@ Generated: 2026-05-30T12:06:28.061Z
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
 | frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
-| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1881 | ops/docs/reference |
+| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1865 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |

@@ -22,7 +22,7 @@ Code files scanned: **466**
 | 10 | `backend/src/contactOptions.ts` | 10 |
 | 11 | `backend/src/database.ts` | 0 |
 | 12 | `backend/src/dataPath/index.js` | 9 |
-| 13 | `backend/src/db/cutoverReadiness.js` | 10 |
+| 13 | `backend/src/db/cutoverReadiness.ts` | 10 |
 | 14 | `backend/src/db/postgresQueryCompat.js` | 12 |
 | 15 | `backend/src/fileAssets.js` | 61 |
 | 16 | `backend/src/helpers.js` | 30 |
@@ -639,20 +639,20 @@ Code files scanned: **466**
 | 8 | `buildArchivedTargetPath` | function | 129 |
 | 9 | `relocateDataRoot` | function | 146 |
 
-### 3.13 `backend/src/db/cutoverReadiness.js`
+### 3.13 `backend/src/db/cutoverReadiness.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeRelative` | function | 36 |
-| 2 | `toRelative` | function | 40 |
-| 3 | `shouldSkipDir` | function | 44 |
-| 4 | `listJavaScriptFiles` | function | 52 |
-| 5 | `analyzeFile` | function | 66 |
-| 6 | `incrementCount` | function | 87 |
-| 7 | `mapCountsToRows` | function | 91 |
-| 8 | `summarizeBlockers` | function | 99 |
-| 9 | `analyzeFiles` | function | 116 |
-| 10 | `analyzePostgresCutoverReadiness` | function | 125 |
+| 1 | `normalizeRelative` | function | 44 |
+| 2 | `toRelative` | function | 48 |
+| 3 | `shouldSkipDir` | function | 52 |
+| 4 | `listSourceFiles` | function | 60 |
+| 5 | `analyzeFile` | function | 74 |
+| 6 | `incrementCount` | function | 95 |
+| 7 | `mapCountsToRows` | function | 99 |
+| 8 | `summarizeBlockers` | function | 107 |
+| 9 | `analyzeFiles` | function | 124 |
+| 10 | `analyzePostgresCutoverReadiness` | function | 134 |
 
 ### 3.14 `backend/src/db/postgresQueryCompat.js`
 

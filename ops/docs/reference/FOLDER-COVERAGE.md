@@ -260,7 +260,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `cutoverReadiness.js` | Project source/support file |
+| 1 | `cutoverReadiness.ts` | Project source/support file |
 | 2 | `postgresQueryCompat.js` | Project source/support file |
 | 3 | `postgresSchema.sql` | Project source/support file |
 

@@ -22,7 +22,7 @@ Code files documented: **466**
 | 10 | `backend/src/contactOptions.ts` | 0 | 1 | 0 | 3 |
 | 11 | `backend/src/database.ts` | 1 | 1 | 1 | 40 |
 | 12 | `backend/src/dataPath/index.js` | 2 | 1 | 0 | 5 |
-| 13 | `backend/src/db/cutoverReadiness.js` | 2 | 1 | 0 | 2 |
+| 13 | `backend/src/db/cutoverReadiness.ts` | 2 | 1 | 0 | 2 |
 | 14 | `backend/src/db/postgresQueryCompat.js` | 0 | 1 | 0 | 2 |
 | 15 | `backend/src/fileAssets.js` | 12 | 1 | 7 | 15 |
 | 16 | `backend/src/helpers.js` | 4 | 1 | 4 | 23 |
@@ -788,7 +788,7 @@ Code files documented: **466**
   - `backend/src/systemFsWorker.ts`
   - `backend/test/dataPath.test.ts`
 
-### 3.13 `backend/src/db/cutoverReadiness.js`
+### 3.13 `backend/src/db/cutoverReadiness.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1654,7 +1654,7 @@ Code files documented: **466**
   - `../../config`
   - `../../dataPath`
   - `../../database.ts`
-  - `../../db/cutoverReadiness`
+  - `../../db/cutoverReadiness.ts`
   - `../../fileAssets`
   - `../../helpers`
   - `../../maintenanceLock.ts`
@@ -1679,7 +1679,7 @@ Code files documented: **466**
   - `backend/src/config/index.js`
   - `backend/src/dataPath/index.js`
   - `backend/src/database.ts`
-  - `backend/src/db/cutoverReadiness.js`
+  - `backend/src/db/cutoverReadiness.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/maintenanceLock.ts`
@@ -2629,11 +2629,11 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/db/cutoverReadiness`
+  - `../src/db/cutoverReadiness.ts`
   - `node:assert/strict`
   - `path`
 - Internal dependencies (1)
-  - `backend/src/db/cutoverReadiness.js`
+  - `backend/src/db/cutoverReadiness.ts`
 - Referenced by (0)
   - none
 
