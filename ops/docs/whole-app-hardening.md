@@ -709,7 +709,7 @@ Last updated: 2026-05-18
     `frontend/src/components/files/FilePickerModal.tsx`. Settings and Catalog
     media upload pathways now have explicit timeout contracts in
     `frontend/src/components/utils-settings/Settings.tsx` and
-    `frontend/src/components/catalog/CatalogPage.jsx`. Product form image
+    `frontend/src/components/catalog/CatalogPage.tsx`. Product form image
     uploads now have explicit timeout contracts in
     `frontend/src/components/products/forms/ProductForm.tsx`. App shell login,
     logout, Google OAuth completion, settings save, and session-duration refresh
@@ -738,7 +738,7 @@ Last updated: 2026-05-18
     `frontend/src/components/utils-settings/AuditLog.tsx`.
     Catalog customer portal share-proof submission and staff review actions now
     have explicit timeout contracts and same-tick guards in
-    `frontend/src/components/catalog/CatalogPage.jsx`.
+    `frontend/src/components/catalog/CatalogPage.tsx`.
     Products page action-history restore/delete, deleted-product restore, bulk
     update, clear-stock, add-stock, and branch-move stock pathways now route
     through bounded mutation runners in

@@ -91,7 +91,7 @@ Priority surfaces:
 - `Products.tsx`
 - `POS.tsx`
 - `Dashboard.tsx`
-- `CatalogPage.jsx`
+- `CatalogPage.tsx`
 - `Settings.tsx`
 - `Backup.tsx`
 - `FilesPage.tsx`

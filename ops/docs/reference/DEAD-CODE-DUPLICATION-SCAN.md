@@ -447,13 +447,13 @@ Move 147 converts the portal editor utility helper to TypeScript while
 preserving `portalEditorUtils.mjs` as an intentional compatibility wrapper.
 About-block normalization, promotion-item normalization, list reordering, and
 Google Maps embed URL normalization stay centralized instead of duplicating
-editor sanitation behavior inside `CatalogPage.jsx`.
+editor sanitation behavior inside `CatalogPage.tsx`.
 
 Move 148 converts the portal language pack helper to TypeScript while
 preserving `portalLanguagePacks.ts` as an intentional compatibility wrapper.
 First-party language options, normalization, membership checks, and translated
 text lookup stay centralized instead of duplicating public portal language
-behavior across `CatalogPage.jsx` and portal i18n helpers.
+behavior across `CatalogPage.tsx` and portal i18n helpers.
 
 Move 149 converts the contact option helper to TypeScript while preserving
 `contactOptionUtils.js` as an intentional compatibility wrapper. Contact
@@ -481,7 +481,7 @@ matching stay centralized instead of duplicating checkout logic inside
 | `ops/scripts/powershell` | Runtime/release orchestration overlaps in setup/start/release flows. | Preserve `run` wrappers; verify `run\verify-local.bat` and Docker doctor paths. |
 | `frontend/src/components/inventory/Inventory.jsx` | Large component and likely repeated transforms. | Helper extraction tests and Inventory Playwright checks. |
 | `backend/src/services/importJobs.js` | Large import pipeline with queue, CSV, image, and policy branches. | Import tests plus live import smoke. |
-| `frontend/src/components/catalog/CatalogPage.jsx` | Large mixed admin/public/editor surface. | Catalog helper tests plus public portal check. |
+| `frontend/src/components/catalog/CatalogPage.tsx` | Large mixed admin/public/editor surface. | Catalog helper tests plus public portal check. |
 | `frontend/src/api/methods.js` | Large API method registry. | API contract/source tests and app bootstrap check. |
 | `backend/src/routes/products.js` and `backend/src/routes/inventory.js` | Query-heavy route files. | Route contract tests, schema audit, product/inventory live checks. |
 

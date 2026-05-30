@@ -167,7 +167,7 @@ Code files documented: **466**
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 3 | 1 | 2 | 1 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 7 | 1 | 5 | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 2 | 1 | 1 | 1 |
-| 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 12 | 1 | 11 | 1 |
+| 158 | `frontend/src/components/catalog/CatalogPage.tsx` | 12 | 1 | 11 | 1 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 | 2 | 0 | 2 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 6 | 1 | 4 | 1 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 8 | 1 | 6 | 1 |
@@ -3001,7 +3001,7 @@ Code files documented: **466**
   - `./app/publicErrorRecovery.ts`
   - `./components/auth/Login`
   - `./components/branches/Branches`
-  - `./components/catalog/CatalogPage.jsx`
+  - `./components/catalog/CatalogPage.tsx`
   - `./components/contacts/Contacts`
   - `./components/dashboard/Dashboard`
   - `./components/files/FilesPage`
@@ -3034,7 +3034,7 @@ Code files documented: **466**
   - `frontend/src/app/publicErrorRecovery.ts`
   - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/branches/Branches.tsx`
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/dashboard/Dashboard.tsx`
   - `frontend/src/components/files/FilesPage.tsx`
@@ -3125,7 +3125,7 @@ Code files documented: **466**
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/branches/BranchForm.tsx`
   - `frontend/src/components/branches/TransferModal.tsx`
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
@@ -3264,7 +3264,7 @@ Code files documented: **466**
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/utils/mediaUpload.ts`
 - Referenced by (1)
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
 
 ### 3.157 `frontend/src/components/catalog/CatalogImageField.tsx`
 
@@ -3277,7 +3277,7 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
 
-### 3.158 `frontend/src/components/catalog/CatalogPage.jsx`
+### 3.158 `frontend/src/components/catalog/CatalogPage.tsx`
 
 - Declared exports: `function`
 - Imports (12)
@@ -3317,7 +3317,7 @@ Code files documented: **466**
   - none
 - Referenced by (2)
   - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
 
 ### 3.160 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
 
@@ -3335,7 +3335,7 @@ Code files documented: **466**
   - `frontend/src/components/shared/ImageGalleryLightbox.tsx`
   - `frontend/src/components/shared/PortalMenu.tsx`
 - Referenced by (1)
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
 
 ### 3.161 `frontend/src/components/catalog/CatalogProductsSection.tsx`
 
@@ -3357,7 +3357,7 @@ Code files documented: **466**
   - `frontend/src/utils/initials.ts`
   - `frontend/src/utils/scriptTypography.ts`
 - Referenced by (1)
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
 
 ### 3.162 `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
 
@@ -3368,7 +3368,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/components/catalog/catalogUi.tsx`
 - Referenced by (1)
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
 
 ### 3.163 `frontend/src/components/catalog/catalogUi.tsx`
 
@@ -3379,7 +3379,7 @@ Code files documented: **466**
   - none
 - Referenced by (4)
   - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
 
@@ -4610,7 +4610,7 @@ Code files documented: **466**
   - `frontend/src/utils/publicAssetUrls.ts`
 - Referenced by (9)
   - `frontend/src/components/catalog/CatalogEditorSurface.tsx`
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/pos/ProductImage.tsx`
@@ -5267,7 +5267,7 @@ Code files documented: **466**
   - `frontend/src/AppContext.tsx`
 - Referenced by (15)
   - `frontend/src/components/branches/Branches.tsx`
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/dashboard/Dashboard.tsx`
   - `frontend/src/components/files/FilesPage.tsx`
@@ -5720,7 +5720,7 @@ Code files documented: **466**
 - Referenced by (33)
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/branches/TransferModal.tsx`
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/contacts/DeliveryTab.tsx`
@@ -5946,7 +5946,7 @@ Code files documented: **466**
   - none
 - Referenced by (3)
   - `frontend/src/App.tsx`
-  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/catalog/CatalogPage.tsx`
   - `frontend/src/components/utils-settings/Settings.tsx`
 
 ### 3.313 `frontend/src/utils/formatters.ts`

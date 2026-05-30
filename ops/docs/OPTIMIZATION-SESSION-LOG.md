@@ -83,7 +83,7 @@ This is a concise running log of what actually happened in recent sessions.
     unrelated pockets
 
 - Mobile public-catalog background panel unmounting
-  - area: `frontend/src/components/catalog/CatalogPage.jsx`
+  - area: `frontend/src/components/catalog/CatalogPage.tsx`
   - result: rejected
   - note: route-only win, but warm whole-app reruns drifted into unrelated
     findings

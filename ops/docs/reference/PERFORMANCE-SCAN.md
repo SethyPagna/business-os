@@ -17,7 +17,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
 | `frontend/src/components/inventory/Inventory.jsx` | 208.9 | 4123 |
 | `backend/src/services/importJobs.js` | 157.1 | 3880 |
-| `frontend/src/components/catalog/CatalogPage.jsx` | 139.2 | 3218 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 148.3 | 3396 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
 | `frontend/src/components/pos/POS.tsx` | 117.4 | 2218 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 115.1 | 2304 |
@@ -46,7 +46,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 |---|---:|---:|
 | `frontend/src/components/inventory/Inventory.jsx` | 4123 | 208.9 |
 | `backend/src/services/importJobs.js` | 3880 | 157.1 |
-| `frontend/src/components/catalog/CatalogPage.jsx` | 3218 | 139.2 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 3396 | 148.3 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
 | `frontend/src/api/methods.js` | 2346 | 102.6 |
@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-CEhsOJXn.js` | 185.7 |
+| `frontend/dist/assets/catalog-DN2_hDrB.js` | 185.8 |
 | `frontend/dist/assets/index-DQztsXP7.css` | 151.6 |
-| `frontend/dist/assets/Inventory-V9ZEyjr0.js` | 143.7 |
-| `frontend/dist/assets/index-RO7DDF8t.js` | 128.5 |
+| `frontend/dist/assets/Inventory-CoTjLyZC.js` | 143.7 |
+| `frontend/dist/assets/index-QjvtaYIQ.js` | 128.6 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/app-shared-Bz1cVeZk.js` | 94.1 |
-| `frontend/dist/assets/Products-Kbeds0g7.js` | 92.8 |
-| `frontend/dist/assets/POS-BMViY2jZ.js` | 76.5 |
+| `frontend/dist/assets/app-shared-BHzICQ7e.js` | 94.1 |
+| `frontend/dist/assets/Products-DqoNLv1U.js` | 92.9 |
+| `frontend/dist/assets/POS-BJmxUu1J.js` | 76.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-CoAIGEXj.js` | 70.7 |
-| `frontend/dist/assets/catalog-editor-xKFiWvVH.js` | 70.5 |
-| `frontend/dist/assets/BulkImportModal-KXaXQhye.js` | 68.2 |
-| `frontend/dist/assets/catalog-preview-vZc7cr6v.js` | 64.3 |
-| `frontend/dist/assets/app-api-methods-CnvTFR3k.js` | 60.1 |
-| `frontend/dist/assets/Backup-rUd6gzLq.js` | 57.9 |
+| `frontend/dist/assets/Dashboard-Dm-Bs8mb.js` | 70.7 |
+| `frontend/dist/assets/catalog-editor-BQYHfx5j.js` | 70.5 |
+| `frontend/dist/assets/BulkImportModal-B4Q8-HxE.js` | 68.3 |
+| `frontend/dist/assets/catalog-preview-Dr6Ok6AT.js` | 64.3 |
+| `frontend/dist/assets/app-api-methods-GHnDNAKI.js` | 60.1 |
+| `frontend/dist/assets/Backup-DKGVHxHn.js` | 57.9 |
 | `frontend/dist/assets/vendor-lucide-B4xjFBi_.js` | 52.5 |
-| `frontend/dist/assets/Settings-ZIieldO0.js` | 52.2 |
-| `frontend/dist/assets/Users--nPMPJ9s.js` | 40.3 |
-| `frontend/dist/assets/Branches-DaRxk0rb.js` | 38.0 |
-| `frontend/dist/assets/ReceiptSettings-B-7YYhXG.js` | 37.0 |
-| `frontend/dist/assets/app-api-1lOGzoVQ.js` | 37.0 |
-| `frontend/dist/assets/Sales-DFwzGfwR.js` | 35.1 |
+| `frontend/dist/assets/Settings-EFBQn4-R.js` | 52.2 |
+| `frontend/dist/assets/Users-Dg7A7Wtd.js` | 40.3 |
+| `frontend/dist/assets/Branches-BlON4bUc.js` | 38.0 |
+| `frontend/dist/assets/ReceiptSettings-DxhN6bvr.js` | 37.0 |
+| `frontend/dist/assets/app-api-DqSF6JIX.js` | 37.0 |
+| `frontend/dist/assets/Sales-DNuP7ylr.js` | 35.1 |
 
 ## 5. Notes
 
@@ -354,7 +354,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   slow/save-data guards, and a 7 s timeout. This improves second-page load
   responsiveness without broadening startup prefetch pressure.
 - Move 275 removes redundant full app language JSON imports from the catalog
-  route. `CatalogPage.jsx` now uses `portalLanguagePacks` and existing local
+  route. `CatalogPage.tsx` now uses `portalLanguagePacks` and existing local
   fallbacks for public/editor copy, and performance guards block direct
   `../../lang/en.json` or `../../lang/km.json` imports from that route.
 - Move 277 removes the redundant `/api/settings/meta` request from the

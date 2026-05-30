@@ -993,7 +993,7 @@ Current checkpoint:
   scanned 345 files across `frontend/src`, `backend/src`, `ops/scripts`, and
   `ops/docs`; it found 57 files above 700 lines and identifies
   `frontend/src/components/inventory/Inventory.jsx`,
-  `backend/src/services/importJobs.js`, `frontend/src/components/catalog/CatalogPage.jsx`,
+  `backend/src/services/importJobs.js`, `frontend/src/components/catalog/CatalogPage.tsx`,
   `frontend/src/components/products/Products.tsx`, and `frontend/src/api/methods.js`
   as high-value split candidates.
 - First Phase 26 physical move complete: Phase 8.4 live Playwright check scripts
@@ -3169,7 +3169,7 @@ Cleanup checkpoint:
   Docker cleanup reclaimed 2.503 GB of builder cache while preserving images,
   volumes, uploads, secrets, and retained backups.
 - Move 275 removes redundant catalog language bundle imports:
-  `CatalogPage.jsx` now uses `portalLanguagePacks` plus local fallbacks instead
+  `CatalogPage.tsx` now uses `portalLanguagePacks` plus local fallbacks instead
   of importing full app `en.json` and `km.json` files. Performance guards now
   fail if the catalog route imports those full language packs again. Focused
   portal language/content tests, frontend typecheck, JSX check, performance
@@ -3320,7 +3320,7 @@ Cleanup checkpoint:
   order. Syntax check, focused automation coverage, and live post-hygiene
   verification pass with zero QA residue and dataset readiness still `loaded`.
 - Move 297 bounds catalog submission image reads:
-  `frontend/src/components/catalog/CatalogPage.jsx` now shares a single
+  `frontend/src/components/catalog/CatalogPage.tsx` now shares a single
   FileReader helper, caps portal submission screenshots at eight, and reads
   pasted/selected screenshots with `CATALOG_IMAGE_READ_CONCURRENCY = 2`
   instead of eagerly base64-reading every selected image with
@@ -5994,3 +5994,18 @@ Move 549 status:
   syntax. The current source extension count is `.js: 95`, `.jsx: 2`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 105` outside generated/runtime
   folders.
+
+Move 550 status:
+- Move 550 converts the catalog page shell to
+  `frontend/src/components/catalog/CatalogPage.tsx`. The typed boundary now
+  covers portal config/draft records, product/filter option shapes, portal
+  cache payloads, media upload state, file picker state, gallery state,
+  Google Translate globals, app/sync context access, and the local catalog API
+  gateway for portal bootstrap, metadata, search, AI, media uploads,
+  membership lookup, share submissions, and submission review. The move keeps
+  catalog lazy chunk imports, portal timeout contracts, bounded screenshot
+  reads, customer membership lookup, public portal translation flow, and review
+  actions unchanged while replacing direct catalog `window.api` calls with
+  `getCatalogApi()`. The current source extension count is `.js: 95`,
+  `.jsx: 1`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 106` outside
+  generated/runtime folders.

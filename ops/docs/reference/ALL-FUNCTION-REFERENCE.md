@@ -167,7 +167,7 @@ Code files scanned: **466**
 | 155 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
 | 156 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1 |
 | 157 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
-| 158 | `frontend/src/components/catalog/CatalogPage.jsx` | 115 |
+| 158 | `frontend/src/components/catalog/CatalogPage.tsx` | 115 |
 | 159 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 |
 | 160 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
 | 161 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
@@ -3354,7 +3354,7 @@ Code files scanned: **466**
 |---:|---|---|---:|
 | 1 | `CatalogImageField` | export default function | 28 |
 
-### 3.158 `frontend/src/components/catalog/CatalogPage.jsx`
+### 3.158 `frontend/src/components/catalog/CatalogPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

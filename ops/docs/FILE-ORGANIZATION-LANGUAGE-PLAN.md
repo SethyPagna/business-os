@@ -531,7 +531,7 @@ Decision rule:
     `d0e1a511d334b9e4`.
 46. Harden Settings and Catalog media upload pathways. Done:
     `frontend/src/components/utils-settings/Settings.tsx` and
-    `frontend/src/components/catalog/CatalogPage.jsx` now wrap their
+    `frontend/src/components/catalog/CatalogPage.tsx` now wrap their
     `uploadFileAsset(...)` media uploads in explicit 30s timeout contracts while
     preserving keyed same-tick guards, abort controllers, progress updates,
     preview rollback, and non-persisted draft behavior. Focused action
@@ -624,7 +624,7 @@ Decision rule:
     production build, and broad Phase 8.4 Playwright UI live check passed on
     frontend hash `f6d54693ea42f9a0`.
 56. Harden Catalog portal submission writes. Done:
-    `frontend/src/components/catalog/CatalogPage.jsx` now wraps customer portal
+    `frontend/src/components/catalog/CatalogPage.tsx` now wraps customer portal
     share-proof submission creation and staff submission review actions in
     shared same-tick guards plus explicit 12s timeout contracts. This prevents
     repeated clicks from stacking customer submission writes or duplicate review
@@ -1304,12 +1304,12 @@ Decision rule:
     normalization helper moved to
     `frontend/src/components/catalog/portalEditorUtils.ts`, while
     `portalEditorUtils.mjs` remains as the compatibility wrapper for
-    `CatalogPage.jsx` and focused portal editor tests.
+    `CatalogPage.tsx` and focused portal editor tests.
 148. Convert portal language pack helper to TypeScript. Done:
     The first-party portal language pack and lookup helper moved to
     `frontend/src/components/catalog/portalLanguagePacks.ts`, while
     `portalLanguagePacks.ts` remains as the compatibility wrapper for
-    `CatalogPage.jsx`, portal i18n helpers, and focused portal vocabulary
+    `CatalogPage.tsx`, portal i18n helpers, and focused portal vocabulary
     tests. `portalLanguagePacks.ts` remains as the small typed wrapper
     declaration needed for TypeScript imports through the stable `.mjs`
     boundary.
@@ -2357,7 +2357,7 @@ Decision rule:
     to delete. Docker cleanup pruned stopped containers and builder cache only,
     reclaiming 2.503 GB of builder cache while preserving volumes and images.
 275. Remove redundant catalog language bundle imports. Done:
-    `CatalogPage.jsx` now relies on the scoped portal language pack and the
+    `CatalogPage.tsx` now relies on the scoped portal language pack and the
     existing call-site fallbacks instead of importing full `en.json` and
     `km.json` app translation bundles. The frontend performance verifier and
     performance loading UX test now block direct full-language JSON imports from
@@ -2543,7 +2543,7 @@ Decision rule:
     Syntax check, focused automation coverage, and live post-hygiene
     verification pass with zero QA residue and dataset readiness `loaded`.
 297. Bound catalog submission image reads. Done:
-    `frontend/src/components/catalog/CatalogPage.jsx` now uses shared image
+    `frontend/src/components/catalog/CatalogPage.tsx` now uses shared image
     FileReader helpers, caps portal submission screenshots at eight, and reads
     selected/pasted images with `CATALOG_IMAGE_READ_CONCURRENCY = 2` instead of
     eagerly base64-reading every selected file at once. Paste handling now
@@ -4378,6 +4378,17 @@ Decision rule:
     database values before they reach stricter TSX child components. The
     current source extension count is `.js: 95`, `.jsx: 2`, `.mjs: 0`,
     `.cjs: 0`, `.ts: 268`, `.tsx: 105` outside generated/runtime folders.
+550. Convert the catalog page shell to TSX. Done:
+    `frontend/src/components/catalog/CatalogPage.tsx` now types the public and
+    editor portal state, catalog product/filter options, portal cache payloads,
+    media upload state, file picker state, gallery state, translation globals,
+    app/sync context access, and the local catalog API gateway. The conversion
+    keeps the extensionless catalog chunk imports, portal timeout contracts,
+    bounded image reads, Google Translate fallback, customer membership lookup,
+    share-proof submission/review actions, and public portal rendering intact
+    while replacing direct catalog `window.api` calls with `getCatalogApi()`.
+    The current source extension count is `.js: 95`, `.jsx: 1`, `.mjs: 0`,
+    `.cjs: 0`, `.ts: 268`, `.tsx: 106` outside generated/runtime folders.
 
 ## Safety Gates
 

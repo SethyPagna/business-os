@@ -190,7 +190,7 @@ Total files documented: **529**
 | 178 | `frontend/src/components/branches/TransferModal.tsx` | frontend-ui | 415 | 16.0 | UI component/page |
 | 179 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | frontend-ui | 1479 | 102.5 | UI component/page |
 | 180 | `frontend/src/components/catalog/CatalogImageField.tsx` | frontend-ui | 115 | 4.6 | UI component/page |
-| 181 | `frontend/src/components/catalog/CatalogPage.jsx` | frontend-ui | 3218 | 139.2 | UI component/page |
+| 181 | `frontend/src/components/catalog/CatalogPage.tsx` | frontend-ui | 3218 | 139.2 | UI component/page |
 | 182 | `frontend/src/components/catalog/CatalogPageContext.tsx` | frontend-ui | 25 | 0.6 | UI component/page |
 | 183 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | frontend-ui | 454 | 21.5 | UI component/page |
 | 184 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | frontend-ui | 614 | 30.3 | UI component/page |

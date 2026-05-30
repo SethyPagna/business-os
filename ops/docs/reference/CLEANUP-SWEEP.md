@@ -424,7 +424,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   new public boundary or the wrapper audit proves it is unused.
 - Move 147 converts the portal editor utility helper to TypeScript while
   preserving the old `.mjs` wrapper. Cleanup must keep `portalEditorUtils.mjs`
-  until `CatalogPage.jsx` and focused portal editor tests intentionally move to
+  until `CatalogPage.tsx` and focused portal editor tests intentionally move to
   a new public boundary or the wrapper audit proves it is unused.
 - Move 148 converts the portal language pack helper to TypeScript while
   preserving the old `.mjs` wrapper. Cleanup must keep
