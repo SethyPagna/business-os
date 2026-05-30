@@ -31,7 +31,7 @@ await runTest('products table separates product identity from operational detail
 })
 
 await runTest('POS product cards expose discount badges before opening details', () => {
-  const source = fs.readFileSync(new URL('../src/components/pos/POS.jsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
   assert.match(source, /ProductDiscountBadge/)
   assert.match(source, /calculateProductDiscount\(product,\s*exchangeRate\)/)
   assert.match(source, /pagedProductCards\.map[\s\S]*<ProductDiscountBadge/)

@@ -205,7 +205,7 @@ function getErrorMessage(error: unknown): string {
 const PAGE_IMPORTERS = {
   dashboard: asPageModule(() => import('./components/dashboard/Dashboard')),
   products: asPageModule(() => import('./components/products/Products.jsx')),
-  pos: asPageModule(() => import('./components/pos/POS.jsx')),
+  pos: asPageModule(() => import('./components/pos/POS.tsx')),
   sales: asPageModule(() => import('./components/sales/Sales')),
   returns: asPageModule(() => import('./components/returns/Returns')),
   inventory: asPageModule(() => import('./components/inventory/Inventory.jsx')),

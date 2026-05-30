@@ -12,7 +12,7 @@ interface CartLineItem {
   quantity: number
   branch_id?: string | number | null
   price_mode?: string
-  product_discount_label?: string
+  product_discount_label?: string | null
   applied_price_usd: number
   applied_price_khr: number
 }

@@ -16,6 +16,7 @@
  */
 
 import { Suspense, lazy, useState, useEffect, useRef, useCallback, useDeferredValue, useMemo } from 'react'
+import type { ChangeEvent, KeyboardEvent } from 'react'
 import { ImageOff, Info, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import {
@@ -65,14 +66,280 @@ const POS_CHECKOUT_TIMEOUT_MS = 20000
 
 // Customer contact-option helpers (mirrors CustomersTab)
 import { parseContactOptions } from '../contacts/CustomersTab'
+import type { ContactOption } from '../contacts/contactOptionUtils'
 
+type AppSettings = Record<string, unknown> & {
+  customer_portal_redeem_points?: string | number
+  customer_portal_redeem_value_khr?: string | number
+  customer_portal_redeem_value_usd?: string | number
+  language?: string
+  pos_payment_methods?: string
+  product_brand_options?: string
+  tax_rate?: string | number
+}
 
-function allTermsMatch(text, terms) {
+type AppContextValue = {
+  exchangeRate: number
+  fmtKHR: (value: unknown) => string
+  fmtUSD: (value: unknown) => string
+  khrSymbol: string
+  notify: (message: unknown, type?: string, duration?: number) => void
+  settings: AppSettings
+  t: (key: string) => string
+  usdSymbol: string
+  user: { id?: string | number; name?: string } | null
+}
+
+type SyncContextValue = {
+  syncChannel?: { channel?: string; ts?: unknown } | null
+}
+
+type BranchRecord = {
+  id: string | number
+  is_active?: boolean
+  is_default?: boolean
+  name: string
+}
+
+type CategoryRecord = {
+  color?: string
+  id?: string | number
+  name: string
+}
+
+type BranchStockRecord = {
+  branch_id?: string | number
+  quantity?: string | number
+}
+
+type ProductGroupMeta = {
+  groupKind?: string
+  hasExplicitGroup?: boolean
+  hasMultipleItems?: boolean
+  maxSellingPriceUsd?: number
+  minSellingPriceUsd?: number
+  stockTotal?: number
+}
+
+type ProductRecord = Record<string, unknown> & {
+  __displayName?: string
+  __groupChoices?: ProductRecord[]
+  __groupKey?: string
+  __groupMeta?: ProductGroupMeta
+  __variantLabel?: string
+  applied_price_khr?: number
+  applied_price_usd?: number
+  barcode?: string
+  branch_id?: string | number | null
+  branch_stock?: BranchStockRecord[]
+  brand?: string
+  cart_line_id?: string
+  category?: string
+  cost_price_khr?: string | number
+  cost_price_usd?: string | number
+  description?: string
+  discount_label?: string
+  id: string | number
+  image_gallery?: string | string[]
+  image_path?: string
+  is_active?: boolean
+  is_group?: boolean
+  low_stock_threshold?: string | number
+  name: string
+  out_of_stock_threshold?: string | number
+  parent_id?: string | number | null
+  price_mode?: string
+  product_discount_khr?: number
+  product_discount_label?: string
+  product_discount_type?: string | null
+  product_discount_usd?: number
+  purchase_price_khr?: string | number
+  purchase_price_usd?: string | number
+  quantity?: number
+  selling_price_khr?: string | number
+  selling_price_usd?: string | number
+  sku?: string
+  special_price_khr?: string | number
+  special_price_usd?: string | number
+  stock_quantity?: string | number
+  supplier?: string
+  unit?: string
+}
+
+type CartLineRecord = ProductRecord & {
+  applied_price_khr: number
+  applied_price_usd: number
+  cart_line_id: string
+  id: string | number
+  name: string
+  quantity: number
+}
+
+type CustomerRecord = Record<string, unknown> & {
+  address?: string
+  email?: string
+  id?: string | number | null
+  membership_number?: string
+  name: string
+  phone?: string
+}
+
+type DeliveryContactRecord = Record<string, unknown> & {
+  address?: string
+  area?: string
+  id?: string | number | null
+  name: string
+  phone?: string
+}
+
+type CustomerOption = {
+  address?: string
+  email?: string
+  label?: string
+  name?: string
+  phone?: string
+}
+
+type CustomerFormState = {
+  address: string
+  membership_number: string
+  name: string
+  phone: string
+}
+
+type DeliveryFormState = {
+  area: string
+  name: string
+  phone: string
+}
+
+type PosOrder = Record<string, unknown> & {
+  cart: CartLineRecord[]
+  customPayment?: boolean
+  customer: CustomerRecord & {
+    _baseCustomer?: CustomerRecord
+    _optionLabel?: string
+    _rawOptions?: string
+  }
+  customerSearch: string
+  deliveryFeePaidBy: string
+  deliveryFeeUsd: string
+  deliverySearch: string
+  discountKhr: string
+  discountUsd: string
+  id: string
+  isDelivery: boolean
+  label?: string
+  membershipDiscountKhr: string
+  membershipDiscountUsd: string
+  membershipRedeemUnits: string
+  paidKhr: string
+  paidUsd: string
+  paymentMethod: string
+  selectedDelivery: DeliveryContactRecord | null
+}
+
+type MembershipInfo = {
+  customer?: { membership_number?: string }
+  points?: { balance?: number }
+}
+
+type ProductFilterMeta = {
+  brands: string[]
+  initials: Array<Record<string, unknown>>
+  suppliers: string[]
+}
+
+type ProductPayload = {
+  filters?: Partial<ProductFilterMeta>
+  initials?: unknown[]
+  items?: ProductRecord[]
+  total?: number
+}
+
+type SaleResult = {
+  error?: string
+  id?: string | number
+  receipt_number?: string
+  receiptNumber?: string
+  success?: boolean
+}
+
+type PosApi = {
+  createCustomer?: (payload: CustomerFormState) => Promise<Partial<CustomerRecord>>
+  createDeliveryContact?: (payload: DeliveryFormState) => Promise<Partial<DeliveryContactRecord>>
+  createSale?: (payload: Record<string, unknown>) => Promise<SaleResult>
+  getBranches?: () => Promise<BranchRecord[]>
+  getCategories?: () => Promise<string[]>
+  getCustomers?: () => Promise<CustomerRecord[]>
+  getDeliveryContacts?: () => Promise<DeliveryContactRecord[]>
+  getProductFilters?: (filters: Record<string, unknown>) => Promise<Partial<ProductFilterMeta>>
+  lookupPortalMembership?: (membershipNumber: string) => Promise<MembershipInfo | null>
+  searchProducts?: (query: Record<string, unknown>) => Promise<ProductPayload | ProductRecord[]>
+}
+
+type ImageLightboxState = {
+  images: string[]
+  index: number
+  title: string
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeCategory(category: unknown): CategoryRecord | null {
+  if (typeof category === 'string') {
+    const name = category.trim()
+    return name ? { name } : null
+  }
+  if (!isPlainRecord(category)) return null
+  const name = String(category.name || '').trim()
+  if (!name) return null
+  return {
+    color: typeof category.color === 'string' ? category.color : undefined,
+    id: typeof category.id === 'string' || typeof category.id === 'number' ? category.id : name,
+    name,
+  }
+}
+
+function getPosApi(): PosApi {
+  return (window as typeof window & { api?: PosApi }).api || {}
+}
+
+function missingPosApiMethod(methodName: string): Promise<never> {
+  return Promise.reject(new Error(`POS API method is unavailable: ${methodName}`))
+}
+
+function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOrder {
+  const base = createEmptyOrder(fallbackIndex) as PosOrder
+  return {
+    ...base,
+    ...order,
+    cart: Array.isArray(order.cart) ? order.cart : base.cart,
+    customer: { ...base.customer, ...(order.customer || {}) },
+    selectedDelivery: order.selectedDelivery || null,
+  }
+}
+
+function getErrorMessage(error: unknown, fallback = 'Failed'): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function asText(value: unknown): string {
+  return String(value || '')
+}
+
+function asNumber(value: unknown): number {
+  return Number(value || 0)
+}
+
+function allTermsMatch(text: string, terms: string[]): boolean {
   const lower = text.toLowerCase()
   return terms.every(t => lower.includes(t.toLowerCase()))
 }
 
-function useDebouncedValue(value, delayMs = 180) {
+function useDebouncedValue<T>(value: T, delayMs = 180): T {
   const [debounced, setDebounced] = useState(value)
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced(value), delayMs)
@@ -81,7 +348,17 @@ function useDebouncedValue(value, delayMs = 180) {
   return debounced
 }
 
-function ProductDiscountBadge({ product, exchangeRate, fmtUSD, label = 'Discounts' }) {
+function ProductDiscountBadge({
+  product,
+  exchangeRate,
+  fmtUSD,
+  label = 'Discounts',
+}: {
+  exchangeRate: number
+  fmtUSD: (value: unknown) => string
+  label?: string
+  product: ProductRecord
+}) {
   const promotion = calculateProductDiscount(product, exchangeRate)
   if (!promotion.active) return null
   const text = `${product?.discount_label || label} ${fmtUSD(promotion.applied_price_usd || 0)}`
@@ -92,22 +369,22 @@ function ProductDiscountBadge({ product, exchangeRate, fmtUSD, label = 'Discount
   )
 }
 export default function POS() {
-  const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
-  const { syncChannel } = useSync()
+  const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp() as AppContextValue
+  const { syncChannel } = useSync() as SyncContextValue
   const isActive = useIsPageActive('pos')
-  const posCopy = useCallback((en, km) => ((settings.language || 'en') === 'km' ? km : en), [settings.language])
+  const posCopy = useCallback((en: string, km = en) => ((settings.language || 'en') === 'km' ? km : en), [settings.language])
 
 // Remote data shared across all orders
-  const [products,         setProducts]         = useState([])
-  const [categories,       setCategories]       = useState([])
-  const [branches,         setBranches]         = useState([])
-  const [customers,        setCustomers]        = useState([])
-  const [deliveryContacts, setDeliveryContacts] = useState([])
-  const [defaultBranchId,  setDefaultBranchId]  = useState(null)
+  const [products,         setProducts]         = useState<ProductRecord[]>([])
+  const [categories,       setCategories]       = useState<CategoryRecord[]>([])
+  const [branches,         setBranches]         = useState<BranchRecord[]>([])
+  const [customers,        setCustomers]        = useState<CustomerRecord[]>([])
+  const [deliveryContacts, setDeliveryContacts] = useState<DeliveryContactRecord[]>([])
+  const [defaultBranchId,  setDefaultBranchId]  = useState<string | number | null>(null)
 
 // Product filter state is persisted in sessionStorage so navigation does not reset it
   const [search,          setSearch]          = useState('')
-  const [searchMode,      setSearchMode]      = useState('AND') // 'AND' | 'OR'
+  const [searchMode,      setSearchMode]      = useState<'AND' | 'OR'>('AND')
   const [categoryFilter,  setCategoryFilter]  = useState(() => sessionStorage.getItem('pos_cat')      || 'all')
   const [brandFilter,     setBrandFilter]     = useState(() => sessionStorage.getItem('pos_brand')    || 'all')
   const [branchFilter,    setBranchFilter]    = useState(() => sessionStorage.getItem('pos_branch')   || 'all')
@@ -119,27 +396,30 @@ export default function POS() {
   const [productPage, setProductPage] = useState(1)
   const [productPageSize, setProductPageSize] = useState(20)
   const [productTotal, setProductTotal] = useState(0)
-  const [productFilterMeta, setProductFilterMeta] = useState({ brands: [], suppliers: [], initials: [] })
+  const [productFilterMeta, setProductFilterMeta] = useState<ProductFilterMeta>({ brands: [], suppliers: [], initials: [] })
   const [catalogRefreshing, setCatalogRefreshing] = useState(false)
   // Persist filter changes
-  const setPersistedCat      = v => { sessionStorage.setItem('pos_cat',      v); setCategoryFilter(v) }
-  const setPersistedBrand    = v => { sessionStorage.setItem('pos_brand',    v); setBrandFilter(v) }
-  const setPersistedBranch   = v => { sessionStorage.setItem('pos_branch',   v); setBranchFilter(v) }
-  const setPersistedStock    = v => { sessionStorage.setItem('pos_stock',    v); setStockFilter(v) }
-  const setPersistedGroup    = v => { sessionStorage.setItem('pos_group',    v); setGroupFilter(v) }
-  const setPersistedSupplier = v => { sessionStorage.setItem('pos_supplier', v); setSupplierFilter(v) }
-  const setPersistedInitial  = v => { sessionStorage.setItem('pos_initial',  v); setInitialFilter(v) }
+  const setPersistedCat      = (v: string) => { sessionStorage.setItem('pos_cat',      v); setCategoryFilter(v) }
+  const setPersistedBrand    = (v: string) => { sessionStorage.setItem('pos_brand',    v); setBrandFilter(v) }
+  const setPersistedBranch   = (v: string) => { sessionStorage.setItem('pos_branch',   v); setBranchFilter(v) }
+  const setPersistedStock    = (v: string) => { sessionStorage.setItem('pos_stock',    v); setStockFilter(v) }
+  const setPersistedGroup    = (v: string) => { sessionStorage.setItem('pos_group',    v); setGroupFilter(v) }
+  const setPersistedSupplier = (v: string) => { sessionStorage.setItem('pos_supplier', v); setSupplierFilter(v) }
+  const setPersistedInitial  = (v: string) => { sessionStorage.setItem('pos_initial',  v); setInitialFilter(v) }
 // Multi-order state
   // Restore orders from sessionStorage so navigating away and back preserves
   // all open orders, carts, customer info, and delivery details.
-  const [orders, setOrders] = useState(() => {
+  const [orders, setOrders] = useState<PosOrder[]>(() => {
     try {
       const saved = sessionStorage.getItem('bos_pos_orders')
-      if (saved) { const parsed = JSON.parse(saved); if (Array.isArray(parsed) && parsed.length) return parsed }
+      if (saved) {
+        const parsed = JSON.parse(saved) as unknown
+        if (Array.isArray(parsed) && parsed.length) return parsed.map((order, index) => normalizeOrder(order as Partial<PosOrder>, index + 1))
+      }
     } catch {}
-    return [createEmptyOrder(1)]
+    return [normalizeOrder({}, 1)]
   })
-  const [activeId, setActiveId] = useState(() => {
+  const [activeId, setActiveId] = useState<string | null>(() => {
     try {
       const saved = sessionStorage.getItem('bos_pos_active')
       if (saved) return saved
@@ -152,7 +432,7 @@ export default function POS() {
 
   // The currently visible order. Derived, not stored separately.
   const resolvedActiveId = activeId && orders.find(o => o.id === activeId) ? activeId : orders[0]?.id
-  const active = orders.find(o => o.id === resolvedActiveId) || orders[0]
+  const active = orders.find(o => o.id === resolvedActiveId) || orders[0] || normalizeOrder({}, 1)
 
 // Sync payment method default when settings load
   useEffect(() => {
@@ -182,7 +462,7 @@ export default function POS() {
   }, [orderCounter])
 
   /** Apply a partial update to the active order. Mirrors React's setState signature. */
-  const patchActive = useCallback((patch) => {
+  const patchActive = useCallback((patch: Partial<PosOrder>) => {
     setOrders(prev => prev.map(o => o.id === resolvedActiveId ? { ...o, ...patch } : o))
   }, [resolvedActiveId])
 
@@ -192,15 +472,15 @@ export default function POS() {
       return
     }
     const nextNum = orders.length + 1
-    const newOrder = createEmptyOrder(nextNum)
+    const newOrder = normalizeOrder(createEmptyOrder(nextNum) as Partial<PosOrder>, nextNum)
     setOrders(prev => [...prev, newOrder])
     setActiveId(newOrder.id)
     setOrderCounter(nextNum + 1)
   }
 
-  const closeOrder = (orderId) => {
+  const closeOrder = (orderId: string) => {
     if (orders.length === 1) {
-      const reset = createEmptyOrder(1)
+      const reset = normalizeOrder({}, 1)
       setOrders([reset])
       setActiveId(reset.id)
       setOrderCounter(2)
@@ -226,50 +506,50 @@ export default function POS() {
   }, [activeId]) // eslint-disable-line ??intentionally only on tab switch
 
 // Autocomplete suggestions (UI-level, not per-order)
-  const [customerSuggestions,  setCustomerSuggestions]  = useState([])
-  const [deliverySuggestions,  setDeliverySuggestions]  = useState([])
+  const [customerSuggestions,  setCustomerSuggestions]  = useState<CustomerRecord[]>([])
+  const [deliverySuggestions,  setDeliverySuggestions]  = useState<DeliveryContactRecord[]>([])
   const [showCustomerDrop,     setShowCustomerDrop]     = useState(false)
   const [showDeliveryDrop,     setShowDeliveryDrop]     = useState(false)
 
 // Inline quick-add modals
   const [showAddCustomer,  setShowAddCustomer]  = useState(false)
-  const [newCustomerForm,  setNewCustomerForm]  = useState({ name: '', membership_number: '', phone: '', address: '' })
+  const [newCustomerForm,  setNewCustomerForm]  = useState<CustomerFormState>({ name: '', membership_number: '', phone: '', address: '' })
   const [savingCustomer,   setSavingCustomer]   = useState(false)
 
   const [showAddDelivery,  setShowAddDelivery]  = useState(false)
-  const [newDeliveryForm,  setNewDeliveryForm]  = useState({ name: '', phone: '', area: '' })
+  const [newDeliveryForm,  setNewDeliveryForm]  = useState<DeliveryFormState>({ name: '', phone: '', area: '' })
 
 // Customer option picker shown after selecting a customer with multiple options
-  const [customerOptionsList, setCustomerOptionsList] = useState([])
+  const [customerOptionsList, setCustomerOptionsList] = useState<ContactOption[]>([])
   const [showOptionPicker,    setShowOptionPicker]    = useState(false)
   const [savingDelivery,   setSavingDelivery]   = useState(false)
 
 // Other UI state
-  const [mobileView,       setMobileView]       = useState('products') // 'products' | 'cart'
-  const [detailProduct,    setDetailProduct]    = useState(null)
+  const [mobileView,       setMobileView]       = useState<'products' | 'cart'>('products')
+  const [detailProduct,    setDetailProduct]    = useState<ProductRecord | null>(null)
   const [loading,          setLoading]          = useState(false)
   const [showStatusPicker, setShowStatusPicker] = useState(false)
-  const [membershipInfo,   setMembershipInfo]   = useState(null)
+  const [membershipInfo,   setMembershipInfo]   = useState<MembershipInfo | null>(null)
   const [membershipLoading, setMembershipLoading] = useState(false)
   const [membershipError,  setMembershipError]  = useState('')
-  const [imageLightbox, setImageLightbox] = useState(null)
+  const [imageLightbox, setImageLightbox] = useState<ImageLightboxState | null>(null)
 
   // Completed receipts shown as overlay modals (queue so multiple can stack)
-  const [receiptQueue, setReceiptQueue] = useState([])
+  const [receiptQueue, setReceiptQueue] = useState<Record<string, unknown>[]>([])
 
-  const searchRef = useRef()
+  const searchRef = useRef<HTMLInputElement | null>(null)
   const catalogRequestRef = useRef(0)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const membershipRequestRef = useRef(0)
-  const membershipInfoRef = useRef(null)
+  const membershipInfoRef = useRef<MembershipInfo | null>(null)
   const savingCustomerRef = useRef(false)
   const savingDeliveryRef = useRef(false)
   const checkoutInFlightRef = useRef(false)
-  const taxRate   = parseFloat(settings.tax_rate || '0') / 100
-  const redeemPointsStep = Math.max(1, parseInt(settings.customer_portal_redeem_points || '100', 10) || 100)
-  const redeemValueUsdStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_usd || '1') || 1))
-  const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_khr || String(exchangeRate)) || exchangeRate))
+  const taxRate   = parseFloat(asText(settings.tax_rate || '0')) / 100
+  const redeemPointsStep = Math.max(1, parseInt(asText(settings.customer_portal_redeem_points || '100'), 10) || 100)
+  const redeemValueUsdStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1))
+  const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_khr || String(exchangeRate))) || exchangeRate))
   const redeemValueKhrStep = rawRedeemValueKhrStep === 0 ? 0 : Math.max(1000, Math.ceil(rawRedeemValueKhrStep / 1000) * 1000)
   const debouncedProductSearch = useDebouncedValue(search, 180)
   const hasProductDiscoveryQuery = useMemo(
@@ -284,9 +564,9 @@ export default function POS() {
     return t('products') || 'products'
   }, [hasProductDiscoveryQuery, stockFilter, t])
 
-  const applyCatalogData = useCallback((prods, cats, brs) => {
+  const applyCatalogData = useCallback((prods: ProductRecord[], cats: unknown[], brs: BranchRecord[]) => {
     setProducts(Array.isArray(prods) ? prods.filter((product) => product?.is_active) : [])
-    setCategories(Array.isArray(cats) ? cats : [])
+    setCategories(Array.isArray(cats) ? cats.map(normalizeCategory).filter((category): category is CategoryRecord => Boolean(category)) : [])
     const activeBranches = Array.isArray(brs) ? brs.filter((branch) => branch?.is_active) : []
     setBranches(activeBranches)
     setDefaultBranchId((current) => {
@@ -322,32 +602,34 @@ export default function POS() {
         sort: 'name_asc',
         include: 'branch_stock,images,family',
       }
+      const api = getPosApi()
       const [productPayload, cats, brs, filterPayload] = await withLoaderTimeout(
         () => Promise.all([
-          window.api.searchProducts(productQuery),
-          window.api.getCategories(),
-          window.api.getBranches(),
-          window.api.getProductFilters({}),
+          api.searchProducts?.(productQuery) || missingPosApiMethod('searchProducts'),
+          api.getCategories?.() || missingPosApiMethod('getCategories'),
+          api.getBranches?.() || missingPosApiMethod('getBranches'),
+          api.getProductFilters?.({}) || missingPosApiMethod('getProductFilters'),
         ]),
         label,
         POS_CATALOG_LOAD_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
-      const prods = Array.isArray(productPayload?.items)
-        ? productPayload.items
+      const payloadRecord = isPlainRecord(productPayload) ? productPayload : {}
+      const prods = Array.isArray(payloadRecord.items)
+        ? payloadRecord.items as ProductRecord[]
         : (Array.isArray(productPayload) ? productPayload : [])
       applyCatalogData(prods, cats, brs)
-      setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
-      const filters = filterPayload || productPayload?.filters || {}
+      setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
+      const filters = isPlainRecord(filterPayload) ? filterPayload : (isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {})
       setProductFilterMeta({
         brands: Array.isArray(filters?.brands) ? filters.brands : [],
         suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
-        initials: aggregateInitialOptions(filters?.initials || productPayload?.initials || []),
+        initials: aggregateInitialOptions((filters?.initials || payloadRecord.initials || []) as Array<Record<string, unknown>>),
       })
       return { prods, cats, brs }
     } catch (error) {
       if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
-      console.error('[POS] catalog load failed:', error.message)
+      console.error('[POS] catalog load failed:', getErrorMessage(error))
       return null
     } finally {
       if (isTrackedRequestCurrent(catalogRequestRef, requestId)) {
@@ -359,14 +641,15 @@ export default function POS() {
   const loadCustomers = useCallback(async (label = 'POS customers') => {
     const requestId = beginTrackedRequest(customerRequestRef)
     try {
-      const data = await withLoaderTimeout(() => window.api.getCustomers(), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
+      const api = getPosApi()
+      const data = await withLoaderTimeout(() => api.getCustomers?.() || missingPosApiMethod('getCustomers'), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
       const nextCustomers = Array.isArray(data) ? data : []
       setCustomers(nextCustomers)
       return nextCustomers
     } catch (error) {
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
-      console.error('[POS] customers load failed:', error.message)
+      console.error('[POS] customers load failed:', getErrorMessage(error))
       return null
     }
   }, [])
@@ -374,28 +657,30 @@ export default function POS() {
   const loadDeliveryContacts = useCallback(async (label = 'POS delivery contacts') => {
     const requestId = beginTrackedRequest(deliveryRequestRef)
     try {
-      const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
+      const api = getPosApi()
+      const data = await withLoaderTimeout(() => api.getDeliveryContacts?.() || missingPosApiMethod('getDeliveryContacts'), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(deliveryRequestRef, requestId)) return null
       const nextContacts = Array.isArray(data) ? data : []
       setDeliveryContacts(nextContacts)
       return nextContacts
     } catch (error) {
       if (!isTrackedRequestCurrent(deliveryRequestRef, requestId)) return null
-      console.error('[POS] delivery contacts load failed:', error.message)
+      console.error('[POS] delivery contacts load failed:', getErrorMessage(error))
       return null
     }
   }, [])
 
   const loadMembershipInfo = useCallback(async (
-    membershipNumber,
+    membershipNumber: string,
     label = 'POS membership lookup',
   ) => {
     const requestId = beginTrackedRequest(membershipRequestRef)
     setMembershipLoading(true)
     setMembershipError('')
     try {
+      const api = getPosApi()
       const data = await withLoaderTimeout(
-        () => window.api.lookupPortalMembership(membershipNumber),
+        () => api.lookupPortalMembership?.(membershipNumber) || missingPosApiMethod('lookupPortalMembership'),
         label,
         POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )
@@ -411,7 +696,7 @@ export default function POS() {
         return membershipInfoRef.current
       }
       setMembershipInfo(null)
-      setMembershipError(error?.message || posCopy('Membership lookup failed'))
+      setMembershipError(getErrorMessage(error, posCopy('Membership lookup failed')))
       return null
     } finally {
       if (isTrackedRequestCurrent(membershipRequestRef, requestId)) {
@@ -514,7 +799,7 @@ export default function POS() {
   }, [active?.customer?.membership_number, isActive, loadMembershipInfo, syncChannel?.ts])
 
 // Customer actions
-  const selectCustomer = (c) => {
+  const selectCustomer = (c: CustomerRecord) => {
     const opts = parseContactOptions(c.address)
     setCustomerSuggestions([])
     setShowCustomerDrop(false)
@@ -562,7 +847,7 @@ export default function POS() {
     }
   }
 
-  const applyCustomerOption = (opt) => {
+  const applyCustomerOption = (opt: ContactOption) => {
     patchActive({
       customer: {
         ...active.customer,
@@ -590,8 +875,9 @@ export default function POS() {
     savingCustomerRef.current = true
     setSavingCustomer(true)
     try {
+      const api = getPosApi()
       const created = await withLoaderTimeout(
-        () => window.api.createCustomer(newCustomerForm),
+        () => api.createCustomer?.(newCustomerForm) || missingPosApiMethod('createCustomer'),
         'Create POS customer',
         POS_CUSTOMER_CREATE_TIMEOUT_MS,
       )
@@ -613,7 +899,7 @@ export default function POS() {
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
       await loadCustomers('POS refresh customers after create')
     } catch (e) {
-      notify(e.message || 'Failed', 'error')
+      notify(getErrorMessage(e), 'error')
     } finally {
       savingCustomerRef.current = false
       setSavingCustomer(false)
@@ -621,7 +907,7 @@ export default function POS() {
   }
 
 // Delivery actions
-  const selectDelivery = (d) => {
+  const selectDelivery = (d: DeliveryContactRecord) => {
     patchActive({ selectedDelivery: d, deliverySearch: d.name })
     setDeliverySuggestions([])
     setShowDeliveryDrop(false)
@@ -640,8 +926,9 @@ export default function POS() {
         ...newDeliveryForm,
         name: newDeliveryForm.name.trim() || `Driver ${newDeliveryForm.phone.trim()}`,
       }
+      const api = getPosApi()
       const res = await withLoaderTimeout(
-        () => window.api.createDeliveryContact(payload),
+        () => api.createDeliveryContact?.(payload) || missingPosApiMethod('createDeliveryContact'),
         'Create POS delivery contact',
         POS_DELIVERY_CREATE_TIMEOUT_MS,
       )
@@ -652,7 +939,7 @@ export default function POS() {
       setShowAddDelivery(false)
       setNewDeliveryForm({ name: '', phone: '', area: '' })
     } catch (e) {
-      notify(e.message || 'Failed', 'error')
+      notify(getErrorMessage(e), 'error')
     } finally {
       savingDeliveryRef.current = false
       setSavingDelivery(false)
@@ -686,7 +973,7 @@ export default function POS() {
   )
   const posBrands = useMemo(() => {
     const fromProducts = (productFilterMeta.brands || []).map((brand) => String(brand || '').trim()).filter(Boolean)
-    let fromSettings = []
+    let fromSettings: string[] = []
     try {
       const parsed = JSON.parse(settings?.product_brand_options || '[]')
       if (Array.isArray(parsed)) {
@@ -695,8 +982,19 @@ export default function POS() {
     } catch (_) {}
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
   }, [productFilterMeta.brands, settings?.product_brand_options])
+  const posPaymentMethods = useMemo((): string[] => {
+    const fallback = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR', 'Pi Pay', 'Transfer']
+    try {
+      const parsed = JSON.parse(asText(settings.pos_payment_methods || '[]')) as unknown
+      if (!Array.isArray(parsed)) return fallback
+      const methods = parsed.map((method) => String(method || '').trim()).filter(Boolean)
+      return methods.length ? methods : fallback
+    } catch {
+      return fallback
+    }
+  }, [settings.pos_payment_methods])
   const initialOptions = useMemo(
-    () => aggregateInitialOptions(productFilterMeta.initials || []),
+    () => aggregateInitialOptions(productFilterMeta.initials as Array<Record<string, unknown>>),
     [productFilterMeta.initials],
   )
 
@@ -723,31 +1021,31 @@ export default function POS() {
 
       // Branch requires a branch_stock entry for the selected branch.
       if (branchFilterId != null) {
-        const bs = (p.branch_stock||[]).find(b => b.branch_id === branchFilterId)
+        const bs = (p.branch_stock || []).find((b) => Number(b.branch_id) === branchFilterId)
         if (!bs) return false
       }
 
       // Compute the effective quantity for this product in the active context.
       const qty = (() => {
         if (branchFilterId != null) {
-          const bs = (p.branch_stock||[]).find(b => b.branch_id === branchFilterId)
-          return bs ? bs.quantity : 0
+          const bs = (p.branch_stock || []).find((b) => Number(b.branch_id) === branchFilterId)
+          return bs ? Number(bs.quantity || 0) : 0
         }
         // When no explicit branch filter is selected, show the product's
         // global `stock_quantity` rather than falling back to the default
         // branch's stock. This prevents "All" from appearing empty when
         // the default branch has no entries for many products.
-        return p.stock_quantity
+        return Number(p.stock_quantity || 0)
       })()
 
       // Explicit stock filter.
-      if (stockFilter === 'out')      return qty <= (p.out_of_stock_threshold || 0)
-      if (stockFilter === 'low')      return qty > (p.out_of_stock_threshold || 0) && qty <= (p.low_stock_threshold || 10)
-      if (stockFilter === 'in_stock') return qty > (p.low_stock_threshold || 10)
+      if (stockFilter === 'out')      return qty <= asNumber(p.out_of_stock_threshold)
+      if (stockFilter === 'low')      return qty > asNumber(p.out_of_stock_threshold) && qty <= (asNumber(p.low_stock_threshold) || 10)
+      if (stockFilter === 'in_stock') return qty > (asNumber(p.low_stock_threshold) || 10)
 
       // Default browsing stays sellable-first. Active search/initial filters become discovery mode,
       // so POS can find the same matching products as Products and Inventory.
-      if (stockFilter === 'all' && !hasProductDiscoveryQuery && qty <= (p.out_of_stock_threshold || 0)) return false
+      if (stockFilter === 'all' && !hasProductDiscoveryQuery && qty <= asNumber(p.out_of_stock_threshold)) return false
 
       return true
     })
@@ -763,19 +1061,19 @@ export default function POS() {
     stockFilter,
   ])
 
-  const productsById = useMemo(() => buildProductsById(products), [products])
+  const productsById = useMemo(() => buildProductsById(products) as unknown as Map<number, ProductRecord>, [products])
   const branchesById = useMemo(() => new Map((Array.isArray(branches) ? branches : []).map((branch) => [Number(branch?.id), branch])), [branches])
 
   const variantChildrenByParentId = useMemo(
-    () => buildVariantChildrenByParentId(products),
+    () => buildVariantChildrenByParentId(products) as unknown as Map<number, ProductRecord[]>,
     [products],
   )
 
   const visibleProductCards = useMemo(() => {
-    const cards = buildVisibleProductCards(filteredProducts, productsById)
+    const cards = buildVisibleProductCards(filteredProducts, productsById) as unknown as ProductRecord[]
     if (groupFilter === 'all') return cards
     return cards.filter((product) => {
-      const meta = product.__groupMeta || {}
+      const meta: ProductGroupMeta = product.__groupMeta || {}
       const isVariantGroup = meta.groupKind === 'variant' || Boolean(product.parent_id)
       const isParentGroup = Boolean(product.is_group || meta.hasExplicitGroup || meta.hasMultipleItems)
       if (groupFilter === 'grouped') return isParentGroup || isVariantGroup
@@ -791,21 +1089,21 @@ export default function POS() {
 
   const pagedProductCards = visibleProductCards
 
-  const getVariantChoices = useCallback((product) => {
-    return getVariantChoicesForProduct(product, variantChildrenByParentId)
+  const getVariantChoices = useCallback((product: ProductRecord) => {
+    return getVariantChoicesForProduct(product, variantChildrenByParentId) as unknown as ProductRecord[]
   }, [variantChildrenByParentId])
 
-  const hasVariantChoices = useCallback((product) => getVariantChoices(product).length > 0, [getVariantChoices])
+  const hasVariantChoices = useCallback((product: ProductRecord) => getVariantChoices(product).length > 0, [getVariantChoices])
 
 
-  const getBranchStockQty = useCallback((product, branchId) => {
-    const id = parseInt(branchId, 10)
+  const getBranchStockQty = useCallback((product: ProductRecord, branchId: string | number | null | undefined) => {
+    const id = Number(branchId)
     if (!product || !Number.isFinite(id)) return 0
     const row = (product.branch_stock || []).find((entry) => Number(entry.branch_id) === id)
     return row ? Number(row.quantity || 0) : 0
   }, [])
 
-  const pickBestBranchId = useCallback((product) => {
+  const pickBestBranchId = useCallback((product: ProductRecord) => {
     const stockRows = (product?.branch_stock || [])
       .map((entry) => ({ branchId: Number(entry.branch_id), qty: Number(entry.quantity || 0) }))
       .filter((entry) => Number.isFinite(entry.branchId) && entry.qty > 0)
@@ -820,7 +1118,7 @@ export default function POS() {
   }, [defaultBranchId])
 
   /** Stock quantity relevant to the active branch filter or item branch assignment. */
-  const getDisplayStock = useCallback((product, cartItem = null) => {
+  const getDisplayStock = useCallback((product: ProductRecord | undefined, cartItem: { branch_id?: string | number | null } | null = null) => {
     if (!product) return 0
 
     if (branchFilter !== 'all') {
@@ -834,9 +1132,9 @@ export default function POS() {
     return Number(product.stock_quantity || 0)
   }, [branchFilter, getBranchStockQty])
 
-  const openProductCard = useCallback((product, { groupProduct = false, inStock = false } = {}) => {
+  const openProductCard = useCallback((product: ProductRecord, { groupProduct = false, inStock = false }: { groupProduct?: boolean; inStock?: boolean } = {}) => {
     if (!product) return
-    const hasSpecial = ((product.special_price_usd || 0) > 0 || (product.special_price_khr || 0) > 0)
+    const hasSpecial = asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0
     const hasPromotion = calculateProductDiscount(product, exchangeRate).active
     if (groupProduct || hasSpecial || hasPromotion) {
       setDetailProduct(product)
@@ -850,7 +1148,7 @@ export default function POS() {
   }, [addToCart, exchangeRate])
 
   /** Build a normalized image list for POS product lightbox (gallery + fallback image). */
-  const getProductGallery = useCallback((product) => {
+  const getProductGallery = useCallback((product: ProductRecord | null | undefined) => {
     const raw = product?.image_gallery
     const list = Array.isArray(raw)
       ? raw
@@ -868,14 +1166,14 @@ export default function POS() {
   }, [])
 
   /** Resolve uploads paths so the lightbox can render both local and sync-server URLs. */
-  const resolveProductImage = useCallback((src) => {
+  const resolveProductImage = useCallback((src: unknown) => {
     const raw = String(src || '').trim()
     if (!raw) return ''
     return resolvePublicAssetUrl(raw)
   }, [])
 
   /** Open shared image lightbox from POS product cards/detail sheet. */
-  const openImageLightbox = useCallback((product, startIndex = 0) => {
+  const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {
     const images = getProductGallery(product).map(resolveProductImage).filter(Boolean)
     if (!images.length) return
     const safeIndex = Math.max(0, Math.min(startIndex, images.length - 1))
@@ -887,17 +1185,17 @@ export default function POS() {
   }, [getProductGallery, resolveProductImage, t])
 
   /** Primary image used by cards/sheets, with gallery-first fallback. */
-  const getPrimaryProductImage = useCallback((product) => {
+  const getPrimaryProductImage = useCallback((product: ProductRecord) => {
     return getProductGallery(product)[0] || product?.image_path || ''
   }, [getProductGallery])
 
 // Cart mutations
-  function addToCart(product, priceMode = 'selling') {
+  function addToCart(product: ProductRecord, priceMode = 'selling') {
     const assignedBranchId = branchFilter !== 'all'
       ? parseInt(branchFilter, 10)
       : pickBestBranchId(product)
     const priceValues = resolveCartPriceValues(product, priceMode, exchangeRate, {
-      usdToKhr: CURRENCY.usdToKhr,
+      usdToKhr: (value: unknown, rate: unknown) => CURRENCY.usdToKhr(Number(value || 0), Number(rate || 0)),
     })
     const existingIndex = findMatchingCartLineIndex(active.cart, {
       productId: product?.id,
@@ -905,7 +1203,7 @@ export default function POS() {
       branchId: assignedBranchId,
     })
     const existing = existingIndex >= 0 ? active.cart[existingIndex] : null
-    let newCart
+    let newCart: CartLineRecord[]
     if (existing) {
       const stock = getDisplayStock(product, existing)
       if (existing.quantity >= stock) { notify(t('not_enough_stock'), 'error'); return }
@@ -924,14 +1222,14 @@ export default function POS() {
         quantity: 1,
         ...priceValues,
         branch_id: assignedBranchId || null,
-      }]
+      } as CartLineRecord]
     }
     patchActive({ cart: newCart })
     setSearch('')
     searchRef.current?.focus()
   }
 
-  const updateQty = (cartLineId, qty) => {
+  const updateQty = (cartLineId: string | number, qty: number) => {
     if (qty <= 0) { patchActive({ cart: active.cart.filter((item) => getCartLineId(item) !== cartLineId) }); return }
     const cartItem = active.cart.find((item) => getCartLineId(item) === cartLineId)
     const product = productsById.get(Number(cartItem?.id))
@@ -939,7 +1237,7 @@ export default function POS() {
     patchActive({ cart: active.cart.map((item) => getCartLineId(item) === cartLineId ? { ...item, quantity: qty } : item) })
   }
 
-  const updatePrice = (cartLineId, field, rawValue) => {
+  const updatePrice = (cartLineId: string | number, field: 'usd' | 'khr', rawValue: string) => {
     const num = normalizePriceValue(rawValue, 0)
     patchActive({
       cart: active.cart.map((item) => {
@@ -963,7 +1261,7 @@ export default function POS() {
     })
   }
 
-  const updateItemBranch = (cartLineId, branchId) => {
+  const updateItemBranch = (cartLineId: string | number, branchId: string) => {
     const nextBranchId = branchId ? parseInt(branchId, 10) : null
     const item = active.cart.find((entry) => getCartLineId(entry) === cartLineId)
     const product = productsById.get(Number(item?.id))
@@ -1012,9 +1310,9 @@ export default function POS() {
   const changeUsd    = totalPaid - totalUsd
   const changeKhr    = changeUsd * exchangeRate
 
-  const handleDiscountUsd = (v) => patchActive({ discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
-  const handleDiscountKhr = (v) => patchActive({ discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
-  const handleMembershipUnits = (value) => {
+  const handleDiscountUsd = (v: string) => patchActive({ discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
+  const handleDiscountKhr = (v: string) => patchActive({ discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
+  const handleMembershipUnits = (value: string) => {
     const rawUnits = Math.max(0, parseInt(value || '0', 10) || 0)
     const units = Math.min(rawUnits, maxMembershipUnits)
     patchActive({
@@ -1082,8 +1380,8 @@ export default function POS() {
 
     const device = getClientDeviceInfo()
     const saleData = {
-      cashier_id:   user.id,
-      cashier_name: user.name,
+      cashier_id:   user?.id || null,
+      cashier_name: user?.name || '',
       customer_name:    active.customer.name    || null,
       customer_id:      active.customer.id      || null,
       customer_membership_number: active.customer.membership_number || null,
@@ -1139,15 +1437,16 @@ export default function POS() {
     }
 
     try {
+      const api = getPosApi()
       const result = await withLoaderTimeout(
-        () => window.api.createSale(saleData),
+        () => api.createSale?.(saleData) || missingPosApiMethod('createSale'),
         'Create POS sale',
         POS_CHECKOUT_TIMEOUT_MS,
       )
       if (result.success) {
         const receiptNumber = result.receiptNumber || result.receipt_number || `RCP-${Date.now()}`
         setReceiptQueue(q => [...q, { ...saleData, id: result.id, receiptNumber, created_at: new Date().toISOString() }])
-        closeOrder(resolvedActiveId)
+        if (resolvedActiveId) closeOrder(resolvedActiveId)
         void loadCatalogData('POS catalog after checkout')
         // Trigger local inventory refresh immediately
         window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
@@ -1156,7 +1455,7 @@ export default function POS() {
         notify(result.error || t('error'), 'error')
       }
     } catch (e) {
-      notify(e?.message || t('error'), 'error')
+      notify(getErrorMessage(e, t('error') || 'Error'), 'error')
     } finally {
       checkoutInFlightRef.current = false
       setLoading(false)
@@ -1197,7 +1496,7 @@ export default function POS() {
               />
               <div className="flex w-full items-center gap-2 sm:w-auto">
                 <div className="flex flex-1 rounded-lg border border-gray-300 dark:border-zinc-600 overflow-hidden sm:flex-none">
-                  {['AND','OR'].map(m => (
+                  {(['AND', 'OR'] as const).map(m => (
                     <button key={m} onClick={() => setSearchMode(m)}
                       className={`flex-1 px-2 py-1.5 text-xs font-bold transition-colors sm:flex-none ${searchMode===m ? 'bg-blue-600 text-white' : 'bg-white dark:bg-zinc-800 text-gray-500 dark:text-gray-400'}`}>
                       {m}
@@ -1224,7 +1523,7 @@ export default function POS() {
                           : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:border-blue-400'
                       }`}
                     >
-                      {activeFilters > 0 ? (t('filters_active')||`Filters (${activeFilters})`).replace('{n}', activeFilters) : (t('filters')||'Filters')}
+                      {activeFilters > 0 ? (t('filters_active') || `Filters (${activeFilters})`).replace('{n}', String(activeFilters)) : (t('filters') || 'Filters')}
                     </button>
                   )
                 })()}
@@ -1306,14 +1605,14 @@ export default function POS() {
               {pagedProductCards.map(p => {
                 const variants = getVariantChoices(p)
                 const groupProduct = hasVariantChoices(p)
-                const groupMeta = p.__groupMeta || null
+                const groupMeta: ProductGroupMeta | null = p.__groupMeta || null
                 const choiceLabel = groupMeta?.groupKind === 'variant'
                   ? posCopy('variants', 'variants')
                   : posCopy('options', 'options')
                 const groupName = t('groups') || 'Groups'
                 const stock   = getDisplayStock(p)
-                const variantInStock = variants.some((variant) => getDisplayStock(variant) > (variant.out_of_stock_threshold || 0))
-                const inStock = groupProduct ? variantInStock : stock > (p.out_of_stock_threshold || 0)
+                const variantInStock = variants.some((variant) => getDisplayStock(variant) > asNumber(variant.out_of_stock_threshold))
+                const inStock = groupProduct ? variantInStock : stock > asNumber(p.out_of_stock_threshold)
                 const promotion = calculateProductDiscount(p, exchangeRate)
                 return (
                   <div
@@ -1357,8 +1656,8 @@ export default function POS() {
                         ? `${fmtUSD(groupMeta?.minSellingPriceUsd || 0)} - ${fmtUSD(groupMeta?.maxSellingPriceUsd || 0)}`
                         : fmtUSD(p.selling_price_usd)}
                     </p>
-                    {p.selling_price_khr > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</p> : null}
-                    {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+                    {asNumber(p.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(p.selling_price_khr))}</p> : null}
+                    {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
                       <p {...getKhmerTextProps(t('special_price') || 'Special', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
                     ) : null}
                     {promotion.active ? (
@@ -1366,7 +1665,7 @@ export default function POS() {
                         {p.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
                       </p>
                     ) : null}
-                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 ${stock <= (p.low_stock_threshold || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`)}>
+                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 ${stock <= (asNumber(p.low_stock_threshold) || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`)}>
                       {groupProduct ? `${variants.length} ${choiceLabel}` : `${stock} ${p.unit}`}
                     </p>
                     {groupProduct && groupMeta?.stockTotal ? (
@@ -1433,7 +1732,7 @@ export default function POS() {
                       onBranchChange={updateItemBranch}
                       onRemove={id => patchActive({ cart: active.cart.filter(i => getCartLineId(i) !== id) })}
                       onShowDetails={() => { const p = productsById.get(Number(item.id)); if (p) setDetailProduct(p) }}
-                      fmtUSD={fmtUSD} fmtKHR={fmtKHR} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate}
+                      fmtUSD={fmtUSD} fmtKHR={fmtKHR} usdSymbol={usdSymbol} khrSymbol={khrSymbol}
                     />
                   ))}
                 </>
@@ -1668,7 +1967,7 @@ export default function POS() {
               <div>
                 <div className="text-xs text-gray-500 font-medium">{t('payment_method')}</div>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {((() => { try { const p=JSON.parse(settings.pos_payment_methods||'[]'); return p.length?p:['Cash','Card','ABA Bank','Wing','KHQR','Pi Pay','Transfer'] } catch { return ['Cash','Card','ABA Bank','Wing','KHQR','Pi Pay','Transfer'] } })()).map(m => (
+                  {posPaymentMethods.map((m) => (
                     <button key={m} onClick={() => patchActive({ paymentMethod: m, customPayment: false })}
                       className={`px-2 py-1 rounded-lg text-xs font-medium ${active.paymentMethod === m && !active.customPayment ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>{m}</button>
                   ))}
@@ -1725,11 +2024,11 @@ export default function POS() {
             </div>
             <div className="p-4 space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
-              {[
+              {([
                 ['completed',         getStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
                 ['awaiting_payment',  getStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Order placed, payment pending - stock held'],
                 ['awaiting_delivery', getStatusLabel('awaiting_delivery', t), t('pos_status_awaiting_delivery_desc')||'Paid, not yet delivered - stock deducted'],
-              ].map(([status, label, desc]) => (
+              ] as const).map(([status, label, desc]) => (
                 <button key={status}
                   onClick={() => { closeStatusPicker(); void handleCheckout(status) }}
                   disabled={loading}
@@ -1773,7 +2072,7 @@ export default function POS() {
         const stock = getDisplayStock(p)
         const variants = getVariantChoices(p)
         const groupProduct = hasVariantChoices(p)
-        const groupMeta = p.__groupMeta || null
+        const groupMeta: ProductGroupMeta | null = p.__groupMeta || null
         const promotion = calculateProductDiscount(p, exchangeRate)
         const choiceLabel = groupMeta?.groupKind === 'variant'
           ? posCopy('Variants', 'Variants')
@@ -1798,30 +2097,30 @@ export default function POS() {
                 </button>
               </div>
               <div className="flex-1 overflow-auto p-4 space-y-2 text-sm">
-                {[
+                {([
                   [t('label_category')||'Category',    p.category],
                   [t('label_supplier')||'Supplier',    p.supplier],
                   [t('label_unit')||'Unit',            p.unit],
                   [t('label_barcode')||'Barcode',      p.barcode],
                   [t('label_description')||'Description', p.description],
-                ].map(([label, val]) => val ? (
-                  <div key={label} className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{label}</span><span className="text-sm text-gray-800 dark:text-gray-200">{val}</span></div>
+                ] as Array<[string, string | number | undefined]>).map(([label, val]) => val ? (
+                  <div key={label} className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{label}</span><span className="text-sm text-gray-800 dark:text-gray-200">{String(val)}</span></div>
                 ) : null)}
-                <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_selling_price')||'Price'}</span><div><span className="font-bold text-blue-600">{fmtUSD(p.selling_price_usd)}</span>{p.selling_price_khr > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(p.selling_price_khr)}</span>}</div></div>
-                {((p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0) ? (
-                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price')||'Special'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</span>{(p.special_price_khr || p.selling_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(p.special_price_khr || p.selling_price_khr || 0)}</span>}</div></div>
+                <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_selling_price')||'Price'}</span><div><span className="font-bold text-blue-600">{fmtUSD(asNumber(p.selling_price_usd))}</span>{asNumber(p.selling_price_khr) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(p.selling_price_khr))}</span>}</div></div>
+                {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
+                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price')||'Special'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(asNumber(p.special_price_usd || p.selling_price_usd || 0))}</span>{asNumber(p.special_price_khr || p.selling_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(p.special_price_khr || p.selling_price_khr || 0))}</span>}</div></div>
                 ) : null}
                 {promotion.active ? (
                   <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'Discounts')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span>}</div></div>
                 ) : null}
-                <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock')||'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (p.low_stock_threshold || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{stock} {p.unit}</span></div>
+                <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock')||'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{stock} {p.unit}</span></div>
                 {groupProduct ? (
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{choiceLabel}</div>
                     <div className="space-y-2">
                       {variants.map((variant) => {
                         const variantStock = getDisplayStock(variant)
-                        const variantInStockNow = variantStock > (variant.out_of_stock_threshold || 0)
+                        const variantInStockNow = variantStock > asNumber(variant.out_of_stock_threshold)
                         const variantPromotion = calculateProductDiscount(variant, exchangeRate)
                         return (
                           <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
@@ -1834,7 +2133,7 @@ export default function POS() {
                               <button className="btn-primary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'selling'); setDetailProduct(null) }}>
                                 {fmtUSD(variant.selling_price_usd || 0)}
                               </button>
-                              {(variant.special_price_usd || 0) > 0 || (variant.special_price_khr || 0) > 0 ? (
+                              {asNumber(variant.special_price_usd) > 0 || asNumber(variant.special_price_khr) > 0 ? (
                                 <button className="btn-secondary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'special'); setDetailProduct(null) }}>
                                   {posCopy('Special', 'Special')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
                                 </button>
@@ -1855,17 +2154,17 @@ export default function POS() {
               {!groupProduct ? (
                 <div className="border-t border-gray-200 p-4 dark:border-gray-700">
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <button className="btn-primary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'selling'); setDetailProduct(null) }}>
-                      {stock <= (p.out_of_stock_threshold || 0) ? t('out_of_stock') : `${posCopy('Regular', 'Regular')} ${fmtUSD(p.selling_price_usd || 0)}`}
+                    <button className="btn-primary flex-1" disabled={stock <= asNumber(p.out_of_stock_threshold)} onClick={() => { addToCart(p, 'selling'); setDetailProduct(null) }}>
+                      {stock <= asNumber(p.out_of_stock_threshold) ? t('out_of_stock') : `${posCopy('Regular', 'Regular')} ${fmtUSD(asNumber(p.selling_price_usd || 0))}`}
                     </button>
                     {promotion.active ? (
-                      <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'promotion'); setDetailProduct(null) }}>
+                      <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={stock <= asNumber(p.out_of_stock_threshold)} onClick={() => { addToCart(p, 'promotion'); setDetailProduct(null) }}>
                         {p.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
                       </button>
                     ) : null}
-                    {((p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0) ? (
-                      <button className="btn-secondary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'special'); setDetailProduct(null) }}>
-                        {posCopy('Special', 'Special')} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
+                    {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
+                      <button className="btn-secondary flex-1" disabled={stock <= asNumber(p.out_of_stock_threshold)} onClick={() => { addToCart(p, 'special'); setDetailProduct(null) }}>
+                        {posCopy('Special', 'Special')} {fmtUSD(asNumber(p.special_price_usd || p.selling_price_usd || 0))}
                       </button>
                     ) : null}
                   </div>

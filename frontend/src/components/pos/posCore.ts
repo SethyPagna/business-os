@@ -3,7 +3,7 @@ import { buildProductGroups } from '../../utils/productGrouping.ts'
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 
-type ProductRecord = ProductGroupRecord & {
+export type ProductRecord = ProductGroupRecord & {
   id?: unknown
   parent_id?: unknown
   special_price_usd?: unknown
@@ -27,8 +27,8 @@ type CartPriceValues = {
   applied_price_usd: number
   applied_price_khr: number
   price_mode: 'selling' | 'special' | 'promotion'
-  product_discount_type?: unknown
-  product_discount_label?: unknown
+  product_discount_type?: string
+  product_discount_label?: string
   product_discount_usd?: number
   product_discount_khr?: number
 }
@@ -127,8 +127,8 @@ export function resolveCartPriceValues(
         applied_price_usd: promotion.applied_price_usd,
         applied_price_khr: promotion.applied_price_khr,
         price_mode: 'promotion',
-        product_discount_type: product?.discount_type || 'percent',
-        product_discount_label: product?.discount_label || '',
+        product_discount_type: String(product?.discount_type || 'percent'),
+        product_discount_label: String(product?.discount_label || ''),
         product_discount_usd: promotion.discount_amount_usd,
         product_discount_khr: promotion.discount_amount_khr,
       }

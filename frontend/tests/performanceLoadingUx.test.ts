@@ -22,7 +22,7 @@ const customerFormModal = fs.readFileSync(new URL('../src/components/contacts/Cu
 const customerMembershipNumber = fs.readFileSync(new URL('../src/components/contacts/customerMembershipNumber.ts', import.meta.url), 'utf8')
 const suppliers = fs.readFileSync(new URL('../src/components/contacts/SuppliersTab.tsx', import.meta.url), 'utf8')
 const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab.tsx', import.meta.url), 'utf8')
-const pos = fs.readFileSync(new URL('../src/components/pos/POS.jsx', import.meta.url), 'utf8')
+const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
 const posFilterPanel = fs.readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
 const sales = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
 const salesExportModal = fs.readFileSync(new URL('../src/components/sales/ExportModal.tsx', import.meta.url), 'utf8')
@@ -1766,7 +1766,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*window\.api\.searchProducts\(productQuery\),[\s\S]*window\.api\.getCategories\(\),[\s\S]*window\.api\.getBranches\(\),[\s\S]*window\.api\.getProductFilters\(\{\}\),[\s\S]*\]\),\s*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*(?:window\.api|api)\.searchProducts(?:\?\.)?\(productQuery\)[\s\S]*(?:window\.api|api)\.getCategories(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getBranches(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getProductFilters(?:\?\.)?\(\{\}\)[\s\S]*\]\),\s*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
   'POS catalog reads should timeout the batched product, category, branch, and filter requests',
 )
 assert.match(
@@ -1796,22 +1796,22 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.lookupPortalMembership\(membershipNumber\),\s*label,\s*POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.lookupPortalMembership(?:\?\.)?\(membershipNumber\)[\s\S]*label,\s*POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
   'POS membership lookup should timeout slow membership reads',
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.createCustomer\(newCustomerForm\),\s*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createCustomer(?:\?\.)?\(newCustomerForm\)[\s\S]*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/,
   'POS quick-add customer writes should timeout slow creates',
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.createDeliveryContact\(payload\),\s*'Create POS delivery contact',\s*POS_DELIVERY_CREATE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createDeliveryContact(?:\?\.)?\(payload\)[\s\S]*'Create POS delivery contact',\s*POS_DELIVERY_CREATE_TIMEOUT_MS,\s*\)/,
   'POS quick-add delivery writes should timeout slow creates',
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.createSale\(saleData\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createSale(?:\?\.)?\(saleData\)[\s\S]*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
   'POS checkout should timeout slow sale creation',
 )
 assert.match(
@@ -1821,7 +1821,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\(\) => window\.api\.getCustomers\(\), label, POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.getCustomers(?:\?\.)?\(\)[\s\S]*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
   'POS customer option reads should timeout slow customer requests',
 )
 assert.doesNotMatch(
@@ -1831,7 +1831,7 @@ assert.doesNotMatch(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\(\) => window\.api\.getDeliveryContacts\(\), label, POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.getDeliveryContacts(?:\?\.)?\(\)[\s\S]*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
   'POS delivery option reads should timeout slow delivery contact requests',
 )
 assert.match(

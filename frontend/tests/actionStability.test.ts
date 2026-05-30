@@ -31,14 +31,14 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 }
 
 await runTest('POS checkout keeps client, API, and backend duplicate guards', () => {
-  const pos = readFrontend('src/components/pos/POS.jsx')
+  const pos = readFrontend('src/components/pos/POS.tsx')
   const methods = readFrontend('src/api/methods.js')
   const salesRoute = readRepo('backend/src/routes/sales.js')
 
   assert.match(pos, /if \(loading \|\| checkoutInFlightRef\.current\) return/)
   assert.match(pos, /checkoutInFlightRef\.current = true[\s\S]*setLoading\(true\)/)
   assert.match(pos, /const POS_CHECKOUT_TIMEOUT_MS = 20000/)
-  assert.match(pos, /withLoaderTimeout\(\s*\(\) => window\.api\.createSale\(saleData\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/)
+  assert.match(pos, /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createSale(?:\?\.)?\(saleData\)[\s\S]*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/)
   assert.match(pos, /finally \{[\s\S]*checkoutInFlightRef\.current = false[\s\S]*setLoading\(false\)/)
 
   assert.match(methods, /export async function createSale\(d\) \{[\s\S]*ensureClientRequestId\(\{ \.\.\.getDeviceInfo\(\), \.\.\.d \}, 'sale'\)/)
@@ -52,17 +52,17 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
 })
 
 await runTest('POS quick-add customer and delivery writes are bounded', () => {
-  const pos = readFrontend('src/components/pos/POS.jsx')
+  const pos = readFrontend('src/components/pos/POS.tsx')
 
   assert.match(pos, /const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000/)
   assert.match(pos, /const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000/)
   assert.match(pos, /if \(savingCustomerRef\.current\) return/)
   assert.match(pos, /savingCustomerRef\.current = true[\s\S]*setSavingCustomer\(true\)/)
-  assert.match(pos, /withLoaderTimeout\(\s*\(\) => window\.api\.createCustomer\(newCustomerForm\),\s*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/)
+  assert.match(pos, /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createCustomer(?:\?\.)?\(newCustomerForm\)[\s\S]*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/)
   assert.match(pos, /finally \{[\s\S]*savingCustomerRef\.current = false[\s\S]*setSavingCustomer\(false\)/)
   assert.match(pos, /if \(savingDeliveryRef\.current\) return/)
   assert.match(pos, /savingDeliveryRef\.current = true[\s\S]*setSavingDelivery\(true\)/)
-  assert.match(pos, /withLoaderTimeout\(\s*\(\) => window\.api\.createDeliveryContact\(payload\),\s*'Create POS delivery contact',\s*POS_DELIVERY_CREATE_TIMEOUT_MS,\s*\)/)
+  assert.match(pos, /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createDeliveryContact(?:\?\.)?\(payload\)[\s\S]*'Create POS delivery contact',\s*POS_DELIVERY_CREATE_TIMEOUT_MS,\s*\)/)
   assert.match(pos, /finally \{[\s\S]*savingDeliveryRef\.current = false[\s\S]*setSavingDelivery\(false\)/)
 })
 
