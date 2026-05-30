@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 607 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 608 in this file.
 
 ## Goal
 
@@ -2986,7 +2986,7 @@ Decision rule:
     This was a backend route cleanup only; no folder move, schema migration,
     or runtime conversion was needed.
 367. Tighten portal AI candidate and provider loops. Done:
-    `backend/src/services/portalAi.js` now uses direct-loop helpers for token
+    `backend/src/services/portalAi.ts` now uses direct-loop helpers for token
     parsing, visitor timestamp pruning, candidate filtering/scoring, assistant
     recommendation normalization, provider usage summaries, and provider
     failover selection. This was a backend service cleanup only; no folder
@@ -5178,6 +5178,18 @@ Decision rule:
     remain blocked on the future compile/staging lane. The expected generated
     language audit now reports `JavaScript: 15`, `TypeScript: 296`, and
     `React TSX: 107` across the active scan roots.
+608. Convert portal AI service to a package-safe TypeScript path.
+    Done: `backend/src/services/portalAi.ts` keeps provider runtime state,
+    visitor activity throttling, product scoring/candidate selection, prompt
+    assembly, assistant JSON normalization, provider failover/cooldown, usage
+    summaries, and portal response policy on the existing CommonJS service
+    style. The portal route now points at the explicit `.ts` service path.
+    Focused service load, route-contract, backend utility, schema audit,
+    stale-path, and Linux packaging proof passed. Packaging still warns for
+    direct `.ts` entries in `pkg.scripts`, so broader backend conversions
+    remain blocked on the future compile/staging lane. The expected generated
+    language audit now reports `JavaScript: 14`, `TypeScript: 297`, and `React
+    TSX: 107` across the active scan roots.
 
 ## Safety Gates
 

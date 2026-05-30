@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 607.
+- Latest completed implementation move in this roadmap: Move 608.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4233,7 +4233,7 @@ Move 376 status:
 
 Move 377 status:
 - Move 377 tightens the portal AI request path in
-  `backend/src/services/portalAi.js`. Token parsing, visitor timestamp
+  `backend/src/services/portalAi.ts`. Token parsing, visitor timestamp
   pruning, product preference filtering, product scoring/candidate projection,
   prompt candidate-line assembly, assistant recommendation normalization,
   provider ordering, provider usage summaries, max-input calculation, and
@@ -6878,4 +6878,18 @@ Move 607 status:
   direct `.ts` scripts, so broader backend conversions still wait for a
   compile/staging package lane. The expected generated language audit now
   reports `JavaScript: 15`, `TypeScript: 296`, and `React TSX: 107` across the
+  active scan roots.
+
+Move 608 status:
+- Move 608 converts `backend/src/services/portalAi.ts` to a package-safe
+  TypeScript path. Provider runtime state, visitor activity throttling,
+  product preference filtering, scoring/candidate projection, prompt assembly,
+  assistant JSON normalization, provider failover/cooldown, usage summaries,
+  and portal response policy remain unchanged on the existing CommonJS service
+  style. The portal route now points at the explicit `.ts` service path.
+  Focused service load, route-contract, backend utility, schema audit,
+  stale-path, and Linux packaging proof passed. `pkg` continues to warn for
+  direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The expected generated language audit now
+  reports `JavaScript: 14`, `TypeScript: 297`, and `React TSX: 107` across the
   active scan roots.
