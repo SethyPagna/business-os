@@ -6,6 +6,29 @@ const path = require('path')
 const UPLOADS_FOLDER_NAME = 'uploads'
 const BACKUPS_FOLDER_NAME = 'backups'
 
+/**
+ * @typedef {(absolutePath: string) => void} FileVisitor
+ *
+ * @typedef {{
+ *   root: string,
+ *   exists: boolean,
+ *   hasData: boolean,
+ *   uploadCount: number,
+ *   uploadBytes: number,
+ *   backupCount: number,
+ *   backupBytes: number,
+ *   totalFileCount: number,
+ *   totalBytes: number,
+ *   lastModifiedAt: string | null,
+ * }} DataRootSummary
+ *
+ * @typedef {{
+ *   sourceRoot?: string,
+ *   targetRoot?: string,
+ *   checkpointDatabase?: () => void,
+ * }} RelocateDataRootOptions
+ */
+
 function normalizePathForCompare(value) {
   return path.resolve(String(value || ''))
     .replace(/[\\/]+$/, '')
@@ -28,6 +51,10 @@ function ensureDataRootLayout(root) {
   }
 }
 
+/**
+ * @param {string} root
+ * @param {FileVisitor} visitor
+ */
 function walkFiles(root, visitor) {
   if (!fs.existsSync(root)) return
   const stack = [path.resolve(root)]
@@ -46,6 +73,10 @@ function walkFiles(root, visitor) {
   }
 }
 
+/**
+ * @param {string} root
+ * @returns {DataRootSummary}
+ */
 function summarizeDataRoot(root) {
   const resolvedRoot = path.resolve(root)
   const uploadsPath = path.join(resolvedRoot, UPLOADS_FOLDER_NAME)
@@ -143,6 +174,9 @@ function buildArchivedTargetPath(targetRoot) {
   throw new Error('Failed to reserve an archive path for the existing Business OS data folder.')
 }
 
+/**
+ * @param {RelocateDataRootOptions} [options]
+ */
 function relocateDataRoot({ sourceRoot, targetRoot, checkpointDatabase } = {}) {
   const source = path.resolve(String(sourceRoot || ''))
   const target = path.resolve(String(targetRoot || ''))

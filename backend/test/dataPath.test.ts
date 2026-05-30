@@ -9,7 +9,7 @@ const {
   ensureDataRootLayout,
   relocateDataRoot,
   summarizeDataRoot,
-} = require('../src/dataPath')
+} = require('../src/dataPath/index.ts')
 
 let failed = 0
 

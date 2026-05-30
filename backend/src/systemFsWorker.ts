@@ -10,7 +10,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const { copyDirectoryContents, relocateDataRoot, summarizeDataRoot, isSamePath, isSubPath } = require('./dataPath')
+const { copyDirectoryContents, relocateDataRoot, summarizeDataRoot, isSamePath, isSubPath } = require('./dataPath/index.ts')
 
 /**
  * @typedef {{ sourceRoot?: unknown, destinationDir?: unknown, dataFolderName?: unknown, backupVersion?: unknown, targetRoot?: unknown }} SystemFsPayload

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 574.
+- Latest completed implementation move in this roadmap: Move 575.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4752,7 +4752,7 @@ Move 420 status:
 
 Move 421 status:
 - Move 421 tightens startup/runtime infrastructure helper loops in
-  `backend/src/config/index.js`, `backend/src/dataPath/index.js`,
+  `backend/src/config/index.js`, `backend/src/dataPath/index.ts`,
   `backend/src/organizationContext/index.js`, `backend/src/settingsSnapshot.ts`,
   and `backend/src/runtimeVersion.ts`. Env candidate filtering, runtime/data
   folder creation, organization folder creation, settings snapshot sanitizing,
@@ -6374,4 +6374,20 @@ Move 574 status:
   so larger backend route/service conversion still waits for a compile/staging
   package lane. The current source extension count is `.js: 59`, `.jsx: 0`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 304`, `.tsx: 107` outside generated/runtime
+  folders.
+
+Move 575 status:
+- Move 575 converts `backend/src/dataPath/index.ts` to a package-safe
+  TypeScript path. The helper keeps path comparison, data-root layout creation,
+  file walking, summarization, copy, archive, and relocation behavior unchanged
+  while adding JSDoc contracts for file visitors, summaries, and relocation
+  options. Organization context, system routes, Google Drive sync, the system
+  filesystem worker, and the focused data-path test now import the explicit
+  `dataPath/index.ts` path so directory index resolution is not implicit.
+  Focused helper load, data-path, system-jobs, Google Drive sync versioning,
+  route-contract, and stale-path scans passed, as did the full backend utility
+  suite, schema audit, and Linux packaging proof. `pkg` continues to warn for direct `.ts` scripts,
+  so larger backend route/service conversion still waits for a compile/staging
+  package lane. The current source extension count is `.js: 58`, `.jsx: 0`,
+  `.mjs: 0`, `.cjs: 0`, `.ts: 305`, `.tsx: 107` outside generated/runtime
   folders.

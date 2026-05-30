@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 574 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 575 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 59`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 304`,
+  `.js: 58`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 305`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3284,7 +3284,7 @@ Decision rule:
     shape remain unchanged. This was a backend utility cleanup only; no folder
     move, schema migration, or language conversion was needed.
 411. Tighten startup/runtime infrastructure helper loops. Done:
-    `backend/src/config/index.js`, `backend/src/dataPath/index.js`,
+    `backend/src/config/index.js`, `backend/src/dataPath/index.ts`,
     `backend/src/organizationContext/index.js`, `backend/src/settingsSnapshot.ts`,
     and `backend/src/runtimeVersion.ts` now use direct loops for env
     candidates, folder creation, settings snapshot sanitizing, first existing
@@ -4719,6 +4719,22 @@ Decision rule:
     on the future compile/staging lane. The current source extension count is
     `.js: 59`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 304`, `.tsx: 107`
     outside generated/runtime folders.
+575. Convert backend data-path relocation helper to a package-safe TypeScript
+    path. Done: `backend/src/dataPath/index.ts` keeps path comparison,
+    data-root layout creation, file walking, summarization, copy, archive, and
+    relocation behavior unchanged while adding JSDoc contracts for file
+    visitors, summaries, and relocation options. Organization context,
+    system routes, Google Drive sync, the system filesystem worker, and the
+    focused data-path test now import the explicit `dataPath/index.ts` path so
+    directory index resolution is not implicit. Focused helper load, data-path,
+    system-jobs, Google Drive sync versioning, route-contract, and stale-path
+    scans passed, as did the full backend utility suite, schema audit, and
+    Linux packaging proof.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so larger
+    backend route/service conversions remain blocked on the future
+    compile/staging lane. The current source extension count is `.js: 58`,
+    `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 305`, `.tsx: 107` outside
+    generated/runtime folders.
 
 ## Safety Gates
 

@@ -48,7 +48,7 @@ const {
   summarizeDataRoot,
   isSamePath,
   isSubPath,
-} = require('../../dataPath')
+} = require('../../dataPath/index.ts')
 const {
   BACKUP_VERSION,
   BACKUP_TABLES,
