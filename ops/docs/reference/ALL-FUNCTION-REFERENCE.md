@@ -52,7 +52,7 @@ Code files scanned: **468**
 | 40 | `backend/src/routes/categories.js` | 2 |
 | 41 | `backend/src/routes/contacts.js` | 34 |
 | 42 | `backend/src/routes/customTables.js` | 9 |
-| 43 | `backend/src/routes/files.js` | 3 |
+| 43 | `backend/src/routes/files.ts` | 3 |
 | 44 | `backend/src/routes/importJobs.js` | 16 |
 | 45 | `backend/src/routes/inventory.js` | 32 |
 | 46 | `backend/src/routes/notifications.ts` | 27 |
@@ -1208,7 +1208,7 @@ Code files scanned: **468**
 | 8 | `ensureCustomTableRowVersioning` | function | 75 |
 | 9 | `getWritableCustomTableKeys` | function | 92 |
 
-### 3.43 `backend/src/routes/files.js`
+### 3.43 `backend/src/routes/files.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

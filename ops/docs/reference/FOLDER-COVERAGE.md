@@ -302,7 +302,7 @@ Total folders documented: **81**
 | 6 | `categories.js` | API route handler |
 | 7 | `contacts.js` | API route handler |
 | 8 | `customTables.js` | API route handler |
-| 9 | `files.js` | API route handler |
+| 9 | `files.ts` | API route handler |
 | 10 | `importJobs.js` | API route handler |
 | 11 | `inventory.js` | API route handler |
 | 12 | `notifications.ts` | API route handler |

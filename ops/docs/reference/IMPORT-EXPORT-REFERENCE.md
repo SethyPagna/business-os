@@ -52,7 +52,7 @@ Code files documented: **468**
 | 40 | `backend/src/routes/categories.js` | 6 | 1 | 5 | 1 |
 | 41 | `backend/src/routes/contacts.js` | 6 | 1 | 5 | 1 |
 | 42 | `backend/src/routes/customTables.js` | 6 | 1 | 5 | 1 |
-| 43 | `backend/src/routes/files.js` | 6 | 1 | 5 | 1 |
+| 43 | `backend/src/routes/files.ts` | 6 | 1 | 5 | 2 |
 | 44 | `backend/src/routes/importJobs.js` | 9 | 1 | 5 | 1 |
 | 45 | `backend/src/routes/inventory.js` | 12 | 1 | 11 | 2 |
 | 46 | `backend/src/routes/notifications.ts` | 5 | 1 | 4 | 3 |
@@ -136,7 +136,7 @@ Code files documented: **468**
 | 124 | `backend/test/productImportPolicies.test.ts` | 2 | 0 | 1 | 0 |
 | 125 | `backend/test/productSearchPagination.test.ts` | 3 | 0 | 0 | 0 |
 | 126 | `backend/test/rfidRoutes.test.ts` | 3 | 0 | 0 | 0 |
-| 127 | `backend/test/routeContracts.test.ts` | 14 | 0 | 9 | 0 |
+| 127 | `backend/test/routeContracts.test.ts` | 15 | 0 | 10 | 0 |
 | 128 | `backend/test/runtimeCache.test.ts` | 5 | 0 | 1 | 0 |
 | 129 | `backend/test/runtimeVersion.test.ts` | 5 | 0 | 1 | 0 |
 | 130 | `backend/test/schemaMetadata.test.ts` | 2 | 0 | 1 | 0 |
@@ -504,7 +504,7 @@ Code files documented: **468**
   - `./src/routes/categories`
   - `./src/routes/contacts`
   - `./src/routes/customTables`
-  - `./src/routes/files`
+  - `./src/routes/files.ts`
   - `./src/routes/importJobs`
   - `./src/routes/inventory`
   - `./src/routes/notifications.ts`
@@ -552,7 +552,7 @@ Code files documented: **468**
   - `backend/src/routes/categories.js`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.js`
-  - `backend/src/routes/files.js`
+  - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/notifications.ts`
@@ -706,7 +706,7 @@ Code files documented: **468**
   - `backend/src/routes/categories.js`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.js`
-  - `backend/src/routes/files.js`
+  - `backend/src/routes/files.ts`
   - `backend/src/routes/products.js`
   - `backend/src/routes/returns.js`
   - `backend/src/routes/sales.js`
@@ -840,7 +840,7 @@ Code files documented: **468**
 - Referenced by (15)
   - `backend/server.js`
   - `backend/src/middleware.js`
-  - `backend/src/routes/files.js`
+  - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
@@ -877,7 +877,7 @@ Code files documented: **468**
   - `backend/src/routes/categories.js`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.js`
-  - `backend/src/routes/files.js`
+  - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/portal.js`
@@ -987,7 +987,7 @@ Code files documented: **468**
   - `backend/src/routes/categories.js`
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.js`
-  - `backend/src/routes/files.js`
+  - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/notifications.ts`
@@ -1351,7 +1351,7 @@ Code files documented: **468**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.43 `backend/src/routes/files.js`
+### 3.43 `backend/src/routes/files.ts`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -1367,8 +1367,9 @@ Code files documented: **468**
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
   - `backend/src/services/mediaQueue.js`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.ts`
 
 ### 3.44 `backend/src/routes/importJobs.js`
 
@@ -2032,7 +2033,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/fileAssets.js`
 - Referenced by (5)
-  - `backend/src/routes/files.js`
+  - `backend/src/routes/files.ts`
   - `backend/src/routes/runtime.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/workers/mediaWorker.ts`
@@ -2731,9 +2732,10 @@ Code files documented: **468**
 ### 3.127 `backend/test/routeContracts.test.ts`
 
 - Declared exports: none detected
-- Imports (14)
+- Imports (15)
   - `../src/routes/auth`
   - `../src/routes/catalog.ts`
+  - `../src/routes/files.ts`
   - `../src/routes/inventory`
   - `../src/routes/notifications.ts`
   - `../src/routes/organizations.ts`
@@ -2746,9 +2748,10 @@ Code files documented: **468**
   - `node:fs`
   - `node:path`
   - `path`
-- Internal dependencies (9)
+- Internal dependencies (10)
   - `backend/src/routes/auth.js`
   - `backend/src/routes/catalog.ts`
+  - `backend/src/routes/files.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`

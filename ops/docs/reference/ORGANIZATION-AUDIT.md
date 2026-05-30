@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T17:51:43.149Z
+Generated: 2026-05-30T18:01:09.466Z
 
 ## Summary
 
@@ -14,10 +14,10 @@ Generated: 2026-05-30T17:51:43.149Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 311 |
+| .ts | 312 |
 | .tsx | 107 |
 | .md | 44 |
-| .js | 41 |
+| .js | 40 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -64,10 +64,10 @@ Generated: 2026-05-30T17:51:43.149Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7972 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7975 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6486 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4837 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6503 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4854 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -90,7 +90,7 @@ Generated: 2026-05-30T17:51:43.149Z
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1750 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
-| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1716 | ops/docs/reference |
+| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1699 | ops/docs/reference |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | ops/scripts/architecture/language-runtime-audit.ts | 1596 | ops/scripts/architecture |
 | backend/src/routes/sales.js | 1573 | backend/routes |
@@ -118,9 +118,9 @@ Generated: 2026-05-30T17:51:43.149Z
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
 | backend/src/routes/portal.js | 12 | backend/routes |
+| backend/test/routeContracts.test.ts | 12 | backend/test/routeContracts.test.ts |
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
 | backend/src/routes/inventory.js | 11 | backend/routes |
-| backend/test/routeContracts.test.ts | 11 | backend/test/routeContracts.test.ts |
 | frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |
 | frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |
 | frontend/src/components/contacts/Contacts.tsx | 10 | frontend/components/contacts |
