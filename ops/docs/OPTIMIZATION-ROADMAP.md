@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 588.
+- Latest completed implementation move in this roadmap: Move 589.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4911,7 +4911,7 @@ Move 437 status:
 
 Move 438 status:
 - Move 438 tightens upload reference cleanup in
-  `backend/src/uploadReferenceCleanup.js`. Settings, product image, product,
+  `backend/src/uploadReferenceCleanup.ts`. Settings, product image, product,
   user avatar, file asset, and customer-share screenshot repair passes now use
   direct row loops instead of callback iteration. Sanitization rules,
   gallery-primary fallback behavior, delete-vs-update decisions, summary
@@ -6588,3 +6588,17 @@ Move 588 status:
   compile/staging package lane. The generated language audit now reports
   `JavaScript: 34`, `TypeScript: 277`, and `React TSX: 107` across the active
   scan roots.
+
+Move 589 status:
+- Move 589 converts `backend/src/uploadReferenceCleanup.ts` to a package-safe
+  TypeScript path. Sync and async settings, product-image,
+  product-primary-image, user-avatar, file-asset, and portal-submission media
+  reference repair behavior remain unchanged on the existing CommonJS helper
+  style. File asset warmup/reconcile callers and focused
+  object-storage/source-contract tests now point at the explicit `.ts` helper.
+  Focused upload-reference repair, portal inventory regression, upload helper
+  load, backend utility, schema audit, stale-path, and Linux packaging proof
+  passed. `pkg` continues to warn for direct `.ts` scripts, so broader backend
+  conversions still wait for a compile/staging package lane. The generated
+  language audit now reports `JavaScript: 33`, `TypeScript: 278`, and
+  `React TSX: 107` across the active scan roots.

@@ -23,7 +23,7 @@ function runTest(name, fn) {
 function withObjectStoreStub(stubbedExports, callback) {
   const objectStorePath = require.resolve('../src/objectStore')
   const settingsSnapshotPath = require.resolve('../src/settingsSnapshot.ts')
-  const uploadCleanupPath = require.resolve('../src/uploadReferenceCleanup')
+  const uploadCleanupPath = require.resolve('../src/uploadReferenceCleanup.ts')
   const objectStore = require(objectStorePath)
   const originals = {}
 
@@ -156,7 +156,7 @@ runTest('async upload reference repair clears missing object-storage settings an
     objectExists: async (key) => key === 'uploads/keep.png',
   }, async () => {
     const db = createFakeCleanupDb()
-    const { repairMissingUploadReferencesAsync } = require('../src/uploadReferenceCleanup')
+    const { repairMissingUploadReferencesAsync } = require('../src/uploadReferenceCleanup.ts')
     const summary = await repairMissingUploadReferencesAsync(db)
 
     assert.equal(summary.settings, 1)

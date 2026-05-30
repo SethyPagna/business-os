@@ -9,7 +9,7 @@ const { UPLOADS_PATH, PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, R2_PUBLIC_BASE_URL
 const { deleteObject, deleteObjects, getObjectStream, isObjectStorageEnabled, listObjects, putObject } = require('./objectStore')
 const { loadSharp } = require('./optionalSharp.ts')
 const { validateUploadedBuffer } = require('./uploadSecurity.ts')
-const { repairMissingUploadReferencesAsync } = require('./uploadReferenceCleanup')
+const { repairMissingUploadReferencesAsync } = require('./uploadReferenceCleanup.ts')
 const { isUploadPublicPath, normalizeUploadPublicPath } = require('./settingsSnapshot.ts')
 
 const sharp = loadSharp()
