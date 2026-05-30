@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T03:22:55.563Z",
+  "generatedAt": "2026-05-30T03:48:44.641Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -25,7 +25,7 @@
     ],
     [
       "React TSX",
-      101
+      102
     ],
     [
       "JavaScript",
@@ -41,7 +41,7 @@
     ],
     [
       "React JSX",
-      6
+      5
     ],
     [
       "Shell",
@@ -67,7 +67,7 @@
     ],
     [
       ".tsx",
-      101
+      102
     ],
     [
       ".js",
@@ -83,7 +83,7 @@
     ],
     [
       ".jsx",
-      6
+      5
     ],
     [
       ".sh",

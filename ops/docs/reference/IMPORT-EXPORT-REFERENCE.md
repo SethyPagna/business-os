@@ -160,7 +160,7 @@ Code files documented: **466**
 | 148 | `frontend/src/App.tsx` | 32 | 1 | 29 | 1 |
 | 149 | `frontend/src/app/appShellUtils.ts` | 0 | 16 | 0 | 5 |
 | 150 | `frontend/src/app/publicErrorRecovery.ts` | 0 | 3 | 0 | 1 |
-| 151 | `frontend/src/AppContext.jsx` | 14 | 5 | 13 | 52 |
+| 151 | `frontend/src/AppContext.tsx` | 15 | 5 | 14 | 52 |
 | 152 | `frontend/src/components/auth/Login.tsx` | 5 | 1 | 4 | 1 |
 | 153 | `frontend/src/components/branches/Branches.tsx` | 13 | 1 | 11 | 1 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 | 1 | 1 | 1 |
@@ -307,7 +307,7 @@ Code files documented: **466**
 | 295 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
 | 296 | `frontend/src/types/jsx-modules.d.ts` | 0 | 11 | 0 | 0 |
 | 297 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 4 |
-| 298 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 1 |
+| 298 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 2 |
 | 299 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
 | 300 | `frontend/src/utils/actionHistory.ts` | 2 | 1 | 1 | 16 |
 | 301 | `frontend/src/utils/appRefresh.ts` | 0 | 3 | 0 | 5 |
@@ -2936,7 +2936,7 @@ Code files documented: **466**
   - `frontend/src/utils/deviceInfo.ts`
 - Referenced by (8)
   - `frontend/src/api/websocket.ts`
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/dashboard/Dashboard.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/products/Products.jsx`
@@ -2989,14 +2989,14 @@ Code files documented: **466**
   - `frontend/src/api/http.ts`
   - `frontend/src/constants.ts`
 - Referenced by (2)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/web-api.ts`
 
 ### 3.148 `frontend/src/App.tsx`
 
 - Declared exports: `function`
 - Imports (32)
-  - `./AppContext.jsx`
+  - `./AppContext.tsx`
   - `./app/appShellUtils.ts`
   - `./app/publicErrorRecovery.ts`
   - `./components/auth/Login`
@@ -3029,7 +3029,7 @@ Code files documented: **466**
   - `react`
   - `react-dom`
 - Internal dependencies (29)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/app/publicErrorRecovery.ts`
   - `frontend/src/components/auth/Login.tsx`
@@ -3070,7 +3070,7 @@ Code files documented: **466**
   - none
 - Referenced by (5)
   - `frontend/src/App.tsx`
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/index.tsx`
   - `frontend/tests/appShellUtils.test.ts`
@@ -3085,16 +3085,17 @@ Code files documented: **466**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.151 `frontend/src/AppContext.jsx`
+### 3.151 `frontend/src/AppContext.tsx`
 
 - Declared exports: `AppProvider`, `isBrokenLocalizedString`, `useApp`, `useSync`, `useT`
-- Imports (14)
+- Imports (15)
   - `./api/http.ts`
   - `./api/websocket.ts`
   - `./app/appShellUtils.ts`
   - `./constants`
   - `./lang/en.json`
   - `./lang/km.json`
+  - `./types/settingsContracts.ts`
   - `./utils/appRefresh.ts`
   - `./utils/deviceInfo.ts`
   - `./utils/loaders.ts`
@@ -3103,13 +3104,14 @@ Code files documented: **466**
   - `./utils/settingsWriteOptions.ts`
   - `./web-api.ts`
   - `react`
-- Internal dependencies (13)
+- Internal dependencies (14)
   - `frontend/src/api/http.ts`
   - `frontend/src/api/websocket.ts`
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/constants.ts`
   - `frontend/src/lang/en.json`
   - `frontend/src/lang/km.json`
+  - `frontend/src/types/settingsContracts.ts`
   - `frontend/src/utils/appRefresh.ts`
   - `frontend/src/utils/deviceInfo.ts`
   - `frontend/src/utils/loaders.ts`
@@ -3175,13 +3177,13 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (5)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../constants`
   - `../../utils/deviceInfo.ts`
   - `../shared/QuickPreferenceToggles`
   - `react`
 - Internal dependencies (4)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/constants.ts`
   - `frontend/src/utils/deviceInfo.ts`
@@ -3192,7 +3194,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (13)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
@@ -3206,7 +3208,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (11)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/branches/BranchForm.tsx`
   - `frontend/src/components/branches/TransferModal.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
@@ -3224,10 +3226,10 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (2)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `react`
 - Internal dependencies (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 - Referenced by (1)
   - `frontend/src/components/branches/Branches.tsx`
 
@@ -3235,11 +3237,11 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `react`
 - Internal dependencies (2)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
   - `frontend/src/components/branches/Branches.tsx`
@@ -3289,7 +3291,7 @@ Code files documented: **466**
   - `./catalogUi`
   - `react`
 - Internal dependencies (11)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/catalog/CatalogEditorSurface.jsx`
   - `frontend/src/components/catalog/CatalogPageContext.tsx`
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
@@ -3432,7 +3434,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (8)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/csvRowCounter.ts`
   - `../../utils/loaders.ts`
@@ -3441,7 +3443,7 @@ Code files documented: **466**
   - `../shared/Modal`
   - `react`
 - Internal dependencies (7)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
@@ -3481,7 +3483,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (12)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/csv`
   - `../../utils/loaders.ts`
   - `../shared/Modal`
@@ -3494,7 +3496,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (10)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/contacts/DeliveryTab.tsx`
@@ -3537,7 +3539,7 @@ Code files documented: **466**
 
 - Declared exports: `parseContactOptions`, `serializeContactOptions`
 - Imports (18)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
@@ -3556,7 +3558,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (16)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/CustomerFormModal.tsx`
   - `frontend/src/components/contacts/contactOptionUtils.ts`
@@ -3580,7 +3582,7 @@ Code files documented: **466**
 
 - Declared exports: `parseDeliveryOptions`, `serializeDeliveryOptions`
 - Imports (17)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
@@ -3598,7 +3600,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (15)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/contactOptionUtils.ts`
   - `frontend/src/components/contacts/shared.tsx`
@@ -3620,7 +3622,7 @@ Code files documented: **466**
 
 - Declared exports: `ContactTable`, `DetailModal`, `ThreeDotMenu`, `buildSelectedSnapshots`, `countActiveFlags`, `useContactSelection`
 - Imports (7)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../shared/LoadingWatchdog`
   - `../shared/Modal`
   - `../shared/PaginationControls`
@@ -3628,7 +3630,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (5)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PaginationControls.tsx`
@@ -3642,7 +3644,7 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (17)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
@@ -3660,7 +3662,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (15)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/contactOptionUtils.ts`
   - `frontend/src/components/contacts/shared.tsx`
@@ -3682,14 +3684,14 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (6)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/historyHelpers.ts`
   - `../shared/ActionHistoryBar`
   - `react`
 - Internal dependencies (5)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/actionHistory.ts`
@@ -3751,9 +3753,9 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (1)
-  - `../../../AppContext.jsx`
+  - `../../../AppContext.tsx`
 - Internal dependencies (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 - Referenced by (3)
   - `frontend/src/components/dashboard/charts/BarChart.tsx`
   - `frontend/src/components/dashboard/charts/DonutChart.tsx`
@@ -3763,7 +3765,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (16)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../api/http.ts`
   - `../../utils/csv`
   - `../../utils/dateHelpers`
@@ -3780,7 +3782,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (14)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/api/http.ts`
   - `frontend/src/components/dashboard/MiniStat.tsx`
   - `frontend/src/components/dashboard/charts/index.ts`
@@ -3811,12 +3813,12 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (4)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/publicAssetUrls.ts`
   - `../shared/Modal`
   - `react`
 - Internal dependencies (3)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/publicAssetUrls.ts`
 - Referenced by (5)
@@ -3830,7 +3832,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (11)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/historyHelpers.ts`
@@ -3842,7 +3844,7 @@ Code files documented: **466**
   - `./FilesResponsesTab`
   - `react`
 - Internal dependencies (10)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/files/FilesProvidersTab.tsx`
   - `frontend/src/components/files/FilesResponsesTab.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
@@ -3920,7 +3922,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (28)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/api/http.ts`
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
@@ -3955,13 +3957,13 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (5)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/csvRowCounter.ts`
   - `../shared/Modal`
   - `react`
 - Internal dependencies (4)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/csvRowCounter.ts`
@@ -4047,7 +4049,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (7)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../shared/LoadingWatchdog`
   - `../shared/SectionSwitcher`
@@ -4055,7 +4057,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (5)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/SectionSwitcher.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
@@ -4067,7 +4069,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (8)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../app/appShellUtils.ts`
   - `../shared/NotificationCenter`
   - `../shared/QuickPreferenceToggles`
@@ -4076,7 +4078,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (6)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/components/shared/NotificationCenter.tsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
@@ -4131,7 +4133,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (16)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/FilterPanel.tsx`
@@ -4248,7 +4250,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (8)
-  - `../../../AppContext.jsx`
+  - `../../../AppContext.tsx`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/historyHelpers.ts`
   - `../../../utils/loaders.ts`
@@ -4257,7 +4259,7 @@ Code files documented: **466**
   - `../shared/primitives`
   - `react`
 - Internal dependencies (7)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
@@ -4406,14 +4408,14 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (6)
-  - `../../../AppContext.jsx`
+  - `../../../AppContext.tsx`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/actionHistory.ts`
   - `../../shared/ActionHistoryBar`
   - `../../shared/Modal`
   - `react`
 - Internal dependencies (5)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
@@ -4425,14 +4427,14 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (6)
-  - `../../../AppContext.jsx`
+  - `../../../AppContext.tsx`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/actionHistory.ts`
   - `../../shared/ActionHistoryBar`
   - `../../shared/Modal`
   - `react`
 - Internal dependencies (5)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
@@ -4444,14 +4446,14 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (6)
-  - `../../../AppContext.jsx`
+  - `../../../AppContext.tsx`
   - `../../../utils/actionGuards.ts`
   - `../../../utils/actionHistory.ts`
   - `../../shared/ActionHistoryBar`
   - `../../shared/Modal`
   - `react`
 - Internal dependencies (5)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
@@ -4506,7 +4508,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (30)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/api/http.ts`
   - `frontend/src/components/products/forms/BulkAddStockModal.tsx`
   - `frontend/src/components/products/forms/ProductForm.tsx`
@@ -4672,11 +4674,11 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `./constants`
   - `react`
 - Internal dependencies (2)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/receipt-settings/constants.ts`
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
@@ -4748,7 +4750,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (12)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/loaders.ts`
   - `../../utils/receiptAppliedConfig.ts`
   - `./AllFieldsPanel`
@@ -4761,7 +4763,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (10)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
   - `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
   - `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
@@ -4790,7 +4792,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (7)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/printReceipt`
   - `../../utils/receiptAppliedConfig.ts`
   - `../receipt-settings/template`
@@ -4798,7 +4800,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (5)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/receipt-settings/template.ts`
   - `frontend/src/components/sales/StatusBadge.tsx`
   - `frontend/src/utils/printReceipt.ts`
@@ -4812,12 +4814,12 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (4)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/loaders.ts`
   - `react`
 - Internal dependencies (3)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/loaders.ts`
 - Referenced by (1)
@@ -4827,12 +4829,12 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (4)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/formatters`
   - `react`
 - Internal dependencies (3)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/formatters.ts`
 - Referenced by (1)
@@ -4842,11 +4844,11 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `react`
 - Internal dependencies (2)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.tsx`
@@ -4855,10 +4857,10 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (2)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/formatters.ts`
 - Internal dependencies (2)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/utils/formatters.ts`
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.tsx`
@@ -4867,7 +4869,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (19)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/csv`
@@ -4887,7 +4889,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (17)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.tsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
@@ -4951,7 +4953,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (22)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/bulkOps.ts`
@@ -4974,7 +4976,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (20)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.tsx`
@@ -5001,13 +5003,13 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (5)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/csvRowCounter.ts`
   - `../shared/Modal`
   - `react`
 - Internal dependencies (4)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/csvRowCounter.ts`
@@ -5055,13 +5057,13 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (5)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../shared/PageHeader`
   - `../shared/pageActivity`
   - `react`
 - Internal dependencies (4)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/actionGuards.ts`
@@ -5072,11 +5074,11 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `lucide-react`
   - `react`
 - Internal dependencies (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 - Referenced by (17)
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
@@ -5100,7 +5102,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (7)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../api/http.ts`
   - `../../utils/actionGuards.ts`
   - `../../utils/importJobRefresh.ts`
@@ -5108,7 +5110,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (5)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/api/http.ts`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/importJobRefresh.ts`
@@ -5239,12 +5241,12 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (4)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `lucide-react`
   - `react`
   - `react-dom`
 - Internal dependencies (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 - Referenced by (2)
   - `frontend/src/App.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
@@ -5256,7 +5258,7 @@ Code files documented: **466**
   - `../../AppContext`
   - `react`
 - Internal dependencies (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 - Referenced by (15)
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/catalog/CatalogPage.jsx`
@@ -5332,11 +5334,11 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `lucide-react`
   - `react`
 - Internal dependencies (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 - Referenced by (3)
   - `frontend/src/App.tsx`
   - `frontend/src/components/auth/Login.tsx`
@@ -5392,7 +5394,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (10)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../constants`
   - `../../utils/actionHistory.ts`
   - `../../utils/loaders.ts`
@@ -5403,7 +5405,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (8)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
@@ -5419,7 +5421,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (14)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/formatters`
@@ -5434,7 +5436,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (12)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/Modal.tsx`
   - `frontend/src/components/shared/PortalMenu.tsx`
@@ -5453,7 +5455,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (10)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/csv`
   - `../../utils/groupedRecords.ts`
@@ -5464,7 +5466,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (8)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/ExportMenu.tsx`
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/shared/PaginationControls.tsx`
@@ -5479,7 +5481,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (10)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionHistory.ts`
   - `../shared/ActionHistoryBar`
   - `../shared/LoadingWatchdog`
@@ -5490,7 +5492,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (8)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/ActionHistoryBar.tsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
@@ -5526,11 +5528,11 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (3)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `react`
 - Internal dependencies (2)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (2)
   - `frontend/src/components/users/UserProfileModal.tsx`
@@ -5540,14 +5542,14 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (6)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/appRefresh`
   - `../../utils/loaders.ts`
   - `lucide-react`
   - `react`
 - Internal dependencies (4)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/appRefresh.ts`
   - `frontend/src/utils/loaders.ts`
@@ -5558,7 +5560,7 @@ Code files documented: **466**
 
 - Declared exports: `function`
 - Imports (13)
-  - `../../AppContext.jsx`
+  - `../../AppContext.tsx`
   - `../../utils/actionGuards.ts`
   - `../../utils/favicon.ts`
   - `../../utils/loaders.ts`
@@ -5572,7 +5574,7 @@ Code files documented: **466**
   - `lucide-react`
   - `react`
 - Internal dependencies (11)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/PageHeader.tsx`
   - `frontend/src/components/shared/SectionSwitcher.tsx`
@@ -5608,7 +5610,7 @@ Code files documented: **466**
   - `frontend/src/api/http.ts`
   - `frontend/src/api/methods.js`
   - `frontend/src/api/websocket.ts`
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/users/UserProfileModal.tsx`
   - `frontend/src/platform/runtime/clientRuntime.ts`
@@ -5619,7 +5621,7 @@ Code files documented: **466**
 - Declared exports: none detected
 - Imports (9)
   - `./App.tsx`
-  - `./AppContext.jsx`
+  - `./AppContext.tsx`
   - `./app/appShellUtils.ts`
   - `./styles/main.css`
   - `@fontsource/noto-sans-khmer/400.css`
@@ -5629,7 +5631,7 @@ Code files documented: **466**
   - `react-dom/client`
 - Internal dependencies (4)
   - `frontend/src/App.tsx`
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/app/appShellUtils.ts`
   - `frontend/src/styles/main.css`
 - Referenced by (0)
@@ -5698,7 +5700,8 @@ Code files documented: **466**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (1)
+- Referenced by (2)
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/utils/settingsWriteOptions.ts`
 
 ### 3.299 `frontend/src/utils/actionGuards.ts`
@@ -5747,10 +5750,10 @@ Code files documented: **466**
 
 - Declared exports: `useActionHistory`
 - Imports (2)
-  - `../AppContext.jsx`
+  - `../AppContext.tsx`
   - `react`
 - Internal dependencies (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 - Referenced by (16)
   - `frontend/src/components/branches/Branches.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
@@ -5778,7 +5781,7 @@ Code files documented: **466**
   - none
 - Referenced by (5)
   - `frontend/src/api/methods.js`
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/utils-settings/ResetData.tsx`
   - `frontend/src/utils/settingsRefresh.ts`
   - `frontend/tests/appRefresh.test.ts`
@@ -5895,7 +5898,7 @@ Code files documented: **466**
 - Referenced by (7)
   - `frontend/src/api/http.ts`
   - `frontend/src/api/methods.js`
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/sales/Sales.tsx`
@@ -6050,7 +6053,7 @@ Code files documented: **466**
   - none
 - Referenced by (20)
   - `frontend/src/App.tsx`
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
@@ -6090,7 +6093,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/tests/permissions.test.ts`
 
 ### 3.322 `frontend/src/utils/pricing.ts`
@@ -6101,7 +6104,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (17)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
   - `frontend/src/components/catalog/portalCatalogDisplay.ts`
   - `frontend/src/components/dashboard/Dashboard.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
@@ -6218,7 +6221,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/types/settingsContracts.ts`
 - Referenced by (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 
 ### 3.331 `frontend/src/web-api.ts`
 
@@ -6238,7 +6241,7 @@ Code files documented: **466**
   - `frontend/src/constants.ts`
   - `frontend/src/platform/runtime/clientRuntime.ts`
 - Referenced by (1)
-  - `frontend/src/AppContext.jsx`
+  - `frontend/src/AppContext.tsx`
 
 ### 3.332 `frontend/tailwind.config.ts`
 

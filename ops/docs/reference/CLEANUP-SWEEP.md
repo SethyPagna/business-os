@@ -409,7 +409,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   bulk-action surfaces and focused tests intentionally move to a new public
   boundary or the wrapper audit proves it is unused.
 - Move 144 converts the app shell helper to TypeScript and retires the old
-  `.mjs` wrapper after `App.jsx`, `AppContext.jsx`, `index.tsx`, and focused
+  `.mjs` wrapper after `App.jsx`, `AppContext.tsx`, `index.tsx`, and focused
   tests moved to the TypeScript source. Cleanup should keep this pattern for
   future wrappers: update callers first, prove no first-party references remain,
   then delete the wrapper.

@@ -17,7 +17,7 @@ Total files documented: **193**
 | 5 | `frontend/src/App.tsx` | 68 |
 | 6 | `frontend/src/app/appShellUtils.ts` | 0 |
 | 7 | `frontend/src/app/publicErrorRecovery.ts` | 1 |
-| 8 | `frontend/src/AppContext.jsx` | 39 |
+| 8 | `frontend/src/AppContext.tsx` | 37 |
 | 9 | `frontend/src/components/auth/Login.tsx` | 23 |
 | 10 | `frontend/src/components/branches/Branches.tsx` | 15 |
 | 11 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
@@ -512,49 +512,47 @@ Total files documented: **193**
 |---:|---|---:|---:|
 | 1 | `getRecoveryStorage` | function | 6 |
 
-### 3.8 `frontend/src/AppContext.jsx`
+### 3.8 `frontend/src/AppContext.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `flattenTranslationTree` | function | 44 |
-| 2 | `safeStorageGet` | function | 100 |
-| 3 | `safeStorageSet` | function | 108 |
-| 4 | `safeStorageRemove` | function | 114 |
-| 5 | `getStoredUserPayload` | function | 120 |
-| 6 | `getStoredUserExpiry` | function | 124 |
-| 7 | `clearPersistedAuthState` | function | 128 |
-| 8 | `persistAuthState` | function | 141 |
-| 9 | `computeSessionExpiryMs` | function | 155 |
-| 10 | `readDeviceSettings` | function | 171 |
-| 11 | `writeDeviceSettings` | function | 179 |
-| 12 | `writeStoredSessionDuration` | function | 185 |
-| 13 | `readPendingOauthLink` | function | 193 |
-| 14 | `clearPendingOauthLink` | function | 207 |
-| 15 | `readOauthCallbackResult` | function | 213 |
-| 16 | `clearOauthCallbackResult` | function | 224 |
-| 17 | `mergeSettingsWithDeviceOverrides` | function | 230 |
-| 18 | `normalizeDateInput` | function | 234 |
-| 19 | `buildRuntimeDescriptorFromBootstrap` | function | 252 |
-| 20 | `LoadingScreen` | function | 280 |
-| 21 | `AccessDenied` | function | 293 |
-| 22 | `onUpdate` | const arrow | 529 |
-| 23 | `onStatus` | const arrow | 559 |
-| 24 | `poll` | const arrow | 567 |
-| 25 | `onError` | const arrow | 587 |
-| 26 | `onWriteBlocked` | const arrow | 603 |
-| 27 | `onRuntimeMismatch` | const arrow | 612 |
-| 28 | `onConflict` | const arrow | 631 |
-| 29 | `onUnauthorized` | const arrow | 700 |
-| 30 | `handleOtpLogin` | const arrow | 758 |
-| 31 | `handleUserUpdated` | const arrow | 800 |
-| 32 | `discoverSyncUrl` | const arrow | 837 |
-| 33 | `hexAlpha` | const arrow | 1011 |
-| 34 | `clearCallbackUrl` | const arrow | 1222 |
-| 35 | `clearPendingLink` | const arrow | 1226 |
-| 36 | `run` | const arrow | 1230 |
-| 37 | `useApp` | const arrow | 1597 |
-| 38 | `useSync` | const arrow | 1598 |
-| 39 | `useT` | const arrow | 1601 |
+| 1 | `getAppApi` | function | 195 |
+| 2 | `getErrorMessage` | function | 205 |
+| 3 | `flattenTranslationTree` | function | 209 |
+| 4 | `safeStorageGet` | function | 265 |
+| 5 | `safeStorageSet` | function | 273 |
+| 6 | `safeStorageRemove` | function | 279 |
+| 7 | `getStoredUserPayload` | function | 285 |
+| 8 | `getStoredUserExpiry` | function | 289 |
+| 9 | `clearPersistedAuthState` | function | 293 |
+| 10 | `persistAuthState` | function | 306 |
+| 11 | `computeSessionExpiryMs` | function | 328 |
+| 12 | `readDeviceSettings` | function | 344 |
+| 13 | `writeDeviceSettings` | function | 353 |
+| 14 | `writeStoredSessionDuration` | function | 359 |
+| 15 | `readPendingOauthLink` | function | 367 |
+| 16 | `clearPendingOauthLink` | function | 381 |
+| 17 | `readOauthCallbackResult` | function | 387 |
+| 18 | `clearOauthCallbackResult` | function | 398 |
+| 19 | `mergeSettingsWithDeviceOverrides` | function | 404 |
+| 20 | `normalizeDateInput` | function | 408 |
+| 21 | `buildRuntimeDescriptorFromBootstrap` | function | 426 |
+| 22 | `LoadingScreen` | function | 455 |
+| 23 | `AccessDenied` | function | 468 |
+| 24 | `onUpdate` | const arrow | 722 |
+| 25 | `onStatus` | const arrow | 754 |
+| 26 | `poll` | const arrow | 763 |
+| 27 | `onError` | const arrow | 783 |
+| 28 | `onWriteBlocked` | const arrow | 805 |
+| 29 | `onRuntimeMismatch` | const arrow | 815 |
+| 30 | `onConflict` | const arrow | 835 |
+| 31 | `onUnauthorized` | const arrow | 904 |
+| 32 | `handleOtpLogin` | const arrow | 963 |
+| 33 | `handleUserUpdated` | const arrow | 1005 |
+| 34 | `discoverSyncUrl` | const arrow | 1042 |
+| 35 | `clearCallbackUrl` | const arrow | 1431 |
+| 36 | `clearPendingLink` | const arrow | 1435 |
+| 37 | `run` | const arrow | 1439 |
 
 ### 3.9 `frontend/src/components/auth/Login.tsx`
 

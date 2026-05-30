@@ -160,7 +160,7 @@ Code files scanned: **466**
 | 148 | `frontend/src/App.tsx` | 68 |
 | 149 | `frontend/src/app/appShellUtils.ts` | 10 |
 | 150 | `frontend/src/app/publicErrorRecovery.ts` | 4 |
-| 151 | `frontend/src/AppContext.jsx` | 41 |
+| 151 | `frontend/src/AppContext.tsx` | 39 |
 | 152 | `frontend/src/components/auth/Login.tsx` | 23 |
 | 153 | `frontend/src/components/branches/Branches.tsx` | 15 |
 | 154 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
@@ -3232,51 +3232,49 @@ Code files scanned: **466**
 | 3 | `shouldAttemptPublicDomRecovery` | export function | 16 |
 | 4 | `clearPublicDomRecoveryMarker` | export function | 32 |
 
-### 3.151 `frontend/src/AppContext.jsx`
+### 3.151 `frontend/src/AppContext.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `flattenTranslationTree` | function | 44 |
-| 2 | `safeStorageGet` | function | 100 |
-| 3 | `safeStorageSet` | function | 108 |
-| 4 | `safeStorageRemove` | function | 114 |
-| 5 | `getStoredUserPayload` | function | 120 |
-| 6 | `getStoredUserExpiry` | function | 124 |
-| 7 | `clearPersistedAuthState` | function | 128 |
-| 8 | `persistAuthState` | function | 141 |
-| 9 | `computeSessionExpiryMs` | function | 155 |
-| 10 | `readDeviceSettings` | function | 171 |
-| 11 | `writeDeviceSettings` | function | 179 |
-| 12 | `writeStoredSessionDuration` | function | 185 |
-| 13 | `readPendingOauthLink` | function | 193 |
-| 14 | `clearPendingOauthLink` | function | 207 |
-| 15 | `readOauthCallbackResult` | function | 213 |
-| 16 | `clearOauthCallbackResult` | function | 224 |
-| 17 | `mergeSettingsWithDeviceOverrides` | function | 230 |
-| 18 | `normalizeDateInput` | function | 234 |
-| 19 | `isBrokenLocalizedString` | export function | 240 |
-| 20 | `buildRuntimeDescriptorFromBootstrap` | function | 252 |
-| 21 | `LoadingScreen` | function | 280 |
-| 22 | `AccessDenied` | function | 293 |
-| 23 | `AppProvider` | export function | 305 |
-| 24 | `onUpdate` | const arrow | 529 |
-| 25 | `onStatus` | const arrow | 559 |
-| 26 | `poll` | const arrow | 567 |
-| 27 | `onError` | const arrow | 587 |
-| 28 | `onWriteBlocked` | const arrow | 603 |
-| 29 | `onRuntimeMismatch` | const arrow | 612 |
-| 30 | `onConflict` | const arrow | 631 |
-| 31 | `onUnauthorized` | const arrow | 700 |
-| 32 | `handleOtpLogin` | const arrow | 758 |
-| 33 | `handleUserUpdated` | const arrow | 800 |
-| 34 | `discoverSyncUrl` | const arrow | 837 |
-| 35 | `hexAlpha` | const arrow | 1011 |
-| 36 | `clearCallbackUrl` | const arrow | 1222 |
-| 37 | `clearPendingLink` | const arrow | 1226 |
-| 38 | `run` | const arrow | 1230 |
-| 39 | `useApp` | const arrow | 1597 |
-| 40 | `useSync` | const arrow | 1598 |
-| 41 | `useT` | const arrow | 1601 |
+| 1 | `getAppApi` | function | 195 |
+| 2 | `getErrorMessage` | function | 205 |
+| 3 | `flattenTranslationTree` | function | 209 |
+| 4 | `safeStorageGet` | function | 265 |
+| 5 | `safeStorageSet` | function | 273 |
+| 6 | `safeStorageRemove` | function | 279 |
+| 7 | `getStoredUserPayload` | function | 285 |
+| 8 | `getStoredUserExpiry` | function | 289 |
+| 9 | `clearPersistedAuthState` | function | 293 |
+| 10 | `persistAuthState` | function | 306 |
+| 11 | `computeSessionExpiryMs` | function | 328 |
+| 12 | `readDeviceSettings` | function | 344 |
+| 13 | `writeDeviceSettings` | function | 353 |
+| 14 | `writeStoredSessionDuration` | function | 359 |
+| 15 | `readPendingOauthLink` | function | 367 |
+| 16 | `clearPendingOauthLink` | function | 381 |
+| 17 | `readOauthCallbackResult` | function | 387 |
+| 18 | `clearOauthCallbackResult` | function | 398 |
+| 19 | `mergeSettingsWithDeviceOverrides` | function | 404 |
+| 20 | `normalizeDateInput` | function | 408 |
+| 21 | `isBrokenLocalizedString` | export function | 414 |
+| 22 | `buildRuntimeDescriptorFromBootstrap` | function | 426 |
+| 23 | `LoadingScreen` | function | 455 |
+| 24 | `AccessDenied` | function | 468 |
+| 25 | `AppProvider` | export function | 480 |
+| 26 | `onUpdate` | const arrow | 722 |
+| 27 | `onStatus` | const arrow | 754 |
+| 28 | `poll` | const arrow | 763 |
+| 29 | `onError` | const arrow | 783 |
+| 30 | `onWriteBlocked` | const arrow | 805 |
+| 31 | `onRuntimeMismatch` | const arrow | 815 |
+| 32 | `onConflict` | const arrow | 835 |
+| 33 | `onUnauthorized` | const arrow | 904 |
+| 34 | `handleOtpLogin` | const arrow | 963 |
+| 35 | `handleUserUpdated` | const arrow | 1005 |
+| 36 | `discoverSyncUrl` | const arrow | 1042 |
+| 37 | `clearCallbackUrl` | const arrow | 1431 |
+| 38 | `clearPendingLink` | const arrow | 1435 |
+| 39 | `run` | const arrow | 1439 |
 
 ### 3.152 `frontend/src/components/auth/Login.tsx`
 
@@ -4897,7 +4895,7 @@ Code files scanned: **466**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `useIsPageActive` | export function | 5 |
+| 1 | `useIsPageActive` | export function | 8 |
 
 ### 3.273 `frontend/src/components/shared/PageHeader.tsx`
 

@@ -183,7 +183,7 @@ Total files documented: **529**
 | 171 | `frontend/src/App.tsx` | frontend-core | 1572 | 60.1 | Main app shell and page mounting |
 | 172 | `frontend/src/app/appShellUtils.ts` | frontend-core | 159 | 5.2 | Project source/support file |
 | 173 | `frontend/src/app/publicErrorRecovery.ts` | frontend-core | 35 | 1.3 | Project source/support file |
-| 174 | `frontend/src/AppContext.jsx` | frontend-core | 1610 | 64.3 | Global app state/context provider |
+| 174 | `frontend/src/AppContext.tsx` | frontend-core | 1826 | 73.5 | Global app state/context provider |
 | 175 | `frontend/src/components/auth/Login.tsx` | frontend-ui | 1245 | 53.8 | UI component/page |
 | 176 | `frontend/src/components/branches/Branches.tsx` | frontend-ui | 1076 | 49.6 | UI component/page |
 | 177 | `frontend/src/components/branches/BranchForm.tsx` | frontend-ui | 202 | 6.4 | UI component/page |
@@ -305,7 +305,7 @@ Total files documented: **529**
 | 293 | `frontend/src/components/shared/Modal.tsx` | frontend-ui | 38 | 1.3 | UI component/page |
 | 294 | `frontend/src/components/shared/navigationConfig.ts` | frontend-ui | 66 | 2.3 | UI component/page |
 | 295 | `frontend/src/components/shared/NotificationCenter.tsx` | frontend-ui | 695 | 33.4 | UI component/page |
-| 296 | `frontend/src/components/shared/pageActivity.ts` | frontend-ui | 9 | 0.3 | UI component/page |
+| 296 | `frontend/src/components/shared/pageActivity.ts` | frontend-ui | 12 | 0.3 | UI component/page |
 | 297 | `frontend/src/components/shared/PageHeader.tsx` | frontend-ui | 72 | 2.5 | UI component/page |
 | 298 | `frontend/src/components/shared/PaginationControls.tsx` | frontend-ui | 222 | 10.3 | UI component/page |
 | 299 | `frontend/src/components/shared/PortalMenu.tsx` | frontend-ui | 271 | 8.9 | UI component/page |
@@ -408,7 +408,7 @@ Total files documented: **529**
 | 396 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 397 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 94 | 4.6 | Project source/support file |
 | 398 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.5 | Project source/support file |
+| 399 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2079 | 93.4 | Project source/support file |
 | 400 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 401 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 402 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |

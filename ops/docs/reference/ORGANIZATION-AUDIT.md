@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T03:22:55.976Z
+Generated: 2026-05-30T03:48:45.032Z
 
 ## Summary
 
@@ -15,13 +15,13 @@ Generated: 2026-05-30T03:22:55.976Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 101 |
+| .tsx | 102 |
 | .js | 84 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
-| .jsx | 6 |
+| .jsx | 5 |
 | .sh | 3 |
 | .sql | 2 |
 | .css | 1 |
@@ -66,16 +66,16 @@ Generated: 2026-05-30T03:22:55.976Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/PHASE29-AUDIT.json | 12118 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7923 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6900 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5941 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4349 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7926 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6898 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5955 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4362 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2667 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2665 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
@@ -88,11 +88,11 @@ Generated: 2026-05-30T03:22:55.976Z
 | frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
+| frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1815 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1748 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
-| frontend/src/AppContext.jsx | 1610 | frontend/src/AppContext.jsx |
 | ops/scripts/architecture/language-runtime-audit.ts | 1596 | ops/scripts/architecture |
 | backend/src/routes/sales.js | 1573 | backend/routes |
 
@@ -114,8 +114,8 @@ Generated: 2026-05-30T03:22:55.976Z
 | frontend/src/components/contacts/DeliveryTab.tsx | 17 | frontend/components/contacts |
 | frontend/src/components/contacts/SuppliersTab.tsx | 17 | frontend/components/contacts |
 | backend/src/services/importJobs.js | 14 | backend/services |
+| frontend/src/AppContext.tsx | 14 | frontend/src/AppContext.tsx |
 | backend/src/routes/auth.js | 13 | backend/routes |
-| frontend/src/AppContext.jsx | 13 | frontend/src/AppContext.jsx |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
 | backend/src/routes/portal.js | 12 | backend/routes |

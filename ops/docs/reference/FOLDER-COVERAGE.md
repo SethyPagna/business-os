@@ -619,7 +619,7 @@ Total folders documented: **81**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `App.tsx` | Main app shell and page mounting |
-| 2 | `AppContext.jsx` | Global app state/context provider |
+| 2 | `AppContext.tsx` | Global app state/context provider |
 | 3 | `constants.ts` | Project source/support file |
 | 4 | `index.tsx` | Project source/support file |
 | 5 | `README.md` | Documentation |
