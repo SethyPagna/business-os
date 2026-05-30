@@ -944,7 +944,7 @@ const COMPLETED_DATA_PATH_SLICES = [
     ],
   },
   {
-    target: 'backend/src/routes/importJobs.js',
+    target: 'backend/src/routes/importJobs.ts',
     optimization: 'Import-job listing now derives permitted import types from the current user and passes them into listImportJobs so the service can filter by type in SQL before decoration.',
     rollback: 'Remove getPermittedImportTypes, call listImportJobs with only the limit, and restore the route-level JavaScript permission filter.',
     proof: [

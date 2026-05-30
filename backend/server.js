@@ -377,7 +377,7 @@ function mountApiRoutes(target) {
   target.use('/api/units', unitsRouter)
   target.use('/api/branches', require('./src/routes/branches'))
   target.use('/api/products', require('./src/routes/products'))
-  target.use('/api/import-jobs', require('./src/routes/importJobs'))
+  target.use('/api/import-jobs', require('./src/routes/importJobs.ts'))
   target.use('/api/files', require('./src/routes/files.ts'))
   target.use('/api/ai', require('./src/routes/ai.ts'))
   target.use('/api/catalog', require('./src/routes/catalog.ts'))

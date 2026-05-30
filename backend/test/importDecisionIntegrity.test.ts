@@ -5,7 +5,7 @@ const fs = require('fs')
 const path = require('path')
 
 const source = fs.readFileSync(path.join(__dirname, '../src/services/importJobs.js'), 'utf8')
-const routeSource = fs.readFileSync(path.join(__dirname, '../src/routes/importJobs.js'), 'utf8')
+const routeSource = fs.readFileSync(path.join(__dirname, '../src/routes/importJobs.ts'), 'utf8')
 
 assert.match(
   source,

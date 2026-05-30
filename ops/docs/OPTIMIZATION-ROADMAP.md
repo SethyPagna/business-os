@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 603.
+- Latest completed implementation move in this roadmap: Move 604.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2439,7 +2439,7 @@ Cleanup checkpoint:
   the same generated Markdown/JSON contract, but avoids one full-schema
   primary-key regex scan per parsed table as the schema grows.
 - Move 171 completes the import-job route list optimization:
-  `backend/src/routes/importJobs.js` now computes the current user's permitted
+  `backend/src/routes/importJobs.ts` now computes the current user's permitted
   import types and passes that list into `listImportJobs()`, while
   `backend/src/services/importJobs.js` applies a SQL `type IN (...)` filter
   before decoration. This keeps the permission contract unchanged while avoiding
@@ -4489,7 +4489,7 @@ Move 397 status:
 
 Move 398 status:
 - Move 398 tightens import job route wrapper loops in
-  `backend/src/routes/importJobs.js`. Import permission checks, permitted type
+  `backend/src/routes/importJobs.ts`. Import permission checks, permitted type
   collection, job file response serialization, and multi-image upload
   persistence now use named direct-loop helpers instead of route-level
   `some()`/`filter()`/`map()` chains. Import type ordering, permission
@@ -6815,3 +6815,20 @@ Move 603 status:
   scripts, so broader backend conversions still wait for a compile/staging
   package lane. The generated language audit now reports `JavaScript: 19`,
   `TypeScript: 292`, and `React TSX: 107` across the active scan roots.
+
+Move 604 status:
+- Move 604 converts `backend/src/routes/importJobs.ts` to a package-safe
+  TypeScript path. Import type permission mapping, permitted-type filtering,
+  upload directory safety, CSV/TSV/ZIP/image file filtering, policy and
+  relative-path parsing, forced-delete parsing, audit event payloads, queue
+  status, job listing, job creation, review/decision/preflight routes,
+  CSV/ZIP/image uploads, start/approve/cancel/delete/retry flows, and error
+  CSV download remain unchanged on the existing CommonJS route style. Server
+  route mounting, import-decision source assertions, backend route docs,
+  language runtime audit metadata, and roadmap docs now point at the explicit
+  `.ts` route path. Focused route load, import-decision, route-contract,
+  backend utility, schema audit, stale-path, and Linux packaging proof passed.
+  `pkg` continues to warn for direct `.ts` scripts, so broader backend
+  conversions still wait for a compile/staging package lane. The generated
+  language audit now reports `JavaScript: 18`, `TypeScript: 293`, and
+  `React TSX: 107` across the active scan roots.

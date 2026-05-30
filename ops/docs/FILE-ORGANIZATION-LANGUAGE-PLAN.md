@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 603 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 604 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 41`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 322`,
+  `.js: 40`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 323`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -1498,7 +1498,7 @@ Decision rule:
     the same report fields, JSON summary contract, and roadmap verification
     path.
 171. Filter import-job lists in the data path. Done:
-    `backend/src/routes/importJobs.js` now derives permitted import types from
+    `backend/src/routes/importJobs.ts` now derives permitted import types from
     the current user and passes them into `listImportJobs()`. The service keeps
     its old unfiltered default for internal callers, but route reads now add a
     SQL `type IN (...)` clause before job decoration, so lower-permission users
@@ -3115,7 +3115,7 @@ Decision rule:
     This was a backend route cleanup only; no folder move, schema migration, or
     runtime conversion was needed.
 388. Tighten import job route wrapper loops. Done:
-    `backend/src/routes/importJobs.js` now resolves permitted import types,
+    `backend/src/routes/importJobs.ts` now resolves permitted import types,
     serializes import job files, and saves multi-image upload records with
     named direct-loop helpers while preserving permission behavior, response
     fields, and upload order. This was a backend route cleanup only; no folder
@@ -5120,6 +5120,22 @@ Decision rule:
     broader backend conversions remain blocked on the future compile/staging
     lane. The generated language audit now reports `JavaScript: 19`,
     `TypeScript: 292`, and `React TSX: 107` across the active scan roots.
+604. Convert import jobs route to a package-safe TypeScript path.
+    Done: `backend/src/routes/importJobs.ts` keeps import type permission
+    mapping, permitted-type filtering, upload directory safety, CSV/TSV/ZIP/
+    image file filtering, policy and relative-path parsing, forced-delete
+    parsing, audit event payloads, queue status, job listing, job creation,
+    review/decision/preflight routes, CSV/ZIP/image uploads, start/approve/
+    cancel/delete/retry flows, and error CSV download on the existing CommonJS
+    route style. Server route mounting, import-decision source assertions,
+    backend route docs, language runtime audit metadata, and roadmap docs now
+    point at the explicit `.ts` route path. Focused route load,
+    import-decision, route-contract, backend utility, schema audit, stale-path,
+    and Linux packaging proof passed. Packaging still warns for direct `.ts`
+    entries in `pkg.scripts`, so broader backend conversions remain blocked on
+    the future compile/staging lane. The generated language audit now reports
+    `JavaScript: 18`, `TypeScript: 293`, and `React TSX: 107` across the
+    active scan roots.
 
 ## Safety Gates
 

@@ -75,7 +75,7 @@ File: `backend/src/routes/products.js`
 ## Import Jobs
 
 Base: `/api/import-jobs`
-File: `backend/src/routes/importJobs.js`
+File: `backend/src/routes/importJobs.ts`
 
 - `GET /`
 - `POST /`
