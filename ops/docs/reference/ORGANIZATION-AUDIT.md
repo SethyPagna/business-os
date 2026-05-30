@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-30T00:46:03.999Z
+Generated: 2026-05-30T01:12:16.956Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 545
+- Files scanned: 546
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,13 +14,13 @@ Generated: 2026-05-30T00:46:03.999Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 266 |
-| .tsx | 94 |
+| .ts | 267 |
+| .tsx | 95 |
 | .js | 84 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
-| .jsx | 13 |
+| .jsx | 12 |
 | .ps1 | 8 |
 | .sh | 3 |
 | .sql | 2 |
@@ -54,8 +54,8 @@ Generated: 2026-05-30T00:46:03.999Z
 | ops/scripts/runtime/audits | 6 |
 | ops/scripts/verification | 6 |
 | frontend/api | 5 |
+| frontend/components/users | 5 |
 | frontend/components/files | 4 |
-| frontend/components/users | 4 |
 | ops/scripts/architecture | 4 |
 | ops/scripts/backend | 4 |
 | ops/scripts/runtime/cloudflare | 4 |
@@ -66,16 +66,16 @@ Generated: 2026-05-30T00:46:03.999Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/PHASE29-AUDIT.json | 12112 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7923 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6888 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5853 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4268 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7934 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6895 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5865 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4278 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2655 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2662 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
@@ -88,7 +88,7 @@ Generated: 2026-05-30T00:46:03.999Z
 | frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1815 | ops/docs/reference |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1748 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1749 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.jsx | 1730 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
 | frontend/src/AppContext.jsx | 1610 | frontend/src/AppContext.jsx |
@@ -116,7 +116,7 @@ Generated: 2026-05-30T00:46:03.999Z
 | backend/src/services/importJobs.js | 14 | backend/services |
 | backend/src/routes/auth.js | 13 | backend/routes |
 | frontend/src/AppContext.jsx | 13 | frontend/src/AppContext.jsx |
-| frontend/src/components/users/Users.jsx | 13 | frontend/components/users |
+| frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | backend/src/routes/portal.js | 12 | backend/routes |
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
 | frontend/src/components/utils-settings/Settings.jsx | 12 | frontend/components/utils-settings |

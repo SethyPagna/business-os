@@ -64,7 +64,7 @@ Total folders documented: **81**
 | 52 | `frontend/src/components/sales` | UI pages/components domain | 7 | 0 |
 | 53 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
 | 54 | `frontend/src/components/shared` | UI pages/components domain | 17 | 0 |
-| 55 | `frontend/src/components/users` | UI pages/components domain | 4 | 0 |
+| 55 | `frontend/src/components/users` | UI pages/components domain | 5 | 0 |
 | 56 | `frontend/src/components/utils-settings` | UI pages/components domain | 8 | 0 |
 | 57 | `frontend/src/lang` | Localization resources | 2 | 0 |
 | 58 | `frontend/src/platform` | Project folder | 0 | 2 |
@@ -1181,7 +1181,7 @@ Total folders documented: **81**
 ### 3.55 Folder: `frontend/src/components/users`
 
 - Purpose: UI pages/components domain
-- Direct files: **4**
+- Direct files: **5**
 - Direct subfolders: **0**
 
 #### 3.55.2 Files
@@ -1190,8 +1190,9 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `PermissionEditor.tsx` | UI component/page |
 | 2 | `UserDetailSheet.tsx` | UI component/page |
-| 3 | `UserProfileModal.jsx` | UI component/page |
-| 4 | `Users.jsx` | UI component/page |
+| 3 | `UserProfileModal.d.ts` | UI component/page |
+| 4 | `UserProfileModal.jsx` | UI component/page |
+| 5 | `Users.tsx` | UI component/page |
 
 
 ### 3.56 Folder: `frontend/src/components/utils-settings`
