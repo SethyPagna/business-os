@@ -708,7 +708,7 @@ Last updated: 2026-05-18
     `frontend/src/components/files/FilesPage.tsx` and
     `frontend/src/components/files/FilePickerModal.tsx`. Settings and Catalog
     media upload pathways now have explicit timeout contracts in
-    `frontend/src/components/utils-settings/Settings.jsx` and
+    `frontend/src/components/utils-settings/Settings.tsx` and
     `frontend/src/components/catalog/CatalogPage.jsx`. Product form image
     uploads now have explicit timeout contracts in
     `frontend/src/components/products/forms/ProductForm.tsx`. App shell login,

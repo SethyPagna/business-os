@@ -1,6 +1,6 @@
 export { default as AuditLog } from './AuditLog'
 export { default as Backup } from './Backup'
-export { default as Settings } from './Settings.jsx'
+export { default as Settings } from './Settings'
 export { ResetData, FactoryReset } from './ResetData'
 export { default as FontFamilyPicker } from './FontFamilyPicker'
 export { default as OtpModal } from './OtpModal'

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useApp } from '../../AppContext'
-import { useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import { useApp as useAppHook } from '../../AppContext.jsx'
 import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ChevronDown, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Save, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
 import FontFamilyPicker from './FontFamilyPicker'
 import OtpModal from './OtpModal'
@@ -12,6 +12,7 @@ import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
+import type { SettingsConflictState } from './settingsConflict.ts'
 import {
   buildCacheBustedMediaPath,
   createInitialUploadState,
@@ -19,11 +20,113 @@ import {
   sanitizePersistedMediaPath,
 } from '../../utils/mediaUpload.ts'
 
+type TranslateFn = (key: string) => string
+type NotifyFn = (message: string, type?: string) => void
+type SettingValue = string | number | null | undefined
+type SettingsRecord = Record<string, SettingValue>
+type SettingsSectionId = 'all' | 'business' | 'appearance' | 'security'
+type OtpModalMode = 'setup' | 'disable' | null
+type ColorChoice = [string, string, string]
+type UploadAction = Record<string, unknown>
+type UploadState = ReturnType<typeof createInitialUploadState>
+type UploadStateMap = Record<string, UploadState>
+
+interface AppUser {
+  id?: string | number
+  name?: string
+  permissions?: string | Record<string, unknown> | null
+}
+
+interface SaveSettingsResult {
+  conflict?: boolean
+  attempted?: SettingsRecord
+  currentSettings?: SettingsRecord
+  actualUpdatedAt?: string | null
+  expectedUpdatedAt?: string | null
+}
+
+interface AppContextValue {
+  t: TranslateFn
+  settings: SettingsRecord
+  saveSettings: (newSettings: SettingsRecord, options?: Record<string, unknown>) => Promise<SaveSettingsResult>
+  loadSettings: (options?: { force?: boolean }) => Promise<SettingsRecord | null>
+  user?: AppUser | null
+  notify: NotifyFn
+  deviceTimezone?: string
+}
+
+interface SettingsApi {
+  otpStatus?: (userId: string | number) => Promise<{ otpEnabled?: boolean }>
+  uploadFileAsset?: (payload: {
+    file: File
+    userId?: string | number
+    userName?: string
+    signal?: AbortSignal
+    onProgress?: (progress: { percent?: number }) => void
+  }) => Promise<{
+    public_path?: string
+    cache_version?: string | number
+    processing_status?: string
+    media_job_id?: string | number
+    error?: string
+  }>
+}
+
+interface NavItem {
+  id: string
+  key: string
+}
+
+interface SwatchPickerProps {
+  colors: ColorChoice[]
+  value: string
+  onChange: (value: string) => void
+  fallbackValue: string
+  title: string
+  hint: string
+  resetLabel: string
+  autoLabel: string
+  customColorTitle: string
+  fieldId: string
+  customColors?: string[]
+  onAddCustomColor?: (color: string) => void
+  onRemoveCustomColor?: (color: string) => void
+}
+
+interface SettingsSectionProps {
+  title: ReactNode
+  description?: ReactNode
+  defaultOpen?: boolean
+  children: ReactNode
+}
+
+type CopyFn = (key: string, fallback: string) => string
+
+const useApp = useAppHook as () => AppContextValue
+
+function getSettingsApi(): SettingsApi {
+  return (window as unknown as { api: SettingsApi }).api || {}
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+function toStringValue(value: unknown, fallback = ''): string {
+  if (value === null || value === undefined) return fallback
+  return String(value)
+}
+
+function toNumberValue(value: unknown, fallback = 0): number {
+  const parsed = Number.parseFloat(toStringValue(value))
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 const SETTINGS_OTP_STATUS_TIMEOUT_MS = 8000
 const SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS = 8000
 const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
-const FALLBACK_COPY = {
+const FALLBACK_COPY: Record<'en' | 'km', Record<string, string>> = {
   en: {
     appearanceHintAccent: 'Buttons, active links, and highlights',
     sidebarColorTitle: 'Sidebar Color',
@@ -67,7 +170,7 @@ const FALLBACK_COPY = {
   },
 }
 
-const SIDEBAR_COLORS = [
+const SIDEBAR_COLORS: ColorChoice[] = [
   ['', 'Auto', '#e5e7eb'],
   ['#f8fafc', 'Light', '#dbe4ef'],
   ['#dbeafe', 'Mid light', '#93c5fd'],
@@ -75,7 +178,7 @@ const SIDEBAR_COLORS = [
   ['#0f172a', 'Dark', '#1e293b'],
 ]
 
-const PAGE_BG_COLORS = [
+const PAGE_BG_COLORS: ColorChoice[] = [
   ['', 'Auto', '#e5e7eb'],
   ['#ffffff', 'Light', '#e5e7eb'],
   ['#f1f5f9', 'Mid light', '#cbd5e1'],
@@ -83,7 +186,7 @@ const PAGE_BG_COLORS = [
   ['#0f172a', 'Dark', '#1e293b'],
 ]
 
-const SIDEBAR_TEXT_COLORS = [
+const SIDEBAR_TEXT_COLORS: ColorChoice[] = [
   ['', 'Auto', '#d1d5db'],
   ['#ffffff', 'Light', '#e5e7eb'],
   ['#cbd5e1', 'Mid light', '#94a3b8'],
@@ -93,26 +196,32 @@ const SIDEBAR_TEXT_COLORS = [
 
 const DEFAULT_PAYMENT_METHODS = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR', 'Pi Pay', 'Transfer']
 
-const SETTINGS_SECTION_OPTIONS = [
+const SETTINGS_SECTION_OPTIONS: Array<{ value: SettingsSectionId; label: string; hint: string }> = [
   { value: 'all', label: 'All', hint: 'Show every settings section.' },
   { value: 'business', label: 'Business', hint: 'Business profile, browser icon, currency, receipt, and payment settings.' },
   { value: 'appearance', label: 'Appearance', hint: 'Theme, colors, fonts, typography, and navigation layout.' },
   { value: 'security', label: 'Security', hint: 'Session duration, notifications, and two-factor authentication.' },
 ]
 
+const SETTINGS_SECTION_IDS = new Set<SettingsSectionId>(SETTINGS_SECTION_OPTIONS.map((option) => option.value))
+
+function isSettingsSectionId(value: string): value is SettingsSectionId {
+  return SETTINGS_SECTION_IDS.has(value as SettingsSectionId)
+}
+
 const THEME_OPTION_KEYS = [['light', 'themeLight', 'Light'], ['dark', 'themeDark', 'Dark']]
 const LANGUAGE_OPTION_KEYS = [['en', 'englishLabel', 'English'], ['km', 'khmerLabel', 'Khmer']]
 const CARD_STYLE_OPTION_KEYS = [['sharp', 'sharp'], ['rounded', 'rounded'], ['pill', 'pill']]
 const DENSITY_OPTION_KEYS = [['comfortable', 'comfortable'], ['compact', 'compact'], ['spacious', 'spacious']]
 
-const ACCENT_COLORS = [
+const ACCENT_COLORS: Array<[string, string]> = [
   ['#2563eb', 'Light'],
   ['#7c3aed', 'Mid light'],
   ['#0f766e', 'Mid dark'],
   ['#1f2937', 'Dark'],
 ]
 
-function parseStoredColors(value) {
+function parseStoredColors(value: unknown): string[] {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value || '[]') : value
     return Array.isArray(parsed)
@@ -123,11 +232,11 @@ function parseStoredColors(value) {
   }
 }
 
-function buildColorChoices(baseColors, customColors = []) {
+function buildColorChoices(baseColors: ColorChoice[], customColors: string[] = []): ColorChoice[] {
   const seen = new Set()
   const presets = Array.isArray(baseColors) ? baseColors : []
   const extras = Array.isArray(customColors) ? customColors : []
-  const next = []
+  const next: ColorChoice[] = []
   for (const [color, label, border] of presets) {
     const key = `${color || ''}|${label || ''}|${border || ''}`
     if (seen.has(key)) continue
@@ -194,7 +303,7 @@ const FONT_PREVIEW_CSS = {
   battambang: '"Battambang", "Noto Sans Khmer", sans-serif',
 }
 
-const SETTINGS_NAV_ICONS = {
+const SETTINGS_NAV_ICONS: Record<string, typeof SettingsIcon> = {
   dashboard: LayoutDashboard,
   catalog: ShoppingBag,
   loyalty_points: Ticket,
@@ -214,7 +323,7 @@ const SETTINGS_NAV_ICONS = {
   server: Server,
 }
 
-function useCopy(language, t) {
+function useCopy(_language: string, t: TranslateFn): CopyFn {
   return (key, fallback) => {
     const translated = t?.(key)
     if (translated && translated !== key) return translated
@@ -222,7 +331,7 @@ function useCopy(language, t) {
   }
 }
 
-function getSettingsNavLabel(item, t) {
+function getSettingsNavLabel(item: NavItem, t: TranslateFn): string {
   if (item.id === 'catalog') {
     const label = t('customer_portal')
     return label && label !== 'customer_portal' ? label : 'Customer Portal'
@@ -253,7 +362,7 @@ function SwatchPicker({
   customColors = [],
   onAddCustomColor,
   onRemoveCustomColor,
-}) {
+}: SwatchPickerProps) {
   return (
     <div className="sm:col-span-2">
       <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -327,7 +436,7 @@ function SettingsSection({
   description = '',
   defaultOpen = false,
   children,
-}) {
+}: SettingsSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
 
   return (
@@ -355,51 +464,54 @@ function SettingsSection({
 export default function Settings() {
   const { t, settings, saveSettings, loadSettings, user, notify, deviceTimezone } = useApp()
   const [otpStatus, setOtpStatus] = useState(false)
-  const [otpModal, setOtpModal] = useState(null)
-  const [pmList, setPmList] = useState([])
+  const [otpModal, setOtpModal] = useState<OtpModalMode>(null)
+  const [pmList, setPmList] = useState<string[]>([])
   const [newPm, setNewPm] = useState('')
-  const [form, setForm] = useState({})
+  const [form, setForm] = useState<SettingsRecord>({})
   const [previewNow, setPreviewNow] = useState(() => new Date())
   const [appFaviconPreview, setAppFaviconPreview] = useState('')
-  const [dragPinnedId, setDragPinnedId] = useState(null)
-  const [settingsSection, setSettingsSection] = useState('all')
-  const [settingsConflict, setSettingsConflict] = useState(null)
+  const [dragPinnedId, setDragPinnedId] = useState<string | null>(null)
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('all')
+  const [settingsConflict, setSettingsConflict] = useState<SettingsConflictState | null>(null)
   const [showConflictReview, setShowConflictReview] = useState(false)
   const [savingSettings, setSavingSettings] = useState(false)
-  const [uploadStates, setUploadStates] = useState(() => ({
+  const [uploadStates, setUploadStates] = useState<UploadStateMap>(() => ({
     ui_app_favicon_image: createInitialUploadState(),
   }))
   const otpStatusRequestRef = useRef(0)
   const faviconPreviewRequestRef = useRef(0)
   const settingsSaveInFlightRef = useRef(false)
-  const uploadInFlightKeysRef = useRef(new Set())
-  const uploadControllersRef = useRef(new Map())
-  const uploadOriginalValuesRef = useRef(new Map())
-  const uploadPreviewUrlsRef = useRef(new Map())
+  const uploadInFlightKeysRef = useRef<Set<string>>(new Set())
+  const uploadControllersRef = useRef<Map<string, AbortController>>(new Map())
+  const uploadOriginalValuesRef = useRef<Map<string, string>>(new Map())
+  const uploadPreviewUrlsRef = useRef<Map<string, string>>(new Map())
   const aliveRef = useRef(true)
   const sectionStorageKey = 'business-os:settings:section'
-  const showSettingsSection = (sectionId) => settingsSection === 'all' || settingsSection === sectionId
+  const showSettingsSection = (sectionId: SettingsSectionId) => settingsSection === 'all' || settingsSection === sectionId
+  const handleSettingsSectionChange = useCallback((value: string) => {
+    if (isSettingsSectionId(value)) setSettingsSection(value)
+  }, [])
   const uploadingImage = useMemo(
     () => Object.values(uploadStates).some((state) => state?.status === 'uploading'),
     [uploadStates],
   )
 
-  const uiLanguage = form.language || settings.language || 'en'
+  const uiLanguage = toStringValue(form.language || settings.language, 'en')
   const copy = useCopy(uiLanguage, t)
-  const previewFontFamily = FONT_PREVIEW_CSS[form.ui_font_family || 'system'] || FONT_PREVIEW_CSS.system
-  const previewBaseSize = Math.max(14, Math.round((parseFloat(form.ui_font_size || 14) / 14) * 16))
-  const previewTitleSize = form.ui_title_font_size || Math.max(20, Math.round((parseFloat(form.ui_font_size || 14) || 14) * 1.75))
+  const previewFontFamily = FONT_PREVIEW_CSS[toStringValue(form.ui_font_family, 'system') as keyof typeof FONT_PREVIEW_CSS] || FONT_PREVIEW_CSS.system
+  const previewBaseSize = Math.max(14, Math.round((toNumberValue(form.ui_font_size, 14) / 14) * 16))
+  const previewTitleSize = form.ui_title_font_size || Math.max(20, Math.round((toNumberValue(form.ui_font_size, 14) || 14) * 1.75))
   const previewSidebarSize = form.ui_sidebar_font_size || Math.max(13, Math.round(previewBaseSize * 0.95))
   const previewSectionSize = form.ui_section_font_size || Math.max(15, Math.round(previewBaseSize * 1.08))
   const previewChipSize = form.ui_chip_font_size || Math.max(11, Math.round(previewBaseSize * 0.78))
   const previewTableSize = form.ui_table_font_size || (form.ui_font_size || 14)
-  const selectedDisplayTimezone = form.display_timezone || settings.display_timezone || deviceTimezone
+  const selectedDisplayTimezone = toStringValue(form.display_timezone || settings.display_timezone || deviceTimezone, Intl.DateTimeFormat().resolvedOptions().timeZone)
   const previewLanguage = uiLanguage === 'km' ? 'km' : 'en'
   const customAccentColors = useMemo(() => parseStoredColors(form.ui_custom_accent_colors), [form.ui_custom_accent_colors])
   const customSidebarColors = useMemo(() => parseStoredColors(form.ui_custom_sidebar_colors), [form.ui_custom_sidebar_colors])
   const customPageBgColors = useMemo(() => parseStoredColors(form.ui_custom_page_bg_colors), [form.ui_custom_page_bg_colors])
   const customSidebarTextColors = useMemo(() => parseStoredColors(form.ui_custom_sidebar_text_colors), [form.ui_custom_sidebar_text_colors])
-  const accentChoices = useMemo(() => buildColorChoices(ACCENT_COLORS.map(([color, label]) => [color, label, color]), customAccentColors), [customAccentColors])
+  const accentChoices = useMemo(() => buildColorChoices(ACCENT_COLORS.map(([color, label]) => [color, label, color] as ColorChoice), customAccentColors), [customAccentColors])
   const sidebarColorChoices = useMemo(() => buildColorChoices(SIDEBAR_COLORS, customSidebarColors), [customSidebarColors])
   const pageBgChoices = useMemo(() => buildColorChoices(PAGE_BG_COLORS, customPageBgColors), [customPageBgColors])
   const sidebarTextChoices = useMemo(() => buildColorChoices(SIDEBAR_TEXT_COLORS, customSidebarTextColors), [customSidebarTextColors])
@@ -444,10 +556,11 @@ export default function Settings() {
     }
 
     const requestId = beginTrackedRequest(otpStatusRequestRef)
+    const userId = user.id
     async function loadOtpStatus() {
       try {
         const result = await withLoaderTimeout(
-          () => window.api.otpStatus(user.id),
+          () => getSettingsApi().otpStatus?.(userId),
           'OTP status',
           SETTINGS_OTP_STATUS_TIMEOUT_MS,
         )
@@ -489,12 +602,14 @@ export default function Settings() {
       }
     }
     loadFaviconPreview()
-    return () => invalidateTrackedRequest(faviconPreviewRequestRef)
+    return () => {
+      invalidateTrackedRequest(faviconPreviewRequestRef)
+    }
   }, [form.ui_app_favicon_image, settings.ui_app_favicon_image])
 
   useEffect(() => {
     try {
-      const raw = settings.pos_payment_methods
+      const raw = toStringValue(settings.pos_payment_methods)
       setPmList(raw ? JSON.parse(raw) : DEFAULT_PAYMENT_METHODS)
     } catch {
       setPmList(DEFAULT_PAYMENT_METHODS)
@@ -519,43 +634,43 @@ export default function Settings() {
     }
   }, [user])
 
-  const navItems = useMemo(
-    () => orderNavItems(NAV_ITEMS, parseNavSetting(form.ui_nav_order, [])).filter((item) => item.id !== 'catalog'),
+  const navItems = useMemo<NavItem[]>(
+    () => orderNavItems(NAV_ITEMS, parseNavSetting(toStringValue(form.ui_nav_order), [])).filter((item) => item.id !== 'catalog') as NavItem[],
     [form.ui_nav_order],
   )
-  const mobilePinned = useMemo(() => parseNavSetting(form.ui_mobile_pinned, DEFAULT_MOBILE_PINNED).slice(0, 4), [form.ui_mobile_pinned])
+  const mobilePinned = useMemo(() => parseNavSetting(toStringValue(form.ui_mobile_pinned), DEFAULT_MOBILE_PINNED).slice(0, 4), [form.ui_mobile_pinned])
   const mobilePinnedItems = useMemo(() => {
     const byId = new Map(navItems.map((item) => [item.id, item]))
-    return mobilePinned.map((id) => byId.get(id)).filter(Boolean)
+    return mobilePinned.map((id) => byId.get(id)).filter((item): item is NavItem => Boolean(item))
   }, [mobilePinned, navItems])
 
-  const setValue = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const setValue = (key: string, value: SettingValue) => setForm((current) => ({ ...current, [key]: value }))
   const getUploadState = useCallback(
-    (key) => uploadStates[key] || createInitialUploadState(),
+    (key: string) => uploadStates[key] || createInitialUploadState(),
     [uploadStates],
   )
-  const updateUploadState = useCallback((key, action) => {
+  const updateUploadState = useCallback((key: string, action: UploadAction) => {
     setUploadStates((current) => reduceUploadState(current, { ...(action || {}), key }))
   }, [])
-  const updateStoredColorList = useCallback((key, updater) => {
+  const updateStoredColorList = useCallback((key: string, updater: (currentList: string[]) => string[]) => {
     setForm((current) => {
       const currentList = parseStoredColors(current[key])
       const nextList = updater(currentList)
       return { ...current, [key]: JSON.stringify(nextList) }
     })
   }, [])
-  const addStoredColor = useCallback((key, color) => {
+  const addStoredColor = useCallback((key: string, color: string) => {
     const normalized = String(color || '').trim().toLowerCase()
     if (!/^#[0-9a-f]{6}$/i.test(normalized)) return
     updateStoredColorList(key, (currentList) => (
       currentList.includes(normalized) ? currentList : [...currentList, normalized]
     ))
   }, [updateStoredColorList])
-  const removeStoredColor = useCallback((key, color) => {
+  const removeStoredColor = useCallback((key: string, color: string) => {
     const normalized = String(color || '').trim().toLowerCase()
     updateStoredColorList(key, (currentList) => currentList.filter((entry) => entry !== normalized))
   }, [updateStoredColorList])
-  const formatPreviewDateTime = (value) => {
+  const formatPreviewDateTime = (value: Date | string | number) => {
     const date = value instanceof Date ? value : new Date(value)
     if (Number.isNaN(date.getTime())) return '--'
     return date.toLocaleString(undefined, {
@@ -571,7 +686,7 @@ export default function Settings() {
     })
   }
 
-  const moveNavItem = (id, direction) => {
+  const moveNavItem = (id: string, direction: 'up' | 'down') => {
     const items = [...navItems]
     const index = items.findIndex((item) => item.id === id)
     if (index < 0) return
@@ -581,7 +696,7 @@ export default function Settings() {
     setValue('ui_nav_order', JSON.stringify(items.map((item) => item.id)))
   }
 
-  const toggleMobilePinned = (id) => {
+  const toggleMobilePinned = (id: string) => {
     const next = [...mobilePinned]
     const existingIndex = next.indexOf(id)
     if (existingIndex >= 0) {
@@ -593,7 +708,7 @@ export default function Settings() {
     setValue('ui_mobile_pinned', JSON.stringify(next))
   }
 
-  const movePinnedItem = (id, direction) => {
+  const movePinnedItem = (id: string, direction: 'up' | 'down') => {
     const next = [...mobilePinned]
     const index = next.indexOf(id)
     if (index < 0) return
@@ -603,7 +718,7 @@ export default function Settings() {
     setValue('ui_mobile_pinned', JSON.stringify(next))
   }
 
-  const movePinnedBefore = (dragId, targetId) => {
+  const movePinnedBefore = (dragId: string | null, targetId: string) => {
     if (!dragId || !targetId || dragId === targetId) return
     const next = [...mobilePinned]
     const dragIndex = next.indexOf(dragId)
@@ -620,7 +735,7 @@ export default function Settings() {
     setValue('ui_mobile_pinned', JSON.stringify(DEFAULT_MOBILE_PINNED))
   }
 
-  const field = (key, label, type = 'text', placeholder = '') => (
+  const field = (key: string, label: string, type = 'text', placeholder = '') => (
     <div>
       <label htmlFor={`settings-${key}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{label}</label>
       <input
@@ -642,7 +757,7 @@ export default function Settings() {
     </div>
   )
 
-  const savePaymentMethods = (updated) => {
+  const savePaymentMethods = (updated: string[]) => {
     setPmList(updated)
     void saveSettings(
       { pos_payment_methods: JSON.stringify(updated) },
@@ -655,17 +770,17 @@ export default function Settings() {
     )
   }
 
-  const cancelImageUpload = useCallback((key) => {
+  const cancelImageUpload = useCallback((key: string) => {
     const controller = uploadControllersRef.current.get(key)
     controller?.abort?.()
     uploadControllersRef.current.delete(key)
     updateUploadState(key, { type: 'cancel' })
   }, [updateUploadState])
 
-  const uploadImageSetting = async (key) => {
+  const uploadImageSetting = async (key: string) => {
     if (!beginKeyedAction(uploadInFlightKeysRef, key)) return
     try {
-      const file = await new Promise((resolve) => {
+      const file = await new Promise<File | null>((resolve) => {
         const input = document.createElement('input')
         input.type = 'file'
         input.accept = 'image/*'
@@ -691,7 +806,7 @@ export default function Settings() {
         previewUrl: localPreview,
       })
       const uploaded = await withLoaderTimeout(
-        () => window.api.uploadFileAsset({
+        () => getSettingsApi().uploadFileAsset?.({
           file,
           userId: user?.id,
           userName: user?.name,
@@ -714,11 +829,12 @@ export default function Settings() {
       })
     } catch (error) {
       if (aliveRef.current) {
-        const cancelled = /cancelled|canceled|aborted/i.test(String(error?.message || ''))
+        const errorMessage = getErrorMessage(error, 'Image upload failed')
+        const cancelled = /cancelled|canceled|aborted/i.test(errorMessage)
         const previousValue = uploadOriginalValuesRef.current.get(key)
         setValue(key, previousValue || '')
-        updateUploadState(key, cancelled ? { type: 'cancel' } : { type: 'error', error: error?.message || 'Image upload failed' })
-        if (!cancelled) notify(error?.message || 'Image upload failed', 'error')
+        updateUploadState(key, cancelled ? { type: 'cancel' } : { type: 'error', error: errorMessage })
+        if (!cancelled) notify(errorMessage, 'error')
       }
     } finally {
       finishKeyedAction(uploadInFlightKeysRef, key)
@@ -737,7 +853,7 @@ export default function Settings() {
     setSavingSettings(true)
     const sanitizedForm = {
       ...form,
-      ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, settings.ui_app_favicon_image || ''),
+      ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, toStringValue(settings.ui_app_favicon_image)),
     }
     try {
       const result = await saveSettings(sanitizedForm, {
@@ -780,13 +896,13 @@ export default function Settings() {
     const nextSettings = latest && typeof latest === 'object'
       ? latest
       : (settingsConflict?.serverSettings || {})
-    setForm({ ...nextSettings })
+    setForm({ ...nextSettings } as SettingsRecord)
     setSettingsConflict(null)
     setShowConflictReview(false)
   }, [loadSettings, settingsConflict])
 
   const keepServerSettings = useCallback(() => {
-    setForm({ ...(settingsConflict?.serverSettings || {}) })
+    setForm({ ...(settingsConflict?.serverSettings || {}) } as SettingsRecord)
     setSettingsConflict(null)
     setShowConflictReview(false)
   }, [settingsConflict])
@@ -796,8 +912,9 @@ export default function Settings() {
       ...(settingsConflict?.serverSettings || {}),
       ...form,
     }
-    setForm(mergedDraft)
-    const result = await saveSettings(mergedDraft, {
+    const normalizedMergedDraft = mergedDraft as SettingsRecord
+    setForm(normalizedMergedDraft)
+    const result = await saveSettings(normalizedMergedDraft, {
       reason: 'settings-merged',
       source: 'settings:conflict-merge',
     })
@@ -842,7 +959,7 @@ export default function Settings() {
         label=""
         options={SETTINGS_SECTION_OPTIONS}
         value={settingsSection}
-        onChange={setSettingsSection}
+        onChange={handleSettingsSectionChange}
         storageKey={sectionStorageKey}
       />
       <LoadingWatchdog
@@ -1207,7 +1324,7 @@ export default function Settings() {
               />
             </div>
 
-            <FontFamilyPicker value={form.ui_font_family || 'system'} onChange={(value) => setValue('ui_font_family', value)} />
+            <FontFamilyPicker value={toStringValue(form.ui_font_family, 'system')} onChange={(value) => setValue('ui_font_family', value)} />
 
             <div>
               <div className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('card_style')}</div>
@@ -1302,7 +1419,7 @@ export default function Settings() {
             <SwatchPicker
               fieldId="settings-ui-sidebar-color"
               colors={sidebarColorChoices}
-              value={form.ui_sidebar_color || ''}
+              value={toStringValue(form.ui_sidebar_color)}
               onChange={(value) => setValue('ui_sidebar_color', value)}
               fallbackValue={form.theme === 'dark' ? '#0f172a' : '#ffffff'}
               title={copy('sidebarColorTitle', 'Sidebar Color')}
@@ -1318,7 +1435,7 @@ export default function Settings() {
             <SwatchPicker
               fieldId="settings-ui-page-bg"
               colors={pageBgChoices}
-              value={form.ui_page_bg || ''}
+              value={toStringValue(form.ui_page_bg)}
               onChange={(value) => setValue('ui_page_bg', value)}
               fallbackValue={form.theme === 'dark' ? '#0f172a' : '#f9fafb'}
               title={copy('pageBgTitle', 'Page Background')}
@@ -1334,7 +1451,7 @@ export default function Settings() {
             <SwatchPicker
               fieldId="settings-ui-sidebar-text-color"
               colors={sidebarTextChoices}
-              value={form.ui_sidebar_text_color || ''}
+              value={toStringValue(form.ui_sidebar_text_color)}
               onChange={(value) => setValue('ui_sidebar_text_color', value)}
               fallbackValue={form.theme === 'dark' ? '#f8fafc' : '#111827'}
               title={copy('sidebarTextColorTitle', 'Sidebar Text & Icon Color')}
@@ -1705,7 +1822,6 @@ export default function Settings() {
               <OtpModal
                 mode={otpModal}
                 userId={user.id}
-                userName={user.name}
                 onClose={() => setOtpModal(null)}
                 onDone={(enabled) => {
                   setOtpStatus(enabled)

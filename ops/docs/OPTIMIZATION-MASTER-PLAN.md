@@ -1,6 +1,6 @@
 ﻿# Business OS Optimization Master Plan
 
-Last updated: 2026-05-16
+Last updated: 2026-05-30
 
 This document is the source of truth for the whole-app live audit and
 optimization program. It exists so progress is trackable in-repo instead of
@@ -92,7 +92,7 @@ Priority surfaces:
 - `POS.jsx`
 - `Dashboard.jsx`
 - `CatalogPage.jsx`
-- `Settings.jsx`
+- `Settings.tsx`
 - `Backup.tsx`
 - `FilesPage.tsx`
 - `Returns.tsx`

@@ -1,6 +1,6 @@
 ﻿# File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 542 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 543 in this file.
 
 ## Goal
 
@@ -530,7 +530,7 @@ Decision rule:
     the broad Phase 8.4 Playwright UI live check passed on frontend hash
     `d0e1a511d334b9e4`.
 46. Harden Settings and Catalog media upload pathways. Done:
-    `frontend/src/components/utils-settings/Settings.jsx` and
+    `frontend/src/components/utils-settings/Settings.tsx` and
     `frontend/src/components/catalog/CatalogPage.jsx` now wrap their
     `uploadFileAsset(...)` media uploads in explicit 30s timeout contracts while
     preserving keyed same-tick guards, abort controllers, progress updates,
@@ -4288,6 +4288,19 @@ Decision rule:
     overview-only default section, backup reliability verifier, and source
     inspection tests intact while centralizing `window.api` access behind a
     typed `getBackupApi()` boundary.
+543. Convert the settings shell to TSX. Done:
+    `frontend/src/components/utils-settings/Settings.tsx` now types the
+    settings record boundary, app context access, the local settings API
+    gateway, OTP status reads, image upload payloads/progress, upload
+    controller maps, conflict state, color swatches, navigation items, section
+    ids, payment method state, and favicon sanitization. The conversion keeps
+    the extensionless utils-settings barrel export, settings save same-tick
+    guard, OTP status timeout, favicon preview timeout, image upload timeout,
+    upload cancellation/cleanup behavior, section navigation source checks,
+    and admin media guard coverage intact while centralizing direct
+    `window.api` settings access behind `getSettingsApi()`. The current source
+    extension count is `.js: 95`, `.jsx: 8`, `.mjs: 0`, `.cjs: 0`,
+    `.ts: 268`, `.tsx: 99` outside generated/runtime folders.
 
 ## Safety Gates
 

@@ -6,7 +6,7 @@ const jsxModules = fs.readFileSync(new URL('../src/types/jsx-modules.d.ts', impo
 
 assert.match(barrel, /export \{ default as AuditLog \} from '\.\/AuditLog'/)
 assert.match(barrel, /export \{ default as Backup \} from '\.\/Backup'/)
-assert.match(barrel, /export \{ default as Settings \} from '\.\/Settings\.jsx'/)
+assert.match(barrel, /export \{ default as Settings \} from '\.\/Settings'/)
 assert.match(barrel, /export \{ ResetData, FactoryReset \} from '\.\/ResetData'/)
 assert.match(barrel, /export \{ default as FontFamilyPicker \} from '\.\/FontFamilyPicker'/)
 assert.match(barrel, /export \{ default as OtpModal \} from '\.\/OtpModal'/)

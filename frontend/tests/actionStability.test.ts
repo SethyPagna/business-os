@@ -253,17 +253,17 @@ await runTest('profile saves and avatar upload keep same-tick guards', () => {
 })
 
 await runTest('settings save and app favicon upload keep synchronous guards', () => {
-  const source = readFrontend('src/components/utils-settings/Settings.jsx')
+  const source = readFrontend('src/components/utils-settings/Settings.tsx')
   const methods = readFrontend('src/api/methods.js')
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const \[savingSettings, setSavingSettings\] = useState\(false\)/)
   assert.match(source, /const settingsSaveInFlightRef = useRef\(false\)/)
-  assert.match(source, /const uploadInFlightKeysRef = useRef\(new Set\(\)\)/)
+  assert.match(source, /const uploadInFlightKeysRef = useRef<Set<string>>\(new Set\(\)\)/)
   assert.match(source, /const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000/)
   assert.match(source, /if \(!beginKeyedAction\(uploadInFlightKeysRef, key\)\) return/)
   assert.match(source, /beginKeyedAction\(uploadInFlightKeysRef, key\)[\s\S]*document\.createElement\('input'\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.uploadFileAsset\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateUploadState\(key, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload settings image',\s*SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getSettingsApi\(\)\.uploadFileAsset\?\.\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateUploadState\(key, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload settings image',\s*SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishKeyedAction\(uploadInFlightKeysRef, key\)[\s\S]*uploadControllersRef\.current\.delete\(key\)/)
   assert.match(source, /if \(!beginSingleAction\(settingsSaveInFlightRef, \{ blocked: savingSettings \}\)\) return/)
   assert.match(source, /beginSingleAction\(settingsSaveInFlightRef, \{ blocked: savingSettings \}\)[\s\S]*setSavingSettings\(true\)/)

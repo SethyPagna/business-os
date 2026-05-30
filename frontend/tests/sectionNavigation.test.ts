@@ -3,7 +3,7 @@ import fs from 'node:fs'
 
 const sectionSwitcher = fs.readFileSync(new URL('../src/components/shared/SectionSwitcher.tsx', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
-const settings = fs.readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
+const settings = fs.readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const loyalty = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.tsx', import.meta.url), 'utf8')
 const loadingWatchdog = fs.readFileSync(new URL('../src/components/shared/LoadingWatchdog.tsx', import.meta.url), 'utf8')

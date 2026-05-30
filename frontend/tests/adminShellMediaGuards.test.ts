@@ -6,7 +6,7 @@ const swSource = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8
 const runtimeSource = readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
 const webApiSource = readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const localDbSource = readFileSync(new URL('../src/api/localDb.ts', import.meta.url), 'utf8')
-const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
+const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
 const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
 const faviconSource = readFileSync(new URL('../src/utils/favicon.ts', import.meta.url), 'utf8')
 const userProfileSource = readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
@@ -97,7 +97,7 @@ assert.doesNotMatch(
 
 assert.match(
   settingsSource,
-  /sanitizePersistedMediaPath\(form\.ui_app_favicon_image, settings\.ui_app_favicon_image \|\| ''\)/,
+  /sanitizePersistedMediaPath\(form\.ui_app_favicon_image, toStringValue\(settings\.ui_app_favicon_image\)\)/,
   'Settings save should sanitize favicon preview URLs before persisting',
 )
 

@@ -5899,3 +5899,16 @@ Move 542 status:
   section, backup reliability verifier, and source guard behavior unchanged
   while centralizing direct `window.api` backup access behind a typed
   `getBackupApi()` boundary.
+
+Move 543 status:
+- Move 543 converts the settings shell to
+  `frontend/src/components/utils-settings/Settings.tsx`. The typed boundary
+  now covers the settings record shape, app context access, local settings API
+  gateway, OTP status reads, image upload payloads/progress, upload controller
+  maps, conflict state, color swatches, navigation items, section ids, payment
+  method state, and favicon sanitization. The move keeps the extensionless
+  utils-settings barrel export, settings save same-tick guard, OTP status
+  timeout, favicon preview timeout, image upload timeout,
+  cancellation/cleanup behavior, section navigation source checks, and admin
+  media guard behavior unchanged while centralizing direct `window.api`
+  settings access behind `getSettingsApi()`.

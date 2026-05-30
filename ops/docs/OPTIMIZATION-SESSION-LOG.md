@@ -985,3 +985,45 @@ Use this shape for future entries:
 - follow-up insight: Backup is the second utils-settings shell moved to TSX;
   Settings remains the next bounded utils-settings candidate before POS,
   Products, Dashboard, Inventory, and Catalog.
+
+- change: converted the settings shell to TSX with typed settings records,
+  app context access, local settings API gateway calls, OTP status reads,
+  image upload payloads/progress, upload controller maps, conflict state,
+  color swatches, navigation items, section ids, payment methods, and favicon
+  sanitization
+- affected files:
+  `frontend/src/components/utils-settings/Settings.tsx`,
+  `frontend/src/components/utils-settings/index.ts`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/adminShellMediaGuards.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/sectionNavigation.test.ts`,
+  `frontend/tests/utilsSettingsBarrel.test.ts`
+- route or API target: Settings business profile, appearance/navigation,
+  security/OTP status, payment methods, app icon upload/preview, conflict
+  resolution, and settings save surfaces
+- keeper or rollback: keeper; focused typecheck, JSX, utils-settings barrel,
+  section navigation, performance loading UX, action stability, admin media
+  guard, settings conflict, settings refresh, frontend/backend utility suites,
+  UI audit, production build, organization audit, schema audit, generated
+  reference refresh, Phase 29 repeat audit, Phase 8.4 live suite, and prune
+  checks passed
+- route-scoped result: focused TSX source checks passed; source/test scans
+  found no remaining old Settings JSX filename references in frontend
+  source/tests or ops scripts and no `any` escape hatches in the converted
+  Settings shell. Direct
+  settings `window.api` calls are now contained behind the typed
+  `getSettingsApi()` gateway.
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up. The
+  running app still served frontend hash `55cf7b8ef08a4b8d`; the fresh local
+  production build hash is `5c7826c6be6c8641`. Live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T02-32-02-184Z/report.json`.
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,131 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: Settings is the third utils-settings shell moved to TSX;
+  the remaining larger JSX shells are POS, Products, Dashboard, Inventory,
+  Catalog page/editor, and App/AppContext.

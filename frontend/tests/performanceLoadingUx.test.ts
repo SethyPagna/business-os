@@ -8,7 +8,7 @@ const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
-const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
+const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
 const otpModal = fs.readFileSync(new URL('../src/components/utils-settings/OtpModal.tsx', import.meta.url), 'utf8')
 const resetData = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
 const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
@@ -1350,7 +1350,7 @@ assert.match(
 )
 assert.match(
   settingsPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.otpStatus\(user\.id\),\s*'OTP status',\s*SETTINGS_OTP_STATUS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getSettingsApi\(\)\.otpStatus\?\.\(userId\),\s*'OTP status',\s*SETTINGS_OTP_STATUS_TIMEOUT_MS,\s*\)/,
   'settings OTP status should timeout slow OTP status reads',
 )
 assert.match(
@@ -1360,7 +1360,7 @@ assert.match(
 )
 assert.match(
   settingsPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadFileAsset\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateUploadState\(key, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload settings image',\s*SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getSettingsApi\(\)\.uploadFileAsset\?\.\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateUploadState\(key, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload settings image',\s*SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
   'settings image uploads should timeout slow file uploads',
 )
 assert.match(
