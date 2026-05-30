@@ -62,7 +62,7 @@ Code files scanned: **468**
 | 50 | `backend/src/routes/returns.js` | 10 |
 | 51 | `backend/src/routes/runtime.ts` | 6 |
 | 52 | `backend/src/routes/sales.js` | 24 |
-| 53 | `backend/src/routes/settings.js` | 8 |
+| 53 | `backend/src/routes/settings.ts` | 8 |
 | 54 | `backend/src/routes/sync.js` | 12 |
 | 55 | `backend/src/routes/system/index.js` | 44 |
 | 56 | `backend/src/routes/units.ts` | 3 |
@@ -1499,7 +1499,7 @@ Code files scanned: **468**
 | 23 | `fetchSaleItemsWithBranches` | function | 308 |
 | 24 | `findSaleByClientRequestId` | function | 317 |
 
-### 3.53 `backend/src/routes/settings.js`
+### 3.53 `backend/src/routes/settings.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

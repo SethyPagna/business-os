@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T18:17:49.593Z
+Generated: 2026-05-30T18:27:40.863Z
 
 ## Summary
 
@@ -14,10 +14,10 @@ Generated: 2026-05-30T18:17:49.593Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 314 |
+| .ts | 315 |
 | .tsx | 107 |
 | .md | 44 |
-| .js | 38 |
+| .js | 37 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
@@ -64,10 +64,10 @@ Generated: 2026-05-30T18:17:49.593Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7981 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7984 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6533 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4883 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6548 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4897 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -90,8 +90,8 @@ Generated: 2026-05-30T18:17:49.593Z
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1750 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
-| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1673 | ops/docs/reference |
 | backend/src/routes/system/index.js | 1659 | backend/routes |
+| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1651 | ops/docs/reference |
 | ops/scripts/architecture/language-runtime-audit.ts | 1596 | ops/scripts/architecture |
 | backend/src/routes/sales.js | 1573 | backend/routes |
 
@@ -112,8 +112,8 @@ Generated: 2026-05-30T18:17:49.593Z
 | backend/src/routes/products.js | 17 | backend/routes |
 | frontend/src/components/contacts/DeliveryTab.tsx | 17 | frontend/components/contacts |
 | frontend/src/components/contacts/SuppliersTab.tsx | 17 | frontend/components/contacts |
+| backend/test/routeContracts.test.ts | 15 | backend/test/routeContracts.test.ts |
 | backend/src/services/importJobs.js | 14 | backend/services |
-| backend/test/routeContracts.test.ts | 14 | backend/test/routeContracts.test.ts |
 | frontend/src/AppContext.tsx | 14 | frontend/src/AppContext.tsx |
 | backend/src/routes/auth.js | 13 | backend/routes |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
