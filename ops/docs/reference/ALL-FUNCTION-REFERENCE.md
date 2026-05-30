@@ -36,7 +36,7 @@ Code files scanned: **468**
 | 24 | `backend/src/netSecurity.ts` | 7 |
 | 25 | `backend/src/objectStore.js` | 29 |
 | 26 | `backend/src/optionalSharp.ts` | 1 |
-| 27 | `backend/src/organizationContext/index.js` | 14 |
+| 27 | `backend/src/organizationContext/index.ts` | 14 |
 | 28 | `backend/src/permissions.ts` | 7 |
 | 29 | `backend/src/portalUtils.ts` | 6 |
 | 30 | `backend/src/postgresDatabase.js` | 14 |
@@ -924,7 +924,7 @@ Code files scanned: **468**
 |---:|---|---|---:|
 | 1 | `loadSharp` | function | 9 |
 
-### 3.27 `backend/src/organizationContext/index.js`
+### 3.27 `backend/src/organizationContext/index.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

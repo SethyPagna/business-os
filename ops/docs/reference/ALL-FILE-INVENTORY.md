@@ -43,7 +43,7 @@ Total files documented: **531**
 | 31 | `backend/src/netSecurity.ts` | backend-core | 148 | 3.6 | Project source/support file |
 | 32 | `backend/src/objectStore.js` | backend-core | 468 | 15.1 | Project source/support file |
 | 33 | `backend/src/optionalSharp.ts` | backend-core | 32 | 0.7 | Project source/support file |
-| 34 | `backend/src/organizationContext/index.js` | backend-core | 264 | 8.2 | Project source/support file |
+| 34 | `backend/src/organizationContext/index.ts` | backend-core | 264 | 8.2 | Project source/support file |
 | 35 | `backend/src/permissions.ts` | backend-core | 227 | 7.0 | Project source/support file |
 | 36 | `backend/src/portalUtils.ts` | backend-core | 122 | 3.1 | Project source/support file |
 | 37 | `backend/src/postgresDatabase.js` | backend-core | 596 | 25.4 | Project source/support file |

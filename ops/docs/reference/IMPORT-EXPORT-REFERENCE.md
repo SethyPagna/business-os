@@ -36,7 +36,7 @@ Code files documented: **468**
 | 24 | `backend/src/netSecurity.ts` | 1 | 1 | 0 | 5 |
 | 25 | `backend/src/objectStore.js` | 7 | 1 | 1 | 6 |
 | 26 | `backend/src/optionalSharp.ts` | 1 | 1 | 0 | 2 |
-| 27 | `backend/src/organizationContext/index.js` | 7 | 1 | 4 | 6 |
+| 27 | `backend/src/organizationContext/index.ts` | 7 | 1 | 4 | 6 |
 | 28 | `backend/src/permissions.ts` | 0 | 1 | 0 | 4 |
 | 29 | `backend/src/portalUtils.ts` | 0 | 1 | 0 | 2 |
 | 30 | `backend/src/postgresDatabase.js` | 7 | 1 | 3 | 2 |
@@ -493,7 +493,7 @@ Code files documented: **468**
   - `./src/maintenanceLock.ts`
   - `./src/middleware`
   - `./src/objectStore`
-  - `./src/organizationContext`
+  - `./src/organizationContext/index.ts`
   - `./src/productBatches`
   - `./src/requestContext.ts`
   - `./src/routes/actionHistory`
@@ -541,7 +541,7 @@ Code files documented: **468**
   - `backend/src/maintenanceLock.ts`
   - `backend/src/middleware.js`
   - `backend/src/objectStore.js`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
   - `backend/src/productBatches.js`
   - `backend/src/requestContext.ts`
   - `backend/src/routes/actionHistory.js`
@@ -673,7 +673,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/middleware.js`
   - `backend/src/objectStore.js`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
   - `backend/src/postgresDatabase.js`
   - `backend/src/routes/auth.js`
   - `backend/src/routes/importJobs.js`
@@ -738,7 +738,7 @@ Code files documented: **468**
   - `backend/src/businessMetrics.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
   - `backend/src/productBatches.js`
   - `backend/src/routes/actionHistory.js`
   - `backend/src/routes/ai.js`
@@ -784,7 +784,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (5)
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/systemFsWorker.ts`
@@ -1063,7 +1063,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/uploadSecurity.ts`
 
-### 3.27 `backend/src/organizationContext/index.js`
+### 3.27 `backend/src/organizationContext/index.ts`
 
 - Declared exports: `module.exports`
 - Imports (7)
@@ -1226,7 +1226,7 @@ Code files documented: **468**
   - `../database.ts`
   - `../helpers`
   - `../middleware`
-  - `../organizationContext`
+  - `../organizationContext/index.ts`
   - `../runtimeState/index.ts`
   - `../security.ts`
   - `../services/googleOauth`
@@ -1245,7 +1245,7 @@ Code files documented: **468**
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/security.ts`
   - `backend/src/services/googleOauth.js`
@@ -1450,11 +1450,11 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (3)
   - `../middleware`
-  - `../organizationContext`
+  - `../organizationContext/index.ts`
   - `express`
 - Internal dependencies (2)
   - `backend/src/middleware.js`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
 - Referenced by (2)
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
@@ -1469,7 +1469,7 @@ Code files documented: **468**
   - `../initials.ts`
   - `../middleware`
   - `../netSecurity.ts`
-  - `../organizationContext`
+  - `../organizationContext/index.ts`
   - `../portalUtils.ts`
   - `../runtimeCache.ts`
   - `../security.ts`
@@ -1483,7 +1483,7 @@ Code files documented: **468**
   - `backend/src/initials.ts`
   - `backend/src/middleware.js`
   - `backend/src/netSecurity.ts`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
   - `backend/src/portalUtils.ts`
   - `backend/src/runtimeCache.ts`
   - `backend/src/security.ts`
@@ -1669,7 +1669,7 @@ Code files documented: **468**
   - `../../maintenanceLock.ts`
   - `../../middleware`
   - `../../objectStore`
-  - `../../organizationContext`
+  - `../../organizationContext/index.ts`
   - `../../runtimeState/index.ts`
   - `../../security.ts`
   - `../../services/backupPackages`
@@ -1694,7 +1694,7 @@ Code files documented: **468**
   - `backend/src/maintenanceLock.ts`
   - `backend/src/middleware.js`
   - `backend/src/objectStore.js`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/security.ts`
   - `backend/src/services/backupPackages.js`
@@ -1735,7 +1735,7 @@ Code files documented: **468**
   - `../fileAssets`
   - `../helpers`
   - `../middleware`
-  - `../organizationContext`
+  - `../organizationContext/index.ts`
   - `../services/googleOauth`
   - `../services/verification`
   - `../sessionAuth.ts`
@@ -1747,7 +1747,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
   - `backend/src/services/googleOauth.js`
   - `backend/src/services/verification.js`
   - `backend/src/sessionAuth.ts`
@@ -2111,7 +2111,7 @@ Code files documented: **468**
   - none
 - Referenced by (2)
   - `backend/src/config/index.js`
-  - `backend/src/organizationContext/index.js`
+  - `backend/src/organizationContext/index.ts`
 
 ### 3.78 `backend/src/systemFsWorker.ts`
 

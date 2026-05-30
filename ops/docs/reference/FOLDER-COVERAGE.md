@@ -275,7 +275,7 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `index.js` | Project source/support file |
+| 1 | `index.ts` | Project source/support file |
 
 
 ### 3.9 Folder: `backend/src/routes`
