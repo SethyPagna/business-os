@@ -78,7 +78,7 @@ Code files scanned: **468**
 | 66 | `backend/src/services/firebaseAuth.js` | 22 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 75 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
-| 69 | `backend/src/services/googleOauth.js` | 17 |
+| 69 | `backend/src/services/googleOauth.ts` | 17 |
 | 70 | `backend/src/services/importJobs.js` | 175 |
 | 71 | `backend/src/services/integrationDoctor.js` | 14 |
 | 72 | `backend/src/services/mediaQueue.ts` | 10 |
@@ -1927,7 +1927,7 @@ Code files scanned: **468**
 | 6 | `selectDateExpiredVersions` | function | 101 |
 | 7 | `selectExpiredDriveSyncVersions` | function | 113 |
 
-### 3.69 `backend/src/services/googleOauth.js`
+### 3.69 `backend/src/services/googleOauth.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

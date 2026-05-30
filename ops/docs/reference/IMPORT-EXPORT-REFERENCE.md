@@ -78,7 +78,7 @@ Code files documented: **468**
 | 66 | `backend/src/services/firebaseAuth.js` | 2 | 1 | 0 | 0 |
 | 67 | `backend/src/services/googleDriveSync/index.js` | 12 | 1 | 8 | 4 |
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 0 | 1 | 0 | 2 |
-| 69 | `backend/src/services/googleOauth.js` | 2 | 1 | 1 | 4 |
+| 69 | `backend/src/services/googleOauth.ts` | 2 | 1 | 1 | 4 |
 | 70 | `backend/src/services/importJobs.js` | 20 | 1 | 14 | 7 |
 | 71 | `backend/src/services/integrationDoctor.js` | 10 | 1 | 8 | 2 |
 | 72 | `backend/src/services/mediaQueue.ts` | 5 | 1 | 3 | 5 |
@@ -685,7 +685,7 @@ Code files documented: **468**
   - `backend/src/serverUtils.js`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
-  - `backend/src/services/googleOauth.js`
+  - `backend/src/services/googleOauth.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/integrationDoctor.js`
   - `backend/src/services/mediaQueue.ts`
@@ -1229,7 +1229,7 @@ Code files documented: **468**
   - `../organizationContext/index.ts`
   - `../runtimeState/index.ts`
   - `../security.ts`
-  - `../services/googleOauth`
+  - `../services/googleOauth.ts`
   - `../services/verification.ts`
   - `../sessionAuth.ts`
   - `../settingsSnapshot.ts`
@@ -1248,7 +1248,7 @@ Code files documented: **468**
   - `backend/src/organizationContext/index.ts`
   - `backend/src/runtimeState/index.ts`
   - `backend/src/security.ts`
-  - `backend/src/services/googleOauth.js`
+  - `backend/src/services/googleOauth.ts`
   - `backend/src/services/verification.ts`
   - `backend/src/sessionAuth.ts`
   - `backend/src/settingsSnapshot.ts`
@@ -1736,7 +1736,7 @@ Code files documented: **468**
   - `../helpers`
   - `../middleware`
   - `../organizationContext/index.ts`
-  - `../services/googleOauth`
+  - `../services/googleOauth.ts`
   - `../services/verification.ts`
   - `../sessionAuth.ts`
   - `bcryptjs`
@@ -1748,7 +1748,7 @@ Code files documented: **468**
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
   - `backend/src/organizationContext/index.ts`
-  - `backend/src/services/googleOauth.js`
+  - `backend/src/services/googleOauth.ts`
   - `backend/src/services/verification.ts`
   - `backend/src/sessionAuth.ts`
 - Referenced by (1)
@@ -1933,7 +1933,7 @@ Code files documented: **468**
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/test/googleDriveSyncVersioning.test.ts`
 
-### 3.69 `backend/src/services/googleOauth.js`
+### 3.69 `backend/src/services/googleOauth.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2005,7 +2005,7 @@ Code files documented: **468**
   - `../objectStore`
   - `./backupPackages`
   - `./googleDriveSync`
-  - `./googleOauth`
+  - `./googleOauth.ts`
   - `./importJobs`
   - `fs`
   - `path`
@@ -2016,7 +2016,7 @@ Code files documented: **468**
   - `backend/src/objectStore.js`
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
-  - `backend/src/services/googleOauth.js`
+  - `backend/src/services/googleOauth.ts`
   - `backend/src/services/importJobs.js`
 - Referenced by (2)
   - `backend/src/routes/system/index.js`
@@ -2594,12 +2594,12 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (4)
-  - `../src/services/googleOauth`
+  - `../src/services/googleOauth.ts`
   - `node:assert/strict`
   - `node:fs`
   - `node:path`
 - Internal dependencies (1)
-  - `backend/src/services/googleOauth.js`
+  - `backend/src/services/googleOauth.ts`
 - Referenced by (0)
   - none
 

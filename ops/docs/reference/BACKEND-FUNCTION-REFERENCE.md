@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **33**
+Total files documented: **32**
 
 ## 2. Symbol Count by File
 
@@ -38,11 +38,10 @@ Total files documented: **33**
 | 26 | `backend/src/services/backupPackages.js` | 59 | 0 |
 | 27 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
 | 28 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
-| 29 | `backend/src/services/googleOauth.js` | 17 | 0 |
-| 30 | `backend/src/services/importJobs.js` | 175 | 0 |
-| 31 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
-| 32 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 33 | `backend/src/systemJobs.js` | 28 | 0 |
+| 29 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 30 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
+| 31 | `backend/src/services/portalAi.js` | 42 | 0 |
+| 32 | `backend/src/systemJobs.js` | 28 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1256,29 +1255,7 @@ Total files documented: **33**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.29 `backend/src/services/googleOauth.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `trim` | function | 27 |
-| 2 | `unique` | function | 31 |
-| 3 | `appendCallbackPath` | function | 43 |
-| 4 | `getGoogleLoginOrigins` | function | 53 |
-| 5 | `getGoogleLoginRedirectUris` | function | 62 |
-| 6 | `getPrimaryRedirectUri` | function | 70 |
-| 7 | `getDefaultReturnPath` | function | 74 |
-| 8 | `normalizeReturnTarget` | function | 80 |
-| 9 | `base64url` | function | 117 |
-| 10 | `sha256Base64Url` | function | 122 |
-| 11 | `getStateSecret` | function | 126 |
-| 12 | `signState` | function | 130 |
-| 13 | `verifyState` | function | 136 |
-| 14 | `getGoogleLoginPublicConfig` | function | 152 |
-| 15 | `buildGoogleOauthStartUrl` | function | 165 |
-| 16 | `exchangeGoogleOauthCode` | function | 196 |
-| 17 | `getGoogleUserFromTokens` | function | 219 |
-
-### 3.30 `backend/src/services/importJobs.js`
+### 3.29 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1458,7 +1435,7 @@ Total files documented: **33**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.31 `backend/src/services/integrationDoctor.js`
+### 3.30 `backend/src/services/integrationDoctor.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1477,7 +1454,7 @@ Total files documented: **33**
 | 13 | `probeBackups` | function | 199 |
 | 14 | `buildIntegrationDoctor` | function | 216 |
 
-### 3.32 `backend/src/services/portalAi.js`
+### 3.31 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1524,7 +1501,7 @@ Total files documented: **33**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.33 `backend/src/systemJobs.js`
+### 3.32 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
