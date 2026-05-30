@@ -21,7 +21,7 @@ Code files scanned: **466**
 | 9 | `backend/src/conflictControl.ts` | 6 |
 | 10 | `backend/src/contactOptions.ts` | 10 |
 | 11 | `backend/src/database.ts` | 0 |
-| 12 | `backend/src/dataPath/index.js` | 9 |
+| 12 | `backend/src/dataPath/index.ts` | 9 |
 | 13 | `backend/src/db/cutoverReadiness.ts` | 10 |
 | 14 | `backend/src/db/postgresQueryCompat.ts` | 12 |
 | 15 | `backend/src/fileAssets.js` | 61 |
@@ -625,19 +625,19 @@ Code files scanned: **466**
 
 - No top-level named symbols detected.
 
-### 3.12 `backend/src/dataPath/index.js`
+### 3.12 `backend/src/dataPath/index.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizePathForCompare` | function | 9 |
-| 2 | `isSamePath` | function | 15 |
-| 3 | `isSubPath` | function | 19 |
-| 4 | `ensureDataRootLayout` | function | 24 |
-| 5 | `walkFiles` | function | 31 |
-| 6 | `summarizeDataRoot` | function | 49 |
-| 7 | `copyDirectoryContents` | function | 92 |
-| 8 | `buildArchivedTargetPath` | function | 129 |
-| 9 | `relocateDataRoot` | function | 146 |
+| 1 | `normalizePathForCompare` | function | 32 |
+| 2 | `isSamePath` | function | 38 |
+| 3 | `isSubPath` | function | 42 |
+| 4 | `ensureDataRootLayout` | function | 47 |
+| 5 | `walkFiles` | function | 58 |
+| 6 | `summarizeDataRoot` | function | 80 |
+| 7 | `copyDirectoryContents` | function | 123 |
+| 8 | `buildArchivedTargetPath` | function | 160 |
+| 9 | `relocateDataRoot` | function | 180 |
 
 ### 3.13 `backend/src/db/cutoverReadiness.ts`
 

@@ -27,7 +27,7 @@ Total files documented: **529**
 | 15 | `backend/src/conflictControl.ts` | backend-core | 117 | 3.4 | Project source/support file |
 | 16 | `backend/src/contactOptions.ts` | backend-core | 211 | 6.5 | Project source/support file |
 | 17 | `backend/src/database.ts` | backend-core | 4 | 0.1 | Schema/migrations and DB bootstrap |
-| 18 | `backend/src/dataPath/index.js` | backend-core | 201 | 6.0 | Project source/support file |
+| 18 | `backend/src/dataPath/index.ts` | backend-core | 235 | 6.6 | Project source/support file |
 | 19 | `backend/src/db/cutoverReadiness.ts` | backend-core | 173 | 5.5 | Project source/support file |
 | 20 | `backend/src/db/postgresQueryCompat.ts` | backend-core | 240 | 6.7 | Project source/support file |
 | 21 | `backend/src/db/postgresSchema.sql` | backend-core | 2148 | 54.6 | Project source/support file |
@@ -43,7 +43,7 @@ Total files documented: **529**
 | 31 | `backend/src/netSecurity.ts` | backend-core | 148 | 3.6 | Project source/support file |
 | 32 | `backend/src/objectStore.js` | backend-core | 468 | 15.1 | Project source/support file |
 | 33 | `backend/src/optionalSharp.ts` | backend-core | 32 | 0.7 | Project source/support file |
-| 34 | `backend/src/organizationContext/index.js` | backend-core | 264 | 8.1 | Project source/support file |
+| 34 | `backend/src/organizationContext/index.js` | backend-core | 264 | 8.2 | Project source/support file |
 | 35 | `backend/src/permissions.ts` | backend-core | 227 | 7.0 | Project source/support file |
 | 36 | `backend/src/portalUtils.ts` | backend-core | 122 | 3.1 | Project source/support file |
 | 37 | `backend/src/postgresDatabase.js` | backend-core | 596 | 25.4 | Project source/support file |

@@ -21,7 +21,7 @@ Code files documented: **466**
 | 9 | `backend/src/conflictControl.ts` | 0 | 1 | 0 | 12 |
 | 10 | `backend/src/contactOptions.ts` | 0 | 1 | 0 | 3 |
 | 11 | `backend/src/database.ts` | 1 | 1 | 1 | 40 |
-| 12 | `backend/src/dataPath/index.js` | 2 | 1 | 0 | 5 |
+| 12 | `backend/src/dataPath/index.ts` | 2 | 1 | 0 | 5 |
 | 13 | `backend/src/db/cutoverReadiness.ts` | 2 | 1 | 0 | 2 |
 | 14 | `backend/src/db/postgresQueryCompat.ts` | 0 | 1 | 0 | 2 |
 | 15 | `backend/src/fileAssets.js` | 12 | 1 | 7 | 15 |
@@ -773,7 +773,7 @@ Code files documented: **466**
   - `backend/test/fileAssetUsageCache.test.ts`
   - `backend/test/importJobStateMachine.test.ts`
 
-### 3.12 `backend/src/dataPath/index.js`
+### 3.12 `backend/src/dataPath/index.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1066,7 +1066,7 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (7)
   - `../config`
-  - `../dataPath`
+  - `../dataPath/index.ts`
   - `../database.ts`
   - `../storage/organizationFolders.ts`
   - `crypto`
@@ -1074,7 +1074,7 @@ Code files documented: **466**
   - `path`
 - Internal dependencies (4)
   - `backend/src/config/index.js`
-  - `backend/src/dataPath/index.js`
+  - `backend/src/dataPath/index.ts`
   - `backend/src/database.ts`
   - `backend/src/storage/organizationFolders.ts`
 - Referenced by (6)
@@ -1652,7 +1652,7 @@ Code files documented: **466**
   - `../../analytics/duckdbRuntime.ts`
   - `../../backupSchema.ts`
   - `../../config`
-  - `../../dataPath`
+  - `../../dataPath/index.ts`
   - `../../database.ts`
   - `../../db/cutoverReadiness.ts`
   - `../../fileAssets`
@@ -1677,7 +1677,7 @@ Code files documented: **466**
   - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/backupSchema.ts`
   - `backend/src/config/index.js`
-  - `backend/src/dataPath/index.js`
+  - `backend/src/dataPath/index.ts`
   - `backend/src/database.ts`
   - `backend/src/db/cutoverReadiness.ts`
   - `backend/src/fileAssets.js`
@@ -1885,7 +1885,7 @@ Code files documented: **466**
 - Declared exports: `module.exports`
 - Imports (12)
   - `../../config`
-  - `../../dataPath`
+  - `../../dataPath/index.ts`
   - `../../database.ts`
   - `../../maintenanceLock.ts`
   - `../../runtimeVersion.ts`
@@ -1898,7 +1898,7 @@ Code files documented: **466**
   - `path`
 - Internal dependencies (8)
   - `backend/src/config/index.js`
-  - `backend/src/dataPath/index.js`
+  - `backend/src/dataPath/index.ts`
   - `backend/src/database.ts`
   - `backend/src/maintenanceLock.ts`
   - `backend/src/runtimeVersion.ts`
@@ -2106,11 +2106,11 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (3)
-  - `./dataPath`
+  - `./dataPath/index.ts`
   - `fs`
   - `path`
 - Internal dependencies (1)
-  - `backend/src/dataPath/index.js`
+  - `backend/src/dataPath/index.ts`
 - Referenced by (0)
   - none
 
@@ -2322,13 +2322,13 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (5)
-  - `../src/dataPath`
+  - `../src/dataPath/index.ts`
   - `fs`
   - `node:assert/strict`
   - `os`
   - `path`
 - Internal dependencies (1)
-  - `backend/src/dataPath/index.js`
+  - `backend/src/dataPath/index.ts`
 - Referenced by (0)
   - none
 
