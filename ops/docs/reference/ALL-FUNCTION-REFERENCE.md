@@ -33,7 +33,7 @@ Code files scanned: **466**
 | 21 | `backend/src/maintenanceLock.ts` | 9 |
 | 22 | `backend/src/middleware.js` | 21 |
 | 23 | `backend/src/money.ts` | 3 |
-| 24 | `backend/src/netSecurity.js` | 7 |
+| 24 | `backend/src/netSecurity.ts` | 7 |
 | 25 | `backend/src/objectStore.js` | 29 |
 | 26 | `backend/src/optionalSharp.ts` | 1 |
 | 27 | `backend/src/organizationContext/index.js` | 14 |
@@ -90,7 +90,7 @@ Code files scanned: **466**
 | 78 | `backend/src/systemFsWorker.ts` | 7 |
 | 79 | `backend/src/systemJobs.js` | 28 |
 | 80 | `backend/src/uploadReferenceCleanup.js` | 3 |
-| 81 | `backend/src/uploadSecurity.js` | 7 |
+| 81 | `backend/src/uploadSecurity.ts` | 7 |
 | 82 | `backend/src/websocket.js` | 1 |
 | 83 | `backend/src/workers/importWorker.ts` | 2 |
 | 84 | `backend/src/workers/mediaWorker.ts` | 2 |
@@ -870,17 +870,17 @@ Code files scanned: **466**
 | 2 | `roundUpToDecimals` | function | 10 |
 | 3 | `normalizePriceValue` | function | 20 |
 
-### 3.24 `backend/src/netSecurity.js`
+### 3.24 `backend/src/netSecurity.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `trim` | function | 26 |
-| 2 | `normalizeHostname` | function | 30 |
-| 3 | `isPrivateIpv4` | function | 34 |
-| 4 | `isPrivateIpv6` | function | 52 |
-| 5 | `isBlockedHostname` | function | 63 |
-| 6 | `assertSafeOutboundUrl` | function | 76 |
-| 7 | `isSafeExternalImageReference` | function | 104 |
+| 1 | `trim` | function | 29 |
+| 2 | `normalizeHostname` | function | 36 |
+| 3 | `isPrivateIpv4` | function | 43 |
+| 4 | `isPrivateIpv6` | function | 64 |
+| 5 | `isBlockedHostname` | function | 78 |
+| 6 | `assertSafeOutboundUrl` | function | 99 |
+| 7 | `isSafeExternalImageReference` | function | 130 |
 
 ### 3.25 `backend/src/objectStore.js`
 
@@ -2332,17 +2332,17 @@ Code files scanned: **466**
 | 2 | `repairMissingUploadReferences` | function | 22 |
 | 3 | `repairMissingUploadReferencesAsync` | function | 134 |
 
-### 3.81 `backend/src/uploadSecurity.js`
+### 3.81 `backend/src/uploadSecurity.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `bufferStartsWith` | function | 12 |
-| 2 | `isLikelyCsvBuffer` | function | 19 |
-| 3 | `detectBufferKind` | function | 32 |
-| 4 | `getExpectedUploadedKind` | function | 46 |
-| 5 | `validateImageMetadata` | function | 55 |
-| 6 | `validateUploadedBuffer` | function | 69 |
-| 7 | `validateUploadedPath` | function | 80 |
+| 1 | `bufferStartsWith` | function | 16 |
+| 2 | `isLikelyCsvBuffer` | function | 26 |
+| 3 | `detectBufferKind` | function | 42 |
+| 4 | `getExpectedUploadedKind` | function | 63 |
+| 5 | `validateImageMetadata` | function | 75 |
+| 6 | `validateUploadedBuffer` | function | 93 |
+| 7 | `validateUploadedPath` | function | 108 |
 
 ### 3.82 `backend/src/websocket.js`
 

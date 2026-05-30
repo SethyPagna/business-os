@@ -33,7 +33,7 @@ Code files documented: **466**
 | 21 | `backend/src/maintenanceLock.ts` | 0 | 1 | 0 | 3 |
 | 22 | `backend/src/middleware.js` | 10 | 1 | 7 | 24 |
 | 23 | `backend/src/money.ts` | 0 | 1 | 0 | 5 |
-| 24 | `backend/src/netSecurity.js` | 1 | 1 | 0 | 5 |
+| 24 | `backend/src/netSecurity.ts` | 1 | 1 | 0 | 5 |
 | 25 | `backend/src/objectStore.js` | 7 | 1 | 1 | 6 |
 | 26 | `backend/src/optionalSharp.ts` | 1 | 1 | 0 | 2 |
 | 27 | `backend/src/organizationContext/index.js` | 7 | 1 | 4 | 6 |
@@ -90,7 +90,7 @@ Code files documented: **466**
 | 78 | `backend/src/systemFsWorker.ts` | 3 | 0 | 1 | 0 |
 | 79 | `backend/src/systemJobs.js` | 2 | 1 | 1 | 2 |
 | 80 | `backend/src/uploadReferenceCleanup.js` | 1 | 1 | 1 | 2 |
-| 81 | `backend/src/uploadSecurity.js` | 2 | 1 | 1 | 4 |
+| 81 | `backend/src/uploadSecurity.ts` | 2 | 1 | 1 | 4 |
 | 82 | `backend/src/websocket.js` | 5 | 1 | 3 | 1 |
 | 83 | `backend/src/workers/importWorker.ts` | 2 | 1 | 2 | 1 |
 | 84 | `backend/src/workers/mediaWorker.ts` | 2 | 1 | 2 | 1 |
@@ -821,7 +821,7 @@ Code files documented: **466**
   - `./optionalSharp.ts`
   - `./settingsSnapshot`
   - `./uploadReferenceCleanup`
-  - `./uploadSecurity`
+  - `./uploadSecurity.ts`
   - `child_process`
   - `crypto`
   - `fs`
@@ -834,7 +834,7 @@ Code files documented: **466**
   - `backend/src/optionalSharp.ts`
   - `backend/src/settingsSnapshot.js`
   - `backend/src/uploadReferenceCleanup.js`
-  - `backend/src/uploadSecurity.js`
+  - `backend/src/uploadSecurity.ts`
 - Referenced by (15)
   - `backend/server.js`
   - `backend/src/middleware.js`
@@ -963,7 +963,7 @@ Code files documented: **466**
   - `./permissions`
   - `./security`
   - `./sessionAuth`
-  - `./uploadSecurity`
+  - `./uploadSecurity.ts`
   - `fs`
   - `multer`
   - `path`
@@ -974,7 +974,7 @@ Code files documented: **466**
   - `backend/src/permissions.js`
   - `backend/src/security.js`
   - `backend/src/sessionAuth.js`
-  - `backend/src/uploadSecurity.js`
+  - `backend/src/uploadSecurity.ts`
 - Referenced by (24)
   - `backend/server.js`
   - `backend/src/authOtpGuards.ts`
@@ -1015,7 +1015,7 @@ Code files documented: **466**
   - `backend/src/routes/products.js`
   - `backend/src/services/importJobs.js`
 
-### 3.24 `backend/src/netSecurity.js`
+### 3.24 `backend/src/netSecurity.ts`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1059,7 +1059,7 @@ Code files documented: **466**
   - none
 - Referenced by (2)
   - `backend/src/fileAssets.js`
-  - `backend/src/uploadSecurity.js`
+  - `backend/src/uploadSecurity.ts`
 
 ### 3.27 `backend/src/organizationContext/index.js`
 
@@ -1461,7 +1461,7 @@ Code files documented: **466**
   - `../helpers`
   - `../initials.ts`
   - `../middleware`
-  - `../netSecurity`
+  - `../netSecurity.ts`
   - `../organizationContext`
   - `../portalUtils.ts`
   - `../runtimeCache.ts`
@@ -1475,7 +1475,7 @@ Code files documented: **466**
   - `backend/src/helpers.js`
   - `backend/src/initials.ts`
   - `backend/src/middleware.js`
-  - `backend/src/netSecurity.js`
+  - `backend/src/netSecurity.ts`
   - `backend/src/organizationContext/index.js`
   - `backend/src/portalUtils.ts`
   - `backend/src/runtimeCache.ts`
@@ -1501,7 +1501,7 @@ Code files documented: **466**
   - `../initials.ts`
   - `../middleware`
   - `../money.ts`
-  - `../netSecurity`
+  - `../netSecurity.ts`
   - `../productBatches`
   - `../productDiscounts.ts`
   - `../productImportPolicies.ts`
@@ -1522,7 +1522,7 @@ Code files documented: **466**
   - `backend/src/initials.ts`
   - `backend/src/middleware.js`
   - `backend/src/money.ts`
-  - `backend/src/netSecurity.js`
+  - `backend/src/netSecurity.ts`
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.ts`
   - `backend/src/productImportPolicies.ts`
@@ -1836,10 +1836,10 @@ Code files documented: **466**
 
 - Declared exports: `module.exports`
 - Imports (2)
-  - `../netSecurity`
+  - `../netSecurity.ts`
   - `../security`
 - Internal dependencies (2)
-  - `backend/src/netSecurity.js`
+  - `backend/src/netSecurity.ts`
   - `backend/src/security.js`
 - Referenced by (2)
   - `backend/src/routes/ai.js`
@@ -1948,11 +1948,11 @@ Code files documented: **466**
   - `../helpers`
   - `../importCsv.ts`
   - `../money.ts`
-  - `../netSecurity`
+  - `../netSecurity.ts`
   - `../productBatches`
   - `../productDiscounts.ts`
   - `../productImportPolicies.ts`
-  - `../uploadSecurity`
+  - `../uploadSecurity.ts`
   - `./mediaQueue`
   - `bullmq`
   - `crypto`
@@ -1969,12 +1969,12 @@ Code files documented: **466**
   - `backend/src/helpers.js`
   - `backend/src/importCsv.ts`
   - `backend/src/money.ts`
-  - `backend/src/netSecurity.js`
+  - `backend/src/netSecurity.ts`
   - `backend/src/productBatches.js`
   - `backend/src/productDiscounts.ts`
   - `backend/src/productImportPolicies.ts`
   - `backend/src/services/mediaQueue.js`
-  - `backend/src/uploadSecurity.js`
+  - `backend/src/uploadSecurity.ts`
 - Referenced by (7)
   - `backend/server.js`
   - `backend/src/routes/importJobs.js`
@@ -2137,7 +2137,7 @@ Code files documented: **466**
   - `backend/src/fileAssets.js`
   - `backend/test/settingsSnapshotObjectStorage.test.ts`
 
-### 3.81 `backend/src/uploadSecurity.js`
+### 3.81 `backend/src/uploadSecurity.ts`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -2548,10 +2548,10 @@ Code files documented: **466**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/netSecurity`
+  - `../src/netSecurity.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/netSecurity.js`
+  - `backend/src/netSecurity.ts`
 - Referenced by (0)
   - none
 
@@ -2824,11 +2824,11 @@ Code files documented: **466**
 - Declared exports: none detected
 - Imports (3)
   - `../src/fileAssets`
-  - `../src/uploadSecurity`
+  - `../src/uploadSecurity.ts`
   - `node:assert/strict`
 - Internal dependencies (2)
   - `backend/src/fileAssets.js`
-  - `backend/src/uploadSecurity.js`
+  - `backend/src/uploadSecurity.ts`
 - Referenced by (0)
   - none
 

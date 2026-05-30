@@ -40,7 +40,7 @@ Total files documented: **529**
 | 28 | `backend/src/maintenanceLock.ts` | backend-core | 131 | 3.3 | Project source/support file |
 | 29 | `backend/src/middleware.js` | backend-core | 336 | 10.3 | Project source/support file |
 | 30 | `backend/src/money.ts` | backend-core | 29 | 0.8 | Project source/support file |
-| 31 | `backend/src/netSecurity.js` | backend-core | 122 | 3.3 | Project source/support file |
+| 31 | `backend/src/netSecurity.ts` | backend-core | 148 | 3.6 | Project source/support file |
 | 32 | `backend/src/objectStore.js` | backend-core | 468 | 15.1 | Project source/support file |
 | 33 | `backend/src/optionalSharp.ts` | backend-core | 32 | 0.7 | Project source/support file |
 | 34 | `backend/src/organizationContext/index.js` | backend-core | 264 | 8.1 | Project source/support file |
@@ -100,7 +100,7 @@ Total files documented: **529**
 | 88 | `backend/src/systemFsWorker.ts` | backend-core | 122 | 3.6 | Project source/support file |
 | 89 | `backend/src/systemJobs.js` | backend-core | 467 | 14.5 | Project source/support file |
 | 90 | `backend/src/uploadReferenceCleanup.js` | backend-core | 245 | 8.2 | Project source/support file |
-| 91 | `backend/src/uploadSecurity.js` | backend-core | 91 | 3.6 | Project source/support file |
+| 91 | `backend/src/uploadSecurity.ts` | backend-core | 119 | 4.1 | Project source/support file |
 | 92 | `backend/src/websocket.js` | backend-core | 94 | 3.6 | Project source/support file |
 | 93 | `backend/src/workers/importWorker.ts` | backend-core | 42 | 1.1 | Project source/support file |
 | 94 | `backend/src/workers/mediaWorker.ts` | backend-core | 41 | 1.0 | Project source/support file |

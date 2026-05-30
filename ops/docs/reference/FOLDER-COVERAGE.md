@@ -186,7 +186,7 @@ Total folders documented: **81**
 | 15 | `maintenanceLock.ts` | Project source/support file |
 | 16 | `middleware.js` | Project source/support file |
 | 17 | `money.ts` | Project source/support file |
-| 18 | `netSecurity.js` | Project source/support file |
+| 18 | `netSecurity.ts` | Project source/support file |
 | 19 | `objectStore.js` | Project source/support file |
 | 20 | `optionalSharp.ts` | Project source/support file |
 | 21 | `permissions.js` | Project source/support file |
@@ -207,7 +207,7 @@ Total folders documented: **81**
 | 36 | `systemFsWorker.ts` | Project source/support file |
 | 37 | `systemJobs.js` | Project source/support file |
 | 38 | `uploadReferenceCleanup.js` | Project source/support file |
-| 39 | `uploadSecurity.js` | Project source/support file |
+| 39 | `uploadSecurity.ts` | Project source/support file |
 | 40 | `websocket.js` | Project source/support file |
 
 
