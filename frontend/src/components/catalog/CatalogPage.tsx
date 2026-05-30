@@ -1,4 +1,5 @@
 import { Suspense, lazy, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import {
   BadgeDollarSign,
   Bot,
@@ -26,6 +27,7 @@ import {
   Ticket,
   Upload,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useIsPageActive } from '../shared/pageActivity'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import {
@@ -85,6 +87,7 @@ import {
   reduceUploadState,
   sanitizePersistedMediaPath,
 } from '../../utils/mediaUpload.ts'
+import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { CatalogPageProvider } from './CatalogPageContext'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
@@ -111,14 +114,169 @@ const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
 const CATALOG_PORTAL_REVIEW_TIMEOUT_MS = 12000
 const CATALOG_SUBMISSION_MAX_SCREENSHOTS = 8
 const CATALOG_IMAGE_READ_CONCURRENCY = 2
+const PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
+const PORTAL_CACHE_PRODUCT_LIMIT = 80
 
-function getAboutBlockLabel(type) {
+type LegacyCatalogRecord = Record<string, any>
+type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
+type CatalogProduct = LegacyCatalogRecord & {
+  id: string | number
+  name?: string
+  brand?: string
+  category?: string
+  barcode?: string
+  sku?: string
+  image_path?: string
+  image_gallery?: unknown[]
+  branch_stock?: Array<{ branch_id?: string | number | null; quantity?: string | number | null }>
+  stock_quantity?: string | number | null
+}
+type PortalConfig = LegacyCatalogRecord & {
+  aiEnabled?: boolean
+  aiProviderId?: string | number | null
+  addressLink?: string
+  businessAddress?: string
+  businessCover?: string
+  businessEmail?: string
+  businessFavicon?: string
+  businessLogo?: string
+  businessName?: string
+  businessPhone?: string
+  exchangeRate?: string | number
+  faqItems?: FaqItem[]
+  gridColumnsDesktop?: string | number
+  gridColumnsMobile?: string | number
+  language?: string
+  links?: Record<string, string>
+  linkLabels?: Record<string, string>
+  lowStockThreshold?: string | number
+  outOfStockThreshold?: string | number
+  priceDisplay?: string
+  refreshSeconds?: string | number
+  showAbout?: boolean
+  showCatalog?: boolean
+  showCover?: boolean
+  showEmail?: boolean
+  showFacebook?: boolean
+  showFaq?: boolean
+  showGoogleMap?: boolean
+  showInstagram?: boolean
+  showMembership?: boolean
+  showPhone?: boolean
+  showPrices?: boolean
+  showPromotions?: boolean
+  showTelegram?: boolean
+  showWebsite?: boolean
+  stockThresholdMode?: string
+  submissionEnabled?: boolean
+  submissionRewardPoints?: string | number
+  title?: string
+  translateWidgetEnabled?: boolean
+}
+type PortalDraft = LegacyCatalogRecord
+type FaqItem = { id: string; question: string; answer: string }
+type PortalMediaBlock = LegacyCatalogRecord & { id?: unknown; type?: string; mediaUrl?: string }
+type GalleryViewState = { open: boolean; title: string; items: string[]; index: number }
+type PortalImageViewState = { open: boolean; title: string; images: string[]; index: number }
+type FilePickerState = { open: boolean; target?: unknown; mediaType: string; title: string }
+type SubmissionDraft = { platform: string; note: string; screenshots: string[] }
+type PortalTab = { key: string; label: string; icon: LucideIcon }
+type EditorSection = [string, string, string]
+type PortalInitialOption = ReturnType<typeof aggregateInitialOptions>[number]
+type CatalogOption = { id: string | number; name: string }
+type CatalogApi = LegacyCatalogRecord
+type UploadState = ReturnType<typeof createInitialUploadState>
+type UploadAction = Parameters<typeof reduceUploadState>[1]
+type CatalogAppContext = {
+  hasPermission: (permission: string) => boolean
+  navigateTo: (page: string) => void
+  saveSettings: (settings: Record<string, unknown>, options?: unknown) => Promise<unknown> | unknown
+  notify: (message: string, type?: string) => void
+  theme?: string
+  toggleTheme: () => void
+  user?: LegacyCatalogRecord | null
+  t: (key: string) => string
+  language?: string
+}
+type CatalogSyncContext = { syncChannel?: { channel?: string } | null }
+
+declare global {
+  interface Window {
+    businessOsPortalTranslateInit?: () => void
+    google?: {
+      translate?: {
+        TranslateElement?: {
+          (options: unknown, elementId: string): unknown
+          InlineLayout?: { SIMPLE?: unknown }
+        }
+      }
+    }
+  }
+}
+
+type ImageFieldProps = {
+  label: string
+  value: string
+  onUpload: () => void
+  onChooseExisting?: (() => void) | null
+  onChange: (value: string) => void
+  onClear: () => void
+  onPreview: () => void
+  fieldId: string
+  uploadLabel?: string
+  chooseLabel?: string
+  clearLabel?: string
+  previewLabel?: string
+  placeholder?: string
+  hint?: string
+  uploadState?: UploadState
+  onCancelUpload?: (() => void) | null
+  cancelLabel?: string
+  uploadingLabel?: string
+  uploadedQueuedLabel?: string
+  uploadedReadyLabel?: string
+}
+
+function getCatalogApi(): CatalogApi {
+  return (window as Window & { api?: CatalogApi }).api || {}
+}
+
+function getCatalogErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : String((error as LegacyCatalogRecord)?.message || fallback)
+}
+
+function normalizePortalInitialOptions(value: unknown): PortalInitialOption[] {
+  if (!Array.isArray(value)) return []
+  return aggregateInitialOptions(value.map((item) => (
+    typeof item === 'string'
+      ? { key: item, value: item, count: 1 }
+      : item
+  )))
+}
+
+function normalizeCatalogOptions(value: unknown): CatalogOption[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item, index) => {
+    if (typeof item === 'string') return { id: item || index, name: item }
+    return {
+      id: (item as LegacyCatalogRecord)?.id ?? index,
+      name: String((item as LegacyCatalogRecord)?.name ?? item ?? ''),
+    }
+  }).filter((item) => item.name)
+}
+
+function normalizeBrandOptions(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => (typeof item === 'string' ? item : String((item as LegacyCatalogRecord)?.name ?? item ?? ''))).filter(Boolean)
+}
+
+function getAboutBlockLabel(type: unknown): string {
   if (type === 'image') return 'Image block'
   if (type === 'video') return 'Video block'
   return 'Text block'
 }
 
-function withAssetVersion(url, versionSeed) {
+function withAssetVersion(url: unknown, versionSeed: unknown): string {
   const raw = String(url || '').trim()
   if (!raw) return ''
   if (raw.startsWith('blob:') || raw.startsWith('data:')) return raw
@@ -128,7 +286,7 @@ function withAssetVersion(url, versionSeed) {
   return `${raw}${separator}v=${encodeURIComponent(seed)}`
 }
 
-function sanitizePortalMediaValue(value, fallback = '') {
+function sanitizePortalMediaValue(value: unknown, fallback = ''): string {
   return sanitizePersistedMediaPath(value, fallback)
 }
 
@@ -138,7 +296,7 @@ function sanitizePortalMediaValue(value, fallback = '') {
  * Public mode: Read-only customer portal catalog/membership experience.
  */
 /** Resolve a portal-localized string from the shared language packs. */
-function tt(lang, key, fallback, fallbackKm = fallback) {
+function tt(lang: unknown, key: string, fallback: string, fallbackKm = fallback): string {
   const localized = getPortalResourceText(lang, key)
   if (localized && !isBrokenLocalizedString(localized)) return localized
   if (lang === 'km' && fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
@@ -146,31 +304,33 @@ function tt(lang, key, fallback, fallbackKm = fallback) {
 }
 
 /** Parse UI setting flags stored as boolean-like string values. */
-function toBoolean(value, fallback = false) {
+function toBoolean(value: unknown, fallback = false): boolean {
   if (typeof value === 'boolean') return value
   if (value == null || value === '') return fallback
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase())
 }
 
 /** Parse a finite numeric value or fall back. */
-function toNumber(value, fallback = 0) {
+function toNumber(value: unknown, fallback: unknown = 0): number {
   const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : fallback
+  const fallbackNumber = Number(fallback)
+  return Number.isFinite(parsed) ? parsed : (Number.isFinite(fallbackNumber) ? fallbackNumber : 0)
 }
 
 /** Restrict price display mode to supported options only. */
-function normalizePriceDisplay(value) {
-  return ['USD', 'KHR', 'BOTH'].includes(value) ? value : 'USD'
+function normalizePriceDisplay(value: unknown): string {
+  const raw = String(value || '').trim()
+  return ['USD', 'KHR', 'BOTH'].includes(raw) ? raw : 'USD'
 }
 
 /** Normalize hex colors for customer portal theme controls. */
-function normalizeHexColor(value, fallback) {
+function normalizeHexColor(value: unknown, fallback: string): string {
   const raw = String(value || '').trim()
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
 }
 
 /** Keep optional outbound portal links to full http/https URLs only. */
-function normalizeExternalUrl(value) {
+function normalizeExternalUrl(value: unknown): string {
   const raw = String(value || '').trim()
   if (!raw) return ''
   const normalized = /^https?:\/\//i.test(raw)
@@ -186,11 +346,11 @@ function normalizeExternalUrl(value) {
   }
 }
 
-function createFaqId(prefix = 'faq') {
+function createFaqId(prefix = 'faq'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function normalizeFaqItems(input) {
+function normalizeFaqItems(input: unknown): FaqItem[] {
   if (!Array.isArray(input)) return []
   const usedIds = new Set()
   return input
@@ -246,20 +406,20 @@ const FAQ_TRANSLATION_LOOKUP = new Map(
   ]),
 )
 
-function translatedPortalText(t, key, fallback) {
+function translatedPortalText(t: ((key: string) => string) | null | undefined, key: string, fallback: string): string {
   const fullKey = 'portalEditor.' + key
   const value = typeof t === 'function' ? t(fullKey) : ''
   return value && value !== fullKey ? value : fallback
 }
 
-function translateConfiguredFaqText(t, value) {
+function translateConfiguredFaqText(t: ((key: string) => string) | null | undefined, value: unknown): string {
   const text = String(value || '').trim()
   if (!text) return ''
   const key = FAQ_TRANSLATION_LOOKUP.get(text.toLowerCase())
   return key ? translatedPortalText(t, key, text) : text
 }
 
-function localizeConfiguredFaqItems(items, t) {
+function localizeConfiguredFaqItems(items: unknown, t: ((key: string) => string) | null | undefined): FaqItem[] {
   return normalizeFaqItems(items).map((item) => ({
     ...item,
     question: translateConfiguredFaqText(t, item.question),
@@ -267,7 +427,7 @@ function localizeConfiguredFaqItems(items, t) {
   }))
 }
 
-function buildFaqStarterItems(t) {
+function buildFaqStarterItems(t: ((key: string) => string) | null | undefined): FaqItem[] {
   const seed = Date.now()
   return FAQ_STARTER_TEXT.map(([index, question, answer]) => ({
     id: `faq-${seed}-${index}`,
@@ -276,7 +436,7 @@ function buildFaqStarterItems(t) {
   }))
 }
 
-function buildAiFaqStarterItems(t) {
+function buildAiFaqStarterItems(t: ((key: string) => string) | null | undefined): FaqItem[] {
   const seed = Date.now()
   return AI_FAQ_STARTER_TEXT.map(([index, question, answer]) => ({
     id: `faq-ai-${seed}-${index}`,
@@ -286,7 +446,7 @@ function buildAiFaqStarterItems(t) {
 }
 
 /** Convert hex color to rgba for layered hero background gradients. */
-function hexToRgba(hex, alpha) {
+function hexToRgba(hex: unknown, alpha: unknown): string {
   const safeHex = normalizeHexColor(hex, '#0f172a')
   const value = safeHex.replace('#', '')
   const r = Number.parseInt(value.slice(0, 2), 16)
@@ -297,7 +457,7 @@ function hexToRgba(hex, alpha) {
 }
 
 /** Read cached portal payload to reduce visible loading delays on hard reload. */
-function readPortalCache() {
+function readPortalCache(): LegacyCatalogRecord | null {
   if (typeof window === 'undefined') return null
   try {
     const raw = sessionStorage.getItem(PORTAL_CACHE_KEY)
@@ -320,7 +480,7 @@ function readPortalCache() {
 }
 
 /** Persist lightweight portal payload cache for fast first paint after refresh. */
-function writePortalCache(payload) {
+function writePortalCache(payload: LegacyCatalogRecord): void {
   if (typeof window === 'undefined') return
   try {
     const lightweightPayload = {
@@ -339,7 +499,7 @@ function writePortalCache(payload) {
 }
 
 /** Normalize customer portal path input into safe route format. */
-function normalizePortalPath(value) {
+function normalizePortalPath(value: unknown): string {
   const cleaned = String(value || '')
     .trim()
     .replace(/^https?:\/\/[^/]+/i, '')
@@ -352,11 +512,11 @@ function normalizePortalPath(value) {
 }
 
 /** Prevent customer portal path overlap with protected backend namespaces. */
-function isReservedPortalPath(value) {
+function isReservedPortalPath(value: string): boolean {
   return value === '/' || value === '/health' || value.startsWith('/api') || value.startsWith('/uploads')
 }
 
-function getPortalTabs(config, copy) {
+function getPortalTabs(config: PortalConfig, copy?: CopyFunction | null): PortalTab[] {
   const items = [
     config?.showAbout ? { key: 'about', label: copy?.('about', 'About') || 'About', icon: Store } : null,
     config?.showCatalog ? { key: 'products', label: copy?.('products', 'Products') || 'Products', icon: ShoppingBag } : null,
@@ -364,10 +524,10 @@ function getPortalTabs(config, copy) {
     config?.showFaq ? { key: 'faq', label: copy?.('faq', 'FAQ') || 'FAQ', icon: HelpCircle } : null,
     config?.aiEnabled ? { key: 'ai', label: config?.aiTitle || copy?.('portalAssistant', 'AI assistant') || 'AI assistant', icon: Bot } : null,
   ]
-  return items.filter(Boolean)
+  return items.filter(Boolean) as PortalTab[]
 }
 
-function resolvePortalActiveTab(config, copy, current = '') {
+function resolvePortalActiveTab(config: PortalConfig, copy?: CopyFunction | null, current = ''): string {
   const tabs = getPortalTabs(config, copy)
   const currentKey = String(current || '').trim()
   if (tabs.some((item) => item.key === currentKey)) return currentKey
@@ -375,7 +535,7 @@ function resolvePortalActiveTab(config, copy, current = '') {
 }
 
 /** Convert runtime portal config into editable key/value draft payload. */
-function buildDraft(config) {
+function buildDraft(config: PortalConfig): PortalDraft {
   return {
     business_name: config.businessName || '',
     business_phone: config.businessPhone || '',
@@ -475,7 +635,7 @@ function buildDraft(config) {
 }
 
 /** Merge editor draft back into display config with clamping and defaults. */
-function applyDraft(config, draft) {
+function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
   const languageSetting = draft.customer_portal_language || config.languageSetting || 'auto'
   const resolvedLanguage = languageSetting === 'auto'
     ? 'en'
@@ -599,29 +759,30 @@ function applyDraft(config, draft) {
 }
 
 /** Resolve the visible quantity using selected branch filter. */
-function getBranchQty(product, branchId) {
+function getBranchQty(product: CatalogProduct, branchId: unknown): number {
   if (!branchId || branchId === 'all') return Number(product.stock_quantity || 0)
   const match = (product.branch_stock || []).find((entry) => String(entry.branch_id) === String(branchId))
   return Number(match?.quantity || 0)
 }
 
 /** Compute stock badge state from product quantity and thresholds. */
-function getStockStatus(product, qty, config = {}) {
+function getStockStatus(product: CatalogProduct, qty: unknown, config: PortalConfig = {}) {
+  const quantity = Number(qty || 0)
   const useGlobal = config.stockThresholdMode === 'global'
   const outThreshold = Number(useGlobal ? config.outOfStockThreshold : product.out_of_stock_threshold || 0)
   const lowThreshold = Number(useGlobal ? config.lowStockThreshold : product.low_stock_threshold || 10)
-  if (qty <= outThreshold) return 'out_of_stock'
-  if (qty <= lowThreshold) return 'low_stock'
+  if (quantity <= outThreshold) return 'out_of_stock'
+  if (quantity <= lowThreshold) return 'low_stock'
   return 'in_stock'
 }
 
 /** Build unique product gallery list with a max of 5 images. */
-function normalizeProductGallery(product) {
+function normalizeProductGallery(product: CatalogProduct | null | undefined): string[] {
   const source = Array.isArray(product?.image_gallery)
     ? product.image_gallery
     : (product?.image_path ? [product.image_path] : [])
-  const unique = []
-  const seen = new Set()
+  const unique: string[] = []
+  const seen = new Set<string>()
   for (const item of source) {
     const value = String(item || '').trim()
     if (!value || seen.has(value)) continue
@@ -633,11 +794,11 @@ function normalizeProductGallery(product) {
   return unique
 }
 
-function normalizePortalProductSearch(value) {
+function normalizePortalProductSearch(value: unknown): string {
   return String(value || '').normalize('NFC').toLocaleLowerCase('km').trim()
 }
 
-function buildRecommendedProductOption(product) {
+function buildRecommendedProductOption(product: CatalogProduct) {
   const id = Number(product?.id)
   return {
     id,
@@ -647,7 +808,7 @@ function buildRecommendedProductOption(product) {
   }
 }
 
-function productMatchesRecommendedSearch(product, searchTerm) {
+function productMatchesRecommendedSearch(product: CatalogProduct, searchTerm: unknown): boolean {
   const query = normalizePortalProductSearch(searchTerm)
   if (query.length < 2) return false
   const tokens = query.split(/[\s,]+/).filter(Boolean)
@@ -662,14 +823,15 @@ function productMatchesRecommendedSearch(product, searchTerm) {
 }
 
 /** Format date/time strings robustly for public and editor views. */
-function formatDateTime(value) {
+function formatDateTime(value: unknown): string {
   if (!value) return '-'
-  const date = new Date(String(value).includes('T') ? value : `${value}Z`)
+  const raw = String(value)
+  const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
 }
 
 /** Render product price text according to selected portal display mode. */
-function formatPortalPrice(usd, khr, config) {
+function formatPortalPrice(usd: unknown, khr: unknown, config: PortalConfig): string {
   const usdValue = Number(usd || 0)
   const exchangeRate = Number(config.exchangeRate || 4100)
   const khrValue = khr != null ? Number(khr || 0) : usdValue * exchangeRate
@@ -703,7 +865,7 @@ function ImageField({
   uploadingLabel = 'Uploading...',
   uploadedQueuedLabel = 'Uploaded. Background optimization is running now.',
   uploadedReadyLabel = 'Uploaded and ready.',
-}) {
+}: ImageFieldProps) {
   const rawValue = String(value || '')
   const displayValue = rawValue.startsWith('data:image/') || rawValue.startsWith('blob:')
     ? 'uploaded-image-preview'
@@ -771,7 +933,7 @@ function ImageField({
   )
 }
 
-function readImageFileAsDataUrl(file, errorMessage = 'Failed to read image') {
+function readImageFileAsDataUrl(file: Blob, errorMessage = 'Failed to read image'): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result || ''))
@@ -780,13 +942,16 @@ function readImageFileAsDataUrl(file, errorMessage = 'Failed to read image') {
   })
 }
 
-async function readImageFilesAsDataUrls(files, { limit = CATALOG_SUBMISSION_MAX_SCREENSHOTS, errorMessage = 'Failed to read image' } = {}) {
+async function readImageFilesAsDataUrls(
+  files: Iterable<File> | ArrayLike<File> | null | undefined,
+  { limit = CATALOG_SUBMISSION_MAX_SCREENSHOTS, errorMessage = 'Failed to read image' } = {},
+): Promise<string[]> {
   const selected = Array.from(files || [])
     .filter((file) => file && String(file.type || '').startsWith('image/'))
     .slice(0, Math.max(0, Number(limit) || 0))
   if (!selected.length) return []
 
-  const results = new Array(selected.length)
+  const results: string[] = new Array(selected.length)
   let nextIndex = 0
   const workers = Array.from({ length: Math.min(CATALOG_IMAGE_READ_CONCURRENCY, selected.length) }, async () => {
     while (nextIndex < selected.length) {
@@ -800,8 +965,8 @@ async function readImageFilesAsDataUrls(files, { limit = CATALOG_SUBMISSION_MAX_
 }
 
 /** Open picker for one image and return data URL for immediate preview/save. */
-async function pickImageAsDataUrl() {
-  const file = await new Promise((resolve) => {
+async function pickImageAsDataUrl(): Promise<string | null> {
+  const file = await new Promise<File | null>((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'image/*'
@@ -813,8 +978,8 @@ async function pickImageAsDataUrl() {
 }
 
 /** Open picker for multiple images and return data URLs. */
-async function pickMultipleImagesAsDataUrls() {
-  const files = await new Promise((resolve) => {
+async function pickMultipleImagesAsDataUrls(): Promise<string[]> {
+  const files = await new Promise<File[]>((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'image/*'
@@ -826,11 +991,11 @@ async function pickMultipleImagesAsDataUrls() {
 }
 
 /** Replace localized {token} placeholders with runtime values. */
-function replaceVars(template, values) {
-  return String(template || '').replace(/\{(\w+)\}/g, (_match, key) => values?.[key] ?? '')
+function replaceVars(template: unknown, values: Record<string, unknown>): string {
+  return String(template || '').replace(/\{(\w+)\}/g, (_match: string, key: string) => String(values?.[key] ?? ''))
 }
 
-function getPortalResourceText(lang, key) {
+function getPortalResourceText(lang: unknown, key: string): string {
   const packed = getPortalLanguageText(lang, key)
   if (packed) return packed
   return ''
@@ -868,14 +1033,14 @@ const ALL_PUBLIC_TRANSLATE_OPTIONS = [
   ...GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
 ]
 
-function isFirstPartyTranslateTarget(value) {
+function isFirstPartyTranslateTarget(value: unknown): boolean {
   const raw = String(value || '').trim()
   if (!raw) return false
   if (FIRST_PARTY_TRANSLATE_BY_LOWER.has(raw.toLowerCase())) return true
   return isFirstPartyPortalLanguage(raw)
 }
 
-function normalizePortalTranslateChoice(value, sourceLang = 'en') {
+function normalizePortalTranslateChoice(value: unknown, sourceLang = 'en'): string {
   const raw = String(value || 'original').trim()
   const lower = raw.toLowerCase()
   const firstParty = FIRST_PARTY_TRANSLATE_BY_LOWER.get(lower) || normalizeFirstPartyPortalLanguage(raw)
@@ -888,7 +1053,7 @@ function isDocumentVisible() {
   return document.visibilityState !== 'hidden'
 }
 
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
@@ -994,29 +1159,29 @@ const DEFAULT_CONFIG = {
 }
 
 /** Main portal page component: editor mode (staff) and public mode (customers). */
-export default function CatalogPage({ publicView = false }) {
-  const { hasPermission, navigateTo, saveSettings, notify, theme, toggleTheme, user, t, language: appLanguage } = useApp()
-  const { syncChannel } = useSync()
+export default function CatalogPage({ publicView = false }: { publicView?: boolean }) {
+  const { hasPermission, navigateTo, saveSettings, notify, theme, toggleTheme, user, t, language: appLanguage } = useApp() as CatalogAppContext
+  const { syncChannel } = useSync() as CatalogSyncContext
   const editorPageActive = useIsPageActive('catalog')
   const isPageActive = publicView || editorPageActive
   const cachedPortalRef = useRef(readPortalCache())
   const cachedPortal = cachedPortalRef.current
-  const [config, setConfig] = useState(() => ({
+  const [config, setConfig] = useState<PortalConfig>(() => ({
     ...DEFAULT_CONFIG,
     ...(cachedPortal?.config || {}),
   }))
-  const [editorDraft, setEditorDraft] = useState(() => buildDraft({
+  const [editorDraft, setEditorDraft] = useState<PortalDraft>(() => buildDraft({
     ...DEFAULT_CONFIG,
     ...(cachedPortal?.config || {}),
   }))
   const [editorDirty, setEditorDirty] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
-  const [products, setProducts] = useState(() => Array.isArray(cachedPortal?.products) ? cachedPortal.products : [])
+  const [products, setProducts] = useState<CatalogProduct[]>(() => Array.isArray(cachedPortal?.products) ? cachedPortal.products : [])
   const [portalProductTotal, setPortalProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
   const [portalProductPage, setPortalProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
   const [portalProductPageSize, setPortalProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || 20) || 20)
   const [portalProductInitial, setPortalProductInitial] = useState('all')
-  const [portalProductInitials, setPortalProductInitials] = useState(() => Array.isArray(cachedPortal?.catalog?.initials) ? cachedPortal.catalog.initials : [])
+  const [portalProductInitials, setPortalProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
   const [publicProductsPanelPrimed, setPublicProductsPanelPrimed] = useState(false)
@@ -1025,41 +1190,41 @@ export default function CatalogPage({ publicView = false }) {
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
   const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
   const [publicPortalNavMetrics, setPublicPortalNavMetrics] = useState({ left: 0, width: 0, height: 0 })
-  const [categories, setCategories] = useState(() => Array.isArray(cachedPortal?.categories) ? cachedPortal.categories : [])
-  const [brands, setBrands] = useState(() => Array.isArray(cachedPortal?.brands) ? cachedPortal.brands : [])
-  const [branches, setBranches] = useState(() => Array.isArray(cachedPortal?.branches) ? cachedPortal.branches : [])
+  const [categories, setCategories] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.categories))
+  const [brands, setBrands] = useState<string[]>(() => normalizeBrandOptions(cachedPortal?.brands))
+  const [branches, setBranches] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.branches))
   const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({
     ...DEFAULT_CONFIG,
     ...(cachedPortal?.config || {}),
   }, null, 'about'))
   const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState([])
-  const [brandFilter, setBrandFilter] = useState([])
-  const [branchFilter, setBranchFilter] = useState([])
-  const [stockFilter, setStockFilter] = useState([])
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([])
+  const [brandFilter, setBrandFilter] = useState<string[]>([])
+  const [branchFilter, setBranchFilter] = useState<string[]>([])
+  const [stockFilter, setStockFilter] = useState<string[]>([])
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [membershipNumber, setMembershipNumber] = useState('')
-  const [membershipData, setMembershipData] = useState(null)
+  const [membershipData, setMembershipData] = useState<LegacyCatalogRecord | null>(null)
   const [membershipError, setMembershipError] = useState('')
   const [membershipLoading, setMembershipLoading] = useState(false)
   const [portalError, setPortalError] = useState('')
   const [loading, setLoading] = useState(() => !(cachedPortal?.config || cachedPortal?.products?.length))
-  const [submissionDraft, setSubmissionDraft] = useState({ platform: '', note: '', screenshots: [] })
+  const [submissionDraft, setSubmissionDraft] = useState<SubmissionDraft>({ platform: '', note: '', screenshots: [] })
   const [submissionSaving, setSubmissionSaving] = useState(false)
-  const [reviewItems, setReviewItems] = useState([])
-  const [reviewSavingId, setReviewSavingId] = useState(null)
-  const [aiProviders, setAiProviders] = useState([])
+  const [reviewItems, setReviewItems] = useState<LegacyCatalogRecord[]>([])
+  const [reviewSavingId, setReviewSavingId] = useState<string | number | null>(null)
+  const [aiProviders, setAiProviders] = useState<LegacyCatalogRecord[]>([])
   const [translateReady, setTranslateReady] = useState(false)
   const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTarget('en'))
   const [translateApplyState, setTranslateApplyState] = useState('idle')
   const [translateApplyMessage, setTranslateApplyMessage] = useState('')
-  const [productGalleryView, setProductGalleryView] = useState({ open: false, title: '', items: [], index: 0 })
-  const [portalImageView, setPortalImageView] = useState({ open: false, title: '', images: [], index: 0 })
-  const [filePicker, setFilePicker] = useState({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
+  const [productGalleryView, setProductGalleryView] = useState<GalleryViewState>({ open: false, title: '', items: [], index: 0 })
+  const [portalImageView, setPortalImageView] = useState<PortalImageViewState>({ open: false, title: '', images: [], index: 0 })
+  const [filePicker, setFilePicker] = useState<FilePickerState>({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
   const [activeEditorSection, setActiveEditorSection] = useState('branding')
-  const [dragAboutBlockId, setDragAboutBlockId] = useState(null)
-  const [dragPromoItemId, setDragPromoItemId] = useState(null)
-  const [mediaUploadStates, setMediaUploadStates] = useState({})
+  const [dragAboutBlockId, setDragAboutBlockId] = useState<string | null>(null)
+  const [dragPromoItemId, setDragPromoItemId] = useState<string | null>(null)
+  const [mediaUploadStates, setMediaUploadStates] = useState<Record<string, ReturnType<typeof createInitialUploadState>>>({})
   const [assistantQuestion, setAssistantQuestion] = useState('')
   const [assistantProfile, setAssistantProfile] = useState({
     brand: '',
@@ -1069,18 +1234,18 @@ export default function CatalogPage({ publicView = false }) {
     goal: '',
   })
   const [assistantLoading, setAssistantLoading] = useState(false)
-  const [assistantResponse, setAssistantResponse] = useState(null)
+  const [assistantResponse, setAssistantResponse] = useState<LegacyCatalogRecord | null>(null)
   const [assistantError, setAssistantError] = useState('')
-  const [assistantExpandedProductId, setAssistantExpandedProductId] = useState(null)
-  const [assistantUsage, setAssistantUsage] = useState(null)
-  const [assistantRequestPolicy, setAssistantRequestPolicy] = useState(null)
-  const [expandedFaqId, setExpandedFaqId] = useState(null)
+  const [assistantExpandedProductId, setAssistantExpandedProductId] = useState<string | number | null>(null)
+  const [assistantUsage, setAssistantUsage] = useState<LegacyCatalogRecord | null>(null)
+  const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LegacyCatalogRecord | null>(null)
+  const [expandedFaqId, setExpandedFaqId] = useState<string | null>(null)
   const [recommendedProductSearchInput, setRecommendedProductSearchInput] = useState('')
   const [recommendedProductSearchTerm, setRecommendedProductSearchTerm] = useState('')
   const deferredSearch = useDeferredValue(search)
   const loadRequestRef = useRef(0)
-  const syncReloadTimerRef = useRef(null)
-  const previewSectionRef = useRef(null)
+  const syncReloadTimerRef = useRef<number | null>(null)
+  const previewSectionRef = useRef<HTMLDivElement | null>(null)
   const membershipLookupRequestRef = useRef(0)
   const submissionSavingRef = useRef(false)
   const reviewSavingRef = useRef(false)
@@ -1091,11 +1256,11 @@ export default function CatalogPage({ publicView = false }) {
   const portalProductsRequestRef = useRef(0)
   const portalFaviconRequestRef = useRef(0)
   const publicScrollAnchorRef = useRef(0)
-  const publicPortalNavRef = useRef(null)
-  const mediaUploadControllersRef = useRef(new Map())
-  const mediaUploadInFlightTargetsRef = useRef(new Set())
-  const mediaUploadPreviewUrlsRef = useRef(new Map())
-  const mediaUploadOriginalValuesRef = useRef(new Map())
+  const publicPortalNavRef = useRef<HTMLElement | null>(null)
+  const mediaUploadControllersRef = useRef(new Map<string, AbortController>())
+  const mediaUploadInFlightTargetsRef = useRef(new Set<string>())
+  const mediaUploadPreviewUrlsRef = useRef(new Map<string, string>())
+  const mediaUploadOriginalValuesRef = useRef(new Map<string, string>())
   const aliveRef = useRef(true)
 
   const canEdit = !publicView && hasPermission('settings')
@@ -1152,6 +1317,8 @@ export default function CatalogPage({ publicView = false }) {
   const externalTranslateTarget = publicView
     && previewConfig.translateWidgetEnabled
     && !isFirstPartyTranslateTarget(normalizedTranslateTarget)
+    ? normalizedTranslateTarget
+    : null
   const portalCopyLanguage = publicView && previewConfig.translateWidgetEnabled && !externalTranslateTarget
     ? (normalizedTranslateTarget === 'original' ? configuredPortalLanguage : normalizedTranslateTarget)
     : configuredPortalLanguage
@@ -1191,34 +1358,36 @@ export default function CatalogPage({ publicView = false }) {
   ])
   const editorLanguage = normalizeFirstPartyPortalLanguage(appLanguage) || 'en'
   const activeCopyLanguage = publicView ? language : editorLanguage
-  const copy = (key, fallback, fallbackKm = fallback) => {
+  const copy: CopyFunction = (key, fallback, fallbackKm = fallback) => {
+    const safeFallback = fallback || key
+    const safeFallbackKm = fallbackKm || safeFallback
     const portalResource = getPortalResourceText(activeCopyLanguage, key)
     if (portalResource) return portalResource
-    if (publicView) return tt(activeCopyLanguage, key, fallback, fallbackKm)
+    if (publicView) return tt(activeCopyLanguage, key, safeFallback, safeFallbackKm)
     const global = typeof t === 'function' ? t(key) : ''
     if (global && global !== key && !isBrokenLocalizedString(global)) return global
-    return tt(activeCopyLanguage, key, fallback, fallbackKm)
+    return tt(activeCopyLanguage, key, safeFallback, safeFallbackKm)
   }
-  const displayConfig = useMemo(
-    () => (publicView ? localizePortalConfig(previewConfig, language) : previewConfig),
+  const displayConfig = useMemo<PortalConfig>(
+    () => (publicView ? localizePortalConfig(previewConfig, language) : previewConfig) as PortalConfig,
     [language, previewConfig, publicView]
   )
-  const displayProducts = useMemo(
-    () => (publicView ? localizePortalProducts(products, language, previewConfig.translations) : products),
+  const displayProducts = useMemo<CatalogProduct[]>(
+    () => (publicView ? localizePortalProducts(products, language, previewConfig.translations) : products) as CatalogProduct[],
     [language, previewConfig.translations, products, publicView]
   )
   const portalBackground = theme === 'dark'
     ? 'radial-gradient(circle at top, #1f2937 0%, #0f172a 38%, #020617 100%)'
     : 'radial-gradient(circle at top, #fef3c7 0%, #fff7ed 35%, #f8fafc 80%)'
   const darkMode = theme === 'dark'
-  const resolveVisibleTab = (candidate, cfg = previewConfig) => {
+  const resolveVisibleTab = (candidate: string, cfg: PortalConfig = previewConfig): string => {
     const visible = [
       cfg.showCatalog ? 'products' : null,
       cfg.showMembership ? 'membership' : null,
       cfg.showAbout ? 'about' : null,
       cfg.showFaq ? 'faq' : null,
       cfg.aiEnabled ? 'ai' : null,
-    ].filter(Boolean)
+    ].filter(Boolean) as string[]
     if (!visible.length) return 'products'
     return visible.includes(candidate) ? candidate : visible[0]
   }
@@ -1259,15 +1428,15 @@ export default function CatalogPage({ publicView = false }) {
     () => normalizePromoItems(editorDraft.customer_portal_promo_items || previewConfig.promoItems || [], { keepEmpty: true }),
     [editorDraft.customer_portal_promo_items, previewConfig.promoItems]
   )
-  const getMediaUploadState = (key) => mediaUploadStates[key] || createInitialUploadState()
-  const updateMediaUploadState = (key, action) => {
+  const getMediaUploadState = (key: string): UploadState => mediaUploadStates[key] || createInitialUploadState()
+  const updateMediaUploadState = (key: string, action: UploadAction) => {
     setMediaUploadStates((current) => reduceUploadState(current, { ...(action || {}), key }))
   }
   const hasActiveMediaUpload = useMemo(
     () => Object.values(mediaUploadStates).some((state) => state?.status === 'uploading'),
     [mediaUploadStates],
   )
-  const forgetMediaUploadState = (key) => {
+  const forgetMediaUploadState = (key: string) => {
     setMediaUploadStates((current) => {
       if (!Object.prototype.hasOwnProperty.call(current, key)) return current
       const next = { ...current }
@@ -1317,7 +1486,7 @@ export default function CatalogPage({ publicView = false }) {
     async function loadAssistantStatus() {
       try {
         const result = await withLoaderTimeout(
-          () => window.api.getPortalAiStatus(),
+          () => getCatalogApi().getPortalAiStatus(),
           'Portal AI status',
           CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS,
         )
@@ -1336,7 +1505,7 @@ export default function CatalogPage({ publicView = false }) {
   }, [publicView, previewConfig.aiEnabled, previewConfig.aiProviderId])
 
   /** Open modal gallery for selected product image list. */
-  function openProductGallery(product, startIndex = 0) {
+  function openProductGallery(product: CatalogProduct, startIndex = 0) {
     const items = normalizeProductGallery(product)
     if (!items.length) return
     const safeStart = Math.max(0, Math.min(startIndex, items.length - 1))
@@ -1349,7 +1518,7 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   /** Apply selected language. Business OS handles English/Khmer instantly; Google is only the external fallback. */
-  async function changeTranslateTarget(nextTarget) {
+  async function changeTranslateTarget(nextTarget: string) {
     const target = normalizePortalTranslateChoice(nextTarget, configuredPortalLanguage)
     setTranslateTarget(target)
     setTranslateApplyMessage('')
@@ -1397,19 +1566,24 @@ export default function CatalogPage({ publicView = false }) {
     setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
   }
 
-  function isPortalLoadCurrent(requestId) {
+  function isPortalLoadCurrent(requestId: number) {
     return aliveRef.current && Number(loadRequestRef.current) === Number(requestId)
   }
 
-  async function loadPortalEditorData(requestId, nextConfig, nextMeta, nextProducts) {
+  async function loadPortalEditorData(
+    requestId: number,
+    nextConfig: PortalConfig,
+    nextMeta: LegacyCatalogRecord,
+    nextProducts: CatalogProduct[],
+  ) {
     const [providersResult, reviewResult] = await Promise.allSettled([
       withLoaderTimeout(
-        () => window.api.getAiProviders(),
+        () => getCatalogApi().getAiProviders(),
         'Portal AI providers',
         CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
       ),
       withLoaderTimeout(
-        () => window.api.getPortalSubmissionsForReview(),
+        () => getCatalogApi().getPortalSubmissionsForReview(),
         'Portal review items',
         CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
       ),
@@ -1458,7 +1632,7 @@ export default function CatalogPage({ publicView = false }) {
       await withLoaderTimeout(() => loadPortal(), 'Customer portal', CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS)
     } catch (error) {
       if (!aliveRef.current || !isTrackedRequestCurrent(portalBootstrapRequestRef, requestId) || !reportError) return
-      setPortalError(error?.message || 'Failed to load customer portal')
+      setPortalError(getCatalogErrorMessage(error, 'Failed to load customer portal'))
     } finally {
       if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
         setLoading(false)
@@ -1472,7 +1646,7 @@ export default function CatalogPage({ publicView = false }) {
     const requestId = beginTrackedRequest(loadRequestRef)
     if (publicView) {
       const portalConfig = await withLoaderTimeout(
-        () => window.api.getPortalConfig(),
+        () => getCatalogApi().getPortalConfig(),
         'Portal config',
         CATALOG_PORTAL_CONFIG_TIMEOUT_MS,
       )
@@ -1499,22 +1673,22 @@ export default function CatalogPage({ publicView = false }) {
       })
 
       withLoaderTimeout(
-        () => window.api.getPortalCatalogMeta?.(),
+        () => getCatalogApi().getPortalCatalogMeta?.(),
         'Portal catalog metadata',
         CATALOG_PORTAL_META_TIMEOUT_MS,
       )
         .then((metaResult) => {
           if (!aliveRef.current || !isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setCategories(Array.isArray(metaResult?.categories) ? metaResult.categories : [])
-          setBrands(Array.isArray(metaResult?.brands) ? metaResult.brands : [])
-          setBranches(Array.isArray(metaResult?.branches) ? metaResult.branches : [])
+          setCategories(normalizeCatalogOptions(metaResult?.categories))
+          setBrands(normalizeBrandOptions(metaResult?.brands))
+          setBranches(normalizeCatalogOptions(metaResult?.branches))
         })
         .catch(() => {})
       return
     }
 
     const bootstrapResult = await withLoaderTimeout(
-      () => window.api.getPortalBootstrap(),
+      () => getCatalogApi().getPortalBootstrap(),
       'Portal bootstrap',
       CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS,
     )
@@ -1528,9 +1702,9 @@ export default function CatalogPage({ publicView = false }) {
 
     const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
     const nextMeta = {
-      categories: Array.isArray(meta?.categories) ? meta.categories : [],
-      brands: Array.isArray(meta?.brands) ? meta.brands : [],
-      branches: Array.isArray(meta?.branches) ? meta.branches : [],
+      categories: normalizeCatalogOptions(meta?.categories),
+      brands: normalizeBrandOptions(meta?.brands),
+      branches: normalizeCatalogOptions(meta?.branches),
     }
     const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
 
@@ -1545,7 +1719,7 @@ export default function CatalogPage({ publicView = false }) {
       setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
       setPortalProductPage(Number(catalogPage.page || 1) || 1)
       setPortalProductPageSize(Number(catalogPage.pageSize || 20) || 20)
-      setPortalProductInitials(Array.isArray(catalogPage.initials) ? catalogPage.initials : [])
+      setPortalProductInitials(normalizePortalInitialOptions(catalogPage.initials))
     }
     setActiveTab((current) => resolveVisibleTab(current, nextConfig))
 
@@ -1622,22 +1796,22 @@ export default function CatalogPage({ publicView = false }) {
     }
 
     withLoaderTimeout(
-      () => window.api.searchPortalCatalogProducts(params),
+      () => getCatalogApi().searchPortalCatalogProducts(params),
       'Portal product search',
       CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS,
     )
       .then((result) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
-        const nextItems = Array.isArray(result?.items) ? result.items : []
+        const nextItems = Array.isArray(result?.items) ? result.items as CatalogProduct[] : []
         setPortalError('')
         setProducts(nextItems)
         setPortalProductTotal(Number(result?.total || 0))
         setPortalProductPage(Number(result?.page || portalProductPage) || 1)
         setPortalProductPageSize(Number(result?.pageSize || portalProductPageSize) || portalProductPageSize)
-        setPortalProductInitials(Array.isArray(result?.initials) ? result.initials : [])
-        const nextBrands = Array.isArray(result?.filters?.brands) ? result.filters.brands : brands
+        setPortalProductInitials(normalizePortalInitialOptions(result?.initials))
+        const nextBrands = Array.isArray(result?.filters?.brands) ? normalizeBrandOptions(result.filters.brands) : brands
         const nextCategories = Array.isArray(result?.filters?.categories)
-          ? result.filters.categories.map((name, index) => ({ id: `server-${index}-${name}`, name }))
+          ? result.filters.categories.map((name: string, index: number) => ({ id: `server-${index}-${name}`, name }))
           : categories
         if (Array.isArray(result?.filters?.brands)) setBrands(nextBrands)
         if (Array.isArray(result?.filters?.categories)) {
@@ -1653,14 +1827,14 @@ export default function CatalogPage({ publicView = false }) {
             page: Number(result?.page || portalProductPage) || 1,
             pageSize: Number(result?.pageSize || portalProductPageSize) || portalProductPageSize,
             total: Number(result?.total || 0),
-            initials: Array.isArray(result?.initials) ? result.initials : portalProductInitials,
+            initials: normalizePortalInitialOptions(result?.initials).length ? normalizePortalInitialOptions(result?.initials) : portalProductInitials,
           },
           reviewItems: [],
         })
       })
       .catch((error) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
-        setPortalError(error?.message || 'Portal product search failed')
+        setPortalError(getCatalogErrorMessage(error, 'Portal product search failed'))
       })
       .finally(() => {
         if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
@@ -1723,7 +1897,7 @@ export default function CatalogPage({ publicView = false }) {
     const titleText = String(previewConfig.businessName || previewConfig.title || 'Customer Portal').trim()
     document.title = titleText || 'Customer Portal'
 
-    const ensureLink = (rel) => {
+    const ensureLink = (rel: string) => {
       let linkEl = document.querySelector(`link[rel="${rel}"]`)
       let created = false
       const previousHref = linkEl?.getAttribute('href') || ''
@@ -1744,12 +1918,12 @@ export default function CatalogPage({ publicView = false }) {
 
     const iconSource = versionedBusinessFavicon || versionedBusinessLogo || ''
     const faviconOptions = previewConfig.businessFavicon
-      ? { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }
+      ? { fit: 'cover' as const, zoom: 100, positionX: 50, positionY: 50 }
       : {
-          fit: 'cover',
-          zoom: previewConfig.logoZoom,
-          positionX: previewConfig.logoPositionX,
-          positionY: previewConfig.logoPositionY,
+          fit: 'cover' as const,
+          zoom: toNumber(previewConfig.logoZoom, 100),
+          positionX: toNumber(previewConfig.logoPositionX, 50),
+          positionY: toNumber(previewConfig.logoPositionY, 50),
         }
     if (iconSource) {
       const requestId = beginTrackedRequest(portalFaviconRequestRef)
@@ -1904,7 +2078,7 @@ export default function CatalogPage({ publicView = false }) {
               .filter((value) => value !== 'original')
               .join(','),
             autoDisplay: false,
-            layout: window.google.translate.TranslateElement.InlineLayout.SIMPLE,
+            layout: window.google.translate.TranslateElement.InlineLayout?.SIMPLE,
           },
           container.id,
         )
@@ -1954,7 +2128,7 @@ export default function CatalogPage({ publicView = false }) {
 
   useEffect(() => {
     if (!isPageActive || !syncChannel) return undefined
-    if (!['products', 'settings', 'customers', 'sales', 'returns', 'branches', 'categories'].includes(syncChannel.channel)) {
+    if (!['products', 'settings', 'customers', 'sales', 'returns', 'branches', 'categories'].includes(String(syncChannel.channel || ''))) {
       return undefined
     }
 
@@ -2033,7 +2207,7 @@ export default function CatalogPage({ publicView = false }) {
     })
   }, [displayProducts, deferredSearch, categoryFilter, brandFilter, branchFilter, stockFilter, displayConfig])
 
-  function toggleFilterValue(values, setter, value) {
+  function toggleFilterValue(values: string[], setter: Dispatch<SetStateAction<string[]>>, value: string) {
     setter((current) => (
       current.includes(value)
         ? current.filter((item) => item !== value)
@@ -2049,12 +2223,12 @@ export default function CatalogPage({ publicView = false }) {
     setPortalProductInitial('all')
   }
 
-  function setDraft(key, value) {
+  function setDraft(key: string, value: unknown) {
     setEditorDirty(true)
     setEditorDraft((current) => ({ ...current, [key]: value }))
   }
 
-  function toggleRecommendedProduct(productId) {
+  function toggleRecommendedProduct(productId: unknown) {
     const id = Number(productId)
     if (!Number.isFinite(id) || id <= 0) return
     const nextIds = recommendedProductIds.includes(id)
@@ -2063,7 +2237,7 @@ export default function CatalogPage({ publicView = false }) {
     setDraft('customer_portal_recommended_product_ids', JSON.stringify(nextIds))
   }
 
-  function openPortalImage(title, images, index = 0) {
+  function openPortalImage(title: string, images: string[], index = 0) {
     const safeImages = Array.isArray(images) ? images.filter(Boolean) : []
     if (!safeImages.length) return
     setPortalImageView({
@@ -2074,15 +2248,15 @@ export default function CatalogPage({ publicView = false }) {
     })
   }
 
-  function setAboutBlocksDraft(nextBlocks) {
+  function setAboutBlocksDraft(nextBlocks: PortalMediaBlock[]) {
     setDraft('customer_portal_about_blocks', serializeAboutBlocks(nextBlocks))
   }
 
-  function setPromoItemsDraft(nextItems) {
+  function setPromoItemsDraft(nextItems: PortalMediaBlock[]) {
     setDraft('customer_portal_promo_items', serializePromoItems(nextItems))
   }
 
-  function getPortalMediaValue(target) {
+  function getPortalMediaValue(target: unknown): string {
     const targetKey = String(target || '').trim()
     if (!targetKey) return ''
     if (targetKey.startsWith('about:')) {
@@ -2096,7 +2270,7 @@ export default function CatalogPage({ publicView = false }) {
     return editorDraft[targetKey] || ''
   }
 
-  function setPortalMediaValue(target, value) {
+  function setPortalMediaValue(target: unknown, value: string) {
     const targetKey = String(target || '').trim()
     if (!targetKey) return
     if (targetKey.startsWith('about:')) {
@@ -2110,13 +2284,13 @@ export default function CatalogPage({ publicView = false }) {
     setDraft(targetKey, value)
   }
 
-  function clearPortalUploadPreview(target) {
+  function clearPortalUploadPreview(target: string) {
     const previewUrl = mediaUploadPreviewUrlsRef.current.get(target)
     if (previewUrl && String(previewUrl).startsWith('blob:')) URL.revokeObjectURL(previewUrl)
     mediaUploadPreviewUrlsRef.current.delete(target)
   }
 
-  function clearPortalMediaTarget(target) {
+  function clearPortalMediaTarget(target: unknown) {
     const targetKey = String(target || '').trim()
     const controller = mediaUploadControllersRef.current.get(targetKey)
     controller?.abort?.()
@@ -2127,12 +2301,12 @@ export default function CatalogPage({ publicView = false }) {
     updateMediaUploadState(targetKey, { type: 'success', publicPath: '', processingStatus: 'idle' })
   }
 
-  async function uploadPortalMedia(target, accept = 'image/*') {
+  async function uploadPortalMedia(target: unknown, accept = 'image/*'): Promise<string> {
     const targetKey = String(target || '').trim()
     if (!targetKey) return ''
     if (!beginKeyedAction(mediaUploadInFlightTargetsRef, targetKey)) return ''
     try {
-      const file = await new Promise((resolve) => {
+      const file = await new Promise<File | null>((resolve) => {
         const input = document.createElement('input')
         input.type = 'file'
         input.accept = accept
@@ -2158,12 +2332,12 @@ export default function CatalogPage({ publicView = false }) {
       })
 
       const uploaded = await withLoaderTimeout(
-        () => window.api.uploadFileAsset({
+        () => getCatalogApi().uploadFileAsset({
           file,
           userId: user?.id,
           userName: user?.name,
           signal: controller.signal,
-          onProgress: ({ percent }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
+          onProgress: ({ percent }: { percent: number }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
         }),
         'Upload portal media',
         CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,
@@ -2182,12 +2356,13 @@ export default function CatalogPage({ publicView = false }) {
       })
       return nextPath
     } catch (error) {
-      const cancelled = /cancelled|canceled|aborted/i.test(String(error?.message || ''))
+      const errorMessage = getCatalogErrorMessage(error, 'Image upload failed')
+      const cancelled = /cancelled|canceled|aborted/i.test(errorMessage)
       const previousValue = mediaUploadOriginalValuesRef.current.get(targetKey)
       if (aliveRef.current) {
         setPortalMediaValue(targetKey, previousValue || '')
-        updateMediaUploadState(targetKey, cancelled ? { type: 'cancel' } : { type: 'error', error: error?.message || 'Image upload failed' })
-        if (!cancelled) notify(error?.message || 'Image upload failed', 'error')
+        updateMediaUploadState(targetKey, cancelled ? { type: 'cancel' } : { type: 'error', error: errorMessage })
+        if (!cancelled) notify(errorMessage, 'error')
       }
       return ''
     } finally {
@@ -2197,25 +2372,25 @@ export default function CatalogPage({ publicView = false }) {
     }
   }
 
-  function cancelPortalMediaUpload(target) {
+  function cancelPortalMediaUpload(target: unknown) {
     const targetKey = String(target || '').trim()
     const controller = mediaUploadControllersRef.current.get(targetKey)
     controller?.abort?.()
   }
 
-  function updateAboutBlock(blockId, key, value) {
+  function updateAboutBlock(blockId: string, key: string, value: unknown) {
     setAboutBlocksDraft(aboutBlocks.map((block) => (
       block.id === blockId ? { ...block, [key]: value } : block
     )))
   }
 
-  function updatePromoItem(itemId, key, value) {
+  function updatePromoItem(itemId: string, key: string, value: unknown) {
     setPromoItemsDraft(promoItems.map((item) => (
       item.id === itemId ? { ...item, [key]: value } : item
     )))
   }
 
-  function addAboutBlock(type) {
+  function addAboutBlock(type: unknown) {
     setAboutBlocksDraft([...aboutBlocks, createAboutBlock(type)])
   }
 
@@ -2223,7 +2398,7 @@ export default function CatalogPage({ publicView = false }) {
     setPromoItemsDraft([...promoItems, createPromoItem()])
   }
 
-  function moveAboutBlockBefore(dragId, targetId) {
+  function moveAboutBlockBefore(dragId: string, targetId: string) {
     if (!dragId || !targetId || dragId === targetId) return
     const nextBlocks = [...aboutBlocks]
     const dragIndex = nextBlocks.findIndex((block) => block.id === dragId)
@@ -2235,7 +2410,7 @@ export default function CatalogPage({ publicView = false }) {
     setAboutBlocksDraft(nextBlocks)
   }
 
-  function removeAboutBlock(blockId) {
+  function removeAboutBlock(blockId: string) {
     const uploadKey = `about:${blockId}`
     const controller = mediaUploadControllersRef.current.get(uploadKey)
     controller?.abort?.()
@@ -2246,7 +2421,7 @@ export default function CatalogPage({ publicView = false }) {
     setAboutBlocksDraft(aboutBlocks.filter((block) => block.id !== blockId))
   }
 
-  function movePromoItemBefore(dragId, targetId) {
+  function movePromoItemBefore(dragId: string, targetId: string) {
     if (!dragId || !targetId || dragId === targetId) return
     const nextItems = [...promoItems]
     const dragIndex = nextItems.findIndex((item) => item.id === dragId)
@@ -2258,7 +2433,7 @@ export default function CatalogPage({ publicView = false }) {
     setPromoItemsDraft(nextItems)
   }
 
-  function removePromoItem(itemId) {
+  function removePromoItem(itemId: string) {
     const uploadKey = `promo:${itemId}`
     const controller = mediaUploadControllersRef.current.get(uploadKey)
     controller?.abort?.()
@@ -2269,7 +2444,7 @@ export default function CatalogPage({ publicView = false }) {
     setPromoItemsDraft(promoItems.filter((item) => item.id !== itemId))
   }
 
-  function setFaqDraft(nextItems) {
+  function setFaqDraft(nextItems: FaqItem[]) {
     setDraft('customer_portal_faq_items', JSON.stringify(nextItems))
   }
 
@@ -2284,7 +2459,7 @@ export default function CatalogPage({ publicView = false }) {
     ])
   }
 
-  function mergeFaqStarterItems(starterItems) {
+  function mergeFaqStarterItems(starterItems: FaqItem[]) {
     if (!faqItems.length) {
       setFaqDraft(starterItems)
       return
@@ -2305,13 +2480,13 @@ export default function CatalogPage({ publicView = false }) {
     mergeFaqStarterItems(buildAiFaqStarterItems(t))
   }
 
-  function updateFaqItem(itemId, key, value) {
+  function updateFaqItem(itemId: string, key: keyof FaqItem, value: string) {
     setFaqDraft(faqItems.map((item) => (
       item.id === itemId ? { ...item, [key]: value } : item
     )))
   }
 
-  function removeFaqItem(itemId) {
+  function removeFaqItem(itemId: string) {
     setFaqDraft(faqItems.filter((item) => item.id !== itemId))
   }
 
@@ -2330,47 +2505,49 @@ export default function CatalogPage({ publicView = false }) {
     setAssistantRequestPolicy(null)
   }
 
-  async function uploadDraftImage(key) {
+  async function uploadDraftImage(key: string) {
     await uploadPortalMedia(key, 'image/*')
   }
 
-  async function uploadAboutBlockMedia(blockId) {
+  async function uploadAboutBlockMedia(blockId: string) {
     const block = aboutBlocks.find((entry) => entry.id === blockId)
     const accept = block?.type === 'video' ? 'video/*' : 'image/*'
     await uploadPortalMedia(`about:${blockId}`, accept)
   }
 
-  async function uploadPromoItemMedia(itemId) {
+  async function uploadPromoItemMedia(itemId: string) {
     await uploadPortalMedia(`promo:${itemId}`, 'image/*')
   }
 
-  function openFilePicker(target, mediaType = 'image', title = copy('openGallery', 'Choose file')) {
+  function openFilePicker(target: unknown, mediaType = 'image', title = copy('openGallery', 'Choose file')) {
     setFilePicker({ open: true, target, mediaType, title })
   }
 
-  function handleFilePickerSelect(publicPath) {
+  function handleFilePickerSelect(publicPath: unknown) {
+    const selectedPath = String(publicPath || '')
     const target = filePicker.target
     if (!target) return
+    const targetKey = String(target)
     if (
-      target === 'customer_portal_logo_image'
-      || target === 'customer_portal_favicon_image'
-      || target === 'customer_portal_cover_image'
+      targetKey === 'customer_portal_logo_image'
+      || targetKey === 'customer_portal_favicon_image'
+      || targetKey === 'customer_portal_cover_image'
     ) {
-      clearPortalUploadPreview(target)
-      setDraft(target, publicPath)
-      updateMediaUploadState(target, { type: 'success', publicPath, processingStatus: 'ready' })
+      clearPortalUploadPreview(targetKey)
+      setDraft(targetKey, selectedPath)
+      updateMediaUploadState(targetKey, { type: 'success', publicPath: selectedPath, processingStatus: 'ready' })
       return
     }
-    if (String(target).startsWith('about:')) {
-      clearPortalUploadPreview(target)
-      updateAboutBlock(String(target).slice('about:'.length), 'mediaUrl', publicPath)
-      updateMediaUploadState(target, { type: 'success', publicPath, processingStatus: 'ready' })
+    if (targetKey.startsWith('about:')) {
+      clearPortalUploadPreview(targetKey)
+      updateAboutBlock(targetKey.slice('about:'.length), 'mediaUrl', selectedPath)
+      updateMediaUploadState(targetKey, { type: 'success', publicPath: selectedPath, processingStatus: 'ready' })
       return
     }
-    if (String(target).startsWith('promo:')) {
-      clearPortalUploadPreview(target)
-      updatePromoItem(String(target).slice('promo:'.length), 'mediaUrl', publicPath)
-      updateMediaUploadState(target, { type: 'success', publicPath, processingStatus: 'ready' })
+    if (targetKey.startsWith('promo:')) {
+      clearPortalUploadPreview(targetKey)
+      updatePromoItem(targetKey.slice('promo:'.length), 'mediaUrl', selectedPath)
+      updateMediaUploadState(targetKey, { type: 'success', publicPath: selectedPath, processingStatus: 'ready' })
     }
   }
 
@@ -2432,16 +2609,16 @@ export default function CatalogPage({ publicView = false }) {
       const sanitizedLogoImage = sanitizePortalMediaValue(editorDraft.customer_portal_logo_image, previewConfig.logoImage || '')
       const sanitizedFaviconImage = sanitizePortalMediaValue(editorDraft.customer_portal_favicon_image, previewConfig.faviconImage || '')
       const sanitizedCoverImage = sanitizePortalMediaValue(editorDraft.customer_portal_cover_image, previewConfig.coverImage || '')
-      const previewAboutBlockMap = new Map((previewConfig.aboutBlocks || []).map((block) => [String(block?.id || ''), block]))
-      const sanitizedAboutBlocks = aboutBlocks.map((block) => ({
+      const previewAboutBlockMap = new Map<string, PortalMediaBlock>((previewConfig.aboutBlocks || []).map((block: PortalMediaBlock) => [String(block?.id || ''), block]))
+      const sanitizedAboutBlocks = aboutBlocks.map((block: PortalMediaBlock) => ({
         ...block,
         mediaUrl: sanitizePortalMediaValue(
           block?.mediaUrl,
           previewAboutBlockMap.get(String(block?.id || ''))?.mediaUrl || '',
         ),
       }))
-      const previewPromoItemMap = new Map((previewConfig.promoItems || []).map((item) => [String(item?.id || ''), item]))
-      const sanitizedPromoItems = promoItems.map((item) => ({
+      const previewPromoItemMap = new Map<string, PortalMediaBlock>((previewConfig.promoItems || []).map((item: PortalMediaBlock) => [String(item?.id || ''), item]))
+      const sanitizedPromoItems = promoItems.map((item: PortalMediaBlock) => ({
         ...item,
         mediaUrl: sanitizePortalMediaValue(
           item?.mediaUrl,
@@ -2538,7 +2715,7 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
-      })
+      }) as LegacyCatalogRecord
       if (result?.conflict) {
         notify(copy('portalSettingsConflict', 'Portal settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
         return
@@ -2560,7 +2737,7 @@ export default function CatalogPage({ publicView = false }) {
       setEditorDirty(false)
       await loadPortal()
     } catch (error) {
-      notify(error?.message || 'Failed to save portal', 'error')
+      notify(getCatalogErrorMessage(error, 'Failed to save portal'), 'error')
     } finally {
       setEditorSaving(false)
     }
@@ -2588,7 +2765,7 @@ export default function CatalogPage({ publicView = false }) {
     setAssistantExpandedProductId(null)
     try {
       const result = await withLoaderTimeout(
-        () => window.api.askPortalAi({
+        () => getCatalogApi().askPortalAi({
           question: assistantQuestion.trim(),
           profile: assistantProfile,
         }),
@@ -2601,8 +2778,9 @@ export default function CatalogPage({ publicView = false }) {
       setAssistantRequestPolicy(result?.requestPolicy || null)
     } catch (error) {
       if (!isTrackedRequestCurrent(assistantRequestRef, requestId)) return
-      setAssistantError(error?.message || 'Portal AI request failed')
-      notify(error?.message || 'Portal AI request failed', 'error')
+      const message = getCatalogErrorMessage(error, 'Portal AI request failed')
+      setAssistantError(message)
+      notify(message, 'error')
     } finally {
       if (isTrackedRequestCurrent(assistantRequestRef, requestId)) {
         assistantInFlightRef.current = false
@@ -2612,7 +2790,7 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   async function refreshMembershipData(
-    membershipNumberValue,
+    membershipNumberValue: unknown,
     {
       clearOnMissing = true,
       label = 'Catalog membership lookup',
@@ -2628,7 +2806,7 @@ export default function CatalogPage({ publicView = false }) {
 
     try {
       const result = await withLoaderTimeout(
-        () => window.api.lookupPortalMembership(value),
+        () => getCatalogApi().lookupPortalMembership(value),
         label,
         CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )
@@ -2644,7 +2822,7 @@ export default function CatalogPage({ publicView = false }) {
       return result
     } catch (error) {
       if (!isTrackedRequestCurrent(membershipLookupRequestRef, requestId)) return null
-      setMembershipError(error?.message || 'Lookup failed')
+      setMembershipError(getCatalogErrorMessage(error, 'Lookup failed'))
       return null
     } finally {
       if (showLoading && isTrackedRequestCurrent(membershipLookupRequestRef, requestId)) {
@@ -2666,8 +2844,8 @@ export default function CatalogPage({ publicView = false }) {
     await refreshMembershipData(value, { label: 'Catalog membership lookup' })
   }
 
-  async function addSubmissionImages(images) {
-    const next = Array.isArray(images) ? images.filter(Boolean) : []
+  async function addSubmissionImages(images: unknown) {
+    const next = Array.isArray(images) ? images.filter(Boolean).map(String) : []
     if (!next.length) return
     if (!aliveRef.current) return
     setSubmissionDraft((current) => ({
@@ -2676,10 +2854,10 @@ export default function CatalogPage({ publicView = false }) {
     }))
   }
 
-  async function handleSubmissionPaste(event) {
+  async function handleSubmissionPaste(event: ClipboardEvent<HTMLElement>) {
     const files = Array.from(event.clipboardData?.items || [])
       .map((item) => (item.kind === 'file' ? item.getAsFile() : null))
-      .filter(Boolean)
+      .filter((file): file is File => Boolean(file))
 
     if (!files.length) return
     event.preventDefault()
@@ -2712,7 +2890,7 @@ export default function CatalogPage({ publicView = false }) {
     try {
       setSubmissionSaving(true)
       await withLoaderTimeout(
-        () => window.api.createPortalSubmission({
+        () => getCatalogApi().createPortalSubmission({
           membershipNumber: membershipNumberValue,
           platform: submissionDraft.platform,
           note: submissionDraft.note,
@@ -2732,20 +2910,20 @@ export default function CatalogPage({ publicView = false }) {
         await refreshPortalView({ showSpinner: false, reportError: false })
       }
     } catch (error) {
-      notify(error?.message || 'Submission failed', 'error')
+      notify(getCatalogErrorMessage(error, 'Submission failed'), 'error')
     } finally {
       finishSingleAction(submissionSavingRef)
       setSubmissionSaving(false)
     }
   }
 
-  async function handleReviewSubmission(item, status) {
+  async function handleReviewSubmission(item: LegacyCatalogRecord, status: string) {
     if (!beginSingleAction(reviewSavingRef, { blocked: reviewSavingId != null, value: item.id })) return
 
     try {
       setReviewSavingId(item.id)
       await withLoaderTimeout(
-        () => window.api.reviewPortalSubmission(item.id, {
+        () => getCatalogApi().reviewPortalSubmission(item.id, {
           status,
           reward_points: item.reward_points || 0,
           review_note: item.review_note || '',
@@ -2765,7 +2943,7 @@ export default function CatalogPage({ publicView = false }) {
         })
       }
     } catch (error) {
-      notify(error?.message || 'Failed to save review', 'error')
+      notify(getCatalogErrorMessage(error, 'Failed to save review'), 'error')
     } finally {
       finishSingleAction(reviewSavingRef)
       setReviewSavingId(null)
@@ -2821,14 +2999,14 @@ export default function CatalogPage({ publicView = false }) {
     }
   )
   const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(displayConfig.gridColumnsMobile, 1))))
-const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayConfig.gridColumnsDesktop, 4))))
+  const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayConfig.gridColumnsDesktop, 4))))
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
   const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + stockFilter.length + (portalProductInitial === 'all' ? 0 : 1)
   const selectedStockBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
   const recommendedProductById = useMemo(() => {
-    const map = new Map()
+    const map = new Map<number, CatalogProduct>()
     for (const product of products || []) {
       const id = Number(product?.id)
       if (Number.isFinite(id) && id > 0) map.set(id, product)
@@ -2838,7 +3016,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
   const selectedRecommendedProductOptions = useMemo(() => (
     recommendedProductIds
       .map((id) => recommendedProductById.get(Number(id)))
-      .filter(Boolean)
+      .filter((product): product is CatalogProduct => Boolean(product))
       .map(buildRecommendedProductOption)
   ), [recommendedProductById, recommendedProductIds])
   const recommendedProductOptions = useMemo(() => {
@@ -2933,7 +3111,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
       const images = await pickMultipleImagesAsDataUrls()
       await addSubmissionImages(images)
     } catch (error) {
-      notify(error?.message || 'Image upload failed', 'error')
+      notify(getCatalogErrorMessage(error, 'Image upload failed'), 'error')
     }
   }
   const secondaryTabProps = {
@@ -2984,7 +3162,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
     setAssistantExpandedProductId,
   }
 
-  function renderSecondaryTabPanel(tab, visible) {
+  function renderSecondaryTabPanel(tab: string, visible: boolean) {
     return (
       <div
         key={tab}
@@ -3016,7 +3194,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
     )
   }
 
-  const editorSections = [
+  const editorSections: EditorSection[] = [
     ['portal-section-branding', 'branding', copy('businessInfo', 'Business details')],
     ['portal-section-media', 'media', copy('mediaSection', 'Media')],
     ['portal-section-display', 'display', copy('display', 'Display settings')],
@@ -3125,7 +3303,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
   const previewBusinessName = String(displayConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
   const portalTabs = getPortalTabs(displayConfig, copy)
-  const scrollPublicPortal = (direction) => {
+  const scrollPublicPortal = (direction: 'top' | 'bottom') => {
     if (typeof window === 'undefined') return
     const top = direction === 'bottom'
       ? Math.max(document.documentElement?.scrollHeight || 0, document.body?.scrollHeight || 0)
@@ -3158,7 +3336,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
         portalBackground={portalBackground}
         copy={copy}
         canEdit={canEdit}
-        previewSectionRef={previewSectionRef}
+        previewSectionRef={previewSectionRef as RefObject<HTMLDivElement>}
         onBackToEditor={() => document.getElementById('portal-editor-top')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         displayConfig={displayConfig}
         versionedBusinessLogo={versionedBusinessLogo}
@@ -3167,7 +3345,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
         portalTabs={portalTabs}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        publicPortalNavRef={publicPortalNavRef}
+        publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
         publicPortalNavPinned={publicPortalNavPinned}
         publicPortalNavMetrics={publicPortalNavMetrics}
         catalogSection={renderCatalogSection()}

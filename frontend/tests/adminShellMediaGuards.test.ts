@@ -7,7 +7,7 @@ const runtimeSource = readFileSync(new URL('../src/platform/runtime/clientRuntim
 const webApiSource = readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const localDbSource = readFileSync(new URL('../src/api/localDb.ts', import.meta.url), 'utf8')
 const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
-const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
+const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.tsx', import.meta.url), 'utf8')
 const faviconSource = readFileSync(new URL('../src/utils/favicon.ts', import.meta.url), 'utf8')
 const userProfileSource = readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 

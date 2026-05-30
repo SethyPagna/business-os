@@ -207,20 +207,20 @@ await runTest('product form image upload and save keep synchronous guards', () =
 })
 
 await runTest('catalog portal media upload keeps a per-target synchronous guard', () => {
-  const source = readFrontend('src/components/catalog/CatalogPage.jsx')
+  const source = readFrontend('src/components/catalog/CatalogPage.tsx')
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
-  assert.match(source, /const mediaUploadInFlightTargetsRef = useRef\(new Set\(\)\)/)
+  assert.match(source, /const mediaUploadInFlightTargetsRef = useRef\(new Set<string>\(\)\)/)
   assert.match(source, /const CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS = 30000/)
-  assert.match(source, /async function uploadPortalMedia\(target, accept = 'image\/\*'\) \{[\s\S]*if \(!beginKeyedAction\(mediaUploadInFlightTargetsRef, targetKey\)\) return ''/)
+  assert.match(source, /async function uploadPortalMedia\(target: unknown, accept = 'image\/\*'\): Promise<string> \{[\s\S]*if \(!beginKeyedAction\(mediaUploadInFlightTargetsRef, targetKey\)\) return ''/)
   assert.match(source, /beginKeyedAction\(mediaUploadInFlightTargetsRef, targetKey\)[\s\S]*document\.createElement\('input'\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.uploadFileAsset\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateMediaUploadState\(targetKey, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload portal media',\s*CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.uploadFileAsset\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}[\s\S]*\) => updateMediaUploadState\(targetKey, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload portal media',\s*CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishKeyedAction\(mediaUploadInFlightTargetsRef, targetKey\)[\s\S]*mediaUploadControllersRef\.current\.delete\(targetKey\)/)
-  assert.match(source, /function cancelPortalMediaUpload\(target\) \{[\s\S]*controller\?\.abort\?\.\(\)/)
+  assert.match(source, /function cancelPortalMediaUpload\(target: unknown\) \{[\s\S]*controller\?\.abort\?\.\(\)/)
 })
 
 await runTest('catalog portal submission writes use guarded bounded actions', () => {
-  const source = readFrontend('src/components/catalog/CatalogPage.jsx')
+  const source = readFrontend('src/components/catalog/CatalogPage.tsx')
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000/)
@@ -228,10 +228,10 @@ await runTest('catalog portal submission writes use guarded bounded actions', ()
   assert.match(source, /const submissionSavingRef = useRef\(false\)/)
   assert.match(source, /const reviewSavingRef = useRef\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(submissionSavingRef, \{ blocked: submissionSaving \}\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.createPortalSubmission\(\{[\s\S]*membershipNumber: membershipNumberValue,[\s\S]*screenshots: submissionDraft\.screenshots,[\s\S]*\}\),\s*'Create portal submission',\s*CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.createPortalSubmission\(\{[\s\S]*membershipNumber: membershipNumberValue,[\s\S]*screenshots: submissionDraft\.screenshots,[\s\S]*\}\),\s*'Create portal submission',\s*CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(submissionSavingRef\)[\s\S]*setSubmissionSaving\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(reviewSavingRef, \{ blocked: reviewSavingId != null, value: item\.id \}\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => window\.api\.reviewPortalSubmission\(item\.id, \{[\s\S]*status,[\s\S]*userName: user\?\.name,[\s\S]*\}\),\s*'Review portal submission',\s*CATALOG_PORTAL_REVIEW_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.reviewPortalSubmission\(item\.id, \{[\s\S]*status,[\s\S]*userName: user\?\.name,[\s\S]*\}\),\s*'Review portal submission',\s*CATALOG_PORTAL_REVIEW_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(reviewSavingRef\)[\s\S]*setReviewSavingId\(null\)/)
 })
 

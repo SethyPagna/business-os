@@ -72,7 +72,7 @@ const userProfile = read(path.join(SRC_ROOT, 'components', 'users', 'UserProfile
 const inventoryImport = read(path.join(SRC_ROOT, 'components', 'inventory', 'InventoryImportModal.tsx'))
 const salesImport = read(path.join(SRC_ROOT, 'components', 'sales', 'SalesImportModal.tsx'))
 const contactImport = read(path.join(SRC_ROOT, 'components', 'contacts', 'shared.tsx'))
-const catalogPage = read(path.join(SRC_ROOT, 'components', 'catalog', 'CatalogPage.jsx'))
+const catalogPage = read(path.join(SRC_ROOT, 'components', 'catalog', 'CatalogPage.tsx'))
 const appShell = read(path.join(SRC_ROOT, 'App.tsx'))
 const sidebar = read(path.join(SRC_ROOT, 'components', 'navigation', 'Sidebar.tsx'))
 assert(fs.existsSync(path.join(SRC_ROOT, 'components', 'products', 'import', 'productImportWorker.ts')), 'Product import worker is missing.')

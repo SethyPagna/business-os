@@ -27,7 +27,7 @@ const REQUIRED_KM_VALUES = {
 }
 
 const PORTAL_FILES = [
-  path.join(COMPONENT_ROOT, 'catalog', 'CatalogPage.jsx'),
+  path.join(COMPONENT_ROOT, 'catalog', 'CatalogPage.tsx'),
   path.join(COMPONENT_ROOT, 'catalog', 'CatalogProductsSection.tsx'),
   path.join(COMPONENT_ROOT, 'catalog', 'CatalogSecondaryTabs.tsx'),
   path.join(COMPONENT_ROOT, 'catalog', 'catalogUi.tsx'),
@@ -124,7 +124,7 @@ function checkKhmerQuality() {
 
 function checkPortalDarkModeContracts() {
   const css = readUtf8(MAIN_CSS_PATH)
-  const catalogPage = readUtf8(path.join(COMPONENT_ROOT, 'catalog', 'CatalogPage.jsx'))
+  const catalogPage = readUtf8(path.join(COMPONENT_ROOT, 'catalog', 'CatalogPage.tsx'))
   const requiredCssTokens = [
     "[data-portal-root='true'].dark .bg-white",
     ".dark [data-portal-root='true'] .bg-white",

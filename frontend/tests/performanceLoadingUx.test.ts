@@ -33,7 +33,7 @@ const editReturnModal = fs.readFileSync(new URL('../src/components/returns/EditR
 const newSupplierReturnModal = fs.readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.tsx', import.meta.url), 'utf8')
 const branches = fs.readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
 const transferModal = fs.readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
-const catalogPage = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
+const catalogPage = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.tsx', import.meta.url), 'utf8')
 const products = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const productPageConfig = fs.readFileSync(new URL('../src/components/products/config/productPageConfig.ts', import.meta.url), 'utf8')
 const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.tsx', import.meta.url), 'utf8')
@@ -1015,17 +1015,17 @@ assert.match(
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getPortalAiStatus\(\),\s*'Portal AI status',\s*CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalAiStatus\(\),\s*'Portal AI status',\s*CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS,\s*\)/,
   'catalog portal AI status should timeout slow status reads',
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getAiProviders\(\),\s*'Portal AI providers',\s*CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getAiProviders\(\),\s*'Portal AI providers',\s*CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,\s*\)/,
   'catalog portal AI providers should timeout slow provider reads',
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getPortalSubmissionsForReview\(\),\s*'Portal review items',\s*CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalSubmissionsForReview\(\),\s*'Portal review items',\s*CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,\s*\)/,
   'catalog portal review items should timeout slow review reads',
 )
 assert.match(
@@ -1035,22 +1035,22 @@ assert.match(
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getPortalConfig\(\),\s*'Portal config',\s*CATALOG_PORTAL_CONFIG_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalConfig\(\),\s*'Portal config',\s*CATALOG_PORTAL_CONFIG_TIMEOUT_MS,\s*\)/,
   'catalog portal config should timeout slow config reads',
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getPortalCatalogMeta\?\.\(\),\s*'Portal catalog metadata',\s*CATALOG_PORTAL_META_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalCatalogMeta\?\.\(\),\s*'Portal catalog metadata',\s*CATALOG_PORTAL_META_TIMEOUT_MS,\s*\)/,
   'catalog portal metadata should timeout slow metadata reads',
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getPortalBootstrap\(\),\s*'Portal bootstrap',\s*CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalBootstrap\(\),\s*'Portal bootstrap',\s*CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS,\s*\)/,
   'catalog portal bootstrap API read should timeout slow bootstrap reads',
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.searchPortalCatalogProducts\(params\),\s*'Portal product search',\s*CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.searchPortalCatalogProducts\(params\),\s*'Portal product search',\s*CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS,\s*\)/,
   'catalog portal product search should timeout slow product reads',
 )
 assert.match(
@@ -1100,22 +1100,22 @@ assert.doesNotMatch(
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.uploadFileAsset\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateMediaUploadState\(targetKey, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload portal media',\s*CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.uploadFileAsset\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}[\s\S]*\) => updateMediaUploadState\(targetKey, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload portal media',\s*CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,\s*\)/,
   'catalog portal media uploads should timeout slow file uploads',
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.createPortalSubmission\(\{[\s\S]*screenshots: submissionDraft\.screenshots,[\s\S]*\}\),\s*'Create portal submission',\s*CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.createPortalSubmission\(\{[\s\S]*screenshots: submissionDraft\.screenshots,[\s\S]*\}\),\s*'Create portal submission',\s*CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS,\s*\)/,
   'catalog portal submissions should timeout slow create actions',
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.reviewPortalSubmission\(item\.id, \{[\s\S]*userName: user\?\.name,[\s\S]*\}\),\s*'Review portal submission',\s*CATALOG_PORTAL_REVIEW_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.reviewPortalSubmission\(item\.id, \{[\s\S]*userName: user\?\.name,[\s\S]*\}\),\s*'Review portal submission',\s*CATALOG_PORTAL_REVIEW_TIMEOUT_MS,\s*\)/,
   'catalog portal reviews should timeout slow review actions',
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.lookupPortalMembership\(value\),\s*label,\s*CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.lookupPortalMembership\(value\),\s*label,\s*CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
   'catalog membership lookup should timeout slow membership reads',
 )
 assert.doesNotMatch(
