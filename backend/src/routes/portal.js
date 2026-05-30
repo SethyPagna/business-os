@@ -6,7 +6,7 @@
  * membership lookup summaries, and share-submission workflows.
  */
 const express = require('express')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 const { tryParse, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { storeDataUrlAsset } = require('../fileAssets')

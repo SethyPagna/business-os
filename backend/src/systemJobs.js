@@ -62,7 +62,7 @@ function safeJsonParse(value, fallback = null) {
 }
 
 function getDb() {
-  return require('./database').db
+  return require('./database.ts').db
 }
 
 function ensureTable() {

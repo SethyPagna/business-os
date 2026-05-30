@@ -4,7 +4,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
-const { db } = require('../../database')
+const { db } = require('../../database.ts')
 const {
   DATA_ROOT,
   DATA_FOLDER_NAME,

@@ -56,7 +56,7 @@ function clearBackupVersionCaches() {
 }
 
 function getDb() {
-  return require('../database').db
+  return require('../database.ts').db
 }
 
 function q(name) {

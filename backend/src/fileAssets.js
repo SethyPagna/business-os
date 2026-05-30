@@ -57,7 +57,7 @@ let cachedSettingsUsageReferences = { builtAt: 0, usageMap: null }
 let cachedSubmissionUsageReferences = { builtAt: 0, usageMap: null }
 
 function getDb() {
-  return require('./database').db
+  return require('./database.ts').db
 }
 
 function buildAssetExtToMime() {

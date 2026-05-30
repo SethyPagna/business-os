@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 569.
+- Latest completed implementation move in this roadmap: Move 570.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6304,3 +6304,17 @@ Move 568 status:
   package lane. The current source extension count is `.js: 66`, `.jsx: 0`,
   `.mjs: 0`, `.cjs: 0`, `.ts: 297`, `.tsx: 107` outside generated/runtime
   folders.
+
+Move 570 status:
+- Move 570 converts `backend/src/database.ts` to a package-safe TypeScript
+  path. The database entrypoint remains a minimal CommonJS passthrough to the
+  Postgres adapter, while the backend server, routes, services, workers,
+  source-inspection tests, and docs use explicit `.ts` imports. Focused
+  database load, schema-metadata, file-asset usage/cache, route-contract,
+  Postgres database, Postgres cutover-readiness, data-path, and performance
+  verifier checks are the required proof slice before this move is accepted,
+  followed by the full backend utility suite, schema audit, and Linux packaging
+  proof. `pkg` continues to warn for direct `.ts` scripts, so larger backend
+  route/service conversion still waits for a compile/staging package lane. The
+  current source extension count is `.js: 63`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`,
+  `.ts: 300`, `.tsx: 107` outside generated/runtime folders.

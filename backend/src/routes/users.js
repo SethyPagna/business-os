@@ -16,7 +16,7 @@
  */
 const express = require('express')
 const bcrypt = require('bcryptjs')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit, getAuditActor } = require('../middleware')
 const { registerUploadFromRequest } = require('../fileAssets')

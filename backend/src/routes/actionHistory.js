@@ -1,7 +1,7 @@
 'use strict'
 
 const express = require('express')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 const { ok, err, audit } = require('../helpers')
 const { authToken, getAuditActor, hasPermission, isAdminControlUser } = require('../middleware')
 const {

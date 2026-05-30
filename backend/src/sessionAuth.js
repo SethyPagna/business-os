@@ -12,7 +12,7 @@ const SESSION_30D_MS = Math.max(SESSION_14D_MS, Number(process.env.AUTH_SESSION_
 const SESSION_ROTATION_GRACE_MS = Math.max(0, Number(process.env.AUTH_SESSION_ROTATION_GRACE_MS || 20 * 1000))
 
 function getDb() {
-  return require('./database').db
+  return require('./database.ts').db
 }
 
 function hashToken(token) {

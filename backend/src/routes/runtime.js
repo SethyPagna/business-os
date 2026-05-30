@@ -7,7 +7,7 @@ const { getQueueStatus, initializeBullQueue } = require('../services/importJobs'
 const { getMediaQueueStatus, initializeMediaQueue } = require('../services/mediaQueue')
 const { getRuntimeCacheStatus, pingRuntimeCache } = require('../runtimeCache.ts')
 const { getRuntimeVersion } = require('../runtimeVersion.ts')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 const { hasSuspiciousCatalogText } = require('../catalogTextIntegrity.ts')
 
 const router = express.Router()

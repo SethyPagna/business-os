@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const databaseModule = require('../src/database')
+const databaseModule = require('../src/database.ts')
 const {
   __resetFileUsageReferenceCaches,
   buildUploadReferenceUsageMap,

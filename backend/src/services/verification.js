@@ -1,7 +1,7 @@
 'use strict'
 
 const crypto = require('crypto')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 
 const DEFAULT_CODE_TTL_MINUTES = Number(process.env.VERIFICATION_CODE_TTL_MINUTES || 10)
 

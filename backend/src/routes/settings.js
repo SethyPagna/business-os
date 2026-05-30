@@ -1,6 +1,6 @@
 'use strict'
 const express = require('express')
-const { db }  = require('../database')
+const { db }  = require('../database.ts')
 const { ok, err, broadcast, logOp, audit } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl.ts')

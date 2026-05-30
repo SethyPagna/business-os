@@ -11,7 +11,7 @@ process.env.JOB_QUEUE_DRIVER = 'bullmq'
 process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES = '0'
 process.env.IMPORT_MEDIA_WAIT_TIMEOUT_MS = '1000'
 
-const { db } = require('../src/database')
+const { db } = require('../src/database.ts')
 const { IMPORTS_PATH } = require('../src/config')
 const {
   addJobFile,

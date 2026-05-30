@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 569 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 570 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 64`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 299`,
+  `.js: 63`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 300`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4650,6 +4650,21 @@ Decision rule:
     remain blocked on the future compile/staging lane. The current source
     extension count is `.js: 64`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 299`,
     `.tsx: 107` outside generated/runtime folders.
+570. Convert backend database adapter entrypoint to a package-safe TypeScript
+    path. Done: `backend/src/database.ts` remains a minimal CommonJS
+    passthrough to the Postgres adapter, while the backend server, routes,
+    services, workers, source-inspection tests, and docs now target explicit
+    `.ts` imports. This keeps database behavior unchanged while removing the
+    last JavaScript adapter wrapper. Focused database load, schema-metadata,
+    file-asset usage/cache, route-contract, Postgres database, Postgres
+    cutover-readiness, data-path, and performance verifier checks are the
+    required proof slice before this move is accepted, followed by the full
+    backend utility suite, schema audit, and Linux packaging proof. Packaging
+    still warns for direct `.ts` entries in `pkg.scripts`, so
+    larger backend route/service conversions remain blocked on the future
+    compile/staging lane. The current source extension count is `.js: 63`,
+    `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 300`, `.tsx: 107` outside
+    generated/runtime folders.
 
 ## Safety Gates
 

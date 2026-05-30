@@ -1,6 +1,6 @@
 'use strict'
 
-const { db } = require('./database')
+const { db } = require('./database.ts')
 
 const LEGACY_BACKFILL_CHUNK_SIZE = Math.max(1, Math.min(250, Number(process.env.BATCH_BACKFILL_CHUNK_SIZE || 25) || 25))
 const LEGACY_BACKFILL_DELAY_MS = Math.max(0, Math.min(5000, Number(process.env.BATCH_BACKFILL_DELAY_MS || 50) || 50))

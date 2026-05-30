@@ -20,7 +20,7 @@ const bcrypt = require('bcryptjs')
 const crypto = require('crypto')
 const speakeasy = require('speakeasy')
 const qrcode = require('qrcode')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 const { ok, err, audit, logOp, tryParse } = require('../helpers')
 const { authToken } = require('../middleware')
 const {

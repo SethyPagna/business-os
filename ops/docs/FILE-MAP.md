@@ -1,6 +1,6 @@
 # File Map
 
-- `backend/src/database.js`: final Postgres adapter entrypoint.
+- `backend/src/database.ts`: final Postgres adapter entrypoint.
 - `backend/src/postgresDatabase.js`: prepared-statement bridge for current route code.
 - `backend/src/services`: imports, media queue, backup/Drive jobs, and business workflows.
 - `frontend/src`: React app and page flows.

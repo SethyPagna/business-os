@@ -2,7 +2,7 @@
 const path    = require('path')
 const fs      = require('fs')
 const express = require('express')
-const { db }  = require('../database')
+const { db }  = require('../database.ts')
 const { UPLOADS_PATH } = require('../config')
 const { ok, err, audit, recordActionHistory, broadcast, logOp, tryParse } = require('../helpers')
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')

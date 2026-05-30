@@ -115,7 +115,7 @@ function inferPurpose(filePath) {
   if (p.includes('/utils/')) return 'Utility helper'
   if (p.endsWith('AppContext.tsx')) return 'Global app state/context provider'
   if (p.endsWith('App.tsx')) return 'Main app shell and page mounting'
-  if (p.endsWith('database.js')) return 'Schema/migrations and DB bootstrap'
+  if (p.endsWith('database.ts')) return 'Schema/migrations and DB bootstrap'
   if (p.endsWith('server.js')) return 'Backend server entrypoint'
   if (base.endsWith('.json')) return 'Configuration/data manifest'
   if (base.endsWith('.md')) return 'Documentation'

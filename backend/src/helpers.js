@@ -8,7 +8,7 @@
  *  - Unit-testing helpers is straightforward without spinning up Express.
  */
 
-const { db } = require('./database')
+const { db } = require('./database.ts')
 const { getRequestMeta } = require('./requestContext.ts')
 
 // ── Server-side operation log ─────────────────────────────────────────────────

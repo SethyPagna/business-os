@@ -7,7 +7,7 @@ const path = require('path')
 const net = require('net')
 const { spawn, spawnSync } = require('child_process')
 const bcrypt = require('bcryptjs')
-const { db } = require('../src/database')
+const { db } = require('../src/database.ts')
 
 const BACKEND_DIR = path.resolve(__dirname, '..')
 const SERVER_ENTRY = path.join(BACKEND_DIR, 'server.js')

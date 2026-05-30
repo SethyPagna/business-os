@@ -1,7 +1,7 @@
 'use strict'
 
 const express = require('express')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 const { tryParse } = require('../helpers')
 const { sanitizeMediaList } = require('../settingsSnapshot.ts')
 

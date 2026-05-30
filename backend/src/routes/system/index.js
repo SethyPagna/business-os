@@ -14,7 +14,7 @@ const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
 const express = require('express')
-const { db, ensureCoreDataInvariants } = require('../../database')
+const { db, ensureCoreDataInvariants } = require('../../database.ts')
 const {
   UPLOADS_PATH,
   DB_PATH,

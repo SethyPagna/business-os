@@ -6,7 +6,7 @@ const {
   MEDIA_QUEUE_CONCURRENCY,
   REDIS_URL,
 } = require('../config')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 
 const MEDIA_OPTIMIZE_QUEUE_NAME = process.env.MEDIA_OPTIMIZE_QUEUE_NAME || 'business-os-media-optimize'
 

@@ -1,6 +1,6 @@
 'use strict'
 
-const { db } = require('./database')
+const { db } = require('./database.ts')
 
 const columnPresenceCache = new Map()
 const firstColumnCache = new Map()

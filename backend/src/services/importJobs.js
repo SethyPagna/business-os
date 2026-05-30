@@ -4,7 +4,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const yauzl = require('yauzl')
-const { db } = require('../database')
+const { db } = require('../database.ts')
 const {
   IMPORTS_PATH,
   IMPORT_ROW_BATCH_SIZE,

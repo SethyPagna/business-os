@@ -2,7 +2,7 @@
 
 process.env.BUSINESS_OS_WORKER_ROLE = process.env.BUSINESS_OS_WORKER_ROLE || 'media-worker'
 
-const { closeDatabase } = require('../database')
+const { closeDatabase } = require('../database.ts')
 const { startMediaWorker } = require('../services/mediaQueue')
 
 let shuttingDown = false

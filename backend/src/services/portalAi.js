@@ -1,6 +1,6 @@
 'use strict'
 
-const { db } = require('../database')
+const { db } = require('../database.ts')
 const { callChatProvider, parseJsonSafe, providerCanUseWebResearch, getProviderMeta } = require('./aiGateway')
 
 const PROVIDER_RUNTIME = new Map()

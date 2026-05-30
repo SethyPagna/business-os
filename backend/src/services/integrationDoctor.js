@@ -119,7 +119,7 @@ function buildExpectedOauthChecklist(driveRedirectUri = '') {
 
 function probeDatabase() {
   try {
-    const { db } = require('../database')
+    const { db } = require('../database.ts')
     const result = db.prepare('SELECT 1 AS ok').get()
     return status(Number(result?.ok || 0) === 1, 'Postgres query succeeded.')
   } catch (error) {
@@ -129,7 +129,7 @@ function probeDatabase() {
 
 function getSafeTableCount(table) {
   try {
-    const { db } = require('../database')
+    const { db } = require('../database.ts')
     return Number(db.prepare(`SELECT COUNT(*) AS count FROM "${String(table).replace(/"/g, '""')}"`).get()?.count || 0)
   } catch (_) {
     return 0
