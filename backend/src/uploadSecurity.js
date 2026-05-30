@@ -1,7 +1,7 @@
 'use strict'
 
 const fs = require('fs')
-const { loadSharp } = require('./optionalSharp')
+const { loadSharp } = require('./optionalSharp.ts')
 
 const sharp = loadSharp()
 

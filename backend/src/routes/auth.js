@@ -65,7 +65,7 @@ const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot')
 const { classifyRequestAccess } = require('../accessControl')
 const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL, R2_PUBLIC_BASE_URL } = require('../config')
 const { buildRuntimeDescriptor } = require('../runtimeState')
-const { canManageOtpTarget, requiresSelfOtpDisablePassword } = require('../authOtpGuards')
+const { canManageOtpTarget, requiresSelfOtpDisablePassword } = require('../authOtpGuards.ts')
 
 const router = express.Router()
 

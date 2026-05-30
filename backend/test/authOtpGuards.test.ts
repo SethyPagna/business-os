@@ -4,7 +4,7 @@ const assert = require('node:assert/strict')
 const {
   canManageOtpTarget,
   requiresSelfOtpDisablePassword,
-} = require('../src/authOtpGuards')
+} = require('../src/authOtpGuards.ts')
 
 let failed = 0
 

@@ -2,8 +2,10 @@
 
 const path = require('path')
 
+/** @type {unknown | null | undefined} */
 let cachedSharp = undefined
 
+/** @returns {unknown | null} */
 function loadSharp() {
   if (cachedSharp !== undefined) return cachedSharp
   const executableDir = path.dirname(process.execPath || '')
