@@ -17,7 +17,7 @@ Code files documented: **468**
 | 5 | `backend/src/backupSchema.ts` | 0 | 1 | 0 | 3 |
 | 6 | `backend/src/businessMetrics.ts` | 1 | 1 | 1 | 5 |
 | 7 | `backend/src/catalogTextIntegrity.ts` | 0 | 1 | 0 | 7 |
-| 8 | `backend/src/config/index.js` | 4 | 1 | 1 | 25 |
+| 8 | `backend/src/config/index.ts` | 4 | 1 | 1 | 25 |
 | 9 | `backend/src/conflictControl.ts` | 0 | 1 | 0 | 12 |
 | 10 | `backend/src/contactOptions.ts` | 0 | 1 | 0 | 3 |
 | 11 | `backend/src/database.ts` | 1 | 1 | 1 | 40 |
@@ -486,7 +486,7 @@ Code files documented: **468**
 - Declared exports: none detected
 - Imports (47)
   - `./src/analytics/duckdbRuntime.ts`
-  - `./src/config`
+  - `./src/config/index.ts`
   - `./src/database.ts`
   - `./src/fileAssets`
   - `./src/helpers`
@@ -534,7 +534,7 @@ Code files documented: **468**
   - `stream`
 - Internal dependencies (40)
   - `backend/src/analytics/duckdbRuntime.ts`
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/database.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
@@ -580,9 +580,9 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (1)
-  - `./config`
+  - `./config/index.ts`
 - Internal dependencies (1)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/src/middleware.ts`
   - `backend/src/routes/auth.js`
@@ -593,10 +593,10 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (2)
-  - `../config`
+  - `../config/index.ts`
   - `path`
 - Internal dependencies (1)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/server.js`
   - `backend/src/routes/system/index.js`
@@ -656,7 +656,7 @@ Code files documented: **468**
   - `backend/src/routes/units.ts`
   - `backend/src/services/importJobs.js`
 
-### 3.8 `backend/src/config/index.js`
+### 3.8 `backend/src/config/index.ts`
 
 - Declared exports: `module.exports`
 - Imports (4)
@@ -817,7 +817,7 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (12)
-  - `./config`
+  - `./config/index.ts`
   - `./database.ts`
   - `./objectStore`
   - `./optionalSharp.ts`
@@ -830,7 +830,7 @@ Code files documented: **468**
   - `path`
   - `stream/promises`
 - Internal dependencies (7)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/database.ts`
   - `backend/src/objectStore.js`
   - `backend/src/optionalSharp.ts`
@@ -960,7 +960,7 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (10)
   - `./accessControl.ts`
-  - `./config`
+  - `./config/index.ts`
   - `./fileAssets`
   - `./permissions.ts`
   - `./security.ts`
@@ -971,7 +971,7 @@ Code files documented: **468**
   - `path`
 - Internal dependencies (7)
   - `backend/src/accessControl.ts`
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/permissions.ts`
   - `backend/src/security.ts`
@@ -1035,7 +1035,7 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (7)
-  - `./config`
+  - `./config/index.ts`
   - `@aws-sdk/client-s3`
   - `@smithy/node-http-handler`
   - `fs`
@@ -1043,7 +1043,7 @@ Code files documented: **468**
   - `https`
   - `stream`
 - Internal dependencies (1)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
 - Referenced by (6)
   - `backend/server.js`
   - `backend/src/fileAssets.js`
@@ -1067,7 +1067,7 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (7)
-  - `../config`
+  - `../config/index.ts`
   - `../dataPath/index.ts`
   - `../database.ts`
   - `../storage/organizationFolders.ts`
@@ -1075,7 +1075,7 @@ Code files documented: **468**
   - `fs`
   - `path`
 - Internal dependencies (4)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/dataPath/index.ts`
   - `backend/src/database.ts`
   - `backend/src/storage/organizationFolders.ts`
@@ -1115,7 +1115,7 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (7)
-  - `./config`
+  - `./config/index.ts`
   - `./db/postgresQueryCompat.ts`
   - `./permissions.ts`
   - `bcryptjs`
@@ -1123,7 +1123,7 @@ Code files documented: **468**
   - `path`
   - `pg-native`
 - Internal dependencies (3)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/db/postgresQueryCompat.ts`
   - `backend/src/permissions.ts`
 - Referenced by (2)
@@ -1222,7 +1222,7 @@ Code files documented: **468**
 - Imports (18)
   - `../accessControl.ts`
   - `../authOtpGuards.ts`
-  - `../config`
+  - `../config/index.ts`
   - `../database.ts`
   - `../helpers`
   - `../middleware.ts`
@@ -1241,7 +1241,7 @@ Code files documented: **468**
 - Internal dependencies (13)
   - `backend/src/accessControl.ts`
   - `backend/src/authOtpGuards.ts`
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/database.ts`
   - `backend/src/helpers.js`
   - `backend/src/middleware.ts`
@@ -1376,7 +1376,7 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (9)
-  - `../config`
+  - `../config/index.ts`
   - `../fileAssets`
   - `../helpers`
   - `../middleware.ts`
@@ -1386,7 +1386,7 @@ Code files documented: **468**
   - `multer`
   - `path`
 - Internal dependencies (5)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/middleware.ts`
@@ -1499,7 +1499,7 @@ Code files documented: **468**
 - Imports (20)
   - `../businessMetrics.ts`
   - `../catalogTextIntegrity.ts`
-  - `../config`
+  - `../config/index.ts`
   - `../conflictControl.ts`
   - `../database.ts`
   - `../fileAssets`
@@ -1520,7 +1520,7 @@ Code files documented: **468**
 - Internal dependencies (17)
   - `backend/src/businessMetrics.ts`
   - `backend/src/catalogTextIntegrity.ts`
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/conflictControl.ts`
   - `backend/src/database.ts`
   - `backend/src/fileAssets.js`
@@ -1639,7 +1639,7 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (7)
-  - `../config`
+  - `../config/index.ts`
   - `../middleware.ts`
   - `../serverUtils`
   - `crypto`
@@ -1647,7 +1647,7 @@ Code files documented: **468**
   - `fs`
   - `path`
 - Internal dependencies (3)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/middleware.ts`
   - `backend/src/serverUtils.js`
 - Referenced by (1)
@@ -1660,7 +1660,7 @@ Code files documented: **468**
   - `../../accessControl.ts`
   - `../../analytics/duckdbRuntime.ts`
   - `../../backupSchema.ts`
-  - `../../config`
+  - `../../config/index.ts`
   - `../../dataPath/index.ts`
   - `../../database.ts`
   - `../../db/cutoverReadiness.ts`
@@ -1685,7 +1685,7 @@ Code files documented: **468**
   - `backend/src/accessControl.ts`
   - `backend/src/analytics/duckdbRuntime.ts`
   - `backend/src/backupSchema.ts`
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/dataPath/index.ts`
   - `backend/src/database.ts`
   - `backend/src/db/cutoverReadiness.ts`
@@ -1758,10 +1758,10 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (2)
-  - `./config`
+  - `./config/index.ts`
   - `ioredis`
 - Internal dependencies (1)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/src/helpers.js`
   - `backend/src/routes/portal.js`
@@ -1772,12 +1772,12 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (4)
-  - `../config`
+  - `../config/index.ts`
   - `crypto`
   - `fs`
   - `path`
 - Internal dependencies (1)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
 - Referenced by (2)
   - `backend/src/routes/auth.js`
   - `backend/src/routes/system/index.js`
@@ -1834,9 +1834,9 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (1)
-  - `./config`
+  - `./config/index.ts`
 - Internal dependencies (1)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/server.js`
   - `backend/src/routes/sync.js`
@@ -1861,7 +1861,7 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (9)
   - `../backupSchema.ts`
-  - `../config`
+  - `../config/index.ts`
   - `../database.ts`
   - `../objectStore`
   - `crypto`
@@ -1871,7 +1871,7 @@ Code files documented: **468**
   - `stream/promises`
 - Internal dependencies (4)
   - `backend/src/backupSchema.ts`
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/database.ts`
   - `backend/src/objectStore.js`
 - Referenced by (4)
@@ -1895,7 +1895,7 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (12)
-  - `../../config`
+  - `../../config/index.ts`
   - `../../dataPath/index.ts`
   - `../../database.ts`
   - `../../maintenanceLock.ts`
@@ -1908,7 +1908,7 @@ Code files documented: **468**
   - `os`
   - `path`
 - Internal dependencies (8)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/dataPath/index.ts`
   - `backend/src/database.ts`
   - `backend/src/maintenanceLock.ts`
@@ -1937,10 +1937,10 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (2)
-  - `../config`
+  - `../config/index.ts`
   - `crypto`
 - Internal dependencies (1)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
 - Referenced by (4)
   - `backend/src/routes/auth.js`
   - `backend/src/routes/users.js`
@@ -1952,7 +1952,7 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (20)
   - `../catalogTextIntegrity.ts`
-  - `../config`
+  - `../config/index.ts`
   - `../contactOptions.ts`
   - `../database.ts`
   - `../fileAssets`
@@ -1973,7 +1973,7 @@ Code files documented: **468**
   - `yauzl`
 - Internal dependencies (14)
   - `backend/src/catalogTextIntegrity.ts`
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/contactOptions.ts`
   - `backend/src/database.ts`
   - `backend/src/fileAssets.js`
@@ -2000,7 +2000,7 @@ Code files documented: **468**
 - Declared exports: `module.exports`
 - Imports (10)
   - `../analytics/duckdbRuntime.ts`
-  - `../config`
+  - `../config/index.ts`
   - `../database.ts`
   - `../objectStore`
   - `./backupPackages`
@@ -2011,7 +2011,7 @@ Code files documented: **468**
   - `path`
 - Internal dependencies (8)
   - `backend/src/analytics/duckdbRuntime.ts`
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/database.ts`
   - `backend/src/objectStore.js`
   - `backend/src/services/backupPackages.js`
@@ -2026,13 +2026,13 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (5)
-  - `../config`
+  - `../config/index.ts`
   - `../database.ts`
   - `../fileAssets`
   - `bullmq`
   - `ioredis`
 - Internal dependencies (3)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/database.ts`
   - `backend/src/fileAssets.js`
 - Referenced by (5)
@@ -2084,12 +2084,12 @@ Code files documented: **468**
 
 - Declared exports: `module.exports`
 - Imports (4)
-  - `./config`
+  - `./config/index.ts`
   - `./objectStore`
   - `fs`
   - `path`
 - Internal dependencies (2)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/objectStore.js`
 - Referenced by (8)
   - `backend/src/fileAssets.js`
@@ -2110,7 +2110,7 @@ Code files documented: **468**
 - Internal dependencies (0)
   - none
 - Referenced by (2)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/organizationContext/index.ts`
 
 ### 3.78 `backend/src/systemFsWorker.ts`
@@ -2478,7 +2478,7 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (8)
-  - `../src/config`
+  - `../src/config/index.ts`
   - `../src/database.ts`
   - `../src/services/importJobs`
   - `../src/services/mediaQueue.ts`
@@ -2487,7 +2487,7 @@ Code files documented: **468**
   - `os`
   - `path`
 - Internal dependencies (4)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/database.ts`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.ts`
@@ -2825,11 +2825,11 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (3)
-  - `../src/config`
+  - `../src/config/index.ts`
   - `../src/serverUtils`
   - `node:assert/strict`
 - Internal dependencies (2)
-  - `backend/src/config/index.js`
+  - `backend/src/config/index.ts`
   - `backend/src/serverUtils.js`
 - Referenced by (0)
   - none

@@ -17,13 +17,13 @@ Total files documented: **531**
 | 5 | `backend/package.json` | backend-root | 67 | 3.7 | Configuration/data manifest |
 | 6 | `backend/README.md` | backend-root | 13 | 0.6 | Documentation |
 | 7 | `backend/server.js` | backend-root | 570 | 19.9 | Backend server entrypoint |
-| 8 | `backend/src/accessControl.ts` | backend-core | 218 | 6.1 | Project source/support file |
+| 8 | `backend/src/accessControl.ts` | backend-core | 218 | 6.2 | Project source/support file |
 | 9 | `backend/src/analytics/duckdbRuntime.ts` | backend-core | 109 | 3.0 | Project source/support file |
 | 10 | `backend/src/authOtpGuards.ts` | backend-core | 34 | 1.2 | Project source/support file |
 | 11 | `backend/src/backupSchema.ts` | backend-core | 165 | 3.8 | Project source/support file |
 | 12 | `backend/src/businessMetrics.ts` | backend-core | 192 | 7.0 | Project source/support file |
 | 13 | `backend/src/catalogTextIntegrity.ts` | backend-core | 96 | 3.0 | Project source/support file |
-| 14 | `backend/src/config/index.js` | backend-core | 303 | 12.3 | Project source/support file |
+| 14 | `backend/src/config/index.ts` | backend-core | 303 | 12.3 | Project source/support file |
 | 15 | `backend/src/conflictControl.ts` | backend-core | 117 | 3.4 | Project source/support file |
 | 16 | `backend/src/contactOptions.ts` | backend-core | 211 | 6.5 | Project source/support file |
 | 17 | `backend/src/database.ts` | backend-core | 4 | 0.1 | Schema/migrations and DB bootstrap |
@@ -76,14 +76,14 @@ Total files documented: **531**
 | 64 | `backend/src/routes/system/index.js` | backend-routes | 1659 | 65.3 | API route handler |
 | 65 | `backend/src/routes/units.ts` | backend-routes | 151 | 5.9 | API route handler |
 | 66 | `backend/src/routes/users.js` | backend-routes | 1086 | 44.5 | API route handler |
-| 67 | `backend/src/runtimeCache.ts` | backend-core | 248 | 6.1 | Project source/support file |
+| 67 | `backend/src/runtimeCache.ts` | backend-core | 248 | 6.2 | Project source/support file |
 | 68 | `backend/src/runtimeState/index.ts` | backend-core | 97 | 2.7 | Project source/support file |
 | 69 | `backend/src/runtimeVersion.ts` | backend-core | 176 | 4.4 | Project source/support file |
 | 70 | `backend/src/schemaMetadata.ts` | backend-core | 155 | 3.7 | Project source/support file |
 | 71 | `backend/src/security.ts` | backend-core | 253 | 7.1 | Project source/support file |
 | 72 | `backend/src/serverUtils.js` | backend-core | 431 | 15.5 | Project source/support file |
 | 73 | `backend/src/services/aiGateway.js` | backend-services | 364 | 13.6 | Integration/service layer |
-| 74 | `backend/src/services/backupPackages.js` | backend-services | 1060 | 36.2 | Integration/service layer |
+| 74 | `backend/src/services/backupPackages.js` | backend-services | 1060 | 36.3 | Integration/service layer |
 | 75 | `backend/src/services/firebaseAuth.js` | backend-services | 384 | 14.3 | Integration/service layer |
 | 76 | `backend/src/services/googleDriveSync/index.js` | backend-services | 1564 | 57.8 | Integration/service layer |
 | 77 | `backend/src/services/googleDriveSync/versioning.ts` | backend-services | 135 | 4.0 | Integration/service layer |

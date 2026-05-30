@@ -17,7 +17,7 @@ Code files scanned: **468**
 | 5 | `backend/src/backupSchema.ts` | 4 |
 | 6 | `backend/src/businessMetrics.ts` | 9 |
 | 7 | `backend/src/catalogTextIntegrity.ts` | 5 |
-| 8 | `backend/src/config/index.js` | 11 |
+| 8 | `backend/src/config/index.ts` | 11 |
 | 9 | `backend/src/conflictControl.ts` | 6 |
 | 10 | `backend/src/contactOptions.ts` | 10 |
 | 11 | `backend/src/database.ts` | 0 |
@@ -581,7 +581,7 @@ Code files scanned: **468**
 | 4 | `assertCatalogTextIntegrity` | function | 63 |
 | 5 | `normalizeOptionList` | function | 73 |
 
-### 3.8 `backend/src/config/index.js`
+### 3.8 `backend/src/config/index.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

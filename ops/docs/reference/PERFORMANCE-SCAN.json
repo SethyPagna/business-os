@@ -3,7 +3,7 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6449717,
+  "totalSourceBytes": 6449896,
   "totalSourceLines": 146302,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
@@ -54,7 +54,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160903,
+      "size": 160911,
       "lines": 3880
     },
     {
@@ -99,7 +99,7 @@
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 101463,
+      "size": 101471,
       "lines": 2218
     },
     {
@@ -134,7 +134,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66885,
+      "size": 66893,
       "lines": 1659
     },
     {
@@ -159,7 +159,7 @@
     },
     {
       "file": "backend/src/services/googleDriveSync/index.js",
-      "size": 59165,
+      "size": 59173,
       "lines": 1564
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "file": "backend/src/services/importJobs.js",
-      "size": 160903,
+      "size": 160911,
       "lines": 3880
     },
     {
@@ -216,7 +216,7 @@
     },
     {
       "file": "backend/src/routes/products.js",
-      "size": 101463,
+      "size": 101471,
       "lines": 2218
     },
     {
@@ -246,7 +246,7 @@
     },
     {
       "file": "backend/src/routes/system/index.js",
-      "size": 66885,
+      "size": 66893,
       "lines": 1659
     },
     {
@@ -266,7 +266,7 @@
     },
     {
       "file": "backend/src/services/googleDriveSync/index.js",
-      "size": 59165,
+      "size": 59173,
       "lines": 1564
     },
     {
