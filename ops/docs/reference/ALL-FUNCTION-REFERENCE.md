@@ -53,7 +53,7 @@ Code files scanned: **468**
 | 41 | `backend/src/routes/contacts.js` | 34 |
 | 42 | `backend/src/routes/customTables.ts` | 9 |
 | 43 | `backend/src/routes/files.ts` | 3 |
-| 44 | `backend/src/routes/importJobs.js` | 16 |
+| 44 | `backend/src/routes/importJobs.ts` | 16 |
 | 45 | `backend/src/routes/inventory.js` | 32 |
 | 46 | `backend/src/routes/notifications.ts` | 27 |
 | 47 | `backend/src/routes/organizations.ts` | 0 |
@@ -1216,7 +1216,7 @@ Code files scanned: **468**
 | 2 | `getFileListFilters` | function | 30 |
 | 3 | `getDeviceMeta` | function | 53 |
 
-### 3.44 `backend/src/routes/importJobs.js`
+### 3.44 `backend/src/routes/importJobs.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

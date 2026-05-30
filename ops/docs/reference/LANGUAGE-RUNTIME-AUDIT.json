@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T20:57:12.147Z",
+  "generatedAt": "2026-05-30T21:07:19.104Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      292
+      293
     ],
     [
       "React TSX",
@@ -29,7 +29,7 @@
     ],
     [
       "JavaScript",
-      19
+      18
     ],
     [
       "Windows batch",
@@ -59,7 +59,7 @@
   "extensionCounts": [
     [
       ".ts",
-      292
+      293
     ],
     [
       ".tsx",
@@ -67,7 +67,7 @@
     ],
     [
       ".js",
-      19
+      18
     ],
     [
       ".bat",
@@ -1576,7 +1576,7 @@
       "covered": true
     },
     {
-      "target": "backend/src/routes/importJobs.js",
+      "target": "backend/src/routes/importJobs.ts",
       "optimization": "Import-job listing now derives permitted import types from the current user and passes them into listImportJobs so the service can filter by type in SQL before decoration.",
       "rollback": "Remove getPermittedImportTypes, call listImportJobs with only the limit, and restore the route-level JavaScript permission filter.",
       "proof": [

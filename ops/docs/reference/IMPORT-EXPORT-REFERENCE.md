@@ -53,7 +53,7 @@ Code files documented: **468**
 | 41 | `backend/src/routes/contacts.js` | 6 | 1 | 5 | 1 |
 | 42 | `backend/src/routes/customTables.ts` | 6 | 1 | 5 | 1 |
 | 43 | `backend/src/routes/files.ts` | 6 | 1 | 5 | 2 |
-| 44 | `backend/src/routes/importJobs.js` | 9 | 1 | 5 | 1 |
+| 44 | `backend/src/routes/importJobs.ts` | 9 | 1 | 5 | 1 |
 | 45 | `backend/src/routes/inventory.js` | 12 | 1 | 11 | 2 |
 | 46 | `backend/src/routes/notifications.ts` | 5 | 1 | 4 | 3 |
 | 47 | `backend/src/routes/organizations.ts` | 3 | 1 | 2 | 2 |
@@ -505,7 +505,7 @@ Code files documented: **468**
   - `./src/routes/contacts`
   - `./src/routes/customTables.ts`
   - `./src/routes/files.ts`
-  - `./src/routes/importJobs`
+  - `./src/routes/importJobs.ts`
   - `./src/routes/inventory`
   - `./src/routes/notifications.ts`
   - `./src/routes/organizations.ts`
@@ -553,7 +553,7 @@ Code files documented: **468**
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
-  - `backend/src/routes/importJobs.js`
+  - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`
@@ -676,7 +676,7 @@ Code files documented: **468**
   - `backend/src/organizationContext/index.ts`
   - `backend/src/postgresDatabase.js`
   - `backend/src/routes/auth.js`
-  - `backend/src/routes/importJobs.js`
+  - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/products.js`
   - `backend/src/routes/sync.ts`
   - `backend/src/routes/system/index.js`
@@ -841,7 +841,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/src/middleware.ts`
   - `backend/src/routes/files.ts`
-  - `backend/src/routes/importJobs.js`
+  - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
   - `backend/src/routes/settings.ts`
@@ -878,7 +878,7 @@ Code files documented: **468**
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
-  - `backend/src/routes/importJobs.js`
+  - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/portal.js`
   - `backend/src/routes/products.js`
@@ -988,7 +988,7 @@ Code files documented: **468**
   - `backend/src/routes/contacts.js`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
-  - `backend/src/routes/importJobs.js`
+  - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/inventory.js`
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`
@@ -1372,7 +1372,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
 
-### 3.44 `backend/src/routes/importJobs.js`
+### 3.44 `backend/src/routes/importJobs.ts`
 
 - Declared exports: `module.exports`
 - Imports (9)
@@ -1988,7 +1988,7 @@ Code files documented: **468**
   - `backend/src/uploadSecurity.ts`
 - Referenced by (7)
   - `backend/server.js`
-  - `backend/src/routes/importJobs.js`
+  - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/integrationDoctor.ts`
