@@ -5,7 +5,7 @@ import Modal from '../shared/Modal'
 import PortalMenu from '../shared/PortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
-import { useApp as useAppHook } from '../../AppContext.jsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 

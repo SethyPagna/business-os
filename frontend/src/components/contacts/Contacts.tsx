@@ -1,7 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import { Suspense, lazy, useState } from 'react'
 import { BookUser, Download, Truck, Upload, Users, Warehouse } from 'lucide-react'
-import { useApp as useAppHook } from '../../AppContext.jsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 import { downloadZipFilesAsync } from '../../utils/csv'
 import { CustomersTab as CustomersTabBase } from './CustomersTab'
 import Modal from '../shared/Modal'

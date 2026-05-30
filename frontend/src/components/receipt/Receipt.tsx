@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ArrowLeft, FileText, ImageDown, Printer } from 'lucide-react'
-import { useApp as useAppHook } from '../../AppContext.jsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 import { downloadReceiptImage, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { getStatusLabel } from '../sales/StatusBadge'

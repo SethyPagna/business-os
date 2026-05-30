@@ -12,7 +12,7 @@ import {
   Mail,
   ShieldCheck,
 } from 'lucide-react'
-import { useApp as useAppHook } from '../../AppContext.jsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'

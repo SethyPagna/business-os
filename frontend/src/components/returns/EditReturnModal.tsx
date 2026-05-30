@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
-import { useApp as useAppHook } from '../../AppContext.jsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts'
 

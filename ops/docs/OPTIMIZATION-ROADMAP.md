@@ -2720,7 +2720,7 @@ Cleanup checkpoint:
   stale-bundle protection chain instead of only package/config manifests:
   Vite emits `business-os-build.json`, the service worker uses the build hash
   for cache versioning, frontend API code dispatches `runtime:version-mismatch`
-  when served frontend metadata differs, `AppContext.jsx` listens for that
+  when served frontend metadata differs, `AppContext.tsx` listens for that
   event, backend runtime routes expose `getRuntimeVersion()`, and frontend
   performance verification still checks build metadata. Existing build
   manifests are validated for concrete `revision`, `hash`, and `builtAt`
@@ -5938,3 +5938,17 @@ Move 545 status:
   catalog routing, favicon shaping, and app-shell source guard behavior
   unchanged while moving startup imports, focused tests, and performance
   verification to the TSX shell.
+
+Move 546 status:
+- Move 546 converts the app context provider to `frontend/src/AppContext.tsx`.
+  The typed boundary now covers app settings, authenticated user/session
+  payloads, bootstrap organization/system payloads, notification state,
+  write-conflict details, sync-channel events, app/sync context values,
+  storage helpers, translation packs, permission maps, and the local runtime
+  API gateway for bootstrap, auth, settings, Google OAuth, session-duration
+  refreshes, public asset URLs, and sync URL updates. The move keeps settings
+  and auth timeout contracts, runtime mismatch recovery, Cloudflare Access
+  reachability handling, websocket polling, device-local UI settings,
+  permission gating, Khmer fallback cleanup, source-inspection tests, and
+  receipt/settings save guard behavior unchanged while replacing direct
+  `window.api` reads with typed `getAppApi()` gateway calls.

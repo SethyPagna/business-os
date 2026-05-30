@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
 import { AlertCircle, AlertTriangle, Bell, CheckCircle2, ChevronDown, ExternalLink, Info, Search, Settings2, X } from 'lucide-react'
-import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,

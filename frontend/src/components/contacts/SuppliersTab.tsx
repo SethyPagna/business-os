@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
-import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'

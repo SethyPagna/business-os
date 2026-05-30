@@ -1,4 +1,4 @@
-﻿# Whole-App Hardening And Reliability Program
+# Whole-App Hardening And Reliability Program
 
 Last updated: 2026-05-18
 
@@ -713,7 +713,7 @@ Last updated: 2026-05-18
     uploads now have explicit timeout contracts in
     `frontend/src/components/products/forms/ProductForm.tsx`. App shell login,
     logout, Google OAuth completion, settings save, and session-duration refresh
-    now have explicit timeout contracts in `frontend/src/AppContext.jsx`.
+    now have explicit timeout contracts in `frontend/src/AppContext.tsx`.
     POS quick-add customer, quick-add delivery contact, and checkout sale writes
     now have explicit timeout contracts in
     `frontend/src/components/pos/POS.jsx`.

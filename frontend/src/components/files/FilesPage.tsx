@@ -12,7 +12,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useIsPageActive } from '../shared/pageActivity'

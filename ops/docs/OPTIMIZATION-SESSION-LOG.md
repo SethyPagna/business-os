@@ -1105,3 +1105,41 @@ Use this shape for future entries:
   Phase 29 repeat audit passed
 - follow-up insight: App is now off the JSX backlog; the remaining JSX shells
   are Inventory, Products, POS, Catalog page/editor, and AppContext.
+
+- change: converted the app context provider to TSX with typed global
+  settings, user/session/bootstrap payloads, notification and write-conflict
+  state, sync-channel event details, storage helpers, translation packs,
+  permission maps, app/sync context values, and a typed runtime API gateway
+  for auth, settings, Google OAuth, session duration refreshes, public asset
+  URL updates, and sync URL updates
+- affected files:
+  `frontend/src/AppContext.tsx`,
+  `frontend/src/index.tsx`,
+  AppContext consumers under `frontend/src/components/**`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/ownedGoogleAuth.test.ts`,
+  `frontend/tests/receiptSettingsSync.test.ts`,
+  `ops/scripts/verification/verify-runtime-deps.ts`
+- route or API target: app bootstrap, session recovery, login/logout, Google
+  OAuth link completion, settings load/save, receipt/settings refresh
+  contracts, runtime mismatch recovery, websocket sync status, device-local UI
+  settings, permissions, translation fallback, and sync URL/public asset URL
+  setup
+- keeper or rollback: keeper; frontend typecheck, JSX scan, full utility
+  suite, UI audit, performance verifier, organization audit, schema audit,
+  and production build passed before live-suite/reference refresh
+- route-scoped result: source/test/script scans found no old AppContext JSX
+  filename references in frontend source, frontend tests, or ops scripts and
+  no `any`/suppression escape hatches in the converted AppContext provider.
+  Remaining JSX shells are Inventory, Products, POS, Catalog page, and Catalog
+  editor.
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up. The
+  running app still served frontend hash `55cf7b8ef08a4b8d`; the fresh local
+  production build hash is `842b12c2b2ef92e8`. Live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T03-45-26-211Z/report.json`.
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,253 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed

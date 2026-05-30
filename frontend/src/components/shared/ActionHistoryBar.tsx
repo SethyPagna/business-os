@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CornerDownLeft, CornerDownRight, History } from 'lucide-react'
-import { useApp as useAppFromContext } from '../../AppContext.jsx'
+import { useApp as useAppFromContext } from '../../AppContext.tsx'
 
 type Translate = (key: string, fallback: string) => string
 

@@ -1,4 +1,4 @@
-import { useApp as useAppHook } from '../../../AppContext.jsx'
+import { useApp as useAppHook } from '../../../AppContext.tsx'
 
 const useApp = useAppHook as () => {
   t: (key: string) => string

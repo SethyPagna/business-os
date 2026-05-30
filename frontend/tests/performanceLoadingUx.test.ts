@@ -111,7 +111,7 @@ assert.match(customerFormModal, /generateCustomerMembershipNumber/, 'customer fo
 assert.match(customerMembershipNumber, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LCMN'/, 'customer membership helper should keep the LCMN prefix')
 assert.match(customerFormModal, /Regenerate/, 'customer form should let staff regenerate membership numbers')
 assert.match(loaders, /const DEFAULT_LOADER_TIMEOUT_MS = 20_000/, 'loader timeout should give slow pages enough time before failing first render')
-const appContext = fs.readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
+const appContext = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
 assert.match(appContext, /RUNTIME_RECOVERY_SESSION_KEY/, 'runtime mismatch recovery should guard against reload loops')
 assert.match(appContext, /window\.location\.replace\(url\.toString\(\)\)/, 'runtime mismatch should heal through a hard reload once')
 assert.match(appContext, /const APP_SETTINGS_LOAD_TIMEOUT_MS = 9000/, 'app settings should use an explicit timeout constant')
@@ -123,12 +123,12 @@ assert.match(appContext, /const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000/, 'settings
 assert.match(appContext, /const APP_SESSION_DURATION_TIMEOUT_MS = 12000/, 'session duration refresh should use an explicit timeout constant')
 assert.match(
   appContext,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.getSettings\(\{ force: options\?\.force === true \}\),\s*'App settings',\s*APP_SETTINGS_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.getSettings\?\.\(\{ force: options\?\.force === true \}\),\s*'App settings',\s*APP_SETTINGS_LOAD_TIMEOUT_MS,\s*\)/,
   'app settings refresh should timeout slow settings reads',
 )
 assert.match(
   appContext,
-  /const readAppBootstrap = useCallback\(\(label = 'App bootstrap'\) => \{[\s\S]*withLoaderTimeout\(\s*\(\) => window\.api\.getAppBootstrap\(\),\s*label,\s*APP_BOOTSTRAP_TIMEOUT_MS,\s*\)/,
+  /const readAppBootstrap = useCallback\(\(label = 'App bootstrap'\): Promise<BootstrapPayload \| null> => \{[\s\S]*withLoaderTimeout\(\s*\(\) => api\.getAppBootstrap\?\.\(\),\s*label,\s*APP_BOOTSTRAP_TIMEOUT_MS,\s*\)/,
   'app bootstrap helper should timeout slow bootstrap reads',
 )
 assert.match(
@@ -143,27 +143,27 @@ assert.doesNotMatch(
 )
 assert.match(
   appContext,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.login\(\{[\s\S]*username, password, organization,[\s\S]*sessionDuration,[\s\S]*\}\),\s*'Login',\s*APP_LOGIN_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.login\?\.\(\{[\s\S]*username, password, organization,[\s\S]*sessionDuration,[\s\S]*\}\),\s*'Login',\s*APP_LOGIN_TIMEOUT_MS,\s*\)/,
   'login should timeout slow auth requests',
 )
 assert.match(
   appContext,
-  /withLoaderTimeout\(\(\) => window\.api\.logout\?\.\(\), 'Logout', APP_LOGOUT_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => api\.logout\?\.\(\), 'Logout', APP_LOGOUT_TIMEOUT_MS\)/,
   'logout should timeout slow auth cleanup requests',
 )
 assert.match(
   appContext,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.completeGoogleOauth\(\{[\s\S]*mode: 'link',[\s\S]*currentUserId: actorId,[\s\S]*\}\),\s*'Complete Google OAuth',\s*APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.completeGoogleOauth\?\.\(\{[\s\S]*mode: 'link',[\s\S]*currentUserId: actorId,[\s\S]*\}\),\s*'Complete Google OAuth',\s*APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS,\s*\)/,
   'Google OAuth completion should timeout slow auth linking requests',
 )
 assert.match(
   appContext,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.saveSettings\(serverUpdates, normalizedOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.saveSettings\?\.\(serverUpdates, normalizedOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/,
   'settings writes should timeout slow server saves',
 )
 assert.match(
   appContext,
-  /withLoaderTimeout\(\s*\(\) => window\.api\.updateSessionDuration\(\{[\s\S]*sessionDuration: normalizedSessionDuration,[\s\S]*\}\),\s*'Refresh session duration',\s*APP_SESSION_DURATION_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.updateSessionDuration\?\.\(\{[\s\S]*sessionDuration: normalizedSessionDuration,[\s\S]*\}\),\s*'Refresh session duration',\s*APP_SESSION_DURATION_TIMEOUT_MS,\s*\)/,
   'session duration refresh should timeout slow auth refreshes',
 )
 for (const [name, source] of [

@@ -5,7 +5,7 @@ This folder contains the first-party Business OS UI surfaces.
 ## Layout Rules
 
 - Each page folder owns one major business domain or settings surface.
-- Shared shell behavior lives above this folder in `frontend/src/App.tsx` and `frontend/src/AppContext.jsx`.
+- Shared shell behavior lives above this folder in `frontend/src/App.tsx` and `frontend/src/AppContext.tsx`.
 - Domain folders may include page entry components, tables, modals, cards, and import/export helpers for that domain.
 
 ## Domain Ownership

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ComponentType, ReactNode } from 'react'
 import ModalBase from '../shared/Modal'
-import { useApp as useAppHook } from '../../AppContext.jsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,

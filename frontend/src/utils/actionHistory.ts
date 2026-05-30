@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useApp as useAppHook } from '../AppContext.jsx'
+import { useApp as useAppHook } from '../AppContext.tsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,

@@ -1,7 +1,7 @@
 import { Suspense, lazy, useDeferredValue, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ComponentProps } from 'react'
 import { Search as SearchIcon, ShoppingBag, Upload } from 'lucide-react'
-import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.jsx'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'

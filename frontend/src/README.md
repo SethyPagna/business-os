@@ -5,7 +5,7 @@ This folder contains the React SPA used by Business OS.
 ## How The Frontend Runs
 
 1. `index.tsx` boots React.
-2. `AppContext.jsx` restores session/settings and exposes global helpers.
+2. `AppContext.tsx` restores session/settings and exposes global helpers.
 3. `App.tsx` mounts the shell, lazy-loads pages, and renders shared notification/sync UI.
 4. `web-api.ts` wires `window.api` to the shared API facade directly.
 5. `api/` owns HTTP, WebSocket, local IndexedDB fallbacks, and domain wrappers.

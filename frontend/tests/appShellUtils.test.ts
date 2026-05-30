@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { getAdminPageFromPath, getMountedPageLimit, isAdminAppPath, isPublicCatalogPath, shouldWarmPageEntries, updateMountedPages } from '../src/app/appShellUtils.ts'
 
 let failed = 0
-const appContextSource = readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
+const appContextSource = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
 
 type TestCallback = () => void
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const appContextSource = fs.readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
+const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
 const receiptSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
 const printSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/PrintSettings.tsx', import.meta.url), 'utf8')
 const receiptPreviewSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
@@ -10,10 +10,10 @@ const printUtilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', 
 const receiptConfigSource = fs.readFileSync(new URL('../src/utils/receiptAppliedConfig.ts', import.meta.url), 'utf8')
 const settingsWriteOptionsSource = fs.readFileSync(new URL('../src/utils/settingsWriteOptions.ts', import.meta.url), 'utf8')
 
-assert.match(appContextSource, /const saveSettings = useCallback\(async \(newSettings, options = \{\}\)/)
+assert.match(appContextSource, /const saveSettings = useCallback\(async \(newSettings: AppSettings, options: SettingsWriteOptions = \{\}\)/)
 assert.match(appContextSource, /const normalizedOptions = normalizeSettingsWriteOptions\(options\)/)
 assert.match(appContextSource, /const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000/)
-assert.match(appContextSource, /withLoaderTimeout\(\s*\(\) => window\.api\.saveSettings\(serverUpdates, normalizedOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/)
+assert.match(appContextSource, /withLoaderTimeout\(\s*\(\) => api\.saveSettings\?\.\(serverUpdates, normalizedOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/)
 assert.match(appContextSource, /if \(!normalizedOptions\.silentToast\) notify\(t\('settings_saved'\)\)/)
 
 assert.match(receiptSettingsSource, /silentToast:\s*!options\.showToast/)

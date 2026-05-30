@@ -17,7 +17,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 }
 
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
-const appContextSource = fs.readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
+const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
 const loginSource = fs.readFileSync(new URL('../src/components/auth/Login.tsx', import.meta.url), 'utf8')
 const profileSource = fs.readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 const backupSource = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
@@ -33,7 +33,7 @@ await runTest('frontend uses owned Google OAuth API names and no Supabase OAuth 
   assert.doesNotMatch(appContextSource, /SupabaseOauth/)
   assert.match(appContextSource, /completeGoogleOauth/)
   assert.match(appContextSource, /const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000/)
-  assert.match(appContextSource, /withLoaderTimeout\(\s*\(\) => window\.api\.completeGoogleOauth\(\{[\s\S]*mode: 'link'[\s\S]*\}\),\s*'Complete Google OAuth',\s*APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS,\s*\)/)
+  assert.match(appContextSource, /withLoaderTimeout\(\s*\(\) => api\.completeGoogleOauth\?\.\(\{[\s\S]*mode: 'link'[\s\S]*\}\),\s*'Complete Google OAuth',\s*APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS,\s*\)/)
   assert.match(loginSource, /startGoogleOauth/)
   assert.match(profileSource, /startGoogleOauth/)
   assert.match(profileSource, /unlinkGoogleOauth/)

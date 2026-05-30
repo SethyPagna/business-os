@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
-import { useApp as useAppHook, useSync as useSyncHook } from '../../../AppContext.jsx'
+import { useApp as useAppHook, useSync as useSyncHook } from '../../../AppContext.tsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import {

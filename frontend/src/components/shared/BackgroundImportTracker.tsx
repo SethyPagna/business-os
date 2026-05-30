@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, Trash2, XCircle } from 'lucide-react'
-import { useApp as useAppHook } from '../../AppContext.jsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 import { isTransientGatewayError } from '../../api/http.ts'
 import { dispatchImportCompletionRefresh, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.ts'
 import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.ts'

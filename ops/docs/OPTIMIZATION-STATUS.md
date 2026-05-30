@@ -112,6 +112,11 @@ Recent route-level win:
   importers, AppContext access, notification payloads, sync/offline event
   details, pending-sync state, route warmup loaders, page error boundaries,
   scroll controls, and chunk recovery helpers.
+- App context is now `frontend/src/AppContext.tsx` with typed settings,
+  user/session/bootstrap payloads, notification and write-conflict state,
+  sync-channel event details, storage/translation helpers, app/sync context
+  values, and a typed runtime API gateway for auth/settings/OAuth/session
+  refresh/sync URL calls.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary
@@ -171,9 +176,12 @@ Recent route-level win:
 
 ## Next Best Moves
 
-1. Split `frontend/src/api/methods.js` into typed sections or convert bounded
-   helper clusters first; it is the next high-impact API gateway target.
-2. Update source-inspection tests and ops verification scripts whenever a real
+1. Convert the remaining JSX shells in measured slices: Inventory, Products,
+   POS, Catalog page, and Catalog editor. Inventory or POS are the next
+   highest user-visible candidates; Products is the broadest table workflow.
+2. Split `frontend/src/api/methods.js` into typed sections or convert bounded
+   helper clusters first; it remains the next high-impact API gateway target.
+3. Update source-inspection tests and ops verification scripts whenever a real
    implementation moves behind a compatibility wrapper.
-3. Refresh Phase 29 references after each migration and keep the public
+4. Refresh Phase 29 references after each migration and keep the public
    Cloudflare portal failure separate until the tunnel/runtime path is fixed.

@@ -1,4 +1,4 @@
-﻿# File Organization And Language Conversion Plan
+# File Organization And Language Conversion Plan
 
 > Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 545 in this file.
 
@@ -550,7 +550,7 @@ Decision rule:
     loop, broad Phase 8.4 Playwright UI live check, and storage pruning passed
     on frontend hash `5e4397389d09fb6a`.
 48. Harden AppContext auth and settings write pathways. Done:
-    `frontend/src/AppContext.jsx` now wraps login, logout, Google OAuth link
+    `frontend/src/AppContext.tsx` now wraps login, logout, Google OAuth link
     completion, server settings save, and session-duration refresh in explicit
     timeout contracts while keeping existing session persistence, bootstrap,
     conflict handling, and local-device setting behavior. Focused loading UX,
@@ -1281,7 +1281,7 @@ Decision rule:
     The route classification, mounted-page limit, warmup, and notification
     helper moved to `frontend/src/app/appShellUtils.ts`. The temporary
     app-shell compatibility wrapper has been retired after `App.tsx`,
-    `AppContext.jsx`, startup routing, and focused app-shell tests moved to the
+    `AppContext.tsx`, startup routing, and focused app-shell tests moved to the
     TypeScript source. The compiler now includes `src/app/**/*.ts`.
 145. Convert portal catalog display helper to TypeScript. Done:
     The customer portal grid, branch matching, promotion display, price
@@ -4327,6 +4327,19 @@ Decision rule:
     focused tests, and performance verification to the TSX shell. The current
     source extension count is `.js: 95`, `.jsx: 6`, `.mjs: 0`, `.cjs: 0`,
     `.ts: 268`, `.tsx: 101` outside generated/runtime folders.
+546. Convert the app context provider to TSX. Done:
+    `frontend/src/AppContext.tsx` now types global settings, authenticated
+    user payloads, bootstrap organization/system payloads, notifications,
+    write-conflict details, sync-channel events, the public app/sync context
+    values, and the local runtime API gateway used for auth, settings,
+    Google OAuth, session duration refreshes, public asset URLs, and sync URL
+    updates. The conversion keeps app bootstrap, settings load/save, login,
+    logout, OAuth completion, runtime mismatch recovery, websocket polling,
+    device-local settings, permission checks, Khmer/English translation
+    fallback, and receipt/settings source guards intact while replacing direct
+    `window.api` calls with typed `getAppApi()` access. The current source
+    extension count is `.js: 95`, `.jsx: 5`, `.mjs: 0`, `.cjs: 0`,
+    `.ts: 267`, `.tsx: 102` outside generated/runtime folders.
 
 ## Safety Gates
 

@@ -2,7 +2,7 @@ import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp, Bell } from 'lucide-react'
-import { useApp as useAppHook } from './AppContext.jsx'
+import { useApp as useAppHook } from './AppContext.tsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import Login from './components/auth/Login'

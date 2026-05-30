@@ -1,6 +1,6 @@
 import { Languages, Moon, Sun } from 'lucide-react'
 import type { MouseEventHandler, ReactNode } from 'react'
-import { useApp as useAppFromContext } from '../../AppContext.jsx'
+import { useApp as useAppFromContext } from '../../AppContext.tsx'
 
 type ToggleButtonProps = {
   active?: boolean

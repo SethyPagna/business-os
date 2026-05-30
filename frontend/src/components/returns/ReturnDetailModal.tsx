@@ -1,4 +1,4 @@
-import { useApp as useAppHook } from '../../AppContext.jsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
 
 const CUSTOMER_SCOPE = 'customer'

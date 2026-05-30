@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useApp as useAppFromContext } from '../../AppContext.jsx'
+import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import { getFieldItems } from './constants'
 
 type ReceiptTemplate = Record<string, unknown>

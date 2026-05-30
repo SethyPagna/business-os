@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { AlertTriangle, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react'
-import { useApp as useAppFromContext } from '../../AppContext.jsx'
+import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh'
 import { withLoaderTimeout } from '../../utils/loaders.ts'

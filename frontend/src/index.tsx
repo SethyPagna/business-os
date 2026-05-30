@@ -5,7 +5,7 @@ import '@fontsource/noto-sans-khmer/400.css'
 import '@fontsource/noto-sans-khmer/500.css'
 import '@fontsource/noto-sans-khmer/600.css'
 import App from './App.tsx'
-import { AppProvider as AppProviderBase } from './AppContext.jsx'
+import { AppProvider as AppProviderBase } from './AppContext.tsx'
 import { isPublicCatalogPath } from './app/appShellUtils.ts'
 import './styles/main.css'
 import {

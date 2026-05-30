@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { useApp as useAppHook } from '../../../AppContext.jsx'
+import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
