@@ -89,7 +89,7 @@ Total files documented: **531**
 | 77 | `backend/src/services/googleDriveSync/versioning.ts` | backend-services | 135 | 4.0 | Integration/service layer |
 | 78 | `backend/src/services/googleOauth.ts` | backend-services | 252 | 8.8 | Integration/service layer |
 | 79 | `backend/src/services/importJobs.js` | backend-services | 3880 | 157.1 | Integration/service layer |
-| 80 | `backend/src/services/integrationDoctor.js` | backend-services | 353 | 11.8 | Integration/service layer |
+| 80 | `backend/src/services/integrationDoctor.ts` | backend-services | 353 | 11.8 | Integration/service layer |
 | 81 | `backend/src/services/mediaQueue.ts` | backend-services | 200 | 7.2 | Integration/service layer |
 | 82 | `backend/src/services/portalAi.js` | backend-services | 621 | 21.7 | Integration/service layer |
 | 83 | `backend/src/services/README.md` | backend-services | 29 | 1.0 | Integration/service layer |

@@ -80,7 +80,7 @@ Code files documented: **468**
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 0 | 1 | 0 | 2 |
 | 69 | `backend/src/services/googleOauth.ts` | 2 | 1 | 1 | 4 |
 | 70 | `backend/src/services/importJobs.js` | 20 | 1 | 14 | 7 |
-| 71 | `backend/src/services/integrationDoctor.js` | 10 | 1 | 8 | 2 |
+| 71 | `backend/src/services/integrationDoctor.ts` | 10 | 1 | 8 | 2 |
 | 72 | `backend/src/services/mediaQueue.ts` | 5 | 1 | 3 | 5 |
 | 73 | `backend/src/services/portalAi.js` | 2 | 1 | 2 | 1 |
 | 74 | `backend/src/services/verification.ts` | 2 | 1 | 1 | 2 |
@@ -600,7 +600,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/server.js`
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
   - `backend/test/analyticsRuntime.test.ts`
 
 ### 3.4 `backend/src/authOtpGuards.ts`
@@ -687,7 +687,7 @@ Code files documented: **468**
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/googleOauth.ts`
   - `backend/src/services/importJobs.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
   - `backend/src/services/mediaQueue.ts`
   - `backend/src/settingsSnapshot.ts`
   - `backend/test/importJobStateMachine.test.ts`
@@ -763,7 +763,7 @@ Code files documented: **468**
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/importJobs.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
   - `backend/src/services/mediaQueue.ts`
   - `backend/src/services/portalAi.js`
   - `backend/src/services/verification.ts`
@@ -1049,7 +1049,7 @@ Code files documented: **468**
   - `backend/src/fileAssets.js`
   - `backend/src/routes/system/index.js`
   - `backend/src/services/backupPackages.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
   - `backend/src/settingsSnapshot.ts`
 
 ### 3.26 `backend/src/optionalSharp.ts`
@@ -1675,7 +1675,7 @@ Code files documented: **468**
   - `../../services/backupPackages`
   - `../../services/googleDriveSync`
   - `../../services/importJobs`
-  - `../../services/integrationDoctor`
+  - `../../services/integrationDoctor.ts`
   - `../../systemJobs`
   - `child_process`
   - `express`
@@ -1700,7 +1700,7 @@ Code files documented: **468**
   - `backend/src/services/backupPackages.js`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/importJobs.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
   - `backend/src/systemJobs.js`
 - Referenced by (2)
   - `backend/server.js`
@@ -1877,7 +1877,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/routes/system/index.js`
   - `backend/src/services/googleDriveSync/index.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
   - `backend/test/backupRetention.test.ts`
 
 ### 3.66 `backend/src/services/firebaseAuth.js`
@@ -1920,7 +1920,7 @@ Code files documented: **468**
   - `backend/src/helpers.js`
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
 
 ### 3.68 `backend/src/services/googleDriveSync/versioning.ts`
 
@@ -1944,7 +1944,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/routes/auth.js`
   - `backend/src/routes/users.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
   - `backend/test/ownedGoogleAuth.test.ts`
 
 ### 3.70 `backend/src/services/importJobs.js`
@@ -1991,11 +1991,11 @@ Code files documented: **468**
   - `backend/src/routes/importJobs.js`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/system/index.js`
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
   - `backend/src/workers/importWorker.ts`
   - `backend/test/importJobStateMachine.test.ts`
 
-### 3.71 `backend/src/services/integrationDoctor.js`
+### 3.71 `backend/src/services/integrationDoctor.ts`
 
 - Declared exports: `module.exports`
 - Imports (10)
@@ -2525,10 +2525,10 @@ Code files documented: **468**
 
 - Declared exports: none detected
 - Imports (2)
-  - `../src/services/integrationDoctor`
+  - `../src/services/integrationDoctor.ts`
   - `node:assert/strict`
 - Internal dependencies (1)
-  - `backend/src/services/integrationDoctor.js`
+  - `backend/src/services/integrationDoctor.ts`
 - Referenced by (0)
   - none
 

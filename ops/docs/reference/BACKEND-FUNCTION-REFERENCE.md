@@ -4,7 +4,7 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **28**
+Total files documented: **27**
 
 ## 2. Symbol Count by File
 
@@ -35,9 +35,8 @@ Total files documented: **28**
 | 23 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
 | 24 | `backend/src/services/googleDriveSync/index.js` | 75 | 0 |
 | 25 | `backend/src/services/importJobs.js` | 175 | 0 |
-| 26 | `backend/src/services/integrationDoctor.js` | 14 | 0 |
-| 27 | `backend/src/services/portalAi.js` | 42 | 0 |
-| 28 | `backend/src/systemJobs.js` | 28 | 0 |
+| 26 | `backend/src/services/portalAi.js` | 42 | 0 |
+| 27 | `backend/src/systemJobs.js` | 28 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -1334,26 +1333,7 @@ Total files documented: **28**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.26 `backend/src/services/integrationDoctor.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `trim` | function | 44 |
-| 2 | `hasValue` | function | 48 |
-| 3 | `redactPresence` | function | 52 |
-| 4 | `status` | function | 59 |
-| 5 | `allCriticalChecksOk` | function | 67 |
-| 6 | `unique` | function | 80 |
-| 7 | `buildExpectedOauthChecklist` | function | 92 |
-| 8 | `probeDatabase` | function | 120 |
-| 9 | `getSafeTableCount` | function | 130 |
-| 10 | `readCurrentBusinessCounts` | function | 139 |
-| 11 | `findLatestVerifiedReleaseBackup` | function | 153 |
-| 12 | `probeQueue` | function | 178 |
-| 13 | `probeBackups` | function | 199 |
-| 14 | `buildIntegrationDoctor` | function | 216 |
-
-### 3.27 `backend/src/services/portalAi.js`
+### 3.26 `backend/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1400,7 +1380,7 @@ Total files documented: **28**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.28 `backend/src/systemJobs.js`
+### 3.27 `backend/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

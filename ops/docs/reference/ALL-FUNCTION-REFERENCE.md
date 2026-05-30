@@ -80,7 +80,7 @@ Code files scanned: **468**
 | 68 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
 | 69 | `backend/src/services/googleOauth.ts` | 17 |
 | 70 | `backend/src/services/importJobs.js` | 175 |
-| 71 | `backend/src/services/integrationDoctor.js` | 14 |
+| 71 | `backend/src/services/integrationDoctor.ts` | 14 |
 | 72 | `backend/src/services/mediaQueue.ts` | 10 |
 | 73 | `backend/src/services/portalAi.js` | 42 |
 | 74 | `backend/src/services/verification.ts` | 21 |
@@ -2129,7 +2129,7 @@ Code files scanned: **468**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.71 `backend/src/services/integrationDoctor.js`
+### 3.71 `backend/src/services/integrationDoctor.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

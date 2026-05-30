@@ -1,6 +1,6 @@
 # Phase 29 Audit
 
-Generated: 2026-05-30T19:48:13.703Z
+Generated: 2026-05-30T19:54:38.652Z
 
 Policy: `ops/automation/business-os-automation.json`
 
@@ -9,7 +9,7 @@ Policy: `ops/automation/business-os-automation.json`
 - Checks: 7
 - Failures: 0
 - Cycles: 1
-- Total child-check duration: 1979 ms
+- Total child-check duration: 1951 ms
 - Repeat consistency: stable
 - Execution mode: contention-safe-reference-writers-then-bounded-guardrails
 - Reference writer concurrency: 1
@@ -20,35 +20,35 @@ Policy: `ops/automation/business-os-automation.json`
 
 | Cycle | Check | Status | Duration | Command | Report output |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Generated bulk audit | passed | 870 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
-| 1 | Schema audit | passed | 135 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
-| 1 | Performance/code-flow scan | passed | 168 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
-| 1 | Language/runtime audit | passed | 222 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
-| 1 | Docker release guardrail | passed | 132 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
-| 1 | Runtime dependency guardrail | passed | 143 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
-| 1 | Organization audit | passed | 309 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
+| 1 | Generated bulk audit | passed | 873 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
+| 1 | Schema audit | passed | 125 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
+| 1 | Performance/code-flow scan | passed | 166 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
+| 1 | Language/runtime audit | passed | 229 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
+| 1 | Docker release guardrail | passed | 135 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
+| 1 | Runtime dependency guardrail | passed | 129 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
+| 1 | Organization audit | passed | 294 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
 
 ## Duration Summary
 
 | Check | Runs | Total | Average | Max |
 | --- | --- | --- | --- | --- |
-| Generated bulk audit | 1 | 870 ms | 870 ms | 870 ms |
-| Organization audit | 1 | 309 ms | 309 ms | 309 ms |
-| Language/runtime audit | 1 | 222 ms | 222 ms | 222 ms |
-| Performance/code-flow scan | 1 | 168 ms | 168 ms | 168 ms |
-| Runtime dependency guardrail | 1 | 143 ms | 143 ms | 143 ms |
-| Schema audit | 1 | 135 ms | 135 ms | 135 ms |
-| Docker release guardrail | 1 | 132 ms | 132 ms | 132 ms |
+| Generated bulk audit | 1 | 873 ms | 873 ms | 873 ms |
+| Organization audit | 1 | 294 ms | 294 ms | 294 ms |
+| Language/runtime audit | 1 | 229 ms | 229 ms | 229 ms |
+| Performance/code-flow scan | 1 | 166 ms | 166 ms | 166 ms |
+| Docker release guardrail | 1 | 135 ms | 135 ms | 135 ms |
+| Runtime dependency guardrail | 1 | 129 ms | 129 ms | 129 ms |
+| Schema audit | 1 | 125 ms | 125 ms | 125 ms |
 
 ## Slowest Runs
 
 | Cycle | Check | Duration |
 | --- | --- | --- |
-| 1 | Generated bulk audit | 870 ms |
-| 1 | Organization audit | 309 ms |
-| 1 | Language/runtime audit | 222 ms |
-| 1 | Performance/code-flow scan | 168 ms |
-| 1 | Runtime dependency guardrail | 143 ms |
+| 1 | Generated bulk audit | 873 ms |
+| 1 | Organization audit | 294 ms |
+| 1 | Language/runtime audit | 229 ms |
+| 1 | Performance/code-flow scan | 166 ms |
+| 1 | Docker release guardrail | 135 ms |
 
 ## Repeat Consistency
 
