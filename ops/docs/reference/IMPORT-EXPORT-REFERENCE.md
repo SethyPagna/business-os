@@ -180,7 +180,7 @@ Code files documented: **466**
 | 168 | `frontend/src/components/catalog/portalTranslateController.ts` | 0 | 19 | 0 | 0 |
 | 169 | `frontend/src/components/contacts/ContactImportModal.tsx` | 8 | 1 | 7 | 4 |
 | 170 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 | 0 | 1 | 0 |
-| 171 | `frontend/src/components/contacts/contactOptionUtils.ts` | 0 | 9 | 0 | 4 |
+| 171 | `frontend/src/components/contacts/contactOptionUtils.ts` | 0 | 9 | 0 | 5 |
 | 172 | `frontend/src/components/contacts/Contacts.tsx` | 12 | 1 | 10 | 1 |
 | 173 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 4 | 1 | 3 | 1 |
 | 174 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 | 1 | 0 | 2 |
@@ -213,7 +213,7 @@ Code files documented: **466**
 | 201 | `frontend/src/components/navigation/Sidebar.tsx` | 8 | 1 | 6 | 1 |
 | 202 | `frontend/src/components/pos/CartItem.tsx` | 2 | 1 | 2 | 1 |
 | 203 | `frontend/src/components/pos/FilterPanel.tsx` | 2 | 1 | 0 | 1 |
-| 204 | `frontend/src/components/pos/POS.jsx` | 18 | 1 | 16 | 1 |
+| 204 | `frontend/src/components/pos/POS.tsx` | 19 | 1 | 17 | 1 |
 | 205 | `frontend/src/components/pos/posCore.ts` | 3 | 9 | 3 | 0 |
 | 206 | `frontend/src/components/pos/ProductImage.tsx` | 1 | 1 | 1 | 1 |
 | 207 | `frontend/src/components/pos/QuickAddModal.tsx` | 1 | 1 | 0 | 1 |
@@ -3008,7 +3008,7 @@ Code files documented: **466**
   - `./components/inventory/Inventory.jsx`
   - `./components/loyalty-points/LoyaltyPointsPage`
   - `./components/navigation/Sidebar`
-  - `./components/pos/POS.jsx`
+  - `./components/pos/POS.tsx`
   - `./components/products/Products.jsx`
   - `./components/receipt-settings/ReceiptSettings`
   - `./components/returns/Returns`
@@ -3041,7 +3041,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
   - `frontend/src/components/returns/Returns.tsx`
@@ -3141,7 +3141,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/InventoryImportModal.tsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
   - `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
   - `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
@@ -3473,11 +3473,12 @@ Code files documented: **466**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (4)
+- Referenced by (5)
   - `frontend/src/components/contacts/CustomerFormModal.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
+  - `frontend/src/components/pos/POS.tsx`
 
 ### 3.172 `frontend/src/components/contacts/Contacts.tsx`
 
@@ -3576,7 +3577,7 @@ Code files documented: **466**
   - `frontend/src/utils/loaders.ts`
 - Referenced by (2)
   - `frontend/src/components/contacts/Contacts.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
 
 ### 3.176 `frontend/src/components/contacts/DeliveryTab.tsx`
 
@@ -4097,7 +4098,7 @@ Code files documented: **466**
   - `frontend/src/utils/pricing.ts`
   - `frontend/src/utils/scriptTypography.ts`
 - Referenced by (1)
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
 
 ### 3.203 `frontend/src/components/pos/FilterPanel.tsx`
 
@@ -4108,12 +4109,12 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
 
-### 3.204 `frontend/src/components/pos/POS.jsx`
+### 3.204 `frontend/src/components/pos/POS.tsx`
 
 - Declared exports: `function`
-- Imports (18)
+- Imports (19)
   - `../../AppContext`
   - `../../utils/deviceInfo`
   - `../../utils/initials.ts`
@@ -4121,6 +4122,7 @@ Code files documented: **466**
   - `../../utils/publicAssetUrls.ts`
   - `../../utils/scriptTypography.ts`
   - `../contacts/CustomersTab`
+  - `../contacts/contactOptionUtils`
   - `../receipt/Receipt`
   - `../sales/StatusBadge`
   - `../shared/ImageGalleryLightbox`
@@ -4132,9 +4134,10 @@ Code files documented: **466**
   - `./QuickAddModal`
   - `lucide-react`
   - `react`
-- Internal dependencies (16)
+- Internal dependencies (17)
   - `frontend/src/AppContext.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
+  - `frontend/src/components/contacts/contactOptionUtils.ts`
   - `frontend/src/components/pos/CartItem.tsx`
   - `frontend/src/components/pos/FilterPanel.tsx`
   - `frontend/src/components/pos/ProductImage.tsx`
@@ -4174,7 +4177,7 @@ Code files documented: **466**
 - Internal dependencies (1)
   - `frontend/src/components/products/shared/primitives.tsx`
 - Referenced by (1)
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
 
 ### 3.207 `frontend/src/components/pos/QuickAddModal.tsx`
 
@@ -4184,7 +4187,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (1)
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
 
 ### 3.208 `frontend/src/components/products/config/productPageConfig.ts`
 
@@ -4806,7 +4809,7 @@ Code files documented: **466**
   - `frontend/src/utils/printReceipt.ts`
   - `frontend/src/utils/receiptAppliedConfig.ts`
 - Referenced by (3)
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
   - `frontend/src/components/sales/Sales.tsx`
 
@@ -5046,7 +5049,7 @@ Code files documented: **466**
 - Internal dependencies (0)
   - none
 - Referenced by (6)
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/receipt/Receipt.tsx`
   - `frontend/src/components/sales/ExportModal.tsx`
   - `frontend/src/components/sales/SaleDetailModal.tsx`
@@ -5176,7 +5179,7 @@ Code files documented: **466**
   - none
 - Referenced by (3)
   - `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/products/Products.jsx`
 
 ### 3.268 `frontend/src/components/shared/LoadingWatchdog.tsx`
@@ -5267,7 +5270,7 @@ Code files documented: **466**
   - `frontend/src/components/files/FilesPage.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
@@ -5304,7 +5307,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/shared.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.tsx`
   - `frontend/src/components/sales/Sales.tsx`
@@ -5900,7 +5903,7 @@ Code files documented: **466**
   - `frontend/src/api/methods.js`
   - `frontend/src/AppContext.tsx`
   - `frontend/src/components/auth/Login.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/tests/deviceInfo.test.ts`
 
@@ -6038,7 +6041,7 @@ Code files documented: **466**
 - Referenced by (7)
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/inventory/Inventory.jsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/pos/posCore.ts`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/utils/groupedRecords.ts`
@@ -6110,7 +6113,7 @@ Code files documented: **466**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/src/components/inventory/ProductDetailModal.tsx`
   - `frontend/src/components/pos/CartItem.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/pos/posCore.ts`
   - `frontend/src/components/products/forms/ProductForm.tsx`
   - `frontend/src/components/products/forms/VariantFormModal.tsx`
@@ -6171,7 +6174,7 @@ Code files documented: **466**
   - `frontend/src/components/contacts/ContactImportModal.tsx`
   - `frontend/src/components/files/FilePickerModal.tsx`
   - `frontend/src/components/files/FilesPage.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/products/helpers/productGalleryHelpers.ts`
   - `frontend/src/components/products/shared/primitives.tsx`
   - `frontend/src/utils/mediaUpload.ts`
@@ -6199,7 +6202,7 @@ Code files documented: **466**
   - `frontend/src/components/catalog/CatalogProductsSection.tsx`
   - `frontend/src/components/inventory/InventoryProductsSurface.tsx`
   - `frontend/src/components/pos/CartItem.tsx`
-  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/scriptTypography.test.ts`
 

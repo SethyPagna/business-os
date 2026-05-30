@@ -1,4 +1,4 @@
-﻿# Business OS Optimization Master Plan
+# Business OS Optimization Master Plan
 
 Last updated: 2026-05-30
 
@@ -89,7 +89,7 @@ Priority surfaces:
 
 - `Inventory.jsx`
 - `Products.jsx`
-- `POS.jsx`
+- `POS.tsx`
 - `Dashboard.tsx`
 - `CatalogPage.jsx`
 - `Settings.tsx`

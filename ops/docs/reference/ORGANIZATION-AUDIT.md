@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T03:48:45.032Z
+Generated: 2026-05-30T05:39:46.973Z
 
 ## Summary
 
@@ -15,13 +15,13 @@ Generated: 2026-05-30T03:48:45.032Z
 | Extension | Files |
 | --- | --- |
 | .ts | 266 |
-| .tsx | 102 |
+| .tsx | 103 |
 | .js | 84 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
-| .jsx | 5 |
+| .jsx | 4 |
 | .sh | 3 |
 | .sql | 2 |
 | .css | 1 |
@@ -65,27 +65,27 @@ Generated: 2026-05-30T03:48:45.032Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/PHASE29-AUDIT.json | 12118 | ops/docs/reference |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7926 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6898 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 5955 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4362 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7929 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6912 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 5966 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4375 | ops/docs |
 | frontend/src/components/inventory/Inventory.jsx | 4123 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
+| ops/docs/reference/PHASE29-AUDIT.json | 3280 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.jsx | 3218 | frontend/components/catalog |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2665 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2679 | ops/docs/reference |
 | frontend/src/api/methods.js | 2346 | frontend/api |
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
 | ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 2301 | ops/docs/reference |
 | backend/src/routes/products.js | 2218 | backend/routes |
+| frontend/src/components/pos/POS.tsx | 2218 | frontend/components/pos |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
 | frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/products/Products.jsx | 2006 | frontend/components/products |
-| frontend/src/components/pos/POS.jsx | 1919 | frontend/components/pos |
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
@@ -106,7 +106,7 @@ Generated: 2026-05-30T03:48:45.032Z
 | frontend/src/components/dashboard/Dashboard.tsx | 21 | frontend/components/dashboard |
 | frontend/src/components/sales/Sales.tsx | 21 | frontend/components/sales |
 | backend/src/routes/system/index.js | 20 | backend/routes |
-| frontend/src/components/pos/POS.jsx | 19 | frontend/components/pos |
+| frontend/src/components/pos/POS.tsx | 20 | frontend/components/pos |
 | frontend/src/components/catalog/CatalogPage.jsx | 18 | frontend/components/catalog |
 | frontend/src/components/contacts/CustomersTab.tsx | 18 | frontend/components/contacts |
 | frontend/src/components/returns/Returns.tsx | 18 | frontend/components/returns |

@@ -127,7 +127,7 @@ Backend:
 
 | Area | Representative files | Risk | Current guard | Next check |
 | --- | --- | --- | --- | --- |
-| POS checkout/payment | `frontend/src/components/pos/POS.jsx`, `frontend/src/api/methods.js`, `backend/src/routes/sales.js` | Duplicate sales, stock double-deduct | `checkoutInFlightRef`, `loading`, `client_request_id`, backend duplicate lookup | Add/keep source regression covering all three layers |
+| POS checkout/payment | `frontend/src/components/pos/POS.tsx`, `frontend/src/api/methods.js`, `backend/src/routes/sales.js` | Duplicate sales, stock double-deduct | `checkoutInFlightRef`, `loading`, `client_request_id`, backend duplicate lookup | Add/keep source regression covering all three layers |
 | Customer returns | `frontend/src/components/returns/NewReturnModal.jsx`, `frontend/src/components/returns/EditReturnModal.jsx`, `backend/src/routes/returns.js` | Duplicate returns, wrong restored stock | `submitting`, synchronous submit ref, backend idempotency for creates | Add deeper edit conflict Playwright check |
 | Supplier returns | `frontend/src/components/returns/NewSupplierReturnModal.jsx`, `backend/src/routes/returns.js` | Duplicate supplier stock removal | `submitting`, synchronous submit ref, backend idempotency | Add live form-state Playwright check |
 | Product import/apply | `frontend/src/components/products/import/BulkImportModal.tsx`, `frontend/src/api/methods.js`, `backend/src/routes/importJobs.js` | Multiple import jobs, repeated uploads, conflicting apply | `loading`, synchronous in-flight ref, server job state, rate limits | Add deeper server idempotency review for approve/start |

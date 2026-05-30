@@ -471,7 +471,7 @@ Move 151 converts the POS core helper to TypeScript while preserving
 `posCore.mjs` as an intentional compatibility wrapper. Product grouping,
 variant choice lookup, cart pricing, cart line identity, and branch-aware line
 matching stay centralized instead of duplicating checkout logic inside
-`POS.jsx`.
+`POS.tsx`.
 
 ## Candidate Areas
 

@@ -119,7 +119,7 @@ Largest tracked source/hotspot areas by file count:
   flows. Do not delete unless scanner replacement is implemented and verified.
 - The largest maintainable source modules remain `Inventory.jsx`,
   `importJobs.js`, `CatalogPage.jsx`, `Dashboard.tsx`, `Products.jsx`,
-  `products.js`, `POS.jsx`, and `inventory.js`.
+  `products.js`, `POS.tsx`, and `inventory.js`.
 
 ## Repeat Loop
 

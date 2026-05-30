@@ -3398,7 +3398,7 @@ Cleanup checkpoint:
   confirmation, keeping category, unit, and brand lookup cleanup on the same
   indexed path.
 - Move 307 indexes POS cart product and branch lookups:
-  `POS.jsx` now reuses the existing `productsById` map for cart quantity
+  `POS.tsx` now reuses the existing `productsById` map for cart quantity
   validation, cart branch changes, and cart detail opening, and adds a
   `branchesById` map for branch-name error messages. This removes repeated
   product and branch array scans from the active checkout path while preserving
@@ -3739,7 +3739,7 @@ Move 335 status:
   scrolling instead of squeezing Product Details, Cost In, Selling Price, Stock,
   and Status together. `frontend/src/components/products/Products.jsx` also
   lets product names wrap inside their column without bleeding into adjacent
-  cells. `frontend/src/components/pos/POS.jsx` now gives the desktop products
+  cells. `frontend/src/components/pos/POS.tsx` now gives the desktop products
   pane and cart pane stable minimum widths inside a horizontally scrollable
   workspace, so POS product cards and cart controls stay readable at the
   awkward 810 px review width.
@@ -5952,3 +5952,14 @@ Move 546 status:
   permission gating, Khmer fallback cleanup, source-inspection tests, and
   receipt/settings save guard behavior unchanged while replacing direct
   `window.api` reads with typed `getAppApi()` gateway calls.
+
+Move 547 status:
+- Move 547 converts the POS shell to `frontend/src/components/pos/POS.tsx`.
+  The typed boundary now covers POS product rows, grouped product metadata,
+  cart lines, open-order state, customer and delivery contacts, contact-option
+  selection, membership lookup state, receipt queue entries, image lightbox
+  state, app/sync context access, and the local POS API gateway. The move keeps
+  catalog/contact/membership/quick-add/checkout timeout contracts, same-tick
+  quick-add and checkout guards, cart branch validation, grouped product
+  cards, promotion/special price handling, and source guard behavior unchanged
+  while centralizing POS runtime calls behind typed `getPosApi()` access.

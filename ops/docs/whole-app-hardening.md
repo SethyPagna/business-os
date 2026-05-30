@@ -716,7 +716,7 @@ Last updated: 2026-05-18
     now have explicit timeout contracts in `frontend/src/AppContext.tsx`.
     POS quick-add customer, quick-add delivery contact, and checkout sale writes
     now have explicit timeout contracts in
-    `frontend/src/components/pos/POS.jsx`.
+    `frontend/src/components/pos/POS.tsx`.
     Return create, return update, and supplier return create writes now have
     explicit timeout contracts in
     `frontend/src/components/returns/NewReturnModal.tsx`,

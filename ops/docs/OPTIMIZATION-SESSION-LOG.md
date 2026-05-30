@@ -1143,3 +1143,36 @@ Use this shape for future entries:
   directory for 220,253 bytes, kept the latest R2 backup object, found no
   stopped Docker containers or builder cache to reclaim, and the post-prune
   Phase 29 repeat audit passed
+
+- change: converted the POS shell to TSX with typed POS product rows, grouped
+  product metadata, cart lines, open-order state, customer and delivery
+  contacts, contact-option selection, membership lookup state, receipt queue
+  entries, image lightbox state, app/sync context access, and a typed POS API
+  gateway
+- affected files:
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/src/components/pos/CartItem.tsx`,
+  `frontend/src/components/pos/posCore.ts`,
+  `frontend/tests/actionStability.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/productSearchPagination.test.ts`
+- route or API target: POS catalog search/bootstrap, product family cards,
+  customer and delivery quick-add, membership lookup, cart branch validation,
+  checkout sale creation, product detail lightbox, and promotion/special price
+  cart lines
+- keeper or rollback: keeper; POS core tests, product search/pagination checks,
+  action stability checks, performance loading UX checks, frontend typecheck,
+  full frontend utility suite, JSX scan, and production build passed before
+  reference refresh
+- route-scoped result: source/test/script scans found no old POS JSX filename
+  references in frontend source, frontend tests, or ops scripts and no
+  `any`/suppression escape hatches in the converted POS shell. Remaining JSX
+  shells are Inventory, Products, Catalog page, and Catalog editor.
+- warm whole-app result: broad Phase 8.4 UI live suite passed with 72 checked
+  signals, no relevant console messages, and no framework overlay. Post-live
+  hygiene passed after elevated Docker access, with zero QA/generated cleanup
+  matches and loaded dataset status. The public Cloudflare portal check still
+  failed to render expected customer content, matching the known tunnel/public
+  follow-up. The fresh local production build hash is `bd5c1f96afecd8fd`, and
+  the live report is
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`.

@@ -441,7 +441,7 @@ Latest verification after cleanup passed on frontend hash `64cbdcafff51e14f`:
   `Inventory.jsx` and focused movement-group tests intentionally move to a new
   public boundary or the wrapper audit proves it is unused.
 - Move 151 converts the POS core helper to TypeScript while preserving the old
-  `.mjs` wrapper. Cleanup must keep `posCore.mjs` until `POS.jsx` and focused
+  `.mjs` wrapper. Cleanup must keep `posCore.mjs` until `POS.tsx` and focused
   POS core tests intentionally move to a new public boundary or the wrapper
   audit proves it is unused.
 - Move 152 converts the product import worker body to TypeScript. The retired

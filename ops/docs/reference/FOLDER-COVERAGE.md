@@ -895,7 +895,7 @@ Total folders documented: **81**
 |---:|---|---|
 | 1 | `CartItem.tsx` | UI component/page |
 | 2 | `FilterPanel.tsx` | UI component/page |
-| 3 | `POS.jsx` | UI component/page |
+| 3 | `POS.tsx` | UI component/page |
 | 4 | `posCore.ts` | UI component/page |
 | 5 | `ProductImage.tsx` | UI component/page |
 | 6 | `QuickAddModal.tsx` | UI component/page |

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 545 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 547 in this file.
 
 ## Goal
 
@@ -559,7 +559,7 @@ Decision rule:
     loop, broad Phase 8.4 Playwright UI live check, and storage pruning passed
     on frontend hash `f1e8f62676674afa`.
 49. Harden POS write pathways. Done:
-    `frontend/src/components/pos/POS.jsx` now wraps POS quick-add customer,
+    `frontend/src/components/pos/POS.tsx` now wraps POS quick-add customer,
     quick-add delivery contact, and checkout sale creation in explicit timeout
     contracts while preserving the existing same-tick customer, delivery, and
     checkout guards plus sale idempotency. Focused action stability tests,
@@ -1332,7 +1332,7 @@ Decision rule:
 151. Convert POS core helper to TypeScript. Done:
     The POS product grouping, variant-choice, cart price, cart line identity,
     and matching helper moved to `frontend/src/components/pos/posCore.ts`,
-    while `posCore.mjs` remains as the compatibility wrapper for `POS.jsx` and
+    while `posCore.mjs` remains as the compatibility wrapper for `POS.tsx` and
     focused POS core tests. The typed helper keeps pricing converters,
     promotion metadata, and branch-aware cart-line matching explicit.
     Verification passed for typecheck, focused POS core tests, frontend
@@ -2615,7 +2615,7 @@ Decision rule:
     filtering from bulk brand cleanup and keeps the three lookup managers
     aligned on indexed selection paths.
 307. Index POS cart product and branch lookups. Done:
-    `frontend/src/components/pos/POS.jsx` now reuses `productsById` for cart
+    `frontend/src/components/pos/POS.tsx` now reuses `productsById` for cart
     quantity validation, branch changes, and detail opening, and builds
     `branchesById` for branch-name error messages. This keeps the checkout path
     on stable indexed references without moving POS files or changing cart-line
@@ -4340,6 +4340,19 @@ Decision rule:
     `window.api` calls with typed `getAppApi()` access. The current source
     extension count is `.js: 95`, `.jsx: 5`, `.mjs: 0`, `.cjs: 0`,
     `.ts: 267`, `.tsx: 102` outside generated/runtime folders.
+547. Convert the POS shell to TSX. Done:
+    `frontend/src/components/pos/POS.tsx` now types POS products, grouped
+    product metadata, cart lines, orders, customer/delivery contacts, membership
+    lookups, receipt queue payloads, image lightbox state, app/sync context
+    access, and the local POS API gateway for catalog reads, contact reads,
+    quick-add creates, membership lookup, and checkout. The conversion keeps
+    the extensionless app lazy import, POS product-grid responsiveness, product
+    family grouping, timeout contracts, same-tick quick-add/checkout guards,
+    cart branch validation, promotion/special price handling, and source
+    inspection tests intact while replacing direct `window.api` access with
+    typed `getPosApi()` calls. The current source extension count is `.js: 95`,
+    `.jsx: 4`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`, `.tsx: 103` outside
+    generated/runtime folders.
 
 ## Safety Gates
 

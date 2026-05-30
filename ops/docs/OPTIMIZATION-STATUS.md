@@ -16,12 +16,12 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `eb1887c5b4ad134b`
+  `bd5c1f96afecd8fd`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T03-19-10-774Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -31,8 +31,8 @@ Current honest pockets:
 
 - broad Phase 8.4 UI live check passed with 72 checked signals, no relevant
   console messages, and no framework overlay
-- post-live hygiene passed with loaded dataset status and zero generated
-  integrity matches
+- post-live hygiene passed after elevated Docker access, with loaded dataset
+  status and zero generated integrity matches
 - the public Cloudflare portal check still failed because
   `https://leangcosmetics.dpdns.org/public` did not render expected customer
   content; keep that as the next public tunnel/runtime issue instead of mixing
@@ -79,8 +79,12 @@ Recent route-level win:
 - Catalog secondary tabs are now
   `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` with typed portal
   copy functions, preview config, membership data, share submissions, about
-  blocks, FAQ items, assistant profile, assistant references, and assistant
-  recommendations.
+  blocks, FAQ items, assistant profile, assistant references, assistant
+  recommendations, and portal tab boundaries.
+- POS page is now `frontend/src/components/pos/POS.tsx` with typed product,
+  order, cart, contact, membership, receipt, lightbox, app/sync, and POS API
+  gateway boundaries. Remaining JSX shells are Inventory, Products, Catalog
+  page, and Catalog editor.
 - Users administration is now `frontend/src/components/users/Users.tsx` with
   typed user rows, role rows, form state, API gateway calls, modal/tab state,
   loading watchdog timers, permission maps, mutation results, and undo/redo
