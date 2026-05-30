@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T17:02:29.751Z
+Generated: 2026-05-30T17:13:01.989Z
 
 ## Summary
 
@@ -14,9 +14,9 @@ Generated: 2026-05-30T17:02:29.751Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 305 |
+| .ts | 306 |
 | .tsx | 107 |
-| .js | 46 |
+| .js | 45 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
@@ -64,10 +64,10 @@ Generated: 2026-05-30T17:02:29.751Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7947 | ops/docs/reference |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7950 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6924 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 6410 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4772 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 6425 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 4785 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -87,8 +87,8 @@ Generated: 2026-05-30T17:02:29.751Z
 | backend/src/routes/inventory.js | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
-| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1812 | ops/docs/reference |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1807 | ops/docs/reference |
+| ops/docs/reference/BACKEND-FUNCTION-REFERENCE.md | 1799 | ops/docs/reference |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1749 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | backend/src/routes/system/index.js | 1659 | backend/routes |

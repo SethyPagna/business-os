@@ -306,7 +306,7 @@ Total folders documented: **81**
 | 10 | `importJobs.js` | API route handler |
 | 11 | `inventory.js` | API route handler |
 | 12 | `notifications.js` | API route handler |
-| 13 | `organizations.js` | API route handler |
+| 13 | `organizations.ts` | API route handler |
 | 14 | `portal.js` | API route handler |
 | 15 | `products.js` | API route handler |
 | 16 | `README.md` | API route handler |

@@ -56,7 +56,7 @@ Code files scanned: **467**
 | 44 | `backend/src/routes/importJobs.js` | 16 |
 | 45 | `backend/src/routes/inventory.js` | 32 |
 | 46 | `backend/src/routes/notifications.js` | 27 |
-| 47 | `backend/src/routes/organizations.js` | 0 |
+| 47 | `backend/src/routes/organizations.ts` | 0 |
 | 48 | `backend/src/routes/portal.js` | 60 |
 | 49 | `backend/src/routes/products.js` | 64 |
 | 50 | `backend/src/routes/returns.js` | 10 |
@@ -1305,7 +1305,7 @@ Code files scanned: **467**
 | 26 | `buildSystemSection` | function | 480 |
 | 27 | `sumSectionCounts` | function | 510 |
 
-### 3.47 `backend/src/routes/organizations.js`
+### 3.47 `backend/src/routes/organizations.ts`
 
 - No top-level named symbols detected.
 
