@@ -5,7 +5,7 @@ const fs = require('fs')
 const path = require('path')
 const express = require('express')
 const { PORT, STORAGE_ROOT } = require('../config')
-const { authToken, routeRateLimit, validateUploadBufferPayload } = require('../middleware')
+const { authToken, routeRateLimit, validateUploadBufferPayload } = require('../middleware.ts')
 const { getCloudflareAccessDiagnostics } = require('../serverUtils')
 
 const router = express.Router()

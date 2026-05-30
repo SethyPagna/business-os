@@ -6,7 +6,7 @@ const express = require('express')
 const multer = require('multer')
 const { IMPORTS_PATH, IMPORT_MAX_CSV_MB, IMPORT_MAX_ZIP_MB } = require('../config')
 const { ok, err, audit } = require('../helpers')
-const { authToken, hasPermission, routeRateLimit, getAuditActor } = require('../middleware')
+const { authToken, hasPermission, routeRateLimit, getAuditActor } = require('../middleware.ts')
 const { sanitizeOriginalFileName } = require('../fileAssets')
 const {
   addJobFile,

@@ -1,6 +1,6 @@
 'use strict'
 
-const { isAdminControlUser } = require('./middleware')
+const { isAdminControlUser } = require('./middleware.ts')
 
 /** @param {unknown} value @returns {number} */
 function normalizeUserId(value) {

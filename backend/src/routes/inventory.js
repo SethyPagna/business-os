@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database.ts')
 const { ok, err, audit, recordActionHistory, broadcast, logOp } = require('../helpers')
-const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
+const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware.ts')
 const { normalizePriceValue } = require('../money.ts')
 const { normalizeProductDiscount } = require('../productDiscounts.ts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')

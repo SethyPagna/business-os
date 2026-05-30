@@ -2,7 +2,7 @@
 
 const express = require('express')
 const { db } = require('../database.ts')
-const { authToken, hasPermission } = require('../middleware')
+const { authToken, hasPermission } = require('../middleware.ts')
 const { getExpiringProducts, getStockAlertProducts } = require('../businessMetrics.ts')
 const { getDriveSyncConfig } = require('../services/googleDriveSync')
 

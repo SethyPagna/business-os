@@ -1,7 +1,7 @@
 'use strict'
 
 const express = require('express')
-const { authToken, assetUpload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
+const { authToken, assetUpload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware.ts')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const { enqueueMediaOptimization } = require('../services/mediaQueue.ts')

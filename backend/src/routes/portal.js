@@ -8,7 +8,7 @@
 const express = require('express')
 const { db } = require('../database.ts')
 const { tryParse, broadcast } = require('../helpers')
-const { authToken, requirePermission, getAuditActor } = require('../middleware')
+const { authToken, requirePermission, getAuditActor } = require('../middleware.ts')
 const { storeDataUrlAsset } = require('../fileAssets')
 const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../portalUtils.ts')
 const { generatePortalAiResponse, getPortalAiUsageStatus } = require('../services/portalAi')

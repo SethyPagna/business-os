@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database.ts')
 const { ok, err, audit, broadcast, parseCSVRows } = require('../helpers')
-const { authToken, requirePermission, getAuditActor } = require('../middleware')
+const { authToken, requirePermission, getAuditActor } = require('../middleware.ts')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const {
   CONTACT_OPTION_LIMIT,

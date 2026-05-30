@@ -22,7 +22,7 @@ const speakeasy = require('speakeasy')
 const qrcode = require('qrcode')
 const { db } = require('../database.ts')
 const { ok, err, audit, logOp, tryParse } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken } = require('../middleware.ts')
 const {
   encryptSecret,
   decryptSecret,

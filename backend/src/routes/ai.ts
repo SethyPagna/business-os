@@ -2,7 +2,7 @@
 
 const express = require('express')
 const { db } = require('../database.ts')
-const { authToken, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
+const { authToken, routeRateLimit, requirePermission, getAuditActor } = require('../middleware.ts')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl.ts')
 const {

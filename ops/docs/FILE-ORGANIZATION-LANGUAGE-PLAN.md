@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 594 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 595 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 50`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 313`,
+  `.js: 49`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 314`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -3308,7 +3308,7 @@ Decision rule:
     import-policy cleanup only; no folder move, schema migration, or language
     conversion was needed.
 414. Tighten schema/security/runtime helper loops. Done:
-    `backend/src/schemaMetadata.ts`, `backend/src/middleware.js`,
+    `backend/src/schemaMetadata.ts`, `backend/src/middleware.ts`,
     `backend/src/security.ts`, `backend/src/netSecurity.ts`, and
     `backend/src/storage/organizationFolders.js` now use direct-loop helpers
     for column candidates, permission keys, any-permission checks,
@@ -4989,6 +4989,19 @@ Decision rule:
     warns for direct `.ts` entries in `pkg.scripts`, so broader backend
     conversions remain blocked on the future compile/staging lane. The
     generated language audit now reports `JavaScript: 28`, `TypeScript: 283`,
+    and `React TSX: 107` across the active scan roots.
+595. Convert shared backend middleware to a package-safe TypeScript path.
+    Done: `backend/src/middleware.ts` keeps session auth binding, public-route
+    network guard behavior, upload/file-type filtering, upload compression and
+    validation, route rate limits, permission merging, admin-control checks,
+    any-permission checks, and audit actor extraction on the existing
+    CommonJS middleware style. The server and every route caller now point at
+    the explicit `.ts` middleware path so Node/package resolution does not rely
+    on extension inference. Focused middleware load, route-contract, backend
+    utility, schema audit, stale-path, and Linux packaging proof passed.
+    Packaging still warns for direct `.ts` entries in `pkg.scripts`, so broader
+    backend conversions remain blocked on the future compile/staging lane. The
+    generated language audit now reports `JavaScript: 27`, `TypeScript: 284`,
     and `React TSX: 107` across the active scan roots.
 
 ## Safety Gates

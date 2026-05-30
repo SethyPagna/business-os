@@ -1,7 +1,7 @@
 'use strict'
 
 const express = require('express')
-const { authToken } = require('../middleware')
+const { authToken } = require('../middleware.ts')
 const {
   getDefaultOrganization,
   searchOrganizations,

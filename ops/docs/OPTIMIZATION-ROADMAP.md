@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 594.
+- Latest completed implementation move in this roadmap: Move 595.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -4781,7 +4781,7 @@ Move 423 status:
 
 Move 424 status:
 - Move 424 tightens schema/security/runtime helper loops in
-  `backend/src/schemaMetadata.ts`, `backend/src/middleware.js`,
+  `backend/src/schemaMetadata.ts`, `backend/src/middleware.ts`,
   `backend/src/security.ts`, `backend/src/netSecurity.ts`, and
   `backend/src/storage/organizationFolders.js`. Column candidate
   normalization, column presence caching, permission key collection,
@@ -6672,4 +6672,19 @@ Move 594 status:
   direct `.ts` scripts, so broader backend conversions still wait for a
   compile/staging package lane. The generated language audit now reports
   `JavaScript: 28`, `TypeScript: 283`, and `React TSX: 107` across the active
+  scan roots.
+
+Move 595 status:
+- Move 595 converts `backend/src/middleware.ts` to a package-safe TypeScript
+  path. Session auth binding, public-route network guard behavior,
+  upload/file-type filtering, upload compression and validation, route rate
+  limits, permission merging, admin-control checks, any-permission checks, and
+  audit actor extraction remain unchanged on the existing CommonJS middleware
+  style. The server and every route caller now point at the explicit `.ts`
+  middleware path so Node/package resolution does not rely on extension
+  inference. Focused middleware load, route-contract, backend utility, schema
+  audit, stale-path, and Linux packaging proof passed. `pkg` continues to warn
+  for direct `.ts` scripts, so broader backend conversions still wait for a
+  compile/staging package lane. The generated language audit now reports
+  `JavaScript: 27`, `TypeScript: 284`, and `React TSX: 107` across the active
   scan roots.
