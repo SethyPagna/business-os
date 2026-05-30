@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T18:01:09.099Z",
+  "generatedAt": "2026-05-30T18:10:20.767Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      271
+      272
     ],
     [
       "React TSX",
@@ -29,7 +29,7 @@
     ],
     [
       "JavaScript",
-      40
+      39
     ],
     [
       "Windows batch",
@@ -59,7 +59,7 @@
   "extensionCounts": [
     [
       ".ts",
-      271
+      272
     ],
     [
       ".tsx",
@@ -67,7 +67,7 @@
     ],
     [
       ".js",
-      40
+      39
     ],
     [
       ".bat",

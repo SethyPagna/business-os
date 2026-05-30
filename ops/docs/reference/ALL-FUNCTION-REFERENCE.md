@@ -49,7 +49,7 @@ Code files scanned: **468**
 | 37 | `backend/src/routes/auth.js` | 31 |
 | 38 | `backend/src/routes/branches.js` | 10 |
 | 39 | `backend/src/routes/catalog.ts` | 4 |
-| 40 | `backend/src/routes/categories.js` | 2 |
+| 40 | `backend/src/routes/categories.ts` | 2 |
 | 41 | `backend/src/routes/contacts.js` | 34 |
 | 42 | `backend/src/routes/customTables.js` | 9 |
 | 43 | `backend/src/routes/files.ts` | 3 |
@@ -1148,7 +1148,7 @@ Code files scanned: **468**
 | 3 | `buildImageMap` | function | 26 |
 | 4 | `buildCatalogProductPayloads` | function | 35 |
 
-### 3.40 `backend/src/routes/categories.js`
+### 3.40 `backend/src/routes/categories.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

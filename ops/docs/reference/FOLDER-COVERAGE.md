@@ -299,7 +299,7 @@ Total folders documented: **81**
 | 3 | `auth.js` | API route handler |
 | 4 | `branches.js` | API route handler |
 | 5 | `catalog.ts` | API route handler |
-| 6 | `categories.js` | API route handler |
+| 6 | `categories.ts` | API route handler |
 | 7 | `contacts.js` | API route handler |
 | 8 | `customTables.js` | API route handler |
 | 9 | `files.ts` | API route handler |
