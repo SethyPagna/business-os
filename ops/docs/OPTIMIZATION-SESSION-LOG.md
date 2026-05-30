@@ -1065,3 +1065,43 @@ Use this shape for future entries:
 - follow-up insight: Dashboard is now off the JSX backlog; the remaining JSX
   shells are Inventory, Products, POS, Catalog page/editor, App, and
   AppContext.
+
+- change: converted the app shell to TSX with typed page ids, lazy route
+  importers, app context access, notification payloads, sync/offline event
+  details, pending-sync state, app-shell API calls, network-information reads,
+  page-error boundary props/state, page slot props, route warmup loaders,
+  timer/idle handles, scroll direction, and chunk recovery helpers
+- affected files:
+  `frontend/src/App.tsx`,
+  `frontend/src/index.tsx`,
+  `frontend/tests/appShellUtils.test.ts`,
+  `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/offlineSalesQueue.test.ts`,
+  `frontend/tests/offlineSecurityHardening.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/scripts/frontend/verify-performance.ts`
+- route or API target: authenticated app shell routing, public catalog shell,
+  lazy page chunk recovery, navigation intent warmup, mounted-page retention,
+  global notification/sync banners, offline sale notices, app favicon shaping,
+  and write-conflict modal loading
+- keeper or rollback: keeper; focused app-shell/performance/offline/API tests,
+  full frontend utility suite, JSX check, UI audit, performance verifier,
+  production build, organization audit, schema audit, generated reference
+  refresh, Phase 29 repeat audit, Phase 8.4 live suite, and prune checks passed
+- route-scoped result: focused TSX source checks passed; source/test/script
+  scans found no old App JSX filename references in frontend source, frontend
+  tests, or ops scripts and no `any` escape hatches in the converted App shell.
+  `index.tsx`, app-shell source tests, and performance verifier now point at
+  `App.tsx`.
+- warm whole-app result: Phase 8.4 live suite passed with 72 checked UI
+  signals, no relevant console messages, no framework overlay, and the public
+  Cloudflare check skipped for the known 530/1033 tunnel follow-up. The
+  running app still served frontend hash `55cf7b8ef08a4b8d`; the fresh local
+  production build hash is `eb1887c5b4ad134b`. Live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T03-19-10-774Z/report.json`.
+- cleanup result: storage prune removed one old Phase 8.4 live-check report
+  directory for 220,278 bytes, kept the latest R2 backup object, found no
+  stopped Docker containers or builder cache to reclaim, and the post-prune
+  Phase 29 repeat audit passed
+- follow-up insight: App is now off the JSX backlog; the remaining JSX shells
+  are Inventory, Products, POS, Catalog page/editor, and AppContext.

@@ -580,7 +580,7 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 
   /* page-scroll: the unified scrollable page container used by every page component.
      Works as a flex child (flex-1 stretches to fill the parent) OR in a block context
-     (height:100% fills the parent). The parent wrapper in App.jsx now uses
+     (height:100% fills the parent). The parent wrapper in App.tsx now uses
      display:flex + flex-direction:column so flex-1 always activates correctly.
      min-height:0 is required so flex children can shrink below their content size. */
   .page-scroll {

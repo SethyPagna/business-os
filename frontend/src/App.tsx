@@ -1,7 +1,8 @@
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp, Bell } from 'lucide-react'
-import { useApp } from './AppContext'
+import { useApp as useAppHook } from './AppContext.jsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import Login from './components/auth/Login'
@@ -10,6 +11,186 @@ import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { createCircularFaviconDataUrl } from './utils/favicon.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
+
+declare const __FRONTEND_BUILD_HASH__: string | undefined
+
+type PageId =
+  | 'dashboard'
+  | 'products'
+  | 'pos'
+  | 'sales'
+  | 'returns'
+  | 'inventory'
+  | 'branches'
+  | 'contacts'
+  | 'catalog'
+  | 'loyalty_points'
+  | 'users'
+  | 'audit_log'
+  | 'receipt_settings'
+  | 'backup'
+  | 'settings'
+  | 'files'
+  | 'server'
+
+type AdminPageId = PageId
+type ChunkImporter = () => Promise<{ default: ComponentType<Record<string, unknown>> }>
+type WarmupLoader = () => Promise<unknown>
+type CancelWarmup = () => void
+type ScrollDirection = 'top' | 'bottom'
+type TranslateFn = (key: string) => string
+
+interface NetworkConnectionLike {
+  saveData?: boolean
+  effectiveType?: string
+}
+
+interface NavigatorWithConnection extends Navigator {
+  connection?: NetworkConnectionLike
+  mozConnection?: NetworkConnectionLike
+  webkitConnection?: NetworkConnectionLike
+}
+
+interface AppUser {
+  id?: number | string
+  name?: string
+  username?: string
+}
+
+interface AppSettings {
+  business_name?: string
+  customer_portal_logo_image?: string
+  customer_portal_favicon_image?: string
+  ui_app_favicon_image?: string
+}
+
+interface AppNotification {
+  type?: string
+  message: string
+}
+
+interface SyncProblemDetail {
+  reason?: string
+  error?: string
+  channel?: string
+  transient?: boolean
+  connected?: boolean
+  active?: boolean
+  status?: number | string
+  message?: string
+  ts?: number | string
+}
+
+interface PendingSyncState {
+  total?: number
+  syncing?: number
+  failed?: number
+  oldest_created_at?: string | number
+}
+
+interface OfflineSaleNoticeDetail {
+  client_request_id?: string
+  receiptNumber?: string
+  ts?: number | string
+}
+
+interface WriteConflictDetail {
+  message?: string
+  ts?: number | string
+}
+
+interface AppShellApi {
+  getPendingSyncState?: () => Promise<PendingSyncState | null | undefined>
+  retryPendingSyncNow?: () => Promise<unknown>
+}
+
+interface AppContextValue {
+  user: AppUser | null
+  authReady: boolean
+  page: AdminPageId
+  notification: AppNotification | null
+  canAccessPage: (pageId: string) => boolean
+  AccessDenied: ComponentType
+  setPage: (pageId: AdminPageId) => void
+  navigateTo: (pageId: AdminPageId) => void
+  settings: AppSettings
+  writeConflict: unknown
+  dismissWriteConflict: () => void
+  reloadWriteConflict: () => void
+  syncUrl: string
+  canWriteToServer: boolean
+  language: string
+  theme: string
+  notify: (message: string, type?: string, durationMs?: number) => void
+  t: TranslateFn
+  clearSyncError?: () => void
+}
+
+interface PageErrorBoundaryProps {
+  pageId: string
+  children: ReactNode
+}
+
+interface PageErrorBoundaryState {
+  error: Error | null
+}
+
+interface NotificationProps {
+  notification: AppNotification | null
+}
+
+interface SyncErrorBannerProps {
+  error: SyncProblemDetail | null
+  onDismiss: () => void
+  onGoToServer: () => void
+}
+
+interface OfflineModeBannerProps {
+  pendingSync: PendingSyncState | null
+  canWriteToServer: boolean
+  syncUrl: string
+  transientOutage: SyncProblemDetail | null
+  vaultLocked: SyncProblemDetail | null
+  appUpdate: SyncProblemDetail | null
+  conflictsNeedReview: WriteConflictDetail | null
+  onUpdateNow: () => void
+  onDismissUpdate: () => void
+}
+
+interface PageSlotProps {
+  accessDenied: ReactNode
+  activePageId: AdminPageId
+  canAccessPage: (pageId: string) => boolean
+  pageId: AdminPageId
+}
+
+const useApp = useAppHook as () => AppContextValue
+
+function asPageModule(importer: () => Promise<unknown>): ChunkImporter {
+  return () => importer() as Promise<{ default: ComponentType<Record<string, unknown>> }>
+}
+
+function getAppShellApi(): AppShellApi {
+  return (window as unknown as { api?: AppShellApi }).api || {}
+}
+
+function getConnection(): NetworkConnectionLike | null {
+  if (typeof navigator === 'undefined') return null
+  const nav = navigator as NavigatorWithConnection
+  return nav.connection || nav.mozConnection || nav.webkitConnection || null
+}
+
+function isPageId(value: unknown): value is PageId {
+  return typeof value === 'string' && value in PAGE_IMPORTERS
+}
+
+function normalizePageId(value: unknown, fallback: AdminPageId = 'dashboard'): AdminPageId {
+  return isPageId(value) ? value : fallback
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || '')
+}
 
 /**
  * Frontend application shell.
@@ -22,37 +203,37 @@ import { withLoaderTimeout } from './utils/loaders.ts'
  */
 
 const PAGE_IMPORTERS = {
-  dashboard: () => import('./components/dashboard/Dashboard'),
-  products: () => import('./components/products/Products'),
-  pos: () => import('./components/pos/POS'),
-  sales: () => import('./components/sales/Sales'),
-  returns: () => import('./components/returns/Returns'),
-  inventory: () => import('./components/inventory/Inventory'),
-  branches: () => import('./components/branches/Branches'),
-  contacts: () => import('./components/contacts/Contacts'),
-  catalog: () => import('./components/catalog/CatalogPage'),
-  loyalty_points: () => import('./components/loyalty-points/LoyaltyPointsPage'),
-  users: () => import('./components/users/Users'),
-  audit_log: () => import('./components/utils-settings/AuditLog'),
-  receipt_settings: () => import('./components/receipt-settings/ReceiptSettings'),
-  backup: () => import('./components/utils-settings/Backup'),
-  settings: () => import('./components/utils-settings/Settings'),
-  files: () => import('./components/files/FilesPage'),
-  server: () => import('./components/server/ServerPage'),
-}
+  dashboard: asPageModule(() => import('./components/dashboard/Dashboard')),
+  products: asPageModule(() => import('./components/products/Products.jsx')),
+  pos: asPageModule(() => import('./components/pos/POS.jsx')),
+  sales: asPageModule(() => import('./components/sales/Sales')),
+  returns: asPageModule(() => import('./components/returns/Returns')),
+  inventory: asPageModule(() => import('./components/inventory/Inventory.jsx')),
+  branches: asPageModule(() => import('./components/branches/Branches')),
+  contacts: asPageModule(() => import('./components/contacts/Contacts')),
+  catalog: asPageModule(() => import('./components/catalog/CatalogPage.jsx')),
+  loyalty_points: asPageModule(() => import('./components/loyalty-points/LoyaltyPointsPage')),
+  users: asPageModule(() => import('./components/users/Users')),
+  audit_log: asPageModule(() => import('./components/utils-settings/AuditLog')),
+  receipt_settings: asPageModule(() => import('./components/receipt-settings/ReceiptSettings')),
+  backup: asPageModule(() => import('./components/utils-settings/Backup')),
+  settings: asPageModule(() => import('./components/utils-settings/Settings')),
+  files: asPageModule(() => import('./components/files/FilesPage')),
+  server: asPageModule(() => import('./components/server/ServerPage')),
+} satisfies Record<PageId, ChunkImporter>
 
 const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
 
 // Keep route chunks cold until the user asks for them. Background dynamic
 // imports were evaluating large bundles during real clicks, which showed up as
 // very high INP on Backup, Contacts, and mobile section changes.
-const WARMUP_PAGE_IDS = [
+const WARMUP_PAGE_IDS: readonly PageId[] = [
   'products',
   'pos',
   'inventory',
-]
+] satisfies PageId[]
 
-const ADMIN_PAGE_SEQUENCE = [
+const ADMIN_PAGE_SEQUENCE: readonly PageId[] = [
   'sales',
   'returns',
   'contacts',
@@ -63,10 +244,10 @@ const ADMIN_PAGE_SEQUENCE = [
   'files',
   'server',
   'backup',
-]
+] satisfies AdminPageId[]
 
 const PAGE_ENTRY_WARMUP_AHEAD_COUNT = 1
-const NARROW_PAGE_ENTRY_WARMUP_IDS = new Set([
+const NARROW_PAGE_ENTRY_WARMUP_IDS: ReadonlySet<PageId> = new Set([
   'contacts',
   'users',
   'audit_log',
@@ -75,9 +256,9 @@ const NARROW_PAGE_ENTRY_WARMUP_IDS = new Set([
   'files',
   'server',
   'backup',
-])
+] satisfies PageId[])
 
-const DELAYED_CHUNK_WARMUP_PAGE_IDS = new Set([
+const DELAYED_CHUNK_WARMUP_PAGE_IDS: ReadonlySet<PageId> = new Set([
   'contacts',
   'users',
   'audit_log',
@@ -86,7 +267,7 @@ const DELAYED_CHUNK_WARMUP_PAGE_IDS = new Set([
   'files',
   'server',
   'backup',
-])
+] satisfies PageId[])
 
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
@@ -97,12 +278,12 @@ const PAGE_LOADER_STALL_WARNING_MS = 15000
 const CHUNK_RECOVERY_QUERY_KEYS = ['__bos_reload', '__bos_build', '__bos_reason', '__bos_server_build']
 const FRONTEND_BUILD_HASH = typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev'
 
-function getChunkErrorMessage(error) {
+function getChunkErrorMessage(error: unknown): string {
   // Normalize unknown thrown values before chunk retry logic inspects them.
-  return String(error?.message || error || '')
+  return getErrorMessage(error)
 }
 
-function isChunkLoadError(message) {
+function isChunkLoadError(message: string): boolean {
   // Covers the error strings emitted by Vite/Chrome when a lazy bundle is
   // temporarily unavailable or a previous build asset was evicted.
   return /Loading chunk/i.test(message)
@@ -111,13 +292,13 @@ function isChunkLoadError(message) {
     || /Importing a module script failed/i.test(message)
 }
 
-function createChunkTimeoutError(key, timeoutMs) {
+function createChunkTimeoutError(key: string, timeoutMs: number): Error {
   const error = new Error(`Page bundle timed out after ${Math.round(timeoutMs / 1000)}s (${key})`)
   error.name = 'ChunkTimeoutError'
   return error
 }
 
-function isRetryableImportError(error) {
+function isRetryableImportError(error: unknown): boolean {
   const message = getChunkErrorMessage(error)
   return isChunkLoadError(message)
     || /timed out/i.test(message)
@@ -125,15 +306,15 @@ function isRetryableImportError(error) {
     || /aborted/i.test(message)
 }
 
-async function importWithTimeout(importer, key, timeoutMs = CHUNK_IMPORT_TIMEOUT_MS) {
-  let timer = null
+async function importWithTimeout(importer: ChunkImporter, key: string, timeoutMs = CHUNK_IMPORT_TIMEOUT_MS): Promise<{ default: ComponentType<Record<string, unknown>> }> {
+  let timer: number | null = null
   try {
     return await Promise.race([
       importer(),
       new Promise((_, reject) => {
         timer = window.setTimeout(() => reject(createChunkTimeoutError(key, timeoutMs)), timeoutMs)
       }),
-    ])
+    ]) as { default: ComponentType<Record<string, unknown>> }
   } finally {
     if (timer != null) {
       window.clearTimeout(timer)
@@ -141,14 +322,14 @@ async function importWithTimeout(importer, key, timeoutMs = CHUNK_IMPORT_TIMEOUT
   }
 }
 
-function clearRetryMarker(marker) {
+function clearRetryMarker(marker: string): void {
   // Reset the retry state after either a successful import or a final failure.
   try {
     sessionStorage.removeItem(marker)
   } catch (_) {}
 }
 
-function buildChunkRecoveryUrl(reason = 'chunk-reload') {
+function buildChunkRecoveryUrl(reason = 'chunk-reload'): string {
   if (typeof window === 'undefined') return ''
   const url = new URL(window.location.href)
   url.searchParams.set('__bos_reload', String(Date.now()))
@@ -159,7 +340,7 @@ function buildChunkRecoveryUrl(reason = 'chunk-reload') {
   return url.toString()
 }
 
-async function deleteStaleShellCaches(cacheKeys) {
+async function deleteStaleShellCaches(cacheKeys: string[]): Promise<void> {
   const keys = Array.isArray(cacheKeys) ? cacheKeys : []
   let nextIndex = 0
   const workers = Array.from({ length: Math.min(STALE_SHELL_CACHE_DELETE_CONCURRENCY, keys.length) }, async () => {
@@ -182,7 +363,7 @@ async function clearStaleShellCaches() {
   } catch (_) {}
 }
 
-function triggerChunkRecoveryReload(marker) {
+function triggerChunkRecoveryReload(marker: string): boolean {
   try {
     sessionStorage.setItem(marker, '1')
   } catch (_) {}
@@ -199,13 +380,13 @@ function triggerChunkRecoveryReload(marker) {
   return true
 }
 
-function createChunkReloadStallError(key) {
+function createChunkReloadStallError(key: string): Error {
   const error = new Error(`Loading chunk recovery reload did not complete (${key}). Please tap Reload page.`)
   error.name = 'ChunkReloadStallError'
   return error
 }
 
-function shouldRetryChunk(marker) {
+function shouldRetryChunk(marker: string): boolean {
   // One reload per page key avoids infinite loops while still healing most
   // stale-index / evicted-chunk deployment states.
   try {
@@ -215,7 +396,7 @@ function shouldRetryChunk(marker) {
   }
 }
 
-function lazyWithRetry(importer, key) {
+function lazyWithRetry(importer: ChunkImporter, key: string) {
   // Wrap React.lazy so stale chunks can trigger one hard reload and pick up the
   // newest HTML/chunk graph after deployments or proxy cache races.
   return lazy(async () => {
@@ -267,10 +448,10 @@ const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
 const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
 const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
 const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
-const NotificationCenter = lazyWithRetry(() => import('./components/shared/NotificationCenter'), 'notification-center')
-const BackgroundImportTracker = lazyWithRetry(() => import('./components/shared/BackgroundImportTracker'), 'background-import-tracker')
-const WriteConflictModal = lazyWithRetry(() => import('./components/shared/WriteConflictModal'), 'write-conflict-modal')
-const PAGE_COMPONENTS = {
+const NotificationCenter = lazyWithRetry(asPageModule(() => import('./components/shared/NotificationCenter')), 'notification-center')
+const BackgroundImportTracker = lazyWithRetry(asPageModule(() => import('./components/shared/BackgroundImportTracker')), 'background-import-tracker')
+const WriteConflictModal = lazyWithRetry(asPageModule(() => import('./components/shared/WriteConflictModal')), 'write-conflict-modal')
+const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   dashboard: Dashboard,
   products: Products,
   pos: POS,
@@ -290,47 +471,48 @@ const PAGE_COMPONENTS = {
   loyalty_points: LoyaltyPointsPage,
 }
 
-function getWarmupImporters() {
+function getWarmupImporters(): WarmupLoader[] {
   // Keep the initial warmup focused on the primary day-to-day flow. The admin
   // stack warms separately when a user actually enters it.
-  return WARMUP_PAGE_IDS
-    .map((pageId) => {
-      const importer = PAGE_IMPORTERS[pageId]
-      if (!importer) return null
-      return () => importWithTimeout(importer, pageId).catch(() => null)
-    })
-    .filter(Boolean)
+  const loaders: WarmupLoader[] = []
+  for (const pageId of WARMUP_PAGE_IDS) {
+    const importer = PAGE_IMPORTERS[pageId]
+    loaders.push(() => importWithTimeout(importer, pageId).catch(() => null))
+  }
+  return loaders
 }
 
-function shouldSkipBackgroundWarmup() {
+function shouldSkipBackgroundWarmup(): boolean {
   if (typeof window === 'undefined') return true
   if (document.visibilityState === 'hidden') return true
-  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+  const connection = getConnection()
   if (!connection) return false
   if (connection.saveData) return true
   return ['slow-2g', '2g', '3g'].includes(String(connection.effectiveType || '').toLowerCase())
 }
 
-function shouldSkipIntentWarmup() {
+function shouldSkipIntentWarmup(): boolean {
   if (typeof window === 'undefined') return true
   if (document.visibilityState === 'hidden') return true
-  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+  const connection = getConnection()
   if (!connection) return false
   if (connection.saveData) return true
   return ['slow-2g', '2g'].includes(String(connection.effectiveType || '').toLowerCase())
 }
 
-function getIntentPageId(event) {
-  return String(event?.detail?.pageId || '').trim()
+function getIntentPageId(event: Event): PageId | '' {
+  const detail = event instanceof CustomEvent ? event.detail as { pageId?: unknown } : null
+  const pageId = String(detail?.pageId || '').trim()
+  return isPageId(pageId) ? pageId : ''
 }
 
-function scheduleIntentChunkLoad(pageId, onDone) {
+function scheduleIntentChunkLoad(pageId: PageId, onDone: (pageId: PageId) => void): CancelWarmup | null {
   const importer = PAGE_IMPORTERS[pageId]
   if (!importer) return null
 
   let cancelled = false
-  let idleId = null
-  let timerId = null
+  let idleId: number | null = null
+  let timerId: number | null = null
   const run = () => {
     if (cancelled || shouldSkipIntentWarmup()) return
     importWithTimeout(importer, pageId, INTENT_CHUNK_IMPORT_TIMEOUT_MS)
@@ -341,7 +523,7 @@ function scheduleIntentChunkLoad(pageId, onDone) {
   }
 
   timerId = window.setTimeout(() => {
-    if ('requestIdleCallback' in window) {
+    if (typeof window.requestIdleCallback === 'function') {
       idleId = window.requestIdleCallback(run, { timeout: 600 })
     } else {
       run()
@@ -351,11 +533,11 @@ function scheduleIntentChunkLoad(pageId, onDone) {
   return () => {
     cancelled = true
     if (timerId != null) window.clearTimeout(timerId)
-    if (idleId != null && 'cancelIdleCallback' in window) window.cancelIdleCallback(idleId)
+    if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
   }
 }
 
-function getDataWarmupLoaders(canAccessPage) {
+function getDataWarmupLoaders(_canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
   // Data warmups used to prefetch many page reads in the background. In
   // practice that created first-visit contention: the real page load would
   // inherit a half-stuck warmup request and sit on "Loading..." until the
@@ -364,12 +546,12 @@ function getDataWarmupLoaders(canAccessPage) {
   return []
 }
 
-function createWarmupLoader(label, fn) {
+function createWarmupLoader(label: string, fn?: () => Promise<unknown>): WarmupLoader | null {
   if (typeof fn !== 'function') return null
   return () => withLoaderTimeout(() => fn(), label, 9000).catch(() => null)
 }
 
-function runWarmupBatches(loaders, batchSize = 3) {
+function runWarmupBatches(loaders: WarmupLoader[], batchSize = 3): Promise<void> {
   return (async () => {
     for (let index = 0; index < loaders.length; index += batchSize) {
       const batch = loaders.slice(index, index + batchSize)
@@ -378,14 +560,14 @@ function runWarmupBatches(loaders, batchSize = 3) {
   })()
 }
 
-function getPageEntryWarmupLoaders(pageId, canAccessPage) {
+function getPageEntryWarmupLoaders(_pageId: PageId, _canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
   // See getDataWarmupLoaders(): route-entry data warmups were duplicating the
   // fetches that the pages themselves already perform, which made first visits
   // less reliable instead of more reliable.
   return []
 }
 
-function useMountedPages(activePage) {
+function useMountedPages(activePage: AdminPageId): AdminPageId[] {
   // Keep only a bounded set of mounted screens alive to preserve local state
   // without letting the app accumulate every page forever.
   const [shellProfile, setShellProfile] = useState(() => ({
@@ -394,7 +576,7 @@ function useMountedPages(activePage) {
       ? !!window.matchMedia('(pointer: coarse)').matches
       : false,
   }))
-  const [mountedPages, setMountedPages] = useState(() => [activePage])
+  const [mountedPages, setMountedPages] = useState<AdminPageId[]>(() => [activePage])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -421,7 +603,7 @@ function useMountedPages(activePage) {
       maxPages: MAX_MOUNTED_PAGES,
     })
     setMountedPages((previousPages) => {
-      return updateMountedPages(previousPages, activePage, pageLimit)
+      return updateMountedPages(previousPages, activePage, pageLimit) as AdminPageId[]
     })
   }, [activePage, shellProfile.coarsePointer, shellProfile.viewportWidth])
 
@@ -430,44 +612,46 @@ function useMountedPages(activePage) {
 
 function useSyncErrorBanner() {
   // Central listener for sync write/read failures that should surface globally.
-  const [syncError, setSyncError] = useState(null)
-  const [transientOutage, setTransientOutage] = useState(null)
-  const [pendingSync, setPendingSync] = useState(null)
-  const [vaultLocked, setVaultLocked] = useState(null)
-  const [appUpdate, setAppUpdate] = useState(null)
-  const [conflictsNeedReview, setConflictsNeedReview] = useState(null)
+  const [syncError, setSyncError] = useState<SyncProblemDetail | null>(null)
+  const [transientOutage, setTransientOutage] = useState<SyncProblemDetail | null>(null)
+  const [pendingSync, setPendingSync] = useState<PendingSyncState | null>(null)
+  const [vaultLocked, setVaultLocked] = useState<SyncProblemDetail | null>(null)
+  const [appUpdate, setAppUpdate] = useState<SyncProblemDetail | null>(null)
+  const [conflictsNeedReview, setConflictsNeedReview] = useState<WriteConflictDetail | null>(null)
 
   useEffect(() => {
     const refreshPendingSync = () => {
-      window.api?.getPendingSyncState?.()
+      getAppShellApi().getPendingSyncState?.()
         .then((state) => setPendingSync(state || null))
         .catch(() => {})
     }
-    const onSyncError = (event) => {
-      if (event?.detail?.transient) return
-      setSyncError(event.detail)
+    const onSyncError = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as SyncProblemDetail : null
+      if (detail?.transient) return
+      setSyncError(detail)
       refreshPendingSync()
     }
-    const onTransientOutage = (event) => {
-      const detail = event?.detail || {}
+    const onTransientOutage = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as SyncProblemDetail : {}
       if (detail.active === false) {
         setTransientOutage(null)
         return
       }
       setTransientOutage(detail)
     }
-    const onSyncRecovered = (event) => {
-      if (event?.type === 'sync:reconnected' || event?.detail?.connected) {
+    const onSyncRecovered = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as SyncProblemDetail : null
+      if (event.type === 'sync:reconnected' || detail?.connected) {
         setSyncError(null)
         setTransientOutage(null)
         refreshPendingSync()
       }
     }
     const onQueueChanged = () => refreshPendingSync()
-    const onVaultLocked = (event) => setVaultLocked(event?.detail || { reason: 'locked', ts: Date.now() })
-    const onAppUpdate = (event) => setAppUpdate(event?.detail || { message: 'New version ready', ts: Date.now() })
-    const onConflictReview = (event) => {
-      setConflictsNeedReview(event?.detail || { message: 'Conflicts need review', ts: Date.now() })
+    const onVaultLocked = (event: Event) => setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() })
+    const onAppUpdate = (event: Event) => setAppUpdate(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { message: 'New version ready', ts: Date.now() })
+    const onConflictReview = (event: Event) => {
+      setConflictsNeedReview(event instanceof CustomEvent ? event.detail as WriteConflictDetail : { message: 'Conflicts need review', ts: Date.now() })
       refreshPendingSync()
     }
     window.addEventListener('sync:error', onSyncError)
@@ -545,16 +729,16 @@ function useVisibilityRecovery() {
   }, [])
 }
 
-function useChunkWarmup(user, activePageId) {
+function useChunkWarmup(user: AppUser | null, activePageId: AdminPageId): void {
   // Only warm chunks after a user exists so public routes stay lightweight.
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
     if (shouldSkipBackgroundWarmup()) return undefined
 
     let cancelled = false
-    let idleId = null
-    let timeoutId = null
-    let followupId = null
+    let idleId: number | null = null
+    let timeoutId: number | null = null
+    let followupId: number | null = null
     let started = false
     const importers = getWarmupImporters()
 
@@ -569,7 +753,7 @@ function useChunkWarmup(user, activePageId) {
     const shouldDelayWarmup = DELAYED_CHUNK_WARMUP_PAGE_IDS.has(activePageId)
     timeoutId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 6000 : 4500) : (isSmallOrTouch ? 9000 : 6500))
 
-    if (!shouldDelayWarmup && 'requestIdleCallback' in window) {
+    if (!shouldDelayWarmup && typeof window.requestIdleCallback === 'function') {
       idleId = window.requestIdleCallback(runWarmup, { timeout: isSmallOrTouch ? 12000 : 8500 })
     } else {
       followupId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 7000 : 5500) : (isSmallOrTouch ? 11000 : 8000))
@@ -577,7 +761,7 @@ function useChunkWarmup(user, activePageId) {
 
     return () => {
       cancelled = true
-      if (idleId != null && 'cancelIdleCallback' in window) {
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
         window.cancelIdleCallback(idleId)
       }
       if (timeoutId != null) {
@@ -590,14 +774,14 @@ function useChunkWarmup(user, activePageId) {
   }, [activePageId, user])
 }
 
-function useIntentChunkWarmup(user, activePageId, canAccessPage) {
+function useIntentChunkWarmup(user: AppUser | null, activePageId: AdminPageId, canAccessPage: (pageId: string) => boolean): void {
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
 
-    const warmedPageIds = new Set()
-    let cancelCurrentWarmup = null
+    const warmedPageIds = new Set<PageId>()
+    let cancelCurrentWarmup: CancelWarmup | null = null
 
-    const warmIntentPage = (event) => {
+    const warmIntentPage = (event: Event) => {
       const pageId = getIntentPageId(event)
       if (!pageId || pageId === activePageId || warmedPageIds.has(pageId)) return
       if (!canAccessPage(pageId) || shouldSkipIntentWarmup()) return
@@ -617,14 +801,14 @@ function useIntentChunkWarmup(user, activePageId, canAccessPage) {
   }, [activePageId, canAccessPage, user])
 }
 
-function useDataWarmup(user, canAccessPage) {
+function useDataWarmup(user: AppUser | null, canAccessPage: (pageId: string) => boolean): void {
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
 
     let cancelled = false
-    let idleId = null
-    let timeoutId = null
-    let followupId = null
+    let idleId: number | null = null
+    let timeoutId: number | null = null
+    let followupId: number | null = null
     let started = false
     const loaders = getDataWarmupLoaders(canAccessPage)
 
@@ -636,7 +820,7 @@ function useDataWarmup(user, canAccessPage) {
 
     timeoutId = window.setTimeout(runWarmup, 1200)
 
-    if ('requestIdleCallback' in window) {
+    if (typeof window.requestIdleCallback === 'function') {
       idleId = window.requestIdleCallback(runWarmup, { timeout: 2800 })
     } else {
       followupId = window.setTimeout(runWarmup, 2400)
@@ -644,7 +828,7 @@ function useDataWarmup(user, canAccessPage) {
 
     return () => {
       cancelled = true
-      if (idleId != null && 'cancelIdleCallback' in window) {
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
         window.cancelIdleCallback(idleId)
       }
       if (timeoutId != null) window.clearTimeout(timeoutId)
@@ -653,7 +837,7 @@ function useDataWarmup(user, canAccessPage) {
   }, [canAccessPage, user])
 }
 
-function usePageEntryWarmup(user, activePageId, canAccessPage) {
+function usePageEntryWarmup(user: AppUser | null, activePageId: AdminPageId, canAccessPage: (pageId: string) => boolean): void {
   // When the user enters the later admin stack, narrow the warmup only for the
   // heavier late-stack pages. Warming the whole remaining admin sequence was
   // pulling a lot of unrelated route code into the same first visit on pages
@@ -669,20 +853,17 @@ function usePageEntryWarmup(user, activePageId, canAccessPage) {
     }
 
     let cancelled = false
-    let idleId = null
-    let timerId = null
+    let idleId: number | null = null
+    let timerId: number | null = null
     const currentIndex = ADMIN_PAGE_SEQUENCE.indexOf(activePageId)
     const shouldNarrowWarmup = NARROW_PAGE_ENTRY_WARMUP_IDS.has(activePageId)
     const upcomingPageIds = shouldNarrowWarmup
       ? ADMIN_PAGE_SEQUENCE.slice(currentIndex + 1, currentIndex + 1 + PAGE_ENTRY_WARMUP_AHEAD_COUNT)
       : ADMIN_PAGE_SEQUENCE.slice(currentIndex + 1)
-    const importerLoaders = upcomingPageIds
-      .map((pageId) => {
-        const importer = PAGE_IMPORTERS[pageId]
-        if (!importer) return null
-        return () => importWithTimeout(importer, pageId).catch(() => null)
-      })
-      .filter(Boolean)
+    const importerLoaders: WarmupLoader[] = upcomingPageIds.map((pageId) => {
+      const importer = PAGE_IMPORTERS[pageId]
+      return () => importWithTimeout(importer, pageId).catch(() => null)
+    })
     const dataLoaders = upcomingPageIds.flatMap((pageId) => getPageEntryWarmupLoaders(pageId, canAccessPage))
 
     const run = async () => {
@@ -695,30 +876,30 @@ function usePageEntryWarmup(user, activePageId, canAccessPage) {
 
     if (shouldNarrowWarmup) {
       timerId = window.setTimeout(run, 3600)
-    } else if ('requestIdleCallback' in window) {
+    } else if (typeof window.requestIdleCallback === 'function') {
       idleId = window.requestIdleCallback(run, { timeout: 2500 })
     } else {
       timerId = window.setTimeout(run, 1800)
     }
     return () => {
       cancelled = true
-      if (idleId != null && 'cancelIdleCallback' in window) window.cancelIdleCallback(idleId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
       if (timerId != null) window.clearTimeout(timerId)
     }
   }, [activePageId, canAccessPage, user])
 }
 
-class PageErrorBoundary extends Component {
-  constructor(props) {
+class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBoundaryState> {
+  constructor(props: PageErrorBoundaryProps) {
     super(props)
     this.state = { error: null }
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: Error): PageErrorBoundaryState {
     return { error }
   }
 
-  componentDidCatch(error, info) {
+  componentDidCatch(error: Error, info: ErrorInfo): void {
     // Page-level crashes should be isolated to the current route, not the
     // entire shell, while still leaving a useful console breadcrumb.
     console.error(`[PageErrorBoundary] Page "${this.props.pageId}" crashed:`, error.message, info.componentStack)
@@ -761,7 +942,7 @@ class PageErrorBoundary extends Component {
   }
 }
 
-function Notification({ notification }) {
+function Notification({ notification }: NotificationProps) {
   // Toast notifications are rendered once here so feature pages only need to
   // enqueue messages through AppContext.
   if (!notification) return null
@@ -774,7 +955,7 @@ function Notification({ notification }) {
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
-function SyncErrorBanner({ error, onDismiss, onGoToServer }) {
+function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProps) {
   const { t } = useApp()
   if (!error) return null
   const blocked = String(error?.reason || '').startsWith('server_')
@@ -797,11 +978,12 @@ function SyncErrorBanner({ error, onDismiss, onGoToServer }) {
 }
 
 function GlobalScrollControls() {
-  const scrollTo = (direction) => {
+  const scrollTo = (direction: ScrollDirection) => {
     const target = getScrollTarget(window)
     const top = getScrollToPosition(target, direction)
-    if (typeof target?.scrollTo === 'function') {
-      target.scrollTo({ top, behavior: 'smooth' })
+    const scrollableTarget = target as { scrollTo?: (options: ScrollToOptions) => void }
+    if (typeof scrollableTarget?.scrollTo === 'function') {
+      scrollableTarget.scrollTo({ top, behavior: 'smooth' })
       return
     }
     if (typeof window !== 'undefined') {
@@ -833,8 +1015,11 @@ function GlobalScrollControls() {
   )
 }
 
-function formatSyncTimestamp(value) {
+function formatSyncTimestamp(value: unknown): string {
   if (!value) return ''
+  if (!(typeof value === 'string' || typeof value === 'number' || value instanceof Date)) {
+    return String(value)
+  }
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
   return date.toLocaleString([], {
@@ -845,7 +1030,7 @@ function formatSyncTimestamp(value) {
   })
 }
 
-function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, appUpdate, conflictsNeedReview, onUpdateNow, onDismissUpdate }) {
+function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, appUpdate, conflictsNeedReview, onUpdateNow, onDismissUpdate }: OfflineModeBannerProps) {
   const { t } = useApp()
   const total = Number(pendingSync?.total || 0)
   const [showRecovered, setShowRecovered] = useState(false)
@@ -982,7 +1167,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
                 type="button"
                 className="rounded-full border border-current px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={!ready}
-                onClick={() => window.api?.retryPendingSyncNow?.().catch(() => {})}
+                onClick={() => getAppShellApi().retryPendingSyncNow?.().catch(() => {})}
               >
                 {ready ? (t('sync_now') || 'Sync now') : (t('waiting_for_server') || 'Waiting for server')}
               </button>
@@ -1037,7 +1222,7 @@ function PageLoader() {
   )
 }
 
-function NotificationCenterFallback({ compact = false }) {
+function NotificationCenterFallback({ compact = false }: { compact?: boolean }) {
   return (
     <button
       type="button"
@@ -1051,7 +1236,7 @@ function NotificationCenterFallback({ compact = false }) {
   )
 }
 
-function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }) {
+function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }: PageSlotProps) {
   const PageComponent = PAGE_COMPONENTS[pageId] || Dashboard
   const isActive = pageId === activePageId
 
@@ -1152,8 +1337,8 @@ export default function App() {
 
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
-    const onQueued = (event) => {
-      const detail = event?.detail || {}
+    const onQueued = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as OfflineSaleNoticeDetail : {}
       const key = `${detail.client_request_id || ''}:${detail.ts || ''}`
       if (offlineNoticeRef.current.queued === key) return
       offlineNoticeRef.current.queued = key
@@ -1165,8 +1350,8 @@ export default function App() {
         .replace(/\s{2,}/g, ' ')
         .replace(/\s+\./g, '.'), 'warning', 7000)
     }
-    const onSynced = (event) => {
-      const detail = event?.detail || {}
+    const onSynced = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as OfflineSaleNoticeDetail : {}
       const key = `${detail.client_request_id || ''}:${detail.ts || ''}`
       if (offlineNoticeRef.current.synced === key) return
       offlineNoticeRef.current.synced = key
@@ -1201,7 +1386,7 @@ export default function App() {
 
   const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)
-  const requestedAdminPage = pathname === '/' ? 'dashboard' : getAdminPageFromPath(pathname)
+  const requestedAdminPage = pathname === '/' ? 'dashboard' : normalizePageId(getAdminPageFromPath(pathname), 'dashboard')
 
   useEffect(() => {
     if (!user || !requestedAdminPage || requestedAdminPage === page) return

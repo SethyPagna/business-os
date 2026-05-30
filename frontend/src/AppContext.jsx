@@ -598,7 +598,7 @@ export function AppProvider({ children, publicMode = false }) {
         return
       }
       console.error('[sync:error]', detail)
-      // The SyncErrorBanner in App.jsx picks this up via its own listener.
+      // The SyncErrorBanner in App.tsx picks this up via its own listener.
     }
     const onWriteBlocked = (e) => {
       setSyncServerUnreachable(true)

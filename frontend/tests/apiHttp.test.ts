@@ -278,7 +278,7 @@ await runTest('read-only 530 pollers use fallback data and backoff hooks', () =>
   const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
   const trackerSource = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
   const appContextSource = fs.readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
-  const appSource = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 
   assert.match(methodsSource, /isTransientGatewayError\(error\?\.status\)/)
   assert.match(methodsSource, /lastImportJobsByQuery/)

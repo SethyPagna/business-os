@@ -3366,7 +3366,7 @@ Cleanup checkpoint:
   frontend utility tests, JSX check, performance verifier, and production build
   pass.
 - Move 302 bounds stale app-shell cache deletion:
-  `frontend/src/App.jsx` now clears old `business-os-app-shell-*` and
+  `frontend/src/App.tsx` now clears old `business-os-app-shell-*` and
   `business-os-static-*` caches through `deleteStaleShellCaches()` with
   `STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2` during chunk recovery reloads.
   This avoids deleting every matching browser cache at once while the app is
@@ -5925,3 +5925,16 @@ Move 544 status:
   stock-alert inventory handoff, dashboard export flows, and dashboard source
   guard behavior unchanged while centralizing direct `window.api` dashboard
   reads behind `getDashboardApi()`.
+
+Move 545 status:
+- Move 545 converts the app shell to `frontend/src/App.tsx`. The typed
+  boundary now covers page ids, lazy route importers, app context access,
+  notification payloads, sync/offline event details, pending-sync state,
+  app-shell API calls, network-information reads, page-error boundary
+  props/state, page slot props, route warmup loaders, timer/idle handles,
+  scroll direction, and chunk recovery helpers. The move keeps route chunk
+  retry/reload recovery, bounded stale cache deletion, mounted-page retention,
+  navigation-intent warmup, offline sale notices, global sync banners, public
+  catalog routing, favicon shaping, and app-shell source guard behavior
+  unchanged while moving startup imports, focused tests, and performance
+  verification to the TSX shell.

@@ -20,7 +20,7 @@ const httpSource = fs.readFileSync(new URL('../src/api/http.ts', import.meta.url
 const localDbSource = fs.readFileSync(new URL('../src/api/localDb.ts', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const swSource = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
-const appSource = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
 const packageSource = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 

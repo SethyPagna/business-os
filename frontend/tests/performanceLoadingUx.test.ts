@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
@@ -54,7 +54,7 @@ const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', i
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 const apiMethods = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
 
-assert.match(app, /const WARMUP_PAGE_IDS = \[\s*'products',[\s\S]*'pos',[\s\S]*'inventory',[\s\S]*\]/, 'background chunk warmup should target the primary day-to-day pages only')
+assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\s*'products',[\s\S]*'pos',[\s\S]*'inventory',[\s\S]*\]/, 'background chunk warmup should target the primary day-to-day pages only')
 assert.match(app, /Page bundle is still loading/, 'page loader should explain stalled chunk loads')
 assert.match(app, /console\.warn\('\[PageLoader\]/, 'page loader should expose diagnostic breadcrumbs')
 assert.match(app, /const CHUNK_IMPORT_TIMEOUT_MS = 15000/, 'chunk timeout should allow slow mobile networks before showing stalled UI')

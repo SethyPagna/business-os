@@ -73,7 +73,7 @@ const inventoryImport = read(path.join(SRC_ROOT, 'components', 'inventory', 'Inv
 const salesImport = read(path.join(SRC_ROOT, 'components', 'sales', 'SalesImportModal.tsx'))
 const contactImport = read(path.join(SRC_ROOT, 'components', 'contacts', 'shared.tsx'))
 const catalogPage = read(path.join(SRC_ROOT, 'components', 'catalog', 'CatalogPage.jsx'))
-const appShell = read(path.join(SRC_ROOT, 'App.jsx'))
+const appShell = read(path.join(SRC_ROOT, 'App.tsx'))
 const sidebar = read(path.join(SRC_ROOT, 'components', 'navigation', 'Sidebar.tsx'))
 assert(fs.existsSync(path.join(SRC_ROOT, 'components', 'products', 'import', 'productImportWorker.ts')), 'Product import worker is missing.')
 assert(bulkImport.includes('new Worker(new URL'), 'Product import analysis must use a Vite module worker.')

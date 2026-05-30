@@ -69,7 +69,7 @@ runTest('page-entry warmup stays desktop-only to reduce mobile churn', () => {
 })
 
 runTest('app shell does not render floating page info help', () => {
-  const source = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /PageHelpButton/)
 })
 

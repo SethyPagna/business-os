@@ -1,6 +1,6 @@
 ﻿# File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 544 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 545 in this file.
 
 ## Goal
 
@@ -1280,7 +1280,7 @@ Decision rule:
 144. Convert app shell path/navigation helper to TypeScript. Done:
     The route classification, mounted-page limit, warmup, and notification
     helper moved to `frontend/src/app/appShellUtils.ts`. The temporary
-    app-shell compatibility wrapper has been retired after `App.jsx`,
+    app-shell compatibility wrapper has been retired after `App.tsx`,
     `AppContext.jsx`, startup routing, and focused app-shell tests moved to the
     TypeScript source. The compiler now includes `src/app/**/*.ts`.
 145. Convert portal catalog display helper to TypeScript. Done:
@@ -2583,7 +2583,7 @@ Decision rule:
     frontend utility tests, JSX check, performance verifier, and production
     build pass.
 302. Bound stale app-shell cache deletion. Done:
-    `frontend/src/App.jsx` now uses `deleteStaleShellCaches()` with
+    `frontend/src/App.tsx` now uses `deleteStaleShellCaches()` with
     `STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2` when chunk recovery clears old
     `business-os-app-shell-*` and `business-os-static-*` browser caches. This
     keeps recovery reload cleanup from issuing an unbounded cache deletion
@@ -4314,6 +4314,19 @@ Decision rule:
     dashboard reads behind `getDashboardApi()`. The current source extension
     count is `.js: 95`, `.jsx: 7`, `.mjs: 0`, `.cjs: 0`, `.ts: 268`,
     `.tsx: 100` outside generated/runtime folders.
+545. Convert the app shell to TSX. Done:
+    `frontend/src/App.tsx` now types page ids, lazy route importers, app
+    context access, notification payloads, sync/offline event details,
+    pending-sync state, app-shell API calls, network-information reads,
+    page-error boundary props/state, page slot props, route warmup loaders,
+    timer/idle handles, scroll direction, and chunk recovery helpers. The
+    conversion keeps route chunk retry/reload recovery, bounded stale cache
+    deletion, compact mounted-page retention, navigation-intent warmup,
+    offline sale notices, global sync banners, public catalog routing, favicon
+    shaping, and app-shell source checks intact while moving `index.tsx`,
+    focused tests, and performance verification to the TSX shell. The current
+    source extension count is `.js: 95`, `.jsx: 6`, `.mjs: 0`, `.cjs: 0`,
+    `.ts: 268`, `.tsx: 101` outside generated/runtime folders.
 
 ## Safety Gates
 

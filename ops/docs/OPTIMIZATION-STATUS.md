@@ -16,12 +16,12 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `84dc0e2e87e5f5d0`
+  `eb1887c5b4ad134b`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T02-58-54-887Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T03-19-10-774Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -108,6 +108,10 @@ Recent route-level win:
   detail rows, app/sync context access, range/granularity state, chart/top mode
   unions, KPI detail payloads, export dependency loading, and local dashboard
   API calls.
+- App shell is now `frontend/src/App.tsx` with typed page ids, lazy route
+  importers, AppContext access, notification payloads, sync/offline event
+  details, pending-sync state, route warmup loaders, page error boundaries,
+  scroll controls, and chunk recovery helpers.
 - browser API bootstrap is now `frontend/src/web-api.ts` with typed lazy method
   dispatch, typed offline vault rows, typed service-worker message handlers,
   typed timers, and an explicit background-sync registration boundary
