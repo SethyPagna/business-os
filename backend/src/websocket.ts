@@ -1,6 +1,6 @@
 'use strict'
 /**
- * websocket.js — WebSocket server setup and client management.
+ * websocket.ts - WebSocket server setup and client management.
  *
  * Exports `attachWss(httpServer)` which wires up the WebSocket server onto an
  * existing http.Server. The shared `wss_clients` Set is imported from helpers
@@ -9,7 +9,7 @@
  */
 
 const { WebSocketServer } = require('ws')
-const { wss_clients }     = require('./helpers')
+const { wss_clients } = require('./helpers')
 const { getSessionUser } = require('./sessionAuth')
 const { isAllowedWebSocketOrigin } = require('./serverUtils')
 
@@ -69,7 +69,7 @@ function attachWss(httpServer) {
         // Log ping/pong for debugging
         if (data.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong' }))
-          console.debug('[WS] received ping → pong')
+          console.debug('[WS] received ping -> pong')
         } else {
           console.debug('[WS] received message', data.type || '(unknown)')
         }

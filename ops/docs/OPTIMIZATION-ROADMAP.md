@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 578.
+- Latest completed implementation move in this roadmap: Move 579.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -6435,4 +6435,18 @@ Move 578 status:
   larger backend route/service conversion still waits for a compile/staging
   package lane. The current source extension count is
   `.js: 55`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 308`, `.tsx: 107` outside
+  generated/runtime folders.
+
+Move 579 status:
+- Move 579 converts `backend/src/websocket.ts` to a package-safe TypeScript
+  path. The shared `attachWss()` server hook, origin/session checks,
+  per-connection rate-limit counters, ping/pong response, and `wss_clients`
+  boundary remain unchanged while `backend/server.js` imports the explicit
+  `.ts` entrypoint. `backend/test/websocket.test.ts` now guards the exported
+  server hook and is part of backend `test:utils`. Focused WebSocket module
+  load, server utility, backend utility, schema audit, stale-path, and Linux
+  packaging proof passed. `pkg` continues to warn for direct `.ts` scripts, so
+  larger backend route/service conversion still waits for a compile/staging
+  package lane. The current source extension count is
+  `.js: 54`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 309`, `.tsx: 107` outside
   generated/runtime folders.

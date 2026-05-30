@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 578 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 579 in this file.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 ## Current Shape
 
 - Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 55`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 308`,
+  `.js: 54`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 309`,
   `.tsx: 107`.
 - Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
   backend/runtime/config/static-public code that still needs package-aware
@@ -4775,6 +4775,18 @@ Decision rule:
     conversions remain blocked on the future compile/staging lane. The
     current source extension count is `.js: 55`, `.jsx: 0`, `.mjs: 0`,
     `.cjs: 0`, `.ts: 308`, `.tsx: 107` outside generated/runtime folders.
+579. Convert backend WebSocket entrypoint to a package-safe TypeScript path.
+    Done: `backend/src/websocket.ts` keeps the shared `attachWss()` server hook,
+    origin/session checks, rate-limit counters, ping/pong behavior, and shared
+    `wss_clients` boundary unchanged while `backend/server.js` imports the
+    explicit `.ts` entrypoint. `backend/test/websocket.test.ts` now guards the
+    exported server hook and is wired into `backend` `test:utils`. Focused
+    WebSocket module load, server utility, backend utility, schema audit,
+    stale-path, and Linux packaging proof passed. Packaging still warns for
+    direct `.ts` entries in `pkg.scripts`, so larger backend route/service
+    conversions remain blocked on the future compile/staging lane. The
+    current source extension count is `.js: 54`, `.jsx: 0`, `.mjs: 0`,
+    `.cjs: 0`, `.ts: 309`, `.tsx: 107` outside generated/runtime folders.
 
 ## Safety Gates
 

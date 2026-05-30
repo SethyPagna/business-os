@@ -553,7 +553,7 @@ function bootstrapServer() {
   server.requestTimeout = 60 * 1000
   server.headersTimeout = 65 * 1000
   server.keepAliveTimeout = 15 * 1000
-  require('./src/websocket').attachWss(server)
+  require('./src/websocket.ts').attachWss(server)
 
   // Do not pin to IPv4 here. Cloudflare Tunnel/dashboard origins often use
   // localhost, which may resolve to ::1 first on Windows. Let Node bind the
