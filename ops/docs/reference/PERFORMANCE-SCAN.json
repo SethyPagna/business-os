@@ -3,7 +3,7 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 351,
   "distAssets": 84,
-  "totalSourceBytes": 6450021,
+  "totalSourceBytes": 6450020,
   "totalSourceLines": 146302,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
@@ -13,7 +13,7 @@
   "largestBuiltChunkBytes": 446639,
   "oversizedSourceFiles": [
     "backend/src/routes/inventory.ts",
-    "backend/src/routes/products.js",
+    "backend/src/routes/products.ts",
     "backend/src/routes/sales.ts",
     "backend/src/routes/system/index.ts",
     "backend/src/services/googleDriveSync/index.ts",
@@ -98,7 +98,7 @@
       "lines": 2144
     },
     {
-      "file": "backend/src/routes/products.js",
+      "file": "backend/src/routes/products.ts",
       "size": 101477,
       "lines": 2218
     },
@@ -124,7 +124,7 @@
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 70018,
+      "size": 70017,
       "lines": 1596
     },
     {
@@ -215,7 +215,7 @@
       "lines": 2218
     },
     {
-      "file": "backend/src/routes/products.js",
+      "file": "backend/src/routes/products.ts",
       "size": 101477,
       "lines": 2218
     },
@@ -251,7 +251,7 @@
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 70018,
+      "size": 70017,
       "lines": 1596
     },
     {

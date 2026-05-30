@@ -58,7 +58,7 @@ Code files documented: **468**
 | 46 | `backend/src/routes/notifications.ts` | 5 | 1 | 4 | 3 |
 | 47 | `backend/src/routes/organizations.ts` | 3 | 1 | 2 | 2 |
 | 48 | `backend/src/routes/portal.ts` | 13 | 1 | 12 | 2 |
-| 49 | `backend/src/routes/products.js` | 20 | 1 | 17 | 2 |
+| 49 | `backend/src/routes/products.ts` | 20 | 1 | 17 | 2 |
 | 50 | `backend/src/routes/returns.ts` | 7 | 1 | 6 | 1 |
 | 51 | `backend/src/routes/runtime.ts` | 9 | 1 | 8 | 2 |
 | 52 | `backend/src/routes/sales.ts` | 8 | 1 | 7 | 1 |
@@ -510,7 +510,7 @@ Code files documented: **468**
   - `./src/routes/notifications.ts`
   - `./src/routes/organizations.ts`
   - `./src/routes/portal.ts`
-  - `./src/routes/products`
+  - `./src/routes/products.ts`
   - `./src/routes/returns.ts`
   - `./src/routes/runtime.ts`
   - `./src/routes/sales.ts`
@@ -558,7 +558,7 @@ Code files documented: **468**
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/returns.ts`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.ts`
@@ -637,7 +637,7 @@ Code files documented: **468**
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/inventory.ts`
   - `backend/src/routes/notifications.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/sales.ts`
 
 ### 3.7 `backend/src/catalogTextIntegrity.ts`
@@ -650,7 +650,7 @@ Code files documented: **468**
 - Referenced by (7)
   - `backend/src/routes/categories.ts`
   - `backend/src/routes/inventory.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/units.ts`
@@ -677,7 +677,7 @@ Code files documented: **468**
   - `backend/src/postgresDatabase.ts`
   - `backend/src/routes/auth.ts`
   - `backend/src/routes/importJobs.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/sync.ts`
   - `backend/src/routes/system/index.ts`
   - `backend/src/runtimeCache.ts`
@@ -707,7 +707,7 @@ Code files documented: **468**
   - `backend/src/routes/contacts.ts`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/files.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/returns.ts`
   - `backend/src/routes/sales.ts`
   - `backend/src/routes/settings.ts`
@@ -751,7 +751,7 @@ Code files documented: **468**
   - `backend/src/routes/inventory.ts`
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/returns.ts`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.ts`
@@ -843,7 +843,7 @@ Code files documented: **468**
   - `backend/src/routes/files.ts`
   - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/system/index.ts`
   - `backend/src/routes/users.ts`
@@ -881,7 +881,7 @@ Code files documented: **468**
   - `backend/src/routes/importJobs.ts`
   - `backend/src/routes/inventory.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/returns.ts`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.ts`
@@ -901,7 +901,7 @@ Code files documented: **468**
   - none
 - Referenced by (5)
   - `backend/src/routes/inventory.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/returns.ts`
   - `backend/src/routes/sales.ts`
   - `backend/test/idempotency.test.ts`
@@ -940,7 +940,7 @@ Code files documented: **468**
 - Referenced by (4)
   - `backend/src/routes/inventory.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/test/initials.test.ts`
 
 ### 3.21 `backend/src/maintenanceLock.ts`
@@ -993,7 +993,7 @@ Code files documented: **468**
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/returns.ts`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/sales.ts`
@@ -1014,7 +1014,7 @@ Code files documented: **468**
   - `backend/src/importParsing.ts`
   - `backend/src/productDiscounts.ts`
   - `backend/src/routes/inventory.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/services/importJobs.js`
 
 ### 3.24 `backend/src/netSecurity.ts`
@@ -1026,7 +1026,7 @@ Code files documented: **468**
   - none
 - Referenced by (5)
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/services/aiGateway.ts`
   - `backend/src/services/importJobs.js`
   - `backend/test/netSecurity.test.ts`
@@ -1140,7 +1140,7 @@ Code files documented: **468**
 - Referenced by (6)
   - `backend/server.js`
   - `backend/src/routes/inventory.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/returns.ts`
   - `backend/src/routes/sales.ts`
   - `backend/src/services/importJobs.js`
@@ -1154,7 +1154,7 @@ Code files documented: **468**
   - `backend/src/money.ts`
 - Referenced by (3)
   - `backend/src/routes/inventory.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/services/importJobs.js`
 
 ### 3.33 `backend/src/productImportPolicies.ts`
@@ -1165,7 +1165,7 @@ Code files documented: **468**
 - Internal dependencies (1)
   - `backend/src/importParsing.ts`
 - Referenced by (3)
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/services/importJobs.js`
   - `backend/test/productImportPolicies.test.ts`
 
@@ -1493,7 +1493,7 @@ Code files documented: **468**
   - `backend/server.js`
   - `backend/test/routeContracts.test.ts`
 
-### 3.49 `backend/src/routes/products.js`
+### 3.49 `backend/src/routes/products.ts`
 
 - Declared exports: `module.exports`
 - Imports (20)
@@ -1810,7 +1810,7 @@ Code files documented: **468**
   - `backend/src/routes/branches.ts`
   - `backend/src/routes/customTables.ts`
   - `backend/src/routes/inventory.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/settings.ts`
   - `backend/test/schemaMetadata.test.ts`
 
@@ -2096,7 +2096,7 @@ Code files documented: **468**
   - `backend/src/routes/auth.ts`
   - `backend/src/routes/catalog.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/settings.ts`
   - `backend/src/uploadReferenceCleanup.ts`
   - `backend/test/settingsSnapshotObjectStorage.test.ts`
@@ -2744,7 +2744,7 @@ Code files documented: **468**
   - `../src/routes/notifications.ts`
   - `../src/routes/organizations.ts`
   - `../src/routes/portal.ts`
-  - `../src/routes/products`
+  - `../src/routes/products.ts`
   - `../src/routes/runtime.ts`
   - `../src/routes/settings.ts`
   - `../src/routes/system/index.ts`
@@ -2763,7 +2763,7 @@ Code files documented: **468**
   - `backend/src/routes/notifications.ts`
   - `backend/src/routes/organizations.ts`
   - `backend/src/routes/portal.ts`
-  - `backend/src/routes/products.js`
+  - `backend/src/routes/products.ts`
   - `backend/src/routes/runtime.ts`
   - `backend/src/routes/settings.ts`
   - `backend/src/routes/system/index.ts`

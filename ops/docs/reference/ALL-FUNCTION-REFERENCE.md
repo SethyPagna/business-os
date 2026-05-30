@@ -58,7 +58,7 @@ Code files scanned: **468**
 | 46 | `backend/src/routes/notifications.ts` | 27 |
 | 47 | `backend/src/routes/organizations.ts` | 0 |
 | 48 | `backend/src/routes/portal.ts` | 60 |
-| 49 | `backend/src/routes/products.js` | 64 |
+| 49 | `backend/src/routes/products.ts` | 64 |
 | 50 | `backend/src/routes/returns.ts` | 10 |
 | 51 | `backend/src/routes/runtime.ts` | 6 |
 | 52 | `backend/src/routes/sales.ts` | 24 |
@@ -1375,7 +1375,7 @@ Code files scanned: **468**
 | 59 | `applyPortalRateLimit` | function | 1006 |
 | 60 | `collectRecommendationCitations` | function | 1014 |
 
-### 3.49 `backend/src/routes/products.js`
+### 3.49 `backend/src/routes/products.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

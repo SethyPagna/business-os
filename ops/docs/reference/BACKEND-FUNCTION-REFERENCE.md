@@ -4,15 +4,14 @@ Auto-generated symbol and route inventory for backend files. Regenerate with `no
 
 ## 1. Coverage Summary
 
-Total files documented: **3**
+Total files documented: **2**
 
 ## 2. Symbol Count by File
 
 | No. | File | Symbols | Route handlers |
 |---:|---|---:|---:|
 | 1 | `backend/server.js` | 23 | 0 |
-| 2 | `backend/src/routes/products.js` | 64 | 12 |
-| 3 | `backend/src/services/importJobs.js` | 175 | 0 |
+| 2 | `backend/src/services/importJobs.js` | 175 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -44,93 +43,7 @@ Total files documented: **3**
 | 22 | `registerShutdownHandlers` | function | 494 |
 | 23 | `bootstrapServer` | function | 511 |
 
-### 3.2 `backend/src/routes/products.js`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `getActiveBranches` | function | 53 |
-| 2 | `settingsHasUpdatedAt` | function | 57 |
-| 3 | `getDefaultBranch` | function | 61 |
-| 4 | `getBranchById` | function | 70 |
-| 5 | `findBranchByName` | function | 77 |
-| 6 | `seedBranchRows` | function | 86 |
-| 7 | `recalcProductStock` | function | 93 |
-| 8 | `normalizeImageGallery` | function | 97 |
-| 9 | `syncProductImageGallery` | function | 104 |
-| 10 | `loadProductImageMap` | function | 123 |
-| 11 | `attachImageGallery` | function | 144 |
-| 12 | `findProductByClientRequestId` | function | 162 |
-| 13 | `assertUniqueProductFields` | function | 172 |
-| 14 | `normalizeProductIdentifier` | function | 220 |
-| 15 | `hasOwnField` | function | 225 |
-| 16 | `pickField` | function | 229 |
-| 17 | `ensureParentProductExists` | function | 233 |
-| 18 | `markParentProductAsGroup` | function | 243 |
-| 19 | `normalizeImportLookup` | function | 248 |
-| 20 | `normalizeLookup` | function | 252 |
-| 21 | `collectUniquePositiveIds` | function | 256 |
-| 22 | `collectNormalizedTokens` | function | 269 |
-| 23 | `collectBoundedValues` | function | 283 |
-| 24 | `collectSortedMapValues` | function | 292 |
-| 25 | `insertSortedValue` | function | 300 |
-| 26 | `normalizeImportFlagValue` | function | 308 |
-| 27 | `getProductImportDetailSignature` | function | 341 |
-| 28 | `chooseImportParentProduct` | function | 362 |
-| 29 | `compareImportParentProduct` | function | 370 |
-| 30 | `findImportProductWithSignature` | function | 383 |
-| 31 | `normalizeImportAction` | function | 391 |
-| 32 | `parseOptionalImportId` | function | 399 |
-| 33 | `discountInsertColumns` | function | 406 |
-| 34 | `discountValues` | function | 410 |
-| 35 | `normalizeExpiryFields` | function | 425 |
-| 36 | `normalizeBatchFields` | function | 436 |
-| 37 | `seedOpeningBatch` | function | 443 |
-| 38 | `normalizePositiveInt` | function | 458 |
-| 39 | `parseInclude` | function | 464 |
-| 40 | `splitSearchTerms` | function | 468 |
-| 41 | `getProductCatalogSnapshotVersion` | function | 472 |
-| 42 | `parseBrandOptionsSetting` | function | 485 |
-| 43 | `sanitizeProductLookupPayload` | function | 495 |
-| 44 | `buildLookupUsageEntries` | function | 508 |
-| 45 | `buildLookupUsageSummary` | function | 575 |
-| 46 | `appendProductSearchFilters` | function | 604 |
-| 47 | `getProductSearchMetadata` | function | 681 |
-| 48 | `distinctField` | const arrow | 686 |
-| 49 | `attachBranchStock` | function | 717 |
-| 50 | `expandProductFamilyRows` | function | 754 |
-| 51 | `bindList` | const arrow | 778 |
-| 52 | `normalizeLookup` | const arrow | 1510 |
-| 53 | `resolveImage` | const arrow | 1620 |
-| 54 | `ensureCategory` | const arrow | 1636 |
-| 55 | `ensureUnit` | const arrow | 1651 |
-| 56 | `ensureBrand` | const arrow | 1666 |
-| 57 | `ensureSupplier` | const arrow | 1679 |
-| 58 | `determineBranch` | const arrow | 1691 |
-| 59 | `handleBranch` | const arrow | 1710 |
-| 60 | `resetBatchStock` | const arrow | 1713 |
-| 61 | `isDirectImageRef` | const arrow | 1750 |
-| 62 | `normalizeDirectImageRef` | const arrow | 1761 |
-| 63 | `parseIncomingImageRefs` | const arrow | 1768 |
-| 64 | `loadCurrentGallery` | const arrow | 1804 |
-
-#### 3.2.1 Route Handlers
-
-| No. | Method | Path | Line |
-|---:|---|---|---:|
-| 1 | GET | `/stats` | 45 |
-| 2 | GET | `/search` | 823 |
-| 3 | GET | `/filters` | 905 |
-| 4 | GET | `/lookups/usage` | 915 |
-| 5 | POST | `/lookups/replace` | 923 |
-| 6 | GET | `/` | 986 |
-| 7 | POST | `/variant` | 1029 |
-| 8 | POST | `/` | 1109 |
-| 9 | PUT | `/:id` | 1192 |
-| 10 | DELETE | `/:id` | 1451 |
-| 11 | POST | `/upload-image` | 1487 |
-| 12 | POST | `/bulk-import` | 1505 |
-
-### 3.3 `backend/src/services/importJobs.js`
+### 3.2 `backend/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|

@@ -483,7 +483,7 @@ matching stay centralized instead of duplicating checkout logic inside
 | `backend/src/services/importJobs.js` | Large import pipeline with queue, CSV, image, and policy branches. | Import tests plus live import smoke. |
 | `frontend/src/components/catalog/CatalogPage.tsx` | Large mixed admin/public/editor surface. | Catalog helper tests plus public portal check. |
 | `frontend/src/api/methods.ts` | Large API method registry. | API contract/source tests and app bootstrap check. |
-| `backend/src/routes/products.js` and `backend/src/routes/inventory.ts` | Query-heavy route files. | Route contract tests, schema audit, product/inventory live checks. |
+| `backend/src/routes/products.ts` and `backend/src/routes/inventory.ts` | Query-heavy route files. | Route contract tests, schema audit, product/inventory live checks. |
 
 ## Duplicate Pattern Watchlist
 
@@ -512,7 +512,7 @@ matching stay centralized instead of duplicating checkout logic inside
   `backend/src/routes/portal.ts`; full catalog and paged search now share the
   same asset materialization and payload decoration helpers.
 - Move 176 removes the repeated active-product scan from image-only bulk import
-  in `backend/src/routes/products.js`; uploaded filenames now match through one
+  in `backend/src/routes/products.ts`; uploaded filenames now match through one
   prebuilt normalized-name map.
 - Move 177 removes repeated sale creation movement statement setup from
   `backend/src/routes/sales.ts`; sold item allocations now reuse the same

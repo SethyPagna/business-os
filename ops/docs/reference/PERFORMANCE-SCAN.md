@@ -25,7 +25,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/api/methods.ts` | 102.7 | 2349 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 102.5 | 1479 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 101.0 | 2144 |
-| `backend/src/routes/products.js` | 99.1 | 2218 |
+| `backend/src/routes/products.ts` | 99.1 | 2218 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 85.1 | 1846 |
 | `backend/src/routes/inventory.ts` | 83.8 | 1881 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 78.5 | 1732 |
@@ -53,7 +53,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/products/Products.tsx` | 2344 | 109.7 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 2304 | 115.1 |
 | `frontend/src/components/pos/POS.tsx` | 2218 | 117.4 |
-| `backend/src/routes/products.js` | 2218 | 99.1 |
+| `backend/src/routes/products.ts` | 2218 | 99.1 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2144 | 101.0 |
 | `backend/src/routes/inventory.ts` | 1881 | 83.8 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1846 | 85.1 |
@@ -909,7 +909,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   materialization, category usage sorting, clean brand sorting, and product
   import same-detail matching now use named direct-loop helpers. A callback
   scan now reports no `map()`, `filter()`, `forEach()`, `reduce()`, `find()`,
-  or `Array.from()` hits in `backend/src/routes/products.js`.
+  or `Array.from()` hits in `backend/src/routes/products.ts`.
 - Move 413 tightens inventory product family expansion. Family root ID
   collection and merged family-row sorting now use direct-loop helpers while
   preserving parent/variant expansion, de-duplication, and product ordering. A

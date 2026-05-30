@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T23:26:53.779Z",
+  "generatedAt": "2026-05-30T23:36:34.701Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      309
+      310
     ],
     [
       "React TSX",
@@ -40,10 +40,6 @@
       3
     ],
     [
-      "JavaScript",
-      2
-    ],
-    [
       "JSON",
       2
     ],
@@ -54,12 +50,16 @@
     [
       "CSS",
       1
+    ],
+    [
+      "JavaScript",
+      1
     ]
   ],
   "extensionCounts": [
     [
       ".ts",
-      309
+      310
     ],
     [
       ".tsx",
@@ -78,10 +78,6 @@
       3
     ],
     [
-      ".js",
-      2
-    ],
-    [
       ".json",
       2
     ],
@@ -91,6 +87,10 @@
     ],
     [
       ".css",
+      1
+    ],
+    [
+      ".js",
       1
     ]
   ],
@@ -1700,7 +1700,7 @@
       "covered": true
     },
     {
-      "target": "backend/src/routes/products.js",
+      "target": "backend/src/routes/products.ts",
       "optimization": "Image-only bulk import now builds one normalized product-name map before processing uploaded image filenames, replacing a full active-product scan for every image.",
       "rollback": "Remove productsByImageBaseName and return to allProducts.find inside the image loop; image matching behavior remains name-based.",
       "proof": [

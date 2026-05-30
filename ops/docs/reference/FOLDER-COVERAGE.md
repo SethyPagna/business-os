@@ -308,7 +308,7 @@ Total folders documented: **81**
 | 12 | `notifications.ts` | API route handler |
 | 13 | `organizations.ts` | API route handler |
 | 14 | `portal.ts` | API route handler |
-| 15 | `products.js` | API route handler |
+| 15 | `products.ts` | API route handler |
 | 16 | `README.md` | API route handler |
 | 17 | `returns.ts` | API route handler |
 | 18 | `runtime.ts` | API route handler |

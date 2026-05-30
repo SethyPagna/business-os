@@ -119,7 +119,7 @@ Largest tracked source/hotspot areas by file count:
   flows. Do not delete unless scanner replacement is implemented and verified.
 - The largest maintainable source modules remain `Inventory.tsx`,
   `importJobs.js`, `CatalogPage.tsx`, `Dashboard.tsx`, `Products.tsx`,
-  `products.js`, `POS.tsx`, and `inventory.ts`.
+  `products.ts`, `POS.tsx`, and `inventory.ts`.
 
 ## Repeat Loop
 
@@ -650,7 +650,7 @@ removing two parallel materialization blocks while preserving the public
 payload shape.
 
 Move 176 completes the next product route data-path slice in
-`backend/src/routes/products.js`. Image-only bulk import now builds a normalized
+`backend/src/routes/products.ts`. Image-only bulk import now builds a normalized
 active-product name map once, then matches each uploaded filename with a direct
 lookup. This removes the repeated all-product scan from the image loop while
 preserving the same filename-to-product name matching rule.

@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-30T23:26:54.183Z
+Generated: 2026-05-30T23:36:35.153Z
 
 ## Summary
 
@@ -14,16 +14,16 @@ Generated: 2026-05-30T23:26:54.183Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 350 |
+| .ts | 351 |
 | .tsx | 107 |
 | .md | 44 |
 | .bat | 16 |
 | .json | 14 |
 | .ps1 | 8 |
 | .sh | 3 |
-| .js | 2 |
 | .sql | 2 |
 | .css | 1 |
+| .js | 1 |
 
 ## Largest Areas
 
@@ -65,9 +65,9 @@ Generated: 2026-05-30T23:26:54.183Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 7984 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7095 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7116 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 6929 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5401 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5422 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.js | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
@@ -78,7 +78,7 @@ Generated: 2026-05-30T23:26:54.183Z
 | frontend/src/api/methods.ts | 2349 | frontend/api |
 | frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
-| backend/src/routes/products.js | 2218 | backend/routes |
+| backend/src/routes/products.ts | 2218 | backend/routes |
 | frontend/src/components/pos/POS.tsx | 2218 | frontend/components/pos |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
@@ -109,7 +109,7 @@ Generated: 2026-05-30T23:26:54.183Z
 | frontend/src/components/catalog/CatalogPage.tsx | 19 | frontend/components/catalog |
 | frontend/src/components/contacts/CustomersTab.tsx | 18 | frontend/components/contacts |
 | frontend/src/components/returns/Returns.tsx | 18 | frontend/components/returns |
-| backend/src/routes/products.js | 17 | backend/routes |
+| backend/src/routes/products.ts | 17 | backend/routes |
 | frontend/src/components/contacts/DeliveryTab.tsx | 17 | frontend/components/contacts |
 | frontend/src/components/contacts/SuppliersTab.tsx | 17 | frontend/components/contacts |
 | backend/test/routeContracts.test.ts | 15 | backend/test/routeContracts.test.ts |
