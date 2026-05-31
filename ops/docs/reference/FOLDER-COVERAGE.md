@@ -11,7 +11,7 @@ Total folders documented: **82**
 | No. | Folder | Purpose | Direct files | Direct subfolders |
 |---:|---|---|---:|---:|
 | 1 | `.` | Project root (run files, setup, packaging, top-level config) | 4 | 4 |
-| 2 | `backend` | Backend project root | 6 | 2 |
+| 2 | `backend` | Backend project root | 7 | 2 |
 | 3 | `backend/src` | Backend runtime core | 40 | 10 |
 | 4 | `backend/src/analytics` | Backend runtime core | 1 | 0 |
 | 5 | `backend/src/config` | Backend runtime core | 1 | 0 |
@@ -78,7 +78,7 @@ Total folders documented: **82**
 | 66 | `frontend/tests` | Project folder | 76 | 0 |
 | 67 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
 | 68 | `ops/scripts/architecture` | Project folder | 4 | 0 |
-| 69 | `ops/scripts/backend` | Project folder | 5 | 0 |
+| 69 | `ops/scripts/backend` | Project folder | 6 | 0 |
 | 70 | `ops/scripts/frontend` | Project folder | 4 | 0 |
 | 71 | `ops/scripts/lib` | Project folder | 2 | 0 |
 | 72 | `ops/scripts/powershell` | Project folder | 8 | 0 |
@@ -123,7 +123,7 @@ Total folders documented: **82**
 ### 3.2 Folder: `backend`
 
 - Purpose: Backend project root
-- Direct files: **6**
+- Direct files: **7**
 - Direct subfolders: **2**
 
 #### 3.2.1 Subfolders
@@ -143,6 +143,7 @@ Total folders documented: **82**
 | 4 | `package.json` | Configuration/data manifest |
 | 5 | `README.md` | Documentation |
 | 6 | `server.js` | Backend server entrypoint |
+| 7 | `server.ts` | Project source/support file |
 
 
 ### 3.3 Folder: `backend/src`
@@ -1499,7 +1500,7 @@ Total folders documented: **82**
 ### 3.69 Folder: `ops/scripts/backend`
 
 - Purpose: Project folder
-- Direct files: **5**
+- Direct files: **6**
 - Direct subfolders: **0**
 
 #### 3.69.2 Files
@@ -1507,10 +1508,11 @@ Total folders documented: **82**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `build-package-stage.ts` | Project source/support file |
-| 2 | `schema-audit.ts` | Project source/support file |
-| 3 | `schema-primary-key-preflight.ts` | Project source/support file |
-| 4 | `schema-primary-key-rollback.sql` | Project source/support file |
-| 5 | `verify-data-integrity.ts` | Project source/support file |
+| 2 | `build-server-entry.ts` | Project source/support file |
+| 3 | `schema-audit.ts` | Project source/support file |
+| 4 | `schema-primary-key-preflight.ts` | Project source/support file |
+| 5 | `schema-primary-key-rollback.sql` | Project source/support file |
+| 6 | `verify-data-integrity.ts` | Project source/support file |
 
 
 ### 3.70 Folder: `ops/scripts/frontend`

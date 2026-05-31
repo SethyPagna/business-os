@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 552,
+  "filesScanned": 553,
   "largeFiles": 74,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -115,6 +115,10 @@
       6
     ],
     [
+      "ops/scripts/backend",
+      6
+    ],
+    [
       "ops/scripts/runtime/audits",
       6
     ],
@@ -124,10 +128,6 @@
     ],
     [
       "frontend/api",
-      5
-    ],
-    [
-      "ops/scripts/backend",
       5
     ],
     [

@@ -10,7 +10,7 @@ Total files documented: **1**
 
 | No. | File | Symbols | Route handlers |
 |---:|---|---:|---:|
-| 1 | `backend/server.js` | 23 | 0 |
+| 1 | `backend/server.js` | 24 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -18,27 +18,28 @@ Total files documented: **1**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `listFrontendAssetFiles` | function | 94 |
-| 2 | `resolveFrontendAssetPath` | function | 104 |
-| 3 | `loadCompressionMiddleware` | function | 127 |
-| 4 | `applySecurityHeaders` | function | 136 |
-| 5 | `applyRequestPolicy` | function | 142 |
-| 6 | `applyCoreMiddleware` | function | 152 |
-| 7 | `normalizeUploadFileName` | function | 166 |
-| 8 | `getSafeActiveUploadPath` | function | 174 |
-| 9 | `findBackupUploadFallback` | function | 183 |
-| 10 | `inferUploadContentType` | function | 229 |
-| 11 | `serveLocalUpload` | function | 240 |
-| 12 | `getObjectStreamWithTimeout` | function | 257 |
-| 13 | `mountStaticAssets` | function | 271 |
-| 14 | `mountHealthRoute` | function | 336 |
-| 15 | `mountApiRoutes` | function | 365 |
-| 16 | `mountTransfersAlias` | function | 403 |
-| 17 | `mountSpaFallback` | function | 418 |
-| 18 | `mountErrorHandler` | function | 437 |
-| 19 | `getStartupBanner` | function | 451 |
-| 20 | `closeDatabase` | function | 476 |
-| 21 | `startDatabaseMaintenanceTimer` | function | 486 |
-| 22 | `registerShutdownHandlers` | function | 494 |
-| 23 | `bootstrapServer` | function | 511 |
+| 1 | `startRequestedWorkerRole` | function | 6 |
+| 2 | `listFrontendAssetFiles` | function | 69 |
+| 3 | `resolveFrontendAssetPath` | function | 80 |
+| 4 | `loadCompressionMiddleware` | function | 106 |
+| 5 | `applySecurityHeaders` | function | 115 |
+| 6 | `applyRequestPolicy` | function | 120 |
+| 7 | `applyCoreMiddleware` | function | 129 |
+| 8 | `normalizeUploadFileName` | function | 143 |
+| 9 | `getSafeActiveUploadPath` | function | 150 |
+| 10 | `findBackupUploadFallback` | function | 160 |
+| 11 | `inferUploadContentType` | function | 214 |
+| 12 | `serveLocalUpload` | function | 230 |
+| 13 | `getObjectStreamWithTimeout` | function | 247 |
+| 14 | `mountStaticAssets` | function | 262 |
+| 15 | `mountHealthRoute` | function | 340 |
+| 16 | `mountApiRoutes` | function | 368 |
+| 17 | `mountTransfersAlias` | function | 403 |
+| 18 | `mountSpaFallback` | function | 417 |
+| 19 | `mountErrorHandler` | function | 435 |
+| 20 | `getStartupBanner` | function | 448 |
+| 21 | `closeDatabase` | function | 471 |
+| 22 | `startDatabaseMaintenanceTimer` | function | 482 |
+| 23 | `registerShutdownHandlers` | function | 490 |
+| 24 | `bootstrapServer` | function | 504 |
 

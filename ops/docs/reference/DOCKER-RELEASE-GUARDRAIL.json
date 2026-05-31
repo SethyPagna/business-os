@@ -30,6 +30,10 @@
     }
   },
   "packageStageCoverage": {
+    "serverEntryScriptPresent": true,
+    "serverEntrySourceOfTruth": true,
+    "serverEntryBuildScript": true,
+    "linuxBuildRegeneratesServerEntry": true,
     "scriptPresent": true,
     "buildScriptUsesStage": true,
     "stageIgnored": true,

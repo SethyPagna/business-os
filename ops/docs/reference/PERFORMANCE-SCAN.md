@@ -30,7 +30,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/inventory.ts` | 83.8 | 1881 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 78.5 | 1732 |
 | `frontend/src/AppContext.tsx` | 73.5 | 1826 |
-| `ops/scripts/architecture/language-runtime-audit.ts` | 69.6 | 1629 |
+| `ops/scripts/architecture/language-runtime-audit.ts` | 70.0 | 1640 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 67.7 | 1311 |
 | `backend/src/routes/system/index.ts` | 65.3 | 1659 |
 | `backend/src/routes/sales.ts` | 64.6 | 1573 |
@@ -60,7 +60,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/AppContext.tsx` | 1826 | 73.5 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 1732 | 78.5 |
 | `backend/src/routes/system/index.ts` | 1659 | 65.3 |
-| `ops/scripts/architecture/language-runtime-audit.ts` | 1629 | 69.6 |
+| `ops/scripts/architecture/language-runtime-audit.ts` | 1640 | 70.0 |
 | `backend/src/routes/sales.ts` | 1573 | 64.6 |
 | `frontend/src/App.tsx` | 1572 | 60.4 |
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |

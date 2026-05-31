@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-31T00:12:02.992Z
+Generated: 2026-05-31T00:23:34.677Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 455
+- Files scanned: 456
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -22,7 +22,7 @@ Generated: 2026-05-31T00:12:02.992Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 316 |
+| TypeScript | 317 |
 | React TSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
@@ -89,6 +89,7 @@ Generated: 2026-05-31T00:12:02.992Z
 | `frontend/src/public-runtime/runtime-noise-guard.ts` | yes | `frontend/public/runtime-noise-guard.js` | yes | none | yes | `npm.cmd --prefix frontend run verify:public-runtime`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/public-runtime/theme-bootstrap.ts` | yes | `frontend/public/theme-bootstrap.js` | yes | none | yes | `npm.cmd --prefix frontend run verify:public-runtime`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/public-runtime/service-worker.ts` | yes | `frontend/public/sw.js` | yes | none | yes | `npm.cmd --prefix frontend run verify:public-runtime`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build` |
+| `backend/server.ts` | yes | `backend/server.js` | yes | none | yes | `npm.cmd --prefix backend run verify:server-entry`<br>`npm.cmd --prefix backend run test:utils`<br>`npm.cmd --prefix backend run build:linux` |
 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | yes | retired frontend/src/components/catalog/portalCatalogDisplay.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalCatalogDisplay.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalContentI18n.ts` | yes | retired frontend/src/components/catalog/portalContentI18n.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalContentI18n.test.ts`<br>`node frontend\tests\portalFaqVocabulary.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalEditorUtils.ts` | yes | retired frontend/src/components/catalog/portalEditorUtils.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalEditorUtils.test.ts`<br>`npm.cmd --prefix frontend run build` |

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-31T00:12:02.992Z",
+  "generatedAt": "2026-05-31T00:23:34.677Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 455,
+  "sourceFiles": 456,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      316
+      317
     ],
     [
       "React TSX",
@@ -55,7 +55,7 @@
   "extensionCounts": [
     [
       ".ts",
-      316
+      317
     ],
     [
       ".tsx",
@@ -573,6 +573,22 @@
         "npm.cmd --prefix frontend run verify:public-runtime",
         "npm.cmd --prefix frontend run test:utils",
         "npm.cmd --prefix frontend run build"
+      ],
+      "implementationExists": true,
+      "wrapperRequired": true,
+      "compatibilityWrapperExists": true,
+      "declarationSupportExists": true,
+      "covered": true
+    },
+    {
+      "implementation": "backend/server.ts",
+      "compatibilityWrapper": "backend/server.js",
+      "wrapperStatus": "generated backend runtime entry; exact filename is retained for run scripts and packaging",
+      "declarationSupport": "",
+      "proof": [
+        "npm.cmd --prefix backend run verify:server-entry",
+        "npm.cmd --prefix backend run test:utils",
+        "npm.cmd --prefix backend run build:linux"
       ],
       "implementationExists": true,
       "wrapperRequired": true,
