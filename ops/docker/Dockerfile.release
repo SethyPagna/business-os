@@ -5,6 +5,7 @@ ARG BUILD_COMMIT=dev
 WORKDIR /build/frontend
 COPY frontend/package*.json ./
 RUN npm ci --no-audit --loglevel=warn
+COPY ops/scripts/frontend/ /build/ops/scripts/frontend/
 COPY frontend/ ./
 RUN printf '%s\n' "$BUILD_COMMIT" > .build-commit
 RUN npm run build
@@ -16,15 +17,18 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 COPY backend/package*.json ./
-RUN npm ci --no-audit --loglevel=warn \
+RUN npm ci --omit=dev --no-audit --loglevel=warn \
   && npm install pg-native@3.7.0 --no-save --no-audit --loglevel=warn \
   && npm ls pg-native libpq
+COPY ops/scripts/backend/ /build/ops/scripts/backend/
+COPY --from=frontend-build /build/frontend/package.json /build/frontend/package.json
+COPY --from=frontend-build /build/frontend/node_modules/typescript /build/frontend/node_modules/typescript
 COPY backend/ ./
 COPY --from=frontend-build /build/frontend/dist ./frontend-dist
-ENV PKG_CACHE_PATH=/root/.pkg-cache
-RUN --mount=type=cache,target=/root/.pkg-cache npm run build:linux
+RUN npm run build:server-entry \
+  && node ../ops/scripts/backend/build-package-stage.ts
 
-FROM debian:bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 LABEL org.opencontainers.image.title="Business OS"
 LABEL org.opencontainers.image.description="Business OS Docker runtime"
 LABEL org.opencontainers.image.source="private"
@@ -35,24 +39,10 @@ RUN apt-get update \
   && useradd --system --create-home --home-dir /app --shell /usr/sbin/nologin businessos
 
 WORKDIR /app
-COPY --from=backend-build /build/dist-bin/business-os-server-linux /app/business-os-server
-COPY --from=backend-build /build/backend/node_modules/sharp /app/node_modules/sharp
-COPY --from=backend-build /build/backend/node_modules/@img /app/node_modules/@img
-COPY --from=backend-build /build/backend/node_modules/pg-native /app/node_modules/pg-native
-COPY --from=backend-build /build/backend/node_modules/libpq /app/node_modules/libpq
-COPY --from=backend-build /build/backend/node_modules/pg-types /app/node_modules/pg-types
-COPY --from=backend-build /build/backend/node_modules/@duckdb /app/node_modules/@duckdb
-COPY --from=backend-build /build/backend/node_modules/pg-int8 /app/node_modules/pg-int8
-COPY --from=backend-build /build/backend/node_modules/postgres-array /app/node_modules/postgres-array
-COPY --from=backend-build /build/backend/node_modules/postgres-bytea /app/node_modules/postgres-bytea
-COPY --from=backend-build /build/backend/node_modules/postgres-date /app/node_modules/postgres-date
-COPY --from=backend-build /build/backend/node_modules/postgres-interval /app/node_modules/postgres-interval
-COPY --from=backend-build /build/backend/node_modules/nan /app/node_modules/nan
-COPY --from=backend-build /build/backend/node_modules/bindings /app/node_modules/bindings
-COPY --from=backend-build /build/backend/node_modules/file-uri-to-path /app/node_modules/file-uri-to-path
+COPY --from=backend-build /build/backend/.pkg-stage/ /app/
+COPY --from=backend-build /build/backend/node_modules /app/node_modules
 RUN ln -s /app/node_modules/sharp /app/sharp \
   && ln -s /app/node_modules/@img /app/@img \
-  && chmod 0555 /app/business-os-server \
   && mkdir -p /runtime \
   && chown -R businessos:businessos /runtime /app
 
@@ -73,4 +63,4 @@ ENV NODE_ENV=production \
 
 USER businessos
 EXPOSE 4000
-ENTRYPOINT ["/usr/bin/tini", "--", "/app/business-os-server"]
+ENTRYPOINT ["/usr/bin/tini", "--", "node", "/app/server.js"]
