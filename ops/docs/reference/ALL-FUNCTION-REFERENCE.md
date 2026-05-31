@@ -427,7 +427,7 @@ Code files scanned: **477**
 | 415 | `frontend/vite.config.ts` | 5 |
 | 416 | `ops/scripts/architecture/generated-bulk-audit.ts` | 18 |
 | 417 | `ops/scripts/architecture/language-runtime-audit.ts` | 20 |
-| 418 | `ops/scripts/architecture/organization-audit.ts` | 15 |
+| 418 | `ops/scripts/architecture/organization-audit.ts` | 14 |
 | 419 | `ops/scripts/architecture/phase29-audit.ts` | 13 |
 | 420 | `ops/scripts/architecture/runtime-js-inventory.ts` | 6 |
 | 421 | `ops/scripts/backend/build-package-stage.ts` | 10 |
@@ -6256,21 +6256,20 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `walkFiles` | function | 23 |
-| 2 | `getArea` | function | 44 |
-| 3 | `countBy` | function | 75 |
-| 4 | `extractRelativeImports` | function | 84 |
-| 5 | `collectFileRecords` | function | 99 |
-| 6 | `nonEmptyLines` | function | 133 |
-| 7 | `extractWrapperTarget` | function | 137 |
-| 8 | `collectCompatibilityWrappers` | function | 150 |
-| 9 | `countOccurrences` | function | 173 |
-| 10 | `wrapperReferenceCandidates` | function | 184 |
-| 11 | `collectWrapperReferenceDetails` | function | 204 |
-| 12 | `renderReferenceFiles` | function | 231 |
-| 13 | `renderReport` | function | 239 |
-| 14 | `buildSummary` | function | 328 |
-| 15 | `main` | function | 356 |
+| 1 | `walkFiles` | function | 81 |
+| 2 | `getArea` | function | 103 |
+| 3 | `extractRelativeImports` | function | 143 |
+| 4 | `collectFileRecords` | function | 158 |
+| 5 | `nonEmptyLines` | function | 192 |
+| 6 | `extractWrapperTarget` | function | 196 |
+| 7 | `collectCompatibilityWrappers` | function | 209 |
+| 8 | `countOccurrences` | function | 232 |
+| 9 | `wrapperReferenceCandidates` | function | 243 |
+| 10 | `collectWrapperReferenceDetails` | function | 263 |
+| 11 | `renderReferenceFiles` | function | 290 |
+| 12 | `renderReport` | function | 298 |
+| 13 | `buildSummary` | function | 387 |
+| 14 | `main` | function | 421 |
 
 ### 3.419 `ops/scripts/architecture/phase29-audit.ts`
 
