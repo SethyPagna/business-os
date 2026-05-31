@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 641 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 642 in this file.
 
 ## Goal
 
@@ -5618,6 +5618,21 @@ Decision rule:
     Phase 8.4 live suite, public Cloudflare portal check, post-live hygiene,
     frontend utility suite, frontend production build, backend utility suite,
     and Phase 29 audit also passed.
+
+642. Record skipped all-pages controls with explicit audit reasons.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    includes skipped button candidates in the summary instead of dropping them
+    before reporting. Each skipped control records a reason, including mutating
+    or external actions, long data-row labels, empty accessible labels, and
+    low-value pagination/alphabet/icon controls. Safe non-destructive buttons
+    are still clicked and verified. This gives future sessions a clearer
+    coverage ledger: what was tested live, what was intentionally skipped, and
+    what needs seeded rollback tests before destructive interaction coverage.
+    Proof: focused dashboard audit passed with 142 control records and 0
+    findings; full exhaustive all-pages audit passed with 34 route/profile
+    checks, 909 control records, 668 tested controls, 241 skipped controls with
+    reasons, 68 screenshots, and 0 findings. Post-live hygiene and Phase 29
+    audit passed.
 
 ## Safety Gates
 

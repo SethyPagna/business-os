@@ -33,6 +33,13 @@ type ControlResult = {
   error?: string
 }
 
+type ButtonCandidate = {
+  index: number
+  label: string
+  skipped: boolean
+  reason?: string
+}
+
 type LayoutIssue = {
   type: string
   message: string
@@ -191,13 +198,13 @@ function textForLabel(value: unknown): string {
   return String(value || '').replace(/\s+/g, ' ').trim()
 }
 
-function shouldSkipButton(label: string): boolean {
+function buttonSkipReason(label: string): string {
   const value = textForLabel(label)
-  if (!value) return true
-  if (value.length > 60) return true
-  if (MUTATING_OR_NOISY_BUTTON_RE.test(value)) return true
-  if (LOW_VALUE_BUTTON_RE.test(value)) return true
-  return false
+  if (!value) return 'empty accessible label'
+  if (value.length > 60) return 'label too long for stable broad audit'
+  if (MUTATING_OR_NOISY_BUTTON_RE.test(value)) return 'mutating, noisy, file, print, or external action'
+  if (LOW_VALUE_BUTTON_RE.test(value)) return 'low-value pagination, alphabet, icon-only, or numeric control'
+  return ''
 }
 
 function expectedButtonNavigation(route: AuditRoute, label: string): { page: string; path: string } | null {
@@ -315,11 +322,11 @@ async function countVisible(locator: Locator): Promise<number> {
   return visible
 }
 
-async function activeButtonCandidates(root: Locator): Promise<Array<{ index: number; label: string }>> {
+async function activeButtonCandidates(root: Locator): Promise<ButtonCandidate[]> {
   const buttons = root.locator('button, [role="button"], [role="tab"]')
   const total = await buttons.count().catch(() => 0)
   const seen = new Set<string>()
-  const candidates: Array<{ index: number; label: string }> = []
+  const candidates: ButtonCandidate[] = []
   for (let index = 0; index < total; index += 1) {
     const button = buttons.nth(index)
     if (!(await button.isVisible().catch(() => false))) continue
@@ -331,11 +338,17 @@ async function activeButtonCandidates(root: Locator): Promise<Array<{ index: num
       || ''
     )).catch(() => '')
     const label = textForLabel(rawLabel)
-    if (shouldSkipButton(label)) continue
-    const key = label.toLowerCase()
+    const reason = buttonSkipReason(label)
+    const reportLabel = label || `button ${index + 1}`
+    const key = `${reportLabel.toLowerCase()}|${reason || 'clickable'}`
     if (seen.has(key)) continue
     seen.add(key)
-    candidates.push({ index, label })
+    candidates.push({
+      index,
+      label: reportLabel,
+      skipped: !!reason,
+      reason: reason || undefined,
+    })
   }
   return candidates
 }
@@ -344,7 +357,7 @@ async function clickButtonCandidate(
   page: Page,
   root: Locator,
   route: AuditRoute,
-  candidate: { index: number; label: string },
+  candidate: ButtonCandidate,
   storageState: BrowserStorageState | null,
 ): Promise<ControlResult> {
   const started = performance.now()
@@ -587,8 +600,21 @@ async function runRoute(page: Page, profile: AuditProfile, route: AuditRoute, st
   const controls: ControlResult[] = []
   controls.push(...await exerciseSearchInputs(root))
   controls.push(...await exerciseSelects(root))
-  const buttonCandidates = (await activeButtonCandidates(root)).slice(0, MAX_BUTTON_CLICKS_PER_ROUTE)
-  for (const candidate of buttonCandidates) {
+  const buttonCandidates = await activeButtonCandidates(root)
+  for (const candidate of buttonCandidates.filter((item) => item.skipped)) {
+    controls.push({
+      kind: 'button',
+      label: candidate.label,
+      ok: true,
+      skipped: true,
+      reason: candidate.reason || 'skipped by audit policy',
+      ms: 0,
+    })
+  }
+  const clickableButtonCandidates = buttonCandidates
+    .filter((item) => !item.skipped)
+    .slice(0, MAX_BUTTON_CLICKS_PER_ROUTE)
+  for (const candidate of clickableButtonCandidates) {
     controls.push(await clickButtonCandidate(page, root, route, candidate, storageState))
   }
   const layoutIssues = await collectLayoutIssues(page, route)

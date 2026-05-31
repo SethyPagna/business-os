@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 641.
+- Latest completed implementation move in this roadmap: Move 642.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7328,3 +7328,17 @@ Move 641 status:
   browser-action smoke, deep live audit, full Phase 8.4 live suite, public
   Cloudflare portal check, post-live hygiene, frontend utility suite, frontend
   production build, backend utility suite, and Phase 29 audit.
+
+Move 642 status:
+- Move 642 makes skipped all-pages controls visible in the Phase 8.4 audit
+  report instead of filtering them out before reporting. Button candidates now
+  carry a skip reason such as `mutating, noisy, file, print, or external
+  action`, `label too long for stable broad audit`, `empty accessible label`,
+  or `low-value pagination, alphabet, icon-only, or numeric control`.
+  Non-destructive buttons are still clicked and verified; skipped controls are
+  recorded as explicit `skipped` control results so the QA coverage ledger shows
+  both what was tested and what needs a dedicated seeded rollback test. Proof:
+  the focused dashboard audit passed with 142 control records and 0 findings;
+  the full exhaustive audit passed with 34 route/profile checks, 909 control
+  records, 668 tested controls, 241 skipped controls with reasons, 68
+  screenshots, and 0 findings. Post-live hygiene and Phase 29 audit passed.
