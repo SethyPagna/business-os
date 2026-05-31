@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 637.
+- Latest completed implementation move in this roadmap: Move 638.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7276,3 +7276,10 @@ Move 637 status:
   flows through one helper that preserves the existing behavior: warn by default
   and fail only when scale services are required. Direct scale-service
   verification passed with a Docker engine reachability warning.
+
+Move 638 status:
+- Move 638 strengthens the backend server-entry build helper with explicit
+  TypeScript shapes for the compiler module boundary, diagnostics, project-path
+  formatting, transpile output, write-if-changed behavior, and main entrypoint.
+  The generated `backend/server.js` contract remains unchanged. Direct
+  server-entry drift check and full Phase 29 audit passed.

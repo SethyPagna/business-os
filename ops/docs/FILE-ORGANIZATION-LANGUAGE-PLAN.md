@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 637 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 638 in this file.
 
 ## Goal
 
@@ -5573,6 +5573,13 @@ Decision rule:
     the current default warning behavior and only fails when scale services are
     explicitly required. Direct scale-service verification passed with a Docker
     engine reachability warning.
+
+638. Strengthen the backend server-entry build helper with real TypeScript types.
+    Done: `ops/scripts/backend/build-server-entry.ts` now declares the
+    TypeScript compiler module boundary, diagnostic, project-path, transpile,
+    write-if-changed, and main-entry shapes. The generated
+    `backend/server.js` contract remains unchanged. Direct server-entry drift
+    check and Phase 29 passed.
 
 ## Safety Gates
 

@@ -8,7 +8,10 @@ const { createRequire } = require('module')
 const PROJECT_ROOT = path.resolve(__dirname, '../../..')
 const BACKEND_ROOT = path.join(PROJECT_ROOT, 'backend')
 const FRONTEND_REQUIRE = createRequire(path.join(PROJECT_ROOT, 'frontend', 'package.json'))
-const ts = FRONTEND_REQUIRE('typescript')
+type TypeScriptModule = typeof import('typescript')
+type TypeScriptDiagnostic = import('typescript').Diagnostic
+
+const ts = FRONTEND_REQUIRE('typescript') as TypeScriptModule
 
 const SOURCE_PATH = path.join(BACKEND_ROOT, 'server.ts')
 const OUTPUT_PATH = path.join(BACKEND_ROOT, 'server.js')
@@ -20,18 +23,18 @@ const GENERATED_HEADER = [
   '',
 ].join('\n')
 
-function toProjectPath(filePath) {
+function toProjectPath(filePath: string): string {
   return path.relative(PROJECT_ROOT, filePath).replace(/\\/g, '/')
 }
 
-function formatDiagnostic(diagnostic) {
+function formatDiagnostic(diagnostic: TypeScriptDiagnostic): string {
   const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
   if (!diagnostic.file || typeof diagnostic.start !== 'number') return message
   const position = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
   return `${toProjectPath(diagnostic.file.fileName)}:${position.line + 1}:${position.character + 1} ${message}`
 }
 
-function transpileServerEntry() {
+function transpileServerEntry(): string {
   const source = fs.readFileSync(SOURCE_PATH, 'utf8')
   const result = ts.transpileModule(source, {
     fileName: SOURCE_PATH,
@@ -53,14 +56,14 @@ function transpileServerEntry() {
   return `${GENERATED_HEADER}${result.outputText.replace(/\s+$/, '')}\n`
 }
 
-function writeIfChanged(filePath, content) {
+function writeIfChanged(filePath: string, content: string): boolean {
   const current = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : ''
   if (current === content) return false
   fs.writeFileSync(filePath, content, 'utf8')
   return true
 }
 
-function main() {
+function main(): void {
   const checkOnly = process.argv.includes('--check')
   const output = transpileServerEntry()
   const current = fs.existsSync(OUTPUT_PATH) ? fs.readFileSync(OUTPUT_PATH, 'utf8') : ''
