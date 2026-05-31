@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 643.
+- Latest completed implementation move in this roadmap: Move 644.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7355,3 +7355,19 @@ Move 643 status:
   checks, 908 control records, 667 tested controls, 241 skipped controls, 0
   failed controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29
   audit, and diff whitespace checks passed.
+
+Move 644 status:
+- Move 644 adds default coverage gates to the all-pages Phase 8.4 audit so
+  coverage collapse is treated as a blocker rather than a quiet pass. The audit
+  now fails with priority-0 coverage findings if tested controls fall below the
+  greater of `BOS_ALL_PAGES_MIN_TESTED_CONTROLS` or
+  `routes * BOS_ALL_PAGES_MIN_TESTED_PER_ROUTE`, or if the skipped-control
+  ratio exceeds `BOS_ALL_PAGES_MAX_SKIPPED_RATIO`. Defaults are intentionally
+  conservative: 3 tested controls per route/profile and a maximum skipped ratio
+  of 0.75, with environment overrides for seeded rollback suites. Proof:
+  focused dashboard audit passed under the gates with 142 control records, 132
+  tested controls, 10 skipped controls, and 0 findings; full exhaustive
+  all-pages audit passed under the gates with 34 route/profile checks, 908
+  control records, 667 tested controls, 241 skipped controls, 0 failed
+  controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29 audit,
+  and diff whitespace checks passed.

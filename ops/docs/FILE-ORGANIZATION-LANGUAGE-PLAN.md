@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 643 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 644 in this file.
 
 ## Goal
 
@@ -5647,6 +5647,22 @@ Decision rule:
     control records, 667 tested controls, 241 skipped controls, 0 failed
     controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29
     audit, and diff whitespace checks passed.
+
+644. Add coverage gates to the all-pages live control audit.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    turns coverage collapse into a priority-0 audit finding. The gate fails
+    when tested controls fall below the greater of
+    `BOS_ALL_PAGES_MIN_TESTED_CONTROLS` or
+    `routes * BOS_ALL_PAGES_MIN_TESTED_PER_ROUTE`, and when the skipped-control
+    ratio exceeds `BOS_ALL_PAGES_MAX_SKIPPED_RATIO`. Defaults are conservative
+    for broad non-destructive QA: 3 tested controls per route/profile and a
+    maximum skipped ratio of 0.75, with environment overrides for future seeded
+    rollback suites. Proof: focused dashboard audit passed under the gates with
+    142 control records, 132 tested controls, 10 skipped controls, and 0
+    findings; full exhaustive all-pages audit passed under the gates with 34
+    route/profile checks, 908 control records, 667 tested controls, 241 skipped
+    controls, 0 failed controls, 68 screenshots, and 0 findings. Post-live
+    hygiene, Phase 29 audit, and diff whitespace checks passed.
 
 ## Safety Gates
 

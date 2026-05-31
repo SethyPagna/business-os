@@ -130,6 +130,9 @@ const ROUTE_READY_TIMEOUT_MS = Number(process.env.BOS_ALL_PAGES_READY_TIMEOUT_MS
 const CONTROL_TIMEOUT_MS = Number(process.env.BOS_ALL_PAGES_CONTROL_TIMEOUT_MS || 2_500)
 const MAX_BUTTON_CLICKS_PER_ROUTE = Number(process.env.BOS_ALL_PAGES_MAX_BUTTONS || 18)
 const MAX_SELECT_CHANGES_PER_ROUTE = Number(process.env.BOS_ALL_PAGES_MAX_SELECTS || 6)
+const MIN_TESTED_CONTROLS_PER_ROUTE = Number(process.env.BOS_ALL_PAGES_MIN_TESTED_PER_ROUTE || 3)
+const MIN_TESTED_CONTROLS = Number(process.env.BOS_ALL_PAGES_MIN_TESTED_CONTROLS || 0)
+const MAX_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_SKIPPED_RATIO || 0.75)
 
 const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|choose|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b|(?:hide|show)\s*\d+\s*fields/i
 const LOW_VALUE_BUTTON_RE = /^\s*(\+|-|×|x|\.{1,3}|…|←|→|↑|↓|<|>|\/|a|b|c|d|e|f|g|h|i|j|k|[0-9]+)\s*$/i
@@ -325,6 +328,33 @@ function computeControlCoverage(controls: ControlRecord[]): ControlCoverage {
     }
   }
   return coverage
+}
+
+function addCoverageGateFindings(): void {
+  const minimumTestedControls = Math.max(
+    MIN_TESTED_CONTROLS,
+    summary.routes.length * MIN_TESTED_CONTROLS_PER_ROUTE,
+  )
+  if (summary.coverage.tested < minimumTestedControls) {
+    addFinding(0, 'coverage', 'all-pages audit tested too few controls', {
+      testedControls: summary.coverage.tested,
+      minimumTestedControls,
+      routes: summary.routes.length,
+      minTestedControlsPerRoute: MIN_TESTED_CONTROLS_PER_ROUTE,
+    })
+  }
+  const skippedRatio = summary.coverage.total > 0
+    ? summary.coverage.skipped / summary.coverage.total
+    : 1
+  if (skippedRatio > MAX_SKIPPED_CONTROL_RATIO) {
+    addFinding(0, 'coverage', 'all-pages audit skipped too many controls', {
+      totalControls: summary.coverage.total,
+      skippedControls: summary.coverage.skipped,
+      skippedRatio: Number(skippedRatio.toFixed(3)),
+      maxSkippedRatio: MAX_SKIPPED_CONTROL_RATIO,
+      skippedByReason: summary.coverage.skippedByReason,
+    })
+  }
 }
 
 async function persistSummary(): Promise<void> {
@@ -806,6 +836,8 @@ async function main(): Promise<void> {
     await browser.close().catch(() => {})
   }
   summary.audit.finishedAt = new Date().toISOString()
+  summary.coverage = computeControlCoverage(summary.controls)
+  addCoverageGateFindings()
   summary.audit.ok = summary.findings.every((finding) => Number(finding.priority) > 0)
   await persistSummary()
   console.log(JSON.stringify({
