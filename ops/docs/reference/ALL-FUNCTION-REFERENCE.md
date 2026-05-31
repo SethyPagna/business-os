@@ -6711,35 +6711,35 @@ Code files scanned: **478**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 135 |
-| 2 | `readArgs` | function | 142 |
-| 3 | `safeName` | function | 158 |
-| 4 | `addFinding` | function | 165 |
-| 5 | `isExternalNoise` | function | 169 |
-| 6 | `isAppConsoleIssue` | function | 173 |
-| 7 | `isAppNetworkIssue` | function | 179 |
-| 8 | `routeRoot` | function | 185 |
-| 9 | `textForLabel` | function | 190 |
-| 10 | `shouldSkipButton` | function | 194 |
-| 11 | `expectedButtonNavigation` | function | 203 |
-| 12 | `attachCollectors` | function | 208 |
-| 13 | `writeJson` | function | 243 |
-| 14 | `persistSummary` | function | 248 |
-| 15 | `saveScreenshot` | function | 253 |
-| 16 | `dismissTransientUi` | function | 260 |
-| 17 | `waitForRouteReady` | function | 278 |
-| 18 | `navigateRoute` | function | 294 |
-| 19 | `countVisible` | function | 309 |
-| 20 | `activeButtonCandidates` | function | 318 |
-| 21 | `clickButtonCandidate` | function | 343 |
-| 22 | `exerciseSearchInputs` | function | 417 |
-| 23 | `exerciseSelects` | function | 461 |
-| 24 | `collectLayoutIssues` | function | 518 |
-| 25 | `hasScrollableAncestor` | const arrow | 539 |
-| 26 | `runRoute` | function | 578 |
-| 27 | `createAuthedPage` | function | 633 |
-| 28 | `runProfile` | function | 652 |
-| 29 | `main` | function | 687 |
+| 1 | `readArg` | function | 142 |
+| 2 | `readArgs` | function | 149 |
+| 3 | `safeName` | function | 165 |
+| 4 | `addFinding` | function | 172 |
+| 5 | `isExternalNoise` | function | 176 |
+| 6 | `isAppConsoleIssue` | function | 180 |
+| 7 | `isAppNetworkIssue` | function | 186 |
+| 8 | `routeRoot` | function | 192 |
+| 9 | `textForLabel` | function | 197 |
+| 10 | `buttonSkipReason` | function | 201 |
+| 11 | `expectedButtonNavigation` | function | 210 |
+| 12 | `attachCollectors` | function | 215 |
+| 13 | `writeJson` | function | 250 |
+| 14 | `persistSummary` | function | 255 |
+| 15 | `saveScreenshot` | function | 260 |
+| 16 | `dismissTransientUi` | function | 267 |
+| 17 | `waitForRouteReady` | function | 285 |
+| 18 | `navigateRoute` | function | 301 |
+| 19 | `countVisible` | function | 316 |
+| 20 | `activeButtonCandidates` | function | 325 |
+| 21 | `clickButtonCandidate` | function | 356 |
+| 22 | `exerciseSearchInputs` | function | 430 |
+| 23 | `exerciseSelects` | function | 474 |
+| 24 | `collectLayoutIssues` | function | 531 |
+| 25 | `hasScrollableAncestor` | const arrow | 552 |
+| 26 | `runRoute` | function | 591 |
+| 27 | `createAuthedPage` | function | 659 |
+| 28 | `runProfile` | function | 678 |
+| 29 | `main` | function | 713 |
 
 ### 3.445 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
