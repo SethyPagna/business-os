@@ -6727,22 +6727,22 @@ Code files scanned: **478**
 | 14 | `incrementCount` | function | 287 |
 | 15 | `computeControlCoverage` | function | 291 |
 | 16 | `addCoverageGateFindings` | function | 333 |
-| 17 | `persistSummary` | function | 360 |
-| 18 | `saveScreenshot` | function | 366 |
-| 19 | `dismissTransientUi` | function | 373 |
-| 20 | `waitForRouteReady` | function | 391 |
-| 21 | `navigateRoute` | function | 407 |
-| 22 | `countVisible` | function | 422 |
-| 23 | `activeButtonCandidates` | function | 431 |
-| 24 | `clickButtonCandidate` | function | 462 |
-| 25 | `exerciseSearchInputs` | function | 536 |
-| 26 | `exerciseSelects` | function | 580 |
-| 27 | `collectLayoutIssues` | function | 637 |
-| 28 | `hasScrollableAncestor` | const arrow | 658 |
-| 29 | `runRoute` | function | 697 |
-| 30 | `createAuthedPage` | function | 765 |
-| 31 | `runProfile` | function | 784 |
-| 32 | `main` | function | 819 |
+| 17 | `persistSummary` | function | 380 |
+| 18 | `saveScreenshot` | function | 386 |
+| 19 | `dismissTransientUi` | function | 393 |
+| 20 | `waitForRouteReady` | function | 411 |
+| 21 | `navigateRoute` | function | 427 |
+| 22 | `countVisible` | function | 442 |
+| 23 | `activeButtonCandidates` | function | 451 |
+| 24 | `clickButtonCandidate` | function | 482 |
+| 25 | `exerciseSearchInputs` | function | 556 |
+| 26 | `exerciseSelects` | function | 600 |
+| 27 | `collectLayoutIssues` | function | 657 |
+| 28 | `hasScrollableAncestor` | const arrow | 678 |
+| 29 | `runRoute` | function | 717 |
+| 30 | `createAuthedPage` | function | 785 |
+| 31 | `runProfile` | function | 804 |
+| 32 | `main` | function | 839 |
 
 ### 3.445 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 

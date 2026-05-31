@@ -492,7 +492,7 @@ Total files documented: **541**
 | 480 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | project-scripts | 144 | 6.0 | Project source/support file |
 | 481 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | project-scripts | 285 | 12.0 | Project source/support file |
 | 482 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | project-scripts | 155 | 6.0 | Project source/support file |
-| 483 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | project-scripts | 866 | 31.3 | Project source/support file |
+| 483 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | project-scripts | 886 | 31.9 | Project source/support file |
 | 484 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | project-scripts | 123 | 3.6 | Project source/support file |
 | 485 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | project-scripts | 139 | 6.5 | Project source/support file |
 | 486 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | project-scripts | 136 | 6.0 | Project source/support file |
