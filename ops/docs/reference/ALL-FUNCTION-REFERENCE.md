@@ -453,7 +453,7 @@ Code files scanned: **478**
 | 441 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
 | 442 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
 | 443 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
-| 444 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 38 |
+| 444 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 43 |
 | 445 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
 | 446 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 2 |
 | 447 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
@@ -6711,44 +6711,49 @@ Code files scanned: **478**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 180 |
-| 2 | `readArgs` | function | 187 |
-| 3 | `safeName` | function | 203 |
-| 4 | `addFinding` | function | 210 |
-| 5 | `isExternalNoise` | function | 214 |
-| 6 | `isAppConsoleIssue` | function | 218 |
-| 7 | `isAppNetworkIssue` | function | 225 |
-| 8 | `routeRoot` | function | 231 |
-| 9 | `textForLabel` | function | 236 |
-| 10 | `buttonSkipReason` | function | 240 |
-| 11 | `expectedButtonNavigation` | function | 249 |
-| 12 | `attachCollectors` | function | 254 |
-| 13 | `writeJson` | function | 289 |
-| 14 | `writeText` | function | 294 |
-| 15 | `incrementCount` | function | 299 |
-| 16 | `markdownCell` | function | 303 |
-| 17 | `markdownTable` | function | 309 |
-| 18 | `percentage` | function | 316 |
-| 19 | `computeControlCoverage` | function | 321 |
-| 20 | `routeCoverageRows` | function | 363 |
-| 21 | `renderCoverageMarkdown` | function | 375 |
-| 22 | `addCoverageGateFindings` | function | 435 |
-| 23 | `persistSummary` | function | 495 |
-| 24 | `saveScreenshot` | function | 505 |
-| 25 | `dismissTransientUi` | function | 512 |
-| 26 | `waitForRouteReady` | function | 530 |
-| 27 | `navigateRoute` | function | 546 |
-| 28 | `countVisible` | function | 561 |
-| 29 | `activeButtonCandidates` | function | 570 |
-| 30 | `clickButtonCandidate` | function | 601 |
-| 31 | `exerciseSearchInputs` | function | 675 |
-| 32 | `exerciseSelects` | function | 719 |
-| 33 | `collectLayoutIssues` | function | 776 |
-| 34 | `hasScrollableAncestor` | const arrow | 797 |
-| 35 | `runRoute` | function | 836 |
-| 36 | `createAuthedPage` | function | 904 |
-| 37 | `runProfile` | function | 923 |
-| 38 | `main` | function | 958 |
+| 1 | `readArg` | function | 196 |
+| 2 | `readArgs` | function | 203 |
+| 3 | `safeName` | function | 219 |
+| 4 | `addFinding` | function | 226 |
+| 5 | `isExternalNoise` | function | 230 |
+| 6 | `isAppConsoleIssue` | function | 234 |
+| 7 | `isAppNetworkIssue` | function | 241 |
+| 8 | `routeRoot` | function | 247 |
+| 9 | `textForLabel` | function | 252 |
+| 10 | `buttonSkipReason` | function | 256 |
+| 11 | `expectedButtonNavigation` | function | 265 |
+| 12 | `attachCollectors` | function | 270 |
+| 13 | `writeJson` | function | 305 |
+| 14 | `writeText` | function | 310 |
+| 15 | `incrementCount` | function | 315 |
+| 16 | `markdownCell` | function | 319 |
+| 17 | `markdownTable` | function | 325 |
+| 18 | `percentage` | function | 332 |
+| 19 | `computeControlCoverage` | function | 337 |
+| 20 | `routeCoverageRows` | function | 379 |
+| 21 | `seededRollbackCategory` | function | 391 |
+| 22 | `seededRollbackHarness` | function | 404 |
+| 23 | `seededRollbackCandidates` | function | 413 |
+| 24 | `seededRollbackSummaryRows` | function | 445 |
+| 25 | `renderSeededRollbackMarkdown` | function | 455 |
+| 26 | `renderCoverageMarkdown` | function | 488 |
+| 27 | `addCoverageGateFindings` | function | 548 |
+| 28 | `persistSummary` | function | 608 |
+| 29 | `saveScreenshot` | function | 639 |
+| 30 | `dismissTransientUi` | function | 646 |
+| 31 | `waitForRouteReady` | function | 664 |
+| 32 | `navigateRoute` | function | 680 |
+| 33 | `countVisible` | function | 695 |
+| 34 | `activeButtonCandidates` | function | 704 |
+| 35 | `clickButtonCandidate` | function | 735 |
+| 36 | `exerciseSearchInputs` | function | 809 |
+| 37 | `exerciseSelects` | function | 853 |
+| 38 | `collectLayoutIssues` | function | 910 |
+| 39 | `hasScrollableAncestor` | const arrow | 931 |
+| 40 | `runRoute` | function | 970 |
+| 41 | `createAuthedPage` | function | 1038 |
+| 42 | `runProfile` | function | 1057 |
+| 43 | `main` | function | 1092 |
 
 ### 3.445 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
