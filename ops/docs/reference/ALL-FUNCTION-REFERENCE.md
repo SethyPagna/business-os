@@ -6469,11 +6469,11 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `markdownTable` | function | 14 |
+| 1 | `markdownTable` | function | 18 |
 | 2 | `stableDigest` | function | 26 |
-| 3 | `summarizeReportValue` | function | 34 |
-| 4 | `outputTail` | function | 53 |
-| 5 | `formatBytes` | function | 64 |
+| 3 | `summarizeReportValue` | function | 30 |
+| 4 | `outputTail` | function | 44 |
+| 5 | `formatBytes` | function | 51 |
 
 ### 3.432 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
 

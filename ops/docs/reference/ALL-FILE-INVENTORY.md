@@ -456,7 +456,7 @@ Total files documented: **540**
 | 444 | `frontend/tsconfig.json` | frontend-root | 47 | 1.3 | Configuration/data manifest |
 | 445 | `frontend/vite.config.ts` | frontend-root | 246 | 9.5 | Project source/support file |
 | 446 | `ops/scripts/architecture/generated-bulk-audit.ts` | project-scripts | 603 | 22.8 | Project source/support file |
-| 447 | `ops/scripts/architecture/language-runtime-audit.ts` | project-scripts | 1660 | 70.9 | Project source/support file |
+| 447 | `ops/scripts/architecture/language-runtime-audit.ts` | project-scripts | 1660 | 71.0 | Project source/support file |
 | 448 | `ops/scripts/architecture/organization-audit.ts` | project-scripts | 381 | 16.9 | Project source/support file |
 | 449 | `ops/scripts/architecture/phase29-audit.ts` | project-scripts | 586 | 20.4 | Project source/support file |
 | 450 | `ops/scripts/architecture/runtime-js-inventory.ts` | project-scripts | 220 | 7.5 | Project source/support file |
@@ -471,7 +471,7 @@ Total files documented: **540**
 | 459 | `ops/scripts/frontend/verify-performance.ts` | project-scripts | 144 | 9.6 | Project source/support file |
 | 460 | `ops/scripts/frontend/verify-ui.ts` | project-scripts | 243 | 8.7 | Project source/support file |
 | 461 | `ops/scripts/lib/fs-utils.ts` | project-scripts | 297 | 7.0 | Project source/support file |
-| 462 | `ops/scripts/lib/report-utils.ts` | project-scripts | 83 | 2.0 | Project source/support file |
+| 462 | `ops/scripts/lib/report-utils.ts` | project-scripts | 70 | 2.1 | Project source/support file |
 | 463 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 265 | 7.9 | Project source/support file |
 | 464 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | project-scripts | 92 | 2.8 | Project source/support file |
 | 465 | `ops/scripts/powershell/docker-release.ps1` | project-scripts | 1011 | 48.0 | Project source/support file |

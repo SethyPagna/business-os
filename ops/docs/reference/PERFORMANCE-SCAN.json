@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 359,
   "distAssets": 84,
-  "totalSourceBytes": 6505652,
-  "totalSourceLines": 147840,
+  "totalSourceBytes": 6505857,
+  "totalSourceLines": 147827,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -124,7 +124,7 @@
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 72604,
+      "size": 72663,
       "lines": 1660
     },
     {
@@ -246,7 +246,7 @@
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 72604,
+      "size": 72663,
       "lines": 1660
     },
     {

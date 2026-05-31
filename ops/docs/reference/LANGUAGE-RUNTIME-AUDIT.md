@@ -1,6 +1,6 @@
 # Language Runtime Audit
 
-Generated: 2026-05-31T00:37:47.321Z
+Generated: 2026-05-31T00:43:20.235Z
 
 ## Summary
 
@@ -192,7 +192,7 @@ Generated: 2026-05-31T00:37:47.321Z
 | --- | --- | --- | --- |
 | `backend/src/db/postgresSchema.sql` | keep under schema-migration protocol, not language/runtime conversion | The canonical schema dump is the data contract, not an executable hot path. Index, primary-key, JSONB, and foreign-key changes need backup, restore rehearsal, orphan checks, rollback SQL, and schema-audit proof before they are applied. | Move 173 inspection found the file ranked because it contains DDL and indexes; ops/docs/SCHEMA-RELATIONSHIPS.md already tracks the safe DDL backlog and migration gates. |
 | `ops/scripts/architecture/language-runtime-audit.ts` | keep as Node.js meta-audit and exclude from SQL/DuckDB conversion queue | The script ranks itself because it contains report strings, SQL/data-path proof labels, and completed-slice metadata. It is a small deterministic report generator, not a runtime query or import hot path. | Move 179 inspection found the remaining SQL/DuckDB candidate was the audit script itself after backend routes and service data paths were optimized or governed by schema protocol. |
-| `ops/scripts/lib/report-utils.ts` | keep as a shared Node.js report helper and exclude from SQL/DuckDB conversion queue | The helper only formats Markdown tables, digests, output tails, and byte labels. It is flagged by path/text report keywords, not by query-heavy runtime behavior or data-volume processing. | Move 210 inspection found no database reads, joins, imports, exports, backup streaming, or analytics loops in the file; converting it would add churn without measurable speed, stability, or packaging benefit. |
+| `ops/scripts/lib/report-utils.ts` | keep as a shared Node.js report helper and exclude from SQL/DuckDB conversion queue | The helper only formats Markdown tables, digests, output tails, and byte labels. It is now TypeScript-typed, but it is still flagged by path/text report keywords rather than query-heavy runtime behavior or data-volume processing. | Move 210 inspection found no database reads, joins, imports, exports, backup streaming, or analytics loops in the file; Move 628 strengthened the helper with real TypeScript annotations while keeping SQL/DuckDB conversion rejected. |
 | `ops/scripts/backend/schema-primary-key-rollback.sql` | keep as rollback DDL under the schema safety protocol | The file is intentionally SQL because it is a rollback artifact for guarded primary-key hardening, not an executable hot path or data-processing runtime. | Move 338 optimized the read-only preflight query and kept rollback SQL as the explicit recovery path required before any primary-key DDL is applied. |
 
 ## Rejected Web Worker Candidates
