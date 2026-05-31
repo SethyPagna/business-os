@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 633 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 634 in this file.
 
 ## Goal
 
@@ -5542,6 +5542,13 @@ Decision rule:
     reads now flow through typed helpers, keeping the current dependency,
     version, and local verification assertions intact while making future
     runtime updates easier to validate. Direct guardrail proof passed.
+
+634. Strengthen the secret hygiene verifier with real TypeScript types.
+    Done: `ops/scripts/verification/verify-secret-hygiene.ts` now declares
+    tracked-file, token-pattern, failure-message, and unsafe-assignment match
+    shapes. Secret assignment detection now flows through a typed helper while
+    preserving the same tracked-file exclusions, placeholder allowances, and
+    leaked token regexes. Direct secret hygiene verification passed.
 
 ## Safety Gates
 

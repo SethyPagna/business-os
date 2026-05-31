@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 633.
+- Latest completed implementation move in this roadmap: Move 634.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7245,3 +7245,10 @@ Move 633 status:
   Package and lock reads now flow through typed helpers, preserving the current
   dependency/version assertions while making future Node/module upgrades easier
   to verify safely. Direct runtime dependency guardrail proof passed.
+
+Move 634 status:
+- Move 634 strengthens the secret hygiene verifier with explicit TypeScript
+  shapes for tracked files, leaked-token pattern metadata, failure messages, and
+  unsafe secret assignment matches. The scanner now routes assignment matching
+  through a typed helper while preserving the same tracked-file exclusions and
+  token leak rules. Direct secret hygiene verification passed.
