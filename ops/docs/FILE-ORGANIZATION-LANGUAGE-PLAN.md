@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 623 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 626 in this file.
 
 ## Goal
 
@@ -8,15 +8,15 @@ Make the codebase easier to navigate, safer to refactor, and more efficient to r
 
 ## Current Shape
 
-- Current source extension baseline outside generated/runtime/vendor folders:
-  `.js: 33`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 331`,
+- Current source extension baseline inside active scan roots and outside
+  generated/runtime/vendor wrappers:
+  `.js: 0`, `.jsx: 0`, `.mjs: 0`, `.cjs: 0`, `.ts: 318`,
   `.tsx: 107`.
-- Frontend JSX-to-TSX source conversion is complete; remaining JavaScript is
-  backend/runtime/config/static-public code that still needs package-aware
-  conversion slices.
-- Backend source conversion is complete under `backend/src`; remaining
-  JavaScript lives outside backend source and still needs package-aware
-  conversion or config/runtime exception review.
+- Frontend JSX-to-TSX source conversion is complete; remaining first-party
+  JavaScript is generated runtime compatibility output for fixed browser,
+  backend, and PM2 filenames.
+- Backend source conversion is complete under `backend/src` and the root
+  backend entry is now TypeScript-authored with generated runtime output.
 - TypeScript is strict for converted frontend source and focused converted
   tests. Backend `.ts` source currently uses Node 24 type stripping and
   CommonJS exports until the broader backend build lane is converted.
@@ -5469,6 +5469,18 @@ Decision rule:
     generated/runtime-compatible: generated `backend/server.js`, generated
     public runtime JS, `ops/config/ecosystem.config.js`, and the tracked
     Scanbot vendor bundle.
+
+626. Add TypeScript-authored PM2 ecosystem config source.
+    Done: `ops/config/ecosystem.config.ts` now owns the typed PM2 app/env
+    configuration while `ops/config/ecosystem.config.js` remains the generated
+    CommonJS file loaded by PM2 and `run/sh/start-server.sh`. The new
+    `ops/scripts/runtime/build-ecosystem-config.ts` generator exposes
+    `build:ecosystem-config` and `verify:ecosystem-config`, Phase 29 runs that
+    drift check as a guardrail, and the language/runtime audit records the
+    generated `.js` as a compatibility wrapper instead of active source.
+    Remaining first-party `.js` outside active source roots is generated
+    runtime output (`backend/server.js`, public runtime JS, PM2 config JS) plus
+    the tracked Scanbot vendor bundle.
 
 ## Safety Gates
 

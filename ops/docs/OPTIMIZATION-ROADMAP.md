@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 623.
+- Latest completed implementation move in this roadmap: Move 626.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7176,3 +7176,13 @@ Move 625 status:
   Focused server-entry check, route/offline security checks, Docker release
   verification, full backend utility tests, Linux packaging proof, generated
   package-stage cleanup, and diff whitespace proof passed.
+
+Move 626 status:
+- Move 626 makes the PM2 ecosystem config TypeScript-authored while preserving
+  the operational `ops/config/ecosystem.config.js` filename used by PM2 and
+  `run/sh/start-server.sh`. `ops/config/ecosystem.config.ts` now owns the
+  typed process/env/restart shape; `ops/scripts/runtime/build-ecosystem-config.ts`
+  regenerates the CommonJS runtime config and `npm.cmd --prefix ops run
+  verify:ecosystem-config` prevents drift. Phase 29 now runs that drift check
+  as a guardrail, and the language/runtime audit excludes the generated PM2
+  `.js` from active source counts while recording the compatibility wrapper.

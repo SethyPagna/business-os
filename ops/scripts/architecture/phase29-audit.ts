@@ -52,6 +52,12 @@ const CHECKS = [
     args: ['ops/scripts/verification/verify-runtime-deps.ts'],
     reports: ['ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json'],
   },
+  {
+    label: 'PM2 ecosystem config guardrail',
+    command: process.execPath,
+    args: ['ops/scripts/runtime/build-ecosystem-config.ts', '--check'],
+    reports: [],
+  },
 ]
 
 const EXECUTION_MODE = 'contention-safe-reference-writers-then-bounded-guardrails'
@@ -66,6 +72,7 @@ const REFERENCE_WRITER_LABELS = new Set([
 const PARALLEL_CHECK_LABELS = new Set([
   'Docker release guardrail',
   'Runtime dependency guardrail',
+  'PM2 ecosystem config guardrail',
 ])
 const ORGANIZATION_CHECK_LABEL = 'Organization audit'
 

@@ -32,6 +32,8 @@
     "phase29:audit:repeat": "node scripts/architecture/phase29-audit.ts --repeat 3",
     "prune-storage": "node scripts/runtime/storage/prune-storage.ts",
     "prune-storage:preview": "node scripts/runtime/storage/prune-storage.ts --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json",
+    "build:ecosystem-config": "node scripts/runtime/build-ecosystem-config.ts",
+    "verify:ecosystem-config": "node scripts/runtime/build-ecosystem-config.ts --check",
     "public-runtime:build": "node scripts/frontend/build-public-runtime-scripts.ts",
     "public-runtime:check": "node scripts/frontend/build-public-runtime-scripts.ts --check"
   },

@@ -7,9 +7,16 @@ const ROOT_DIR = path.resolve(__dirname, '../../..')
 const REPORT_PATH = path.join(ROOT_DIR, 'ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md')
 const SUMMARY_PATH = path.join(ROOT_DIR, 'ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json')
 
-const SCAN_ROOTS = ['frontend/src', 'frontend/tests', 'backend/src', 'backend/test', 'ops/scripts', 'run']
+const SCAN_ROOTS = ['frontend/src', 'frontend/tests', 'backend/src', 'backend/test', 'ops/scripts', 'ops/config', 'run']
 const EXCLUDED_DIRS = new Set(['node_modules', 'dist', 'runtime', '.playwright-cli'])
 const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.ts', '.tsx', '.css', '.sql', '.ps1', '.bat', '.cmd', '.sh', '.yml', '.yaml', '.json'])
+const GENERATED_RUNTIME_SOURCE_EXCLUSIONS = new Set([
+  'backend/server.js',
+  'frontend/public/runtime-noise-guard.js',
+  'frontend/public/theme-bootstrap.js',
+  'frontend/public/sw.js',
+  'ops/config/ecosystem.config.js',
+])
 const FILE_READ_MODE = 'bounded-parallel'
 const ROOT_WALK_CONCURRENCY = 3
 const MATRIX_CHECK_CONCURRENCY = 8
@@ -48,6 +55,8 @@ async function walkFiles(root) {
         continue
       }
       const extension = path.extname(entry.name)
+      const relativePath = normalizePath(path.relative(ROOT_DIR, absolutePath))
+      if (GENERATED_RUNTIME_SOURCE_EXCLUSIONS.has(relativePath)) continue
       if (SOURCE_EXTENSIONS.has(extension)) output.push(absolutePath)
     }
   }
@@ -291,6 +300,17 @@ const CONVERTED_TYPESCRIPT_SLICES = [
       'npm.cmd --prefix backend run verify:server-entry',
       'npm.cmd --prefix backend run test:utils',
       'npm.cmd --prefix backend run build:linux',
+    ],
+  },
+  {
+    implementation: 'ops/config/ecosystem.config.ts',
+    compatibilityWrapper: 'ops/config/ecosystem.config.js',
+    wrapperStatus: 'generated PM2 runtime config; exact filename is retained for PM2 and run/sh/start-server.sh',
+    declarationSupport: '',
+    proof: [
+      'npm.cmd --prefix ops run verify:ecosystem-config',
+      'node ops\\scripts\\architecture\\phase29-audit.ts',
+      'run\\sh\\start-server.sh keeps ECOSYSTEM pointed at ops/config/ecosystem.config.js',
     ],
   },
   {
