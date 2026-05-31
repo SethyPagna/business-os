@@ -483,7 +483,7 @@ Code files scanned: **477**
 | 471 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
 | 472 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
 | 473 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
-| 474 | `ops/scripts/verification/verify-hardening-policy.ts` | 9 |
+| 474 | `ops/scripts/verification/verify-hardening-policy.ts` | 10 |
 | 475 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
 | 476 | `ops/scripts/verification/verify-scale-services.ts` | 8 |
 | 477 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
@@ -7042,15 +7042,16 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeRelativePath` | function | 13 |
-| 2 | `readWithLocalImports` | function | 17 |
-| 3 | `listTrackedOrPendingFiles` | function | 31 |
-| 4 | `lineFor` | function | 38 |
-| 5 | `assertContains` | function | 44 |
-| 6 | `assertNotContains` | function | 50 |
-| 7 | `assertNoApiCachingRegression` | function | 56 |
-| 8 | `assertFullAutomationIncludesPolicy` | function | 77 |
-| 9 | `main` | function | 93 |
+| 1 | `normalizeRelativePath` | function | 30 |
+| 2 | `readPolicy` | function | 34 |
+| 3 | `readWithLocalImports` | function | 42 |
+| 4 | `listTrackedOrPendingFiles` | function | 56 |
+| 5 | `lineFor` | function | 63 |
+| 6 | `assertContains` | function | 69 |
+| 7 | `assertNotContains` | function | 75 |
+| 8 | `assertNoApiCachingRegression` | function | 81 |
+| 9 | `assertFullAutomationIncludesPolicy` | function | 102 |
+| 10 | `main` | function | 118 |
 
 ### 3.475 `ops/scripts/verification/verify-runtime-deps.ts`
 
