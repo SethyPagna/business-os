@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 628 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 629 in this file.
 
 ## Goal
 
@@ -5499,6 +5499,17 @@ Decision rule:
     relying on JSDoc typedefs. Existing report callers keep their
     `require('../lib/report-utils.ts')` imports. Direct export smoke checks,
     generated-bulk audit, and Phase 29 passed.
+
+629. Strengthen the shared ops filesystem helper with real TypeScript types.
+    Done: `ops/scripts/lib/fs-utils.ts` now uses TypeScript aliases and
+    function annotations for JSON fallbacks, file-walk options, root-file
+    options, collected file/folder results, path helpers, tolerant read helpers,
+    text detection, and the CommonJS export shape instead of relying on JSDoc
+    typedefs. Existing report, architecture, frontend, runtime, and
+    verification scripts keep their `require('../lib/fs-utils.ts')` imports.
+    `mapLimit()` now clamps invalid or zero concurrency to one worker rather
+    than returning unprocessed slots. Direct export smoke checks, performance
+    scan, and Phase 29 passed.
 
 ## Safety Gates
 

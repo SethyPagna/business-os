@@ -1,37 +1,52 @@
 'use strict'
 
-const fs = require('fs')
-const path = require('path')
+type FsModule = typeof import('fs')
+type PathModule = typeof import('path')
+type Dirent = import('fs').Dirent
+type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
+type FileWalkOptions = {
+  excludeDirs?: Set<string>
+  extensions?: Set<string> | null
+}
+type RootFileOptions = {
+  extensions?: Set<string> | null
+  excludedFiles?: Set<string>
+}
+type CollectedFilesAndFolders = {
+  files: string[]
+  folders: string[]
+}
+type FsUtilsExports = {
+  toPosix: typeof toPosix
+  resolveProjectRoot: typeof resolveProjectRoot
+  relFrom: typeof relFrom
+  readUtf8: typeof readUtf8
+  readJson: typeof readJson
+  readUtf8Async: typeof readUtf8Async
+  readJsonAsync: typeof readJsonAsync
+  lineCount: typeof lineCount
+  pathExists: typeof pathExists
+  mapLimit: typeof mapLimit
+  walkFilesRecursive: typeof walkFilesRecursive
+  collectFilesAndFolders: typeof collectFilesAndFolders
+  collectRootFiles: typeof collectRootFiles
+  isProbablyText: typeof isProbablyText
+}
 
-/**
- * @typedef {Record<string, unknown> | unknown[] | string | number | boolean | null} JsonFallback
- * @typedef {{ excludeDirs?: Set<string>, extensions?: Set<string> | null }} FileWalkOptions
- * @typedef {{ extensions?: Set<string> | null, excludedFiles?: Set<string> }} RootFileOptions
- */
+declare const require: (moduleName: 'fs' | 'path') => FsModule | PathModule
+declare const __dirname: string
+declare const process: { cwd: () => string }
+declare const Buffer: { alloc: (size: number) => Buffer }
+declare const module: { exports: FsUtilsExports }
 
-/**
- * 1. Filesystem Utility Library
- * 1.1 Purpose
- * - Centralize shared script helpers used across project scripts.
- * - Reduce duplicate walk/read/path logic in multiple script files.
- */
+const fs = require('fs') as FsModule
+const path = require('path') as PathModule
 
-/**
- * 1.2 Path helpers
- */
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function toPosix(value) {
+function toPosix(value: unknown): string {
   return String(value || '').replace(/\\/g, '/')
 }
 
-/**
- * @param {string} [startDir]
- * @returns {string}
- */
-function resolveProjectRoot(startDir = __dirname) {
+function resolveProjectRoot(startDir = __dirname): string {
   let current = path.resolve(startDir)
   while (true) {
     const hasProjectShape =
@@ -46,24 +61,11 @@ function resolveProjectRoot(startDir = __dirname) {
   }
 }
 
-/**
- * @param {string} rootDir
- * @param {string} absPath
- * @returns {string}
- */
-function relFrom(rootDir, absPath) {
+function relFrom(rootDir: string, absPath: string): string {
   return toPosix(path.relative(rootDir, absPath))
 }
 
-/**
- * 1.3 Read helpers
- */
-/**
- * @param {string} filePath
- * @param {string} [fallback]
- * @returns {string}
- */
-function readUtf8(filePath, fallback = '') {
+function readUtf8(filePath: string, fallback = ''): string {
   try {
     return fs.readFileSync(filePath, 'utf8')
   } catch (_) {
@@ -71,13 +73,7 @@ function readUtf8(filePath, fallback = '') {
   }
 }
 
-/**
- * @template [T=JsonFallback]
- * @param {string} filePath
- * @param {T} [fallback]
- * @returns {T}
- */
-function readJson(filePath, fallback = /** @type {T} */ ({})) {
+function readJson<T = JsonValue>(filePath: string, fallback = {} as T): T {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'))
   } catch (_) {
@@ -85,12 +81,7 @@ function readJson(filePath, fallback = /** @type {T} */ ({})) {
   }
 }
 
-/**
- * @param {string} filePath
- * @param {string} [fallback]
- * @returns {Promise<string>}
- */
-async function readUtf8Async(filePath, fallback = '') {
+async function readUtf8Async(filePath: string, fallback = ''): Promise<string> {
   try {
     return await fs.promises.readFile(filePath, 'utf8')
   } catch (_) {
@@ -98,13 +89,7 @@ async function readUtf8Async(filePath, fallback = '') {
   }
 }
 
-/**
- * @template [T=JsonFallback]
- * @param {string} filePath
- * @param {T} [fallback]
- * @returns {Promise<T>}
- */
-async function readJsonAsync(filePath, fallback = /** @type {T} */ ({})) {
+async function readJsonAsync<T = JsonValue>(filePath: string, fallback = {} as T): Promise<T> {
   try {
     return JSON.parse(await fs.promises.readFile(filePath, 'utf8'))
   } catch (_) {
@@ -112,20 +97,12 @@ async function readJsonAsync(filePath, fallback = /** @type {T} */ ({})) {
   }
 }
 
-/**
- * @param {unknown} text
- * @returns {number}
- */
-function lineCount(text) {
+function lineCount(text: unknown): number {
   if (!text) return 0
   return String(text).split(/\r?\n/).length
 }
 
-/**
- * @param {string} filePath
- * @returns {Promise<boolean>}
- */
-async function pathExists(filePath) {
+async function pathExists(filePath: string): Promise<boolean> {
   try {
     await fs.promises.access(filePath)
     return true
@@ -134,59 +111,40 @@ async function pathExists(filePath) {
   }
 }
 
-/**
- * @template T
- * @template R
- * @param {T[]} items
- * @param {number} limit
- * @param {(item: T, index: number) => Promise<R> | R} mapper
- * @returns {Promise<R[]>}
- */
-async function mapLimit(items, limit, mapper) {
-  const output = new Array(items.length)
+async function mapLimit<T, R>(items: T[], limit: number, mapper: (item: T, index: number) => Promise<R> | R): Promise<R[]> {
+  const output = new Array<R>(items.length)
+  if (!items.length) return output
+  const workerCount = Math.max(1, Math.min(Math.floor(limit) || 1, items.length))
   let nextIndex = 0
-  async function worker() {
+  async function worker(): Promise<void> {
     while (nextIndex < items.length) {
       const currentIndex = nextIndex
       nextIndex += 1
       output[currentIndex] = await mapper(items[currentIndex], currentIndex)
     }
   }
-  const workers = Array.from({ length: Math.min(limit, items.length) }, worker)
+  const workers = Array.from({ length: workerCount }, worker)
   await Promise.all(workers)
   return output
 }
 
-/**
- * 1.4 File collection helpers
- */
-/**
- * @param {unknown} entryName
- * @param {Set<string>} excludeDirs
- * @returns {boolean}
- */
-function shouldSkipDirectory(entryName, excludeDirs) {
+function shouldSkipDirectory(entryName: unknown, excludeDirs: Set<string>): boolean {
   return excludeDirs.has(String(entryName || '').toLowerCase())
 }
 
-/**
- * @param {string} startDir
- * @param {FileWalkOptions} [options]
- * @returns {string[]}
- */
-function walkFilesRecursive(startDir, options = {}) {
+function walkFilesRecursive(startDir: string, options: FileWalkOptions = {}): string[] {
   const {
     excludeDirs = new Set(['node_modules', 'dist', '.git', '.pm2', 'release']),
     extensions = null,
   } = options
-  const out = []
+  const out: string[] = []
   if (!fs.existsSync(startDir)) return out
   const stack = [startDir]
   while (stack.length) {
     const current = stack.pop()
     if (!current) continue
     const entries = fs.readdirSync(current, { withFileTypes: true })
-    entries.forEach((entry) => {
+    entries.forEach((entry: Dirent) => {
       const abs = path.join(current, entry.name)
       if (entry.isDirectory()) {
         if (!shouldSkipDirectory(entry.name, excludeDirs)) stack.push(abs)
@@ -202,18 +160,13 @@ function walkFilesRecursive(startDir, options = {}) {
   return out
 }
 
-/**
- * @param {string} startDir
- * @param {FileWalkOptions} [options]
- * @returns {{ files: string[], folders: string[] }}
- */
-function collectFilesAndFolders(startDir, options = {}) {
+function collectFilesAndFolders(startDir: string, options: FileWalkOptions = {}): CollectedFilesAndFolders {
   const {
     excludeDirs = new Set(['node_modules', 'dist', '.git', '.pm2', 'release']),
     extensions = null,
   } = options
-  const files = []
-  const folders = []
+  const files: string[] = []
+  const folders: string[] = []
   if (!fs.existsSync(startDir)) return { files, folders }
   const stack = [startDir]
   while (stack.length) {
@@ -221,7 +174,7 @@ function collectFilesAndFolders(startDir, options = {}) {
     if (!current) continue
     folders.push(current)
     const entries = fs.readdirSync(current, { withFileTypes: true })
-    entries.forEach((entry) => {
+    entries.forEach((entry: Dirent) => {
       const abs = path.join(current, entry.name)
       if (entry.isDirectory()) {
         if (!shouldSkipDirectory(entry.name, excludeDirs)) stack.push(abs)
@@ -237,19 +190,14 @@ function collectFilesAndFolders(startDir, options = {}) {
   return { files, folders }
 }
 
-/**
- * @param {string} rootDir
- * @param {RootFileOptions} [options]
- * @returns {string[]}
- */
-function collectRootFiles(rootDir, options = {}) {
+function collectRootFiles(rootDir: string, options: RootFileOptions = {}): string[] {
   const {
     extensions = null,
     excludedFiles = new Set(),
   } = options
-  const out = []
+  const out: string[] = []
   const entries = fs.readdirSync(rootDir, { withFileTypes: true })
-  entries.forEach((entry) => {
+  entries.forEach((entry: Dirent) => {
     if (!entry.isFile()) return
     if (excludedFiles.has(entry.name)) return
     if (extensions instanceof Set) {
@@ -261,11 +209,7 @@ function collectRootFiles(rootDir, options = {}) {
   return out
 }
 
-/**
- * @param {string} filePath
- * @returns {boolean}
- */
-function isProbablyText(filePath) {
+function isProbablyText(filePath: string): boolean {
   try {
     const fd = fs.openSync(filePath, 'r')
     const size = Math.min(4096, fs.statSync(filePath).size)
