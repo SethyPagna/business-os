@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 632.
+- Latest completed implementation move in this roadmap: Move 633.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7237,3 +7237,11 @@ Move 632 status:
   and the generated Phase 29 JSON summary. Parsed child output is now narrowed
   to object values before repeat checks read fields, preserving the current
   execution order and non-mutating audit contract. Direct Phase 29 proof passed.
+
+Move 633 status:
+- Move 633 strengthens the runtime dependency guardrail with explicit TypeScript
+  shapes for package manifests, package locks, version consistency, nested
+  coverage trees, runtime-version coverage, and the generated JSON summary.
+  Package and lock reads now flow through typed helpers, preserving the current
+  dependency/version assertions while making future Node/module upgrades easier
+  to verify safely. Direct runtime dependency guardrail proof passed.

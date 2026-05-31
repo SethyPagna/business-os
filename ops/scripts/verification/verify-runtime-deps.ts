@@ -24,47 +24,107 @@ const FRONTEND_TAILWIND_CONFIG = path.join(ROOT, 'frontend', 'tailwind.config.ts
 const VERIFY_LOCAL_BAT = path.join(ROOT, 'run', 'verify-local.bat')
 const NPM_INSTALL_MODE_HELPER = path.join(ROOT, 'ops', 'scripts', 'powershell', 'npm-install-mode.ps1')
 const SUMMARY_PATH = path.join(ROOT, 'ops', 'docs', 'reference', 'RUNTIME-DEPS-GUARDRAIL.json')
-const FORBIDDEN_TRACKED_CONFIGS = [
+const FORBIDDEN_TRACKED_CONFIGS: string[] = [
   path.join(ROOT, 'frontend', 'postcss.config.cjs'),
   path.join(ROOT, 'frontend', 'tailwind.config.cjs'),
 ]
 
-const REQUIRED_FRONTEND_DEPS = [
+const REQUIRED_FRONTEND_DEPS: string[] = [
   '@zxing/browser',
   '@zxing/library',
 ]
 
-function assertTrackedFile(filePath) {
+type JsonObject = Record<string, unknown>
+type PackageJson = {
+  version?: string
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
+  scripts?: Record<string, string>
+}
+type PackageLock = {
+  version?: string
+  packages?: Record<string, JsonObject>
+  dependencies?: Record<string, JsonObject>
+}
+type PackageSet = {
+  rootPackage: PackageJson | null
+  backendPackage: PackageJson
+  backendLock: PackageLock
+  frontendPackage: PackageJson
+  frontendLock: PackageLock
+  opsPackage: PackageJson
+  opsLock: PackageLock
+}
+type VersionConsistency = {
+  appVersion: string
+  versions: Record<string, string>
+  rootPackageTracked: boolean
+  rootPackagePresent: boolean
+  mismatches: string[]
+  consistent: boolean
+}
+type CoverageTree = {
+  [key: string]: boolean | CoverageTree
+}
+type LocalVerificationCoverage = CoverageTree & {
+  progressLabelCoverage: CoverageTree
+}
+type RuntimeVersionGuardCoverage = Record<string, boolean>
+type RuntimeDepsSummary = {
+  summary: string
+  status: 'passed'
+  appVersion: string
+  backendVersion: string
+  frontendVersion: string
+  opsVersion: string
+  versionConsistency: VersionConsistency
+  requiredFrontendDeps: string[]
+  missingFrontendDeps: string[]
+  missingLockDeps: string[]
+  forbiddenTrackedConfigsPresent: string[]
+  runtimeVersionGuardCoverage: RuntimeVersionGuardCoverage
+  localVerificationCoverage: LocalVerificationCoverage
+}
+
+function readPackageJson(filePath: string): PackageJson {
+  return readJson(filePath) as PackageJson
+}
+
+function readPackageLock(filePath: string): PackageLock {
+  return readJson(filePath) as PackageLock
+}
+
+function assertTrackedFile(filePath: string): void {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Missing tracked file: ${path.relative(ROOT, filePath)}`)
   }
 }
 
-function rel(filePath) {
+function rel(filePath: string): string {
   return path.relative(ROOT, filePath).replace(/\\/g, '/')
 }
 
-function requireToken(source, token, label) {
+function requireToken(source: string, token: string, label: string): void {
   if (!source.includes(token)) {
     throw new Error(`${label} is missing ${token}`)
   }
 }
 
-function hasLockDependency(lock, packageName) {
+function hasLockDependency(lock: PackageLock, packageName: string): boolean {
   if (lock?.packages?.[`node_modules/${packageName}`]) return true
   if (lock?.dependencies?.[packageName]) return true
   return false
 }
 
-function readIncludes(filePath, token) {
+function readIncludes(filePath: string, token: string): boolean {
   return readUtf8(filePath).includes(token)
 }
 
-function packageLockVersion(lock) {
+function packageLockVersion(lock: PackageLock): string {
   return String(lock?.version || lock?.packages?.['']?.version || '').trim()
 }
 
-function buildVersionConsistency(packages) {
+function buildVersionConsistency(packages: PackageSet): VersionConsistency {
   const appVersion = String(packages.backendPackage.version || '').trim()
   const versions = {
     backendPackage: appVersion,
@@ -90,13 +150,13 @@ function buildVersionConsistency(packages) {
   }
 }
 
-function assertVersionConsistency(versionConsistency) {
+function assertVersionConsistency(versionConsistency: VersionConsistency): void {
   if (!versionConsistency.consistent) {
     throw new Error(`Version mismatch: ${versionConsistency.mismatches.join(', ')} expected=${versionConsistency.appVersion}`)
   }
 }
 
-function assertRuntimeVersionGuardWiring() {
+function assertRuntimeVersionGuardWiring(): void {
   ;[
     FRONTEND_VITE_CONFIG,
     FRONTEND_API_HTTP,
@@ -164,10 +224,10 @@ function assertRuntimeVersionGuardWiring() {
   ].forEach((token) => requireToken(performanceVerify, token, rel(FRONTEND_PERFORMANCE_VERIFY)))
 }
 
-function assertBuildManifestShapeWhenPresent() {
+function assertBuildManifestShapeWhenPresent(): void {
   if (!fs.existsSync(FRONTEND_DIST_BUILD_MANIFEST)) return
 
-  const manifest = readJson(FRONTEND_DIST_BUILD_MANIFEST, null)
+  const manifest = readJson(FRONTEND_DIST_BUILD_MANIFEST, null) as JsonObject | null
   if (!manifest || typeof manifest !== 'object') {
     throw new Error(`Invalid JSON in ${rel(FRONTEND_DIST_BUILD_MANIFEST)}`)
   }
@@ -181,7 +241,7 @@ function assertBuildManifestShapeWhenPresent() {
   }
 }
 
-function buildLocalVerificationCoverage() {
+function buildLocalVerificationCoverage(): LocalVerificationCoverage {
   assertTrackedFile(VERIFY_LOCAL_BAT)
   assertTrackedFile(NPM_INSTALL_MODE_HELPER)
   const verifyLocal = readUtf8(VERIFY_LOCAL_BAT)
@@ -229,7 +289,7 @@ function buildLocalVerificationCoverage() {
   }
 }
 
-function assertCoverageComplete(coverage, label, prefix = '') {
+function assertCoverageComplete(coverage: CoverageTree, label: string, prefix = ''): void {
   Object.entries(coverage).forEach(([key, value]) => {
     const pathLabel = prefix ? `${prefix}.${key}` : key
     if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -242,7 +302,7 @@ function assertCoverageComplete(coverage, label, prefix = '') {
   })
 }
 
-function main() {
+function main(): void {
   assertTrackedFile(BACKEND_PACKAGE_JSON)
   assertTrackedFile(BACKEND_PACKAGE_LOCK)
   assertTrackedFile(FRONTEND_PACKAGE_JSON)
@@ -251,13 +311,13 @@ function main() {
   assertTrackedFile(OPS_PACKAGE_LOCK)
   assertTrackedFile(FRONTEND_TAILWIND_CONFIG)
 
-  const rootPackage = fs.existsSync(ROOT_PACKAGE_JSON) ? readJson(ROOT_PACKAGE_JSON) : null
-  const backendPackage = readJson(BACKEND_PACKAGE_JSON)
-  const backendLock = readJson(BACKEND_PACKAGE_LOCK)
-  const frontendPackage = readJson(FRONTEND_PACKAGE_JSON)
-  const frontendLock = readJson(FRONTEND_PACKAGE_LOCK)
-  const opsPackage = readJson(OPS_PACKAGE_JSON)
-  const opsLock = readJson(OPS_PACKAGE_LOCK)
+  const rootPackage = fs.existsSync(ROOT_PACKAGE_JSON) ? readPackageJson(ROOT_PACKAGE_JSON) : null
+  const backendPackage = readPackageJson(BACKEND_PACKAGE_JSON)
+  const backendLock = readPackageLock(BACKEND_PACKAGE_LOCK)
+  const frontendPackage = readPackageJson(FRONTEND_PACKAGE_JSON)
+  const frontendLock = readPackageLock(FRONTEND_PACKAGE_LOCK)
+  const opsPackage = readPackageJson(OPS_PACKAGE_JSON)
+  const opsLock = readPackageLock(OPS_PACKAGE_LOCK)
   const manifestDeps = {
     ...(frontendPackage.dependencies || {}),
     ...(frontendPackage.devDependencies || {}),
@@ -294,7 +354,7 @@ function main() {
   const localVerificationCoverage = buildLocalVerificationCoverage()
   assertCoverageComplete(localVerificationCoverage, rel(VERIFY_LOCAL_BAT))
 
-  const runtimeVersionGuardCoverage = {
+  const runtimeVersionGuardCoverage: RuntimeVersionGuardCoverage = {
     viteBuildManifest: readIncludes(FRONTEND_VITE_CONFIG, 'business-os-build-manifest') &&
       readIncludes(FRONTEND_VITE_CONFIG, 'business-os-build.json'),
     viteDefinesFrontendBuild: readIncludes(FRONTEND_VITE_CONFIG, '__FRONTEND_BUILD_HASH__') &&
@@ -319,7 +379,7 @@ function main() {
       readIncludes(FRONTEND_PERFORMANCE_VERIFY, 'buildHash'),
     distBuildManifestPresent: fs.existsSync(FRONTEND_DIST_BUILD_MANIFEST),
   }
-  const summary = {
+  const summary: RuntimeDepsSummary = {
     summary: rel(SUMMARY_PATH),
     status: 'passed',
     appVersion: versionConsistency.appVersion,

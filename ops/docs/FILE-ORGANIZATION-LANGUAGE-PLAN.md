@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 632 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 633 in this file.
 
 ## Goal
 
@@ -5534,6 +5534,14 @@ Decision rule:
     JSON is narrowed to object values before repeat verification reads fields,
     keeping the audit non-mutating while making the repeated sweep safer to
     evolve. Direct Phase 29 proof passed.
+
+633. Strengthen the runtime dependency guardrail with real TypeScript types.
+    Done: `ops/scripts/verification/verify-runtime-deps.ts` now declares package
+    manifest, package lock, version consistency, nested coverage tree,
+    runtime-version coverage, and generated summary shapes. Package and lock
+    reads now flow through typed helpers, keeping the current dependency,
+    version, and local verification assertions intact while making future
+    runtime updates easier to validate. Direct guardrail proof passed.
 
 ## Safety Gates
 
