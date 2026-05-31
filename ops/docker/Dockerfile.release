@@ -29,7 +29,6 @@ RUN npm run build:server-entry \
   && node ../ops/scripts/backend/build-package-stage.ts
 
 FROM node:24-bookworm-slim AS runtime
-ARG BUILD_COMMIT=dev
 LABEL org.opencontainers.image.title="Business OS"
 LABEL org.opencontainers.image.description="Business OS Docker runtime"
 LABEL org.opencontainers.image.source="private"
@@ -47,6 +46,7 @@ RUN ln -s /app/node_modules/sharp /app/sharp \
   && mkdir -p /runtime \
   && chown -R businessos:businessos /runtime /app
 
+ARG BUILD_COMMIT=dev
 ENV NODE_ENV=production \
     PORT=4000 \
     BUSINESS_OS_BUILD_REVISION=${BUILD_COMMIT} \
