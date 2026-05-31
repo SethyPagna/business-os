@@ -4,7 +4,7 @@ Auto-generated function/class symbol commentary for all first-party code files (
 
 ## 1. Coverage Summary
 
-Code files scanned: **478**
+Code files scanned: **479**
 
 ## 2. Symbol Count by File
 
@@ -63,7 +63,7 @@ Code files scanned: **478**
 | 51 | `backend/src/routes/returns.ts` | 10 |
 | 52 | `backend/src/routes/runtime.ts` | 6 |
 | 53 | `backend/src/routes/sales.ts` | 24 |
-| 54 | `backend/src/routes/settings.ts` | 8 |
+| 54 | `backend/src/routes/settings.ts` | 10 |
 | 55 | `backend/src/routes/sync.ts` | 12 |
 | 56 | `backend/src/routes/system/index.ts` | 44 |
 | 57 | `backend/src/routes/units.ts` | 3 |
@@ -468,26 +468,27 @@ Code files scanned: **478**
 | 456 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 2 |
 | 457 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 3 |
 | 458 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
-| 459 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 2 |
-| 460 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 2 |
-| 461 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
-| 462 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
-| 463 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
-| 464 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
-| 465 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
-| 466 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
-| 467 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
-| 468 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
-| 469 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 11 |
-| 470 | `ops/scripts/runtime/storage/prune-storage.ts` | 17 |
-| 471 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
-| 472 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
-| 473 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
-| 474 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
-| 475 | `ops/scripts/verification/verify-hardening-policy.ts` | 10 |
-| 476 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
-| 477 | `ops/scripts/verification/verify-scale-services.ts` | 9 |
-| 478 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
+| 459 | `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts` | 9 |
+| 460 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 2 |
+| 461 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 2 |
+| 462 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
+| 463 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
+| 464 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
+| 465 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
+| 466 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
+| 467 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
+| 468 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
+| 469 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
+| 470 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 11 |
+| 471 | `ops/scripts/runtime/storage/prune-storage.ts` | 17 |
+| 472 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
+| 473 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
+| 474 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
+| 475 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
+| 476 | `ops/scripts/verification/verify-hardening-policy.ts` | 10 |
+| 477 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
+| 478 | `ops/scripts/verification/verify-scale-services.ts` | 9 |
+| 479 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
 
 ## 3. Detailed Function Commentary
 
@@ -1553,6 +1554,8 @@ Code files scanned: **478**
 | 6 | `getSettingsSnapshot` | function | 87 |
 | 7 | `collectAttemptedSettings` | function | 94 |
 | 8 | `getSettingsUpdatedAt` | function | 106 |
+| 9 | `parseUpdatedAtMs` | function | 131 |
+| 10 | `isExpectedOlderThanCurrent` | function | 145 |
 
 ### 3.55 `backend/src/routes/sync.ts`
 
@@ -3012,172 +3015,172 @@ Code files scanned: **478**
 | 65 | `getSettings` | export function | 795 |
 | 66 | `saveSettings` | export function | 816 |
 | 67 | `runSave` | const arrow | 817 |
-| 68 | `getCategories` | const arrow | 875 |
-| 69 | `createCategory` | const arrow | 876 |
-| 70 | `updateCategory` | const arrow | 881 |
-| 71 | `deleteCategory` | const arrow | 886 |
-| 72 | `getUnits` | const arrow | 893 |
-| 73 | `createUnit` | const arrow | 894 |
-| 74 | `updateUnit` | const arrow | 899 |
-| 75 | `deleteUnit` | const arrow | 904 |
-| 76 | `getBranches` | const arrow | 911 |
-| 77 | `getBranchSummary` | const arrow | 912 |
-| 78 | `updateBranch` | const arrow | 914 |
-| 79 | `deleteBranch` | const arrow | 918 |
-| 80 | `getBranchStock` | const arrow | 922 |
-| 81 | `getTransfers` | const arrow | 926 |
-| 82 | `getBranchStockIntegrity` | const arrow | 928 |
-| 83 | `getProducts` | const arrow | 932 |
-| 84 | `searchProducts` | const arrow | 933 |
-| 85 | `getProductsByIds` | const arrow | 943 |
-| 86 | `getProductFilters` | const arrow | 954 |
-| 87 | `getProductLookupUsage` | const arrow | 964 |
-| 88 | `replaceProductLookupValues` | const arrow | 972 |
-| 89 | `getCatalogMeta` | export function | 985 |
-| 90 | `getCatalogProducts` | export function | 993 |
-| 91 | `getPortalConfig` | export function | 1001 |
-| 92 | `getPortalBootstrap` | export function | 1009 |
-| 93 | `getPortalCatalogMeta` | export function | 1017 |
-| 94 | `getPortalCatalogProducts` | export function | 1025 |
-| 95 | `searchPortalCatalogProducts` | export function | 1033 |
-| 96 | `lookupPortalMembership` | export function | 1045 |
-| 97 | `createPortalSubmission` | export function | 1055 |
-| 98 | `getPortalAiStatus` | export function | 1069 |
-| 99 | `askPortalAi` | export function | 1077 |
-| 100 | `getPortalSubmissionsForReview` | const arrow | 1091 |
-| 101 | `reviewPortalSubmission` | const arrow | 1093 |
-| 102 | `getAiProviders` | const arrow | 1096 |
-| 103 | `createAiProvider` | const arrow | 1098 |
-| 104 | `updateAiProvider` | const arrow | 1100 |
-| 105 | `deleteAiProvider` | const arrow | 1102 |
-| 106 | `testAiProvider` | const arrow | 1104 |
-| 107 | `getAiResponses` | const arrow | 1106 |
-| 108 | `createProduct` | export function | 1108 |
-| 109 | `updateProduct` | export function | 1122 |
-| 110 | `deleteProduct` | const arrow | 1135 |
-| 111 | `buildMultipartHeaders` | function | 1152 |
-| 112 | `apiFormPost` | function | 1162 |
-| 113 | `withImportDeviceInfo` | const arrow | 1181 |
-| 114 | `listImportJobs` | const arrow | 1184 |
-| 115 | `getImportJobReview` | const arrow | 1193 |
-| 116 | `updateImportJobDecisions` | const arrow | 1197 |
-| 117 | `startImportJob` | const arrow | 1200 |
-| 118 | `approveImportJob` | const arrow | 1202 |
-| 119 | `cancelImportJob` | const arrow | 1204 |
-| 120 | `retryImportJob` | const arrow | 1206 |
-| 121 | `deleteImportJob` | const arrow | 1208 |
-| 122 | `getImportQueueStatus` | const arrow | 1227 |
-| 123 | `downloadImportJobErrors` | export function | 1229 |
-| 124 | `uploadImportJobCsv` | export function | 1249 |
-| 125 | `uploadImportJobZip` | export function | 1260 |
-| 126 | `uploadImportJobImages` | export function | 1271 |
-| 127 | `getFiles` | export function | 1301 |
-| 128 | `uploadFileAsset` | export function | 1317 |
-| 129 | `finish` | const arrow | 1344 |
-| 130 | `abortListener` | const arrow | 1351 |
-| 131 | `deleteFileAsset` | export function | 1399 |
-| 132 | `uploadProductImage` | export function | 1411 |
-| 133 | `uploadUserAvatar` | export function | 1445 |
-| 134 | `openCSVDialog` | export function | 1484 |
-| 135 | `openImageDialog` | export function | 1504 |
-| 136 | `getImageDataUrl` | export function | 1512 |
-| 137 | `getActionHistory` | const arrow | 1524 |
-| 138 | `updateActionHistory` | const arrow | 1530 |
-| 139 | `getInventorySummary` | const arrow | 1536 |
-| 140 | `getInventoryStats` | const arrow | 1537 |
-| 141 | `searchInventoryProducts` | const arrow | 1541 |
-| 142 | `getInventoryMovements` | const arrow | 1551 |
-| 143 | `getInventoryReasons` | const arrow | 1576 |
-| 144 | `saveInventoryReasons` | const arrow | 1578 |
-| 145 | `buildOfflineSaleReceiptNumber` | function | 1581 |
-| 146 | `isRetryableOfflineSaleError` | function | 1587 |
-| 147 | `findQueuedSale` | function | 1596 |
-| 148 | `putOfflineSaleMirror` | function | 1603 |
-| 149 | `queueOfflineSale` | function | 1628 |
-| 150 | `queuedSaleBackoffMs` | function | 1686 |
-| 151 | `updateQueuedRow` | function | 1691 |
-| 152 | `completeQueuedSale` | function | 1700 |
-| 153 | `failQueuedSale` | function | 1723 |
-| 154 | `markQueuedSaleConflict` | function | 1736 |
-| 155 | `syncPendingSalesQueue` | function | 1758 |
-| 156 | `getRfidStatus` | const arrow | 1801 |
-| 157 | `searchRfidTags` | const arrow | 1807 |
-| 158 | `recordRfidSessionEvents` | const arrow | 1813 |
-| 159 | `applyRfidSession` | const arrow | 1817 |
-| 160 | `createSale` | export function | 1821 |
-| 161 | `getSales` | const arrow | 1833 |
-| 162 | `getDashboard` | const arrow | 1840 |
-| 163 | `getAnalytics` | const arrow | 1841 |
-| 164 | `getCustomers` | const arrow | 1850 |
-| 165 | `getCustomerPointSummaries` | const arrow | 1871 |
-| 166 | `createCustomer` | export function | 1875 |
-| 167 | `updateCustomer` | const arrow | 1879 |
-| 168 | `deleteCustomer` | const arrow | 1883 |
-| 169 | `downloadCustomerTemplate` | const arrow | 1888 |
-| 170 | `getSuppliers` | const arrow | 1897 |
-| 171 | `createSupplier` | export function | 1902 |
-| 172 | `updateSupplier` | const arrow | 1906 |
-| 173 | `deleteSupplier` | const arrow | 1910 |
-| 174 | `downloadSupplierTemplate` | const arrow | 1915 |
-| 175 | `getDeliveryContacts` | const arrow | 1924 |
-| 176 | `createDeliveryContact` | export function | 1929 |
-| 177 | `updateDeliveryContact` | const arrow | 1933 |
-| 178 | `deleteDeliveryContact` | const arrow | 1937 |
-| 179 | `getUsers` | const arrow | 1944 |
-| 180 | `updateUser` | const arrow | 1946 |
-| 181 | `getUserProfile` | const arrow | 1947 |
-| 182 | `getUserAuthMethods` | const arrow | 1948 |
-| 183 | `updateUserProfile` | const arrow | 1950 |
-| 184 | `disconnectUserAuthProvider` | const arrow | 1952 |
-| 185 | `changeUserPassword` | const arrow | 1954 |
-| 186 | `resetPassword` | const arrow | 1956 |
-| 187 | `getRoles` | const arrow | 1959 |
-| 188 | `updateRole` | const arrow | 1961 |
-| 189 | `deleteRole` | const arrow | 1962 |
-| 190 | `getCustomTables` | const arrow | 1965 |
-| 191 | `getCustomTableData` | const arrow | 1967 |
-| 192 | `insertCustomRow` | const arrow | 1968 |
-| 193 | `updateCustomRow` | const arrow | 1969 |
-| 194 | `deleteCustomRow` | const arrow | 1970 |
-| 195 | `getAuditLogs` | const arrow | 1973 |
-| 196 | `deleteAuditLogsRetention` | const arrow | 1999 |
-| 197 | `wait` | function | 2003 |
-| 198 | `getSystemJob` | export function | 2007 |
-| 199 | `cancelSystemJob` | export function | 2012 |
-| 200 | `pollSystemJob` | export function | 2017 |
-| 201 | `waitForSystemJob` | function | 2043 |
-| 202 | `getIntegrationDoctor` | export function | 2051 |
-| 203 | `queueBackupFolderExport` | export function | 2062 |
-| 204 | `exportBackupFolder` | export function | 2071 |
-| 205 | `queueBackupFolderRestore` | export function | 2075 |
-| 206 | `importBackupFolder` | export function | 2082 |
-| 207 | `getGoogleDriveSyncStatus` | const arrow | 2090 |
-| 208 | `saveGoogleDriveSyncPreferences` | const arrow | 2124 |
-| 209 | `startGoogleDriveSyncOauth` | const arrow | 2127 |
-| 210 | `disconnectGoogleDriveSync` | const arrow | 2130 |
-| 211 | `forgetGoogleDriveSyncCredentials` | const arrow | 2133 |
-| 212 | `queueGoogleDriveSyncNow` | const arrow | 2136 |
-| 213 | `syncGoogleDriveNow` | const arrow | 2139 |
-| 214 | `resetData` | export function | 2144 |
-| 215 | `factoryReset` | export function | 2151 |
-| 216 | `downloadImportTemplate` | export function | 2159 |
-| 217 | `openPath` | export function | 2206 |
-| 218 | `getReturns` | const arrow | 2215 |
-| 219 | `createReturn` | export function | 2221 |
-| 220 | `createSupplierReturn` | export function | 2227 |
-| 221 | `updateSaleStatus` | const arrow | 2236 |
-| 222 | `attachSaleCustomer` | const arrow | 2252 |
-| 223 | `getSalesExport` | const arrow | 2276 |
-| 224 | `updateReturn` | const arrow | 2280 |
-| 225 | `testSyncServer` | export function | 2304 |
-| 226 | `openFolderDialog` | export function | 2323 |
-| 227 | `getDataPath` | const arrow | 2334 |
-| 228 | `getScaleMigrationStatus` | const arrow | 2335 |
-| 229 | `prepareScaleMigration` | const arrow | 2336 |
-| 230 | `runScaleMigration` | const arrow | 2337 |
-| 231 | `setDataPath` | export function | 2338 |
-| 232 | `resetDataPath` | export function | 2343 |
-| 233 | `browseDir` | const arrow | 2348 |
+| 68 | `getCategories` | const arrow | 880 |
+| 69 | `createCategory` | const arrow | 881 |
+| 70 | `updateCategory` | const arrow | 886 |
+| 71 | `deleteCategory` | const arrow | 891 |
+| 72 | `getUnits` | const arrow | 898 |
+| 73 | `createUnit` | const arrow | 899 |
+| 74 | `updateUnit` | const arrow | 904 |
+| 75 | `deleteUnit` | const arrow | 909 |
+| 76 | `getBranches` | const arrow | 916 |
+| 77 | `getBranchSummary` | const arrow | 917 |
+| 78 | `updateBranch` | const arrow | 919 |
+| 79 | `deleteBranch` | const arrow | 923 |
+| 80 | `getBranchStock` | const arrow | 927 |
+| 81 | `getTransfers` | const arrow | 931 |
+| 82 | `getBranchStockIntegrity` | const arrow | 933 |
+| 83 | `getProducts` | const arrow | 937 |
+| 84 | `searchProducts` | const arrow | 938 |
+| 85 | `getProductsByIds` | const arrow | 948 |
+| 86 | `getProductFilters` | const arrow | 959 |
+| 87 | `getProductLookupUsage` | const arrow | 969 |
+| 88 | `replaceProductLookupValues` | const arrow | 977 |
+| 89 | `getCatalogMeta` | export function | 990 |
+| 90 | `getCatalogProducts` | export function | 998 |
+| 91 | `getPortalConfig` | export function | 1006 |
+| 92 | `getPortalBootstrap` | export function | 1014 |
+| 93 | `getPortalCatalogMeta` | export function | 1022 |
+| 94 | `getPortalCatalogProducts` | export function | 1030 |
+| 95 | `searchPortalCatalogProducts` | export function | 1038 |
+| 96 | `lookupPortalMembership` | export function | 1050 |
+| 97 | `createPortalSubmission` | export function | 1060 |
+| 98 | `getPortalAiStatus` | export function | 1074 |
+| 99 | `askPortalAi` | export function | 1082 |
+| 100 | `getPortalSubmissionsForReview` | const arrow | 1096 |
+| 101 | `reviewPortalSubmission` | const arrow | 1098 |
+| 102 | `getAiProviders` | const arrow | 1101 |
+| 103 | `createAiProvider` | const arrow | 1103 |
+| 104 | `updateAiProvider` | const arrow | 1105 |
+| 105 | `deleteAiProvider` | const arrow | 1107 |
+| 106 | `testAiProvider` | const arrow | 1109 |
+| 107 | `getAiResponses` | const arrow | 1111 |
+| 108 | `createProduct` | export function | 1113 |
+| 109 | `updateProduct` | export function | 1127 |
+| 110 | `deleteProduct` | const arrow | 1140 |
+| 111 | `buildMultipartHeaders` | function | 1157 |
+| 112 | `apiFormPost` | function | 1167 |
+| 113 | `withImportDeviceInfo` | const arrow | 1186 |
+| 114 | `listImportJobs` | const arrow | 1189 |
+| 115 | `getImportJobReview` | const arrow | 1198 |
+| 116 | `updateImportJobDecisions` | const arrow | 1202 |
+| 117 | `startImportJob` | const arrow | 1205 |
+| 118 | `approveImportJob` | const arrow | 1207 |
+| 119 | `cancelImportJob` | const arrow | 1209 |
+| 120 | `retryImportJob` | const arrow | 1211 |
+| 121 | `deleteImportJob` | const arrow | 1213 |
+| 122 | `getImportQueueStatus` | const arrow | 1232 |
+| 123 | `downloadImportJobErrors` | export function | 1234 |
+| 124 | `uploadImportJobCsv` | export function | 1254 |
+| 125 | `uploadImportJobZip` | export function | 1265 |
+| 126 | `uploadImportJobImages` | export function | 1276 |
+| 127 | `getFiles` | export function | 1306 |
+| 128 | `uploadFileAsset` | export function | 1322 |
+| 129 | `finish` | const arrow | 1349 |
+| 130 | `abortListener` | const arrow | 1356 |
+| 131 | `deleteFileAsset` | export function | 1404 |
+| 132 | `uploadProductImage` | export function | 1416 |
+| 133 | `uploadUserAvatar` | export function | 1450 |
+| 134 | `openCSVDialog` | export function | 1489 |
+| 135 | `openImageDialog` | export function | 1509 |
+| 136 | `getImageDataUrl` | export function | 1517 |
+| 137 | `getActionHistory` | const arrow | 1529 |
+| 138 | `updateActionHistory` | const arrow | 1535 |
+| 139 | `getInventorySummary` | const arrow | 1541 |
+| 140 | `getInventoryStats` | const arrow | 1542 |
+| 141 | `searchInventoryProducts` | const arrow | 1546 |
+| 142 | `getInventoryMovements` | const arrow | 1556 |
+| 143 | `getInventoryReasons` | const arrow | 1581 |
+| 144 | `saveInventoryReasons` | const arrow | 1583 |
+| 145 | `buildOfflineSaleReceiptNumber` | function | 1586 |
+| 146 | `isRetryableOfflineSaleError` | function | 1592 |
+| 147 | `findQueuedSale` | function | 1601 |
+| 148 | `putOfflineSaleMirror` | function | 1608 |
+| 149 | `queueOfflineSale` | function | 1633 |
+| 150 | `queuedSaleBackoffMs` | function | 1691 |
+| 151 | `updateQueuedRow` | function | 1696 |
+| 152 | `completeQueuedSale` | function | 1705 |
+| 153 | `failQueuedSale` | function | 1728 |
+| 154 | `markQueuedSaleConflict` | function | 1741 |
+| 155 | `syncPendingSalesQueue` | function | 1763 |
+| 156 | `getRfidStatus` | const arrow | 1806 |
+| 157 | `searchRfidTags` | const arrow | 1812 |
+| 158 | `recordRfidSessionEvents` | const arrow | 1818 |
+| 159 | `applyRfidSession` | const arrow | 1822 |
+| 160 | `createSale` | export function | 1826 |
+| 161 | `getSales` | const arrow | 1838 |
+| 162 | `getDashboard` | const arrow | 1845 |
+| 163 | `getAnalytics` | const arrow | 1846 |
+| 164 | `getCustomers` | const arrow | 1855 |
+| 165 | `getCustomerPointSummaries` | const arrow | 1876 |
+| 166 | `createCustomer` | export function | 1880 |
+| 167 | `updateCustomer` | const arrow | 1884 |
+| 168 | `deleteCustomer` | const arrow | 1888 |
+| 169 | `downloadCustomerTemplate` | const arrow | 1893 |
+| 170 | `getSuppliers` | const arrow | 1902 |
+| 171 | `createSupplier` | export function | 1907 |
+| 172 | `updateSupplier` | const arrow | 1911 |
+| 173 | `deleteSupplier` | const arrow | 1915 |
+| 174 | `downloadSupplierTemplate` | const arrow | 1920 |
+| 175 | `getDeliveryContacts` | const arrow | 1929 |
+| 176 | `createDeliveryContact` | export function | 1934 |
+| 177 | `updateDeliveryContact` | const arrow | 1938 |
+| 178 | `deleteDeliveryContact` | const arrow | 1942 |
+| 179 | `getUsers` | const arrow | 1949 |
+| 180 | `updateUser` | const arrow | 1951 |
+| 181 | `getUserProfile` | const arrow | 1952 |
+| 182 | `getUserAuthMethods` | const arrow | 1953 |
+| 183 | `updateUserProfile` | const arrow | 1955 |
+| 184 | `disconnectUserAuthProvider` | const arrow | 1957 |
+| 185 | `changeUserPassword` | const arrow | 1959 |
+| 186 | `resetPassword` | const arrow | 1961 |
+| 187 | `getRoles` | const arrow | 1964 |
+| 188 | `updateRole` | const arrow | 1966 |
+| 189 | `deleteRole` | const arrow | 1967 |
+| 190 | `getCustomTables` | const arrow | 1970 |
+| 191 | `getCustomTableData` | const arrow | 1972 |
+| 192 | `insertCustomRow` | const arrow | 1973 |
+| 193 | `updateCustomRow` | const arrow | 1974 |
+| 194 | `deleteCustomRow` | const arrow | 1975 |
+| 195 | `getAuditLogs` | const arrow | 1978 |
+| 196 | `deleteAuditLogsRetention` | const arrow | 2004 |
+| 197 | `wait` | function | 2008 |
+| 198 | `getSystemJob` | export function | 2012 |
+| 199 | `cancelSystemJob` | export function | 2017 |
+| 200 | `pollSystemJob` | export function | 2022 |
+| 201 | `waitForSystemJob` | function | 2048 |
+| 202 | `getIntegrationDoctor` | export function | 2056 |
+| 203 | `queueBackupFolderExport` | export function | 2067 |
+| 204 | `exportBackupFolder` | export function | 2076 |
+| 205 | `queueBackupFolderRestore` | export function | 2080 |
+| 206 | `importBackupFolder` | export function | 2087 |
+| 207 | `getGoogleDriveSyncStatus` | const arrow | 2095 |
+| 208 | `saveGoogleDriveSyncPreferences` | const arrow | 2129 |
+| 209 | `startGoogleDriveSyncOauth` | const arrow | 2132 |
+| 210 | `disconnectGoogleDriveSync` | const arrow | 2135 |
+| 211 | `forgetGoogleDriveSyncCredentials` | const arrow | 2138 |
+| 212 | `queueGoogleDriveSyncNow` | const arrow | 2141 |
+| 213 | `syncGoogleDriveNow` | const arrow | 2144 |
+| 214 | `resetData` | export function | 2149 |
+| 215 | `factoryReset` | export function | 2156 |
+| 216 | `downloadImportTemplate` | export function | 2164 |
+| 217 | `openPath` | export function | 2211 |
+| 218 | `getReturns` | const arrow | 2220 |
+| 219 | `createReturn` | export function | 2226 |
+| 220 | `createSupplierReturn` | export function | 2232 |
+| 221 | `updateSaleStatus` | const arrow | 2241 |
+| 222 | `attachSaleCustomer` | const arrow | 2257 |
+| 223 | `getSalesExport` | const arrow | 2281 |
+| 224 | `updateReturn` | const arrow | 2285 |
+| 225 | `testSyncServer` | export function | 2309 |
+| 226 | `openFolderDialog` | export function | 2328 |
+| 227 | `getDataPath` | const arrow | 2339 |
+| 228 | `getScaleMigrationStatus` | const arrow | 2340 |
+| 229 | `prepareScaleMigration` | const arrow | 2341 |
+| 230 | `runScaleMigration` | const arrow | 2342 |
+| 231 | `setDataPath` | export function | 2343 |
+| 232 | `resetDataPath` | export function | 2348 |
+| 233 | `browseDir` | const arrow | 2353 |
 
 ### 3.150 `frontend/src/api/websocket.ts`
 
@@ -4666,10 +4669,10 @@ Code files scanned: **478**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getErrorMessage` | function | 71 |
-| 2 | `Section` | function | 76 |
-| 3 | `Toggle` | function | 87 |
-| 4 | `ReceiptSettings` | export default function | 102 |
+| 1 | `getErrorMessage` | function | 73 |
+| 2 | `Section` | function | 78 |
+| 3 | `Toggle` | function | 89 |
+| 4 | `ReceiptSettings` | export default function | 104 |
 
 ### 3.249 `frontend/src/components/receipt-settings/template.ts`
 
@@ -6876,28 +6879,42 @@ Code files scanned: **478**
 | 4 | `endpointStatus` | function | 70 |
 | 5 | `main` | function | 74 |
 
-### 3.459 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
+### 3.459 `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 44 |
+| 2 | `headers` | function | 48 |
+| 3 | `getSettings` | function | 70 |
+| 4 | `saveSettings` | function | 76 |
+| 5 | `waitForSettingsPost` | function | 88 |
+| 6 | `waitForReceiptLanguage` | function | 95 |
+| 7 | `dismissRuntimeVersionMismatchToast` | function | 106 |
+| 8 | `clickLanguage` | function | 115 |
+| 9 | `main` | function | 125 |
+
+### 3.460 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 33 |
 | 2 | `main` | function | 40 |
 
-### 3.460 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
+### 3.461 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 29 |
 | 2 | `main` | function | 36 |
 
-### 3.461 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
+### 3.462 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 32 |
 | 2 | `main` | function | 40 |
 
-### 3.462 `ops/scripts/runtime/smoke/check-public-url.ts`
+### 3.463 `ops/scripts/runtime/smoke/check-public-url.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6913,7 +6930,7 @@ Code files scanned: **478**
 | 10 | `checkHttpsViaIp` | function | 123 |
 | 11 | `main` | function | 160 |
 
-### 3.463 `ops/scripts/runtime/smoke/check-route-contract.ts`
+### 3.464 `ops/scripts/runtime/smoke/check-route-contract.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6921,7 +6938,7 @@ Code files scanned: **478**
 | 2 | `checkRoute` | function | 40 |
 | 3 | `main` | function | 67 |
 
-### 3.464 `ops/scripts/runtime/smoke/live-smoke.ts`
+### 3.465 `ops/scripts/runtime/smoke/live-smoke.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6932,7 +6949,7 @@ Code files scanned: **478**
 | 5 | `main` | function | 86 |
 | 6 | `record` | const arrow | 91 |
 
-### 3.465 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
+### 3.466 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6944,7 +6961,7 @@ Code files scanned: **478**
 | 6 | `writeReport` | function | 115 |
 | 7 | `main` | function | 121 |
 
-### 3.466 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
+### 3.467 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6957,7 +6974,7 @@ Code files scanned: **478**
 | 7 | `buildSql` | function | 191 |
 | 8 | `runPsql` | function | 200 |
 
-### 3.467 `ops/scripts/runtime/storage/cleanup-test-data.ts`
+### 3.468 `ops/scripts/runtime/storage/cleanup-test-data.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6983,7 +7000,7 @@ Code files scanned: **478**
 | 20 | `cleanupAuditImportFiles` | function | 376 |
 | 21 | `countMatchedRows` | function | 399 |
 
-### 3.468 `ops/scripts/runtime/storage/dataset-readiness.ts`
+### 3.469 `ops/scripts/runtime/storage/dataset-readiness.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6993,7 +7010,7 @@ Code files scanned: **478**
 | 4 | `buildCountsSql` | function | 56 |
 | 5 | `summarizeDataset` | function | 74 |
 
-### 3.469 `ops/scripts/runtime/storage/post-live-hygiene.ts`
+### 3.470 `ops/scripts/runtime/storage/post-live-hygiene.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7009,7 +7026,7 @@ Code files scanned: **478**
 | 10 | `runChecks` | function | 184 |
 | 11 | `main` | function | 192 |
 
-### 3.470 `ops/scripts/runtime/storage/prune-storage.ts`
+### 3.471 `ops/scripts/runtime/storage/prune-storage.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7031,7 +7048,7 @@ Code files scanned: **478**
 | 16 | `findBackupRoots` | function | 357 |
 | 17 | `main` | function | 371 |
 
-### 3.471 `ops/scripts/runtime/storage/restore-candidates.ts`
+### 3.472 `ops/scripts/runtime/storage/restore-candidates.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7044,7 +7061,7 @@ Code files scanned: **478**
 | 7 | `findBackupPackages` | function | 136 |
 | 8 | `chooseRecommendation` | function | 150 |
 
-### 3.472 `ops/scripts/runtime/storage/restore-rehearsal.ts`
+### 3.473 `ops/scripts/runtime/storage/restore-rehearsal.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7063,7 +7080,7 @@ Code files scanned: **478**
 | 13 | `countRestoredTables` | function | 152 |
 | 14 | `compareCounts` | function | 159 |
 
-### 3.473 `ops/scripts/verification/verify-backup-reliability.ts`
+### 3.474 `ops/scripts/verification/verify-backup-reliability.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7074,7 +7091,7 @@ Code files scanned: **478**
 | 5 | `checkNeedles` | function | 47 |
 | 6 | `main` | function | 58 |
 
-### 3.474 `ops/scripts/verification/verify-docker-release.ts`
+### 3.475 `ops/scripts/verification/verify-docker-release.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7090,7 +7107,7 @@ Code files scanned: **478**
 | 10 | `walk` | function | 317 |
 | 11 | `main` | function | 328 |
 
-### 3.475 `ops/scripts/verification/verify-hardening-policy.ts`
+### 3.476 `ops/scripts/verification/verify-hardening-policy.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7105,7 +7122,7 @@ Code files scanned: **478**
 | 9 | `assertFullAutomationIncludesPolicy` | function | 102 |
 | 10 | `main` | function | 118 |
 
-### 3.476 `ops/scripts/verification/verify-runtime-deps.ts`
+### 3.477 `ops/scripts/verification/verify-runtime-deps.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7125,7 +7142,7 @@ Code files scanned: **478**
 | 14 | `assertCoverageComplete` | function | 292 |
 | 15 | `main` | function | 305 |
 
-### 3.477 `ops/scripts/verification/verify-scale-services.ts`
+### 3.478 `ops/scripts/verification/verify-scale-services.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7139,7 +7156,7 @@ Code files scanned: **478**
 | 8 | `pushDockerAvailabilityMessage` | function | 103 |
 | 9 | `main` | function | 108 |
 
-### 3.478 `ops/scripts/verification/verify-secret-hygiene.ts`
+### 3.479 `ops/scripts/verification/verify-secret-hygiene.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

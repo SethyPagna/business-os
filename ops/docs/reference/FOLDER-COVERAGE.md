@@ -85,7 +85,7 @@ Total folders documented: **82**
 | 73 | `ops/scripts/runtime` | Project folder | 2 | 5 |
 | 74 | `ops/scripts/runtime/audits` | Project folder | 6 | 0 |
 | 75 | `ops/scripts/runtime/cloudflare` | Project folder | 4 | 0 |
-| 76 | `ops/scripts/runtime/live-checks` | Project folder | 18 | 0 |
+| 76 | `ops/scripts/runtime/live-checks` | Project folder | 19 | 0 |
 | 77 | `ops/scripts/runtime/smoke` | Project folder | 4 | 0 |
 | 78 | `ops/scripts/runtime/storage` | Project folder | 7 | 0 |
 | 79 | `ops/scripts/verification` | Project folder | 6 | 0 |
@@ -1627,7 +1627,7 @@ Total folders documented: **82**
 ### 3.76 Folder: `ops/scripts/runtime/live-checks`
 
 - Purpose: Project folder
-- Direct files: **18**
+- Direct files: **19**
 - Direct subfolders: **0**
 
 #### 3.76.2 Files
@@ -1649,9 +1649,10 @@ Total folders documented: **82**
 | 13 | `phase84-product-units-actions-live-check.ts` | Project source/support file |
 | 14 | `phase84-product-variant-actions-live-check.ts` | Project source/support file |
 | 15 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
-| 16 | `phase84-sales-actions-live-check.ts` | Project source/support file |
-| 17 | `phase84-ui-live-check.ts` | Project source/support file |
-| 18 | `phase84-users-actions-live-check.ts` | Project source/support file |
+| 16 | `phase84-receipt-settings-rollback-check.ts` | Project source/support file |
+| 17 | `phase84-sales-actions-live-check.ts` | Project source/support file |
+| 18 | `phase84-ui-live-check.ts` | Project source/support file |
+| 19 | `phase84-users-actions-live-check.ts` | Project source/support file |
 
 
 ### 3.77 Folder: `ops/scripts/runtime/smoke`

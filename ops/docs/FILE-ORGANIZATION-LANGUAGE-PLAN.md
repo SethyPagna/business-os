@@ -5742,6 +5742,28 @@ Decision rule:
     19 candidates: 14 data-mutating controls, 3 settings language toggles, and
     2 print/download controls. Post-live hygiene and Phase 29 audit passed.
 
+650. Add receipt-settings rollback live coverage and settings conflict hardening.
+    Done: a new `phase84:receipt-settings-rollback` script exercises the
+    compact receipt preview language controls with a rollback harness instead
+    of leaving them as skipped mutating controls in the broad audit. The check
+    snapshots the original receipt template, seeds English, clicks `KH`, `Both`,
+    and `EN`, verifies the persisted `receipt_language`, writes a screenshot and
+    JSON report, then restores the original template. Frontend settings writes
+    now classify `settings_conflict`, retry small writes against newer
+    timestamps, keep receipt-settings queued auto-saves pointed at the latest
+    template, and can narrowly bypass stale timestamp metadata for this receipt
+    template fallback while the old packaged backend remains deployed. The
+    backend settings route now scopes optimistic timestamp comparison to the
+    attempted keys so unrelated background sync settings do not block compact
+    UI writes after the next backend rollout. Docker release packaging was
+    adjusted toward the generated `.pkg-stage` Node runtime path because the
+    current `pkg` binary path failed to emit an artifact; Docker Desktop still
+    hung during replacement-image build, so the live app was updated by placing
+    rebuilt frontend assets in `/runtime/frontend/dist` and restarting the app
+    container. Proof: frontend utility tests, frontend typecheck, frontend
+    build, backend utility tests, and the receipt-settings rollback live check
+    passed. Follow-up remains to finish a clean Docker image rebuild.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

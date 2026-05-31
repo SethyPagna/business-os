@@ -7454,3 +7454,30 @@ Move 649 status:
   screenshots, and 0 findings. The seeded rollback latest report now lists 19
   candidates: 14 data-mutating controls, 3 settings language toggles, and 2
   print/download controls. Post-live hygiene and Phase 29 audit passed.
+
+Move 650 status:
+- Move 650 adds a dedicated receipt-settings rollback live check for the
+  compact preview language controls (`KH`, `Both`, `EN`) and removes that gap
+  from the broad-audit-only backlog path. The new
+  `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts`
+  logs in, snapshots the current `receipt_template`, seeds English, clicks the
+  language controls in the live UI, verifies the server-side
+  `receipt_language`, captures a screenshot, and restores the original
+  template in `finally`. The receipt settings UI now keeps queued auto-saves
+  pointed at the latest template ref, retries compact settings writes against
+  fresh conflict timestamps, and has a narrow fallback for the currently
+  deployed old backend that still compares settings writes against unrelated
+  background sync keys. The backend settings route was also repaired so future
+  releases compare optimistic timestamps against the attempted settings keys
+  and accept client metadata that is newer than those keys. Docker release
+  packaging was moved toward the generated `.pkg-stage` Node runtime path after
+  `@yao-pkg/pkg` repeatedly exited without a binary; Docker Desktop still hung
+  before producing a replacement image, so the current production container was
+  updated by copying the rebuilt `frontend/dist` into `/runtime/frontend/dist`
+  and restarting the app container. Proof: frontend `test:utils`, frontend
+  `typecheck`, frontend `build`, backend `test:utils`, and
+  `npm.cmd --prefix ops run phase84:receipt-settings-rollback` passed. The
+  rollback report shows `KH`, `Both`, and `EN` all reached the expected server
+  state and the original receipt template was restored. Remaining follow-up:
+  complete a clean Docker image rebuild once Docker Desktop stops hanging on
+  `docker build`.
