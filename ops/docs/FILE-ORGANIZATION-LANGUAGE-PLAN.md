@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 631 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 632 in this file.
 
 ## Goal
 
@@ -5526,6 +5526,14 @@ Decision rule:
     empty stack pops, so future folder cleanup and rewire checks have clearer
     boundaries while preserving the current report contract. Direct organization
     audit proof passed.
+
+632. Strengthen the Phase 29 coordinator with real TypeScript types.
+    Done: `ops/scripts/architecture/phase29-audit.ts` now declares audit check,
+    CLI option, child-process result, parsed-output, check-run, audit-cycle,
+    duration-summary, repeat-consistency, and final summary shapes. Parsed child
+    JSON is narrowed to object values before repeat verification reads fields,
+    keeping the audit non-mutating while making the repeated sweep safer to
+    evolve. Direct Phase 29 proof passed.
 
 ## Safety Gates
 

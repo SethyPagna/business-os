@@ -9,7 +9,92 @@ const REPORT_PATH = path.join(ROOT_DIR, 'ops/docs/reference/PHASE29-AUDIT.md')
 const SUMMARY_PATH = path.join(ROOT_DIR, 'ops/docs/reference/PHASE29-AUDIT.json')
 const POLICY_PATH = path.join(ROOT_DIR, 'ops/automation/business-os-automation.json')
 
-const CHECKS = [
+type AuditCheck = {
+  label: string
+  command: string
+  args: string[]
+  reports: string[]
+}
+type CliOptions = {
+  repeat: number
+  verbose: boolean
+}
+type ChildProcessResult = {
+  status: number
+  stdout: string
+  stderr: string
+}
+type ParsedOutput = Record<string, unknown> | null
+type CheckRunResult = {
+  label: string
+  command: string
+  status: number
+  durationMs: number
+  reports: string[]
+  parsedOutput: ParsedOutput
+  cycle: number
+}
+type SummaryRunResult = Omit<CheckRunResult, 'status'> & {
+  status: 'passed' | 'failed'
+  exitCode: number
+}
+type AuditCycle = {
+  cycle: number
+  results: CheckRunResult[]
+}
+type DurationEntry = {
+  label: string
+  runs: number
+  totalMs: number
+  maxMs: number
+  averageMs?: number
+}
+type DurationSummary = {
+  totalMs: number
+  byCheck: Required<DurationEntry>[]
+  slowestRuns: Array<{ cycle: number, label: string, durationMs: number }>
+}
+type ComparableContext = {
+  label?: string
+  field?: string
+}
+type RepeatValue = {
+  cycle: number
+  value: unknown
+}
+type RepeatComparison = {
+  label: string
+  field: string
+  stable: boolean
+  values: RepeatValue[]
+}
+type RepeatConsistency = {
+  checked: boolean
+  stable: boolean
+  comparisons: RepeatComparison[]
+  drift: RepeatComparison[]
+}
+type Phase29Summary = {
+  generatedAt: string
+  report: string
+  summary: string
+  policy: string
+  mode: string
+  executionMode: string
+  referenceWriterConcurrency: number
+  parallelCheckConcurrency: number
+  verboseChildOutput: boolean
+  repeat: number
+  cycles: number
+  checks: number
+  failures: number
+  failedChecks: string[]
+  durationSummary: DurationSummary
+  repeatConsistency: RepeatConsistency
+  results: SummaryRunResult[]
+}
+
+const CHECKS: AuditCheck[] = [
   {
     label: 'Generated bulk audit',
     command: process.execPath,
@@ -83,7 +168,7 @@ const PARALLEL_CHECK_LABELS = new Set([
 ])
 const ORGANIZATION_CHECK_LABEL = 'Organization audit'
 
-function parseArgs(argv) {
+function parseArgs(argv: string[]): CliOptions {
   const options = { repeat: 1, verbose: false }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -100,11 +185,16 @@ function parseArgs(argv) {
   return options
 }
 
-function parseLastJsonObject(output) {
+function isParsedObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function parseLastJsonObject(output: unknown): ParsedOutput {
   const text = String(output || '').trim()
   for (let index = text.lastIndexOf('{'); index >= 0; index = text.lastIndexOf('{', index - 1)) {
     try {
-      return JSON.parse(text.slice(index))
+      const parsed = JSON.parse(text.slice(index))
+      if (isParsedObject(parsed)) return parsed
     } catch (_) {
       // Keep walking backward until we find the start of the last JSON object.
     }
@@ -112,7 +202,7 @@ function parseLastJsonObject(output) {
   return null
 }
 
-function runChildProcess(check, options) {
+function runChildProcess(check: AuditCheck, options: CliOptions): Promise<ChildProcessResult> {
   return new Promise((resolve) => {
     const child = spawn(check.command, check.args, {
       cwd: ROOT_DIR,
@@ -140,7 +230,7 @@ function runChildProcess(check, options) {
   })
 }
 
-async function runCheck(check, cycle, repeat, options) {
+async function runCheck(check: AuditCheck, cycle: number, repeat: number, options: CliOptions): Promise<CheckRunResult> {
   console.log(`\n[phase29] cycle ${cycle}/${repeat}: ${check.label}`)
   const startedAt = Date.now()
   const result = await runChildProcess(check, options)
@@ -165,16 +255,22 @@ async function runCheck(check, cycle, repeat, options) {
   }
 }
 
-async function runCheckGroup(checks, cycle, repeat, options, concurrency = PARALLEL_CHECK_CONCURRENCY) {
+async function runCheckGroup(
+  checks: AuditCheck[],
+  cycle: number,
+  repeat: number,
+  options: CliOptions,
+  concurrency = PARALLEL_CHECK_CONCURRENCY,
+): Promise<CheckRunResult[]> {
   return mapLimit(checks, concurrency, (check) => runCheck(check, cycle, repeat, options))
 }
 
-function flattenCycles(cycles) {
+function flattenCycles(cycles: AuditCycle[]): CheckRunResult[] {
   return cycles.flatMap((cycle) => cycle.results)
 }
 
-function buildDurationSummary(results) {
-  const byLabel = new Map()
+function buildDurationSummary(results: CheckRunResult[]): DurationSummary {
+  const byLabel = new Map<string, DurationEntry>()
   for (const result of results) {
     const current = byLabel.get(result.label) || {
       label: result.label,
@@ -208,14 +304,14 @@ function buildDurationSummary(results) {
   }
 }
 
-async function renderReport(cycles, repeat) {
+async function renderReport(cycles: AuditCycle[], repeat: number): Promise<string> {
   const generatedAt = new Date().toISOString()
-  const reportRows = []
+  const reportRows: string[][] = []
   const results = flattenCycles(cycles)
   const repeatConsistency = buildRepeatConsistency(cycles)
   const durationSummary = buildDurationSummary(results)
   for (const result of results) {
-    const reportLinks = []
+    const reportLinks: string[] = []
     for (const report of result.reports) {
       reportLinks.push(await filePathExists(path.join(ROOT_DIR, report)) ? `\`${report}\`` : `missing: \`${report}\``)
     }
@@ -299,7 +395,7 @@ Full repeat values are retained in \`${normalizePath(path.relative(ROOT_DIR, SUM
 `
 }
 
-function comparableValue(value, { label = '', field = '' } = {}) {
+function comparableValue(value: unknown, { label = '', field = '' }: ComparableContext = {}): unknown {
   let stableValue = value
   if (label === 'Runtime dependency guardrail' && field === 'runtimeVersionGuardCoverage') {
     const { distBuildManifestPresent: _distBuildManifestPresent, ...sourceWiringCoverage } = value || {}
@@ -311,13 +407,13 @@ function comparableValue(value, { label = '', field = '' } = {}) {
   return stableValue
 }
 
-function collectParsedByCycle(cycles, label) {
+function collectParsedByCycle(cycles: AuditCycle[], label: string): CheckRunResult[] {
   return cycles
     .map((cycle) => cycle.results.find((result) => result.label === label))
-    .filter((result) => result?.parsedOutput)
+    .filter((result): result is CheckRunResult => Boolean(result?.parsedOutput))
 }
 
-function buildRepeatConsistency(cycles) {
+function buildRepeatConsistency(cycles: AuditCycle[]): RepeatConsistency {
   const specs = [
     {
       label: 'Generated bulk audit',
@@ -489,8 +585,8 @@ function buildRepeatConsistency(cycles) {
   if (cycles.length <= 1) {
     return { checked: false, stable: true, comparisons: [], drift: [] }
   }
-  const comparisons = []
-  const drift = []
+  const comparisons: RepeatComparison[] = []
+  const drift: RepeatComparison[] = []
   for (const spec of specs) {
     const results = collectParsedByCycle(cycles, spec.label)
     if (results.length !== cycles.length) continue
@@ -509,7 +605,7 @@ function buildRepeatConsistency(cycles) {
   return { checked: true, stable: drift.length === 0, comparisons, drift }
 }
 
-function buildSummary(cycles, repeat) {
+function buildSummary(cycles: AuditCycle[], repeat: number): Phase29Summary {
   const results = flattenCycles(cycles)
   const failures = results.filter((result) => result.status !== 0)
   const repeatConsistency = buildRepeatConsistency(cycles)
@@ -547,9 +643,9 @@ function buildSummary(cycles, repeat) {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
-  const cycles = []
+  const cycles: AuditCycle[] = []
   const referenceWriterChecks = CHECKS.filter((check) => REFERENCE_WRITER_LABELS.has(check.label))
   const parallelChecks = CHECKS.filter((check) => PARALLEL_CHECK_LABELS.has(check.label))
   const organizationCheck = CHECKS.find((check) => check.label === ORGANIZATION_CHECK_LABEL)

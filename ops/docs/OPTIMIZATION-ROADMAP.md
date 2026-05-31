@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 631.
+- Latest completed implementation move in this roadmap: Move 632.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7229,3 +7229,11 @@ Move 631 status:
   and guards empty stack pops, preserving the same report contract while making
   future folder rewire checks easier to change safely. Direct organization
   audit proof passed.
+
+Move 632 status:
+- Move 632 strengthens the Phase 29 coordinator with explicit TypeScript shapes
+  for audit checks, CLI options, child-process results, parsed child JSON,
+  check runs, audit cycles, duration summaries, repeat-consistency comparisons,
+  and the generated Phase 29 JSON summary. Parsed child output is now narrowed
+  to object values before repeat checks read fields, preserving the current
+  execution order and non-mutating audit contract. Direct Phase 29 proof passed.
