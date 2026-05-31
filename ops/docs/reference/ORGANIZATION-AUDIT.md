@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-31T05:48:43.035Z
+Generated: 2026-05-31T06:22:40.346Z
 
 ## Summary
 
@@ -64,9 +64,9 @@ Generated: 2026-05-31T05:48:43.035Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8242 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7358 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7135 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5669 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7374 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7136 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5685 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3401 | ops/docs/reference |
