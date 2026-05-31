@@ -7481,3 +7481,27 @@ Move 650 status:
   state and the original receipt template was restored. Remaining follow-up:
   complete a clean Docker image rebuild once Docker Desktop stops hanging on
   `docker build`.
+
+Move 651 status:
+- Move 651 completes the Docker rebuild follow-up from Move 650 and fixes the
+  Returns supplier-scope crash found by the live suite. The release Dockerfile
+  now passes `BUILD_COMMIT` through `BUSINESS_OS_BUILD_REVISION` during the
+  frontend build and into the runtime environment, so `/health` and
+  `/business-os-build.json` expose matching concrete revisions instead of
+  `dev`. The stale `/runtime/frontend/dist` override was removed from the
+  runtime volume, and the active containers were recreated on a fresh
+  timestamped `business-os` release tag; older unused `business-os` image tags
+  were deleted, leaving only `latest` and the active timestamped tag. While running
+  the broad Phase 8.4 live suite, supplier returns exposed a genuine
+  `Maximum call stack size exceeded` page crash. Root cause was
+  `clearLoadWatchdog` recursively calling itself in
+  `frontend/src/components/returns/Returns.tsx`; it now calls
+  `window.clearTimeout(loadWatchdogRef.current)` before clearing the ref. Proof:
+  frontend typecheck, frontend build, focused supplier-returns Playwright
+  interaction, receipt-settings rollback live check, post-live hygiene,
+  Phase 29 audit, focused dashboard/products/POS/receipt-settings desktop and
+  mobile control audit, full Phase 8.4 live suite, public Cloudflare portal
+  check, and admin Cloudflare `/health` check all passed. Exact current runtime
+  tag, backend revision, and frontend hash are intentionally read from
+  `/health` and `/business-os-build.json` after each release rebuild so this
+  plan entry does not go stale after documentation-only commits.

@@ -523,7 +523,7 @@ Total files documented: **542**
 | 511 | `ops/scripts/runtime/storage/restore-candidates.ts` | project-scripts | 213 | 7.5 | Project source/support file |
 | 512 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | project-scripts | 219 | 7.9 | Project source/support file |
 | 513 | `ops/scripts/verification/verify-backup-reliability.ts` | project-scripts | 162 | 5.7 | Project source/support file |
-| 514 | `ops/scripts/verification/verify-docker-release.ts` | project-scripts | 691 | 33.2 | Project source/support file |
+| 514 | `ops/scripts/verification/verify-docker-release.ts` | project-scripts | 696 | 33.5 | Project source/support file |
 | 515 | `ops/scripts/verification/verify-hardening-policy.ts` | project-scripts | 165 | 6.2 | Project source/support file |
 | 516 | `ops/scripts/verification/verify-runtime-deps.ts` | project-scripts | 410 | 16.6 | Project source/support file |
 | 517 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 180 | 6.7 | Project source/support file |

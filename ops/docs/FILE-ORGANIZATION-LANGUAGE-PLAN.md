@@ -5764,6 +5764,23 @@ Decision rule:
     build, backend utility tests, and the receipt-settings rollback live check
     passed. Follow-up remains to finish a clean Docker image rebuild.
 
+651. Complete Docker rebuild follow-up and fix supplier returns stack overflow.
+    Done: the release Dockerfile now wires `BUILD_COMMIT` into
+    `BUSINESS_OS_BUILD_REVISION` for both Vite frontend builds and runtime
+    `/health` metadata, eliminating the `dev` revision mismatch in packaged
+    Docker releases. The stale runtime frontend override was removed, the stack
+    was recreated on a fresh timestamped `business-os` release tag, and older
+    unused `business-os` image tags were deleted so only `latest` and the active
+    timestamped release remain. The broad live suite then exposed a supplier
+    returns crash caused by `clearLoadWatchdog` recursively calling itself in
+    `frontend/src/components/returns/Returns.tsx`; it now clears the stored
+    timer with `window.clearTimeout`. Proof: frontend typecheck, frontend
+    build, focused supplier-returns Playwright interaction, receipt-settings
+    rollback live check, post-live hygiene, Phase 29 audit,
+    dashboard/products/POS/receipt-settings desktop and mobile control audit,
+    full Phase 8.4 live suite, public Cloudflare portal check, and admin
+    Cloudflare `/health` check passed.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.
