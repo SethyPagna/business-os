@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 638 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 640 in this file.
 
 ## Goal
 
@@ -5580,6 +5580,29 @@ Decision rule:
     write-if-changed, and main-entry shapes. The generated
     `backend/server.js` contract remains unchanged. Direct server-entry drift
     check and Phase 29 passed.
+
+639. Add an all-pages live control audit for Phase 8.4.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    provides a reusable Playwright gate for every manifest route. The audit
+    uses the existing login/session helper, opens fresh pages per route/profile,
+    records app-owned console and network issues, exercises search inputs,
+    safe select controls, tabs, filters, and other non-destructive buttons,
+    captures ready/after-control screenshots, and checks for responsive overflow
+    and clipped nowrap text. The ops package exposes
+    `phase84:all-pages-control-audit`. Destructive or data-mutating controls are
+    intentionally skipped so QA does not change production-like data. Proof:
+    `npm.cmd --prefix ops run phase84:all-pages-control-audit -- --profile
+    exhaustive` passed with 34 route/profile checks, 328 non-destructive
+    control interactions, 68 screenshots, and 0 findings.
+
+640. Harden Windows data-root relocation against transient folder locks.
+    Done: `backend/src/dataPath/index.ts` now retries archive-directory renames
+    for transient `EBUSY`, `EPERM`, and `EACCES` failures before giving up. This
+    keeps data-root cleanup and migration safer on Windows when antivirus or
+    the file system briefly holds a temp directory. The change preserves the
+    same archive path, copy behavior, nested-path rejection, and data safety
+    checks. Focused `node backend\test\dataPath.test.ts` and full backend
+    `npm.cmd --prefix backend run test:utils` passed.
 
 ## Safety Gates
 

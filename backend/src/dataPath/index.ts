@@ -174,6 +174,28 @@ function buildArchivedTargetPath(targetRoot) {
   throw new Error('Failed to reserve an archive path for the existing Business OS data folder.')
 }
 
+function waitForFileSystemRetry(delayMs) {
+  const buffer = new SharedArrayBuffer(4)
+  const view = new Int32Array(buffer)
+  Atomics.wait(view, 0, 0, delayMs)
+}
+
+function renameDirectoryWithRetry(sourcePath, targetPath, attempts = 8) {
+  let lastError = null
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      fs.renameSync(sourcePath, targetPath)
+      return
+    } catch (error) {
+      lastError = error
+      const retryable = ['EBUSY', 'EPERM', 'EACCES'].includes(String(error?.code || ''))
+      if (!retryable || attempt === attempts - 1) break
+      waitForFileSystemRetry(50 * (attempt + 1))
+    }
+  }
+  throw lastError
+}
+
 /**
  * @param {RelocateDataRootOptions} [options]
  */
@@ -201,7 +223,7 @@ function relocateDataRoot({ sourceRoot, targetRoot, checkpointDatabase } = {}) {
 
   if (targetSummaryBefore.hasData) {
     archivedTargetPath = buildArchivedTargetPath(target)
-    fs.renameSync(target, archivedTargetPath)
+    renameDirectoryWithRetry(target, archivedTargetPath)
   }
 
   ensureDataRootLayout(target)
@@ -229,6 +251,7 @@ module.exports = {
   isSamePath,
   isSubPath,
   relocateDataRoot,
+  renameDirectoryWithRetry,
   summarizeDataRoot,
   walkFiles,
 }

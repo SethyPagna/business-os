@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 638.
+- Latest completed implementation move in this roadmap: Move 640.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -66,6 +66,9 @@ What remains:
 - Keep optimizing hot loops and duplicated helper paths one focused slice at a
   time, with backend/frontend tests plus Playwright checks after each visible
   or runtime-facing change.
+- Use the all-pages control audit as the broad Phase 8.4 live QA gate before
+  claiming UI-wide stability: `npm.cmd --prefix ops run
+  phase84:all-pages-control-audit -- --profile exhaustive`.
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
@@ -7283,3 +7286,30 @@ Move 638 status:
   formatting, transpile output, write-if-changed behavior, and main entrypoint.
   The generated `backend/server.js` contract remains unchanged. Direct
   server-entry drift check and full Phase 29 audit passed.
+
+Move 639 status:
+- Move 639 adds the reusable all-pages Phase 8.4 control audit at
+  `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` and exposes it as
+  `npm.cmd --prefix ops run phase84:all-pages-control-audit`. The Playwright
+  runner logs in through the existing audit auth helper, visits every admin and
+  public manifest route across desktop and mobile profiles, fills and clears
+  search inputs, changes and restores safe selects, clicks non-destructive
+  buttons/tabs/filters, captures before/after screenshots, checks framework
+  overlays, records app-owned console/network issues, and scans for responsive
+  overflow or clipped nowrap text. Destructive or data-mutating controls such as
+  save/delete/restore/pay/upload/print/sync-now/backup-run and receipt-field
+  hide/show toggles are skipped so live QA does not mutate business data.
+  Proof: the exhaustive run passed with 34 route/profile checks, 328
+  non-destructive control interactions, 68 screenshots, and 0 findings. Latest
+  report:
+  `ops/runtime/reports/all-pages-control-audit-2026-05-31T02-09-05-858Z/summary.json`.
+
+Move 640 status:
+- Move 640 hardens `backend/src/dataPath/index.ts` for Windows data-root
+  relocation by adding a bounded retry around archive-directory renames. This
+  closes the observed `EBUSY` failure where Windows or security scanning briefly
+  locked a non-empty target data root during `relocateDataRoot()`. The retry is
+  limited to transient `EBUSY`, `EPERM`, and `EACCES` rename failures and keeps
+  the same archive/copy behavior once the file-system lock clears. Proof:
+  focused `node backend\test\dataPath.test.ts` and full backend
+  `npm.cmd --prefix backend run test:utils` passed.

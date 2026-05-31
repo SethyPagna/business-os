@@ -23,6 +23,7 @@
     "post-live-hygiene": "node scripts/runtime/storage/post-live-hygiene.ts",
     "live-hygiene:check": "node scripts/runtime/storage/post-live-hygiene.ts",
     "phase84:live-suite": "node scripts/runtime/live-checks/phase84-live-suite.ts",
+    "phase84:all-pages-control-audit": "node scripts/runtime/live-checks/all-pages-control-audit.ts",
     "dataset-readiness": "node scripts/runtime/storage/dataset-readiness.ts --output ops/runtime/reports/dataset-readiness-latest.json",
     "dataset-readiness:loaded": "node scripts/runtime/storage/dataset-readiness.ts --fail-if-empty --output ops/runtime/reports/dataset-readiness-latest.json",
     "restore-candidates": "node scripts/runtime/storage/restore-candidates.ts --output ops/runtime/reports/restore-candidates-latest.json",
