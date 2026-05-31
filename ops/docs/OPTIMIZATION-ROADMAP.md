@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 645.
+- Latest completed implementation move in this roadmap: Move 646.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7384,3 +7384,21 @@ Move 645 status:
   checks, 908 control records, 667 tested controls, 241 skipped controls, 0
   failed controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29
   audit, and diff whitespace checks passed.
+
+Move 646 status:
+- Move 646 adds a per-route skipped-control ratio gate to the all-pages Phase
+  8.4 audit and classifies the exact PageLoader recovery breadcrumb as a
+  non-blocking diagnostic. The audit now emits a priority-0 coverage finding
+  when any individual route/profile exceeds
+  `BOS_ALL_PAGES_MAX_ROUTE_SKIPPED_RATIO`, defaulting to 0.8, so pages with
+  mostly skipped controls cannot hide behind healthy global totals. The exact
+  `[PageLoader] Page bundle is still loading...` warning is no longer treated
+  as an app console issue because it is an intentional recovery breadcrumb
+  asserted by frontend loading UX tests; visible stalls and route readiness
+  still fail through the existing route/layout checks. Proof: focused
+  `inventory` audit passed on the current highest skipped-ratio route with 94
+  control records, 26 tested controls, 68 skipped controls, and 0 findings;
+  full exhaustive all-pages audit passed with 34 route/profile checks, 909
+  control records, 668 tested controls, 241 skipped controls, 0 failed
+  controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29 audit,
+  and diff whitespace checks passed.

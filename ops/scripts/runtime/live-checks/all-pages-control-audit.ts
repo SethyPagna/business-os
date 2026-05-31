@@ -133,10 +133,12 @@ const MAX_SELECT_CHANGES_PER_ROUTE = Number(process.env.BOS_ALL_PAGES_MAX_SELECT
 const MIN_TESTED_CONTROLS_PER_ROUTE = Number(process.env.BOS_ALL_PAGES_MIN_TESTED_PER_ROUTE || 3)
 const MIN_TESTED_CONTROLS = Number(process.env.BOS_ALL_PAGES_MIN_TESTED_CONTROLS || 0)
 const MAX_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_SKIPPED_RATIO || 0.75)
+const MAX_ROUTE_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_ROUTE_SKIPPED_RATIO || 0.8)
 
 const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|choose|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b|(?:hide|show)\s*\d+\s*fields/i
 const LOW_VALUE_BUTTON_RE = /^\s*(\+|-|×|x|\.{1,3}|…|←|→|↑|↓|<|>|\/|a|b|c|d|e|f|g|h|i|j|k|[0-9]+)\s*$/i
 const EXTERNAL_NOISE_RE = /chrome-extension:|No Listener: tabs:outgoing|Grammarly|Statsig|ab\.chatgpt\.com|ERR_BLOCKED_BY_CLIENT|webextension\.js|CoupertUIFont|unsafe-eval.*content\.js/i
+const NON_BLOCKING_APP_DIAGNOSTIC_RE = /^\[PageLoader\] Page bundle is still loading\. The app shell is waiting instead of forcing a reload\.$/
 const APP_API_RE = /\/api\/|\/health|\/business-os-build\.json|\/uploads\//i
 const LAYOUT_SELECTOR = 'button, input, select, textarea, [role="button"], [role="tab"], [role="menuitem"], th, td, .card, .btn, .control, .table-row'
 const INTENTIONAL_ROUTE_BUTTONS: Record<string, Array<{ label: RegExp; page: string; path: string }>> = {
@@ -212,6 +214,7 @@ function isExternalNoise(message: unknown): boolean {
 function isAppConsoleIssue(entry: ConsoleEntry): boolean {
   const type = String(entry.type || '').toLowerCase()
   if (!['error', 'warning', 'warn', 'pageerror'].includes(type)) return false
+  if (NON_BLOCKING_APP_DIAGNOSTIC_RE.test(String(entry.text || ''))) return false
   return !isExternalNoise(entry.text)
 }
 
@@ -344,7 +347,7 @@ function addCoverageGateFindings(): void {
     })
   }
   if (MIN_TESTED_CONTROLS_PER_ROUTE > 0) {
-    const weakRoutes = summary.routes
+    const routeCoverage = summary.routes
       .map((route) => {
         const routeKey = `${route.profile}/${route.route}`
         const coverage = summary.coverage.byRoute[routeKey] || {
@@ -355,11 +358,24 @@ function addCoverageGateFindings(): void {
         }
         return { route: routeKey, ...coverage }
       })
+    const weakRoutes = routeCoverage
       .filter((route) => route.tested < MIN_TESTED_CONTROLS_PER_ROUTE)
     if (weakRoutes.length) {
       addFinding(0, 'coverage', 'all-pages audit has routes with too few tested controls', {
         minTestedControlsPerRoute: MIN_TESTED_CONTROLS_PER_ROUTE,
         weakRoutes,
+      })
+    }
+    const highSkippedRoutes = routeCoverage
+      .map((route) => ({
+        ...route,
+        skippedRatio: route.total > 0 ? Number((route.skipped / route.total).toFixed(3)) : 1,
+      }))
+      .filter((route) => route.skippedRatio > MAX_ROUTE_SKIPPED_CONTROL_RATIO)
+    if (highSkippedRoutes.length) {
+      addFinding(0, 'coverage', 'all-pages audit has routes with too many skipped controls', {
+        maxRouteSkippedRatio: MAX_ROUTE_SKIPPED_CONTROL_RATIO,
+        highSkippedRoutes,
       })
     }
   }

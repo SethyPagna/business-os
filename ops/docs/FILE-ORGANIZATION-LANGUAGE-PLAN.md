@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 645 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 646 in this file.
 
 ## Goal
 
@@ -5677,6 +5677,22 @@ Decision rule:
     control records, 667 tested controls, 241 skipped controls, 0 failed
     controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29
     audit, and diff whitespace checks passed.
+
+646. Gate per-route skipped-control ratios and tolerate loader breadcrumbs.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    checks every route/profile against `BOS_ALL_PAGES_MAX_ROUTE_SKIPPED_RATIO`,
+    defaulting to 0.8, in addition to the global skipped-control ratio. This
+    blocks a page that is mostly skipped even when the whole-app totals look
+    healthy. The exact `[PageLoader] Page bundle is still loading...` warning is
+    also classified as a non-blocking recovery diagnostic because frontend
+    loading UX tests intentionally require that breadcrumb; visible stalls and
+    failed route readiness still fail through the route/layout gates. Proof:
+    focused `inventory` audit passed on the current highest skipped-ratio route
+    with 94 control records, 26 tested controls, 68 skipped controls, and 0
+    findings; full exhaustive all-pages audit passed with 34 route/profile
+    checks, 909 control records, 668 tested controls, 241 skipped controls, 0
+    failed controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase
+    29 audit, and diff whitespace checks passed.
 
 ## Safety Gates
 
