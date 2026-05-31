@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 648.
+- Latest completed implementation move in this roadmap: Move 649.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7437,3 +7437,20 @@ Move 648 status:
   and 0 findings. The seeded rollback latest report lists 28 candidates: 14
   data-mutating controls, 12 settings toggles, and 2 print/download controls.
   Post-live hygiene and Phase 29 audit passed.
+
+Move 649 status:
+- Move 649 hardens all-pages button targeting for dynamic receipt settings
+  surfaces. The audit now prefers fresh accessible-name lookups before clicking
+  a stored button candidate, skips receipt-settings candidates that disappear
+  after tab changes instead of falling back to stale indexes, and treats compact
+  receipt preview language buttons (`EN`, `KH`, `Both`) as rollback-harness
+  controls because they change receipt settings. The generic `Hide/Show N
+  fields` skip rule was removed after code inspection proved those buttons are
+  local section expand/collapse controls, so they can be covered by the broad
+  audit when still visible. Proof: a focused `receipt_settings` audit passed
+  with 34 controls, 15 tested controls, 19 skipped controls, and 0 findings;
+  full exhaustive all-pages audit passed with 34 route/profile checks, 908
+  controls, 708 tested controls, 200 skipped controls, 0 failed controls, 68
+  screenshots, and 0 findings. The seeded rollback latest report now lists 19
+  candidates: 14 data-mutating controls, 3 settings language toggles, and 2
+  print/download controls. Post-live hygiene and Phase 29 audit passed.

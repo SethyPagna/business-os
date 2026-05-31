@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 648 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 649 in this file.
 
 ## Goal
 
@@ -5725,6 +5725,22 @@ Decision rule:
     rollback latest report lists 28 candidates: 14 data-mutating controls, 12
     settings toggles, and 2 print/download controls. Post-live hygiene and
     Phase 29 audit passed.
+
+649. Harden dynamic receipt-settings control targeting.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    re-finds button candidates by fresh accessible name before clicking, while
+    avoiding stale-index fallback on the dynamic receipt settings page. Compact
+    receipt preview language buttons (`EN`, `KH`, `Both`) are now classified as
+    rollback-harness controls because they change receipt language settings.
+    The earlier generic `Hide/Show N fields` skip rule was removed after code
+    inspection confirmed those are local section expand/collapse controls, not
+    settings writes. Proof: focused `receipt_settings` audit passed with 34
+    controls, 15 tested controls, 19 skipped controls, and 0 findings; full
+    exhaustive all-pages audit passed with 34 route/profile checks, 908 control
+    records, 708 tested controls, 200 skipped controls, 0 failed controls, 68
+    screenshots, and 0 findings. The seeded rollback latest report now lists
+    19 candidates: 14 data-mutating controls, 3 settings language toggles, and
+    2 print/download controls. Post-live hygiene and Phase 29 audit passed.
 
 ## Safety Gates
 

@@ -153,7 +153,8 @@ const MIN_TESTED_CONTROLS = Number(process.env.BOS_ALL_PAGES_MIN_TESTED_CONTROLS
 const MAX_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_SKIPPED_RATIO || 0.75)
 const MAX_ROUTE_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_ROUTE_SKIPPED_RATIO || 0.8)
 
-const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b|(?:hide|show)\s*\d+\s*fields/i
+const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b/i
+const SETTINGS_LANGUAGE_BUTTON_RE = /^(en|kh|both)$/i
 const LOW_VALUE_BUTTON_RE = /^\s*(\+|-|×|x|\.{1,3}|…|←|→|↑|↓|<|>|\/|a|b|c|d|e|f|g|h|i|j|k|[0-9]+)\s*$/i
 const EXTERNAL_NOISE_RE = /chrome-extension:|No Listener: tabs:outgoing|Grammarly|Statsig|ab\.chatgpt\.com|ERR_BLOCKED_BY_CLIENT|webextension\.js|CoupertUIFont|unsafe-eval.*content\.js/i
 const NON_BLOCKING_APP_DIAGNOSTIC_RE = /^\[PageLoader\] Page bundle is still loading\. The app shell is waiting instead of forcing a reload\.$/
@@ -258,6 +259,7 @@ function buttonSkipReason(label: string): string {
   if (!value) return 'empty accessible label'
   if (value.length > 60) return 'label too long for stable broad audit'
   if (MUTATING_OR_NOISY_BUTTON_RE.test(value)) return 'mutating, noisy, file, print, or external action'
+  if (SETTINGS_LANGUAGE_BUTTON_RE.test(value)) return 'settings language toggle requires rollback harness'
   if (LOW_VALUE_BUTTON_RE.test(value)) return 'low-value pagination, alphabet, icon-only, or numeric control'
   return ''
 }
@@ -265,6 +267,10 @@ function buttonSkipReason(label: string): string {
 function expectedButtonNavigation(route: AuditRoute, label: string): { page: string; path: string } | null {
   const candidates = INTENTIONAL_ROUTE_BUTTONS[route.name] || []
   return candidates.find((candidate) => candidate.label.test(label)) || null
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 async function attachCollectors(page: Page, profile: string, route: string): Promise<{
@@ -394,6 +400,7 @@ function seededRollbackCategory(control: ControlRecord): string {
   if (reason.includes('file chooser') || /\b(upload|file|camera|scan)\b/.test(label)) return 'file-or-media'
   if (/\b(print|download)\b/.test(label)) return 'print-or-download'
   if (/\b(email|whatsapp|send)\b/.test(label)) return 'external-message'
+  if (reason.includes('settings language toggle') || SETTINGS_LANGUAGE_BUTTON_RE.test(control.label)) return 'settings-toggle'
   if (/(?:hide|show)\s*\d+\s*fields/.test(label)) return 'settings-toggle'
   if (/\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|apply|approve|reject|backup|sync)\b/.test(label)) {
     return 'data-mutating'
@@ -417,6 +424,7 @@ function seededRollbackCandidates(): SeededRollbackCandidate[] {
     const reason = String(control.reason || '')
     const isRollbackCandidate = control.skipped && (
       reason === 'mutating, noisy, file, print, or external action'
+      || reason === 'settings language toggle requires rollback harness'
       || reason === 'file chooser avoided'
     )
     if (!isRollbackCandidate) continue
@@ -745,7 +753,21 @@ async function clickButtonCandidate(
   try {
     await dismissTransientUi(page)
     const buttons = root.locator('button, [role="button"], [role="tab"]')
-    const button = buttons.nth(candidate.index)
+    const exactName = new RegExp(`^\\s*${escapeRegExp(resultName)}\\s*$`, 'i')
+    let button = root.getByRole('button', { name: exactName }).first()
+    if (!(await button.count().catch(() => 0))) {
+      button = root.getByRole('tab', { name: exactName }).first()
+    }
+    if (!(await button.count().catch(() => 0))) {
+      if (route.name !== 'receipt_settings') {
+        button = buttons.nth(candidate.index)
+      } else {
+        return { kind: 'button', label: resultName, ok: true, skipped: true, ms: 0, reason: 'candidate hidden after earlier interaction' }
+      }
+    }
+    if (!(await button.count().catch(() => 0))) {
+      return { kind: 'button', label: resultName, ok: true, skipped: true, ms: 0, reason: 'candidate hidden after earlier interaction' }
+    }
     if (!(await button.isVisible().catch(() => false))) {
       return { kind: 'button', label: resultName, ok: true, skipped: true, ms: 0, reason: 'candidate hidden after earlier interaction' }
     }
