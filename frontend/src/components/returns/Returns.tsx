@@ -289,7 +289,7 @@ export default function Returns() {
 
   const clearLoadWatchdog = useCallback(() => {
     if (loadWatchdogRef.current != null) {
-      clearLoadWatchdog()
+      window.clearTimeout(loadWatchdogRef.current)
       loadWatchdogRef.current = null
     }
   }, [])

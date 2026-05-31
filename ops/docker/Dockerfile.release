@@ -8,7 +8,7 @@ RUN npm ci --no-audit --loglevel=warn
 COPY ops/scripts/frontend/ /build/ops/scripts/frontend/
 COPY frontend/ ./
 RUN printf '%s\n' "$BUILD_COMMIT" > .build-commit
-RUN npm run build
+RUN BUSINESS_OS_BUILD_REVISION="$BUILD_COMMIT" npm run build
 
 FROM node:24-bookworm AS backend-build
 ARG BUILD_COMMIT=dev
@@ -29,6 +29,7 @@ RUN npm run build:server-entry \
   && node ../ops/scripts/backend/build-package-stage.ts
 
 FROM node:24-bookworm-slim AS runtime
+ARG BUILD_COMMIT=dev
 LABEL org.opencontainers.image.title="Business OS"
 LABEL org.opencontainers.image.description="Business OS Docker runtime"
 LABEL org.opencontainers.image.source="private"
@@ -48,6 +49,7 @@ RUN ln -s /app/node_modules/sharp /app/sharp \
 
 ENV NODE_ENV=production \
     PORT=4000 \
+    BUSINESS_OS_BUILD_REVISION=${BUILD_COMMIT} \
     BUSINESS_OS_RUNTIME_DIR=/runtime \
     BUSINESS_OS_RUNTIME=docker \
     BUSINESS_OS_DOCKER_RELEASE=1 \

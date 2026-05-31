@@ -390,6 +390,8 @@ function main() {
     'FROM node:24-bookworm AS frontend-build',
     'FROM node:24-bookworm AS backend-build',
     'FROM node:24-bookworm-slim AS runtime',
+    'BUSINESS_OS_BUILD_REVISION="$BUILD_COMMIT" npm run build',
+    'BUSINESS_OS_BUILD_REVISION=${BUILD_COMMIT}',
     'npm run build:server-entry',
     'node ../ops/scripts/backend/build-package-stage.ts',
     'COPY --from=backend-build /build/backend/.pkg-stage/ /app/',
