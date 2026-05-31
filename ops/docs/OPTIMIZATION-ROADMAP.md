@@ -7148,3 +7148,17 @@ Move 623 status:
   scripts, guarded stage deletion, and runtime require rewriting. Docker
   release verification and Linux packaging proof passed; generated
   `backend/.pkg-stage` and `dist-bin` remain cleanup targets after proof.
+
+Move 624 status:
+- Move 624 makes the app-owned public runtime browser scripts
+  TypeScript-authored without changing their served URLs. The new
+  `frontend/src/public-runtime/` sources own the runtime noise guard, theme
+  bootstrap, and offline service worker logic; `ops/scripts/frontend/
+  build-public-runtime-scripts.ts` transpiles them into
+  `frontend/public/runtime-noise-guard.js`, `frontend/public/theme-bootstrap.js`,
+  and `frontend/public/sw.js`. Frontend utility tests now run a
+  `verify:public-runtime` drift check, and the production frontend build runs
+  the generator before Vite copies public assets. This preserves the browser
+  contract for `/sw.js` while removing those scripts from the maintainable
+  JavaScript source queue. Focused public-runtime check, frontend typecheck,
+  frontend utility tests, production build, and diff whitespace proof passed.

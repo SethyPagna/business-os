@@ -5436,6 +5436,23 @@ Decision rule:
     proof passed; generated `backend/.pkg-stage` and `dist-bin` are cleanup
     targets after proof and must not be committed.
 
+624. Add TypeScript-authored public runtime browser scripts.
+    Done: `frontend/src/public-runtime/` now owns the runtime noise guard,
+    theme bootstrap, and offline service worker sources as TypeScript. The
+    served browser files stay at `frontend/public/runtime-noise-guard.js`,
+    `frontend/public/theme-bootstrap.js`, and `frontend/public/sw.js` because
+    `frontend/index.html`, service-worker registration, backend static headers,
+    release checks, and offline tests depend on those exact URLs. The new
+    `ops/scripts/frontend/build-public-runtime-scripts.ts` transpiles the
+    TypeScript sources, frontend `prebuild` regenerates them before Vite, and
+    `verify:public-runtime` is part of `test:utils` so generated public JS
+    cannot drift from source. Focused public-runtime check, frontend
+    typecheck, frontend utility tests, production build, and diff whitespace
+    proof passed. Remaining first-party `.js` outside active source roots is
+    runtime/compatibility entrypoint material: `backend/server.js`,
+    `ops/config/ecosystem.config.js`, generated public runtime JS, and the
+    tracked Scanbot vendor bundle.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

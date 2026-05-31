@@ -31,7 +31,9 @@
     "schema-pk-preflight:strict": "node scripts/backend/schema-primary-key-preflight.ts --fail-on-blocker",
     "phase29:audit:repeat": "node scripts/architecture/phase29-audit.ts --repeat 3",
     "prune-storage": "node scripts/runtime/storage/prune-storage.ts",
-    "prune-storage:preview": "node scripts/runtime/storage/prune-storage.ts --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json"
+    "prune-storage:preview": "node scripts/runtime/storage/prune-storage.ts --dry-run --skip-remote --output ops/runtime/reports/prune-storage-preview-latest.json",
+    "public-runtime:build": "node scripts/frontend/build-public-runtime-scripts.ts",
+    "public-runtime:check": "node scripts/frontend/build-public-runtime-scripts.ts --check"
   },
   "devDependencies": {
     "playwright": "^1.59.1"

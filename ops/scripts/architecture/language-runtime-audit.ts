@@ -250,6 +250,39 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     ],
   },
   {
+    implementation: 'frontend/src/public-runtime/runtime-noise-guard.ts',
+    compatibilityWrapper: 'frontend/public/runtime-noise-guard.js',
+    wrapperStatus: 'generated browser runtime artifact; exact public URL is retained',
+    declarationSupport: '',
+    proof: [
+      'npm.cmd --prefix frontend run verify:public-runtime',
+      'npm.cmd --prefix frontend run test:utils',
+      'npm.cmd --prefix frontend run build',
+    ],
+  },
+  {
+    implementation: 'frontend/src/public-runtime/theme-bootstrap.ts',
+    compatibilityWrapper: 'frontend/public/theme-bootstrap.js',
+    wrapperStatus: 'generated browser runtime artifact; exact public URL is retained',
+    declarationSupport: '',
+    proof: [
+      'npm.cmd --prefix frontend run verify:public-runtime',
+      'npm.cmd --prefix frontend run test:utils',
+      'npm.cmd --prefix frontend run build',
+    ],
+  },
+  {
+    implementation: 'frontend/src/public-runtime/service-worker.ts',
+    compatibilityWrapper: 'frontend/public/sw.js',
+    wrapperStatus: 'generated service worker artifact; exact public URL is retained',
+    declarationSupport: '',
+    proof: [
+      'npm.cmd --prefix frontend run verify:public-runtime',
+      'npm.cmd --prefix frontend run test:utils',
+      'npm.cmd --prefix frontend run build',
+    ],
+  },
+  {
     implementation: 'frontend/src/components/catalog/portalCatalogDisplay.ts',
     compatibilityWrapper: 'frontend/src/components/catalog/portalCatalogDisplay.mjs',
     declarationSupport: '',
