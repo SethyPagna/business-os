@@ -6711,38 +6711,38 @@ Code files scanned: **478**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 174 |
-| 2 | `readArgs` | function | 181 |
-| 3 | `safeName` | function | 197 |
-| 4 | `addFinding` | function | 204 |
-| 5 | `isExternalNoise` | function | 208 |
-| 6 | `isAppConsoleIssue` | function | 212 |
-| 7 | `isAppNetworkIssue` | function | 218 |
-| 8 | `routeRoot` | function | 224 |
-| 9 | `textForLabel` | function | 229 |
-| 10 | `buttonSkipReason` | function | 233 |
-| 11 | `expectedButtonNavigation` | function | 242 |
-| 12 | `attachCollectors` | function | 247 |
-| 13 | `writeJson` | function | 282 |
-| 14 | `incrementCount` | function | 287 |
-| 15 | `computeControlCoverage` | function | 291 |
-| 16 | `addCoverageGateFindings` | function | 333 |
-| 17 | `persistSummary` | function | 380 |
-| 18 | `saveScreenshot` | function | 386 |
-| 19 | `dismissTransientUi` | function | 393 |
-| 20 | `waitForRouteReady` | function | 411 |
-| 21 | `navigateRoute` | function | 427 |
-| 22 | `countVisible` | function | 442 |
-| 23 | `activeButtonCandidates` | function | 451 |
-| 24 | `clickButtonCandidate` | function | 482 |
-| 25 | `exerciseSearchInputs` | function | 556 |
-| 26 | `exerciseSelects` | function | 600 |
-| 27 | `collectLayoutIssues` | function | 657 |
-| 28 | `hasScrollableAncestor` | const arrow | 678 |
-| 29 | `runRoute` | function | 717 |
-| 30 | `createAuthedPage` | function | 785 |
-| 31 | `runProfile` | function | 804 |
-| 32 | `main` | function | 839 |
+| 1 | `readArg` | function | 176 |
+| 2 | `readArgs` | function | 183 |
+| 3 | `safeName` | function | 199 |
+| 4 | `addFinding` | function | 206 |
+| 5 | `isExternalNoise` | function | 210 |
+| 6 | `isAppConsoleIssue` | function | 214 |
+| 7 | `isAppNetworkIssue` | function | 221 |
+| 8 | `routeRoot` | function | 227 |
+| 9 | `textForLabel` | function | 232 |
+| 10 | `buttonSkipReason` | function | 236 |
+| 11 | `expectedButtonNavigation` | function | 245 |
+| 12 | `attachCollectors` | function | 250 |
+| 13 | `writeJson` | function | 285 |
+| 14 | `incrementCount` | function | 290 |
+| 15 | `computeControlCoverage` | function | 294 |
+| 16 | `addCoverageGateFindings` | function | 336 |
+| 17 | `persistSummary` | function | 396 |
+| 18 | `saveScreenshot` | function | 402 |
+| 19 | `dismissTransientUi` | function | 409 |
+| 20 | `waitForRouteReady` | function | 427 |
+| 21 | `navigateRoute` | function | 443 |
+| 22 | `countVisible` | function | 458 |
+| 23 | `activeButtonCandidates` | function | 467 |
+| 24 | `clickButtonCandidate` | function | 498 |
+| 25 | `exerciseSearchInputs` | function | 572 |
+| 26 | `exerciseSelects` | function | 616 |
+| 27 | `collectLayoutIssues` | function | 673 |
+| 28 | `hasScrollableAncestor` | const arrow | 694 |
+| 29 | `runRoute` | function | 733 |
+| 30 | `createAuthedPage` | function | 801 |
+| 31 | `runProfile` | function | 820 |
+| 32 | `main` | function | 855 |
 
 ### 3.445 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
