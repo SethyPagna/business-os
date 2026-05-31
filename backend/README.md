@@ -2,7 +2,8 @@
 
 The backend is an Express runtime plus background workers.
 
-- `server.js` is the HTTP entrypoint.
+- `server.ts` is the HTTP entrypoint source; `server.js` is the generated
+  runtime entrypoint kept for Node, PM2, launch scripts, and packaged builds.
 - `src\routes\` contains API route modules.
 - `src\services\` contains domain services for imports, uploads, media, history, storage, and sync.
 - `src\workers\` contains background worker entrypoints for import and media jobs.

@@ -5453,6 +5453,23 @@ Decision rule:
     `ops/config/ecosystem.config.js`, generated public runtime JS, and the
     tracked Scanbot vendor bundle.
 
+625. Add TypeScript-authored backend server entry source.
+    Done: `backend/server.ts` now owns the backend HTTP entrypoint source while
+    `backend/server.js` remains the generated runtime filename required by
+    `run/start-server.bat`, PM2 config, shell launchers, spawned backend tests,
+    and package metadata. `ops/scripts/backend/build-server-entry.ts` transpiles
+    the entry, `verify:server-entry` prevents drift, `test:utils` runs that
+    check before backend tests, and `build:linux` regenerates it before
+    `.pkg-stage` packaging. The Docker release guardrail now requires the
+    server-entry generator, package-script wiring, and build-before-stage
+    ordering. Focused server-entry check, route/offline security source checks,
+    Docker release verification, full backend utility tests, Linux packaging
+    proof, generated package artifact cleanup, and diff whitespace proof
+    passed. Remaining first-party `.js` outside active source roots is now
+    generated/runtime-compatible: generated `backend/server.js`, generated
+    public runtime JS, `ops/config/ecosystem.config.js`, and the tracked
+    Scanbot vendor bundle.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

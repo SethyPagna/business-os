@@ -7162,3 +7162,17 @@ Move 624 status:
   contract for `/sw.js` while removing those scripts from the maintainable
   JavaScript source queue. Focused public-runtime check, frontend typecheck,
   frontend utility tests, production build, and diff whitespace proof passed.
+
+Move 625 status:
+- Move 625 makes the backend runtime entry TypeScript-authored while
+  preserving the operational `backend/server.js` filename used by run scripts,
+  PM2, spawned backend tests, and packaged builds. `backend/server.ts` is now
+  the source of truth; `ops/scripts/backend/build-server-entry.ts` transpiles it
+  into the generated runtime entrypoint. `backend/package.json` now exposes
+  `build:server-entry` and `verify:server-entry`, runs the drift check before
+  backend utility tests, and regenerates the entry before Linux package
+  staging. The Docker release guardrail now verifies that server-entry
+  generation exists, is checked by tests, and runs before package staging.
+  Focused server-entry check, route/offline security checks, Docker release
+  verification, full backend utility tests, Linux packaging proof, generated
+  package-stage cleanup, and diff whitespace proof passed.

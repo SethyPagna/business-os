@@ -283,6 +283,17 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     ],
   },
   {
+    implementation: 'backend/server.ts',
+    compatibilityWrapper: 'backend/server.js',
+    wrapperStatus: 'generated backend runtime entry; exact filename is retained for run scripts and packaging',
+    declarationSupport: '',
+    proof: [
+      'npm.cmd --prefix backend run verify:server-entry',
+      'npm.cmd --prefix backend run test:utils',
+      'npm.cmd --prefix backend run build:linux',
+    ],
+  },
+  {
     implementation: 'frontend/src/components/catalog/portalCatalogDisplay.ts',
     compatibilityWrapper: 'frontend/src/components/catalog/portalCatalogDisplay.mjs',
     declarationSupport: '',

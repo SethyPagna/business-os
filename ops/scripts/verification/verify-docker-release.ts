@@ -23,6 +23,7 @@ const startRuntimePath = path.join(root, 'ops', 'scripts', 'powershell', 'start-
 const automationPolicyPath = path.join(root, 'ops', 'automation', 'business-os-automation.json')
 const opsPackagePath = path.join(root, 'ops', 'package.json')
 const backendPackagePath = path.join(root, 'backend', 'package.json')
+const buildServerEntryPath = path.join(root, 'ops', 'scripts', 'backend', 'build-server-entry.ts')
 const buildPackageStagePath = path.join(root, 'ops', 'scripts', 'backend', 'build-package-stage.ts')
 const summaryPath = path.join(root, 'ops', 'docs', 'reference', 'DOCKER-RELEASE-GUARDRAIL.json')
 const cloudflareRuntimePaths = {
@@ -559,7 +560,16 @@ function main() {
     failures.push(`Backend package JSON is invalid: ${error.message}`)
   }
   const packageStageScript = read(buildPackageStagePath)
+  const serverEntryScript = read(buildServerEntryPath)
   const packageStageCoverage = {
+    serverEntryScriptPresent: fs.existsSync(buildServerEntryPath),
+    serverEntrySourceOfTruth: serverEntryScript.includes("const SOURCE_PATH = path.join(BACKEND_ROOT, 'server.ts')") &&
+      serverEntryScript.includes("const OUTPUT_PATH = path.join(BACKEND_ROOT, 'server.js')"),
+    serverEntryBuildScript: backendPackage?.scripts?.['build:server-entry']?.includes('build-server-entry.ts') &&
+      backendPackage?.scripts?.['verify:server-entry']?.includes('build-server-entry.ts --check') &&
+      backendPackage?.scripts?.['test:utils']?.includes('verify:server-entry'),
+    linuxBuildRegeneratesServerEntry: backendPackage?.scripts?.['build:linux']?.includes('build:server-entry') &&
+      backendPackage?.scripts?.['build:linux']?.includes('build-package-stage.ts'),
     scriptPresent: fs.existsSync(buildPackageStagePath),
     buildScriptUsesStage: backendPackage?.scripts?.['build:linux']?.includes('build-package-stage.ts') &&
       backendPackage?.scripts?.['build:linux']?.includes('@yao-pkg/pkg .pkg-stage'),
