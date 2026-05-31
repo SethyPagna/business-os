@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 649 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 652 in this file.
 
 ## Goal
 
@@ -5780,6 +5780,17 @@ Decision rule:
     dashboard/products/POS/receipt-settings desktop and mobile control audit,
     full Phase 8.4 live suite, public Cloudflare portal check, and admin
     Cloudflare `/health` check passed.
+
+652. Scope ESM package metadata for runtime audit and live-check scripts.
+    Done: local `package.json` files under
+    `ops/scripts/runtime/audits` and `ops/scripts/runtime/live-checks` declare
+    only those TypeScript script families as ESM, avoiding global package-type
+    changes that would break CommonJS storage, Cloudflare, smoke, and release
+    orchestration scripts. `action-history-undo-redo-check.ts` was converted to
+    native ESM imports with `import.meta.url` path resolution so it remains in
+    the audit family and still cleans up its seeded QA rows in `finally`. Proof:
+    receipt-settings rollback live check, action-history undo/redo check, and
+    post-live hygiene all passed with the scoped package metadata in place.
 
 ## Safety Gates
 

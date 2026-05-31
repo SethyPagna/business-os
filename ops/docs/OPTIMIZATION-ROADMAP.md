@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 649.
+- Latest completed implementation move in this roadmap: Move 652.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7505,3 +7505,17 @@ Move 651 status:
   tag, backend revision, and frontend hash are intentionally read from
   `/health` and `/business-os-build.json` after each release rebuild so this
   plan entry does not go stale after documentation-only commits.
+
+Move 652 status:
+- Move 652 scopes Node's ESM package detection for the TypeScript runtime
+  audit and live-check folders without changing the CommonJS storage,
+  Cloudflare, smoke, or release orchestration scripts. The new local
+  `package.json` markers under `ops/scripts/runtime/audits` and
+  `ops/scripts/runtime/live-checks` remove the `MODULE_TYPELESS_PACKAGE_JSON`
+  reparsing warning from Phase 8.4 Playwright checks while keeping mixed
+  runtime scripts package-safe. `action-history-undo-redo-check.ts` now uses
+  native ESM imports and `import.meta.url` path resolution, preserving its
+  undo/redo rollback cleanup contract. Proof: the receipt-settings rollback
+  live check, action-history undo/redo check, and post-live hygiene gate all
+  passed, proving ESM live/audit scripts and CommonJS storage scripts still run
+  in their intended modes.

@@ -1,7 +1,8 @@
 /* eslint-disable no-console */
-const fs = require('node:fs')
-const path = require('node:path')
-const { spawnSync } = require('node:child_process')
+import fs from 'node:fs'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 type FetchSession = {
   cookieHeader: string
@@ -43,6 +44,8 @@ type ActionHistoryReport = {
   cleanup: CleanupResult | null
 }
 
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 const ROOT_DIR = path.resolve(__dirname, '../../../..')
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
 const USERNAME = process.env.BOS_USERNAME || 'admin'
