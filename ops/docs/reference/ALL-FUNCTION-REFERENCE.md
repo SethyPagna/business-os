@@ -439,7 +439,7 @@ Code files scanned: **477**
 | 427 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 428 | `ops/scripts/frontend/verify-performance.ts` | 4 |
 | 429 | `ops/scripts/frontend/verify-ui.ts` | 11 |
-| 430 | `ops/scripts/lib/fs-utils.ts` | 16 |
+| 430 | `ops/scripts/lib/fs-utils.ts` | 13 |
 | 431 | `ops/scripts/lib/report-utils.ts` | 5 |
 | 432 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 5 |
 | 433 | `ops/scripts/runtime/audits/audit-auth.ts` | 6 |
@@ -6448,22 +6448,19 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toPosix` | function | 26 |
-| 2 | `resolveProjectRoot` | function | 34 |
-| 3 | `relFrom` | function | 54 |
-| 4 | `readUtf8` | function | 66 |
-| 5 | `readJson` | function | 80 |
-| 6 | `readUtf8Async` | function | 93 |
-| 7 | `readJsonAsync` | function | 107 |
-| 8 | `lineCount` | function | 119 |
-| 9 | `pathExists` | function | 128 |
-| 10 | `mapLimit` | function | 145 |
-| 11 | `worker` | function | 148 |
-| 12 | `shouldSkipDirectory` | function | 168 |
-| 13 | `walkFilesRecursive` | function | 177 |
-| 14 | `collectFilesAndFolders` | function | 210 |
-| 15 | `collectRootFiles` | function | 245 |
-| 16 | `isProbablyText` | function | 268 |
+| 1 | `toPosix` | function | 45 |
+| 2 | `resolveProjectRoot` | function | 49 |
+| 3 | `relFrom` | function | 64 |
+| 4 | `readUtf8` | function | 68 |
+| 5 | `readUtf8Async` | function | 84 |
+| 6 | `lineCount` | function | 100 |
+| 7 | `pathExists` | function | 105 |
+| 8 | `worker` | function | 119 |
+| 9 | `shouldSkipDirectory` | function | 131 |
+| 10 | `walkFilesRecursive` | function | 135 |
+| 11 | `collectFilesAndFolders` | function | 163 |
+| 12 | `collectRootFiles` | function | 193 |
+| 13 | `isProbablyText` | function | 212 |
 
 ### 3.431 `ops/scripts/lib/report-utils.ts`
 

@@ -470,7 +470,7 @@ Total files documented: **540**
 | 458 | `ops/scripts/frontend/verify-i18n.ts` | project-scripts | 145 | 4.3 | Project source/support file |
 | 459 | `ops/scripts/frontend/verify-performance.ts` | project-scripts | 144 | 9.6 | Project source/support file |
 | 460 | `ops/scripts/frontend/verify-ui.ts` | project-scripts | 243 | 8.7 | Project source/support file |
-| 461 | `ops/scripts/lib/fs-utils.ts` | project-scripts | 297 | 7.0 | Project source/support file |
+| 461 | `ops/scripts/lib/fs-utils.ts` | project-scripts | 241 | 6.8 | Project source/support file |
 | 462 | `ops/scripts/lib/report-utils.ts` | project-scripts | 70 | 2.1 | Project source/support file |
 | 463 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 265 | 7.9 | Project source/support file |
 | 464 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | project-scripts | 92 | 2.8 | Project source/support file |
