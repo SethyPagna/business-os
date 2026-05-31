@@ -484,7 +484,7 @@ Code files scanned: **477**
 | 472 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
 | 473 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
 | 474 | `ops/scripts/verification/verify-hardening-policy.ts` | 9 |
-| 475 | `ops/scripts/verification/verify-runtime-deps.ts` | 13 |
+| 475 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
 | 476 | `ops/scripts/verification/verify-scale-services.ts` | 8 |
 | 477 | `ops/scripts/verification/verify-secret-hygiene.ts` | 0 |
 
@@ -7056,19 +7056,21 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assertTrackedFile` | function | 37 |
-| 2 | `rel` | function | 43 |
-| 3 | `requireToken` | function | 47 |
-| 4 | `hasLockDependency` | function | 53 |
-| 5 | `readIncludes` | function | 59 |
-| 6 | `packageLockVersion` | function | 63 |
-| 7 | `buildVersionConsistency` | function | 67 |
-| 8 | `assertVersionConsistency` | function | 93 |
-| 9 | `assertRuntimeVersionGuardWiring` | function | 99 |
-| 10 | `assertBuildManifestShapeWhenPresent` | function | 167 |
-| 11 | `buildLocalVerificationCoverage` | function | 184 |
-| 12 | `assertCoverageComplete` | function | 232 |
-| 13 | `main` | function | 245 |
+| 1 | `readPackageJson` | function | 89 |
+| 2 | `readPackageLock` | function | 93 |
+| 3 | `assertTrackedFile` | function | 97 |
+| 4 | `rel` | function | 103 |
+| 5 | `requireToken` | function | 107 |
+| 6 | `hasLockDependency` | function | 113 |
+| 7 | `readIncludes` | function | 119 |
+| 8 | `packageLockVersion` | function | 123 |
+| 9 | `buildVersionConsistency` | function | 127 |
+| 10 | `assertVersionConsistency` | function | 153 |
+| 11 | `assertRuntimeVersionGuardWiring` | function | 159 |
+| 12 | `assertBuildManifestShapeWhenPresent` | function | 227 |
+| 13 | `buildLocalVerificationCoverage` | function | 244 |
+| 14 | `assertCoverageComplete` | function | 292 |
+| 15 | `main` | function | 305 |
 
 ### 3.476 `ops/scripts/verification/verify-scale-services.ts`
 
