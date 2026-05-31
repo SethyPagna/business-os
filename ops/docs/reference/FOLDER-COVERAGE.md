@@ -85,7 +85,7 @@ Total folders documented: **82**
 | 73 | `ops/scripts/runtime` | Project folder | 2 | 5 |
 | 74 | `ops/scripts/runtime/audits` | Project folder | 6 | 0 |
 | 75 | `ops/scripts/runtime/cloudflare` | Project folder | 4 | 0 |
-| 76 | `ops/scripts/runtime/live-checks` | Project folder | 17 | 0 |
+| 76 | `ops/scripts/runtime/live-checks` | Project folder | 18 | 0 |
 | 77 | `ops/scripts/runtime/smoke` | Project folder | 4 | 0 |
 | 78 | `ops/scripts/runtime/storage` | Project folder | 7 | 0 |
 | 79 | `ops/scripts/verification` | Project folder | 6 | 0 |
@@ -1627,30 +1627,31 @@ Total folders documented: **82**
 ### 3.76 Folder: `ops/scripts/runtime/live-checks`
 
 - Purpose: Project folder
-- Direct files: **17**
+- Direct files: **18**
 - Direct subfolders: **0**
 
 #### 3.76.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `live-check-utils.ts` | Project source/support file |
-| 2 | `phase84-branches-actions-live-check.ts` | Project source/support file |
-| 3 | `phase84-contacts-live-check.ts` | Project source/support file |
-| 4 | `phase84-files-providers-actions-live-check.ts` | Project source/support file |
-| 5 | `phase84-inventory-actions-live-check.ts` | Project source/support file |
-| 6 | `phase84-live-suite.ts` | Project source/support file |
-| 7 | `phase84-product-brands-actions-live-check.ts` | Project source/support file |
-| 8 | `phase84-product-categories-actions-live-check.ts` | Project source/support file |
-| 9 | `phase84-product-page-actions-live-check.ts` | Project source/support file |
-| 10 | `phase84-product-scanning-actions-live-check.ts` | Project source/support file |
-| 11 | `phase84-product-stock-actions-live-check.ts` | Project source/support file |
-| 12 | `phase84-product-units-actions-live-check.ts` | Project source/support file |
-| 13 | `phase84-product-variant-actions-live-check.ts` | Project source/support file |
-| 14 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
-| 15 | `phase84-sales-actions-live-check.ts` | Project source/support file |
-| 16 | `phase84-ui-live-check.ts` | Project source/support file |
-| 17 | `phase84-users-actions-live-check.ts` | Project source/support file |
+| 1 | `all-pages-control-audit.ts` | Project source/support file |
+| 2 | `live-check-utils.ts` | Project source/support file |
+| 3 | `phase84-branches-actions-live-check.ts` | Project source/support file |
+| 4 | `phase84-contacts-live-check.ts` | Project source/support file |
+| 5 | `phase84-files-providers-actions-live-check.ts` | Project source/support file |
+| 6 | `phase84-inventory-actions-live-check.ts` | Project source/support file |
+| 7 | `phase84-live-suite.ts` | Project source/support file |
+| 8 | `phase84-product-brands-actions-live-check.ts` | Project source/support file |
+| 9 | `phase84-product-categories-actions-live-check.ts` | Project source/support file |
+| 10 | `phase84-product-page-actions-live-check.ts` | Project source/support file |
+| 11 | `phase84-product-scanning-actions-live-check.ts` | Project source/support file |
+| 12 | `phase84-product-stock-actions-live-check.ts` | Project source/support file |
+| 13 | `phase84-product-units-actions-live-check.ts` | Project source/support file |
+| 14 | `phase84-product-variant-actions-live-check.ts` | Project source/support file |
+| 15 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
+| 16 | `phase84-sales-actions-live-check.ts` | Project source/support file |
+| 17 | `phase84-ui-live-check.ts` | Project source/support file |
+| 18 | `phase84-users-actions-live-check.ts` | Project source/support file |
 
 
 ### 3.77 Folder: `ops/scripts/runtime/smoke`

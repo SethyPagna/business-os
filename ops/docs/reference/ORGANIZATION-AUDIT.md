@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-05-31T01:34:44.847Z
+Generated: 2026-05-31T02:33:48.722Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 557
+- Files scanned: 558
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-05-31T01:34:44.847Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 360 |
+| .ts | 361 |
 | .tsx | 107 |
 | .md | 45 |
 | .bat | 16 |
@@ -32,8 +32,8 @@ Generated: 2026-05-31T01:34:44.847Z
 | ops/docs/reference | 32 |
 | frontend/components/products | 31 |
 | backend/routes | 24 |
+| ops/scripts/runtime/live-checks | 18 |
 | frontend/components/shared | 17 |
-| ops/scripts/runtime/live-checks | 17 |
 | ops/docs | 14 |
 | frontend/components/catalog | 13 |
 | backend/services | 12 |
@@ -63,10 +63,10 @@ Generated: 2026-05-31T01:34:44.847Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8222 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7286 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7096 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5602 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8242 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7316 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7132 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5625 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3400 | ops/docs/reference |
@@ -87,7 +87,7 @@ Generated: 2026-05-31T01:34:44.847Z
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1880 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1773 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1774 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1660 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |

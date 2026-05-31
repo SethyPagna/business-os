@@ -4,7 +4,7 @@ Auto-generated function/class symbol commentary for all first-party code files (
 
 ## 1. Coverage Summary
 
-Code files scanned: **477**
+Code files scanned: **478**
 
 ## 2. Symbol Count by File
 
@@ -22,7 +22,7 @@ Code files scanned: **477**
 | 10 | `backend/src/conflictControl.ts` | 6 |
 | 11 | `backend/src/contactOptions.ts` | 10 |
 | 12 | `backend/src/database.ts` | 0 |
-| 13 | `backend/src/dataPath/index.ts` | 9 |
+| 13 | `backend/src/dataPath/index.ts` | 11 |
 | 14 | `backend/src/db/cutoverReadiness.ts` | 10 |
 | 15 | `backend/src/db/postgresQueryCompat.ts` | 12 |
 | 16 | `backend/src/fileAssets.ts` | 61 |
@@ -453,40 +453,41 @@ Code files scanned: **477**
 | 441 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
 | 442 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
 | 443 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
-| 444 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
-| 445 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 2 |
-| 446 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
-| 447 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 2 |
-| 448 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 3 |
-| 449 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 11 |
-| 450 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 3 |
-| 451 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 2 |
-| 452 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 3 |
-| 453 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 2 |
-| 454 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 2 |
-| 455 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 2 |
-| 456 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 3 |
-| 457 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
-| 458 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 2 |
-| 459 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 2 |
-| 460 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
-| 461 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
-| 462 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
-| 463 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
-| 464 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
-| 465 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
-| 466 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
-| 467 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
-| 468 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 11 |
-| 469 | `ops/scripts/runtime/storage/prune-storage.ts` | 17 |
-| 470 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
-| 471 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
-| 472 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
-| 473 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
-| 474 | `ops/scripts/verification/verify-hardening-policy.ts` | 10 |
-| 475 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
-| 476 | `ops/scripts/verification/verify-scale-services.ts` | 9 |
-| 477 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
+| 444 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 28 |
+| 445 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
+| 446 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 2 |
+| 447 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
+| 448 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 2 |
+| 449 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 3 |
+| 450 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 11 |
+| 451 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 3 |
+| 452 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 2 |
+| 453 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 3 |
+| 454 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 2 |
+| 455 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 2 |
+| 456 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 2 |
+| 457 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 3 |
+| 458 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
+| 459 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 2 |
+| 460 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 2 |
+| 461 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
+| 462 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
+| 463 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
+| 464 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
+| 465 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
+| 466 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
+| 467 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
+| 468 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
+| 469 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 11 |
+| 470 | `ops/scripts/runtime/storage/prune-storage.ts` | 17 |
+| 471 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
+| 472 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
+| 473 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
+| 474 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
+| 475 | `ops/scripts/verification/verify-hardening-policy.ts` | 10 |
+| 476 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
+| 477 | `ops/scripts/verification/verify-scale-services.ts` | 9 |
+| 478 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
 
 ## 3. Detailed Function Commentary
 
@@ -678,7 +679,9 @@ Code files scanned: **477**
 | 6 | `summarizeDataRoot` | function | 80 |
 | 7 | `copyDirectoryContents` | function | 123 |
 | 8 | `buildArchivedTargetPath` | function | 160 |
-| 9 | `relocateDataRoot` | function | 180 |
+| 9 | `waitForFileSystemRetry` | function | 177 |
+| 10 | `renameDirectoryWithRetry` | function | 183 |
+| 11 | `relocateDataRoot` | function | 202 |
 
 ### 3.14 `backend/src/db/cutoverReadiness.ts`
 
@@ -6704,7 +6707,40 @@ Code files scanned: **477**
 | 7 | `verifyRuntimeObjectStoreFallback` | function | 86 |
 | 8 | `main` | function | 94 |
 
-### 3.444 `ops/scripts/runtime/live-checks/live-check-utils.ts`
+### 3.444 `ops/scripts/runtime/live-checks/all-pages-control-audit.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `readArg` | function | 129 |
+| 2 | `readArgs` | function | 136 |
+| 3 | `safeName` | function | 152 |
+| 4 | `addFinding` | function | 159 |
+| 5 | `isExternalNoise` | function | 163 |
+| 6 | `isAppConsoleIssue` | function | 167 |
+| 7 | `isAppNetworkIssue` | function | 173 |
+| 8 | `routeRoot` | function | 179 |
+| 9 | `textForLabel` | function | 184 |
+| 10 | `shouldSkipButton` | function | 188 |
+| 11 | `attachCollectors` | function | 197 |
+| 12 | `writeJson` | function | 232 |
+| 13 | `persistSummary` | function | 237 |
+| 14 | `saveScreenshot` | function | 242 |
+| 15 | `dismissTransientUi` | function | 249 |
+| 16 | `waitForRouteReady` | function | 267 |
+| 17 | `navigateRoute` | function | 283 |
+| 18 | `countVisible` | function | 298 |
+| 19 | `activeButtonCandidates` | function | 307 |
+| 20 | `clickButtonCandidate` | function | 332 |
+| 21 | `exerciseSearchInputs` | function | 383 |
+| 22 | `exerciseSelects` | function | 427 |
+| 23 | `collectLayoutIssues` | function | 484 |
+| 24 | `hasScrollableAncestor` | const arrow | 505 |
+| 25 | `runRoute` | function | 544 |
+| 26 | `createAuthedPage` | function | 599 |
+| 27 | `runProfile` | function | 618 |
+| 28 | `main` | function | 653 |
+
+### 3.445 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6717,28 +6753,28 @@ Code files scanned: **477**
 | 7 | `waitForRead` | export function | 101 |
 | 8 | `closeTopModal` | export function | 118 |
 
-### 3.445 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
+### 3.446 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 36 |
 
-### 3.446 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
+### 3.447 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 36 |
 
-### 3.447 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
+### 3.448 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 29 |
 | 2 | `main` | function | 36 |
 
-### 3.448 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
+### 3.449 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6746,7 +6782,7 @@ Code files scanned: **477**
 | 2 | `openFirstProductDetail` | function | 37 |
 | 3 | `main` | function | 46 |
 
-### 3.449 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
+### 3.450 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6762,7 +6798,7 @@ Code files scanned: **477**
 | 10 | `skippedStep` | function | 202 |
 | 11 | `runSuite` | function | 212 |
 
-### 3.450 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
+### 3.451 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6770,14 +6806,14 @@ Code files scanned: **477**
 | 2 | `verifiedContextGet` | function | 39 |
 | 3 | `main` | function | 46 |
 
-### 3.451 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
+### 3.452 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 35 |
 
-### 3.452 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
+### 3.453 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6785,28 +6821,28 @@ Code files scanned: **477**
 | 2 | `openFirstActionMenu` | function | 37 |
 | 3 | `main` | function | 46 |
 
-### 3.453 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
+### 3.454 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 29 |
 | 2 | `main` | function | 36 |
 
-### 3.454 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
+### 3.455 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 36 |
 
-### 3.455 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
+### 3.456 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 35 |
 
-### 3.456 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
+### 3.457 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6814,7 +6850,7 @@ Code files scanned: **477**
 | 2 | `openFirstVariantModal` | function | 36 |
 | 3 | `main` | function | 53 |
 
-### 3.457 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
+### 3.458 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6824,28 +6860,28 @@ Code files scanned: **477**
 | 4 | `endpointStatus` | function | 70 |
 | 5 | `main` | function | 74 |
 
-### 3.458 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
+### 3.459 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 33 |
 | 2 | `main` | function | 40 |
 
-### 3.459 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
+### 3.460 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 29 |
 | 2 | `main` | function | 36 |
 
-### 3.460 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
+### 3.461 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 32 |
 | 2 | `main` | function | 40 |
 
-### 3.461 `ops/scripts/runtime/smoke/check-public-url.ts`
+### 3.462 `ops/scripts/runtime/smoke/check-public-url.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6861,7 +6897,7 @@ Code files scanned: **477**
 | 10 | `checkHttpsViaIp` | function | 123 |
 | 11 | `main` | function | 160 |
 
-### 3.462 `ops/scripts/runtime/smoke/check-route-contract.ts`
+### 3.463 `ops/scripts/runtime/smoke/check-route-contract.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6869,7 +6905,7 @@ Code files scanned: **477**
 | 2 | `checkRoute` | function | 40 |
 | 3 | `main` | function | 67 |
 
-### 3.463 `ops/scripts/runtime/smoke/live-smoke.ts`
+### 3.464 `ops/scripts/runtime/smoke/live-smoke.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6880,7 +6916,7 @@ Code files scanned: **477**
 | 5 | `main` | function | 86 |
 | 6 | `record` | const arrow | 91 |
 
-### 3.464 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
+### 3.465 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6892,7 +6928,7 @@ Code files scanned: **477**
 | 6 | `writeReport` | function | 115 |
 | 7 | `main` | function | 121 |
 
-### 3.465 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
+### 3.466 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6905,7 +6941,7 @@ Code files scanned: **477**
 | 7 | `buildSql` | function | 191 |
 | 8 | `runPsql` | function | 200 |
 
-### 3.466 `ops/scripts/runtime/storage/cleanup-test-data.ts`
+### 3.467 `ops/scripts/runtime/storage/cleanup-test-data.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6931,7 +6967,7 @@ Code files scanned: **477**
 | 20 | `cleanupAuditImportFiles` | function | 376 |
 | 21 | `countMatchedRows` | function | 399 |
 
-### 3.467 `ops/scripts/runtime/storage/dataset-readiness.ts`
+### 3.468 `ops/scripts/runtime/storage/dataset-readiness.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6941,7 +6977,7 @@ Code files scanned: **477**
 | 4 | `buildCountsSql` | function | 56 |
 | 5 | `summarizeDataset` | function | 74 |
 
-### 3.468 `ops/scripts/runtime/storage/post-live-hygiene.ts`
+### 3.469 `ops/scripts/runtime/storage/post-live-hygiene.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6957,7 +6993,7 @@ Code files scanned: **477**
 | 10 | `runChecks` | function | 184 |
 | 11 | `main` | function | 192 |
 
-### 3.469 `ops/scripts/runtime/storage/prune-storage.ts`
+### 3.470 `ops/scripts/runtime/storage/prune-storage.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6979,7 +7015,7 @@ Code files scanned: **477**
 | 16 | `findBackupRoots` | function | 357 |
 | 17 | `main` | function | 371 |
 
-### 3.470 `ops/scripts/runtime/storage/restore-candidates.ts`
+### 3.471 `ops/scripts/runtime/storage/restore-candidates.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6992,7 +7028,7 @@ Code files scanned: **477**
 | 7 | `findBackupPackages` | function | 136 |
 | 8 | `chooseRecommendation` | function | 150 |
 
-### 3.471 `ops/scripts/runtime/storage/restore-rehearsal.ts`
+### 3.472 `ops/scripts/runtime/storage/restore-rehearsal.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7011,7 +7047,7 @@ Code files scanned: **477**
 | 13 | `countRestoredTables` | function | 152 |
 | 14 | `compareCounts` | function | 159 |
 
-### 3.472 `ops/scripts/verification/verify-backup-reliability.ts`
+### 3.473 `ops/scripts/verification/verify-backup-reliability.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7022,7 +7058,7 @@ Code files scanned: **477**
 | 5 | `checkNeedles` | function | 47 |
 | 6 | `main` | function | 58 |
 
-### 3.473 `ops/scripts/verification/verify-docker-release.ts`
+### 3.474 `ops/scripts/verification/verify-docker-release.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7038,7 +7074,7 @@ Code files scanned: **477**
 | 10 | `walk` | function | 317 |
 | 11 | `main` | function | 328 |
 
-### 3.474 `ops/scripts/verification/verify-hardening-policy.ts`
+### 3.475 `ops/scripts/verification/verify-hardening-policy.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7053,7 +7089,7 @@ Code files scanned: **477**
 | 9 | `assertFullAutomationIncludesPolicy` | function | 102 |
 | 10 | `main` | function | 118 |
 
-### 3.475 `ops/scripts/verification/verify-runtime-deps.ts`
+### 3.476 `ops/scripts/verification/verify-runtime-deps.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7073,7 +7109,7 @@ Code files scanned: **477**
 | 14 | `assertCoverageComplete` | function | 292 |
 | 15 | `main` | function | 305 |
 
-### 3.476 `ops/scripts/verification/verify-scale-services.ts`
+### 3.477 `ops/scripts/verification/verify-scale-services.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7087,7 +7123,7 @@ Code files scanned: **477**
 | 8 | `pushDockerAvailabilityMessage` | function | 103 |
 | 9 | `main` | function | 108 |
 
-### 3.477 `ops/scripts/verification/verify-secret-hygiene.ts`
+### 3.478 `ops/scripts/verification/verify-secret-hygiene.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
