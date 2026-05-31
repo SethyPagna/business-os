@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 627.
+- Latest completed implementation move in this roadmap: Move 628.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7195,3 +7195,11 @@ Move 627 status:
   vendor bundle, verifies TypeScript sources exist for generated files, and
   writes `ops/docs/reference/RUNTIME-JS-INVENTORY.md` plus JSON. Phase 29 now
   fails if a new unclassified first-party JavaScript file appears.
+
+Move 628 status:
+- Move 628 strengthens the shared ops reporting helper from JSDoc-style
+  JavaScript-in-TypeScript to real TypeScript annotations. `ops/scripts/lib/
+  report-utils.ts` now declares its Markdown cell, crypto hash factory, and
+  CommonJS export shape with TypeScript types while preserving the existing
+  `require('../lib/report-utils.ts')` runtime contract. The direct export smoke
+  check, generated-bulk audit, and full Phase 29 audit passed.

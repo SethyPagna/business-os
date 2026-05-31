@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 627 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 628 in this file.
 
 ## Goal
 
@@ -5491,6 +5491,14 @@ Decision rule:
     exposes `runtime-js-inventory`, and Phase 29 runs it so any new
     unclassified first-party JavaScript file fails the audit instead of
     becoming invisible drift.
+
+628. Strengthen the shared ops report helper with real TypeScript types.
+    Done: `ops/scripts/lib/report-utils.ts` now uses TypeScript aliases and
+    function annotations for Markdown cells, digest input handling, output-tail
+    formatting, byte formatting, and the CommonJS export shape instead of
+    relying on JSDoc typedefs. Existing report callers keep their
+    `require('../lib/report-utils.ts')` imports. Direct export smoke checks,
+    generated-bulk audit, and Phase 29 passed.
 
 ## Safety Gates
 

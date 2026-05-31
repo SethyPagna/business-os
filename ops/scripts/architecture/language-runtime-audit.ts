@@ -1132,8 +1132,8 @@ const REJECTED_DATA_PATH_CANDIDATES = [
   {
     file: 'ops/scripts/lib/report-utils.ts',
     decision: 'keep as a shared Node.js report helper and exclude from SQL/DuckDB conversion queue',
-    reason: 'The helper only formats Markdown tables, digests, output tails, and byte labels. It is flagged by path/text report keywords, not by query-heavy runtime behavior or data-volume processing.',
-    evidence: 'Move 210 inspection found no database reads, joins, imports, exports, backup streaming, or analytics loops in the file; converting it would add churn without measurable speed, stability, or packaging benefit.',
+    reason: 'The helper only formats Markdown tables, digests, output tails, and byte labels. It is now TypeScript-typed, but it is still flagged by path/text report keywords rather than query-heavy runtime behavior or data-volume processing.',
+    evidence: 'Move 210 inspection found no database reads, joins, imports, exports, backup streaming, or analytics loops in the file; Move 628 strengthened the helper with real TypeScript annotations while keeping SQL/DuckDB conversion rejected.',
   },
   {
     file: 'ops/scripts/backend/schema-primary-key-rollback.sql',

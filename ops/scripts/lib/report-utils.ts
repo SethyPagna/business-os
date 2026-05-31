@@ -1,17 +1,21 @@
 'use strict'
 
+type MarkdownCell = string | number | boolean | null | undefined
+type HashFactory = typeof import('crypto').createHash
+type ReportUtilsExports = {
+  markdownTable: typeof markdownTable
+  stableDigest: typeof stableDigest
+  summarizeReportValue: typeof summarizeReportValue
+  outputTail: typeof outputTail
+  formatBytes: typeof formatBytes
+}
+
+declare const require: (moduleName: 'crypto') => { createHash: HashFactory }
+declare const module: { exports: ReportUtilsExports }
+
 const { createHash } = require('crypto')
 
-/**
- * @typedef {string | number | boolean | null | undefined} MarkdownCell
- */
-
-/**
- * @param {string[]} headers
- * @param {MarkdownCell[][]} rows
- * @returns {string}
- */
-function markdownTable(headers, rows) {
+function markdownTable(headers: string[], rows: MarkdownCell[][]): string {
   return [
     `| ${headers.join(' | ')} |`,
     `| ${headers.map(() => '---').join(' | ')} |`,
@@ -19,19 +23,11 @@ function markdownTable(headers, rows) {
   ].join('\n')
 }
 
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function stableDigest(value) {
+function stableDigest(value: unknown): string {
   return createHash('sha256').update(String(value)).digest('hex').slice(0, 12)
 }
 
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function summarizeReportValue(value) {
+function summarizeReportValue(value: unknown): string {
   const text = String(value)
   if (text.length <= 120) return text
   let sizeLabel = `chars:${text.length}`
@@ -45,23 +41,14 @@ function summarizeReportValue(value) {
   return `${sizeLabel}; sha256:${stableDigest(text)}; preview:${text.slice(0, 96)}...`
 }
 
-/**
- * @param {unknown} value
- * @param {number} [limit]
- * @returns {string}
- */
-function outputTail(value, limit = 4000) {
+function outputTail(value: unknown, limit = 4000): string {
   const text = String(value || '').trim()
   if (!text) return ''
   if (text.length <= limit) return text
   return `...${text.slice(text.length - limit)}`
 }
 
-/**
- * @param {number} bytes
- * @returns {string}
- */
-function formatBytes(bytes) {
+function formatBytes(bytes: number): string {
   if (!bytes) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let value = bytes
