@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 640 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 641 in this file.
 
 ## Goal
 
@@ -5603,6 +5603,21 @@ Decision rule:
     same archive path, copy behavior, nested-path rejection, and data safety
     checks. Focused `node backend\test\dataPath.test.ts` and full backend
     `npm.cmd --prefix backend run test:utils` passed.
+
+641. Expand all-pages live control audit navigation coverage.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    recognizes intentional cross-page workflow buttons instead of treating them
+    as route instability. Dashboard buttons such as `Review in inventory` and
+    `Open inventory` are verified by confirming the expected inventory route,
+    recording `navigated-to-inventory` proof, and returning to the dashboard so
+    later controls are still tested. The broad gate remains strict for
+    accidental route changes. Proof: `npm.cmd --prefix ops run
+    phase84:all-pages-control-audit -- --profile exhaustive` passed with 34
+    route/profile checks, 779 non-destructive control interactions, 68
+    screenshots, and 0 findings. Browser-action smoke, deep live audit, full
+    Phase 8.4 live suite, public Cloudflare portal check, post-live hygiene,
+    frontend utility suite, frontend production build, backend utility suite,
+    and Phase 29 audit also passed.
 
 ## Safety Gates
 

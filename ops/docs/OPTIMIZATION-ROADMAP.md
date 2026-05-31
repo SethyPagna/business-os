@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 640.
+- Latest completed implementation move in this roadmap: Move 641.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7313,3 +7313,18 @@ Move 640 status:
   the same archive/copy behavior once the file-system lock clears. Proof:
   focused `node backend\test\dataPath.test.ts` and full backend
   `npm.cmd --prefix backend run test:utils` passed.
+
+Move 641 status:
+- Move 641 expands the all-pages Phase 8.4 control audit so intentional
+  cross-page navigation buttons are verified instead of misreported as route
+  instability. Dashboard actions such as `Review in inventory` and
+  `Open inventory` are now allowed to land on the inventory page, record
+  `navigated-to-inventory` proof, and then return to the original dashboard
+  route before the audit continues. This keeps the broad audit strict for
+  accidental navigation while covering legitimate workflow jumps. Proof:
+  `npm.cmd --prefix ops run phase84:all-pages-control-audit -- --profile
+  exhaustive` passed with 34 route/profile checks, 779 non-destructive control
+  interactions, 68 screenshots, and 0 findings. Additional proof passed:
+  browser-action smoke, deep live audit, full Phase 8.4 live suite, public
+  Cloudflare portal check, post-live hygiene, frontend utility suite, frontend
+  production build, backend utility suite, and Phase 29 audit.

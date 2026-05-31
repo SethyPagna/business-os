@@ -110,6 +110,12 @@ const LOW_VALUE_BUTTON_RE = /^\s*(\+|-|×|x|\.{1,3}|…|←|→|↑|↓|<|>|\/|a
 const EXTERNAL_NOISE_RE = /chrome-extension:|No Listener: tabs:outgoing|Grammarly|Statsig|ab\.chatgpt\.com|ERR_BLOCKED_BY_CLIENT|webextension\.js|CoupertUIFont|unsafe-eval.*content\.js/i
 const APP_API_RE = /\/api\/|\/health|\/business-os-build\.json|\/uploads\//i
 const LAYOUT_SELECTOR = 'button, input, select, textarea, [role="button"], [role="tab"], [role="menuitem"], th, td, .card, .btn, .control, .table-row'
+const INTENTIONAL_ROUTE_BUTTONS: Record<string, Array<{ label: RegExp; page: string; path: string }>> = {
+  dashboard: [
+    { label: /^Review in inventory$/i, page: 'inventory', path: '/inventory' },
+    { label: /^Open inventory$/i, page: 'inventory', path: '/inventory' },
+  ],
+}
 
 const summary: AuditSummary = {
   audit: {
@@ -192,6 +198,11 @@ function shouldSkipButton(label: string): boolean {
   if (MUTATING_OR_NOISY_BUTTON_RE.test(value)) return true
   if (LOW_VALUE_BUTTON_RE.test(value)) return true
   return false
+}
+
+function expectedButtonNavigation(route: AuditRoute, label: string): { page: string; path: string } | null {
+  const candidates = INTENTIONAL_ROUTE_BUTTONS[route.name] || []
+  return candidates.find((candidate) => candidate.label.test(label)) || null
 }
 
 async function attachCollectors(page: Page, profile: string, route: string): Promise<{
@@ -329,9 +340,16 @@ async function activeButtonCandidates(root: Locator): Promise<Array<{ index: num
   return candidates
 }
 
-async function clickButtonCandidate(page: Page, root: Locator, route: AuditRoute, candidate: { index: number; label: string }): Promise<ControlResult> {
+async function clickButtonCandidate(
+  page: Page,
+  root: Locator,
+  route: AuditRoute,
+  candidate: { index: number; label: string },
+  storageState: BrowserStorageState | null,
+): Promise<ControlResult> {
   const started = performance.now()
   const resultName = candidate.label
+  const expectedNavigation = expectedButtonNavigation(route, resultName)
   try {
     await dismissTransientUi(page)
     const buttons = root.locator('button, [role="button"], [role="tab"]')
@@ -356,17 +374,33 @@ async function clickButtonCandidate(page: Page, root: Locator, route: AuditRoute
     const bodyTextLength = await page.locator('body').evaluate((node) => node.textContent?.trim().length || 0).catch(() => 0)
     const overlayCount = await page.locator('#vite-error-overlay, [data-nextjs-dialog-overlay]').count().catch(() => 0)
     await dismissTransientUi(page)
-    const stillReady = route.scope === 'public'
-      ? bodyTextLength > 40
-      : await page.locator(`[data-bos-active-page="true"][data-bos-page-slot="${route.name}"]`).count().catch(() => 0) > 0
-        || await page.evaluate((expectedPath) => window.location.pathname === expectedPath, route.path).catch(() => false)
+    const navigationState = await page.evaluate(() => {
+      const active = document.querySelector('[data-bos-active-page="true"]')
+      return {
+        pathname: window.location.pathname,
+        activePage: active?.getAttribute('data-bos-page-slot') || '',
+      }
+    }).catch(() => ({ pathname: '', activePage: '' }))
+    const landedOnExpectedNavigation = !!expectedNavigation
+      && (navigationState.activePage === expectedNavigation.page || navigationState.pathname === expectedNavigation.path)
+    const stillReady = landedOnExpectedNavigation || (
+      route.scope === 'public'
+        ? bodyTextLength > 40
+        : await page.locator(`[data-bos-active-page="true"][data-bos-page-slot="${route.name}"]`).count().catch(() => 0) > 0
+          || navigationState.pathname === route.path
+    )
     const ok = bodyTextLength > 40 && overlayCount === 0 && stillReady
+    if (landedOnExpectedNavigation) {
+      await navigateRoute(page, route, storageState).catch(() => {})
+    }
     return {
       kind: 'button',
       label: resultName,
       ok,
       ms: Math.round(performance.now() - started),
-      proof: ok ? 'clicked-and-route-still-rendered' : 'route-not-stable-after-click',
+      proof: ok
+        ? (landedOnExpectedNavigation ? `navigated-to-${expectedNavigation?.page}` : 'clicked-and-route-still-rendered')
+        : 'route-not-stable-after-click',
     }
   } catch (error) {
     await dismissTransientUi(page)
@@ -555,7 +589,7 @@ async function runRoute(page: Page, profile: AuditProfile, route: AuditRoute, st
   controls.push(...await exerciseSelects(root))
   const buttonCandidates = (await activeButtonCandidates(root)).slice(0, MAX_BUTTON_CLICKS_PER_ROUTE)
   for (const candidate of buttonCandidates) {
-    controls.push(await clickButtonCandidate(page, root, route, candidate))
+    controls.push(await clickButtonCandidate(page, root, route, candidate, storageState))
   }
   const layoutIssues = await collectLayoutIssues(page, route)
   const appConsoleIssues = consoleEntries.filter(isAppConsoleIssue)
