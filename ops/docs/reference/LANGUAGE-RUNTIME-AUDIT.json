@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-31T00:23:34.677Z",
+  "generatedAt": "2026-05-31T00:32:56.422Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -9,9 +9,10 @@
     "backend/src",
     "backend/test",
     "ops/scripts",
+    "ops/config",
     "run"
   ],
-  "sourceFiles": 456,
+  "sourceFiles": 457,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -21,7 +22,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      317
+      318
     ],
     [
       "React TSX",
@@ -55,7 +56,7 @@
   "extensionCounts": [
     [
       ".ts",
-      317
+      318
     ],
     [
       ".tsx",
@@ -589,6 +590,22 @@
         "npm.cmd --prefix backend run verify:server-entry",
         "npm.cmd --prefix backend run test:utils",
         "npm.cmd --prefix backend run build:linux"
+      ],
+      "implementationExists": true,
+      "wrapperRequired": true,
+      "compatibilityWrapperExists": true,
+      "declarationSupportExists": true,
+      "covered": true
+    },
+    {
+      "implementation": "ops/config/ecosystem.config.ts",
+      "compatibilityWrapper": "ops/config/ecosystem.config.js",
+      "wrapperStatus": "generated PM2 runtime config; exact filename is retained for PM2 and run/sh/start-server.sh",
+      "declarationSupport": "",
+      "proof": [
+        "npm.cmd --prefix ops run verify:ecosystem-config",
+        "node ops\\scripts\\architecture\\phase29-audit.ts",
+        "run\\sh\\start-server.sh keeps ECOSYSTEM pointed at ops/config/ecosystem.config.js"
       ],
       "implementationExists": true,
       "wrapperRequired": true,

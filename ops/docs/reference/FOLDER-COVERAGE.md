@@ -82,7 +82,7 @@ Total folders documented: **82**
 | 70 | `ops/scripts/frontend` | Project folder | 4 | 0 |
 | 71 | `ops/scripts/lib` | Project folder | 2 | 0 |
 | 72 | `ops/scripts/powershell` | Project folder | 8 | 0 |
-| 73 | `ops/scripts/runtime` | Project folder | 1 | 5 |
+| 73 | `ops/scripts/runtime` | Project folder | 2 | 5 |
 | 74 | `ops/scripts/runtime/audits` | Project folder | 6 | 0 |
 | 75 | `ops/scripts/runtime/cloudflare` | Project folder | 4 | 0 |
 | 76 | `ops/scripts/runtime/live-checks` | Project folder | 17 | 0 |
@@ -1568,7 +1568,7 @@ Total folders documented: **82**
 ### 3.73 Folder: `ops/scripts/runtime`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **2**
 - Direct subfolders: **5**
 
 #### 3.73.1 Subfolders
@@ -1586,6 +1586,7 @@ Total folders documented: **82**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `browser-action-smoke.ts` | Project source/support file |
+| 2 | `build-ecosystem-config.ts` | Project source/support file |
 
 
 ### 3.74 Folder: `ops/scripts/runtime/audits`

@@ -1,10 +1,10 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 357,
+  "sourceFiles": 358,
   "distAssets": 84,
-  "totalSourceBytes": 6493718,
-  "totalSourceLines": 147500,
+  "totalSourceBytes": 6497687,
+  "totalSourceLines": 147613,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -124,8 +124,8 @@
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 71721,
-      "lines": 1640
+      "size": 72604,
+      "lines": 1660
     },
     {
       "file": "frontend/src/components/users/UserProfileModal.tsx",
@@ -245,14 +245,14 @@
       "lines": 1732
     },
     {
+      "file": "ops/scripts/architecture/language-runtime-audit.ts",
+      "size": 72604,
+      "lines": 1660
+    },
+    {
       "file": "backend/src/routes/system/index.ts",
       "size": 66913,
       "lines": 1659
-    },
-    {
-      "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 71721,
-      "lines": 1640
     },
     {
       "file": "backend/src/routes/sales.ts",

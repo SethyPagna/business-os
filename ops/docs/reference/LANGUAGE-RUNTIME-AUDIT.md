@@ -1,12 +1,12 @@
 # Language Runtime Audit
 
-Generated: 2026-05-31T00:23:34.677Z
+Generated: 2026-05-31T00:32:56.422Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 456
-- Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
+- Files scanned: 457
+- Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/config`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
 - Preferred heavy-data path: SQL/DuckDB before new general-purpose runtimes
@@ -22,7 +22,7 @@ Generated: 2026-05-31T00:23:34.677Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 317 |
+| TypeScript | 318 |
 | React TSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
@@ -90,6 +90,7 @@ Generated: 2026-05-31T00:23:34.677Z
 | `frontend/src/public-runtime/theme-bootstrap.ts` | yes | `frontend/public/theme-bootstrap.js` | yes | none | yes | `npm.cmd --prefix frontend run verify:public-runtime`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/public-runtime/service-worker.ts` | yes | `frontend/public/sw.js` | yes | none | yes | `npm.cmd --prefix frontend run verify:public-runtime`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build` |
 | `backend/server.ts` | yes | `backend/server.js` | yes | none | yes | `npm.cmd --prefix backend run verify:server-entry`<br>`npm.cmd --prefix backend run test:utils`<br>`npm.cmd --prefix backend run build:linux` |
+| `ops/config/ecosystem.config.ts` | yes | `ops/config/ecosystem.config.js` | yes | none | yes | `npm.cmd --prefix ops run verify:ecosystem-config`<br>`node ops\scripts\architecture\phase29-audit.ts`<br>`run\sh\start-server.sh keeps ECOSYSTEM pointed at ops/config/ecosystem.config.js` |
 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | yes | retired frontend/src/components/catalog/portalCatalogDisplay.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalCatalogDisplay.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalContentI18n.ts` | yes | retired frontend/src/components/catalog/portalContentI18n.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalContentI18n.test.ts`<br>`node frontend\tests\portalFaqVocabulary.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalEditorUtils.ts` | yes | retired frontend/src/components/catalog/portalEditorUtils.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalEditorUtils.test.ts`<br>`npm.cmd --prefix frontend run build` |
