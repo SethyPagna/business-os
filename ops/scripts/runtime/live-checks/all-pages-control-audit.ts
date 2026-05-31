@@ -111,6 +111,7 @@ type AuditSummary = {
   findings: Finding[]
   artifacts: {
     screenshots: string[]
+    coverageReports: string[]
   }
 }
 
@@ -125,7 +126,9 @@ const REPORT_DIR = process.env.BOS_ALL_PAGES_AUDIT_REPORT_DIR
   : path.join(ROOT_DIR, 'ops/runtime/reports', `all-pages-control-audit-${TIMESTAMP}`)
 const SCREENSHOT_DIR = path.join(REPORT_DIR, 'screenshots')
 const REPORT_PATH = path.join(REPORT_DIR, 'summary.json')
+const COVERAGE_REPORT_PATH = path.join(REPORT_DIR, 'coverage.md')
 const LATEST_REPORT_PATH = path.join(ROOT_DIR, 'ops/runtime/reports/all-pages-control-audit-latest.json')
+const LATEST_COVERAGE_REPORT_PATH = path.join(ROOT_DIR, 'ops/runtime/reports/all-pages-control-audit-latest.md')
 const ROUTE_READY_TIMEOUT_MS = Number(process.env.BOS_ALL_PAGES_READY_TIMEOUT_MS || 18_000)
 const CONTROL_TIMEOUT_MS = Number(process.env.BOS_ALL_PAGES_CONTROL_TIMEOUT_MS || 2_500)
 const MAX_BUTTON_CLICKS_PER_ROUTE = Number(process.env.BOS_ALL_PAGES_MAX_BUTTONS || 18)
@@ -170,6 +173,7 @@ const summary: AuditSummary = {
   findings: [],
   artifacts: {
     screenshots: [],
+    coverageReports: [],
   },
 }
 
@@ -287,8 +291,31 @@ async function writeJson(file: string, data: unknown): Promise<void> {
   await fs.writeFile(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
 }
 
+async function writeText(file: string, content: string): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await fs.writeFile(file, content, 'utf8')
+}
+
 function incrementCount(target: Record<string, number>, key: string): void {
   target[key] = (target[key] || 0) + 1
+}
+
+function markdownCell(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\|/g, '\\|')
+}
+
+function markdownTable(headers: string[], rows: unknown[][]): string {
+  const headerRow = `| ${headers.map(markdownCell).join(' | ')} |`
+  const divider = `| ${headers.map(() => '---').join(' | ')} |`
+  const body = rows.map((row) => `| ${row.map(markdownCell).join(' | ')} |`)
+  return [headerRow, divider, ...body].join('\n')
+}
+
+function percentage(numerator: number, denominator: number): string {
+  if (!denominator) return 'n/a'
+  return `${((numerator / denominator) * 100).toFixed(1)}%`
 }
 
 function computeControlCoverage(controls: ControlRecord[]): ControlCoverage {
@@ -331,6 +358,78 @@ function computeControlCoverage(controls: ControlRecord[]): ControlCoverage {
     }
   }
   return coverage
+}
+
+function routeCoverageRows(): Array<{ route: string; total: number; tested: number; failed: number; skipped: number; skippedRatio: number }> {
+  return Object.entries(summary.coverage.byRoute)
+    .map(([route, coverage]) => ({
+      route,
+      total: coverage.total,
+      tested: coverage.tested,
+      failed: coverage.failed,
+      skipped: coverage.skipped,
+      skippedRatio: coverage.total > 0 ? Number((coverage.skipped / coverage.total).toFixed(3)) : 1,
+    }))
+}
+
+function renderCoverageMarkdown(): string {
+  const coverage = summary.coverage
+  const kindRows = Object.entries(coverage.byKind)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([kind, count]) => [kind, count])
+  const skipRows = Object.entries(coverage.skippedByReason)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([reason, count]) => [reason, count])
+  const routes = routeCoverageRows()
+  const lowestTestedRows = [...routes]
+    .sort((left, right) => left.tested - right.tested || right.skippedRatio - left.skippedRatio || left.route.localeCompare(right.route))
+    .slice(0, 12)
+    .map((route) => [route.route, route.total, route.tested, route.skipped, percentage(route.skipped, route.total), route.failed])
+  const highestSkippedRows = [...routes]
+    .sort((left, right) => right.skippedRatio - left.skippedRatio || left.tested - right.tested || left.route.localeCompare(right.route))
+    .slice(0, 12)
+    .map((route) => [route.route, route.total, route.tested, route.skipped, percentage(route.skipped, route.total), route.failed])
+  const findingRows = summary.findings
+    .map((finding) => [finding.priority, finding.area, finding.message])
+
+  return `# All-Pages Control Audit Coverage
+
+Generated: ${new Date().toISOString()}
+
+## Summary
+
+- OK: ${summary.audit.ok === undefined ? 'pending' : String(summary.audit.ok)}
+- Profile: ${summary.audit.profile}
+- Routes: ${summary.routes.length}
+- Controls: ${coverage.total}
+- Tested: ${coverage.tested}
+- Passed: ${coverage.passed}
+- Failed: ${coverage.failed}
+- Skipped: ${coverage.skipped}
+- Skipped ratio: ${percentage(coverage.skipped, coverage.total)}
+- Findings: ${summary.findings.length}
+- Screenshots: ${summary.artifacts.screenshots.length}
+
+## Controls By Kind
+
+${markdownTable(['Kind', 'Controls'], kindRows)}
+
+## Skipped By Reason
+
+${markdownTable(['Reason', 'Controls'], skipRows)}
+
+## Lowest Tested Routes
+
+${markdownTable(['Route', 'Total', 'Tested', 'Skipped', 'Skipped %', 'Failed'], lowestTestedRows)}
+
+## Highest Skipped Routes
+
+${markdownTable(['Route', 'Total', 'Tested', 'Skipped', 'Skipped %', 'Failed'], highestSkippedRows)}
+
+## Findings
+
+${findingRows.length ? markdownTable(['Priority', 'Area', 'Message'], findingRows) : 'No findings.'}
+`
 }
 
 function addCoverageGateFindings(): void {
@@ -395,8 +494,12 @@ function addCoverageGateFindings(): void {
 
 async function persistSummary(): Promise<void> {
   summary.coverage = computeControlCoverage(summary.controls)
+  summary.artifacts.coverageReports = [COVERAGE_REPORT_PATH, LATEST_COVERAGE_REPORT_PATH]
   await writeJson(REPORT_PATH, summary)
   await writeJson(LATEST_REPORT_PATH, summary)
+  const coverageReport = renderCoverageMarkdown()
+  await writeText(COVERAGE_REPORT_PATH, coverageReport)
+  await writeText(LATEST_COVERAGE_REPORT_PATH, coverageReport)
 }
 
 async function saveScreenshot(page: Page, name: string): Promise<string> {

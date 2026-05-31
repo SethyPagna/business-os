@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 646 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 647 in this file.
 
 ## Goal
 
@@ -5693,6 +5693,21 @@ Decision rule:
     checks, 909 control records, 668 tested controls, 241 skipped controls, 0
     failed controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase
     29 audit, and diff whitespace checks passed.
+
+647. Write all-pages control coverage Markdown reports.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    writes a per-run `coverage.md` and the latest
+    `ops/runtime/reports/all-pages-control-audit-latest.md` beside the existing
+    JSON summaries. The JSON artifact list now includes those Markdown report
+    paths, making broad Phase 8.4 coverage readable without a custom parser.
+    The report summarizes whole-app coverage, controls by kind, skipped
+    reasons, lowest-tested routes, highest-skipped routes, findings, and
+    screenshot totals. Proof: focused `loyalty_points` audit passed with 16
+    controls, 7 tested controls, 9 skipped controls, 4 screenshots, and 0
+    findings; full exhaustive all-pages audit passed with 34 route/profile
+    checks, 908 control records, 667 tested controls, 241 skipped controls, 0
+    failed controls, 68 screenshots, and 0 findings. Post-live hygiene and
+    Phase 29 audit passed.
 
 ## Safety Gates
 

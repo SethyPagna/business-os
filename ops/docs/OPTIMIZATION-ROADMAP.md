@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 646.
+- Latest completed implementation move in this roadmap: Move 647.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7402,3 +7402,20 @@ Move 646 status:
   control records, 668 tested controls, 241 skipped controls, 0 failed
   controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29 audit,
   and diff whitespace checks passed.
+
+Move 647 status:
+- Move 647 writes a compact Markdown coverage report for the all-pages Phase
+  8.4 control audit. Each run now persists both the existing machine-readable
+  `summary.json` and a human-readable `coverage.md`, plus the latest pointers
+  at `ops/runtime/reports/all-pages-control-audit-latest.json` and
+  `ops/runtime/reports/all-pages-control-audit-latest.md`. The JSON artifacts
+  list the coverage report paths so future sessions can quickly inspect route
+  coverage, skipped reasons, low-tested routes, high-skipped routes, findings,
+  and screenshot counts without custom parsing. Proof: focused
+  `loyalty_points` audit passed with 16 controls, 7 tested controls, 9 skipped
+  controls, 4 screenshots, and 0 findings; full exhaustive all-pages audit
+  passed with 34 route/profile checks, 908 control records, 667 tested
+  controls, 241 skipped controls, 0 failed controls, 68 screenshots, and 0
+  findings. The generated Markdown latest report shows a 26.5% skipped ratio,
+  control counts by kind, skipped-reason counts, lowest-tested routes, and
+  highest-skipped routes. Post-live hygiene and Phase 29 audit passed.
