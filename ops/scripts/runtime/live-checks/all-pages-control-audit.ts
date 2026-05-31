@@ -33,6 +33,24 @@ type ControlResult = {
   error?: string
 }
 
+type ControlRecord = ControlResult & { profile: string; route: string }
+
+type ControlCoverage = {
+  total: number
+  tested: number
+  passed: number
+  failed: number
+  skipped: number
+  byKind: Record<string, number>
+  skippedByReason: Record<string, number>
+  byRoute: Record<string, {
+    total: number
+    tested: number
+    failed: number
+    skipped: number
+  }>
+}
+
 type ButtonCandidate = {
   index: number
   label: string
@@ -88,7 +106,8 @@ type AuditSummary = {
     ok?: boolean
   }
   routes: RouteResult[]
-  controls: Array<ControlResult & { profile: string; route: string }>
+  controls: ControlRecord[]
+  coverage: ControlCoverage
   findings: Finding[]
   artifacts: {
     screenshots: string[]
@@ -133,6 +152,16 @@ const summary: AuditSummary = {
   },
   routes: [],
   controls: [],
+  coverage: {
+    total: 0,
+    tested: 0,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    byKind: {},
+    skippedByReason: {},
+    byRoute: {},
+  },
   findings: [],
   artifacts: {
     screenshots: [],
@@ -252,7 +281,54 @@ async function writeJson(file: string, data: unknown): Promise<void> {
   await fs.writeFile(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
 }
 
+function incrementCount(target: Record<string, number>, key: string): void {
+  target[key] = (target[key] || 0) + 1
+}
+
+function computeControlCoverage(controls: ControlRecord[]): ControlCoverage {
+  const coverage: ControlCoverage = {
+    total: controls.length,
+    tested: 0,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    byKind: {},
+    skippedByReason: {},
+    byRoute: {},
+  }
+  for (const control of controls) {
+    const routeKey = `${control.profile}/${control.route}`
+    if (!coverage.byRoute[routeKey]) {
+      coverage.byRoute[routeKey] = {
+        total: 0,
+        tested: 0,
+        failed: 0,
+        skipped: 0,
+      }
+    }
+    const routeCoverage = coverage.byRoute[routeKey]
+    routeCoverage.total += 1
+    incrementCount(coverage.byKind, control.kind || 'unknown')
+    if (control.skipped) {
+      coverage.skipped += 1
+      routeCoverage.skipped += 1
+      incrementCount(coverage.skippedByReason, control.reason || 'unspecified')
+      continue
+    }
+    coverage.tested += 1
+    routeCoverage.tested += 1
+    if (control.ok) {
+      coverage.passed += 1
+    } else {
+      coverage.failed += 1
+      routeCoverage.failed += 1
+    }
+  }
+  return coverage
+}
+
 async function persistSummary(): Promise<void> {
+  summary.coverage = computeControlCoverage(summary.controls)
   await writeJson(REPORT_PATH, summary)
   await writeJson(LATEST_REPORT_PATH, summary)
 }
@@ -736,6 +812,10 @@ async function main(): Promise<void> {
     ok: summary.audit.ok,
     routes: summary.routes.length,
     controls: summary.controls.length,
+    testedControls: summary.coverage.tested,
+    skippedControls: summary.coverage.skipped,
+    failedControls: summary.coverage.failed,
+    skippedByReason: summary.coverage.skippedByReason,
     findings: summary.findings.length,
     reportPath: REPORT_PATH,
     screenshotCount: summary.artifacts.screenshots.length,

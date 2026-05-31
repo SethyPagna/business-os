@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 642 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 643 in this file.
 
 ## Goal
 
@@ -5633,6 +5633,20 @@ Decision rule:
     checks, 909 control records, 668 tested controls, 241 skipped controls with
     reasons, 68 screenshots, and 0 findings. Post-live hygiene and Phase 29
     audit passed.
+
+643. Add machine-readable all-pages control coverage summary.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    writes a top-level `coverage` block into `summary.json`. The block records
+    total, tested, passed, failed, skipped, by-kind counts, skipped-by-reason
+    counts, and per-route tested/failed/skipped totals. The console output also
+    prints tested, skipped, failed, and skipped-by-reason counts so future
+    sessions can quickly tell whether the broad audit was meaningful without
+    custom report parsing. Proof: focused dashboard audit passed with 142
+    control records, 132 tested controls, 10 skipped controls, and 0 findings;
+    full exhaustive all-pages audit passed with 34 route/profile checks, 908
+    control records, 667 tested controls, 241 skipped controls, 0 failed
+    controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29
+    audit, and diff whitespace checks passed.
 
 ## Safety Gates
 
