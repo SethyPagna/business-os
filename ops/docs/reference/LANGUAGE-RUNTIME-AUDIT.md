@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-30T23:58:37.583Z
+Generated: 2026-05-31T00:12:02.992Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 451
+- Files scanned: 455
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -22,7 +22,7 @@ Generated: 2026-05-30T23:58:37.583Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 312 |
+| TypeScript | 316 |
 | React TSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
@@ -86,6 +86,9 @@ Generated: 2026-05-30T23:58:37.583Z
 | --- | --- | --- | --- | --- | --- | --- |
 | `frontend/src/app/appShellUtils.ts` | yes | retired after callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\appShellUtils.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/runtime/runtimeErrorClassifier.ts` | yes | retired after callers moved to TypeScript source | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\runtimeErrorClassifier.test.ts`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/public-runtime/runtime-noise-guard.ts` | yes | `frontend/public/runtime-noise-guard.js` | yes | none | yes | `npm.cmd --prefix frontend run verify:public-runtime`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/public-runtime/theme-bootstrap.ts` | yes | `frontend/public/theme-bootstrap.js` | yes | none | yes | `npm.cmd --prefix frontend run verify:public-runtime`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build` |
+| `frontend/src/public-runtime/service-worker.ts` | yes | `frontend/public/sw.js` | yes | none | yes | `npm.cmd --prefix frontend run verify:public-runtime`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | yes | retired frontend/src/components/catalog/portalCatalogDisplay.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalCatalogDisplay.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalContentI18n.ts` | yes | retired frontend/src/components/catalog/portalContentI18n.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalContentI18n.test.ts`<br>`node frontend\tests\portalFaqVocabulary.test.ts`<br>`npm.cmd --prefix frontend run build` |
 | `frontend/src/components/catalog/portalEditorUtils.ts` | yes | retired frontend/src/components/catalog/portalEditorUtils.mjs | n/a | none | yes | `npm.cmd --prefix frontend run typecheck`<br>`node frontend\tests\portalEditorUtils.test.ts`<br>`npm.cmd --prefix frontend run build` |

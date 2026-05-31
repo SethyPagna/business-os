@@ -4,7 +4,7 @@ Auto-generated folder-level documentation coverage for all first-party project f
 
 ## 1. Coverage Summary
 
-Total folders documented: **81**
+Total folders documented: **82**
 
 ## 2. Folder Matrix
 
@@ -32,7 +32,7 @@ Total folders documented: **81**
 | 20 | `frontend/public/scanbot-web-sdk/bundle` | Project folder | 2 | 1 |
 | 21 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
 | 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
-| 23 | `frontend/src` | Project folder | 6 | 9 |
+| 23 | `frontend/src` | Project folder | 6 | 10 |
 | 24 | `frontend/src/api` | Frontend API and sync transport | 5 | 0 |
 | 25 | `frontend/src/app` | Project folder | 2 | 0 |
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
@@ -70,27 +70,28 @@ Total folders documented: **81**
 | 58 | `frontend/src/platform` | Project folder | 0 | 2 |
 | 59 | `frontend/src/platform/runtime` | Project folder | 1 | 0 |
 | 60 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
-| 61 | `frontend/src/runtime` | Project folder | 1 | 0 |
-| 62 | `frontend/src/styles` | Project folder | 1 | 0 |
-| 63 | `frontend/src/types` | Project folder | 3 | 0 |
-| 64 | `frontend/src/utils` | Project folder | 33 | 0 |
-| 65 | `frontend/tests` | Project folder | 76 | 0 |
-| 66 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
-| 67 | `ops/scripts/architecture` | Project folder | 4 | 0 |
-| 68 | `ops/scripts/backend` | Project folder | 5 | 0 |
-| 69 | `ops/scripts/frontend` | Project folder | 3 | 0 |
-| 70 | `ops/scripts/lib` | Project folder | 2 | 0 |
-| 71 | `ops/scripts/powershell` | Project folder | 8 | 0 |
-| 72 | `ops/scripts/runtime` | Project folder | 1 | 5 |
-| 73 | `ops/scripts/runtime/audits` | Project folder | 6 | 0 |
-| 74 | `ops/scripts/runtime/cloudflare` | Project folder | 4 | 0 |
-| 75 | `ops/scripts/runtime/live-checks` | Project folder | 17 | 0 |
-| 76 | `ops/scripts/runtime/smoke` | Project folder | 4 | 0 |
-| 77 | `ops/scripts/runtime/storage` | Project folder | 7 | 0 |
-| 78 | `ops/scripts/verification` | Project folder | 6 | 0 |
-| 79 | `run` | Project run-script home for bat and sh launchers | 9 | 2 |
-| 80 | `run/docker` | Project folder | 9 | 0 |
-| 81 | `run/sh` | POSIX run/setup/stop scripts | 3 | 0 |
+| 61 | `frontend/src/public-runtime` | Project folder | 3 | 0 |
+| 62 | `frontend/src/runtime` | Project folder | 1 | 0 |
+| 63 | `frontend/src/styles` | Project folder | 1 | 0 |
+| 64 | `frontend/src/types` | Project folder | 3 | 0 |
+| 65 | `frontend/src/utils` | Project folder | 33 | 0 |
+| 66 | `frontend/tests` | Project folder | 76 | 0 |
+| 67 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
+| 68 | `ops/scripts/architecture` | Project folder | 4 | 0 |
+| 69 | `ops/scripts/backend` | Project folder | 5 | 0 |
+| 70 | `ops/scripts/frontend` | Project folder | 4 | 0 |
+| 71 | `ops/scripts/lib` | Project folder | 2 | 0 |
+| 72 | `ops/scripts/powershell` | Project folder | 8 | 0 |
+| 73 | `ops/scripts/runtime` | Project folder | 1 | 5 |
+| 74 | `ops/scripts/runtime/audits` | Project folder | 6 | 0 |
+| 75 | `ops/scripts/runtime/cloudflare` | Project folder | 4 | 0 |
+| 76 | `ops/scripts/runtime/live-checks` | Project folder | 17 | 0 |
+| 77 | `ops/scripts/runtime/smoke` | Project folder | 4 | 0 |
+| 78 | `ops/scripts/runtime/storage` | Project folder | 7 | 0 |
+| 79 | `ops/scripts/verification` | Project folder | 6 | 0 |
+| 80 | `run` | Project run-script home for bat and sh launchers | 9 | 2 |
+| 81 | `run/docker` | Project folder | 9 | 0 |
+| 82 | `run/sh` | POSIX run/setup/stop scripts | 3 | 0 |
 
 ## 3. Detailed Folder Commentary
 
@@ -600,7 +601,7 @@ Total folders documented: **81**
 
 - Purpose: Project folder
 - Direct files: **6**
-- Direct subfolders: **9**
+- Direct subfolders: **10**
 
 #### 3.23.1 Subfolders
 
@@ -611,10 +612,11 @@ Total folders documented: **81**
 | 3 | `components` |
 | 4 | `lang` |
 | 5 | `platform` |
-| 6 | `runtime` |
-| 7 | `styles` |
-| 8 | `types` |
-| 9 | `utils` |
+| 6 | `public-runtime` |
+| 7 | `runtime` |
+| 8 | `styles` |
+| 9 | `types` |
+| 10 | `utils` |
 
 #### 3.23.2 Files
 
@@ -1270,20 +1272,22 @@ Total folders documented: **81**
 | 1 | `storagePolicy.ts` | Project source/support file |
 
 
-### 3.61 Folder: `frontend/src/runtime`
+### 3.61 Folder: `frontend/src/public-runtime`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **3**
 - Direct subfolders: **0**
 
 #### 3.61.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `runtimeErrorClassifier.ts` | Project source/support file |
+| 1 | `runtime-noise-guard.ts` | Project source/support file |
+| 2 | `service-worker.ts` | Project source/support file |
+| 3 | `theme-bootstrap.ts` | Project source/support file |
 
 
-### 3.62 Folder: `frontend/src/styles`
+### 3.62 Folder: `frontend/src/runtime`
 
 - Purpose: Project folder
 - Direct files: **1**
@@ -1293,16 +1297,29 @@ Total folders documented: **81**
 
 | No. | File | Purpose |
 |---:|---|---|
+| 1 | `runtimeErrorClassifier.ts` | Project source/support file |
+
+
+### 3.63 Folder: `frontend/src/styles`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.63.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
 | 1 | `main.css` | Project source/support file |
 
 
-### 3.63 Folder: `frontend/src/types`
+### 3.64 Folder: `frontend/src/types`
 
 - Purpose: Project folder
 - Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.63.2 Files
+#### 3.64.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1311,13 +1328,13 @@ Total folders documented: **81**
 | 3 | `settingsContracts.ts` | Project source/support file |
 
 
-### 3.64 Folder: `frontend/src/utils`
+### 3.65 Folder: `frontend/src/utils`
 
 - Purpose: Project folder
 - Direct files: **33**
 - Direct subfolders: **0**
 
-#### 3.64.2 Files
+#### 3.65.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1356,13 +1373,13 @@ Total folders documented: **81**
 | 33 | `settingsWriteOptions.ts` | Utility helper |
 
 
-### 3.65 Folder: `frontend/tests`
+### 3.66 Folder: `frontend/tests`
 
 - Purpose: Project folder
 - Direct files: **76**
 - Direct subfolders: **0**
 
-#### 3.65.2 Files
+#### 3.66.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1444,13 +1461,13 @@ Total folders documented: **81**
 | 76 | `utilsSettingsBarrel.test.ts` | Project source/support file |
 
 
-### 3.66 Folder: `ops/scripts`
+### 3.67 Folder: `ops/scripts`
 
 - Purpose: Project-level automation scripts
 - Direct files: **0**
 - Direct subfolders: **7**
 
-#### 3.66.1 Subfolders
+#### 3.67.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -1463,13 +1480,13 @@ Total folders documented: **81**
 | 7 | `verification` |
 
 
-### 3.67 Folder: `ops/scripts/architecture`
+### 3.68 Folder: `ops/scripts/architecture`
 
 - Purpose: Project folder
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.67.2 Files
+#### 3.68.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1479,13 +1496,13 @@ Total folders documented: **81**
 | 4 | `phase29-audit.ts` | Project source/support file |
 
 
-### 3.68 Folder: `ops/scripts/backend`
+### 3.69 Folder: `ops/scripts/backend`
 
 - Purpose: Project folder
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.68.2 Files
+#### 3.69.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1496,28 +1513,29 @@ Total folders documented: **81**
 | 5 | `verify-data-integrity.ts` | Project source/support file |
 
 
-### 3.69 Folder: `ops/scripts/frontend`
+### 3.70 Folder: `ops/scripts/frontend`
 
 - Purpose: Project folder
-- Direct files: **3**
+- Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.69.2 Files
+#### 3.70.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `verify-i18n.ts` | Project source/support file |
-| 2 | `verify-performance.ts` | Project source/support file |
-| 3 | `verify-ui.ts` | Project source/support file |
+| 1 | `build-public-runtime-scripts.ts` | Project source/support file |
+| 2 | `verify-i18n.ts` | Project source/support file |
+| 3 | `verify-performance.ts` | Project source/support file |
+| 4 | `verify-ui.ts` | Project source/support file |
 
 
-### 3.70 Folder: `ops/scripts/lib`
+### 3.71 Folder: `ops/scripts/lib`
 
 - Purpose: Project folder
 - Direct files: **2**
 - Direct subfolders: **0**
 
-#### 3.70.2 Files
+#### 3.71.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1525,13 +1543,13 @@ Total folders documented: **81**
 | 2 | `report-utils.ts` | Project source/support file |
 
 
-### 3.71 Folder: `ops/scripts/powershell`
+### 3.72 Folder: `ops/scripts/powershell`
 
 - Purpose: Project folder
 - Direct files: **8**
 - Direct subfolders: **0**
 
-#### 3.71.2 Files
+#### 3.72.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1545,13 +1563,13 @@ Total folders documented: **81**
 | 8 | `tailscale-health-monitor.ps1` | Project source/support file |
 
 
-### 3.72 Folder: `ops/scripts/runtime`
+### 3.73 Folder: `ops/scripts/runtime`
 
 - Purpose: Project folder
 - Direct files: **1**
 - Direct subfolders: **5**
 
-#### 3.72.1 Subfolders
+#### 3.73.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -1561,20 +1579,20 @@ Total folders documented: **81**
 | 4 | `smoke` |
 | 5 | `storage` |
 
-#### 3.72.2 Files
+#### 3.73.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `browser-action-smoke.ts` | Project source/support file |
 
 
-### 3.73 Folder: `ops/scripts/runtime/audits`
+### 3.74 Folder: `ops/scripts/runtime/audits`
 
 - Purpose: Project folder
 - Direct files: **6**
 - Direct subfolders: **0**
 
-#### 3.73.2 Files
+#### 3.74.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1586,13 +1604,13 @@ Total folders documented: **81**
 | 6 | `full-app-audit.ts` | Project source/support file |
 
 
-### 3.74 Folder: `ops/scripts/runtime/cloudflare`
+### 3.75 Folder: `ops/scripts/runtime/cloudflare`
 
 - Purpose: Project folder
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.74.2 Files
+#### 3.75.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1602,13 +1620,13 @@ Total folders documented: **81**
 | 4 | `verify-r2-object-store.ts` | Project source/support file |
 
 
-### 3.75 Folder: `ops/scripts/runtime/live-checks`
+### 3.76 Folder: `ops/scripts/runtime/live-checks`
 
 - Purpose: Project folder
 - Direct files: **17**
 - Direct subfolders: **0**
 
-#### 3.75.2 Files
+#### 3.76.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1631,13 +1649,13 @@ Total folders documented: **81**
 | 17 | `phase84-users-actions-live-check.ts` | Project source/support file |
 
 
-### 3.76 Folder: `ops/scripts/runtime/smoke`
+### 3.77 Folder: `ops/scripts/runtime/smoke`
 
 - Purpose: Project folder
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.76.2 Files
+#### 3.77.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1647,13 +1665,13 @@ Total folders documented: **81**
 | 4 | `post-start-diagnostics.ts` | Project source/support file |
 
 
-### 3.77 Folder: `ops/scripts/runtime/storage`
+### 3.78 Folder: `ops/scripts/runtime/storage`
 
 - Purpose: Project folder
 - Direct files: **7**
 - Direct subfolders: **0**
 
-#### 3.77.2 Files
+#### 3.78.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1666,13 +1684,13 @@ Total folders documented: **81**
 | 7 | `restore-rehearsal.ts` | Project source/support file |
 
 
-### 3.78 Folder: `ops/scripts/verification`
+### 3.79 Folder: `ops/scripts/verification`
 
 - Purpose: Project folder
 - Direct files: **6**
 - Direct subfolders: **0**
 
-#### 3.78.2 Files
+#### 3.79.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1684,20 +1702,20 @@ Total folders documented: **81**
 | 6 | `verify-secret-hygiene.ts` | Project source/support file |
 
 
-### 3.79 Folder: `run`
+### 3.80 Folder: `run`
 
 - Purpose: Project run-script home for bat and sh launchers
 - Direct files: **9**
 - Direct subfolders: **2**
 
-#### 3.79.1 Subfolders
+#### 3.80.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `docker` |
 | 2 | `sh` |
 
-#### 3.79.2 Files
+#### 3.80.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1712,13 +1730,13 @@ Total folders documented: **81**
 | 9 | `verify-local.bat` | Project source/support file |
 
 
-### 3.80 Folder: `run/docker`
+### 3.81 Folder: `run/docker`
 
 - Purpose: Project folder
 - Direct files: **9**
 - Direct subfolders: **0**
 
-#### 3.80.2 Files
+#### 3.81.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1733,13 +1751,13 @@ Total folders documented: **81**
 | 9 | `update.bat` | Project source/support file |
 
 
-### 3.81 Folder: `run/sh`
+### 3.82 Folder: `run/sh`
 
 - Purpose: POSIX run/setup/stop scripts
 - Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.81.2 Files
+#### 3.82.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|

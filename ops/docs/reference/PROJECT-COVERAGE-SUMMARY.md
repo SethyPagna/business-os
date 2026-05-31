@@ -2,8 +2,8 @@
 
 Auto-generated high-level coverage summary for first-party frontend/backend files and folders.
 
-- Total files: **532**
-- Total folders: **81**
+- Total files: **536**
+- Total folders: **82**
 
 | Category | File Count |
 |---|---:|
@@ -12,14 +12,14 @@ Auto-generated high-level coverage summary for first-party frontend/backend file
 | backend-routes | 24 |
 | backend-services | 12 |
 | frontend-api | 5 |
-| frontend-core | 14 |
+| frontend-core | 17 |
 | frontend-i18n | 2 |
 | frontend-root | 100 |
 | frontend-style | 1 |
 | frontend-ui | 140 |
 | frontend-utils | 33 |
 | project-root | 4 |
-| project-scripts | 88 |
+| project-scripts | 89 |
 
 Generated from:
 - `ops/docs/reference/ALL-FILE-INVENTORY.md`

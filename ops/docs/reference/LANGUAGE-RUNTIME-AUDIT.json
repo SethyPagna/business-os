@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T23:58:37.583Z",
+  "generatedAt": "2026-05-31T00:12:02.992Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -11,7 +11,7 @@
     "ops/scripts",
     "run"
   ],
-  "sourceFiles": 451,
+  "sourceFiles": 455,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -21,7 +21,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      312
+      316
     ],
     [
       "React TSX",
@@ -55,7 +55,7 @@
   "extensionCounts": [
     [
       ".ts",
-      312
+      316
     ],
     [
       ".tsx",
@@ -528,6 +528,54 @@
       ],
       "implementationExists": true,
       "wrapperRequired": false,
+      "compatibilityWrapperExists": true,
+      "declarationSupportExists": true,
+      "covered": true
+    },
+    {
+      "implementation": "frontend/src/public-runtime/runtime-noise-guard.ts",
+      "compatibilityWrapper": "frontend/public/runtime-noise-guard.js",
+      "wrapperStatus": "generated browser runtime artifact; exact public URL is retained",
+      "declarationSupport": "",
+      "proof": [
+        "npm.cmd --prefix frontend run verify:public-runtime",
+        "npm.cmd --prefix frontend run test:utils",
+        "npm.cmd --prefix frontend run build"
+      ],
+      "implementationExists": true,
+      "wrapperRequired": true,
+      "compatibilityWrapperExists": true,
+      "declarationSupportExists": true,
+      "covered": true
+    },
+    {
+      "implementation": "frontend/src/public-runtime/theme-bootstrap.ts",
+      "compatibilityWrapper": "frontend/public/theme-bootstrap.js",
+      "wrapperStatus": "generated browser runtime artifact; exact public URL is retained",
+      "declarationSupport": "",
+      "proof": [
+        "npm.cmd --prefix frontend run verify:public-runtime",
+        "npm.cmd --prefix frontend run test:utils",
+        "npm.cmd --prefix frontend run build"
+      ],
+      "implementationExists": true,
+      "wrapperRequired": true,
+      "compatibilityWrapperExists": true,
+      "declarationSupportExists": true,
+      "covered": true
+    },
+    {
+      "implementation": "frontend/src/public-runtime/service-worker.ts",
+      "compatibilityWrapper": "frontend/public/sw.js",
+      "wrapperStatus": "generated service worker artifact; exact public URL is retained",
+      "declarationSupport": "",
+      "proof": [
+        "npm.cmd --prefix frontend run verify:public-runtime",
+        "npm.cmd --prefix frontend run test:utils",
+        "npm.cmd --prefix frontend run build"
+      ],
+      "implementationExists": true,
+      "wrapperRequired": true,
       "compatibilityWrapperExists": true,
       "declarationSupportExists": true,
       "covered": true
