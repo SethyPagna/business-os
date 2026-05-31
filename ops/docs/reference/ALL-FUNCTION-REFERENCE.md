@@ -7015,12 +7015,12 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `read` | function | 11 |
-| 2 | `lineFor` | function | 15 |
-| 3 | `requireText` | function | 21 |
-| 4 | `forbidText` | function | 25 |
-| 5 | `checkNeedles` | function | 29 |
-| 6 | `main` | function | 36 |
+| 1 | `read` | function | 29 |
+| 2 | `lineFor` | function | 33 |
+| 3 | `requireText` | function | 39 |
+| 4 | `forbidText` | function | 43 |
+| 5 | `checkNeedles` | function | 47 |
+| 6 | `main` | function | 58 |
 
 ### 3.473 `ops/scripts/verification/verify-docker-release.ts`
 
