@@ -343,6 +343,26 @@ function addCoverageGateFindings(): void {
       minTestedControlsPerRoute: MIN_TESTED_CONTROLS_PER_ROUTE,
     })
   }
+  if (MIN_TESTED_CONTROLS_PER_ROUTE > 0) {
+    const weakRoutes = summary.routes
+      .map((route) => {
+        const routeKey = `${route.profile}/${route.route}`
+        const coverage = summary.coverage.byRoute[routeKey] || {
+          total: 0,
+          tested: 0,
+          failed: 0,
+          skipped: 0,
+        }
+        return { route: routeKey, ...coverage }
+      })
+      .filter((route) => route.tested < MIN_TESTED_CONTROLS_PER_ROUTE)
+    if (weakRoutes.length) {
+      addFinding(0, 'coverage', 'all-pages audit has routes with too few tested controls', {
+        minTestedControlsPerRoute: MIN_TESTED_CONTROLS_PER_ROUTE,
+        weakRoutes,
+      })
+    }
+  }
   const skippedRatio = summary.coverage.total > 0
     ? summary.coverage.skipped / summary.coverage.total
     : 1

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 644.
+- Latest completed implementation move in this roadmap: Move 645.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7371,3 +7371,16 @@ Move 644 status:
   control records, 667 tested controls, 241 skipped controls, 0 failed
   controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29 audit,
   and diff whitespace checks passed.
+
+Move 645 status:
+- Move 645 makes the all-pages Phase 8.4 coverage gate route-aware. The audit
+  still enforces the global tested-control floor, and now also emits a
+  priority-0 coverage finding when any individual audited route/profile has
+  fewer tested controls than `BOS_ALL_PAGES_MIN_TESTED_PER_ROUTE`. This prevents
+  high-control pages from masking weak coverage on smaller pages. Proof:
+  focused `loyalty_points` audit passed on the current lowest-coverage route
+  with 16 control records, 7 tested controls, 9 skipped controls, and 0
+  findings; full exhaustive all-pages audit passed with 34 route/profile
+  checks, 908 control records, 667 tested controls, 241 skipped controls, 0
+  failed controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29
+  audit, and diff whitespace checks passed.

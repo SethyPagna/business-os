@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 644 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 645 in this file.
 
 ## Goal
 
@@ -5663,6 +5663,20 @@ Decision rule:
     route/profile checks, 908 control records, 667 tested controls, 241 skipped
     controls, 0 failed controls, 68 screenshots, and 0 findings. Post-live
     hygiene, Phase 29 audit, and diff whitespace checks passed.
+
+645. Make all-pages control coverage gates route-aware.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    checks every individual audited route/profile against
+    `BOS_ALL_PAGES_MIN_TESTED_PER_ROUTE`, in addition to the global tested
+    control floor. If any route falls below the minimum, the audit emits a
+    priority-0 coverage finding with the weak route list, so high-control pages
+    cannot hide weak coverage on smaller pages. Proof: focused
+    `loyalty_points` audit passed on the current lowest-coverage route with 16
+    control records, 7 tested controls, 9 skipped controls, and 0 findings;
+    full exhaustive all-pages audit passed with 34 route/profile checks, 908
+    control records, 667 tested controls, 241 skipped controls, 0 failed
+    controls, 68 screenshots, and 0 findings. Post-live hygiene, Phase 29
+    audit, and diff whitespace checks passed.
 
 ## Safety Gates
 
