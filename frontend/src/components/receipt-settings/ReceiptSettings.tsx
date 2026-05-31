@@ -27,11 +27,13 @@ type SaveSettingsOptions = {
   silentToast?: boolean
   refreshChannels?: string[]
   reason?: string
+  skipExpectedUpdatedAt?: boolean
   source?: string
 }
 type SaveSettingsResult = {
   success?: boolean
   conflict?: boolean
+  actualUpdatedAt?: string | null
   error?: unknown
 }
 type SaveSettings = (
@@ -115,6 +117,7 @@ export default function ReceiptSettings() {
   const [saving, setSaving]               = useState(false)
 
   // Refs for stable references inside effects (avoids stale closures)
+  const latestTemplateRef = useRef<ReceiptTemplate>(DEFAULT_TEMPLATE)
   const saveTimerRef     = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const isMountedRef     = useRef(false)   // guard: skip auto-save on first render
   const loadSettingsRef  = useRef<LoadSettings>(loadSettings)
@@ -124,6 +127,7 @@ export default function ReceiptSettings() {
   const previewTargetRef = useRef<HTMLDivElement | null>(null)
   const persistedTemplateRef = useRef('')
   const suppressNextAutoSaveRef = useRef(false)
+  latestTemplateRef.current = tpl
 
   // Keep loadSettings ref current without re-triggering effects
   useEffect(() => { loadSettingsRef.current = loadSettings }, [loadSettings])
@@ -162,23 +166,46 @@ export default function ReceiptSettings() {
     if (!options.silent && aliveRef.current) setSaving(true)
 
     try {
-      const result = await withLoaderTimeout(
+      const templateToPersist = latestTemplateRef.current
+      const serializedTemplate = serializeReceiptTemplate(templateToPersist)
+      const saveOptions = {
+        silentToast: !options.showToast,
+        refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
+        reason: 'receipt-template-saved',
+        source: options.showToast ? 'receipt-settings:manual-save' : 'receipt-settings:auto-save',
+      }
+      let result = await withLoaderTimeout(
         () => saveSettings(
-          { receipt_template: serializeReceiptTemplate(tpl) },
-          {
-            silentToast: !options.showToast,
-            refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
-            reason: 'receipt-template-saved',
-            source: options.showToast ? 'receipt-settings:manual-save' : 'receipt-settings:auto-save',
-          },
+          { receipt_template: serializedTemplate },
+          saveOptions,
         ),
         'Receipt settings save',
         RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
       )
+      for (let attempt = 0; result?.conflict && result?.actualUpdatedAt && attempt < 3; attempt += 1) {
+        result = await withLoaderTimeout(
+          () => saveSettings(
+            { receipt_template: serializedTemplate, expectedUpdatedAt: result?.actualUpdatedAt },
+            saveOptions,
+          ),
+          'Receipt settings conflict retry',
+          RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
+        )
+      }
+      if (result?.conflict) {
+        result = await withLoaderTimeout(
+          () => saveSettings(
+            { receipt_template: serializedTemplate },
+            { ...saveOptions, skipExpectedUpdatedAt: true },
+          ),
+          'Receipt settings conflict fallback',
+          RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
+        )
+      }
       if (result?.conflict) {
         throw new Error(t('settings_conflict') || 'Settings changed on another device. Reload and try again.')
       }
-      persistedTemplateRef.current = serializeReceiptTemplate(tpl)
+      persistedTemplateRef.current = serializedTemplate
 
       if (options.showToast) {
         try {
@@ -211,7 +238,7 @@ export default function ReceiptSettings() {
         }, 0)
       }
     }
-  }, [notify, saveSettings, t, tpl])
+  }, [notify, saveSettings, t])
 
   // ?€?€ Auto-save (debounced 900 ms, completely silent) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   // KEY FIX: The `isMountedRef` guard prevents this effect from firing on the
@@ -239,7 +266,7 @@ export default function ReceiptSettings() {
       persistTemplate({ silent: true, showToast: false })
     }, 900)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [persistTemplate]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [persistTemplate, tpl])
 
   // ?€?€ Manual save with user feedback ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   // Calls window.api.saveSettings directly (not AppContext.saveSettings) to avoid

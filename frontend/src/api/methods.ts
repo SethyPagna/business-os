@@ -821,7 +821,7 @@ export async function saveSettings(updates, options = {}) {
       reason: String(options?.reason || 'settings-saved').trim() || 'settings-saved',
       source: String(options?.source || 'settings:save').trim() || 'settings:save',
     }
-    let payload = await withSettingsExpectedUpdatedAt(updates)
+    let payload = options?.skipExpectedUpdatedAt ? { ...updates } : await withSettingsExpectedUpdatedAt(updates)
     try {
       const result = await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true)
       if (result?.updatedAt) {
@@ -839,20 +839,25 @@ export async function saveSettings(updates, options = {}) {
         && attemptedKeys.length > 0
         && attemptedKeys.length <= 2
       ) {
-        const retryPayload = {
-          ...attemptedSettings,
-          expectedUpdatedAt: error.actualUpdatedAt,
-        }
-        try {
-          const retryResult = await route('settings:save', () => apiFetch('POST', '/api/settings', retryPayload), null, true)
-          if (retryResult?.updatedAt) {
-            await localSaveSettingsMeta(retryResult.updatedAt).catch(() => {})
+        let nextExpectedUpdatedAt = error.actualUpdatedAt
+        for (let retryAttempt = 0; retryAttempt < 3 && nextExpectedUpdatedAt; retryAttempt += 1) {
+          const retryPayload = {
+            ...attemptedSettings,
+            expectedUpdatedAt: nextExpectedUpdatedAt,
           }
-          await localSaveSettings(attemptedSettings).catch(() => {})
-          refreshAppData(refreshChannels, refreshDetail)
-          return retryResult
-        } catch (retryError) {
-          error = retryError
+          try {
+            const retryResult = await route('settings:save', () => apiFetch('POST', '/api/settings', retryPayload), null, true)
+            if (retryResult?.updatedAt) {
+              await localSaveSettingsMeta(retryResult.updatedAt).catch(() => {})
+            }
+            await localSaveSettings(attemptedSettings).catch(() => {})
+            refreshAppData(refreshChannels, refreshDetail)
+            return retryResult
+          } catch (retryError) {
+            error = retryError
+            if (!isWriteConflictError(retryError) || !retryError?.actualUpdatedAt) break
+            nextExpectedUpdatedAt = retryError.actualUpdatedAt
+          }
         }
       }
       error.attempted = error?.attempted || attemptedSettings

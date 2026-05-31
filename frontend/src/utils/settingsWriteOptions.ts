@@ -7,6 +7,7 @@ export function normalizeSettingsWriteOptions(options: SettingsWriteOptions = {}
       ? options.refreshChannels.filter(Boolean) as SettingsRefreshChannel[]
       : [],
     reason: String(options.reason || '').trim(),
+    skipExpectedUpdatedAt: options.skipExpectedUpdatedAt === true,
     source: String(options.source || '').trim(),
   }
 }

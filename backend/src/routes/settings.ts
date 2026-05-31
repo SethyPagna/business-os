@@ -103,15 +103,54 @@ function collectAttemptedSettings(updates = {}) {
   return { attempted, keys }
 }
 
-function getSettingsUpdatedAt() {
+function getSettingsUpdatedAt(keys = null) {
   if (!settingsHasUpdatedAt()) {
     return normalizeUpdatedAt(new Date().toISOString()) || null
+  }
+  if (Array.isArray(keys) && keys.length) {
+    const cleanKeys = keys
+      .map((key) => String(key || '').trim())
+      .filter(Boolean)
+    if (cleanKeys.length) {
+      const placeholders = cleanKeys.map(() => '?').join(', ')
+      const row = db.prepare(`
+        SELECT MAX(COALESCE(updated_at::text, CURRENT_TIMESTAMP::text)) AS updated_at
+        FROM settings
+        WHERE key IN (${placeholders})
+      `).get(...cleanKeys)
+      return normalizeUpdatedAt(row?.updated_at) || null
+    }
   }
   const row = db.prepare(`
     SELECT MAX(COALESCE(updated_at::text, CURRENT_TIMESTAMP::text)) AS updated_at
     FROM settings
   `).get()
   return normalizeUpdatedAt(row?.updated_at) || normalizeUpdatedAt(new Date().toISOString()) || null
+}
+
+function parseUpdatedAtMs(value) {
+  const normalized = normalizeUpdatedAt(value)
+  if (!normalized) return null
+  const match = normalized.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?([+-]\d{2})(?::?(\d{2}))?$/)
+  if (!match) {
+    const fallback = Date.parse(normalized)
+    return Number.isFinite(fallback) ? fallback : null
+  }
+  const [, date, time, fraction = '', hourOffset, minuteOffset = '00'] = match
+  const millis = fraction.padEnd(3, '0').slice(0, 3)
+  const parsed = Date.parse(`${date}T${time}.${millis}${hourOffset}:${minuteOffset}`)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function isExpectedOlderThanCurrent(expectedUpdatedAt, currentUpdatedAt) {
+  const expected = normalizeUpdatedAt(expectedUpdatedAt)
+  const current = normalizeUpdatedAt(currentUpdatedAt)
+  if (!expected || !current) return false
+  if (expected === current) return false
+  const expectedMs = parseUpdatedAtMs(expected)
+  const currentMs = parseUpdatedAtMs(current)
+  if (expectedMs !== null && currentMs !== null) return expectedMs < currentMs
+  return expected !== current
 }
 
 // GET /api/settings
@@ -148,8 +187,8 @@ router.post('/', authToken, requirePermission('settings'), async (req, res) => {
     )
   try {
     db.transaction(() => {
-      const currentUpdatedAt = getSettingsUpdatedAt()
-      if (expectedUpdatedAt && currentUpdatedAt && expectedUpdatedAt !== currentUpdatedAt) {
+      const currentUpdatedAt = getSettingsUpdatedAt(attemptedKeys) || getSettingsUpdatedAt()
+      if (expectedUpdatedAt && currentUpdatedAt && isExpectedOlderThanCurrent(expectedUpdatedAt, currentUpdatedAt)) {
         throw new WriteConflictError('settings', { updated_at: currentUpdatedAt }, expectedUpdatedAt, 'updated')
       }
 

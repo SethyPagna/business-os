@@ -22,5 +22,6 @@ export interface SettingsWriteOptions {
   silentToast?: boolean
   refreshChannels?: SettingsRefreshChannel[]
   reason?: string
+  skipExpectedUpdatedAt?: boolean
   source?: string
 }

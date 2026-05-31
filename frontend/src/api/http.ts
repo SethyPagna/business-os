@@ -348,7 +348,7 @@ function dispatchTransientGatewayOutage(channel: string, error: ApiRuntimeError 
 }
 
 export function isWriteConflictError(error: any): boolean {
-  return !!(error && (error.conflict || error.code === 'write_conflict'))
+  return !!(error && (error.conflict || error.code === 'write_conflict' || error.code === 'settings_conflict'))
 }
 
 export function isWriteBlockedError(error: any): boolean {
