@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 626.
+- Latest completed implementation move in this roadmap: Move 627.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7186,3 +7186,12 @@ Move 626 status:
   verify:ecosystem-config` prevents drift. Phase 29 now runs that drift check
   as a guardrail, and the language/runtime audit excludes the generated PM2
   `.js` from active source counts while recording the compatibility wrapper.
+
+Move 627 status:
+- Move 627 adds a runtime JavaScript inventory guardrail for the end-state
+  conversion lane. `ops/scripts/architecture/runtime-js-inventory.ts` scans the
+  workspace for `.js`, `.jsx`, `.mjs`, and `.cjs` outside dependency/generated
+  bulk folders, classifies the remaining generated runtime files and Scanbot
+  vendor bundle, verifies TypeScript sources exist for generated files, and
+  writes `ops/docs/reference/RUNTIME-JS-INVENTORY.md` plus JSON. Phase 29 now
+  fails if a new unclassified first-party JavaScript file appears.

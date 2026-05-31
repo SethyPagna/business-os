@@ -41,6 +41,12 @@ const CHECKS = [
     reports: ['ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md', 'ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json'],
   },
   {
+    label: 'Runtime JavaScript inventory',
+    command: process.execPath,
+    args: ['ops/scripts/architecture/runtime-js-inventory.ts'],
+    reports: ['ops/docs/reference/RUNTIME-JS-INVENTORY.md', 'ops/docs/reference/RUNTIME-JS-INVENTORY.json'],
+  },
+  {
     label: 'Docker release guardrail',
     command: process.execPath,
     args: ['ops/scripts/verification/verify-docker-release.ts'],
@@ -68,6 +74,7 @@ const REFERENCE_WRITER_LABELS = new Set([
   'Schema audit',
   'Performance/code-flow scan',
   'Language/runtime audit',
+  'Runtime JavaScript inventory',
 ])
 const PARALLEL_CHECK_LABELS = new Set([
   'Docker release guardrail',

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 626 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 627 in this file.
 
 ## Goal
 
@@ -5481,6 +5481,16 @@ Decision rule:
     Remaining first-party `.js` outside active source roots is generated
     runtime output (`backend/server.js`, public runtime JS, PM2 config JS) plus
     the tracked Scanbot vendor bundle.
+
+627. Add a runtime JavaScript inventory guardrail.
+    Done: `ops/scripts/architecture/runtime-js-inventory.ts` now scans for
+    remaining `.js`, `.jsx`, `.mjs`, and `.cjs` files outside dependency and
+    generated bulk folders, classifies generated runtime files and the Scanbot
+    vendor bundle, verifies generated files still have TypeScript sources, and
+    writes `ops/docs/reference/RUNTIME-JS-INVENTORY.md` plus JSON. `ops`
+    exposes `runtime-js-inventory`, and Phase 29 runs it so any new
+    unclassified first-party JavaScript file fails the audit instead of
+    becoming invisible drift.
 
 ## Safety Gates
 
