@@ -20,13 +20,72 @@ const LARGE_FILE_LINE_THRESHOLD = 700
 const ROOT_WALK_CONCURRENCY = 3
 const FILE_READ_CONCURRENCY = 24
 
-async function walkFiles(root) {
+type CountRow = [string, number]
+type SourceRecord = {
+  absolutePath: string
+  relativePath: string
+  extension: string
+  area: string
+  lineCount: number
+  relativeImportCount: number
+  source: string
+}
+type CompatibilityWrapper = {
+  file: string
+  target: string
+  lineCount: number
+  targetPresent: boolean
+}
+type WrapperReference = {
+  file: string
+  count: number
+}
+type WrapperWithReferences = CompatibilityWrapper & {
+  referenceCount: number
+  activeReferenceCount: number
+  generatedReferenceCount: number
+  referenceFiles: WrapperReference[]
+  activeReferenceFiles: WrapperReference[]
+  generatedReferenceFiles: WrapperReference[]
+}
+type OrganizationSummaryInput = {
+  records: SourceRecord[]
+  wrappers: WrapperWithReferences[]
+  brokenWrappers: WrapperWithReferences[]
+  activeRemovalCandidates: WrapperWithReferences[]
+  generatedOnlyWrappers: WrapperWithReferences[]
+}
+type OrganizationSummary = {
+  report: string
+  summary: string
+  filesScanned: number
+  largeFiles: number
+  compatibilityWrappers: number
+  brokenCompatibilityWrappers: number
+  wrapperRemovalCandidates: number
+  generatedOnlyWrapperReferences: number
+  scanRoots: string[]
+  scanFiles: string[]
+  fileReadMode: string
+  rootWalkMode: string
+  rootWalkConcurrency: number
+  fileReadConcurrency: number
+  largeFileThreshold: number
+  largestAreas: CountRow[]
+  largeFilePaths: string[]
+  wrapperFiles: string[]
+  brokenWrapperFiles: string[]
+  removableWrapperFiles: string[]
+}
+
+async function walkFiles(root: string): Promise<string[]> {
   const absoluteRoot = path.join(ROOT_DIR, root)
   if (!(await pathExists(absoluteRoot))) return []
-  const output = []
-  const stack = [absoluteRoot]
+  const output: string[] = []
+  const stack: string[] = [absoluteRoot]
   while (stack.length) {
     const current = stack.pop()
+    if (!current) continue
     const entries = await fs.readdir(current, { withFileTypes: true })
     for (const entry of entries) {
       if (entry.name === 'node_modules' || entry.name === 'dist') continue
@@ -41,7 +100,7 @@ async function walkFiles(root) {
   return output.sort((left, right) => normalizePath(left).localeCompare(normalizePath(right)))
 }
 
-function getArea(relativePath) {
+function getArea(relativePath: string): string {
   const parts = relativePath.split('/')
   if (relativePath === 'package.json') return 'root/config'
   if (relativePath === 'docker-compose.yml' || relativePath === 'Dockerfile') return 'root/config'
@@ -72,8 +131,8 @@ function getArea(relativePath) {
   return parts.slice(0, 3).join('/')
 }
 
-function countBy(items, pickKey) {
-  const map = new Map()
+function countBy<T>(items: T[], pickKey: (item: T) => string): CountRow[] {
+  const map = new Map<string, number>()
   for (const item of items) {
     const key = pickKey(item)
     map.set(key, (map.get(key) || 0) + 1)
@@ -81,8 +140,8 @@ function countBy(items, pickKey) {
   return [...map.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 }
 
-function extractRelativeImports(source) {
-  const imports = []
+function extractRelativeImports(source: string): string[] {
+  const imports: string[] = []
   const patterns = [
     /from\s+['"](\.{1,2}\/[^'"]+)['"]/g,
     /import\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g,
@@ -96,8 +155,8 @@ function extractRelativeImports(source) {
   return imports
 }
 
-async function collectFileRecords() {
-  const files = new Set()
+async function collectFileRecords(): Promise<SourceRecord[]> {
+  const files = new Set<string>()
   const rootFileGroups = await mapLimit(SCAN_ROOTS, ROOT_WALK_CONCURRENCY, (root) => walkFiles(root))
   for (const group of rootFileGroups) {
     for (const file of group) {
@@ -130,11 +189,11 @@ async function collectFileRecords() {
   return records
 }
 
-function nonEmptyLines(source) {
+function nonEmptyLines(source: unknown): string[] {
   return String(source || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
 }
 
-function extractWrapperTarget(source) {
+function extractWrapperTarget(source: unknown): string {
   const patterns = [
     /import\s+['"](\.\/[^'"]+)['"]/,
     /export\s+\*\s+from\s+['"](\.\/[^'"]+)['"]/,
@@ -147,7 +206,7 @@ function extractWrapperTarget(source) {
   return ''
 }
 
-function collectCompatibilityWrappers(records) {
+function collectCompatibilityWrappers(records: SourceRecord[]): CompatibilityWrapper[] {
   const paths = new Set(records.map((record) => record.relativePath))
   return records
     .map((record) => {
@@ -166,11 +225,11 @@ function collectCompatibilityWrappers(records) {
         targetPresent: paths.has(targetPath),
       }
     })
-    .filter(Boolean)
+    .filter((wrapper): wrapper is CompatibilityWrapper => Boolean(wrapper))
     .sort((left, right) => left.file.localeCompare(right.file))
 }
 
-function countOccurrences(source, needle) {
+function countOccurrences(source: unknown, needle: string): number {
   if (!needle) return 0
   let count = 0
   let index = String(source || '').indexOf(needle)
@@ -181,7 +240,7 @@ function countOccurrences(source, needle) {
   return count
 }
 
-function wrapperReferenceCandidates(wrapperPath, fromPath) {
+function wrapperReferenceCandidates(wrapperPath: string, fromPath: string): string[] {
   const candidates = new Set([wrapperPath, wrapperPath.replace(/\//g, '\\')])
   const recordDir = path.dirname(fromPath)
   const relativePath = normalizePath(path.relative(recordDir === '.' ? ROOT_DIR : path.join(ROOT_DIR, recordDir), path.join(ROOT_DIR, wrapperPath)))
@@ -201,7 +260,7 @@ function wrapperReferenceCandidates(wrapperPath, fromPath) {
   return [...candidates].filter(Boolean)
 }
 
-function collectWrapperReferenceDetails(records, wrappers) {
+function collectWrapperReferenceDetails(records: SourceRecord[], wrappers: CompatibilityWrapper[]): WrapperWithReferences[] {
   const reportRelativePath = normalizePath(path.relative(ROOT_DIR, REPORT_PATH))
   const sourceRecords = records.filter((record) => record.relativePath !== reportRelativePath)
   return wrappers.map((wrapper) => {
@@ -212,7 +271,7 @@ function collectWrapperReferenceDetails(records, wrappers) {
         const count = candidates.reduce((total, candidate) => total + countOccurrences(record.source, candidate), 0)
         return count ? { file: record.relativePath, count } : null
       })
-      .filter(Boolean)
+      .filter((reference): reference is WrapperReference => Boolean(reference))
       .sort((left, right) => right.count - left.count || left.file.localeCompare(right.file))
     const activeReferences = references.filter((reference) => !reference.file.startsWith('ops/docs/reference/'))
     const generatedReferences = references.filter((reference) => reference.file.startsWith('ops/docs/reference/'))
@@ -228,7 +287,7 @@ function collectWrapperReferenceDetails(records, wrappers) {
   })
 }
 
-function renderReferenceFiles(references) {
+function renderReferenceFiles(references: WrapperReference[]): string {
   if (!references.length) return 'none'
   const visible = references.slice(0, 5)
     .map((reference) => `${reference.file} (${reference.count})`)
@@ -236,7 +295,7 @@ function renderReferenceFiles(references) {
   return remaining > 0 ? `${visible.join('<br>')}<br>+${remaining} more` : visible.join('<br>')
 }
 
-function renderReport(records) {
+function renderReport(records: SourceRecord[]): string {
   const generatedAt = new Date().toISOString()
   const extensionRows = countBy(records, (record) => record.extension)
     .map(([extension, count]) => [extension, String(count)])
@@ -325,7 +384,13 @@ ${removableWrapperRows.length ? markdownTable(['Wrapper', 'Current target', 'Gen
 `
 }
 
-function buildSummary({ records, wrappers, brokenWrappers, activeRemovalCandidates, generatedOnlyWrappers }) {
+function buildSummary({
+  records,
+  wrappers,
+  brokenWrappers,
+  activeRemovalCandidates,
+  generatedOnlyWrappers,
+}: OrganizationSummaryInput): OrganizationSummary {
   return {
     report: normalizePath(path.relative(ROOT_DIR, REPORT_PATH)),
     summary: normalizePath(path.relative(ROOT_DIR, SUMMARY_PATH)),
@@ -353,7 +418,7 @@ function buildSummary({ records, wrappers, brokenWrappers, activeRemovalCandidat
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const records = await collectFileRecords()
   const wrappers = collectWrapperReferenceDetails(records, collectCompatibilityWrappers(records))
   const brokenWrappers = wrappers.filter((wrapper) => !wrapper.targetPresent)

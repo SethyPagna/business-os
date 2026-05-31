@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 630.
+- Latest completed implementation move in this roadmap: Move 631.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7221,3 +7221,11 @@ Move 630 status:
   summary shape while preserving the current report and JSON output contract.
   The typed `topN()` helper now accepts only the known numeric scan metrics.
   Direct performance scan proof and full Phase 29 audit passed.
+
+Move 631 status:
+- Move 631 strengthens the Phase 29 organization audit with explicit TypeScript
+  shapes for source records, compatibility wrappers, wrapper references, summary
+  inputs, and JSON summary output. The directory walker now uses typed arrays
+  and guards empty stack pops, preserving the same report contract while making
+  future folder rewire checks easier to change safely. Direct organization
+  audit proof passed.

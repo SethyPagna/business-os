@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 630 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 631 in this file.
 
 ## Goal
 
@@ -5518,6 +5518,14 @@ Decision rule:
     implicit JavaScript objects. The typed `topN()` helper is constrained to
     the known numeric scan metrics, while report/JSON output remains unchanged.
     Direct performance scan proof and Phase 29 passed.
+
+631. Strengthen the Phase 29 organization audit with real TypeScript types.
+    Done: `ops/scripts/architecture/organization-audit.ts` now declares source
+    record, compatibility wrapper, wrapper reference, summary input, and JSON
+    summary shapes. The recursive walker also uses typed path stacks and guards
+    empty stack pops, so future folder cleanup and rewire checks have clearer
+    boundaries while preserving the current report contract. Direct organization
+    audit proof passed.
 
 ## Safety Gates
 
