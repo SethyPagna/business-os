@@ -5,6 +5,7 @@ import Modal from '../../shared/Modal'
 import { deriveScannerPresentation } from './barcodeScannerState.ts'
 import { isCameraBlockedByDocumentPolicy } from './scanbotScanner.ts'
 import { scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
+import { readCameraPermissionState, watchCameraPermission, type CameraPermissionState } from './cameraPermission.ts'
 
 const KNOWN_FORMATS = [
   'aztec',
@@ -23,7 +24,7 @@ const KNOWN_FORMATS = [
 ]
 
 type ScannerStatus = 'idle' | 'starting' | 'scanning' | 'blocked' | 'dismissed' | 'manual'
-type ScannerPermissionState = 'unknown' | 'prompt' | 'granted' | 'denied' | 'blocked' | 'unsupported'
+type ScannerPermissionState = CameraPermissionState
 
 interface BarcodeScannerModalProps {
   open: boolean
@@ -107,33 +108,6 @@ function stopStream(stream: MediaStream | null | undefined): void {
   try {
     stream?.getTracks?.().forEach((track) => track.stop())
   } catch (_) {}
-}
-
-async function readCameraPermissionState(): Promise<ScannerPermissionState> {
-  try {
-    if (!navigator?.permissions?.query) return 'unknown'
-    const result = await navigator.permissions.query({ name: 'camera' as PermissionName })
-    const state = String(result?.state || 'unknown')
-    return ['prompt', 'granted', 'denied'].includes(state) ? state as ScannerPermissionState : 'unknown'
-  } catch (_) {
-    return 'unknown'
-  }
-}
-
-async function watchCameraPermission(onChange: (state: ScannerPermissionState) => void): Promise<() => void> {
-  try {
-    if (!navigator?.permissions?.query) return () => {}
-    const result = await navigator.permissions.query({ name: 'camera' as PermissionName })
-    const handleChange = () => {
-      const state = String(result?.state || 'unknown')
-      onChange(['prompt', 'granted', 'denied'].includes(state) ? state as ScannerPermissionState : 'unknown')
-    }
-    handleChange()
-    result.addEventListener?.('change', handleChange)
-    return () => result.removeEventListener?.('change', handleChange)
-  } catch (_) {
-    return () => {}
-  }
 }
 
 export default function BarcodeScannerModal({

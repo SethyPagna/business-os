@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-31T20:04:02.081Z",
+  "generatedAt": "2026-05-31T23:49:37.509Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -12,7 +12,7 @@
     "ops/config",
     "run"
   ],
-  "sourceFiles": 458,
+  "sourceFiles": 459,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -22,7 +22,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      319
+      320
     ],
     [
       "React TSX",
@@ -56,7 +56,7 @@
   "extensionCounts": [
     [
       ".ts",
-      319
+      320
     ],
     [
       ".tsx",
@@ -186,6 +186,12 @@
       "evidence": "Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle."
     },
     {
+      "file": "frontend/src/components/products/scanning/scanbotScanner.ts",
+      "decision": "keep on main browser scanner path",
+      "reason": "The Scanbot adapter injects the vendor UI script, checks document camera policy, reads browser permission state, and starts the SDK UI. Those are DOM, camera permission, and third-party browser UI boundaries rather than transferable Worker computation.",
+      "evidence": "Move 653 inspection found the useful cleanup was a shared typed camera-permission helper used by both Scanbot mode selection and the scanner modal, while broad Worker extraction would duplicate main-thread SDK and document access."
+    },
+    {
       "file": "frontend/src/components/shared/ImageGalleryLightbox.tsx",
       "decision": "keep as React presentation component",
       "reason": "The lightbox filters a small image list, clamps an index, handles keyboard navigation, and renders images/thumbnails. It has no decoding, resizing, or heavy image processing loop to transfer.",
@@ -255,9 +261,9 @@
     },
     {
       "track": "Web Worker extraction",
-      "firstCandidate": "frontend/src/components/products/scanning/scanbotScanner.ts",
-      "score": 5,
-      "lines": 180,
+      "firstCandidate": "",
+      "score": 0,
+      "lines": 0,
       "requiredProof": [
         "npm.cmd --prefix frontend run test:utils",
         "npm.cmd --prefix frontend run build",
@@ -1867,13 +1873,5 @@
     }
   ],
   "completedDataPathCoverageGaps": [],
-  "conversionCandidates": [
-    {
-      "file": "frontend/src/components/products/scanning/scanbotScanner.ts",
-      "lines": 180,
-      "score": 5,
-      "track": "Web Worker extraction",
-      "rule": "Browser CPU/file parsing/media work candidate."
-    }
-  ]
+  "conversionCandidates": []
 }

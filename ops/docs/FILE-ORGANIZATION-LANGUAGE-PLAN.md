@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 652 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 653 in this file.
 
 ## Goal
 
@@ -5791,6 +5791,18 @@ Decision rule:
     the audit family and still cleans up its seeded QA rows in `finally`. Proof:
     receipt-settings rollback live check, action-history undo/redo check, and
     post-live hygiene all passed with the scoped package metadata in place.
+
+653. Close the Scanbot Worker false positive and share camera permission helpers.
+    Done: `cameraPermission.ts` now centralizes typed camera permission reads
+    and watchers for the Scanbot adapter and barcode scanner modal, replacing
+    duplicate local normalization in both files. The Phase 29 language/runtime
+    audit rejects `scanbotScanner.ts` as a Web Worker candidate because the file
+    owns vendor UI script injection, document camera policy checks, browser
+    permission reads, and SDK UI startup. Those browser boundaries must stay on
+    the main thread; the useful optimization was the shared typed helper and
+    stronger focused coverage. Proof: focused Scanbot scanner tests, frontend
+    utility suite, frontend typecheck, frontend production build, and regenerated
+    language/runtime audit passed.
 
 ## Safety Gates
 

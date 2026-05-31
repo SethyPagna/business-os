@@ -1165,6 +1165,12 @@ const REJECTED_WEB_WORKER_CANDIDATES = [
     evidence: 'Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle.',
   },
   {
+    file: 'frontend/src/components/products/scanning/scanbotScanner.ts',
+    decision: 'keep on main browser scanner path',
+    reason: 'The Scanbot adapter injects the vendor UI script, checks document camera policy, reads browser permission state, and starts the SDK UI. Those are DOM, camera permission, and third-party browser UI boundaries rather than transferable Worker computation.',
+    evidence: 'Move 653 inspection found the useful cleanup was a shared typed camera-permission helper used by both Scanbot mode selection and the scanner modal, while broad Worker extraction would duplicate main-thread SDK and document access.',
+  },
+  {
     file: 'frontend/src/components/shared/ImageGalleryLightbox.tsx',
     decision: 'keep as React presentation component',
     reason: 'The lightbox filters a small image list, clamps an index, handles keyboard navigation, and renders images/thumbnails. It has no decoding, resizing, or heavy image processing loop to transfer.',

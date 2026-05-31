@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-05-31T20:04:02.081Z
+Generated: 2026-05-31T23:49:37.509Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 458
+- Files scanned: 459
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/config`, `run`
 - Default frontend runtime: React/JavaScript
 - Default backend runtime: Node.js
@@ -22,7 +22,7 @@ Generated: 2026-05-31T20:04:02.081Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 319 |
+| TypeScript | 320 |
 | React TSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |
@@ -33,16 +33,14 @@ Generated: 2026-05-31T20:04:02.081Z
 
 ## Conversion Candidates
 
-| Track | File | Lines | Score | Rule |
-| --- | --- | --- | --- | --- |
-| Web Worker extraction | frontend/src/components/products/scanning/scanbotScanner.ts | 180 | 5 | Browser CPU/file parsing/media work candidate. |
+No conversion candidates detected.
 
 ## First Executable Slices
 
 | Track | First candidate | Lines | Score | Required proof |
 | --- | --- | --- | --- | --- |
 | TypeScript utility conversion | none | 0 | 0 | `npm.cmd --prefix frontend run typecheck`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`rg old import path after rename or extension change` |
-| Web Worker extraction | `frontend/src/components/products/scanning/scanbotScanner.ts` | 180 | 5 | `npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright flow for the affected import/scanner/media action`<br>`fallback path when Worker construction fails` |
+| Web Worker extraction | none | 0 | 0 | `npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright flow for the affected import/scanner/media action`<br>`fallback path when Worker construction fails` |
 | SQL/DuckDB/data-path optimization | none | 0 | 0 | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.ts`<br>`backup/restore or count-diff rehearsal for changed data paths`<br>`before/after timing on the same fixture` |
 
 ## Verification Matrix
@@ -202,6 +200,7 @@ Generated: 2026-05-31T20:04:02.081Z
 | `frontend/src/utils/csvImport.ts` | keep as shared parser and fallback oracle | The heavy product import analysis already runs in productImportWorker, contact/inventory/sales row checks already use focused workers, and the remaining generic parseCSV surface has no direct UI caller. | Move 167 inspection found parseCsvRows used by productImportPlanner inside a Worker and by an unused localDb.parseCSV compatibility helper. |
 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | keep on main browser path | Photo barcode scanning depends on FileReader, Image elements, native BarcodeDetector, and zxing BrowserMultiFormatReader image-element decoding; broad Worker extraction would duplicate the path and lose browser compatibility. | Move 168 inspection found DOM image loading and browser detector/zxing boundaries rather than a pure CPU loop that can move safely to a Worker. |
 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | keep on React/browser camera path | The modal owns camera permission state, media streams, video refs, requestAnimationFrame scanning, and manual-entry UI. These are DOM and user-permission workflows, not transferable Worker computation. | Move 168 inspection found getUserMedia, video element, permission watcher, BarcodeDetector, zxing controls, and React state tightly coupled to the UI lifecycle. |
+| `frontend/src/components/products/scanning/scanbotScanner.ts` | keep on main browser scanner path | The Scanbot adapter injects the vendor UI script, checks document camera policy, reads browser permission state, and starts the SDK UI. Those are DOM, camera permission, and third-party browser UI boundaries rather than transferable Worker computation. | Move 653 inspection found the useful cleanup was a shared typed camera-permission helper used by both Scanbot mode selection and the scanner modal, while broad Worker extraction would duplicate main-thread SDK and document access. |
 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | keep as React presentation component | The lightbox filters a small image list, clamps an index, handles keyboard navigation, and renders images/thumbnails. It has no decoding, resizing, or heavy image processing loop to transfer. | Move 169 inspection found React state/control rendering and event handlers only; image loading remains normal browser rendering. |
 | `frontend/src/utils/importJobRefresh.ts` | keep as main-thread event dispatcher | The helper maps completed import-job types to refresh channels and dispatches sync:update browser events. Moving it to a Worker would add message overhead and lose direct window event dispatch. | Move 169 inspection found small status/type normalization, Set dedupe, and CustomEvent dispatch only; Move 385 converted the helper to TypeScript but kept the same main-thread event boundary. |
 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | keep on React main thread | Polls import-job state, dedupes a bounded eight-row list, dispatches completion refreshes, and coordinates UI actions; it has no file parsing, media decoding, or CPU-heavy browser loop worth moving to a Worker. | Move 165 inspection of BackgroundImportTracker.tsx found API orchestration and tiny list transforms only. |

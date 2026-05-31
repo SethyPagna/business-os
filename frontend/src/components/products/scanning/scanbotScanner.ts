@@ -1,7 +1,9 @@
+import { readCameraPermissionState, type CameraPermissionState } from './cameraPermission.ts'
+
 type ScanbotMode = {
   mode: 'fallback' | 'scanbot'
   reason: 'unsupported' | 'document-policy' | 'granted' | 'retry-after-denied' | 'permission-prompt'
-  permissionState: string
+  permissionState: CameraPermissionState
 }
 
 type ScanbotSdk = {
@@ -104,16 +106,6 @@ function loadScanbotScript(): Promise<ScanbotSdk | null> {
     document.head.appendChild(script)
   })
   return scriptPromise
-}
-
-async function readCameraPermissionState(): Promise<string> {
-  try {
-    if (!globalThis.navigator?.permissions?.query) return 'unknown'
-    const result = await globalThis.navigator.permissions.query({ name: 'camera' as PermissionName })
-    return String(result?.state || 'unknown')
-  } catch (_) {
-    return 'unknown'
-  }
 }
 
 export async function getPreferredScannerMode(): Promise<ScanbotMode> {

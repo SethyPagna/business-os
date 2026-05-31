@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 652.
+- Latest completed implementation move in this roadmap: Move 653.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7519,3 +7519,17 @@ Move 652 status:
   live check, action-history undo/redo check, and post-live hygiene gate all
   passed, proving ESM live/audit scripts and CommonJS storage scripts still run
   in their intended modes.
+
+Move 653 status:
+- Move 653 closes the false-positive Scanbot Web Worker candidate from the
+  Phase 29 language/runtime audit and tightens the scanner permission path.
+  `frontend/src/components/products/scanning/cameraPermission.ts` now owns typed
+  camera permission reads and permission-change watching, so
+  `scanbotScanner.ts` and `BarcodeScannerModal.tsx` no longer carry duplicate
+  permission normalization logic. The language/runtime audit now records
+  `scanbotScanner.ts` as a rejected Worker candidate because it injects the
+  vendor UI script, checks document camera policy, and starts camera/SDK UI on
+  the main browser thread; moving it to a Worker would add risk without moving
+  real CPU/file/media work. Proof: focused Scanbot scanner tests, frontend
+  utility suite, frontend typecheck, frontend production build, and regenerated
+  language/runtime audit passed.
