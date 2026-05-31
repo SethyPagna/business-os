@@ -428,7 +428,7 @@ Code files scanned: **477**
 | 416 | `ops/scripts/architecture/generated-bulk-audit.ts` | 18 |
 | 417 | `ops/scripts/architecture/language-runtime-audit.ts` | 20 |
 | 418 | `ops/scripts/architecture/organization-audit.ts` | 14 |
-| 419 | `ops/scripts/architecture/phase29-audit.ts` | 13 |
+| 419 | `ops/scripts/architecture/phase29-audit.ts` | 14 |
 | 420 | `ops/scripts/architecture/runtime-js-inventory.ts` | 6 |
 | 421 | `ops/scripts/backend/build-package-stage.ts` | 10 |
 | 422 | `ops/scripts/backend/build-server-entry.ts` | 5 |
@@ -6275,19 +6275,20 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 86 |
-| 2 | `parseLastJsonObject` | function | 103 |
-| 3 | `runChildProcess` | function | 115 |
-| 4 | `runCheck` | function | 143 |
-| 5 | `runCheckGroup` | function | 168 |
-| 6 | `flattenCycles` | function | 172 |
-| 7 | `buildDurationSummary` | function | 176 |
-| 8 | `renderReport` | function | 211 |
-| 9 | `comparableValue` | function | 302 |
-| 10 | `collectParsedByCycle` | function | 314 |
-| 11 | `buildRepeatConsistency` | function | 320 |
-| 12 | `buildSummary` | function | 512 |
-| 13 | `main` | function | 550 |
+| 1 | `parseArgs` | function | 171 |
+| 2 | `isParsedObject` | function | 188 |
+| 3 | `parseLastJsonObject` | function | 192 |
+| 4 | `runChildProcess` | function | 205 |
+| 5 | `runCheck` | function | 233 |
+| 6 | `runCheckGroup` | function | 258 |
+| 7 | `flattenCycles` | function | 268 |
+| 8 | `buildDurationSummary` | function | 272 |
+| 9 | `renderReport` | function | 307 |
+| 10 | `comparableValue` | function | 398 |
+| 11 | `collectParsedByCycle` | function | 410 |
+| 12 | `buildRepeatConsistency` | function | 416 |
+| 13 | `buildSummary` | function | 608 |
+| 14 | `main` | function | 646 |
 
 ### 3.420 `ops/scripts/architecture/runtime-js-inventory.ts`
 
