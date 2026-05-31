@@ -171,5 +171,5 @@ Total scripts documented: **23**
 ## ops/scripts/docs/performance-scan.ts
 
 - File type: `.ts`
-- Total lines: **237**
+- Total lines: **296**
 
