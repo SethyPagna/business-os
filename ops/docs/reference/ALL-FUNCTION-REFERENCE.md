@@ -453,7 +453,7 @@ Code files scanned: **478**
 | 441 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
 | 442 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
 | 443 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
-| 444 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 32 |
+| 444 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 38 |
 | 445 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
 | 446 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 2 |
 | 447 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
@@ -6711,38 +6711,44 @@ Code files scanned: **478**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 176 |
-| 2 | `readArgs` | function | 183 |
-| 3 | `safeName` | function | 199 |
-| 4 | `addFinding` | function | 206 |
-| 5 | `isExternalNoise` | function | 210 |
-| 6 | `isAppConsoleIssue` | function | 214 |
-| 7 | `isAppNetworkIssue` | function | 221 |
-| 8 | `routeRoot` | function | 227 |
-| 9 | `textForLabel` | function | 232 |
-| 10 | `buttonSkipReason` | function | 236 |
-| 11 | `expectedButtonNavigation` | function | 245 |
-| 12 | `attachCollectors` | function | 250 |
-| 13 | `writeJson` | function | 285 |
-| 14 | `incrementCount` | function | 290 |
-| 15 | `computeControlCoverage` | function | 294 |
-| 16 | `addCoverageGateFindings` | function | 336 |
-| 17 | `persistSummary` | function | 396 |
-| 18 | `saveScreenshot` | function | 402 |
-| 19 | `dismissTransientUi` | function | 409 |
-| 20 | `waitForRouteReady` | function | 427 |
-| 21 | `navigateRoute` | function | 443 |
-| 22 | `countVisible` | function | 458 |
-| 23 | `activeButtonCandidates` | function | 467 |
-| 24 | `clickButtonCandidate` | function | 498 |
-| 25 | `exerciseSearchInputs` | function | 572 |
-| 26 | `exerciseSelects` | function | 616 |
-| 27 | `collectLayoutIssues` | function | 673 |
-| 28 | `hasScrollableAncestor` | const arrow | 694 |
-| 29 | `runRoute` | function | 733 |
-| 30 | `createAuthedPage` | function | 801 |
-| 31 | `runProfile` | function | 820 |
-| 32 | `main` | function | 855 |
+| 1 | `readArg` | function | 180 |
+| 2 | `readArgs` | function | 187 |
+| 3 | `safeName` | function | 203 |
+| 4 | `addFinding` | function | 210 |
+| 5 | `isExternalNoise` | function | 214 |
+| 6 | `isAppConsoleIssue` | function | 218 |
+| 7 | `isAppNetworkIssue` | function | 225 |
+| 8 | `routeRoot` | function | 231 |
+| 9 | `textForLabel` | function | 236 |
+| 10 | `buttonSkipReason` | function | 240 |
+| 11 | `expectedButtonNavigation` | function | 249 |
+| 12 | `attachCollectors` | function | 254 |
+| 13 | `writeJson` | function | 289 |
+| 14 | `writeText` | function | 294 |
+| 15 | `incrementCount` | function | 299 |
+| 16 | `markdownCell` | function | 303 |
+| 17 | `markdownTable` | function | 309 |
+| 18 | `percentage` | function | 316 |
+| 19 | `computeControlCoverage` | function | 321 |
+| 20 | `routeCoverageRows` | function | 363 |
+| 21 | `renderCoverageMarkdown` | function | 375 |
+| 22 | `addCoverageGateFindings` | function | 435 |
+| 23 | `persistSummary` | function | 495 |
+| 24 | `saveScreenshot` | function | 505 |
+| 25 | `dismissTransientUi` | function | 512 |
+| 26 | `waitForRouteReady` | function | 530 |
+| 27 | `navigateRoute` | function | 546 |
+| 28 | `countVisible` | function | 561 |
+| 29 | `activeButtonCandidates` | function | 570 |
+| 30 | `clickButtonCandidate` | function | 601 |
+| 31 | `exerciseSearchInputs` | function | 675 |
+| 32 | `exerciseSelects` | function | 719 |
+| 33 | `collectLayoutIssues` | function | 776 |
+| 34 | `hasScrollableAncestor` | const arrow | 797 |
+| 35 | `runRoute` | function | 836 |
+| 36 | `createAuthedPage` | function | 904 |
+| 37 | `runProfile` | function | 923 |
+| 38 | `main` | function | 958 |
 
 ### 3.445 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
