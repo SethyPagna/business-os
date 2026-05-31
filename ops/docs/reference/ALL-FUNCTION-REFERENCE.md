@@ -6320,11 +6320,11 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toProjectPath` | function | 23 |
-| 2 | `formatDiagnostic` | function | 27 |
-| 3 | `transpileServerEntry` | function | 34 |
-| 4 | `writeIfChanged` | function | 56 |
-| 5 | `main` | function | 63 |
+| 1 | `toProjectPath` | function | 26 |
+| 2 | `formatDiagnostic` | function | 30 |
+| 3 | `transpileServerEntry` | function | 37 |
+| 4 | `writeIfChanged` | function | 59 |
+| 5 | `main` | function | 66 |
 
 ### 3.423 `ops/scripts/backend/schema-audit.ts`
 

@@ -431,7 +431,7 @@ Code files documented: **477**
 | 419 | `ops/scripts/architecture/phase29-audit.ts` | 5 | 0 | 2 | 0 |
 | 420 | `ops/scripts/architecture/runtime-js-inventory.ts` | 4 | 0 | 2 | 0 |
 | 421 | `ops/scripts/backend/build-package-stage.ts` | 2 | 0 | 0 | 0 |
-| 422 | `ops/scripts/backend/build-server-entry.ts` | 3 | 0 | 0 | 0 |
+| 422 | `ops/scripts/backend/build-server-entry.ts` | 4 | 0 | 0 | 0 |
 | 423 | `ops/scripts/backend/schema-audit.ts` | 2 | 0 | 0 | 0 |
 | 424 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 3 | 0 | 0 | 0 |
 | 425 | `ops/scripts/backend/verify-data-integrity.ts` | 3 | 0 | 0 | 0 |
@@ -7421,10 +7421,11 @@ Code files documented: **477**
 ### 3.422 `ops/scripts/backend/build-server-entry.ts`
 
 - Declared exports: none detected
-- Imports (3)
+- Imports (4)
   - `fs`
   - `module`
   - `path`
+  - `typescript`
 - Internal dependencies (0)
   - none
 - Referenced by (0)

@@ -461,7 +461,7 @@ Total files documented: **540**
 | 449 | `ops/scripts/architecture/phase29-audit.ts` | project-scripts | 682 | 22.8 | Project source/support file |
 | 450 | `ops/scripts/architecture/runtime-js-inventory.ts` | project-scripts | 220 | 7.5 | Project source/support file |
 | 451 | `ops/scripts/backend/build-package-stage.ts` | project-scripts | 142 | 3.9 | Project source/support file |
-| 452 | `ops/scripts/backend/build-server-entry.ts` | project-scripts | 86 | 2.8 | Project source/support file |
+| 452 | `ops/scripts/backend/build-server-entry.ts` | project-scripts | 89 | 3.0 | Project source/support file |
 | 453 | `ops/scripts/backend/schema-audit.ts` | project-scripts | 496 | 16.9 | Project source/support file |
 | 454 | `ops/scripts/backend/schema-primary-key-preflight.ts` | project-scripts | 216 | 8.3 | Project source/support file |
 | 455 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |
