@@ -485,7 +485,7 @@ Code files scanned: **477**
 | 473 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
 | 474 | `ops/scripts/verification/verify-hardening-policy.ts` | 10 |
 | 475 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
-| 476 | `ops/scripts/verification/verify-scale-services.ts` | 8 |
+| 476 | `ops/scripts/verification/verify-scale-services.ts` | 9 |
 | 477 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
 
 ## 3. Detailed Function Commentary
@@ -7077,14 +7077,15 @@ Code files scanned: **477**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ensureDir` | function | 19 |
-| 2 | `run` | function | 23 |
-| 3 | `firstExisting` | function | 41 |
-| 4 | `whereDocker` | function | 45 |
-| 5 | `resolveDocker` | function | 58 |
-| 6 | `checkSecretIgnoreRules` | function | 68 |
-| 7 | `trackedLicenses` | const arrow | 69 |
-| 8 | `main` | function | 95 |
+| 1 | `ensureDir` | function | 27 |
+| 2 | `run` | function | 31 |
+| 3 | `firstExisting` | function | 49 |
+| 4 | `whereDocker` | function | 53 |
+| 5 | `resolveDocker` | function | 66 |
+| 6 | `checkSecretIgnoreRules` | function | 76 |
+| 7 | `trackedLicenses` | const arrow | 77 |
+| 8 | `pushDockerAvailabilityMessage` | function | 103 |
+| 9 | `main` | function | 108 |
 
 ### 3.477 `ops/scripts/verification/verify-secret-hygiene.ts`
 

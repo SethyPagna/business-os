@@ -524,7 +524,7 @@ Total files documented: **540**
 | 512 | `ops/scripts/verification/verify-docker-release.ts` | project-scripts | 691 | 33.2 | Project source/support file |
 | 513 | `ops/scripts/verification/verify-hardening-policy.ts` | project-scripts | 165 | 6.2 | Project source/support file |
 | 514 | `ops/scripts/verification/verify-runtime-deps.ts` | project-scripts | 410 | 16.6 | Project source/support file |
-| 515 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
+| 515 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 180 | 6.7 | Project source/support file |
 | 516 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 71 | 2.4 | Project source/support file |
 | 517 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
 | 518 | `README.md` | project-root | 159 | 11.6 | Project documentation entrypoint |
