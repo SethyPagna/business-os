@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 636.
+- Latest completed implementation move in this roadmap: Move 637.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7268,3 +7268,11 @@ Move 636 status:
   array before scanning. The hardening policy was also updated from stale
   backend `.js` paths to the current tracked TypeScript sources for sync and
   maintenance locks. Direct hardening policy verification passed.
+
+Move 637 status:
+- Move 637 strengthens the scale-service verifier with explicit TypeScript
+  shapes for CLI arguments, command results, spawn options, Docker path
+  resolution, and failure/warning collections. Docker availability handling now
+  flows through one helper that preserves the existing behavior: warn by default
+  and fail only when scale services are required. Direct scale-service
+  verification passed with a Docker engine reachability warning.

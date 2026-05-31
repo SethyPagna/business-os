@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 636 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 637 in this file.
 
 ## Goal
 
@@ -5565,6 +5565,14 @@ Decision rule:
     policy file now references current tracked TypeScript sources for backend
     sync and maintenance-lock checks instead of stale `.js` paths. Direct
     hardening policy verification passed.
+
+637. Strengthen the scale-service verifier with real TypeScript types.
+    Done: `ops/scripts/verification/verify-scale-services.ts` now declares CLI
+    argument, command-result, spawn-option, Docker path, failure, and warning
+    shapes. Docker availability handling now flows through one helper that keeps
+    the current default warning behavior and only fails when scale services are
+    explicitly required. Direct scale-service verification passed with a Docker
+    engine reachability warning.
 
 ## Safety Gates
 

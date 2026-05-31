@@ -10,17 +10,25 @@ const PROJECT_ROOT = path.resolve(__dirname, '../../..')
 const DOCKER_CONFIG = path.join(PROJECT_ROOT, 'ops', 'runtime', 'docker-config')
 const DOCKER_SCALE_ENV = path.join(PROJECT_ROOT, 'ops', 'runtime', 'docker-scale.env')
 const COMPOSE_FILE = path.join(PROJECT_ROOT, 'ops', 'docker', 'compose.scale.yml')
-const args = new Set(process.argv.slice(2))
+type CommandResult = {
+  ok: boolean
+  status: number | null
+  stdout: string
+  stderr: string
+}
+type SpawnOptions = Parameters<typeof spawnSync>[2]
+
+const args = new Set<string>(process.argv.slice(2))
 const requireServices = args.has('--require') || process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES === '1'
 const printComposeCommand = args.has('--print-compose-command')
-const failures = []
-const warnings = []
+const failures: string[] = []
+const warnings: string[] = []
 
-function ensureDir(dir) {
+function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true })
 }
 
-function run(exe, commandArgs, options = {}) {
+function run(exe: string, commandArgs: string[], options: SpawnOptions = {}): CommandResult {
   const result = spawnSync(exe, commandArgs, {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
@@ -38,11 +46,11 @@ function run(exe, commandArgs, options = {}) {
   }
 }
 
-function firstExisting(candidates) {
+function firstExisting(candidates: Array<string | undefined>): string {
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || ''
 }
 
-function whereDocker() {
+function whereDocker(): string {
   try {
     const output = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['docker'], {
       cwd: PROJECT_ROOT,
@@ -55,7 +63,7 @@ function whereDocker() {
   }
 }
 
-function resolveDocker() {
+function resolveDocker(): string {
   return firstExisting([
     whereDocker(),
     process.env.DOCKER_EXE,
@@ -65,7 +73,7 @@ function resolveDocker() {
   ])
 }
 
-function checkSecretIgnoreRules() {
+function checkSecretIgnoreRules(): void {
   const trackedLicenses = (() => {
     try {
       return execFileSync('git', ['ls-files'], { cwd: PROJECT_ROOT, encoding: 'utf8' })
@@ -92,7 +100,12 @@ function checkSecretIgnoreRules() {
   }
 }
 
-function main() {
+function pushDockerAvailabilityMessage(message: string): void {
+  if (requireServices) failures.push(message)
+  else warnings.push(message)
+}
+
+function main(): void {
   ensureDir(DOCKER_CONFIG)
   ensureDir(path.dirname(DOCKER_SCALE_ENV))
   checkSecretIgnoreRules()
@@ -126,31 +139,23 @@ function main() {
 
   const dockerExe = resolveDocker()
   if (!dockerExe) {
-    const message = 'Docker CLI was not found on PATH or at the standard Windows Docker Desktop path.'
-    if (requireServices) failures.push(message)
-    else warnings.push(message)
+    pushDockerAvailabilityMessage('Docker CLI was not found on PATH or at the standard Windows Docker Desktop path.')
   } else {
     const version = run(dockerExe, ['--version'])
     if (!version.ok) {
-      const message = `Docker CLI did not run: ${version.stderr || version.stdout || `exit ${version.status}`}`
-      if (requireServices) failures.push(message)
-      else warnings.push(message)
+      pushDockerAvailabilityMessage(`Docker CLI did not run: ${version.stderr || version.stdout || `exit ${version.status}`}`)
     } else {
       console.log(`Docker: ${version.stdout}`)
     }
     const compose = run(dockerExe, ['compose', 'version'])
     if (!compose.ok) {
-      const message = `Docker Compose did not run: ${compose.stderr || compose.stdout || `exit ${compose.status}`}`
-      if (requireServices) failures.push(message)
-      else warnings.push(message)
+      pushDockerAvailabilityMessage(`Docker Compose did not run: ${compose.stderr || compose.stdout || `exit ${compose.status}`}`)
     } else {
       console.log(`Compose: ${compose.stdout}`)
     }
     const info = run(dockerExe, ['info', '--format', '{{.ServerVersion}}'])
     if (!info.ok) {
-      const message = 'Docker Desktop engine is not reachable. Double-click Start Business OS.bat or run run\\setup.bat so Business OS can start the required services.'
-      if (requireServices) failures.push(message)
-      else warnings.push(message)
+      pushDockerAvailabilityMessage('Docker Desktop engine is not reachable. Double-click Start Business OS.bat or run run\\setup.bat so Business OS can start the required services.')
     } else {
       console.log(`Docker engine: ${info.stdout}`)
     }
