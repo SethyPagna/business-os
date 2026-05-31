@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 629 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 630 in this file.
 
 ## Goal
 
@@ -5510,6 +5510,14 @@ Decision rule:
     `mapLimit()` now clamps invalid or zero concurrency to one worker rather
     than returning unprocessed slots. Direct export smoke checks, performance
     scan, and Phase 29 passed.
+
+630. Strengthen the Phase 29 performance scan with real TypeScript types.
+    Done: `ops/scripts/docs/performance-scan.ts` now declares TypeScript row
+    and summary shapes for source files, built chunks, measured rows, sortable
+    metrics, and the generated performance summary instead of relying on
+    implicit JavaScript objects. The typed `topN()` helper is constrained to
+    the known numeric scan metrics, while report/JSON output remains unchanged.
+    Direct performance scan proof and Phase 29 passed.
 
 ## Safety Gates
 

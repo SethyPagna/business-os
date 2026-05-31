@@ -1,8 +1,61 @@
 #!/usr/bin/env node
 'use strict'
 
-const fs = require('fs')
-const path = require('path')
+type FsModule = typeof import('fs')
+type PathModule = typeof import('path')
+type FsUtils = {
+  resolveProjectRoot: (startDir?: string) => string
+  relFrom: (rootDir: string, absPath: string) => string
+  lineCount: (text: unknown) => number
+  mapLimit: <T, R>(items: T[], limit: number, mapper: (item: T, index: number) => Promise<R> | R) => Promise<R[]>
+  walkFilesRecursive: (startDir: string, options?: { excludeDirs?: Set<string>, extensions?: Set<string> | null }) => string[]
+  collectRootFiles: (rootDir: string, options?: { extensions?: Set<string> | null, excludedFiles?: Set<string> }) => string[]
+}
+type SourceRow = {
+  file: string
+  size: number
+  lines: number
+}
+type ChunkRow = {
+  file: string
+  size: number
+}
+type MeasuredRow = SourceRow | (ChunkRow & { lines?: number })
+type SortableMetric = 'size' | 'lines'
+type PerformanceSummary = {
+  report: string
+  summary: string
+  sourceFiles: number
+  distAssets: number
+  totalSourceBytes: number
+  totalSourceLines: number
+  largestSourceFile: string | null
+  largestSourceFileBytes: number
+  largestSourceLinesFile: string | null
+  largestSourceLines: number
+  largestBuiltChunk: string | null
+  largestBuiltChunkBytes: number
+  oversizedSourceFiles: string[]
+  oversizedBuiltChunks: string[]
+  topSourceBySize: MeasuredRow[]
+  topSourceByLines: MeasuredRow[]
+  topBuiltChunks: MeasuredRow[]
+  sourceReadMode: string
+  sourceReadConcurrency: number
+  chunkStatConcurrency: number
+  manualNotesPreserved?: boolean
+  manualNotesLines?: number
+}
+
+declare const require: (moduleName: string) => FsModule | PathModule | FsUtils
+declare const __dirname: string
+declare const process: {
+  stdout: { write: (message: string) => void }
+  exit: (code?: number) => never
+}
+
+const fs = require('fs') as FsModule
+const path = require('path') as PathModule
 const {
   resolveProjectRoot,
   relFrom,
@@ -10,7 +63,7 @@ const {
   mapLimit,
   walkFilesRecursive,
   collectRootFiles,
-} = require('../lib/fs-utils.ts')
+} = require('../lib/fs-utils.ts') as FsUtils
 
 // Resolve from the script location so metrics can be generated from any
 // working directory.
@@ -62,20 +115,20 @@ const ROOT_SCAN_EXTENSIONS = new Set([
 ])
 const ROOT_EXCLUDED_FILES = new Set(['business-os-server.exe', 'build-release.log'])
 
-function kb(bytes) {
+function kb(bytes: number): string {
   // 2.1 Render human-readable file sizes.
   return (bytes / 1024).toFixed(1)
 }
 
-function topN(rows, n = 20, key = 'size') {
+function topN<T extends MeasuredRow>(rows: T[], n = 20, key: SortableMetric = 'size'): T[] {
   // 2.2 Sort helper used by size/line/chunk sections.
   return rows
     .slice()
-    .sort((a, b) => b[key] - a[key])
+    .sort((a, b) => Number(b[key] || 0) - Number(a[key] || 0))
     .slice(0, n)
 }
 
-function compactRows(rows) {
+function compactRows<T extends MeasuredRow>(rows: T[]): MeasuredRow[] {
   return rows.map((row) => ({
     file: row.file,
     size: row.size,
@@ -83,7 +136,7 @@ function compactRows(rows) {
   }))
 }
 
-async function readSourceRow(filePath) {
+async function readSourceRow(filePath: string): Promise<SourceRow> {
   const [stat, text] = await Promise.all([
     fs.promises.stat(filePath),
     fs.promises.readFile(filePath, 'utf8').catch(() => ''),
@@ -95,12 +148,12 @@ async function readSourceRow(filePath) {
   }
 }
 
-async function readChunkRow(filePath) {
+async function readChunkRow(filePath: string): Promise<ChunkRow> {
   const stat = await fs.promises.stat(filePath)
   return { file: relFrom(ROOT, filePath), size: stat.size }
 }
 
-function readManualNotes() {
+function readManualNotes(): string {
   if (!fs.existsSync(DOC_PATH)) return DEFAULT_MANUAL_NOTES
 
   const existing = fs.readFileSync(DOC_PATH, 'utf8')
@@ -120,7 +173,13 @@ function readManualNotes() {
   return DEFAULT_MANUAL_NOTES
 }
 
-function buildPerformanceSummary(sourceRows, chunkRows, largeSourceBySize, largeSourceByLines, largeChunks) {
+function buildPerformanceSummary(
+  sourceRows: SourceRow[],
+  chunkRows: ChunkRow[],
+  largeSourceBySize: SourceRow[],
+  largeSourceByLines: SourceRow[],
+  largeChunks: ChunkRow[],
+): PerformanceSummary {
   const oversizedSourceFiles = sourceRows
     .filter((row) => row.size >= 80 * 1024 || row.lines >= 1500)
     .map((row) => row.file)
@@ -154,7 +213,7 @@ function buildPerformanceSummary(sourceRows, chunkRows, largeSourceBySize, large
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   /**
    * 3. Scan Inputs
    * - Frontend source, backend source, and unified ops scripts.

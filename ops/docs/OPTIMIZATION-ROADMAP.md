@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 629.
+- Latest completed implementation move in this roadmap: Move 630.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7213,3 +7213,11 @@ Move 629 status:
   `mapLimit()` now clamps invalid or zero concurrency to one worker so a bad
   caller cannot silently skip work. Direct export smoke checks, performance
   scan, and full Phase 29 audit passed.
+
+Move 630 status:
+- Move 630 strengthens the Phase 29 performance scan with real TypeScript row
+  and summary types. `ops/scripts/docs/performance-scan.ts` now declares source
+  rows, built-chunk rows, measured rows, sortable metrics, and the generated
+  summary shape while preserving the current report and JSON output contract.
+  The typed `topN()` helper now accepts only the known numeric scan metrics.
+  Direct performance scan proof and full Phase 29 audit passed.
