@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 634.
+- Latest completed implementation move in this roadmap: Move 635.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7252,3 +7252,11 @@ Move 634 status:
   unsafe secret assignment matches. The scanner now routes assignment matching
   through a typed helper while preserving the same tracked-file exclusions and
   token leak rules. Direct secret hygiene verification passed.
+
+Move 635 status:
+- Move 635 strengthens the backup reliability verifier with explicit TypeScript
+  shapes for source keys, source records, expectation maps, and checker
+  callbacks. The needle checker now reports an unknown source key as a verifier
+  failure instead of assuming every expectation map key is valid, preserving the
+  existing streaming backup, Drive sync, cancellation, UI, and offline pause
+  assertions. Direct backup reliability verification passed.

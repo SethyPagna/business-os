@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 634 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 635 in this file.
 
 ## Goal
 
@@ -5549,6 +5549,14 @@ Decision rule:
     shapes. Secret assignment detection now flows through a typed helper while
     preserving the same tracked-file exclusions, placeholder allowances, and
     leaked token regexes. Direct secret hygiene verification passed.
+
+635. Strengthen the backup reliability verifier with real TypeScript types.
+    Done: `ops/scripts/verification/verify-backup-reliability.ts` now declares
+    source-key, source-record, expectation-map, and checker-callback shapes.
+    The text-contract checker now fails clearly if a future expectation map
+    references an unknown source key, while preserving the current streaming
+    backup, Drive sync, cancellation, UI, and offline pause assertions. Direct
+    backup reliability verification passed.
 
 ## Safety Gates
 

@@ -8,34 +8,56 @@ const { readUtf8 } = require('../lib/fs-utils.ts')
 
 const root = path.resolve(__dirname, '..', '..', '..')
 
-function read(relativePath) {
+type SourceKey =
+  | 'backupPackages'
+  | 'driveSync'
+  | 'systemJobs'
+  | 'maintenanceLock'
+  | 'systemRoutes'
+  | 'backupUi'
+  | 'apiMethods'
+  | 'offlineApi'
+  | 'fullAutomation'
+type SourceRecord = {
+  file: string
+  text: string
+}
+type SourceMap = Record<SourceKey, SourceRecord>
+type NeedleExpectations = Partial<Record<SourceKey, string[]>>
+type NeedleChecker = (failures: string[], file: string, text: string, needle: string) => void
+
+function read(relativePath: string): string {
   return readUtf8(path.join(root, relativePath))
 }
 
-function lineFor(text, needle) {
+function lineFor(text: string, needle: string): number {
   const index = text.indexOf(needle)
   if (index < 0) return 0
   return text.slice(0, index).split(/\r?\n/).length
 }
 
-function requireText(failures, file, text, needle) {
+function requireText(failures: string[], file: string, text: string, needle: string): void {
   if (!text.includes(needle)) failures.push(`${file} is missing required text: ${needle}`)
 }
 
-function forbidText(failures, file, text, needle) {
+function forbidText(failures: string[], file: string, text: string, needle: string): void {
   if (text.includes(needle)) failures.push(`${file}:${lineFor(text, needle)} contains forbidden blocking pattern: ${needle}`)
 }
 
-function checkNeedles(failures, sources, expectations, checker) {
+function checkNeedles(failures: string[], sources: SourceMap, expectations: NeedleExpectations, checker: NeedleChecker): void {
   Object.entries(expectations).forEach(([key, needles]) => {
-    const source = sources[key]
+    const source = sources[key as SourceKey]
+    if (!source) {
+      failures.push(`Backup reliability verifier has an expectation for unknown source: ${key}`)
+      return
+    }
     needles.forEach((needle) => checker(failures, source.file, source.text, needle))
   })
 }
 
-function main() {
-  const failures = []
-  const sources = {
+function main(): void {
+  const failures: string[] = []
+  const sources: SourceMap = {
     backupPackages: { file: 'backend/src/services/backupPackages.ts', text: read('backend/src/services/backupPackages.ts') },
     driveSync: { file: 'backend/src/services/googleDriveSync/index.ts', text: read('backend/src/services/googleDriveSync/index.ts') },
     systemJobs: { file: 'backend/src/systemJobs.ts', text: read('backend/src/systemJobs.ts') },
