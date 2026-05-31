@@ -77,7 +77,7 @@ Total folders documented: **82**
 | 65 | `frontend/src/utils` | Project folder | 33 | 0 |
 | 66 | `frontend/tests` | Project folder | 76 | 0 |
 | 67 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
-| 68 | `ops/scripts/architecture` | Project folder | 4 | 0 |
+| 68 | `ops/scripts/architecture` | Project folder | 5 | 0 |
 | 69 | `ops/scripts/backend` | Project folder | 6 | 0 |
 | 70 | `ops/scripts/frontend` | Project folder | 4 | 0 |
 | 71 | `ops/scripts/lib` | Project folder | 2 | 0 |
@@ -1484,7 +1484,7 @@ Total folders documented: **82**
 ### 3.68 Folder: `ops/scripts/architecture`
 
 - Purpose: Project folder
-- Direct files: **4**
+- Direct files: **5**
 - Direct subfolders: **0**
 
 #### 3.68.2 Files
@@ -1495,6 +1495,7 @@ Total folders documented: **82**
 | 2 | `language-runtime-audit.ts` | Project source/support file |
 | 3 | `organization-audit.ts` | Project source/support file |
 | 4 | `phase29-audit.ts` | Project source/support file |
+| 5 | `runtime-js-inventory.ts` | Project source/support file |
 
 
 ### 3.69 Folder: `ops/scripts/backend`

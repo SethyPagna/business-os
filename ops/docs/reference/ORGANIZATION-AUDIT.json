@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 554,
+  "filesScanned": 557,
   "largeFiles": 74,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -35,12 +35,12 @@
       32
     ],
     [
-      "frontend/components/products",
-      31
+      "ops/docs/reference",
+      32
     ],
     [
-      "ops/docs/reference",
-      30
+      "frontend/components/products",
+      31
     ],
     [
       "backend/routes",
@@ -131,15 +131,15 @@
       5
     ],
     [
+      "ops/scripts/architecture",
+      5
+    ],
+    [
       "frontend/components/files",
       4
     ],
     [
       "frontend/components/users",
-      4
-    ],
-    [
-      "ops/scripts/architecture",
       4
     ],
     [

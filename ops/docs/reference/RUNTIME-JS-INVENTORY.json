@@ -1,0 +1,88 @@
+{
+  "generatedAt": "2026-05-31T00:37:47.470Z",
+  "report": "ops/docs/reference/RUNTIME-JS-INVENTORY.md",
+  "summary": "ops/docs/reference/RUNTIME-JS-INVENTORY.json",
+  "runtimeJsFiles": 11,
+  "allowedFiles": 11,
+  "unclassifiedFiles": [],
+  "missingSources": [],
+  "records": [
+    {
+      "path": "backend/server.js",
+      "category": "generated backend runtime entry",
+      "source": "backend/server.ts",
+      "proof": "npm.cmd --prefix backend run verify:server-entry",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/runtime-noise-guard.js",
+      "category": "generated browser runtime asset",
+      "source": "frontend/src/public-runtime/runtime-noise-guard.ts",
+      "proof": "npm.cmd --prefix frontend run verify:public-runtime",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js",
+      "category": "tracked vendor scanner bundle",
+      "source": "frontend/public/scanbot-web-sdk",
+      "proof": "Scanner replacement must be proven before deleting or converting vendor files.",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js",
+      "category": "tracked vendor scanner bundle",
+      "source": "frontend/public/scanbot-web-sdk",
+      "proof": "Scanner replacement must be proven before deleting or converting vendor files.",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js",
+      "category": "tracked vendor scanner bundle",
+      "source": "frontend/public/scanbot-web-sdk",
+      "proof": "Scanner replacement must be proven before deleting or converting vendor files.",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js",
+      "category": "tracked vendor scanner bundle",
+      "source": "frontend/public/scanbot-web-sdk",
+      "proof": "Scanner replacement must be proven before deleting or converting vendor files.",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js",
+      "category": "tracked vendor scanner bundle",
+      "source": "frontend/public/scanbot-web-sdk",
+      "proof": "Scanner replacement must be proven before deleting or converting vendor files.",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js",
+      "category": "tracked vendor scanner bundle",
+      "source": "frontend/public/scanbot-web-sdk",
+      "proof": "Scanner replacement must be proven before deleting or converting vendor files.",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/sw.js",
+      "category": "generated service worker asset",
+      "source": "frontend/src/public-runtime/service-worker.ts",
+      "proof": "npm.cmd --prefix frontend run verify:public-runtime",
+      "allowed": true
+    },
+    {
+      "path": "frontend/public/theme-bootstrap.js",
+      "category": "generated browser runtime asset",
+      "source": "frontend/src/public-runtime/theme-bootstrap.ts",
+      "proof": "npm.cmd --prefix frontend run verify:public-runtime",
+      "allowed": true
+    },
+    {
+      "path": "ops/config/ecosystem.config.js",
+      "category": "generated PM2 runtime config",
+      "source": "ops/config/ecosystem.config.ts",
+      "proof": "npm.cmd --prefix ops run verify:ecosystem-config",
+      "allowed": true
+    }
+  ]
+}

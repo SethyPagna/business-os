@@ -4,7 +4,7 @@ Auto-generated file-level commentary for all first-party project files (frontend
 
 ## 1. Coverage Summary
 
-Total files documented: **539**
+Total files documented: **540**
 
 ## 2. File Commentary Matrix
 
@@ -458,94 +458,95 @@ Total files documented: **539**
 | 446 | `ops/scripts/architecture/generated-bulk-audit.ts` | project-scripts | 603 | 22.8 | Project source/support file |
 | 447 | `ops/scripts/architecture/language-runtime-audit.ts` | project-scripts | 1660 | 70.9 | Project source/support file |
 | 448 | `ops/scripts/architecture/organization-audit.ts` | project-scripts | 381 | 16.9 | Project source/support file |
-| 449 | `ops/scripts/architecture/phase29-audit.ts` | project-scripts | 579 | 20.1 | Project source/support file |
-| 450 | `ops/scripts/backend/build-package-stage.ts` | project-scripts | 142 | 3.9 | Project source/support file |
-| 451 | `ops/scripts/backend/build-server-entry.ts` | project-scripts | 86 | 2.8 | Project source/support file |
-| 452 | `ops/scripts/backend/schema-audit.ts` | project-scripts | 496 | 16.9 | Project source/support file |
-| 453 | `ops/scripts/backend/schema-primary-key-preflight.ts` | project-scripts | 216 | 8.3 | Project source/support file |
-| 454 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |
-| 455 | `ops/scripts/backend/verify-data-integrity.ts` | project-scripts | 689 | 29.0 | Project source/support file |
-| 456 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | project-scripts | 110 | 3.6 | Project source/support file |
-| 457 | `ops/scripts/frontend/verify-i18n.ts` | project-scripts | 145 | 4.3 | Project source/support file |
-| 458 | `ops/scripts/frontend/verify-performance.ts` | project-scripts | 144 | 9.6 | Project source/support file |
-| 459 | `ops/scripts/frontend/verify-ui.ts` | project-scripts | 243 | 8.7 | Project source/support file |
-| 460 | `ops/scripts/lib/fs-utils.ts` | project-scripts | 297 | 7.0 | Project source/support file |
-| 461 | `ops/scripts/lib/report-utils.ts` | project-scripts | 83 | 2.0 | Project source/support file |
-| 462 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 265 | 7.9 | Project source/support file |
-| 463 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | project-scripts | 92 | 2.8 | Project source/support file |
-| 464 | `ops/scripts/powershell/docker-release.ps1` | project-scripts | 1011 | 48.0 | Project source/support file |
-| 465 | `ops/scripts/powershell/full-automation.ps1` | project-scripts | 214 | 8.1 | Project source/support file |
-| 466 | `ops/scripts/powershell/npm-install-mode.ps1` | project-scripts | 28 | 0.8 | Project source/support file |
-| 467 | `ops/scripts/powershell/runtime-bootstrap.ps1` | project-scripts | 592 | 21.6 | Project source/support file |
-| 468 | `ops/scripts/powershell/start-runtime.ps1` | project-scripts | 377 | 16.3 | Project source/support file |
-| 469 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | project-scripts | 240 | 7.8 | Project source/support file |
-| 470 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | project-scripts | 206 | 7.1 | Project source/support file |
-| 471 | `ops/scripts/runtime/audits/audit-auth.ts` | project-scripts | 191 | 6.0 | Project source/support file |
-| 472 | `ops/scripts/runtime/audits/audit-manifest.ts` | project-scripts | 302 | 8.7 | Project source/support file |
-| 473 | `ops/scripts/runtime/audits/audit-report-html.ts` | project-scripts | 446 | 15.9 | Project source/support file |
-| 474 | `ops/scripts/runtime/audits/deep-live-audit.ts` | project-scripts | 1463 | 55.3 | Project source/support file |
-| 475 | `ops/scripts/runtime/audits/full-app-audit.ts` | project-scripts | 652 | 28.6 | Project source/support file |
-| 476 | `ops/scripts/runtime/browser-action-smoke.ts` | project-scripts | 869 | 31.2 | Project source/support file |
-| 477 | `ops/scripts/runtime/build-ecosystem-config.ts` | project-scripts | 86 | 2.8 | Project source/support file |
-| 478 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | project-scripts | 244 | 10.8 | Project source/support file |
-| 479 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | project-scripts | 144 | 6.0 | Project source/support file |
-| 480 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | project-scripts | 285 | 12.0 | Project source/support file |
-| 481 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | project-scripts | 155 | 6.0 | Project source/support file |
-| 482 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | project-scripts | 123 | 3.6 | Project source/support file |
-| 483 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | project-scripts | 139 | 6.5 | Project source/support file |
-| 484 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | project-scripts | 136 | 6.0 | Project source/support file |
-| 485 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | project-scripts | 136 | 6.3 | Project source/support file |
-| 486 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | project-scripts | 165 | 8.1 | Project source/support file |
-| 487 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | project-scripts | 247 | 7.6 | Project source/support file |
-| 488 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | project-scripts | 140 | 6.7 | Project source/support file |
-| 489 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | project-scripts | 129 | 6.1 | Project source/support file |
-| 490 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | project-scripts | 144 | 6.6 | Project source/support file |
-| 491 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | project-scripts | 127 | 6.0 | Project source/support file |
-| 492 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | project-scripts | 139 | 6.7 | Project source/support file |
-| 493 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | project-scripts | 129 | 6.0 | Project source/support file |
-| 494 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | project-scripts | 139 | 6.0 | Project source/support file |
-| 495 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | project-scripts | 176 | 7.3 | Project source/support file |
-| 496 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | project-scripts | 137 | 6.1 | Project source/support file |
-| 497 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | project-scripts | 865 | 56.8 | Project source/support file |
-| 498 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | project-scripts | 164 | 7.9 | Project source/support file |
-| 499 | `ops/scripts/runtime/smoke/check-public-url.ts` | project-scripts | 239 | 8.2 | Project source/support file |
-| 500 | `ops/scripts/runtime/smoke/check-route-contract.ts` | project-scripts | 86 | 3.9 | Project source/support file |
-| 501 | `ops/scripts/runtime/smoke/live-smoke.ts` | project-scripts | 318 | 13.4 | Project source/support file |
-| 502 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | project-scripts | 213 | 6.9 | Project source/support file |
-| 503 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | project-scripts | 230 | 9.6 | Project source/support file |
-| 504 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | project-scripts | 430 | 18.8 | Project source/support file |
-| 505 | `ops/scripts/runtime/storage/dataset-readiness.ts` | project-scripts | 117 | 4.5 | Project source/support file |
-| 506 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | project-scripts | 211 | 6.7 | Project source/support file |
-| 507 | `ops/scripts/runtime/storage/prune-storage.ts` | project-scripts | 464 | 15.7 | Project source/support file |
-| 508 | `ops/scripts/runtime/storage/restore-candidates.ts` | project-scripts | 213 | 7.5 | Project source/support file |
-| 509 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | project-scripts | 219 | 7.9 | Project source/support file |
-| 510 | `ops/scripts/verification/verify-backup-reliability.ts` | project-scripts | 140 | 5.0 | Project source/support file |
-| 511 | `ops/scripts/verification/verify-docker-release.ts` | project-scripts | 691 | 33.2 | Project source/support file |
-| 512 | `ops/scripts/verification/verify-hardening-policy.ts` | project-scripts | 140 | 5.5 | Project source/support file |
-| 513 | `ops/scripts/verification/verify-runtime-deps.ts` | project-scripts | 350 | 14.7 | Project source/support file |
-| 514 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
-| 515 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
-| 516 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
-| 517 | `README.md` | project-root | 159 | 11.6 | Project documentation entrypoint |
-| 518 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
-| 519 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
-| 520 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |
-| 521 | `run/docker/backup.bat` | project-scripts | 15 | 0.6 | Project source/support file |
-| 522 | `run/docker/doctor.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 523 | `run/docker/install.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 524 | `run/docker/README.md` | project-scripts | 44 | 3.1 | Documentation |
-| 525 | `run/docker/release.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 526 | `run/docker/restore.bat` | project-scripts | 29 | 1.0 | Project source/support file |
-| 527 | `run/docker/rotate-cloudflare.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 528 | `run/docker/start.bat` | project-scripts | 15 | 0.6 | Project source/support file |
-| 529 | `run/docker/update.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 530 | `run/full-automation.bat` | project-scripts | 22 | 0.6 | Project source/support file |
-| 531 | `run/README.md` | project-scripts | 47 | 2.9 | Documentation |
-| 532 | `run/setup.bat` | project-scripts | 349 | 16.2 | Project source/support file |
-| 533 | `run/sh/setup.sh` | project-scripts | 116 | 3.3 | Project source/support file |
-| 534 | `run/sh/start-server.sh` | project-scripts | 147 | 5.6 | Project source/support file |
-| 535 | `run/sh/stop-server.sh` | project-scripts | 62 | 1.6 | Project source/support file |
-| 536 | `run/start-server.bat` | project-scripts | 570 | 29.3 | Project source/support file |
-| 537 | `run/stop-server.bat` | project-scripts | 183 | 8.4 | Project source/support file |
-| 538 | `run/verify-local.bat` | project-scripts | 148 | 4.9 | Project source/support file |
-| 539 | `Start Business OS.bat` | project-root | 38 | 1.3 | Project source/support file |
+| 449 | `ops/scripts/architecture/phase29-audit.ts` | project-scripts | 586 | 20.4 | Project source/support file |
+| 450 | `ops/scripts/architecture/runtime-js-inventory.ts` | project-scripts | 220 | 7.5 | Project source/support file |
+| 451 | `ops/scripts/backend/build-package-stage.ts` | project-scripts | 142 | 3.9 | Project source/support file |
+| 452 | `ops/scripts/backend/build-server-entry.ts` | project-scripts | 86 | 2.8 | Project source/support file |
+| 453 | `ops/scripts/backend/schema-audit.ts` | project-scripts | 496 | 16.9 | Project source/support file |
+| 454 | `ops/scripts/backend/schema-primary-key-preflight.ts` | project-scripts | 216 | 8.3 | Project source/support file |
+| 455 | `ops/scripts/backend/schema-primary-key-rollback.sql` | project-scripts | 15 | 0.5 | Project source/support file |
+| 456 | `ops/scripts/backend/verify-data-integrity.ts` | project-scripts | 689 | 29.0 | Project source/support file |
+| 457 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | project-scripts | 110 | 3.6 | Project source/support file |
+| 458 | `ops/scripts/frontend/verify-i18n.ts` | project-scripts | 145 | 4.3 | Project source/support file |
+| 459 | `ops/scripts/frontend/verify-performance.ts` | project-scripts | 144 | 9.6 | Project source/support file |
+| 460 | `ops/scripts/frontend/verify-ui.ts` | project-scripts | 243 | 8.7 | Project source/support file |
+| 461 | `ops/scripts/lib/fs-utils.ts` | project-scripts | 297 | 7.0 | Project source/support file |
+| 462 | `ops/scripts/lib/report-utils.ts` | project-scripts | 83 | 2.0 | Project source/support file |
+| 463 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 265 | 7.9 | Project source/support file |
+| 464 | `ops/scripts/powershell/clear-stale-node-processes.ps1` | project-scripts | 92 | 2.8 | Project source/support file |
+| 465 | `ops/scripts/powershell/docker-release.ps1` | project-scripts | 1011 | 48.0 | Project source/support file |
+| 466 | `ops/scripts/powershell/full-automation.ps1` | project-scripts | 214 | 8.1 | Project source/support file |
+| 467 | `ops/scripts/powershell/npm-install-mode.ps1` | project-scripts | 28 | 0.8 | Project source/support file |
+| 468 | `ops/scripts/powershell/runtime-bootstrap.ps1` | project-scripts | 592 | 21.6 | Project source/support file |
+| 469 | `ops/scripts/powershell/start-runtime.ps1` | project-scripts | 377 | 16.3 | Project source/support file |
+| 470 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | project-scripts | 240 | 7.8 | Project source/support file |
+| 471 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | project-scripts | 206 | 7.1 | Project source/support file |
+| 472 | `ops/scripts/runtime/audits/audit-auth.ts` | project-scripts | 191 | 6.0 | Project source/support file |
+| 473 | `ops/scripts/runtime/audits/audit-manifest.ts` | project-scripts | 302 | 8.7 | Project source/support file |
+| 474 | `ops/scripts/runtime/audits/audit-report-html.ts` | project-scripts | 446 | 15.9 | Project source/support file |
+| 475 | `ops/scripts/runtime/audits/deep-live-audit.ts` | project-scripts | 1463 | 55.3 | Project source/support file |
+| 476 | `ops/scripts/runtime/audits/full-app-audit.ts` | project-scripts | 652 | 28.6 | Project source/support file |
+| 477 | `ops/scripts/runtime/browser-action-smoke.ts` | project-scripts | 869 | 31.2 | Project source/support file |
+| 478 | `ops/scripts/runtime/build-ecosystem-config.ts` | project-scripts | 86 | 2.8 | Project source/support file |
+| 479 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | project-scripts | 244 | 10.8 | Project source/support file |
+| 480 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | project-scripts | 144 | 6.0 | Project source/support file |
+| 481 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | project-scripts | 285 | 12.0 | Project source/support file |
+| 482 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | project-scripts | 155 | 6.0 | Project source/support file |
+| 483 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | project-scripts | 123 | 3.6 | Project source/support file |
+| 484 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | project-scripts | 139 | 6.5 | Project source/support file |
+| 485 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | project-scripts | 136 | 6.0 | Project source/support file |
+| 486 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | project-scripts | 136 | 6.3 | Project source/support file |
+| 487 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | project-scripts | 165 | 8.1 | Project source/support file |
+| 488 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | project-scripts | 247 | 7.6 | Project source/support file |
+| 489 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | project-scripts | 140 | 6.7 | Project source/support file |
+| 490 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | project-scripts | 129 | 6.1 | Project source/support file |
+| 491 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | project-scripts | 144 | 6.6 | Project source/support file |
+| 492 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | project-scripts | 127 | 6.0 | Project source/support file |
+| 493 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | project-scripts | 139 | 6.7 | Project source/support file |
+| 494 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | project-scripts | 129 | 6.0 | Project source/support file |
+| 495 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | project-scripts | 139 | 6.0 | Project source/support file |
+| 496 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | project-scripts | 176 | 7.3 | Project source/support file |
+| 497 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | project-scripts | 137 | 6.1 | Project source/support file |
+| 498 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | project-scripts | 865 | 56.8 | Project source/support file |
+| 499 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | project-scripts | 164 | 7.9 | Project source/support file |
+| 500 | `ops/scripts/runtime/smoke/check-public-url.ts` | project-scripts | 239 | 8.2 | Project source/support file |
+| 501 | `ops/scripts/runtime/smoke/check-route-contract.ts` | project-scripts | 86 | 3.9 | Project source/support file |
+| 502 | `ops/scripts/runtime/smoke/live-smoke.ts` | project-scripts | 318 | 13.4 | Project source/support file |
+| 503 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | project-scripts | 213 | 6.9 | Project source/support file |
+| 504 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | project-scripts | 230 | 9.6 | Project source/support file |
+| 505 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | project-scripts | 430 | 18.8 | Project source/support file |
+| 506 | `ops/scripts/runtime/storage/dataset-readiness.ts` | project-scripts | 117 | 4.5 | Project source/support file |
+| 507 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | project-scripts | 211 | 6.7 | Project source/support file |
+| 508 | `ops/scripts/runtime/storage/prune-storage.ts` | project-scripts | 464 | 15.7 | Project source/support file |
+| 509 | `ops/scripts/runtime/storage/restore-candidates.ts` | project-scripts | 213 | 7.5 | Project source/support file |
+| 510 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | project-scripts | 219 | 7.9 | Project source/support file |
+| 511 | `ops/scripts/verification/verify-backup-reliability.ts` | project-scripts | 140 | 5.0 | Project source/support file |
+| 512 | `ops/scripts/verification/verify-docker-release.ts` | project-scripts | 691 | 33.2 | Project source/support file |
+| 513 | `ops/scripts/verification/verify-hardening-policy.ts` | project-scripts | 140 | 5.5 | Project source/support file |
+| 514 | `ops/scripts/verification/verify-runtime-deps.ts` | project-scripts | 350 | 14.7 | Project source/support file |
+| 515 | `ops/scripts/verification/verify-scale-services.ts` | project-scripts | 175 | 6.5 | Project source/support file |
+| 516 | `ops/scripts/verification/verify-secret-hygiene.ts` | project-scripts | 56 | 2.0 | Project source/support file |
+| 517 | `package.json` | project-root | 22 | 0.6 | Configuration/data manifest |
+| 518 | `README.md` | project-root | 159 | 11.6 | Project documentation entrypoint |
+| 519 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
+| 520 | `run/clean-generated.bat` | project-scripts | 60 | 1.8 | Project source/support file |
+| 521 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.1 | Project source/support file |
+| 522 | `run/docker/backup.bat` | project-scripts | 15 | 0.6 | Project source/support file |
+| 523 | `run/docker/doctor.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 524 | `run/docker/install.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 525 | `run/docker/README.md` | project-scripts | 44 | 3.1 | Documentation |
+| 526 | `run/docker/release.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 527 | `run/docker/restore.bat` | project-scripts | 29 | 1.0 | Project source/support file |
+| 528 | `run/docker/rotate-cloudflare.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 529 | `run/docker/start.bat` | project-scripts | 15 | 0.6 | Project source/support file |
+| 530 | `run/docker/update.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 531 | `run/full-automation.bat` | project-scripts | 22 | 0.6 | Project source/support file |
+| 532 | `run/README.md` | project-scripts | 47 | 2.9 | Documentation |
+| 533 | `run/setup.bat` | project-scripts | 349 | 16.2 | Project source/support file |
+| 534 | `run/sh/setup.sh` | project-scripts | 116 | 3.3 | Project source/support file |
+| 535 | `run/sh/start-server.sh` | project-scripts | 147 | 5.6 | Project source/support file |
+| 536 | `run/sh/stop-server.sh` | project-scripts | 62 | 1.6 | Project source/support file |
+| 537 | `run/start-server.bat` | project-scripts | 570 | 29.3 | Project source/support file |
+| 538 | `run/stop-server.bat` | project-scripts | 183 | 8.4 | Project source/support file |
+| 539 | `run/verify-local.bat` | project-scripts | 148 | 4.9 | Project source/support file |
+| 540 | `Start Business OS.bat` | project-root | 38 | 1.3 | Project source/support file |
