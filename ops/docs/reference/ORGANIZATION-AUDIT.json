@@ -2,7 +2,7 @@
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
   "filesScanned": 558,
-  "largeFiles": 74,
+  "largeFiles": 75,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
   "wrapperRemovalCandidates": 0,
@@ -225,6 +225,7 @@
     "ops/scripts/powershell/docker-release.ps1",
     "ops/scripts/runtime/audits/deep-live-audit.ts",
     "ops/scripts/runtime/browser-action-smoke.ts",
+    "ops/scripts/runtime/live-checks/all-pages-control-audit.ts",
     "ops/scripts/runtime/live-checks/phase84-ui-live-check.ts"
   ],
   "wrapperFiles": [],

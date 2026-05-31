@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-31T02:33:48.722Z
+Generated: 2026-05-31T04:23:35.898Z
 
 ## Summary
 
@@ -64,12 +64,12 @@ Generated: 2026-05-31T02:33:48.722Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8242 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7316 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7132 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5625 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7331 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7133 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5640 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| ops/docs/reference/PHASE29-AUDIT.json | 3400 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3401 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2762 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |

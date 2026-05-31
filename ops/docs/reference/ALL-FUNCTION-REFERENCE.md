@@ -453,7 +453,7 @@ Code files scanned: **478**
 | 441 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
 | 442 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
 | 443 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
-| 444 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 28 |
+| 444 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 29 |
 | 445 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
 | 446 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 2 |
 | 447 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
@@ -6711,34 +6711,35 @@ Code files scanned: **478**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 129 |
-| 2 | `readArgs` | function | 136 |
-| 3 | `safeName` | function | 152 |
-| 4 | `addFinding` | function | 159 |
-| 5 | `isExternalNoise` | function | 163 |
-| 6 | `isAppConsoleIssue` | function | 167 |
-| 7 | `isAppNetworkIssue` | function | 173 |
-| 8 | `routeRoot` | function | 179 |
-| 9 | `textForLabel` | function | 184 |
-| 10 | `shouldSkipButton` | function | 188 |
-| 11 | `attachCollectors` | function | 197 |
-| 12 | `writeJson` | function | 232 |
-| 13 | `persistSummary` | function | 237 |
-| 14 | `saveScreenshot` | function | 242 |
-| 15 | `dismissTransientUi` | function | 249 |
-| 16 | `waitForRouteReady` | function | 267 |
-| 17 | `navigateRoute` | function | 283 |
-| 18 | `countVisible` | function | 298 |
-| 19 | `activeButtonCandidates` | function | 307 |
-| 20 | `clickButtonCandidate` | function | 332 |
-| 21 | `exerciseSearchInputs` | function | 383 |
-| 22 | `exerciseSelects` | function | 427 |
-| 23 | `collectLayoutIssues` | function | 484 |
-| 24 | `hasScrollableAncestor` | const arrow | 505 |
-| 25 | `runRoute` | function | 544 |
-| 26 | `createAuthedPage` | function | 599 |
-| 27 | `runProfile` | function | 618 |
-| 28 | `main` | function | 653 |
+| 1 | `readArg` | function | 135 |
+| 2 | `readArgs` | function | 142 |
+| 3 | `safeName` | function | 158 |
+| 4 | `addFinding` | function | 165 |
+| 5 | `isExternalNoise` | function | 169 |
+| 6 | `isAppConsoleIssue` | function | 173 |
+| 7 | `isAppNetworkIssue` | function | 179 |
+| 8 | `routeRoot` | function | 185 |
+| 9 | `textForLabel` | function | 190 |
+| 10 | `shouldSkipButton` | function | 194 |
+| 11 | `expectedButtonNavigation` | function | 203 |
+| 12 | `attachCollectors` | function | 208 |
+| 13 | `writeJson` | function | 243 |
+| 14 | `persistSummary` | function | 248 |
+| 15 | `saveScreenshot` | function | 253 |
+| 16 | `dismissTransientUi` | function | 260 |
+| 17 | `waitForRouteReady` | function | 278 |
+| 18 | `navigateRoute` | function | 294 |
+| 19 | `countVisible` | function | 309 |
+| 20 | `activeButtonCandidates` | function | 318 |
+| 21 | `clickButtonCandidate` | function | 343 |
+| 22 | `exerciseSearchInputs` | function | 417 |
+| 23 | `exerciseSelects` | function | 461 |
+| 24 | `collectLayoutIssues` | function | 518 |
+| 25 | `hasScrollableAncestor` | const arrow | 539 |
+| 26 | `runRoute` | function | 578 |
+| 27 | `createAuthedPage` | function | 633 |
+| 28 | `runProfile` | function | 652 |
+| 29 | `main` | function | 687 |
 
 ### 3.445 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
