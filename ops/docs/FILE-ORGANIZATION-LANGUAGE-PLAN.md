@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 635 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 636 in this file.
 
 ## Goal
 
@@ -5557,6 +5557,14 @@ Decision rule:
     references an unknown source key, while preserving the current streaming
     backup, Drive sync, cancellation, UI, and offline pause assertions. Direct
     backup reliability verification passed.
+
+636. Strengthen the hardening policy verifier and current policy paths.
+    Done: `ops/scripts/verification/verify-hardening-policy.ts` now declares
+    hardening policy, file-rule, source path, and failure-message shapes, and
+    validates that the policy JSON exposes a rules array before scanning. The
+    policy file now references current tracked TypeScript sources for backend
+    sync and maintenance-lock checks instead of stale `.js` paths. Direct
+    hardening policy verification passed.
 
 ## Safety Gates
 

@@ -85,7 +85,7 @@
           ]
         },
         {
-          "path": "backend/src/routes/sync.js",
+          "path": "backend/src/routes/sync.ts",
           "mustContain": [
             "OUTBOX_OPERATION_MAP",
             "onlineOnly: true",
@@ -125,7 +125,7 @@
           "mustContain": ["cancelSystemJob", "AbortController", "cancel_requested_at", "metrics_json", "SystemJobCancelledError"]
         },
         {
-          "path": "backend/src/maintenanceLock.js",
+          "path": "backend/src/maintenanceLock.ts",
           "mustContain": ["system_busy", "maintenanceWriteGuard", "423"]
         },
         {

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 635.
+- Latest completed implementation move in this roadmap: Move 636.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7260,3 +7260,11 @@ Move 635 status:
   failure instead of assuming every expectation map key is valid, preserving the
   existing streaming backup, Drive sync, cancellation, UI, and offline pause
   assertions. Direct backup reliability verification passed.
+
+Move 636 status:
+- Move 636 strengthens the hardening policy verifier with explicit TypeScript
+  shapes for policy rules, file rules, tracked/pending source paths, and failure
+  messages. The verifier now validates that the policy JSON exposes a rules
+  array before scanning. The hardening policy was also updated from stale
+  backend `.js` paths to the current tracked TypeScript sources for sync and
+  maintenance locks. Direct hardening policy verification passed.

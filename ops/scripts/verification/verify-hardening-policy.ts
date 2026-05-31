@@ -10,14 +10,39 @@ const { readJson, readUtf8 } = require('../lib/fs-utils.ts')
 const root = path.resolve(__dirname, '..', '..', '..')
 const policyPath = path.join(root, 'ops', 'policies', 'hardening-policy.json')
 
-function normalizeRelativePath(value) {
+type FilePolicyRule = {
+  path: string
+  mustContain?: string[]
+  mustNotContain?: string[]
+}
+type HardeningRule = {
+  name?: string
+  mustNotExist?: string[]
+  files?: FilePolicyRule[]
+}
+type HardeningPolicy = {
+  version?: number
+  name?: string
+  trackedOnly?: boolean
+  rules: HardeningRule[]
+}
+
+function normalizeRelativePath(value: unknown): string {
   return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '')
 }
 
-function readWithLocalImports(relativePath) {
+function readPolicy(): HardeningPolicy {
+  const policy = readJson(policyPath) as HardeningPolicy
+  if (!policy || !Array.isArray(policy.rules)) {
+    throw new Error(`${normalizeRelativePath(path.relative(root, policyPath))} must define a rules array`)
+  }
+  return policy
+}
+
+function readWithLocalImports(relativePath: string): string {
   const text = readUtf8(path.join(root, relativePath))
   const baseDir = path.dirname(relativePath)
-  const importedTexts = []
+  const importedTexts: string[] = []
   const importPattern = /import\s+['"](\.\/[^'"]+)['"]/g
   for (const match of text.matchAll(importPattern)) {
     const importedRelativePath = normalizeRelativePath(path.join(baseDir, match[1]))
@@ -28,32 +53,32 @@ function readWithLocalImports(relativePath) {
   return [text, ...importedTexts].join('\n')
 }
 
-function listTrackedOrPendingFiles() {
+function listTrackedOrPendingFiles(): Set<string> {
   return new Set(execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' })
     .split(/\r?\n/)
     .map(normalizeRelativePath)
     .filter(Boolean))
 }
 
-function lineFor(text, needle) {
+function lineFor(text: string, needle: string): number {
   const index = text.indexOf(needle)
   if (index < 0) return 0
   return text.slice(0, index).split(/\r?\n/).length
 }
 
-function assertContains(failures, relativePath, text, needle, ruleName) {
+function assertContains(failures: string[], relativePath: string, text: string, needle: string, ruleName: string): void {
   if (!text.includes(needle)) {
     failures.push(`${ruleName}: ${relativePath} is missing required text: ${needle}`)
   }
 }
 
-function assertNotContains(failures, relativePath, text, needle, ruleName) {
+function assertNotContains(failures: string[], relativePath: string, text: string, needle: string, ruleName: string): void {
   if (text.includes(needle)) {
     failures.push(`${ruleName}: ${relativePath}:${lineFor(text, needle)} contains forbidden text: ${needle}`)
   }
 }
 
-function assertNoApiCachingRegression(failures) {
+function assertNoApiCachingRegression(failures: string[]): void {
   const swPath = 'frontend/public/sw.js'
   const sw = readUtf8(path.join(root, swPath))
   const fetchHandler = sw.match(/self\.addEventListener\('fetch'[\s\S]*?\n}\)/)?.[0] || ''
@@ -74,7 +99,7 @@ function assertNoApiCachingRegression(failures) {
   }
 }
 
-function assertFullAutomationIncludesPolicy(failures) {
+function assertFullAutomationIncludesPolicy(failures: string[]): void {
   const script = readUtf8(path.join(root, 'ops/scripts/powershell/full-automation.ps1'))
   const secretIndex = script.indexOf('Secret hygiene verification')
   const policyIndex = script.indexOf('Hardening policy verification')
@@ -90,12 +115,12 @@ function assertFullAutomationIncludesPolicy(failures) {
   }
 }
 
-function main() {
-  const policy = readJson(policyPath)
+function main(): void {
+  const policy = readPolicy()
   const tracked = listTrackedOrPendingFiles()
-  const failures = []
+  const failures: string[] = []
 
-  for (const rule of policy.rules || []) {
+  for (const rule of policy.rules) {
     const ruleName = rule.name || 'unnamed rule'
     for (const missingPath of rule.mustNotExist || []) {
       const relativePath = normalizeRelativePath(missingPath)
