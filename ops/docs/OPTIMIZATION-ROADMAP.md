@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 647.
+- Latest completed implementation move in this roadmap: Move 648.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7419,3 +7419,21 @@ Move 647 status:
   findings. The generated Markdown latest report shows a 26.5% skipped ratio,
   control counts by kind, skipped-reason counts, lowest-tested routes, and
   highest-skipped routes. Post-live hygiene and Phase 29 audit passed.
+
+Move 648 status:
+- Move 648 adds a seeded rollback backlog to the all-pages Phase 8.4 control
+  audit. The audit now writes per-run and latest JSON/Markdown artifacts at
+  `seeded-rollback-backlog.*` and
+  `ops/runtime/reports/all-pages-control-audit-seeded-rollback-latest.*`.
+  These reports extract intentionally skipped controls that need a dedicated
+  rollback harness before live clicking: data-mutating buttons, receipt
+  settings toggles, print/download actions, file/media actions, and external
+  delivery actions. The skip classifier was tightened by removing the generic
+  `choose` trigger, which fixed public-catalog FAQ false positives and raised
+  tested coverage. Proof: focused `public_catalog` audit passed with 136
+  controls, 116 tested controls, 20 skipped controls, and 0 findings; full
+  exhaustive all-pages audit passed with 34 route/profile checks, 909 controls,
+  670 tested controls, 239 skipped controls, 0 failed controls, 68 screenshots,
+  and 0 findings. The seeded rollback latest report lists 28 candidates: 14
+  data-mutating controls, 12 settings toggles, and 2 print/download controls.
+  Post-live hygiene and Phase 29 audit passed.

@@ -35,6 +35,16 @@ type ControlResult = {
 
 type ControlRecord = ControlResult & { profile: string; route: string }
 
+type SeededRollbackCandidate = {
+  profile: string
+  route: string
+  kind: string
+  label: string
+  reason: string
+  category: string
+  suggestedHarness: string
+}
+
 type ControlCoverage = {
   total: number
   tested: number
@@ -112,6 +122,7 @@ type AuditSummary = {
   artifacts: {
     screenshots: string[]
     coverageReports: string[]
+    seededRollbackBacklog: string[]
   }
 }
 
@@ -127,8 +138,12 @@ const REPORT_DIR = process.env.BOS_ALL_PAGES_AUDIT_REPORT_DIR
 const SCREENSHOT_DIR = path.join(REPORT_DIR, 'screenshots')
 const REPORT_PATH = path.join(REPORT_DIR, 'summary.json')
 const COVERAGE_REPORT_PATH = path.join(REPORT_DIR, 'coverage.md')
+const SEEDED_ROLLBACK_BACKLOG_PATH = path.join(REPORT_DIR, 'seeded-rollback-backlog.json')
+const SEEDED_ROLLBACK_BACKLOG_MARKDOWN_PATH = path.join(REPORT_DIR, 'seeded-rollback-backlog.md')
 const LATEST_REPORT_PATH = path.join(ROOT_DIR, 'ops/runtime/reports/all-pages-control-audit-latest.json')
 const LATEST_COVERAGE_REPORT_PATH = path.join(ROOT_DIR, 'ops/runtime/reports/all-pages-control-audit-latest.md')
+const LATEST_SEEDED_ROLLBACK_BACKLOG_PATH = path.join(ROOT_DIR, 'ops/runtime/reports/all-pages-control-audit-seeded-rollback-latest.json')
+const LATEST_SEEDED_ROLLBACK_BACKLOG_MARKDOWN_PATH = path.join(ROOT_DIR, 'ops/runtime/reports/all-pages-control-audit-seeded-rollback-latest.md')
 const ROUTE_READY_TIMEOUT_MS = Number(process.env.BOS_ALL_PAGES_READY_TIMEOUT_MS || 18_000)
 const CONTROL_TIMEOUT_MS = Number(process.env.BOS_ALL_PAGES_CONTROL_TIMEOUT_MS || 2_500)
 const MAX_BUTTON_CLICKS_PER_ROUTE = Number(process.env.BOS_ALL_PAGES_MAX_BUTTONS || 18)
@@ -138,7 +153,7 @@ const MIN_TESTED_CONTROLS = Number(process.env.BOS_ALL_PAGES_MIN_TESTED_CONTROLS
 const MAX_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_SKIPPED_RATIO || 0.75)
 const MAX_ROUTE_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_ROUTE_SKIPPED_RATIO || 0.8)
 
-const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|choose|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b|(?:hide|show)\s*\d+\s*fields/i
+const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b|(?:hide|show)\s*\d+\s*fields/i
 const LOW_VALUE_BUTTON_RE = /^\s*(\+|-|×|x|\.{1,3}|…|←|→|↑|↓|<|>|\/|a|b|c|d|e|f|g|h|i|j|k|[0-9]+)\s*$/i
 const EXTERNAL_NOISE_RE = /chrome-extension:|No Listener: tabs:outgoing|Grammarly|Statsig|ab\.chatgpt\.com|ERR_BLOCKED_BY_CLIENT|webextension\.js|CoupertUIFont|unsafe-eval.*content\.js/i
 const NON_BLOCKING_APP_DIAGNOSTIC_RE = /^\[PageLoader\] Page bundle is still loading\. The app shell is waiting instead of forcing a reload\.$/
@@ -174,6 +189,7 @@ const summary: AuditSummary = {
   artifacts: {
     screenshots: [],
     coverageReports: [],
+    seededRollbackBacklog: [],
   },
 }
 
@@ -372,6 +388,103 @@ function routeCoverageRows(): Array<{ route: string; total: number; tested: numb
     }))
 }
 
+function seededRollbackCategory(control: ControlRecord): string {
+  const label = control.label.toLowerCase()
+  const reason = String(control.reason || '').toLowerCase()
+  if (reason.includes('file chooser') || /\b(upload|file|camera|scan)\b/.test(label)) return 'file-or-media'
+  if (/\b(print|download)\b/.test(label)) return 'print-or-download'
+  if (/\b(email|whatsapp|send)\b/.test(label)) return 'external-message'
+  if (/(?:hide|show)\s*\d+\s*fields/.test(label)) return 'settings-toggle'
+  if (/\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|apply|approve|reject|backup|sync)\b/.test(label)) {
+    return 'data-mutating'
+  }
+  return 'mutation-risk'
+}
+
+function seededRollbackHarness(category: string): string {
+  if (category === 'file-or-media') return 'Use a small fixture file and delete uploaded artifacts after the test.'
+  if (category === 'print-or-download') return 'Intercept print/download APIs and assert the generated artifact without writing business rows.'
+  if (category === 'external-message') return 'Stub external delivery clients and assert queued payloads in a rollback transaction.'
+  if (category === 'settings-toggle') return 'Snapshot settings, toggle the seeded field group, assert preview output, then restore settings.'
+  if (category === 'data-mutating') return 'Run against seeded rows inside a rollback or snapshot/restore transaction.'
+  return 'Add a dedicated seeded test with before/after data assertions and cleanup.'
+}
+
+function seededRollbackCandidates(): SeededRollbackCandidate[] {
+  const seen = new Set<string>()
+  const candidates: SeededRollbackCandidate[] = []
+  for (const control of summary.controls) {
+    const reason = String(control.reason || '')
+    const isRollbackCandidate = control.skipped && (
+      reason === 'mutating, noisy, file, print, or external action'
+      || reason === 'file chooser avoided'
+    )
+    if (!isRollbackCandidate) continue
+    const category = seededRollbackCategory(control)
+    const key = `${control.profile}|${control.route}|${control.kind}|${control.label}|${category}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push({
+      profile: control.profile,
+      route: control.route,
+      kind: control.kind,
+      label: control.label,
+      reason,
+      category,
+      suggestedHarness: seededRollbackHarness(category),
+    })
+  }
+  return candidates.sort((left, right) => (
+    left.category.localeCompare(right.category)
+    || left.route.localeCompare(right.route)
+    || left.profile.localeCompare(right.profile)
+    || left.label.localeCompare(right.label)
+  ))
+}
+
+function seededRollbackSummaryRows(candidates: SeededRollbackCandidate[]): unknown[][] {
+  const totals = new Map<string, number>()
+  for (const candidate of candidates) {
+    totals.set(candidate.category, (totals.get(candidate.category) || 0) + 1)
+  }
+  return Array.from(totals.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([category, count]) => [category, count, seededRollbackHarness(category)])
+}
+
+function renderSeededRollbackMarkdown(candidates: SeededRollbackCandidate[]): string {
+  const candidateRows = candidates
+    .slice(0, 80)
+    .map((candidate) => [
+      candidate.category,
+      `${candidate.profile}/${candidate.route}`,
+      candidate.kind,
+      candidate.label,
+      candidate.reason,
+      candidate.suggestedHarness,
+    ])
+
+  return `# Seeded Rollback Control Backlog
+
+Generated: ${new Date().toISOString()}
+
+These controls are intentionally skipped by the broad non-mutating all-pages
+audit because they can mutate business data, open files/media, print/download,
+or call external delivery paths. They need dedicated seeded rollback coverage
+before the broad audit should click them.
+
+## Summary
+
+- Candidates: ${candidates.length}
+
+${markdownTable(['Category', 'Controls', 'Suggested Harness'], seededRollbackSummaryRows(candidates))}
+
+## Candidate Controls
+
+${candidateRows.length ? markdownTable(['Category', 'Route', 'Kind', 'Label', 'Skip Reason', 'Suggested Harness'], candidateRows) : 'No seeded rollback candidates.'}
+`
+}
+
 function renderCoverageMarkdown(): string {
   const coverage = summary.coverage
   const kindRows = Object.entries(coverage.byKind)
@@ -495,11 +608,32 @@ function addCoverageGateFindings(): void {
 async function persistSummary(): Promise<void> {
   summary.coverage = computeControlCoverage(summary.controls)
   summary.artifacts.coverageReports = [COVERAGE_REPORT_PATH, LATEST_COVERAGE_REPORT_PATH]
+  summary.artifacts.seededRollbackBacklog = [
+    SEEDED_ROLLBACK_BACKLOG_PATH,
+    SEEDED_ROLLBACK_BACKLOG_MARKDOWN_PATH,
+    LATEST_SEEDED_ROLLBACK_BACKLOG_PATH,
+    LATEST_SEEDED_ROLLBACK_BACKLOG_MARKDOWN_PATH,
+  ]
   await writeJson(REPORT_PATH, summary)
   await writeJson(LATEST_REPORT_PATH, summary)
   const coverageReport = renderCoverageMarkdown()
   await writeText(COVERAGE_REPORT_PATH, coverageReport)
   await writeText(LATEST_COVERAGE_REPORT_PATH, coverageReport)
+  const rollbackCandidates = seededRollbackCandidates()
+  const rollbackReport = {
+    generatedAt: new Date().toISOString(),
+    sourceSummary: REPORT_PATH,
+    candidateCount: rollbackCandidates.length,
+    categories: Object.fromEntries(
+      seededRollbackSummaryRows(rollbackCandidates).map(([category, count]) => [category, count]),
+    ),
+    candidates: rollbackCandidates,
+  }
+  await writeJson(SEEDED_ROLLBACK_BACKLOG_PATH, rollbackReport)
+  await writeJson(LATEST_SEEDED_ROLLBACK_BACKLOG_PATH, rollbackReport)
+  const rollbackMarkdown = renderSeededRollbackMarkdown(rollbackCandidates)
+  await writeText(SEEDED_ROLLBACK_BACKLOG_MARKDOWN_PATH, rollbackMarkdown)
+  await writeText(LATEST_SEEDED_ROLLBACK_BACKLOG_MARKDOWN_PATH, rollbackMarkdown)
 }
 
 async function saveScreenshot(page: Page, name: string): Promise<string> {

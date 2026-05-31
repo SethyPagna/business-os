@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 647 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 648 in this file.
 
 ## Goal
 
@@ -5707,6 +5707,23 @@ Decision rule:
     findings; full exhaustive all-pages audit passed with 34 route/profile
     checks, 908 control records, 667 tested controls, 241 skipped controls, 0
     failed controls, 68 screenshots, and 0 findings. Post-live hygiene and
+    Phase 29 audit passed.
+
+648. Add seeded rollback backlog reports for skipped mutating controls.
+    Done: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now
+    writes per-run and latest JSON/Markdown rollback backlog artifacts for
+    controls that the broad non-mutating audit must not click directly. The
+    backlog categorizes skipped controls by required harness: data-mutating,
+    settings-toggle, print-or-download, file-or-media, external-message, or
+    mutation-risk. The skip policy also stopped treating generic `choose`
+    wording as a file/media risk, which removed public-catalog FAQ false
+    positives and increased tested coverage. Proof: focused `public_catalog`
+    audit passed with 136 controls, 116 tested controls, 20 skipped controls,
+    and 0 findings; full exhaustive all-pages audit passed with 34
+    route/profile checks, 909 control records, 670 tested controls, 239 skipped
+    controls, 0 failed controls, 68 screenshots, and 0 findings. The seeded
+    rollback latest report lists 28 candidates: 14 data-mutating controls, 12
+    settings toggles, and 2 print/download controls. Post-live hygiene and
     Phase 29 audit passed.
 
 ## Safety Gates
