@@ -486,7 +486,7 @@ Code files scanned: **477**
 | 474 | `ops/scripts/verification/verify-hardening-policy.ts` | 9 |
 | 475 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
 | 476 | `ops/scripts/verification/verify-scale-services.ts` | 8 |
-| 477 | `ops/scripts/verification/verify-secret-hygiene.ts` | 0 |
+| 477 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
 
 ## 3. Detailed Function Commentary
 
@@ -7087,5 +7087,7 @@ Code files scanned: **477**
 
 ### 3.477 `ops/scripts/verification/verify-secret-hygiene.ts`
 
-- No top-level named symbols detected.
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `isUnsafeSecretAssignment` | function | 35 |
 
