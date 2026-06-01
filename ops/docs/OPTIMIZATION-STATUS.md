@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 679, typed inventory core transport extraction
+- Latest completed move: Move 680, typed RFID transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `37fc69af122b1ac6`
+  `d782f88511b84022`
 
 Latest verified reports:
 
@@ -30,7 +30,7 @@ Latest verified reports:
 - latest focused Audit Log desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-00-11-876Z/summary.json`
 - latest focused Inventory desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-15-32-810Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-26-48-123Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,6 +48,14 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend RFID inventory transport is now `frontend/src/api/rfidTransport.ts`
+  with typed gateway status, tag search/create, session event, review, and
+  apply transport. RFID id encoding and device-attributed RFID write payloads
+  now live outside the large API registry. The source guard now parses 214
+  frontend TypeScript files, the production build reports the `app-api-methods`
+  chunk around 43.40 kB, and the focused Inventory desktop/mobile live audit
+  passed with zero findings.
 
 - Frontend inventory core transport is now
   `frontend/src/api/inventoryTransport.ts` with typed stock actions,

@@ -70,6 +70,15 @@ import {
   transferInventoryStock as transferInventoryStockRequest,
 } from './inventoryTransport.ts'
 import {
+  applyRfidSession as applyRfidSessionRequest,
+  createRfidSession as createRfidSessionRequest,
+  createRfidTag as createRfidTagRequest,
+  getRfidSessionReview as getRfidSessionReviewRequest,
+  getRfidStatus as getRfidStatusRequest,
+  recordRfidSessionEvents as recordRfidSessionEventsRequest,
+  searchRfidTags as searchRfidTagsRequest,
+} from './rfidTransport.ts'
+import {
   askPortalAi as askPortalAiRequest,
   createPortalSubmission as createPortalSubmissionRequest,
   getCatalogMeta as getCatalogMetaRequest,
@@ -1294,23 +1303,21 @@ async function syncPendingSalesQueue({ force = false } = {}) {
 }
 
 export const getRfidStatus = (params = {}) => {
-  const q = buildQueryString(params)
-  return route(`inventory:rfid:status:${q}`, () => apiFetch('GET', appendQuery('/api/inventory/rfid/status', q)), () => ({ item: { connected: false, readerCount: 0, tagCount: 0, exceptionCount: 0 } }))
+  return getRfidStatusRequest(params)
 }
 export const createRfidTag = payload =>
-  route('inventory:rfid:tags:create', () => apiFetch('POST', '/api/inventory/rfid/tags', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+  createRfidTagRequest(payload)
 export const searchRfidTags = (params = {}) => {
-  const q = buildQueryString(params)
-  return route(`inventory:rfid:tags:search:${q}`, () => apiFetch('GET', appendQuery('/api/inventory/rfid/tags/search', q)), () => ({ items: [] }))
+  return searchRfidTagsRequest(params)
 }
 export const createRfidSession = payload =>
-  route('inventory:rfid:sessions:create', () => apiFetch('POST', '/api/inventory/rfid/sessions', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+  createRfidSessionRequest(payload)
 export const recordRfidSessionEvents = (id, payload) =>
-  route(`inventory:rfid:sessions:${id}:events`, () => apiFetch('POST', `/api/inventory/rfid/sessions/${encodeURIComponent(id)}/events`, { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+  recordRfidSessionEventsRequest(id, payload)
 export const getRfidSessionReview = id =>
-  route(`inventory:rfid:sessions:${id}:review`, () => apiFetch('GET', `/api/inventory/rfid/sessions/${encodeURIComponent(id)}/review`), null)
+  getRfidSessionReviewRequest(id)
 export const applyRfidSession = (id, payload = {}) =>
-  route(`inventory:rfid:sessions:${id}:apply`, () => apiFetch('POST', `/api/inventory/rfid/sessions/${encodeURIComponent(id)}/apply`, { ...getDeviceInfo(), ...payload }), null, true)
+  applyRfidSessionRequest(id, payload)
 
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {

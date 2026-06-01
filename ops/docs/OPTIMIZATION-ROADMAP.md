@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 679.
+- Latest completed implementation move in this roadmap: Move 680.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7923,3 +7923,19 @@ Move 679 status:
   suite, frontend production build, and focused Inventory desktop/mobile live
   control audit passed with zero findings; Phase 29 and live hygiene checks are
   rerun after reference refresh.
+
+Move 680 status:
+- Move 680 extracts RFID inventory transport from the large frontend API
+  registry. `frontend/src/api/rfidTransport.ts` now owns RFID gateway status,
+  tag search/create, session creation, session events, review reads, and apply
+  writes with typed query-building, id encoding, and device-attributed write
+  payload shaping. `methods.ts` keeps public wrapper names for compatibility
+  while no longer carrying direct `/api/inventory/rfid/*` request calls. The
+  API guide documents the new boundary, focused API HTTP tests verify source
+  placement and id encoding, the source guard parsed 214 frontend source files,
+  and the production build shows the `app-api-methods` chunk at about 43.40 kB
+  with no circular chunk warning. Proof: focused API HTTP tests, frontend
+  source guard, frontend typecheck, frontend utility suite, frontend production
+  build, and focused Inventory desktop/mobile live control audit passed with
+  zero findings; Phase 29 and live hygiene checks are rerun after reference
+  refresh.
