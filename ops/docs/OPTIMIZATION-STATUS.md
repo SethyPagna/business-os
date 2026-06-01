@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 691, typed audit log transport extraction
+- Latest completed move: Move 692, typed dashboard transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `5a08bbe2656abb76`
+  `76e995c2f07f60d3`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-05-12-423Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-48-21-182Z/summary.json`
 - latest focused Settings desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-16-31-085Z/summary.json`
 - latest focused Library desktop/mobile control audit:
@@ -60,6 +60,16 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend dashboard transport is now
+  `frontend/src/api/dashboardTransport.ts` with typed dashboard summary and
+  analytics reads. Analytics query construction, range-aware route cache keys,
+  and shared append-query behavior now live outside the large API registry.
+  The source guard now parses 226 frontend TypeScript files, the production
+  build reports the `app-api-methods` chunk around 26.86 kB, and the focused
+  Dashboard desktop/mobile live audit passed with 36/46 controls tested, 10
+  long-label controls skipped by stable broad-audit guardrails, and zero
+  findings.
 
 - Frontend audit log transport is now
   `frontend/src/api/auditLogTransport.ts` with typed paged audit-log reads and

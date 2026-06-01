@@ -657,6 +657,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const appBootstrapTransportSource = fs.readFileSync(new URL('../src/api/appBootstrapTransport.ts', import.meta.url), 'utf8')
   const customTablesTransportSource = fs.readFileSync(new URL('../src/api/customTablesTransport.ts', import.meta.url), 'utf8')
   const auditLogTransportSource = fs.readFileSync(new URL('../src/api/auditLogTransport.ts', import.meta.url), 'utf8')
+  const dashboardTransportSource = fs.readFileSync(new URL('../src/api/dashboardTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
   const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
   const systemJobsSource = fs.readFileSync(new URL('../src/api/systemJobs.ts', import.meta.url), 'utf8')
@@ -682,6 +683,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /from '\.\/appBootstrapTransport\.ts'/)
   assert.match(source, /from '\.\/customTablesTransport\.ts'/)
   assert.match(source, /from '\.\/auditLogTransport\.ts'/)
+  assert.match(source, /from '\.\/dashboardTransport\.ts'/)
   assert.match(source, /from '\.\/queryCache\.ts'/)
   assert.match(source, /import \{ withExpectedUpdatedAt, withSettingsExpectedUpdatedAt \} from '\.\/expectedUpdatedAt\.ts'/)
   assert.match(source, /import \{ mirrorTable, purgeSensitiveLiveServerMirrors, routeMirrored \} from '\.\/localMirrors\.ts'/)
@@ -788,6 +790,12 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(auditLogTransportSource, /dexieDb\.table\('audit_logs'\)\.orderBy\('created_at'\)\.reverse\(\)\.limit\(pageSize\)\.toArray\(\)/)
   assert.match(auditLogTransportSource, /export function deleteAuditLogsRetention/)
   assert.match(auditLogTransportSource, /encodeURIComponent\(String\(olderThanDays\)\)/)
+  assert.match(dashboardTransportSource, /export function getDashboard/)
+  assert.match(dashboardTransportSource, /apiFetch\('GET', '\/api\/dashboard'\)/)
+  assert.match(dashboardTransportSource, /export function getAnalytics/)
+  assert.match(dashboardTransportSource, /buildQueryString\(params, \{ skipEmpty: false \}\)/)
+  assert.match(dashboardTransportSource, /`analytics:get:\$\{query\}`/)
+  assert.match(dashboardTransportSource, /appendQuery\('\/api\/analytics', query\)/)
   assert.match(
     queryCacheSource,
     /export async function clearCachedQueryResults\(prefixes: string\[\] = \[\]\): Promise<void>[\s\S]*const keys: string\[\] = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys: string\[\] = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,
@@ -837,6 +845,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /apiFetch\('GET', appendQuery\('\/api\/system\/audit-logs'/)
   assert.doesNotMatch(source, /apiFetch\('DELETE', `\/api\/system\/audit-logs\/retention/)
   assert.doesNotMatch(source, /mirrorTable\('audit_logs'\)/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/dashboard'\)/)
+  assert.doesNotMatch(source, /apiFetch\('GET', appendQuery\('\/api\/analytics'/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/otp\/setup'/)
   assert.doesNotMatch(source, /apiFetch\('GET', appendActorQuery\('\/api\/ai\/providers'\)/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/ai\/providers'/)

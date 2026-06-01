@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 691.
+- Latest completed implementation move in this roadmap: Move 692.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8139,3 +8139,20 @@ Move 691 status:
   the focused Audit Log desktop/mobile live control audit passed with 28/29
   controls tested, 1 empty-label control skipped, and zero findings; Phase 29
   and live hygiene checks are rerun after reference refresh.
+
+Move 692 status:
+- Move 692 extracts dashboard transport from the large frontend API registry.
+  `frontend/src/api/dashboardTransport.ts` now owns dashboard summary reads and
+  analytics reads with shared query-string construction, append-query handling,
+  and range-aware route cache keys. `methods.ts` keeps public `window.api`
+  wrapper names for compatibility while no longer carrying direct
+  `/api/dashboard` or `/api/analytics` fetches. The API guide documents the new
+  dashboard boundary, and focused API HTTP tests verify source placement,
+  dashboard summary transport, analytics query construction, route cache-key
+  ownership, append-query usage, and no direct dashboard/analytics fetch calls
+  in the large registry. The source guard parsed 226 frontend source files, the
+  production build shows the `app-api-methods` chunk at about 26.86 kB with no
+  circular chunk warning, and the focused Dashboard desktop/mobile live control
+  audit passed with 36/46 controls tested, 10 long-label controls skipped, and
+  zero findings; Phase 29 and live hygiene checks are rerun after reference
+  refresh.

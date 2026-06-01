@@ -146,6 +146,10 @@ This folder is the browser-side transport layer for Business OS.
   - audit log paged reads and retention cleanup transport
   - keeps audit row mirroring, local paged fallback shape, and encoded retention query parameters outside the large domain registry
 
+- `dashboardTransport.ts`
+  - dashboard summary and analytics reads
+  - keeps analytics query construction and per-range route cache keys outside the large domain registry
+
 - `cooldownFallbacks.ts`
   - notification summary and Drive sync status fallback/cooldown helpers
   - keeps transient-gateway backoff state and typed fallback payloads outside the large domain registry

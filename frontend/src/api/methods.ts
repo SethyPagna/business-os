@@ -201,6 +201,10 @@ import {
   getAuditLogs as getAuditLogsRequest,
 } from './auditLogTransport.ts'
 import {
+  getAnalytics as getAnalyticsRequest,
+  getDashboard as getDashboardRequest,
+} from './dashboardTransport.ts'
+import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
   getCurrentOrganization as getCurrentOrganizationRequest,
@@ -1076,14 +1080,8 @@ export const getSales   = (params) => {
 }
 
 // ─── Dashboard & analytics ────────────────────────────────────────────────────
-export const getDashboard = ()       => route('dashboard:get',  () => apiFetch('GET', '/api/dashboard'))
-export const getAnalytics = (params) => {
-  const q = buildQueryString(params, { skipEmpty: false })
-  // Include the full query string in the cache key so each unique date range
-  // gets its own cache entry. Without this, changing the filter (e.g. 7d → 30d)
-  // returns the stale cached result instead of re-fetching from the server.
-  return route(`analytics:get:${q}`, () => apiFetch('GET', appendQuery('/api/analytics', q)))
-}
+export const getDashboard = ()       => getDashboardRequest()
+export const getAnalytics = (params) => getAnalyticsRequest(params)
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 export const getCustomers = (params = {}) => {
