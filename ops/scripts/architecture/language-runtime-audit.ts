@@ -1494,7 +1494,7 @@ ${rejectedWorkerRows.length ? markdownTable(['File', 'Decision', 'Reason', 'Evid
 ## Boundary
 
 - This audit does not convert files, install runtimes, run migrations, move folders, or delete source.
-- React/JavaScript and Node.js remain the default until typecheck, benchmark, packaging, and rollback evidence exists.
+- React/TypeScript source and Node.js runtime remain the default until typecheck, benchmark, packaging, and rollback evidence exists.
 - SQL/DuckDB and Web Workers are preferred first for narrow hot paths before Rust, Go, Python, or WASM.
 `
 }
@@ -1540,7 +1540,7 @@ function buildSummary(records) {
     languageCounts: countBy(records, (record) => record.language),
     extensionCounts: countBy(records, (record) => record.extension),
     defaults: {
-      frontend: 'React/JavaScript',
+      frontend: 'React/TypeScript source with Vite-emitted browser JavaScript',
       backend: 'Node.js',
       heavyData: 'SQL/DuckDB before new general-purpose runtimes',
       browserCpu: 'Web Workers before server round-trips or WASM',

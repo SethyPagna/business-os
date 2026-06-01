@@ -3,7 +3,7 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 363,
   "distAssets": 86,
-  "totalSourceBytes": 6574135,
+  "totalSourceBytes": 6574187,
   "totalSourceLines": 149597,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
@@ -124,7 +124,7 @@
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 73236,
+      "size": 73288,
       "lines": 1666
     },
     {
@@ -246,7 +246,7 @@
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
-      "size": 73236,
+      "size": 73288,
       "lines": 1666
     },
     {

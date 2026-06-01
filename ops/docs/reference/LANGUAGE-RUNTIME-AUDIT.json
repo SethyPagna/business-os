@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-01T00:08:24.861Z",
+  "generatedAt": "2026-06-01T00:13:33.083Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -88,7 +88,7 @@
     ]
   ],
   "defaults": {
-    "frontend": "React/JavaScript",
+    "frontend": "React/TypeScript source with Vite-emitted browser JavaScript",
     "backend": "Node.js",
     "heavyData": "SQL/DuckDB before new general-purpose runtimes",
     "browserCpu": "Web Workers before server round-trips or WASM",

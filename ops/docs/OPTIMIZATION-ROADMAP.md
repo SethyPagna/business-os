@@ -7563,3 +7563,16 @@ Move 655 status:
   `jsxSyntaxCheck` scans, frontend utility suite, frontend production build,
   regenerated documentation references, Phase 29 audit, and focused Products
   desktop/mobile live control audit passed.
+
+Move 656 status:
+- Move 656 aligns the Phase 29 language/runtime audit with the actual
+  TypeScript source baseline. The audit no longer describes the frontend
+  default as `React/JavaScript`; it now records `React/TypeScript source with
+  Vite-emitted browser JavaScript`, while keeping Node.js as the backend
+  runtime and the separate runtime JavaScript inventory as the authority for
+  generated browser/server/vendor JavaScript. This keeps future language
+  conversion decisions honest: frontend source is already TypeScript/TSX,
+  remaining JavaScript is generated or vendor-owned, and Rust/Go/Python/WASM
+  still require benchmark, packaging, and rollback proof. Proof:
+  regenerated language/runtime audit, frontend source guard, Phase 29 audit,
+  and focused Products desktop/mobile live control audit passed.

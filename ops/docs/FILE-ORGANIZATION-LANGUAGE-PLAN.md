@@ -5832,6 +5832,17 @@ Decision rule:
     suite, frontend production build, regenerated references, Phase 29 audit,
     and focused Products desktop/mobile live control audit passed.
 
+656. Align the language/runtime audit with the TypeScript frontend baseline.
+    Done: `ops/scripts/architecture/language-runtime-audit.ts` now reports the
+    default frontend runtime as `React/TypeScript source with Vite-emitted
+    browser JavaScript` instead of the stale React/JavaScript wording. This
+    keeps Phase 29 and the generated reference docs synchronized with the
+    current end-state: active frontend source is TypeScript/TSX, the backend
+    remains Node.js, and the runtime JavaScript inventory separately governs
+    generated wrappers and the Scanbot vendor bundle. Proof: regenerated
+    language/runtime audit, frontend source guard, Phase 29 audit, and focused
+    Products desktop/mobile live control audit passed.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

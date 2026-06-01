@@ -1,13 +1,13 @@
 # Language Runtime Audit
 
-Generated: 2026-06-01T00:08:24.861Z
+Generated: 2026-06-01T00:13:33.083Z
 
 ## Summary
 
 - Mode: non-mutating audit.
 - Files scanned: 458
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/config`, `run`
-- Default frontend runtime: React/JavaScript
+- Default frontend runtime: React/TypeScript source with Vite-emitted browser JavaScript
 - Default backend runtime: Node.js
 - Preferred heavy-data path: SQL/DuckDB before new general-purpose runtimes
 - Browser CPU path: Web Workers before server round-trips or WASM
@@ -208,5 +208,5 @@ No conversion candidates detected.
 ## Boundary
 
 - This audit does not convert files, install runtimes, run migrations, move folders, or delete source.
-- React/JavaScript and Node.js remain the default until typecheck, benchmark, packaging, and rollback evidence exists.
+- React/TypeScript source and Node.js runtime remain the default until typecheck, benchmark, packaging, and rollback evidence exists.
 - SQL/DuckDB and Web Workers are preferred first for narrow hot paths before Rust, Go, Python, or WASM.
