@@ -52,33 +52,13 @@ import {
   maxStoredNumber,
   isCooldownActive,
 } from '../platform/storage/storagePolicy.ts'
+import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.ts'
+import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
+import { serializePendingSyncPreview } from './syncPreview.ts'
 
 function getPortalBaseUrl() {
   const browserOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : ''
   return (browserOrigin || getSyncServerUrl() || '').replace(/\/$/, '')
-}
-
-const SETTINGS_CONFLICT_META_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'])
-
-function buildAttemptedSettings(updates = {}) {
-  const attempted = {}
-  for (const key of Object.keys(updates || {})) {
-    if (SETTINGS_CONFLICT_META_KEYS.has(key)) continue
-    attempted[key] = updates[key]
-  }
-  return attempted
-}
-
-function buildAttemptedReturnItems(items = []) {
-  const attemptedItems = []
-  for (const item of Array.isArray(items) ? items : []) {
-    attemptedItems.push({
-      product_name: item?.product_name || '',
-      quantity: item?.quantity || 0,
-      return_to_stock: item?.return_to_stock !== false,
-    })
-  }
-  return attemptedItems
 }
 
 function getCurrentUserContext() {
@@ -103,7 +83,6 @@ const OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 const DISCARD_SYNC_UPDATE_CHANNELS = ['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard']
 const OFFLINE_SALE_SYNC_UPDATE_CHANNELS = ['sales', 'products', 'inventory', 'dashboard']
-const PENDING_SYNC_PREVIEW_LIMIT = 25
 let offlineDeviceSnapshotPromise = null
 
 function dispatchSyncUpdates(channels = [], reason = '') {
@@ -154,42 +133,6 @@ export async function discardPendingSyncQueue(reason = 'Offline changes were cle
     discarded: existing.length,
     reason,
   }
-}
-
-function createClientRequestId(prefix = 'req') {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `${prefix}_${crypto.randomUUID()}`
-  }
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-}
-
-function ensureClientRequestId(payload, prefix) {
-  const current = String(payload?.client_request_id || '').trim()
-  if (current) return { ...(payload || {}), client_request_id: current.slice(0, 120) }
-  return { ...(payload || {}), client_request_id: createClientRequestId(prefix) }
-}
-
-function serializePendingSyncPreview(items = []) {
-  const preview = []
-  const limit = Math.min(PENDING_SYNC_PREVIEW_LIMIT, items.length)
-  for (let index = 0; index < limit; index += 1) {
-    const item = items[index]
-    preview.push({
-      _seq: item._seq,
-      channel: item.channel,
-      operation: item.operation || null,
-      entity_table: item.entity_table || null,
-      entity_id: item.entity_id ?? null,
-      entity_name: item.entity_name || null,
-      status: item.status || 'pending',
-      created_at: item.created_at || null,
-      updated_at: item.updated_at || null,
-      retry_count: Number(item.retry_count || 0),
-      retry_at: item.retry_at || null,
-      error: item.error || null,
-    })
-  }
-  return preview
 }
 
 export async function getPendingSyncState() {

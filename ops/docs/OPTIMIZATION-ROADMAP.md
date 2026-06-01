@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 654.
+- Latest completed implementation move in this roadmap: Move 659.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7604,3 +7604,17 @@ Move 658 status:
   Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
   frontend utility suite, frontend production build, Phase 29 audit, and
   focused Products desktop/mobile live control audit passed.
+
+Move 659 status:
+- Move 659 continues the `frontend/src/api/methods.ts` split by moving more
+  pure request and sync helpers behind typed API boundaries.
+  `frontend/src/api/requestIds.ts` now owns idempotent client request-id
+  creation and trimming, `frontend/src/api/conflicts.ts` owns compact
+  settings/return conflict-attempt payload shaping, and
+  `frontend/src/api/syncPreview.ts` owns the bounded pending-sync queue
+  preview serializer. `methods.ts` imports those helpers instead of carrying
+  the logic inside the remaining `ts-nocheck` registry, and the API guide plus
+  focused API HTTP tests now cover each helper directly. Proof: focused API
+  HTTP tests, frontend source guard, frontend typecheck, frontend utility
+  suite, frontend production build, Phase 29 audit, and focused Products
+  desktop/mobile live control audit passed.

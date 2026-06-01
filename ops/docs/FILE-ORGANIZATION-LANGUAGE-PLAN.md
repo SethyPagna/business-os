@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 654 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 659 in this file.
 
 ## Goal
 
@@ -5864,6 +5864,19 @@ Decision rule:
     logic now has explicit types, direct tests, and a documented folder
     boundary in `frontend/src/api/README.md`. Proof: focused API HTTP tests,
     frontend source guard, frontend typecheck, frontend utility suite,
+    frontend production build, Phase 29 audit, and focused Products
+    desktop/mobile live control audit passed.
+
+659. Extract typed API request-id, conflict, and sync-preview helpers.
+    Done: `frontend/src/api/requestIds.ts` now owns client request-id creation
+    and capping for write idempotency, `frontend/src/api/conflicts.ts` owns
+    compact settings and return-item conflict-attempt payload builders, and
+    `frontend/src/api/syncPreview.ts` owns the bounded pending-sync queue
+    preview serializer. `frontend/src/api/methods.ts` now imports those typed
+    helpers instead of keeping the pure logic inside the large `ts-nocheck`
+    registry. The API guide documents the new boundaries, and the focused API
+    HTTP tests exercise all three helpers directly. Proof: focused API HTTP
+    tests, frontend source guard, frontend typecheck, frontend utility suite,
     frontend production build, Phase 29 audit, and focused Products
     desktop/mobile live control audit passed.
 

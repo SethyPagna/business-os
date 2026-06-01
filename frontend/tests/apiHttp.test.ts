@@ -15,7 +15,10 @@ import {
   setSyncServerUrl,
   setSyncToken,
 } from '../src/api/http.ts'
+import { buildAttemptedReturnItems, buildAttemptedSettings } from '../src/api/conflicts.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
+import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
+import { PENDING_SYNC_PREVIEW_LIMIT, serializePendingSyncPreview } from '../src/api/syncPreview.ts'
 
 type TestCallback = () => void | Promise<void>
 type FetchCall = Parameters<typeof fetch>
@@ -350,6 +353,63 @@ await runTest('product id lookup normalizes ids without intermediate map/filter 
   assert.match(source, /const uniqueIds = normalizePositiveUniqueIds\(ids, 100\)/)
   assert.deepEqual(normalizePositiveUniqueIds([3, '3', '2', 0, -1, 'x', 4], 2), [3, 2])
   assert.doesNotMatch(source, /Array\.from\(new Set\(\(ids \|\| \[\]\)\.map/)
+})
+
+await runTest('idempotency request payload helpers preserve existing ids and cap user-provided ids', () => {
+  const generated = createClientRequestId('sale')
+  assert.match(generated, /^sale_/)
+  assert.deepEqual(
+    ensureClientRequestId({ client_request_id: ` ${'x'.repeat(125)} `, name: 'Serum' }, 'product'),
+    { client_request_id: 'x'.repeat(120), name: 'Serum' },
+  )
+  const ensured = ensureClientRequestId({ name: 'Serum' }, 'product')
+  assert.equal(ensured.name, 'Serum')
+  assert.match(String(ensured.client_request_id), /^product_/)
+})
+
+await runTest('conflict preview helpers strip metadata and keep return item intent compact', () => {
+  assert.deepEqual(
+    buildAttemptedSettings({ storeName: 'Leang', updatedAt: 'server', expected_updated_at: 'old' }),
+    { storeName: 'Leang' },
+  )
+  assert.deepEqual(
+    buildAttemptedReturnItems([
+      { product_name: 'Mask', quantity: 2 },
+      { product_name: 'Serum', quantity: 0, return_to_stock: false },
+    ]),
+    [
+      { product_name: 'Mask', quantity: 2, return_to_stock: true },
+      { product_name: 'Serum', quantity: 0, return_to_stock: false },
+    ],
+  )
+})
+
+await runTest('pending sync preview serializes only the compact visible queue slice', () => {
+  const items = Array.from({ length: PENDING_SYNC_PREVIEW_LIMIT + 2 }, (_, index) => ({
+    _seq: index + 1,
+    channel: 'sales:create',
+    operation: '',
+    entity_id: index + 10,
+    status: index === 0 ? '' : 'failed',
+    retry_count: String(index),
+  }))
+  const preview = serializePendingSyncPreview(items)
+  assert.equal(preview.length, PENDING_SYNC_PREVIEW_LIMIT)
+  assert.deepEqual(preview[0], {
+    _seq: 1,
+    channel: 'sales:create',
+    operation: null,
+    entity_table: null,
+    entity_id: 10,
+    entity_name: null,
+    status: 'pending',
+    created_at: null,
+    updated_at: null,
+    retry_count: 0,
+    retry_at: null,
+    error: null,
+  })
+  assert.equal(preview.at(-1)?._seq, PENDING_SYNC_PREVIEW_LIMIT)
 })
 
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-01T00:26:41.067Z",
+  "generatedAt": "2026-06-01T00:41:42.842Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -12,7 +12,7 @@
     "ops/config",
     "run"
   ],
-  "sourceFiles": 459,
+  "sourceFiles": 462,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -22,7 +22,7 @@
   "languageCounts": [
     [
       "TypeScript",
-      320
+      323
     ],
     [
       "React TSX",
@@ -56,7 +56,7 @@
   "extensionCounts": [
     [
       ".ts",
-      320
+      323
     ],
     [
       ".tsx",
