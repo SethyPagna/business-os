@@ -29,6 +29,7 @@ import {
 } from '../src/api/cooldownFallbacks.ts'
 import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from '../src/api/expectedUpdatedAt.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from '../src/api/importTransport.ts'
+import { mirrorReadResult } from '../src/api/localMirrors.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 import { buildQueryCacheStorageKey } from '../src/api/queryCache.ts'
@@ -564,10 +565,19 @@ await runTest('expected updated-at helpers preserve explicit and row timestamp m
   )
 })
 
+await runTest('local mirror helper returns server data while mirroring asynchronously', async () => {
+  const result = { ok: true }
+  let mirrored: unknown = null
+  assert.equal(mirrorReadResult(async (value) => { mirrored = value }, result), result)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(mirrored, result)
+})
+
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
   const expectedUpdatedAtSource = fs.readFileSync(new URL('../src/api/expectedUpdatedAt.ts', import.meta.url), 'utf8')
+  const localMirrorsSource = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
   const importTransportSource = fs.readFileSync(new URL('../src/api/importTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
@@ -577,7 +587,10 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /import \{ apiFormPost, buildMultipartHeaders, withImportDeviceInfo \} from '\.\/importTransport\.ts'/)
   assert.match(source, /from '\.\/queryCache\.ts'/)
   assert.match(source, /import \{ withExpectedUpdatedAt, withSettingsExpectedUpdatedAt \} from '\.\/expectedUpdatedAt\.ts'/)
+  assert.match(source, /import \{ mirrorReadResult, mirrorTable, purgeSensitiveLiveServerMirrors \} from '\.\/localMirrors\.ts'/)
   assert.match(expectedUpdatedAtSource, /export async function withExpectedUpdatedAt\([\s\S]*body\.expectedUpdatedAt = body\.updated_at[\s\S]*table\?\.get\?\.\(id\)/)
+  assert.match(localMirrorsSource, /export function mirrorReadResult[\s\S]*return result/)
+  assert.match(localMirrorsSource, /export function mirrorTable[\s\S]*for \(const row of Array\.isArray\(rows\) \? rows : \[\]\)[\s\S]*replaceTableContents/)
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
@@ -591,6 +604,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /Object\.entries\(extra \|\| \{\}\)\.forEach/)
   assert.doesNotMatch(source, /\.map\(\(row\) => String\(row\?\.key \|\| ''\)\)\s*\.filter/)
   assert.doesNotMatch(source, /const QUERY_CACHE_PREFIX/)
+  assert.doesNotMatch(source, /LIVE_SERVER_SENSITIVE_MIRROR_TABLES/)
 })
 
 await runTest('empty local mirrors are not treated as usable server read fallback data', () => {

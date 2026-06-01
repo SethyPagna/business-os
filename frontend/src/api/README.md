@@ -22,6 +22,10 @@ This folder is the browser-side transport layer for Business OS.
   - bounded read-query cache helpers stored in Dexie settings rows
   - keeps cache key construction, TTL reads, writes, and sync-update invalidation scans outside the large domain registry
 
+- `localMirrors.ts`
+  - local Dexie mirror write/purge helpers for server read fallbacks
+  - keeps live-server mirror policy, sensitive table purge state, and mirror write fan-out outside the large domain registry
+
 - `expectedUpdatedAt.ts`
   - optimistic-update payload helpers for row and settings writes
   - keeps updated-at conflict metadata lookup outside the large domain registry

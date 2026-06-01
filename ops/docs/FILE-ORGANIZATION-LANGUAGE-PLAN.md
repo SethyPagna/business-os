@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 665 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 666 in this file.
 
 ## Goal
 
@@ -5966,6 +5966,21 @@ Decision rule:
     boundary and the focused API HTTP test covers explicit and row timestamp
     behavior. The source guard parsed 201 frontend files and the production
     build now reports the `app-api-methods` chunk around 55.46 kB. Proof:
+    focused API HTTP tests, frontend source guard, frontend typecheck,
+    frontend utility suite, frontend production build, Phase 29 audit, and
+    focused Products desktop/mobile live control audit passed.
+
+666. Extract typed local mirror helpers from the large domain registry.
+    Done: `frontend/src/api/localMirrors.ts` now owns asynchronous mirror
+    fan-out, live-server mirror persistence checks, sensitive mirror purge
+    state, and Dexie mirror table replacement previously embedded in
+    `frontend/src/api/methods.ts`. The helper keeps the existing policy that
+    clears sensitive live-server mirrors while preserving safe offline fallback
+    mirrors, and `methods.ts` keeps only the route wrapper that combines server
+    reads with local fallbacks. The API guide documents the boundary and the
+    focused API HTTP test covers asynchronous mirror return behavior plus source
+    placement. The source guard parsed 202 frontend files and the production
+    build now reports the `app-api-methods` chunk around 55.09 kB. Proof:
     focused API HTTP tests, frontend source guard, frontend typecheck,
     frontend utility suite, frontend production build, Phase 29 audit, and
     focused Products desktop/mobile live control audit passed.

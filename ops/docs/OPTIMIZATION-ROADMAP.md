@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 665.
+- Latest completed implementation move in this roadmap: Move 666.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7710,3 +7710,18 @@ Move 665 status:
   frontend source guard, frontend typecheck, frontend utility suite, frontend
   production build, Phase 29 audit, and focused Products desktop/mobile live
   control audit passed.
+
+Move 666 status:
+- Move 666 extracts local read-mirror helpers from the large frontend API
+  registry. `frontend/src/api/localMirrors.ts` now owns asynchronous mirror
+  write fan-out, live-server mirror persistence policy checks, sensitive mirror
+  purge state, and Dexie table replacement shaping. Server read fallbacks still
+  use the same `routeMirrored` wrapper in `methods.ts`, but the remaining
+  `ts-nocheck` registry no longer carries live-server sensitive table constants,
+  purge promise state, or mirror row-copy loops. The API guide documents the
+  boundary, focused API HTTP tests cover asynchronous mirror return behavior and
+  source placement, the source guard parsed 202 frontend source files, and the
+  production build shows the `app-api-methods` chunk at about 55.09 kB. Proof:
+  focused API HTTP tests, frontend source guard, frontend typecheck, frontend
+  utility suite, frontend production build, Phase 29 audit, and focused
+  Products desktop/mobile live control audit passed.

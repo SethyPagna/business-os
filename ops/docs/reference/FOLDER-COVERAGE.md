@@ -33,7 +33,7 @@ Total folders documented: **82**
 | 21 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
 | 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
 | 23 | `frontend/src` | Project folder | 6 | 10 |
-| 24 | `frontend/src/api` | Frontend API and sync transport | 15 | 0 |
+| 24 | `frontend/src/api` | Frontend API and sync transport | 16 | 0 |
 | 25 | `frontend/src/app` | Project folder | 2 | 0 |
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
@@ -634,7 +634,7 @@ Total folders documented: **82**
 ### 3.24 Folder: `frontend/src/api`
 
 - Purpose: Frontend API and sync transport
-- Direct files: **15**
+- Direct files: **16**
 - Direct subfolders: **0**
 
 #### 3.24.2 Files
@@ -648,14 +648,15 @@ Total folders documented: **82**
 | 5 | `http.ts` | Frontend API/sync helper |
 | 6 | `importTransport.ts` | Frontend API/sync helper |
 | 7 | `localDb.ts` | Frontend API/sync helper |
-| 8 | `methods.ts` | Frontend API/sync helper |
-| 9 | `portalHttp.ts` | Frontend API/sync helper |
-| 10 | `query.ts` | Frontend API/sync helper |
-| 11 | `queryCache.ts` | Frontend API/sync helper |
-| 12 | `README.md` | Frontend API/sync helper |
-| 13 | `requestIds.ts` | Frontend API/sync helper |
-| 14 | `syncPreview.ts` | Frontend API/sync helper |
-| 15 | `websocket.ts` | Frontend API/sync helper |
+| 8 | `localMirrors.ts` | Frontend API/sync helper |
+| 9 | `methods.ts` | Frontend API/sync helper |
+| 10 | `portalHttp.ts` | Frontend API/sync helper |
+| 11 | `query.ts` | Frontend API/sync helper |
+| 12 | `queryCache.ts` | Frontend API/sync helper |
+| 13 | `README.md` | Frontend API/sync helper |
+| 14 | `requestIds.ts` | Frontend API/sync helper |
+| 15 | `syncPreview.ts` | Frontend API/sync helper |
+| 16 | `websocket.ts` | Frontend API/sync helper |
 
 
 ### 3.25 Folder: `frontend/src/app`

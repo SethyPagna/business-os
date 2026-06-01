@@ -31,7 +31,7 @@ import {
   markApiVersionMismatch,
 } from './http.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from './query.ts'
-import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.ts'
+import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate } from './localDb.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { STORAGE_KEYS, SYNC } from '../constants'
 import { decodeTextBuffer } from '../utils/csvImport.ts'
@@ -42,11 +42,7 @@ import {
   getSettingsRefreshChannels,
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
-import {
-  LIVE_SERVER_SENSITIVE_MIRROR_TABLES,
-  shouldPersistLocalMirror as shouldPersistLocalMirrorByPolicy,
-  isCooldownActive,
-} from '../platform/storage/storagePolicy.ts'
+import { isCooldownActive } from '../platform/storage/storagePolicy.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.ts'
 import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
@@ -69,6 +65,7 @@ import {
   writeCachedQueryResult,
 } from './queryCache.ts'
 import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from './expectedUpdatedAt.ts'
+import { mirrorReadResult, mirrorTable, purgeSensitiveLiveServerMirrors } from './localMirrors.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
@@ -274,48 +271,8 @@ async function invalidateClientRuntimeState(reason = 'server-mutation') {
   }
 }
 
-function mirrorReadResult(mirrorFn, result) {
-  if (typeof mirrorFn === 'function') {
-    Promise.resolve()
-      .then(() => mirrorFn(result))
-      .catch(() => {})
-  }
-  return result
-}
-
 function routeMirrored(channel, serverFn, localFn, mirrorFn) {
   return route(channel, async () => mirrorReadResult(mirrorFn, await serverFn()), localFn)
-}
-
-let sensitiveMirrorPurgePromise = null
-
-function shouldPersistLocalMirror(tableName) {
-  return shouldPersistLocalMirrorByPolicy(tableName, getSyncServerUrl())
-}
-
-async function purgeSensitiveLiveServerMirrors() {
-  if (!getSyncServerUrl()) {
-    sensitiveMirrorPurgePromise = null
-    return
-  }
-  if (!sensitiveMirrorPurgePromise) {
-    sensitiveMirrorPurgePromise = clearLocalMirrorTables([...LIVE_SERVER_SENSITIVE_MIRROR_TABLES]).catch(() => {})
-  }
-  await sensitiveMirrorPurgePromise
-}
-
-function mirrorTable(tableName) {
-  return async (rows) => {
-    if (!shouldPersistLocalMirror(tableName)) {
-      await clearLocalMirrorTables([tableName]).catch(() => {})
-      return []
-    }
-    const incomingRows = []
-    for (const row of Array.isArray(rows) ? rows : []) {
-      incomingRows.push({ ...row })
-    }
-    return replaceTableContents(tableName, incomingRows)
-  }
 }
 
 if (typeof window !== 'undefined') {
