@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 675 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 676 in this file.
 
 ## Goal
 
@@ -6123,6 +6123,21 @@ Decision rule:
     typecheck, frontend utility suite, frontend production build, Phase 29
     audit, focused Products desktop/mobile live control audit, and post-live
     hygiene passed.
+
+676. Extract typed AI provider transport from the large domain registry.
+    Done: `frontend/src/api/aiTransport.ts` now owns AI provider list,
+    create, update, delete, test, and AI response read transport previously
+    embedded in `frontend/src/api/methods.ts`. The helper keeps actor
+    attribution on provider and response reads through the shared
+    `appendActorQuery` boundary, while `methods.ts` keeps public wrapper names
+    for existing `window.api` callers. The API guide documents the new AI
+    transport split, and focused API HTTP tests verify source placement plus
+    actor-query usage. The source guard parsed 210 frontend files and the
+    production build now reports the `app-api-methods` chunk around 48.10 kB
+    with no circular chunk warning. Proof: focused API HTTP tests, frontend
+    source guard, frontend typecheck, frontend utility suite, frontend
+    production build, Phase 29 audit, focused Products desktop/mobile live
+    control audit, and post-live hygiene passed.
 
 ## Safety Gates
 

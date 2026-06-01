@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 675, typed system diagnostics transport extraction
+- Latest completed move: Move 676, typed AI transport extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `2049903349defa0f`
+  `70c81f2c7e942c2c`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-18-01-356Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-28-28-590Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -42,6 +42,12 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend AI provider transport is now `frontend/src/api/aiTransport.ts` with
+  typed provider CRUD/test calls and AI response reads using the shared actor
+  query helper. The large API registry keeps only public `window.api`
+  compatibility wrappers for those AI actions, and the source guard now parses
+  210 frontend TypeScript files.
 
 - Frontend auth and organization transport is now
   `frontend/src/api/authTransport.ts` with typed login/logout, password reset,

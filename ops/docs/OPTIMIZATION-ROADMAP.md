@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 675.
+- Latest completed implementation move in this roadmap: Move 676.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7856,6 +7856,21 @@ Move 675 status:
   source placement, the source guard parsed 209 frontend source files, and the
   production build shows the `app-api-methods` chunk at about 48.48 kB with no
   circular chunk warning. Proof: focused API HTTP tests, frontend source guard,
+  frontend typecheck, frontend utility suite, frontend production build, Phase
+  29 audit, focused Products desktop/mobile live control audit, and post-live
+  hygiene passed.
+
+Move 676 status:
+- Move 676 extracts AI provider and AI response transport from the large
+  frontend API registry. `frontend/src/api/aiTransport.ts` now owns provider
+  list/create/update/delete/test calls and AI response reads, using the shared
+  `appendActorQuery` helper for actor-attributed reads. `methods.ts` keeps the
+  public wrapper names while no longer carrying direct `/api/ai/*` request
+  calls or AI route keys in the large registry. The API guide documents the
+  new boundary, focused API HTTP tests verify source placement and actor query
+  usage, the source guard parsed 210 frontend source files, and the production
+  build shows the `app-api-methods` chunk at about 48.10 kB with no circular
+  chunk warning. Proof: focused API HTTP tests, frontend source guard,
   frontend typecheck, frontend utility suite, frontend production build, Phase
   29 audit, focused Products desktop/mobile live control audit, and post-live
   hygiene passed.

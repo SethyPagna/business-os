@@ -33,7 +33,7 @@ Total folders documented: **82**
 | 21 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
 | 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
 | 23 | `frontend/src` | Project folder | 6 | 10 |
-| 24 | `frontend/src/api` | Frontend API and sync transport | 23 | 0 |
+| 24 | `frontend/src/api` | Frontend API and sync transport | 24 | 0 |
 | 25 | `frontend/src/app` | Project folder | 2 | 0 |
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
@@ -634,7 +634,7 @@ Total folders documented: **82**
 ### 3.24 Folder: `frontend/src/api`
 
 - Purpose: Frontend API and sync transport
-- Direct files: **23**
+- Direct files: **24**
 - Direct subfolders: **0**
 
 #### 3.24.2 Files
@@ -642,28 +642,29 @@ Total folders documented: **82**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `actorQuery.ts` | Frontend API/sync helper |
-| 2 | `authTransport.ts` | Frontend API/sync helper |
-| 3 | `browserDialogs.ts` | Frontend API/sync helper |
-| 4 | `conflicts.ts` | Frontend API/sync helper |
-| 5 | `cooldownFallbacks.ts` | Frontend API/sync helper |
-| 6 | `driveSync.ts` | Frontend API/sync helper |
-| 7 | `expectedUpdatedAt.ts` | Frontend API/sync helper |
-| 8 | `http.ts` | Frontend API/sync helper |
-| 9 | `importTransport.ts` | Frontend API/sync helper |
-| 10 | `localDb.ts` | Frontend API/sync helper |
-| 11 | `localMirrors.ts` | Frontend API/sync helper |
-| 12 | `methods.ts` | Frontend API/sync helper |
-| 13 | `notificationSummary.ts` | Frontend API/sync helper |
-| 14 | `portalHttp.ts` | Frontend API/sync helper |
-| 15 | `query.ts` | Frontend API/sync helper |
-| 16 | `queryCache.ts` | Frontend API/sync helper |
-| 17 | `README.md` | Frontend API/sync helper |
-| 18 | `requestIds.ts` | Frontend API/sync helper |
-| 19 | `syncPreview.ts` | Frontend API/sync helper |
-| 20 | `syncRuntime.ts` | Frontend API/sync helper |
-| 21 | `systemJobs.ts` | Frontend API/sync helper |
-| 22 | `systemRuntime.ts` | Frontend API/sync helper |
-| 23 | `websocket.ts` | Frontend API/sync helper |
+| 2 | `aiTransport.ts` | Frontend API/sync helper |
+| 3 | `authTransport.ts` | Frontend API/sync helper |
+| 4 | `browserDialogs.ts` | Frontend API/sync helper |
+| 5 | `conflicts.ts` | Frontend API/sync helper |
+| 6 | `cooldownFallbacks.ts` | Frontend API/sync helper |
+| 7 | `driveSync.ts` | Frontend API/sync helper |
+| 8 | `expectedUpdatedAt.ts` | Frontend API/sync helper |
+| 9 | `http.ts` | Frontend API/sync helper |
+| 10 | `importTransport.ts` | Frontend API/sync helper |
+| 11 | `localDb.ts` | Frontend API/sync helper |
+| 12 | `localMirrors.ts` | Frontend API/sync helper |
+| 13 | `methods.ts` | Frontend API/sync helper |
+| 14 | `notificationSummary.ts` | Frontend API/sync helper |
+| 15 | `portalHttp.ts` | Frontend API/sync helper |
+| 16 | `query.ts` | Frontend API/sync helper |
+| 17 | `queryCache.ts` | Frontend API/sync helper |
+| 18 | `README.md` | Frontend API/sync helper |
+| 19 | `requestIds.ts` | Frontend API/sync helper |
+| 20 | `syncPreview.ts` | Frontend API/sync helper |
+| 21 | `syncRuntime.ts` | Frontend API/sync helper |
+| 22 | `systemJobs.ts` | Frontend API/sync helper |
+| 23 | `systemRuntime.ts` | Frontend API/sync helper |
+| 24 | `websocket.ts` | Frontend API/sync helper |
 
 
 ### 3.25 Folder: `frontend/src/app`

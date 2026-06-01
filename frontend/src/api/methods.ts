@@ -45,6 +45,14 @@ import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.t
 import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
 import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
+import {
+  createAiProvider as createAiProviderRequest,
+  deleteAiProvider as deleteAiProviderRequest,
+  getAiProviders as getAiProvidersRequest,
+  getAiResponses as getAiResponsesRequest,
+  testAiProvider as testAiProviderRequest,
+  updateAiProvider as updateAiProviderRequest,
+} from './aiTransport.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './importTransport.ts'
 import {
@@ -702,17 +710,17 @@ export const reviewPortalSubmission = (id, payload) =>
   route('portalSubmissions:review', () => apiFetch('PATCH', `/api/portal/submissions/${id}/review`, payload), null, true)
 
 export const getAiProviders = () =>
-  route('ai:providers:get', () => apiFetch('GET', appendActorQuery('/api/ai/providers')), () => ({ items: [], providerMeta: {} }))
+  getAiProvidersRequest()
 export const createAiProvider = (payload) =>
-  route('ai:providers:create', () => apiFetch('POST', '/api/ai/providers', payload), null, true)
+  createAiProviderRequest(payload)
 export const updateAiProvider = (id, payload) =>
-  route('ai:providers:update', () => apiFetch('PUT', `/api/ai/providers/${id}`, payload), null, true)
+  updateAiProviderRequest(id, payload)
 export const deleteAiProvider = (id, payload) =>
-  route('ai:providers:delete', () => apiFetch('DELETE', `/api/ai/providers/${id}`, payload), null, true)
+  deleteAiProviderRequest(id, payload)
 export const testAiProvider = (id, payload) =>
-  route('ai:providers:test', () => apiFetch('POST', `/api/ai/providers/${id}/test`, payload), null, true)
+  testAiProviderRequest(id, payload)
 export const getAiResponses = (limit = 80) =>
-  route(`ai:responses:${limit}`, () => apiFetch('GET', appendActorQuery(`/api/ai/responses?limit=${limit}`)), () => ({ items: [] }))
+  getAiResponsesRequest(limit)
 export async function createProduct(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'product')
   // Auto-create supplier if new
