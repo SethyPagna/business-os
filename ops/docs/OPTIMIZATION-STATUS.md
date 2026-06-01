@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 702, defer bootstrap storage maintenance
+- Latest completed move: Move 703, defer route warmups until after load
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `95565c2fbe120c41`
+  `830635f186b1e640`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T12-49-12-762Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T12-56-51-694Z/summary.json`
 - latest focused Sales desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
 - latest focused POS desktop/mobile control audit:
@@ -64,6 +64,18 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent runtime/load win:
+
+- Frontend route warmups now wait until the current document has finished
+  loading in `frontend/src/App.tsx`. Primary route chunk warmups and
+  page-entry warmups still run on settled, eligible sessions, but the new
+  `scheduleWarmupAfterLoad()` gate prevents speculative dynamic imports from
+  competing with the page's own network and parse work during initial load.
+  Empty data warmup plans also return before allocating timers. This keeps
+  useful later navigation warming while reducing first-load contention on slow
+  or busy browsers. The source guard parsed 227 frontend TypeScript files, the
+  production build hash is `830635f186b1e640`, and the focused Dashboard
+  desktop/mobile live audit passed with 36/46 controls tested, 10 long-label
+  controls skipped by stable broad-audit guardrails, and zero findings.
 
 - Frontend API bootstrap now defers retired-token cleanup and backend-origin
   sync URL persistence in `frontend/src/web-api.ts`. The API proxy,

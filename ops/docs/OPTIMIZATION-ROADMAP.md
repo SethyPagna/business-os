@@ -8318,3 +8318,20 @@ Move 702 status:
   Dashboard desktop/mobile live control audit passed with 36/46 controls
   tested, 10 long-label controls skipped, and zero findings; Phase 29 and live
   hygiene checks are rerun after reference refresh.
+
+Move 703 status:
+- Move 703 defers route chunk warmups until after the current page has fully
+  loaded. `frontend/src/App.tsx` now routes primary background warmup and
+  page-entry warmup scheduling through `scheduleWarmupAfterLoad()`, so
+  speculative dynamic imports for Products, POS, Inventory, and later admin
+  pages no longer compete with the active page's initial network, parse, and
+  render work. Empty data warmup plans now exit before allocating timeout or
+  idle-callback timers. Intent warmup remains immediate on actual pointer/touch
+  intent, and settled-session chunk warmup still runs through the existing
+  visibility, save-data, and slow-network guardrails. The focused loading UX
+  guard verifies the after-load warmup scheduler, primary/page-entry warmup
+  use, and empty data-warmup early return; source guard, typecheck, frontend
+  utility suite, and production build passed. Production build hash:
+  `830635f186b1e640`; focused Dashboard desktop/mobile live control audit
+  passed with 36/46 controls tested, 10 long-label controls skipped, and zero
+  findings; Phase 29 and live hygiene checks are rerun after reference refresh.

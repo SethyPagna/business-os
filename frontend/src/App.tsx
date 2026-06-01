@@ -622,6 +622,29 @@ function runWarmupBatches(loaders: WarmupLoader[], batchSize = 3): Promise<void>
   })()
 }
 
+function scheduleWarmupAfterLoad(start: () => CancelWarmup | void): CancelWarmup {
+  if (typeof window === 'undefined') return () => {}
+
+  let cancelled = false
+  let cancelStartedWarmup: CancelWarmup | null = null
+  const run = () => {
+    if (cancelled) return
+    cancelStartedWarmup = start() || null
+  }
+
+  if (document.readyState === 'complete') {
+    run()
+  } else {
+    window.addEventListener('load', run, { once: true })
+  }
+
+  return () => {
+    cancelled = true
+    window.removeEventListener('load', run)
+    cancelStartedWarmup?.()
+  }
+}
+
 function getPageEntryWarmupLoaders(_pageId: PageId, _canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
   // See getDataWarmupLoaders(): route-entry data warmups were duplicating the
   // fetches that the pages themselves already perform, which made first visits
@@ -906,11 +929,9 @@ function useChunkWarmup(user: AppUser | null, activePageId: AdminPageId): void {
     if (shouldSkipBackgroundWarmup()) return undefined
 
     let cancelled = false
-    let idleId: number | null = null
-    let timeoutId: number | null = null
-    let followupId: number | null = null
     let started = false
     const importers = getWarmupImporters()
+    if (!importers.length) return undefined
 
     const runWarmup = async () => {
       if (cancelled || started || shouldSkipBackgroundWarmup()) return
@@ -918,28 +939,38 @@ function useChunkWarmup(user: AppUser | null, activePageId: AdminPageId): void {
       await runWarmupBatches(importers, 1)
     }
 
-    const isSmallOrTouch = Number(window.innerWidth || 0) < 768
-      || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
-    const shouldDelayWarmup = DELAYED_CHUNK_WARMUP_PAGE_IDS.has(activePageId)
-    timeoutId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 6000 : 4500) : (isSmallOrTouch ? 9000 : 6500))
+    const cancelAfterLoad = scheduleWarmupAfterLoad(() => {
+      if (cancelled || shouldSkipBackgroundWarmup()) return undefined
+      let idleId: number | null = null
+      let timeoutId: number | null = null
+      let followupId: number | null = null
+      const isSmallOrTouch = Number(window.innerWidth || 0) < 768
+        || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+      const shouldDelayWarmup = DELAYED_CHUNK_WARMUP_PAGE_IDS.has(activePageId)
+      timeoutId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 6000 : 4500) : (isSmallOrTouch ? 9000 : 6500))
 
-    if (!shouldDelayWarmup && typeof window.requestIdleCallback === 'function') {
-      idleId = window.requestIdleCallback(runWarmup, { timeout: isSmallOrTouch ? 12000 : 8500 })
-    } else {
-      followupId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 7000 : 5500) : (isSmallOrTouch ? 11000 : 8000))
-    }
+      if (!shouldDelayWarmup && typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(runWarmup, { timeout: isSmallOrTouch ? 12000 : 8500 })
+      } else {
+        followupId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 7000 : 5500) : (isSmallOrTouch ? 11000 : 8000))
+      }
+
+      return () => {
+        if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+          window.cancelIdleCallback(idleId)
+        }
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId)
+        }
+        if (followupId != null) {
+          window.clearTimeout(followupId)
+        }
+      }
+    })
 
     return () => {
       cancelled = true
-      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleId)
-      }
-      if (timeoutId != null) {
-        window.clearTimeout(timeoutId)
-      }
-      if (followupId != null) {
-        window.clearTimeout(followupId)
-      }
+      cancelAfterLoad()
     }
   }, [activePageId, user])
 }
@@ -981,6 +1012,7 @@ function useDataWarmup(user: AppUser | null, canAccessPage: (pageId: string) => 
     let followupId: number | null = null
     let started = false
     const loaders = getDataWarmupLoaders(canAccessPage)
+    if (!loaders.length) return undefined
 
     const runWarmup = async () => {
       if (cancelled || started) return
@@ -1044,17 +1076,23 @@ function usePageEntryWarmup(user: AppUser | null, activePageId: AdminPageId, can
       ])
     }
 
-    if (shouldNarrowWarmup) {
-      timerId = window.setTimeout(run, 3600)
-    } else if (typeof window.requestIdleCallback === 'function') {
-      idleId = window.requestIdleCallback(run, { timeout: 2500 })
-    } else {
-      timerId = window.setTimeout(run, 1800)
-    }
+    const cancelAfterLoad = scheduleWarmupAfterLoad(() => {
+      if (cancelled) return undefined
+      if (shouldNarrowWarmup) {
+        timerId = window.setTimeout(run, 3600)
+      } else if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(run, { timeout: 2500 })
+      } else {
+        timerId = window.setTimeout(run, 1800)
+      }
+      return () => {
+        if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
+        if (timerId != null) window.clearTimeout(timerId)
+      }
+    })
     return () => {
       cancelled = true
-      if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
-      if (timerId != null) window.clearTimeout(timerId)
+      cancelAfterLoad()
     }
   }, [activePageId, canAccessPage, user])
 }

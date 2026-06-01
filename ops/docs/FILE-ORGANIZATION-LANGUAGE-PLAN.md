@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 702 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 703 in this file.
 
 ## Goal
 
@@ -6586,6 +6586,20 @@ Decision rule:
     both install the same URL. Proof: focused performance loading UX test,
     frontend source guard, frontend typecheck, frontend utility suite,
     frontend production build with hash `95565c2fbe120c41`, and focused
+    Dashboard desktop/mobile live control audit passed with 36/46 controls
+    tested, 10 long-label controls skipped, and zero findings; Phase 29 and
+    live hygiene checks are rerun after reference refresh.
+
+703. Defer route chunk warmups until after the current page load completes.
+    Done: `frontend/src/App.tsx` now funnels primary background route warmup
+    and page-entry warmup through `scheduleWarmupAfterLoad()`. Speculative
+    dynamic imports for Products, POS, Inventory, and later admin pages no
+    longer start while the current page is still loading, but intent warmup
+    remains available when the user actually points at or touches navigation.
+    Empty data warmup plans now return before allocating timeout or
+    idle-callback timers. Proof: focused performance loading UX test,
+    frontend source guard, frontend typecheck, frontend utility suite,
+    frontend production build with hash `830635f186b1e640`, and focused
     Dashboard desktop/mobile live control audit passed with 36/46 controls
     tested, 10 long-label controls skipped, and zero findings; Phase 29 and
     live hygiene checks are rerun after reference refresh.

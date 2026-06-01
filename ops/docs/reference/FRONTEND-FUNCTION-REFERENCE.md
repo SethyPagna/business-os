@@ -50,7 +50,7 @@ Total files documented: **233**
 | 38 | `frontend/src/api/systemJobs.ts` | 3 |
 | 39 | `frontend/src/api/systemRuntime.ts` | 0 |
 | 40 | `frontend/src/api/websocket.ts` | 7 |
-| 41 | `frontend/src/App.tsx` | 82 |
+| 41 | `frontend/src/App.tsx` | 84 |
 | 42 | `frontend/src/app/appShellUtils.ts` | 0 |
 | 43 | `frontend/src/app/publicErrorRecovery.ts` | 1 |
 | 44 | `frontend/src/AppContext.tsx` | 38 |
@@ -703,55 +703,57 @@ Total files documented: **233**
 | 31 | `getDataWarmupLoaders` | function | 602 |
 | 32 | `createWarmupLoader` | function | 611 |
 | 33 | `runWarmupBatches` | function | 616 |
-| 34 | `getPageEntryWarmupLoaders` | function | 625 |
-| 35 | `useMountedPages` | function | 632 |
-| 36 | `syncProfile` | const arrow | 646 |
-| 37 | `useSyncErrorBanner` | function | 675 |
-| 38 | `refreshPendingSync` | const arrow | 685 |
-| 39 | `onSyncError` | const arrow | 690 |
-| 40 | `onTransientOutage` | const arrow | 696 |
-| 41 | `onSyncRecovered` | const arrow | 704 |
-| 42 | `onQueueChanged` | const arrow | 712 |
-| 43 | `onVaultLocked` | const arrow | 713 |
-| 44 | `onAppUpdate` | const arrow | 714 |
-| 45 | `onConflictReview` | const arrow | 715 |
-| 46 | `useDeferredImportTrackerMount` | function | 763 |
-| 47 | `enable` | const arrow | 776 |
-| 48 | `enableWhenVisible` | const arrow | 780 |
-| 49 | `onSyncUpdate` | const arrow | 785 |
-| 50 | `onVisible` | const arrow | 788 |
-| 51 | `useDeferredNotificationCenterMount` | function | 817 |
-| 52 | `enable` | const arrow | 833 |
-| 53 | `enableWhenVisible` | const arrow | 837 |
-| 54 | `onSyncUpdate` | const arrow | 841 |
-| 55 | `useVisibilityRecovery` | function | 870 |
-| 56 | `onVisible` | const arrow | 874 |
-| 57 | `onFocus` | const arrow | 884 |
-| 58 | `useChunkWarmup` | function | 902 |
-| 59 | `runWarmup` | const arrow | 915 |
-| 60 | `useIntentChunkWarmup` | function | 947 |
-| 61 | `warmIntentPage` | const arrow | 954 |
-| 62 | `useDataWarmup` | function | 974 |
-| 63 | `runWarmup` | const arrow | 985 |
-| 64 | `usePageEntryWarmup` | function | 1010 |
-| 65 | `run` | const arrow | 1039 |
-| 66 | `PageErrorBoundary` | class | 1062 |
-| 67 | `Notification` | function | 1115 |
-| 68 | `SyncErrorBanner` | function | 1128 |
-| 69 | `GlobalScrollControls` | function | 1150 |
-| 70 | `scrollTo` | const arrow | 1151 |
-| 71 | `formatSyncTimestamp` | function | 1188 |
-| 72 | `OfflineModeBanner` | function | 1203 |
-| 73 | `PageLoader` | function | 1352 |
-| 74 | `NotificationCenterFallback` | function | 1395 |
-| 75 | `PageSlot` | function | 1410 |
-| 76 | `PublicCatalogView` | function | 1436 |
-| 77 | `App` | component/function | 1446 |
-| 78 | `cleanupRecoveryStorageMarkers` | const arrow | 1508 |
-| 79 | `onQueued` | const arrow | 1537 |
-| 80 | `onSynced` | const arrow | 1550 |
-| 81 | `handleLocationChange` | const arrow | 1575 |
-| 82 | `processFavicon` | function | 1623 |
+| 34 | `scheduleWarmupAfterLoad` | function | 625 |
+| 35 | `run` | const arrow | 630 |
+| 36 | `getPageEntryWarmupLoaders` | function | 648 |
+| 37 | `useMountedPages` | function | 655 |
+| 38 | `syncProfile` | const arrow | 669 |
+| 39 | `useSyncErrorBanner` | function | 698 |
+| 40 | `refreshPendingSync` | const arrow | 708 |
+| 41 | `onSyncError` | const arrow | 713 |
+| 42 | `onTransientOutage` | const arrow | 719 |
+| 43 | `onSyncRecovered` | const arrow | 727 |
+| 44 | `onQueueChanged` | const arrow | 735 |
+| 45 | `onVaultLocked` | const arrow | 736 |
+| 46 | `onAppUpdate` | const arrow | 737 |
+| 47 | `onConflictReview` | const arrow | 738 |
+| 48 | `useDeferredImportTrackerMount` | function | 786 |
+| 49 | `enable` | const arrow | 799 |
+| 50 | `enableWhenVisible` | const arrow | 803 |
+| 51 | `onSyncUpdate` | const arrow | 808 |
+| 52 | `onVisible` | const arrow | 811 |
+| 53 | `useDeferredNotificationCenterMount` | function | 840 |
+| 54 | `enable` | const arrow | 856 |
+| 55 | `enableWhenVisible` | const arrow | 860 |
+| 56 | `onSyncUpdate` | const arrow | 864 |
+| 57 | `useVisibilityRecovery` | function | 893 |
+| 58 | `onVisible` | const arrow | 897 |
+| 59 | `onFocus` | const arrow | 907 |
+| 60 | `useChunkWarmup` | function | 925 |
+| 61 | `runWarmup` | const arrow | 936 |
+| 62 | `useIntentChunkWarmup` | function | 978 |
+| 63 | `warmIntentPage` | const arrow | 985 |
+| 64 | `useDataWarmup` | function | 1005 |
+| 65 | `runWarmup` | const arrow | 1017 |
+| 66 | `usePageEntryWarmup` | function | 1042 |
+| 67 | `run` | const arrow | 1071 |
+| 68 | `PageErrorBoundary` | class | 1100 |
+| 69 | `Notification` | function | 1153 |
+| 70 | `SyncErrorBanner` | function | 1166 |
+| 71 | `GlobalScrollControls` | function | 1188 |
+| 72 | `scrollTo` | const arrow | 1189 |
+| 73 | `formatSyncTimestamp` | function | 1226 |
+| 74 | `OfflineModeBanner` | function | 1241 |
+| 75 | `PageLoader` | function | 1390 |
+| 76 | `NotificationCenterFallback` | function | 1433 |
+| 77 | `PageSlot` | function | 1448 |
+| 78 | `PublicCatalogView` | function | 1474 |
+| 79 | `App` | component/function | 1484 |
+| 80 | `cleanupRecoveryStorageMarkers` | const arrow | 1546 |
+| 81 | `onQueued` | const arrow | 1575 |
+| 82 | `onSynced` | const arrow | 1588 |
+| 83 | `handleLocationChange` | const arrow | 1613 |
+| 84 | `processFavicon` | function | 1661 |
 
 ### 3.42 `frontend/src/app/appShellUtils.ts`
 
