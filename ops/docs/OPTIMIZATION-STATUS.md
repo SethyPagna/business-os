@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 688, typed access-control transport extraction
+- Latest completed move: Move 689, typed app bootstrap transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `bc9b9aede4eb66ed`
+  `55b95d75eaed078d`
 
 Latest verified reports:
 
@@ -25,6 +25,8 @@ Latest verified reports:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
+- latest focused Dashboard desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-05-12-423Z/summary.json`
 - latest focused Library desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-14-04-097Z/summary.json`
 - latest focused Contacts desktop/mobile control audit:
@@ -56,6 +58,17 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend app bootstrap transport is now
+  `frontend/src/api/appBootstrapTransport.ts` with typed local, invalid-session,
+  and transient-offline bootstrap fallback behavior. Stored-user recovery,
+  local settings bootstrap, sensitive live-server mirror purge, stored-session
+  detection, and unauthorized/offline response shaping now live outside the
+  large API registry. The source guard now parses 223 frontend TypeScript
+  files, the production build reports the `app-api-methods` chunk around
+  27.90 kB, and the focused Dashboard desktop/mobile live audit passed with
+  36/46 controls tested, 10 long-label controls skipped by stable broad-audit
+  guardrails, and zero findings.
 
 - Frontend access-control transport is now
   `frontend/src/api/accessControlTransport.ts` with typed user, profile,

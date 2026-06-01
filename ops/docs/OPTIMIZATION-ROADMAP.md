@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 688.
+- Latest completed implementation move in this roadmap: Move 689.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8086,3 +8086,22 @@ Move 688 status:
   Users desktop/mobile live control audit passed with 14/16 controls tested, 2
   low-value controls skipped, and zero findings; Phase 29 and live hygiene
   checks are rerun after reference refresh.
+
+Move 689 status:
+- Move 689 extracts app bootstrap transport from the large frontend API
+  registry. `frontend/src/api/appBootstrapTransport.ts` now owns app bootstrap
+  local fallback, invalid-session fallback, transient-offline fallback,
+  stored-user recovery, local settings bootstrap, sensitive live-server mirror
+  purge, and stored-session detection. `methods.ts` keeps the public
+  `getAppBootstrap` wrapper for compatibility while no longer carrying direct
+  `/api/auth/bootstrap` fetch, session-storage parsing, local bootstrap
+  construction, or unauthorized/offline response shaping. The API guide
+  documents the new app bootstrap boundary, and focused API HTTP tests verify
+  source placement, invalid-session handling, local settings fallback,
+  transient-gateway fallback, and no direct bootstrap fetch in the large
+  registry. The source guard parsed 223 frontend source files, the production
+  build shows the `app-api-methods` chunk at about 27.90 kB with no circular
+  chunk warning, and the focused Dashboard desktop/mobile live control audit
+  passed with 36/46 controls tested, 10 long-label controls skipped, and zero
+  findings; Phase 29 and live hygiene checks are rerun after reference
+  refresh.

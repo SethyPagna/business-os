@@ -30,7 +30,7 @@ import {
 import { appendQuery, buildQueryString } from './query.ts'
 import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate } from './localDb.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
-import { STORAGE_KEYS, SYNC } from '../constants'
+import { SYNC } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
 import {
@@ -208,6 +208,7 @@ import {
   unlinkGoogleOauth as unlinkGoogleOauthRequest,
   updateSessionDuration as updateSessionDurationRequest,
 } from './authTransport.ts'
+import { getAppBootstrap as getAppBootstrapRequest } from './appBootstrapTransport.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from './notificationSummary.ts'
 import {
   disconnectGoogleDriveSync as disconnectGoogleDriveSyncRequest,
@@ -462,64 +463,8 @@ export const completeGoogleOauth = (payload) =>
   completeGoogleOauthRequest(payload)
 export const unlinkGoogleOauth = (payload) =>
   unlinkGoogleOauthRequest(payload)
-export async function getAppBootstrap() {
-  const buildLocalBootstrap = async () => {
-    let user = null
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = window.sessionStorage.getItem(STORAGE_KEYS.USER) || window.localStorage.getItem(STORAGE_KEYS.USER)
-        user = raw ? JSON.parse(raw) : null
-      } catch (_) {
-        user = null
-      }
-    }
-    return {
-      user,
-      settings: await localGetSettings(),
-      organizationCreationEnabled: false,
-      organization: null,
-      group: null,
-      storage: null,
-      system: null,
-    }
-  }
-
-  const hasServer = !!getSyncServerUrl()
-  const hasStoredSession = hasStoredUserSession()
-
-  if (!hasServer) {
-    await purgeSensitiveLiveServerMirrors().catch(() => {})
-    return buildLocalBootstrap()
-  }
-
-  await purgeSensitiveLiveServerMirrors().catch(() => {})
-
-  try {
-    return await apiFetch('GET', '/api/auth/bootstrap')
-  } catch (error) {
-    if (isInvalidSessionError(error)) {
-      const localBootstrap = await buildLocalBootstrap()
-      const fallback = {
-        ...localBootstrap,
-        user: null,
-      }
-      if (!hasStoredSession) return fallback
-      return {
-        ...fallback,
-        unauthorized: true,
-        authError: error?.message || 'Please sign in again to continue.',
-      }
-    }
-    if (isNetErr(error) || isTransientGatewayError(error?.status)) {
-      const localBootstrap = await buildLocalBootstrap()
-      return {
-        ...localBootstrap,
-        offline: true,
-      }
-    }
-    throw error
-  }
-}
+export const getAppBootstrap = () =>
+  getAppBootstrapRequest()
 export const getOrganizationBootstrap = () =>
   getOrganizationBootstrapRequest()
 export const searchOrganizations = (query) =>

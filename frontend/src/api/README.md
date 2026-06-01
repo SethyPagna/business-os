@@ -134,6 +134,10 @@ This folder is the browser-side transport layer for Business OS.
   - user, profile, authentication-method, password, role, and permission-management transport
   - keeps actor-attributed user/role reads, mirrored user/role fallbacks, encoded ids, and expected-updated-at security mutations outside the large domain registry
 
+- `appBootstrapTransport.ts`
+  - app bootstrap transport with local, unauthorized, and transient-offline fallbacks
+  - keeps stored-session detection, sensitive mirror purge, and local settings bootstrap recovery outside the large domain registry
+
 - `cooldownFallbacks.ts`
   - notification summary and Drive sync status fallback/cooldown helpers
   - keeps transient-gateway backoff state and typed fallback payloads outside the large domain registry

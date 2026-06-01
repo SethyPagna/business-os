@@ -320,10 +320,13 @@ await runTest('read-only 530 pollers use fallback data and backoff hooks', () =>
 })
 
 await runTest('app bootstrap converts invalid sessions into an explicit unauthorized result', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/api/appBootstrapTransport.ts', import.meta.url), 'utf8')
   assert.match(source, /if\s*\(isInvalidSessionError\(error\)\)/)
   assert.match(source, /unauthorized:\s*true/)
-  assert.match(source, /authError:\s*error\?\.message \|\| 'Please sign in again to continue\.'/)
+  assert.match(source, /authError:[\s\S]*'Please sign in again to continue\.'/)
+  assert.match(source, /apiFetch\('GET', '\/api\/auth\/bootstrap'\)/)
+  assert.match(source, /purgeSensitiveLiveServerMirrors\(\)/)
+  assert.match(source, /localGetSettings\(\)/)
 })
 
 await runTest('paged audit and user-attributed activity APIs expose user filters', () => {
@@ -647,6 +650,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const fileTransportSource = fs.readFileSync(new URL('../src/api/fileTransport.ts', import.meta.url), 'utf8')
   const contactsTransportSource = fs.readFileSync(new URL('../src/api/contactsTransport.ts', import.meta.url), 'utf8')
   const accessControlTransportSource = fs.readFileSync(new URL('../src/api/accessControlTransport.ts', import.meta.url), 'utf8')
+  const appBootstrapTransportSource = fs.readFileSync(new URL('../src/api/appBootstrapTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
   const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
   const systemJobsSource = fs.readFileSync(new URL('../src/api/systemJobs.ts', import.meta.url), 'utf8')
@@ -669,6 +673,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /from '\.\/fileTransport\.ts'/)
   assert.match(source, /from '\.\/contactsTransport\.ts'/)
   assert.match(source, /from '\.\/accessControlTransport\.ts'/)
+  assert.match(source, /from '\.\/appBootstrapTransport\.ts'/)
   assert.match(source, /from '\.\/queryCache\.ts'/)
   assert.match(source, /import \{ withExpectedUpdatedAt, withSettingsExpectedUpdatedAt \} from '\.\/expectedUpdatedAt\.ts'/)
   assert.match(source, /import \{ mirrorTable, purgeSensitiveLiveServerMirrors, routeMirrored \} from '\.\/localMirrors\.ts'/)
@@ -760,6 +765,10 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(accessControlTransportSource, /mirrorTable\('roles'\)/)
   assert.match(accessControlTransportSource, /withExpectedUpdatedAt\('roles', id, payload\)/)
   assert.match(accessControlTransportSource, /encodeURIComponent\(String\(id\)\)/)
+  assert.match(appBootstrapTransportSource, /export async function getAppBootstrap/)
+  assert.match(appBootstrapTransportSource, /getSyncServerUrl\(\)/)
+  assert.match(appBootstrapTransportSource, /hasStoredUserSession\(\)/)
+  assert.match(appBootstrapTransportSource, /isTransientGatewayError\(status\)/)
   assert.match(
     queryCacheSource,
     /export async function clearCachedQueryResults\(prefixes: string\[\] = \[\]\): Promise<void>[\s\S]*const keys: string\[\] = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys: string\[\] = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,
@@ -801,6 +810,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/roles'/)
   assert.doesNotMatch(source, /provider-disconnect/)
   assert.doesNotMatch(source, /change-password/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/auth\/bootstrap'\)/)
+  assert.doesNotMatch(source, /sessionStorage\.getItem\(STORAGE_KEYS\.USER\)/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/otp\/setup'/)
   assert.doesNotMatch(source, /apiFetch\('GET', appendActorQuery\('\/api\/ai\/providers'\)/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/ai\/providers'/)
