@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 678 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 679 in this file.
 
 ## Goal
 
@@ -6169,6 +6169,23 @@ Decision rule:
     45.34 kB with no circular chunk warning. Proof: focused API HTTP tests,
     frontend source guard, frontend typecheck, frontend utility suite,
     frontend production build, and focused Audit Log desktop/mobile live
+    control audit passed with zero findings; Phase 29 and live hygiene checks
+    are rerun after reference refresh.
+
+679. Extract typed inventory core transport from the large domain registry.
+    Done: `frontend/src/api/inventoryTransport.ts` now owns stock adjust,
+    transfer, row move, inventory summary/stats, inventory product search,
+    movement history, and inventory reason read/write transport previously
+    embedded in `frontend/src/api/methods.ts`. The shared mirrored-read helper
+    moved into `frontend/src/api/localMirrors.ts`, so inventory product search
+    keeps cache-backed fallback behavior while `methods.ts` keeps public
+    `window.api` wrapper names for compatibility. The API guide documents the
+    new inventory transport split, and focused API HTTP tests verify source
+    placement plus mirrored query-cache ownership. The source guard parsed 213
+    frontend files and the production build now reports the `app-api-methods`
+    chunk around 44.19 kB with no circular chunk warning. Proof: focused API
+    HTTP tests, frontend source guard, frontend typecheck, frontend utility
+    suite, frontend production build, and focused Inventory desktop/mobile live
     control audit passed with zero findings; Phase 29 and live hygiene checks
     are rerun after reference refresh.
 

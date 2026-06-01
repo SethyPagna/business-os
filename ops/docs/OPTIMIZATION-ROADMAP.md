@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 678.
+- Latest completed implementation move in this roadmap: Move 679.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7906,3 +7906,20 @@ Move 678 status:
   frontend typecheck, frontend utility suite, frontend production build, and
   focused Audit Log desktop/mobile live control audit passed with zero
   findings; Phase 29 and live hygiene checks are rerun after reference refresh.
+
+Move 679 status:
+- Move 679 extracts inventory core transport from the large frontend API
+  registry. `frontend/src/api/inventoryTransport.ts` now owns stock adjust,
+  transfer, row move, inventory summary/stats, inventory product search,
+  movement history, and inventory reason read/write transport. The shared
+  `routeMirrored` helper moved into `frontend/src/api/localMirrors.ts`, so
+  inventory product search keeps the same cache-backed local fallback while
+  the large registry keeps public wrapper names for compatibility. The API
+  guide documents the new boundary, focused API HTTP tests verify source
+  placement and mirrored query-cache ownership, the source guard parsed 213
+  frontend source files, and the production build shows the `app-api-methods`
+  chunk at about 44.19 kB with no circular chunk warning. Proof: focused API
+  HTTP tests, frontend source guard, frontend typecheck, frontend utility
+  suite, frontend production build, and focused Inventory desktop/mobile live
+  control audit passed with zero findings; Phase 29 and live hygiene checks are
+  rerun after reference refresh.

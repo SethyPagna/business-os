@@ -54,6 +54,10 @@ This folder is the browser-side transport layer for Business OS.
   - action history read/create/update/undo/redo transport with device attribution
   - keeps history route keys and mutation payload shaping outside the large domain registry
 
+- `inventoryTransport.ts`
+  - inventory stock actions, summary/stats, product search, movement history, and reason transport
+  - keeps inventory query caching, page bounds, and device-attributed stock writes outside the large domain registry
+
 - `portalTransport.ts`
   - customer portal catalog/config/submission/AI transport plus review actions
   - keeps portal timeout headers and API-version mismatch handling outside the large domain registry

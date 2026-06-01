@@ -59,6 +59,17 @@ import {
   updateActionHistory as updateActionHistoryRequest,
 } from './actionHistoryTransport.ts'
 import {
+  adjustStock as adjustStockRequest,
+  getInventoryMovements as getInventoryMovementsRequest,
+  getInventoryReasons as getInventoryReasonsRequest,
+  getInventoryStats as getInventoryStatsRequest,
+  getInventorySummary as getInventorySummaryRequest,
+  moveStockRow as moveStockRowRequest,
+  saveInventoryReasons as saveInventoryReasonsRequest,
+  searchInventoryProducts as searchInventoryProductsRequest,
+  transferInventoryStock as transferInventoryStockRequest,
+} from './inventoryTransport.ts'
+import {
   askPortalAi as askPortalAiRequest,
   createPortalSubmission as createPortalSubmissionRequest,
   getCatalogMeta as getCatalogMetaRequest,
@@ -110,7 +121,7 @@ import {
   writeCachedQueryResult,
 } from './queryCache.ts'
 import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from './expectedUpdatedAt.ts'
-import { mirrorReadResult, mirrorTable, purgeSensitiveLiveServerMirrors } from './localMirrors.ts'
+import { mirrorTable, purgeSensitiveLiveServerMirrors, routeMirrored } from './localMirrors.ts'
 import {
   DISCARD_SYNC_UPDATE_CHANNELS,
   OFFLINE_SALE_SYNC_UPDATE_CHANNELS,
@@ -306,10 +317,6 @@ async function invalidateClientRuntimeState(reason = 'server-mutation') {
       detail: { channel: 'runtime', reason, ts: Date.now() },
     }))
   }
-}
-
-function routeMirrored(channel, serverFn, localFn, mirrorFn) {
-  return route(channel, async () => mirrorReadResult(mirrorFn, await serverFn()), localFn)
 }
 
 if (typeof window !== 'undefined') {
@@ -1035,9 +1042,12 @@ export async function uploadUserAvatar({ filePath, fileName, file }) {
 export { getSyncServerUrl }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
-export const adjustStock           = d         => route('products:adjustStock', () => apiFetch('POST', '/api/inventory/adjust', { ...getDeviceInfo(), ...d }), null, true)
-export const transferInventoryStock = d        => route('inventory:transfer', () => apiFetch('POST', '/api/inventory/transfer', ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'transfer')), null, true)
-export const moveStockRow          = d         => route('inventory:moveRow', () => apiFetch('POST', '/api/inventory/move-row', { ...getDeviceInfo(), ...d }), null, true)
+export const adjustStock = d =>
+  adjustStockRequest(d)
+export const transferInventoryStock = d =>
+  transferInventoryStockRequest(d)
+export const moveStockRow = d =>
+  moveStockRowRequest(d)
 
 export const getActionHistory = (scope = 'global', limit = 10, params = {}) => {
   return getActionHistoryRequest(scope, limit, params)
@@ -1050,50 +1060,18 @@ export const undoActionHistory = id =>
   undoActionHistoryRequest(id)
 export const redoActionHistory = id =>
   redoActionHistoryRequest(id)
-export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
-export const getInventoryStats = (params = {}) => {
-  const q = buildQueryString(params)
-  return route(`inventory:stats:${q}`, () => apiFetch('GET', appendQuery('/api/inventory/stats', q)), () => ({ item: null }))
-}
-export const searchInventoryProducts = (params = {}) => {
-  const q = buildQueryString(params)
-  const cacheKey = `inventory:products:search:v2:${q}`
-  return routeMirrored(
-    cacheKey,
-    () => apiFetch('GET', appendQuery('/api/inventory/products/search', q)),
-    () => readCachedQueryResult(cacheKey),
-    (result) => writeCachedQueryResult(cacheKey, result),
-  )
-}
-export const getInventoryMovements = ({ branchId, userId, search, searchMode, startDate, endDate, page = 1, pageSize = 10000 } = {}) => {
-  const safePage = Math.max(1, Number(page || 1) || 1)
-  const safePageSize = Math.min(Math.max(Number(pageSize || 10000) || 10000, 1), 50000)
-  const q = buildQueryString({
-    branchId,
-    userId,
-    search,
-    searchMode,
-    startDate,
-    endDate,
-    page: safePage,
-    pageSize: safePageSize,
-  })
-  return route(
-    `inventory:movements:${q}`,
-    () => apiFetch('GET', appendQuery('/api/inventory/movements', q)),
-    () => ({
-      items: [],
-      total: 0,
-      page: safePage,
-      pageSize: safePageSize,
-      totalPages: 1,
-    }),
-  )
-}
+export const getInventorySummary = (params = {}) =>
+  getInventorySummaryRequest(params)
+export const getInventoryStats = (params = {}) =>
+  getInventoryStatsRequest(params)
+export const searchInventoryProducts = (params = {}) =>
+  searchInventoryProductsRequest(params)
+export const getInventoryMovements = (params = {}) =>
+  getInventoryMovementsRequest(params)
 export const getInventoryReasons = () =>
-  route('inventory:reasons:get', () => apiFetch('GET', '/api/inventory/reasons'), () => ({ items: [] }))
+  getInventoryReasonsRequest()
 export const saveInventoryReasons = (items = []) =>
-  route('inventory:reasons:save', () => apiFetch('PUT', '/api/inventory/reasons', { ...getDeviceInfo(), items }), null, true)
+  saveInventoryReasonsRequest(items)
 
 function buildOfflineSaleReceiptNumber(payload = {}) {
   const clientRequestId = String(payload.client_request_id || createClientRequestId('sale')).trim()
