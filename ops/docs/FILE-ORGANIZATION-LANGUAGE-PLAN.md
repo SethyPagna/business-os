@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 693 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 694 in this file.
 
 ## Goal
 
@@ -6454,6 +6454,22 @@ Decision rule:
     frontend production build, and focused Sales plus POS desktop/mobile live
     control audits passed with zero findings; Phase 29 and live hygiene checks
     are rerun after reference refresh.
+
+694. Defer pending-sync startup refresh out of the first shell render.
+    Done: `frontend/src/App.tsx` now schedules the initial pending-sync banner
+    read with a cancellable idle-time helper instead of calling
+    `getPendingSyncState()` synchronously during app startup. This avoids
+    pulling the lazy API methods chunk and IndexedDB pending-write scan into
+    the first render path, while keeping immediate refreshes for sync errors,
+    write-blocked signals, reconnect/status changes, queue changes, offline
+    sale queued/synced events, and write conflicts. The performance loading UX
+    guard verifies the scheduler and blocks a regression back to synchronous
+    startup queue reads. Proof: focused performance loading UX test, frontend
+    source guard, frontend typecheck, frontend utility suite, frontend
+    production build with hash `ec095d6fa2045c5a`, and focused Dashboard
+    desktop/mobile live control audit passed with 36/46 controls tested, 10
+    long-label controls skipped, and zero findings; Phase 29 and live hygiene
+    checks are rerun after reference refresh.
 
 ## Safety Gates
 

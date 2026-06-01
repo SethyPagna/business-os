@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 693.
+- Latest completed implementation move in this roadmap: Move 694.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8172,3 +8172,18 @@ Move 693 status:
   26.59 kB with no circular chunk warning, and the focused Sales and POS
   desktop/mobile live control audits passed with zero findings; Phase 29 and
   live hygiene checks are rerun after reference refresh.
+
+Move 694 status:
+- Move 694 defers the global pending-sync banner's first queue scan out of the
+  first shell render. `frontend/src/App.tsx` now uses a cancellable
+  `scheduleInitialPendingSyncRefresh()` helper that waits briefly and then
+  prefers `requestIdleCallback` with a timeout before calling
+  `getPendingSyncState()`. Real sync/error/reconnect/queue/conflict events
+  still refresh immediately, so this is a real startup load reduction without
+  hiding stale sync state forever. The focused loading UX guard verifies the
+  idle scheduler and prevents a synchronous pending-sync read from returning,
+  the source guard parsed 227 frontend source files, the production build hash
+  is `ec095d6fa2045c5a`, and the focused Dashboard desktop/mobile live control
+  audit passed with 36/46 controls tested, 10 long-label controls skipped, and
+  zero findings; Phase 29 and live hygiene checks are rerun after reference
+  refresh.

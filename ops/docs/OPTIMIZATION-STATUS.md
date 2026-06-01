@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 693, typed sales transport extraction
+- Latest completed move: Move 694, deferred pending-sync startup refresh
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `bd7b109eb975de6d`
+  `ec095d6fa2045c5a`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-48-21-182Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-33-30-468Z/summary.json`
 - latest focused Sales desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
 - latest focused POS desktop/mobile control audit:
@@ -62,6 +62,20 @@ Current honest pockets:
   `https://leangcosmetics.dpdns.org/public` did not render expected customer
   content; keep that as the next public tunnel/runtime issue instead of mixing
   it into local TypeScript migration work
+
+Recent runtime/load win:
+
+- Frontend startup now defers the global pending-sync banner's first
+  `getPendingSyncState()` read through a cancellable idle scheduler in
+  `frontend/src/App.tsx`. This keeps the first shell render from immediately
+  importing the lazy `app-api-methods` chunk and scanning IndexedDB for queued
+  writes, while still refreshing immediately on sync errors, write-blocked
+  signals, reconnect/status changes, queue changes, offline sale queued/synced
+  events, and write conflicts. The source guard parsed 227 frontend TypeScript
+  files, the production build hash is `ec095d6fa2045c5a`, and the focused
+  Dashboard desktop/mobile live audit passed with 36/46 controls tested, 10
+  long-label controls skipped by stable broad-audit guardrails, and zero
+  findings.
 
 Recent route-level win:
 

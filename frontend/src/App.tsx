@@ -272,6 +272,8 @@ const DELAYED_CHUNK_WARMUP_PAGE_IDS: ReadonlySet<PageId> = new Set([
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
 const INTENT_CHUNK_WARMUP_DELAY_MS = 80
+const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 2500
+const PENDING_SYNC_IDLE_TIMEOUT_MS = 8000
 const STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 const PAGE_LOADER_STALL_WARNING_MS = 15000
@@ -537,6 +539,34 @@ function scheduleIntentChunkLoad(pageId: PageId, onDone: (pageId: PageId) => voi
   }
 }
 
+function scheduleInitialPendingSyncRefresh(refresh: () => void): CancelWarmup {
+  if (typeof window === 'undefined') return () => {}
+
+  let cancelled = false
+  let idleId: number | null = null
+  let timerId: number | null = null
+  const run = () => {
+    if (cancelled || document.visibilityState === 'hidden') return
+    refresh()
+  }
+
+  timerId = window.setTimeout(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(run, { timeout: PENDING_SYNC_IDLE_TIMEOUT_MS })
+    } else {
+      run()
+    }
+  }, PENDING_SYNC_INITIAL_REFRESH_DELAY_MS)
+
+  return () => {
+    cancelled = true
+    if (timerId != null) window.clearTimeout(timerId)
+    if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+      window.cancelIdleCallback(idleId)
+    }
+  }
+}
+
 function getDataWarmupLoaders(_canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
   // Data warmups used to prefetch many page reads in the background. In
   // practice that created first-visit contention: the real page load would
@@ -665,9 +695,10 @@ function useSyncErrorBanner() {
     window.addEventListener('offline:vault-locked', onVaultLocked)
     window.addEventListener('sync:app-update-available', onAppUpdate)
     window.addEventListener('sync:write-conflict', onConflictReview)
-    refreshPendingSync()
+    const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
     const timer = window.setInterval(refreshPendingSync, 20_000)
     return () => {
+      cancelInitialPendingSyncRefresh()
       window.clearInterval(timer)
       window.removeEventListener('sync:error', onSyncError)
       window.removeEventListener('sync:write-blocked', onSyncError)

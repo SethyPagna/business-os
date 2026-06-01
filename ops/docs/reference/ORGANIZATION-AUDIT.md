@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-01T08:21:56.578Z
+Generated: 2026-06-01T08:39:30.878Z
 
 ## Summary
 
@@ -64,14 +64,14 @@ Generated: 2026-06-01T08:21:56.578Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8931 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 8175 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7600 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6476 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 8190 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7602 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6492 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2994 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2996 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
@@ -81,7 +81,7 @@ Generated: 2026-06-01T08:21:56.578Z
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2085 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
@@ -90,8 +90,8 @@ Generated: 2026-06-01T08:21:56.578Z
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |
+| frontend/src/App.tsx | 1603 | frontend/src/App.tsx |
 | backend/src/routes/sales.ts | 1573 | backend/routes |
-| frontend/src/App.tsx | 1572 | frontend/src/App.tsx |
 | backend/src/services/googleDriveSync/index.ts | 1564 | backend/services |
 
 ## Relative Import Hotspots
