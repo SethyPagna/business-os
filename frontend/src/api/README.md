@@ -38,6 +38,10 @@ This folder is the browser-side transport layer for Business OS.
   - portal base URL resolver and abortable public-portal fetch helper
   - keeps public catalog, membership, submission, and portal AI reads on one timeout path
 
+- `importTransport.ts`
+  - import-job multipart headers, live-server form POSTs, and import payload device metadata
+  - keeps CSV, ZIP, image, and error-download transport details out of the large domain registry
+
 - `localDb.ts`
   - Dexie-based browser storage for offline queues and local cache helpers
 

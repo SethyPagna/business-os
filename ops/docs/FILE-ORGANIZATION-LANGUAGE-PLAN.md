@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 661 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 662 in this file.
 
 ## Goal
 
@@ -5907,6 +5907,22 @@ Decision rule:
     Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
     frontend utility suite, frontend production build, Phase 29 audit, and
     focused Products desktop/mobile live control audit passed.
+
+662. Extract typed import multipart transport helpers from the large domain
+    registry.
+    Done: `frontend/src/api/importTransport.ts` now owns multipart import
+    headers, device-info payload enrichment, and live-server form posting
+    previously embedded in `frontend/src/api/methods.ts`. The helper keeps the
+    same live-write gate, sync-server base URL trimming, device metadata
+    headers, cookie credentials, and server error fallback while giving import
+    upload/CSV/restore/history/rollback flows one typed transport boundary.
+    The API guide documents the split and the focused API HTTP test covers
+    headers, payload enrichment, and multipart request wiring. The source guard
+    parsed 198 frontend files and the production build now reports the
+    `app-api-methods` chunk around 58.47 kB. Proof: focused API HTTP tests,
+    frontend source guard, frontend typecheck, frontend utility suite,
+    frontend production build, Phase 29 audit, and focused Products
+    desktop/mobile live control audit passed.
 
 ## Safety Gates
 

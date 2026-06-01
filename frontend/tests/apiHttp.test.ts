@@ -17,6 +17,7 @@ import {
 } from '../src/api/http.ts'
 import { appendActorQuery, getCurrentUserContext } from '../src/api/actorQuery.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from '../src/api/conflicts.ts'
+import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from '../src/api/importTransport.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
@@ -474,17 +475,53 @@ await runTest('portal HTTP helper prefers browser origin and keeps fetch abort s
   }
 })
 
+await runTest('import transport helper posts multipart forms through the live server path', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test/')
+  const originalFetch = globalThis.fetch
+  const calls: FetchCall[] = []
+  globalThis.fetch = ((...args: FetchCall) => {
+    calls.push(args)
+    return Promise.resolve(new Response(JSON.stringify({ data: { uploaded: 1 } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+  }) as typeof fetch
+
+  try {
+    const headers = buildMultipartHeaders()
+    assert.equal(headers['bypass-tunnel-reminder'], 'true')
+    assert.equal(typeof headers['x-client-time'], 'string')
+    assert.equal(withImportDeviceInfo({ source: 'ui' }).source, 'ui')
+    const form = new FormData()
+    form.append('file', new Blob(['id\n1\n'], { type: 'text/csv' }), 'products.csv')
+    assert.deepEqual(await apiFormPost('/api/import-jobs/7/csv', form, 'importJobs:csv'), { uploaded: 1 })
+    assert.equal(calls.length, 1)
+    assert.equal(String(calls[0][0]), 'https://sync.example.test/api/import-jobs/7/csv')
+    assert.equal(calls[0][1]?.method, 'POST')
+    assert.equal(calls[0][1]?.credentials, 'include')
+    assert.equal((calls[0][1]?.headers as Record<string, string>)?.['bypass-tunnel-reminder'], 'true')
+    assert.equal(calls[0][1]?.body, form)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
+  const importTransportSource = fs.readFileSync(new URL('../src/api/importTransport.ts', import.meta.url), 'utf8')
   assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
   assert.match(source, /import \{ fetchJsonWithTimeout, getPortalBaseUrl \} from '\.\/portalHttp\.ts'/)
+  assert.match(source, /import \{ apiFormPost, buildMultipartHeaders, withImportDeviceInfo \} from '\.\/importTransport\.ts'/)
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
   )
   assert.match(portalHttpSource, /export async function fetchJsonWithTimeout\([\s\S]*const controller = new AbortController\(\)[\s\S]*signal: controller\.signal/)
+  assert.match(importTransportSource, /export async function apiFormPost\([\s\S]*requireLiveServerWrite\(channel,[\s\S]*credentials: 'include'[\s\S]*body: form/)
   assert.match(
     source,
     /async function clearCachedQueryResults\(prefixes = \[\]\)[\s\S]*const keys = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,

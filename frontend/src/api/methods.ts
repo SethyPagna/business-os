@@ -57,6 +57,7 @@ import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
 import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
+import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './importTransport.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
@@ -1018,37 +1019,6 @@ export const otpStatus  = id => apiFetch('GET', `/api/auth/otp/status/${id}`)
 export const createProductVariant = d => route('products:create', () => apiFetch('POST', '/api/products/variant', d), null, true)
 
 export const bulkImportProducts = d        => route('products:bulkImport', () => apiFetch('POST', '/api/products/bulk-import', d),     null, true)
-
-function buildMultipartHeaders() {
-  const device = getDeviceInfo()
-  return {
-    'bypass-tunnel-reminder': 'true',
-    'x-client-time': device.clientTime || '',
-    'x-device-tz': device.deviceTz || '',
-    'x-device-name': device.deviceName || '',
-  }
-}
-
-async function apiFormPost(path, form, channel = 'importJobs:upload') {
-  requireLiveServerWrite(channel, {
-    offlineMessage: 'Server is offline. Imports need the live server so large files can be processed safely.',
-    notConfiguredMessage: 'Server is not connected. Imports need a live server.',
-  })
-  const base = getSyncServerUrl().replace(/\/$/, '')
-  const res = await fetch(`${base}${path}`, {
-    method: 'POST',
-    headers: buildMultipartHeaders(),
-    credentials: 'include',
-    body: form,
-  })
-  const text = await res.text()
-  let json = null
-  try { json = text ? JSON.parse(text) : null } catch (_) {}
-  if (!res.ok) throw new Error(json?.error || text || `HTTP ${res.status}`)
-  return json?.data || json
-}
-
-const withImportDeviceInfo = (payload = {}) => ({ ...(payload || {}), ...getDeviceInfo() })
 
 export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', withImportDeviceInfo(d)), null, true)
 export const listImportJobs = (params = {}) => {

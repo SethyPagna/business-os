@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 661.
+- Latest completed implementation move in this roadmap: Move 662.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7646,3 +7646,19 @@ Move 661 status:
   guard, frontend typecheck, frontend utility suite, frontend production build,
   Phase 29 audit, and focused Products desktop/mobile live control audit
   passed.
+
+Move 662 status:
+- Move 662 extracts the import multipart transport boundary from the large
+  frontend API registry. `frontend/src/api/importTransport.ts` now owns
+  `buildMultipartHeaders`, `withImportDeviceInfo`, and `apiFormPost`,
+  preserving live-server write gating, sync-server URL trimming, device
+  headers, multipart credentials, and the existing server-error fallback text.
+  Import upload, CSV parsing, history, restore, lookup, and rollback methods
+  now import this typed helper instead of carrying multipart transport logic in
+  the remaining `ts-nocheck` registry. The API guide documents the boundary,
+  the focused API HTTP test covers headers, payload device fields, and multipart
+  posting directly, the source guard parsed 198 frontend source files, and the
+  production build shows the `app-api-methods` chunk at about 58.47 kB. Proof:
+  focused API HTTP tests, frontend source guard, frontend typecheck, frontend
+  utility suite, frontend production build, Phase 29 audit, and focused
+  Products desktop/mobile live control audit passed.
