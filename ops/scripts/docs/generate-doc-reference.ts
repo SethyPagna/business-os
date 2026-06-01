@@ -366,10 +366,10 @@ This guide standardizes module naming without breaking existing imports immediat
 
 ## Frontend Naming Pattern
 
-- Page-level components: \`<Domain>Page.jsx\`
-- Domain subcomponents: \`<Domain><Responsibility>.jsx\`
-- Shared primitives: \`<PrimitiveName>.jsx\` in \`components/shared/\`
-- Hook files: \`use<Domain><Feature>.js\`
+- Page-level components: \`<Domain>Page.tsx\`
+- Domain subcomponents: \`<Domain><Responsibility>.tsx\`
+- Shared primitives: \`<PrimitiveName>.tsx\` in \`components/shared/\`
+- Hook files: \`use<Domain><Feature>.ts\`
 
 ## Translation Key Grouping Pattern
 

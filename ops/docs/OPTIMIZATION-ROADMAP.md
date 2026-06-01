@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 653.
+- Latest completed implementation move in this roadmap: Move 654.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -2098,8 +2098,9 @@ Cleanup checkpoint:
   TypeScript slice.
 - The media upload helper slice is now complete:
   `frontend/src/utils/mediaUpload.ts` owns upload-state reduction, temporary
-  preview sanitization, and cache-busted media paths, while `mediaUpload.js`
-  remains as the compatibility wrapper for existing imports. The conversion
+  preview sanitization, and cache-busted media paths. `mediaUpload.js`
+  initially remained as the compatibility wrapper for existing imports, then
+  was retired after callers moved to the TypeScript source. The conversion
   added `mediaUploadHelpers.test.ts` to the utility suite and fixed duplicate
   `v` query parameters when an explicit upload cache version replaces the
   frontend build hash.
@@ -2327,9 +2328,9 @@ Cleanup checkpoint:
   `frontend/src/components/dashboard/charts/index.ts` owns the chart exports,
   while `index.js` initially remained as the compatibility wrapper for
   dashboard and report-rendering imports, then was retired in Move 479 after
-  callers moved to the TypeScript source. `frontend/src/types/jsx-modules.d.ts`
-  keeps the existing JSX chart module boundary explicit until chart components
-  are converted as separate visual slices.
+  callers moved to the TypeScript source. The temporary JSX module declaration
+  shim was retired once the active chart/component imports moved to typed
+  sources and no `.jsx` imports remained.
 - The receipt template helper slice is now complete:
   `frontend/src/components/receipt-settings/template.ts` owns parsing and
   serialization of persisted receipt templates, while `template.js` initially
@@ -2349,10 +2350,9 @@ Cleanup checkpoint:
   `frontend/src/components/utils-settings/index.ts` owns the admin utility
   component re-export boundary, while `index.js` initially remained as the
   compatibility wrapper for any folder-level imports, then was retired in Move
-  479 after callers moved to the TypeScript source.
-  `frontend/src/types/jsx-modules.d.ts` records the checked JSX boundary until
-  the large settings, backup, audit, reset-data, OTP, and font-picker
-  components move in separate slices.
+  479 after callers moved to the TypeScript source. The temporary JSX module
+  declaration shim was retired once the utility settings barrel and callers
+  used typed source imports only.
 - The settings conflict helper slice is now complete:
   `frontend/src/components/utils-settings/settingsConflict.ts` owns the
   stale-write conflict state and field-diff helpers, while
@@ -7533,3 +7533,18 @@ Move 653 status:
   real CPU/file/media work. Proof: focused Scanbot scanner tests, frontend
   utility suite, frontend typecheck, frontend production build, and regenerated
   language/runtime audit passed.
+
+Move 654 status:
+- Move 654 retires the obsolete frontend JSX compatibility shim and refreshes
+  stale chunk-path metadata after the TypeScript conversion. `vite.config.ts`
+  now points manual chunk rules at `mediaUpload.ts`, `PortalMenu.tsx`, and
+  `WriteConflictModal.tsx` instead of old `.js/.jsx` paths, preserving the
+  intended media, portal, and write-conflict chunk boundaries. The unused
+  `frontend/src/types/jsx-modules.d.ts` declaration file was deleted, the
+  utils-settings barrel test now asserts that the shim stays gone, and the
+  language/runtime audit no longer requires JSX declaration support for
+  already-converted dashboard/settings barrels. The generated module naming
+  guide now documents `.tsx`/`.ts` frontend naming instead of `.jsx`/`.js`.
+  Proof: stale-path scans, focused utils-settings and scanner tests, frontend
+  typecheck, frontend utility suite, frontend production build, regenerated
+  documentation references, and Phase 29 audit passed.

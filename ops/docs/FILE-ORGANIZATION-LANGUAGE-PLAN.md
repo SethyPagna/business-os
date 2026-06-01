@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 653 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 654 in this file.
 
 ## Goal
 
@@ -1073,12 +1073,14 @@ Decision rule:
 117. Convert media upload helper to TypeScript. Done:
     The upload-state and media cache-busting helper moved to
     `frontend/src/utils/mediaUpload.ts`, while
-    `frontend/src/utils/mediaUpload.js` remains as the compatibility wrapper for
-    catalog, settings, product form, and focused test imports. Added the
-    existing `frontend/tests/mediaUploadHelpers.test.ts` to the frontend utility
-    suite and fixed cache-busting so explicit upload versions replace an
-    existing `v` query parameter instead of appending a duplicate. Added
-    `frontend/src/utils/publicAssetUrls.ts` directly after retiring the JS public-asset boundary declaration file.
+    `frontend/src/utils/mediaUpload.js` initially remained as the compatibility
+    wrapper for catalog, settings, product form, and focused test imports, then
+    was retired after callers moved to the TypeScript source. Added the existing
+    `frontend/tests/mediaUploadHelpers.test.ts` to the frontend utility suite
+    and fixed cache-busting so explicit upload versions replace an existing `v`
+    query parameter instead of appending a duplicate. Added
+    `frontend/src/utils/publicAssetUrls.ts` directly after retiring the JS
+    public-asset boundary declaration file.
 118. Convert pricing helper to TypeScript. Done:
     The shared pricing and product-discount helper moved to
     `frontend/src/utils/pricing.ts`, while `frontend/src/utils/pricing.js`
@@ -1365,9 +1367,9 @@ Decision rule:
     `frontend/src/components/dashboard/charts/index.ts`, while `index.js`
     initially remained as the compatibility wrapper for dashboard and
     report-rendering imports, then was retired in Move 479 after callers moved
-    to the TypeScript source. `frontend/src/types/jsx-modules.d.ts` documents
-    the checked boundary for existing JSX chart components until those visual
-    components are converted in their own measured slices.
+    to the TypeScript source. The temporary JSX module declaration shim was
+    retired once active chart/component imports moved to typed sources and no
+    `.jsx` imports remained.
 156. Convert receipt template helper to TypeScript. Done:
     The receipt template parser and serializer moved to
     `frontend/src/components/receipt-settings/template.ts`, while
@@ -1390,9 +1392,9 @@ Decision rule:
     `frontend/src/components/utils-settings/index.ts`, while `index.js`
     initially remained as the stable compatibility wrapper for any importers
     that use the folder public boundary, then was retired in Move 479 after
-    callers moved to the TypeScript source. `frontend/src/types/jsx-modules.d.ts`
-    now documents the checked JSX component boundary needed by the barrel until
-    those large admin surfaces are converted in separate measured slices.
+    callers moved to the TypeScript source. The temporary JSX module
+    declaration shim was retired once the utility settings barrel and callers
+    used typed source imports only.
 159. Convert settings conflict helper to TypeScript. Done:
     The settings stale-write conflict mapper moved to
     `frontend/src/components/utils-settings/settingsConflict.ts`, while
@@ -5803,6 +5805,19 @@ Decision rule:
     stronger focused coverage. Proof: focused Scanbot scanner tests, frontend
     utility suite, frontend typecheck, frontend production build, and regenerated
     language/runtime audit passed.
+
+654. Retire obsolete JSX shim and stale frontend chunk paths.
+    Done: `vite.config.ts` now references the converted TypeScript source paths
+    for media upload, portal menu, and write-conflict modal chunking. The
+    obsolete `frontend/src/types/jsx-modules.d.ts` file was deleted after
+    source scans proved there are no active frontend `.jsx` files or imports,
+    and `utilsSettingsBarrel.test.ts` now asserts that the shim stays retired.
+    The language/runtime audit no longer lists JSX declaration support for
+    converted dashboard/settings barrels, and the generated module naming guide
+    now uses `.tsx`/`.ts` frontend naming. Proof: stale-path scans, focused
+    utils-settings and scanner tests, frontend typecheck, frontend utility
+    suite, frontend production build, regenerated references, and Phase 29 audit
+    passed.
 
 ## Safety Gates
 

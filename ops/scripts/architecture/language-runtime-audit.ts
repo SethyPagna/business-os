@@ -650,7 +650,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     implementation: 'frontend/src/components/dashboard/charts/index.ts',
     compatibilityWrapper: '',
     wrapperStatus: 'retired after dashboard chart callers moved to TypeScript source',
-    declarationSupport: 'frontend/src/types/jsx-modules.d.ts',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\dashboardDataReliability.test.ts',
@@ -686,7 +686,7 @@ const CONVERTED_TYPESCRIPT_SLICES = [
     implementation: 'frontend/src/components/utils-settings/index.ts',
     compatibilityWrapper: '',
     wrapperStatus: 'retired after utility settings callers moved to TypeScript source',
-    declarationSupport: 'frontend/src/types/jsx-modules.d.ts',
+    declarationSupport: '',
     proof: [
       'npm.cmd --prefix frontend run typecheck',
       'node frontend\\tests\\utilsSettingsBarrel.test.ts',

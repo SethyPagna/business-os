@@ -142,7 +142,7 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (
-      normalized.includes('/src/utils/mediaUpload.js')
+      normalized.includes('/src/utils/mediaUpload.ts')
       || normalized.includes('/src/utils/favicon')
     ) {
       return 'media-upload-utils'
@@ -154,7 +154,7 @@ function manualChunks(id: string): string | undefined {
       return 'file-picker-modal'
     }
     if (
-      normalized.includes('/src/components/shared/PortalMenu.jsx')
+      normalized.includes('/src/components/shared/PortalMenu.tsx')
       || normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
       || normalized.includes('/src/components/catalog/portalContentI18n.ts')
       || normalized.includes('/src/components/catalog/portalTranslateController.ts')
@@ -171,7 +171,7 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/shared/NotificationCenter.tsx')) return 'notification-center'
     if (normalized.includes('/src/components/shared/BackgroundImportTracker.tsx')) return 'background-import-tracker'
-    if (normalized.includes('/src/components/shared/WriteConflictModal.jsx')) return 'write-conflict-modal'
+    if (normalized.includes('/src/components/shared/WriteConflictModal.tsx')) return 'write-conflict-modal'
     if (normalized.includes('/src/api/')) return 'app-api'
     if (normalized.includes('/src/app/')) return 'app-shell'
     if (normalized.includes('/src/components/shared/')) return 'app-shared'
