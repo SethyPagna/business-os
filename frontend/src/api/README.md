@@ -38,6 +38,10 @@ This folder is the browser-side transport layer for Business OS.
   - system job polling, cancellation, and backup folder queue transport helpers
   - keeps long-running backup job API mechanics outside the large domain registry
 
+- `driveSync.ts`
+  - Google Drive sync status, cooldown-aware fallback, preferences, OAuth, and job queue transport
+  - keeps Drive sync polling/action mechanics outside the large domain registry
+
 - `expectedUpdatedAt.ts`
   - optimistic-update payload helpers for row and settings writes
   - keeps updated-at conflict metadata lookup outside the large domain registry

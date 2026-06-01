@@ -7769,3 +7769,18 @@ Move 669 status:
   52.93 kB. Proof: focused API HTTP tests, Backup job tests, frontend source
   guard, frontend typecheck, frontend utility suite, and frontend production
   build passed.
+
+Move 670 status:
+- Move 670 extracts Google Drive sync transport helpers from the large
+  frontend API registry. `frontend/src/api/driveSync.ts` now owns status
+  cooldown fallback, in-flight status request sharing, preferences, OAuth
+  start, disconnect, credential forgetting, and queued Drive sync job
+  transport. `methods.ts` keeps the same public `window.api` wrapper names
+  while no longer carrying Drive-specific cooldown imports or request promise
+  state. The API guide documents the boundary, focused API HTTP tests verify
+  source placement, the source guard parsed 206 frontend source files, and the
+  production build shows the `app-api-methods` chunk at about 51.89 kB. Proof:
+  focused API HTTP tests, Backup job tests, frontend source guard, frontend
+  typecheck, frontend utility suite, frontend production build, Phase 29 audit,
+  focused Products desktop/mobile live control audit, and post-live hygiene
+  passed.

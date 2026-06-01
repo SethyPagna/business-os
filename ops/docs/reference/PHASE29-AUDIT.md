@@ -1,6 +1,6 @@
 # Phase 29 Audit
 
-Generated: 2026-06-01T02:14:24.456Z
+Generated: 2026-06-01T02:28:52.550Z
 
 Policy: `ops/automation/business-os-automation.json`
 
@@ -9,7 +9,7 @@ Policy: `ops/automation/business-os-automation.json`
 - Checks: 9
 - Failures: 0
 - Cycles: 1
-- Total child-check duration: 2529 ms
+- Total child-check duration: 2507 ms
 - Repeat consistency: stable
 - Execution mode: contention-safe-reference-writers-then-bounded-guardrails
 - Reference writer concurrency: 1
@@ -20,39 +20,39 @@ Policy: `ops/automation/business-os-automation.json`
 
 | Cycle | Check | Status | Duration | Command | Report output |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Generated bulk audit | passed | 969 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
-| 1 | Schema audit | passed | 132 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
-| 1 | Performance/code-flow scan | passed | 177 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
-| 1 | Language/runtime audit | passed | 212 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
-| 1 | Runtime JavaScript inventory | passed | 154 ms | `node.exe ops/scripts/architecture/runtime-js-inventory.ts` | `ops/docs/reference/RUNTIME-JS-INVENTORY.md`<br>`ops/docs/reference/RUNTIME-JS-INVENTORY.json` |
-| 1 | Docker release guardrail | passed | 132 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
-| 1 | Runtime dependency guardrail | passed | 145 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
-| 1 | PM2 ecosystem config guardrail | passed | 328 ms | `node.exe ops/scripts/runtime/build-ecosystem-config.ts --check` | none |
-| 1 | Organization audit | passed | 280 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
+| 1 | Generated bulk audit | passed | 983 ms | `node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json` | `ops/docs/reference/GENERATED-BULK-AUDIT.md`<br>`ops/docs/reference/GENERATED-BULK-AUDIT.json` |
+| 1 | Schema audit | passed | 128 ms | `node.exe ops/scripts/backend/schema-audit.ts` | `ops/docs/reference/SCHEMA-AUDIT.md`<br>`ops/docs/reference/SCHEMA-AUDIT.json` |
+| 1 | Performance/code-flow scan | passed | 166 ms | `node.exe ops/scripts/docs/performance-scan.ts` | `ops/docs/reference/PERFORMANCE-SCAN.md`<br>`ops/docs/reference/PERFORMANCE-SCAN.json` |
+| 1 | Language/runtime audit | passed | 217 ms | `node.exe ops/scripts/architecture/language-runtime-audit.ts` | `ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md`<br>`ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json` |
+| 1 | Runtime JavaScript inventory | passed | 155 ms | `node.exe ops/scripts/architecture/runtime-js-inventory.ts` | `ops/docs/reference/RUNTIME-JS-INVENTORY.md`<br>`ops/docs/reference/RUNTIME-JS-INVENTORY.json` |
+| 1 | Docker release guardrail | passed | 130 ms | `node.exe ops/scripts/verification/verify-docker-release.ts` | `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` |
+| 1 | Runtime dependency guardrail | passed | 126 ms | `node.exe ops/scripts/verification/verify-runtime-deps.ts` | `ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json` |
+| 1 | PM2 ecosystem config guardrail | passed | 321 ms | `node.exe ops/scripts/runtime/build-ecosystem-config.ts --check` | none |
+| 1 | Organization audit | passed | 281 ms | `node.exe ops/scripts/architecture/organization-audit.ts` | `ops/docs/reference/ORGANIZATION-AUDIT.md`<br>`ops/docs/reference/ORGANIZATION-AUDIT.json` |
 
 ## Duration Summary
 
 | Check | Runs | Total | Average | Max |
 | --- | --- | --- | --- | --- |
-| Generated bulk audit | 1 | 969 ms | 969 ms | 969 ms |
-| PM2 ecosystem config guardrail | 1 | 328 ms | 328 ms | 328 ms |
-| Organization audit | 1 | 280 ms | 280 ms | 280 ms |
-| Language/runtime audit | 1 | 212 ms | 212 ms | 212 ms |
-| Performance/code-flow scan | 1 | 177 ms | 177 ms | 177 ms |
-| Runtime JavaScript inventory | 1 | 154 ms | 154 ms | 154 ms |
-| Runtime dependency guardrail | 1 | 145 ms | 145 ms | 145 ms |
-| Docker release guardrail | 1 | 132 ms | 132 ms | 132 ms |
-| Schema audit | 1 | 132 ms | 132 ms | 132 ms |
+| Generated bulk audit | 1 | 983 ms | 983 ms | 983 ms |
+| PM2 ecosystem config guardrail | 1 | 321 ms | 321 ms | 321 ms |
+| Organization audit | 1 | 281 ms | 281 ms | 281 ms |
+| Language/runtime audit | 1 | 217 ms | 217 ms | 217 ms |
+| Performance/code-flow scan | 1 | 166 ms | 166 ms | 166 ms |
+| Runtime JavaScript inventory | 1 | 155 ms | 155 ms | 155 ms |
+| Docker release guardrail | 1 | 130 ms | 130 ms | 130 ms |
+| Schema audit | 1 | 128 ms | 128 ms | 128 ms |
+| Runtime dependency guardrail | 1 | 126 ms | 126 ms | 126 ms |
 
 ## Slowest Runs
 
 | Cycle | Check | Duration |
 | --- | --- | --- |
-| 1 | Generated bulk audit | 969 ms |
-| 1 | PM2 ecosystem config guardrail | 328 ms |
-| 1 | Organization audit | 280 ms |
-| 1 | Language/runtime audit | 212 ms |
-| 1 | Performance/code-flow scan | 177 ms |
+| 1 | Generated bulk audit | 983 ms |
+| 1 | PM2 ecosystem config guardrail | 321 ms |
+| 1 | Organization audit | 281 ms |
+| 1 | Language/runtime audit | 217 ms |
+| 1 | Performance/code-flow scan | 166 ms |
 
 ## Repeat Consistency
 

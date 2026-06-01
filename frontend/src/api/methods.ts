@@ -49,15 +49,20 @@ import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './importTransport.ts'
 import {
-  clearDriveSyncStatusCooldown,
   clearNotificationSummaryMissing,
-  getDriveSyncStatusFallback,
   getNotificationSummaryFallback,
-  markDriveSyncStatusCooldown,
   markNotificationSummaryMissing,
-  readDriveSyncStatusCooldown,
   readNotificationSummaryMissingUntil,
 } from './cooldownFallbacks.ts'
+import {
+  disconnectGoogleDriveSync as disconnectGoogleDriveSyncRequest,
+  forgetGoogleDriveSyncCredentials as forgetGoogleDriveSyncCredentialsRequest,
+  getGoogleDriveSyncStatus as getGoogleDriveSyncStatusRequest,
+  queueGoogleDriveSyncNow as queueGoogleDriveSyncNowRequest,
+  saveGoogleDriveSyncPreferences as saveGoogleDriveSyncPreferencesRequest,
+  startGoogleDriveSyncOauth as startGoogleDriveSyncOauthRequest,
+  syncGoogleDriveNow as syncGoogleDriveNowRequest,
+} from './driveSync.ts'
 import {
   clearCachedQueryResults,
   readCachedQueryResult,
@@ -266,7 +271,6 @@ if (typeof window !== 'undefined') {
 
 let notificationSummaryRequestPromise = null
 const lastImportJobsByQuery = new Map()
-let driveSyncStatusRequestPromise = null
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export async function login({ username, password, organization, sessionDuration, clientTime, deviceTz, deviceName }) {
@@ -1634,57 +1638,25 @@ export async function importBackupFolder(sourceDir) {
 // Dashboard, Inventory, Sales, Returns, Contacts, Branches, etc. all reload
 // fresh data immediately instead of showing stale results for up to 45 s.
 export const getGoogleDriveSyncStatus = () =>
-  route('system:driveSyncStatus', async () => {
-    const cooldownUntil = readDriveSyncStatusCooldown()
-    if (isCooldownActive(cooldownUntil)) {
-      return getDriveSyncStatusFallback({ cooldownUntil })
-    }
-    if (driveSyncStatusRequestPromise) return await driveSyncStatusRequestPromise
-    driveSyncStatusRequestPromise = (async () => {
-      try {
-        const result = await apiFetch('GET', '/api/system/drive-sync/status')
-        clearDriveSyncStatusCooldown()
-        return result
-      } catch (error) {
-        const status = Number(error?.status || 0)
-        const message = String(error?.message || '').toLowerCase()
-        const retryable = isNetErr(error)
-          || message.includes('insufficient_resources')
-          || [404, 429, 500, 502, 503, 504].includes(status)
-        if (retryable) {
-          const nextUntil = markDriveSyncStatusCooldown()
-          return getDriveSyncStatusFallback({
-            cooldownUntil: nextUntil,
-            lastError: error?.message || 'Drive sync status temporarily unavailable',
-          })
-        }
-        throw error
-      } finally {
-        driveSyncStatusRequestPromise = null
-      }
-    })()
-    return await driveSyncStatusRequestPromise
-  }, () => getDriveSyncStatusFallback())
+  getGoogleDriveSyncStatusRequest()
 
 export const saveGoogleDriveSyncPreferences = (payload) =>
-  route('system:driveSyncPreferences', () => apiFetch('POST', '/api/system/drive-sync/preferences', payload), null, true)
+  saveGoogleDriveSyncPreferencesRequest(payload)
 
 export const startGoogleDriveSyncOauth = (payload) =>
-  route('system:driveSyncOauthStart', () => apiFetch('POST', '/api/system/drive-sync/oauth/start', payload), null, true)
+  startGoogleDriveSyncOauthRequest(payload)
 
 export const disconnectGoogleDriveSync = () =>
-  route('system:driveSyncDisconnect', () => apiFetch('POST', '/api/system/drive-sync/disconnect', {}), null, true)
+  disconnectGoogleDriveSyncRequest()
 
 export const forgetGoogleDriveSyncCredentials = (payload = {}) =>
-  route('system:driveSyncForgetCredentials', () => apiFetch('POST', '/api/system/drive-sync/forget-credentials', payload), null, true)
+  forgetGoogleDriveSyncCredentialsRequest(payload)
 
 export const queueGoogleDriveSyncNow = () =>
-  route('system:driveSyncNow:queue', () => apiFetch('POST', '/api/system/drive-sync/jobs', {}, SYNC.REQUEST_TIMEOUT_MS), null, true)
+  queueGoogleDriveSyncNowRequest()
 
 export const syncGoogleDriveNow = () =>
-  route('system:driveSyncNow', async () => {
-    return queueGoogleDriveSyncNow()
-  }, null, true)
+  syncGoogleDriveNowRequest()
 
 export async function resetData(mode = 'sales') {
   const result = await route('data:reset', () => apiFetch('POST', '/api/system/reset-data', { mode }), null, true)
