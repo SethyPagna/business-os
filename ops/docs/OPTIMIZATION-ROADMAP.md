@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 674.
+- Latest completed implementation move in this roadmap: Move 675.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7844,3 +7844,18 @@ Move 674 status:
   frontend source guard, frontend typecheck, frontend utility suite, frontend
   production build, Phase 29 audit, focused Products desktop/mobile live
   control audit, and post-live hygiene passed.
+
+Move 675 status:
+- Move 675 extracts system diagnostics transport into the typed system runtime
+  boundary. `frontend/src/api/systemRuntime.ts` now owns system config reads,
+  system debug-log reads, and the read-only integration doctor route alongside
+  the existing reset/data-path/scale-migration transport. `methods.ts` keeps
+  the public wrapper names while no longer carrying direct `/api/system/config`,
+  `/api/system/debug/log`, or integration-doctor request shaping in the large
+  registry. Focused API HTTP tests verify the read-only GET body contract and
+  source placement, the source guard parsed 209 frontend source files, and the
+  production build shows the `app-api-methods` chunk at about 48.48 kB with no
+  circular chunk warning. Proof: focused API HTTP tests, frontend source guard,
+  frontend typecheck, frontend utility suite, frontend production build, Phase
+  29 audit, focused Products desktop/mobile live control audit, and post-live
+  hygiene passed.

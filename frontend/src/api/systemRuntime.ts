@@ -1,8 +1,28 @@
 import { apiFetch, route } from './http.ts'
+import { SYNC } from '../constants'
 
 type SystemPayload = Record<string, unknown>
 
 const LONG_SYSTEM_ACTION_TIMEOUT_MS = 10 * 60 * 1000
+
+export function getSystemConfig(): Promise<unknown> {
+  return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
+}
+
+export function getSystemDebugLog(): Promise<unknown> {
+  return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
+}
+
+export function getIntegrationDoctor(options: { deep?: boolean; write?: boolean } = {}): Promise<unknown> {
+  const params = new URLSearchParams()
+  if (options.deep || options.write) params.set('deep', '1')
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return route(
+    'system:integrationDoctor',
+    () => apiFetch('GET', `/api/system/integration-doctor${suffix}`, undefined, SYNC.REQUEST_TIMEOUT_MS),
+    undefined,
+  )
+}
 
 export async function resetData(mode = 'sales'): Promise<unknown> {
   return route(

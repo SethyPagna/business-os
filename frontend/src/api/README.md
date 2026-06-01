@@ -39,7 +39,7 @@ This folder is the browser-side transport layer for Business OS.
   - keeps long-running backup job API mechanics outside the large domain registry
 
 - `systemRuntime.ts`
-  - reset/factory reset, sync server URL test, folder/path helpers, and scale migration transport
+  - system config/debug reads, integration doctor, reset/factory reset, sync server URL test, folder/path helpers, and scale migration transport
   - keeps filesystem-facing system calls and long-timeout system transport outside the large domain registry
 
 - `authTransport.ts`

@@ -176,7 +176,7 @@ Code files documented: **497**
 | 164 | `frontend/src/api/syncPreview.ts` | 0 | 2 | 0 | 2 |
 | 165 | `frontend/src/api/syncRuntime.ts` | 1 | 7 | 1 | 1 |
 | 166 | `frontend/src/api/systemJobs.ts` | 2 | 8 | 2 | 0 |
-| 167 | `frontend/src/api/systemRuntime.ts` | 1 | 12 | 1 | 0 |
+| 167 | `frontend/src/api/systemRuntime.ts` | 2 | 15 | 2 | 0 |
 | 168 | `frontend/src/api/websocket.ts` | 2 | 4 | 2 | 2 |
 | 169 | `frontend/src/App.tsx` | 32 | 1 | 29 | 1 |
 | 170 | `frontend/src/app/appShellUtils.ts` | 0 | 16 | 0 | 5 |
@@ -322,7 +322,7 @@ Code files documented: **497**
 | 310 | `frontend/src/components/utils-settings/ResetData.tsx` | 6 | 0 | 4 | 1 |
 | 311 | `frontend/src/components/utils-settings/Settings.tsx` | 13 | 1 | 11 | 1 |
 | 312 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 2 |
-| 313 | `frontend/src/constants.ts` | 0 | 12 | 0 | 12 |
+| 313 | `frontend/src/constants.ts` | 0 | 12 | 0 | 13 |
 | 314 | `frontend/src/index.tsx` | 9 | 0 | 4 | 0 |
 | 315 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 2 |
 | 316 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 3 |
@@ -3416,11 +3416,13 @@ Code files documented: **497**
 
 ### 3.167 `frontend/src/api/systemRuntime.ts`
 
-- Declared exports: `browseDir`, `factoryReset`, `getDataPath`, `getScaleMigrationStatus`, `openFolderDialog`, `openPath`, `prepareScaleMigration`, `resetData`, `resetDataPath`, `runScaleMigration`, `setDataPath`, `testSyncServer`
-- Imports (1)
+- Declared exports: `browseDir`, `factoryReset`, `getDataPath`, `getIntegrationDoctor`, `getScaleMigrationStatus`, `getSystemConfig`, `getSystemDebugLog`, `openFolderDialog`, `openPath`, `prepareScaleMigration`, `resetData`, `resetDataPath`, `runScaleMigration`, `setDataPath`, `testSyncServer`
+- Imports (2)
+  - `../constants`
   - `./http.ts`
-- Internal dependencies (1)
+- Internal dependencies (2)
   - `frontend/src/api/http.ts`
+  - `frontend/src/constants.ts`
 - Referenced by (0)
   - none
 
@@ -6075,13 +6077,14 @@ Code files documented: **497**
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (12)
+- Referenced by (13)
   - `frontend/src/api/actorQuery.ts`
   - `frontend/src/api/driveSync.ts`
   - `frontend/src/api/http.ts`
   - `frontend/src/api/methods.ts`
   - `frontend/src/api/syncRuntime.ts`
   - `frontend/src/api/systemJobs.ts`
+  - `frontend/src/api/systemRuntime.ts`
   - `frontend/src/api/websocket.ts`
   - `frontend/src/AppContext.tsx`
   - `frontend/src/components/auth/Login.tsx`

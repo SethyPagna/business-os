@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 674 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 675 in this file.
 
 ## Goal
 
@@ -6102,6 +6102,23 @@ Decision rule:
     transport split, and focused API HTTP tests verify the source placement.
     The source guard parsed 209 frontend files and the production build now
     reports the `app-api-methods` chunk around 48.85 kB with no circular chunk
+    warning. Proof: focused API HTTP tests, frontend source guard, frontend
+    typecheck, frontend utility suite, frontend production build, Phase 29
+    audit, focused Products desktop/mobile live control audit, and post-live
+    hygiene passed.
+
+675. Extract typed system diagnostics transport into the system runtime
+    boundary.
+    Done: `frontend/src/api/systemRuntime.ts` now owns system config reads,
+    system debug-log reads, and the read-only integration doctor route next to
+    the existing reset, data-path, sync-server, and scale-migration transport.
+    `methods.ts` keeps public `getSystemConfig`, `getSystemDebugLog`, and
+    `getIntegrationDoctor` wrappers for existing `window.api` callers, while
+    direct system diagnostics endpoint strings and integration-doctor query
+    shaping are no longer embedded in the large domain registry. Focused API
+    HTTP tests verify the read-only GET body contract and source placement.
+    The source guard parsed 209 frontend files and the production build now
+    reports the `app-api-methods` chunk around 48.48 kB with no circular chunk
     warning. Proof: focused API HTTP tests, frontend source guard, frontend
     typecheck, frontend utility suite, frontend production build, Phase 29
     audit, focused Products desktop/mobile live control audit, and post-live

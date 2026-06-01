@@ -103,7 +103,10 @@ import {
   browseDir as browseDirRequest,
   factoryReset as factoryResetRequest,
   getDataPath as getDataPathRequest,
+  getIntegrationDoctor as getIntegrationDoctorRequest,
   getScaleMigrationStatus as getScaleMigrationStatusRequest,
+  getSystemConfig as getSystemConfigRequest,
+  getSystemDebugLog as getSystemDebugLogRequest,
   openFolderDialog as openFolderDialogRequest,
   openPath as openPathRequest,
   prepareScaleMigration as prepareScaleMigrationRequest,
@@ -313,15 +316,13 @@ export const updateSessionDuration = (payload) =>
   updateSessionDurationRequest(payload)
 export const getVerificationCapabilities = () =>
   getVerificationCapabilitiesRequest()
-export async function getSystemConfig() {
-  return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
-}
+export const getSystemConfig = () =>
+  getSystemConfigRequest()
 export async function getNotificationSummary() {
   return getNotificationSummaryRequest()
 }
-export async function getSystemDebugLog() {
-  return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
-}
+export const getSystemDebugLog = () =>
+  getSystemDebugLogRequest()
 export const startGoogleOauth = (payload) =>
   startGoogleOauthRequest(payload)
 export const completeGoogleOauth = (payload) =>
@@ -1575,16 +1576,8 @@ export async function pollSystemJob(jobId, options = {}) {
   return pollSystemJobRequest(jobId, options)
 }
 
-export async function getIntegrationDoctor(options = {}) {
-  const params = new URLSearchParams()
-  if (options.deep || options.write) params.set('deep', '1')
-  const suffix = params.toString() ? `?${params.toString()}` : ''
-  return route(
-    'system:integrationDoctor',
-    () => apiFetch('GET', `/api/system/integration-doctor${suffix}`, undefined, SYNC.REQUEST_TIMEOUT_MS),
-    undefined,
-  )
-}
+export const getIntegrationDoctor = (options = {}) =>
+  getIntegrationDoctorRequest(options)
 
 export async function queueBackupFolderExport(destinationDir = '') {
   return queueBackupFolderExportRequest(destinationDir)

@@ -283,8 +283,8 @@ await runTest('read routes return fallback on transient gateway errors without s
 })
 
 await runTest('integration doctor is a read-only route and does not pass a null GET body', () => {
-  const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
-  const block = source.match(/export async function getIntegrationDoctor[\s\S]*?\n}/)?.[0] || ''
+  const source = fs.readFileSync(new URL('../src/api/systemRuntime.ts', import.meta.url), 'utf8')
+  const block = source.match(/export function getIntegrationDoctor[\s\S]*?\n}/)?.[0] || ''
   assert.match(block, /apiFetch\('GET',\s*`\/api\/system\/integration-doctor\$\{suffix\}`,\s*undefined,/)
   assert.doesNotMatch(block, /apiFetch\('GET'[\s\S]*,\s*null\s*,/)
   assert.doesNotMatch(block, /\n\s*true,\s*\n\s*\)/)
@@ -678,6 +678,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /driveSyncStatusRequestPromise/)
   assert.doesNotMatch(source, /markDriveSyncStatusCooldown/)
   assert.doesNotMatch(source, /clearDriveSyncStatusCooldown/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/system\/config'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/system\/debug\/log'/)
   assert.doesNotMatch(source, /notificationSummaryRequestPromise/)
   assert.doesNotMatch(source, /markNotificationSummaryMissing/)
   assert.doesNotMatch(source, /clearNotificationSummaryMissing/)
@@ -689,6 +691,9 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(systemJobsSource, /export async function pollSystemJob/)
   assert.match(systemJobsSource, /await wait\(pollMs\)/)
   assert.match(systemJobsSource, /export async function queueBackupFolderExport/)
+  assert.match(systemRuntimeSource, /export function getSystemConfig/)
+  assert.match(systemRuntimeSource, /export function getSystemDebugLog/)
+  assert.match(systemRuntimeSource, /export function getIntegrationDoctor/)
   assert.match(systemRuntimeSource, /export async function resetData/)
   assert.match(systemRuntimeSource, /export async function testSyncServer/)
   assert.match(systemRuntimeSource, /export function browseDir/)
