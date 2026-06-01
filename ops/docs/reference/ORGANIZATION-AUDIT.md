@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-01T14:28:24.855Z
+Generated: 2026-06-01T14:55:49.198Z
 
 ## Summary
 
@@ -64,9 +64,9 @@ Generated: 2026-06-01T14:28:24.855Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 8404 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 8425 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6690 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6711 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
@@ -78,7 +78,7 @@ Generated: 2026-06-01T14:28:24.855Z
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | frontend/src/components/pos/POS.tsx | 2218 | frontend/components/pos |
-| frontend/tests/performanceLoadingUx.test.ts | 2175 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2178 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |

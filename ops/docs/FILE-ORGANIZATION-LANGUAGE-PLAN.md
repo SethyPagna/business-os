@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 706 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 707 in this file.
 
 ## Goal
 
@@ -6668,6 +6668,27 @@ Decision rule:
     hygiene passed. Remaining deeper target: remove the synchronous
     Dexie/local DB side-effect from `web-api` bootstrap without regressing the
     guaranteed `window.api` install.
+
+707. Remove Dexie/local DB from the startup static import graph.
+    Done: `frontend/src/platform/runtime/clientRuntime.ts` now keeps pure
+    runtime descriptor helpers free of the local DB module and dynamically
+    imports `resetLocalMirrorDb()` only inside `resetClientRuntimeState()`,
+    the rare runtime reset path. This preserves runtime reset behavior while
+    removing `app-local-db` and `vendor-dexie` from normal boot. Proof:
+    performance loading UX guard, source syntax check, typecheck, frontend
+    utility suite, JSX/source check, production build hash
+    `1d2c42ce528647f9`, Docker live build sync, live entry verification
+    showing `assets/index-sOwFDnkY.js` at 80,434 bytes with no startup preload
+    or static import for `notification-center`, `catalog-*`,
+    `catalog-preview-*`, `catalog-editor-*`, `portal-tools`,
+    `media-upload-utils`, `file-picker-modal`, `UserProfileModal`,
+    `app-local-db`, or `vendor-dexie`; exhaustive Playwright all-pages control
+    audit passed across 34 desktop/mobile routes with 518 visible controls,
+    392 exercised controls, 68 screenshots, zero failed controls, and zero
+    findings; broad Phase 8.4 UI live check passed with 72 checked signals and
+    no relevant console messages; public Cloudflare portal check passed with
+    20 rendered products, zero failed responses, zero page errors, and
+    enforced CSP; post-live hygiene passed.
 
 ## Safety Gates
 

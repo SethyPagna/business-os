@@ -2570,15 +2570,15 @@ Total files documented: **233**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `canUseBrowserStorage` | function | 31 |
-| 2 | `isBusinessOsStorageKey` | function | 35 |
-| 3 | `sanitizeText` | function | 40 |
-| 4 | `unregisterServiceWorkers` | function | 152 |
-| 5 | `deleteBusinessOsCaches` | function | 156 |
-| 6 | `clearServiceWorkersAndCaches` | function | 162 |
-| 7 | `snapshotStorage` | function | 178 |
-| 8 | `clearStorage` | function | 191 |
-| 9 | `restoreStorage` | function | 204 |
+| 1 | `canUseBrowserStorage` | function | 30 |
+| 2 | `isBusinessOsStorageKey` | function | 34 |
+| 3 | `sanitizeText` | function | 39 |
+| 4 | `unregisterServiceWorkers` | function | 151 |
+| 5 | `deleteBusinessOsCaches` | function | 155 |
+| 6 | `clearServiceWorkersAndCaches` | function | 161 |
+| 7 | `snapshotStorage` | function | 177 |
+| 8 | `clearStorage` | function | 190 |
+| 9 | `restoreStorage` | function | 203 |
 
 ### 3.188 `frontend/src/platform/storage/storagePolicy.ts`
 

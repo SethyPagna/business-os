@@ -5718,23 +5718,23 @@ Code files scanned: **515**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `canUseBrowserStorage` | function | 31 |
-| 2 | `isBusinessOsStorageKey` | function | 35 |
-| 3 | `sanitizeText` | function | 40 |
-| 4 | `sanitizeSyncServerUrl` | export function | 44 |
-| 5 | `normalizeRuntimeDescriptor` | export function | 56 |
-| 6 | `readStoredRuntimeDescriptor` | export function | 65 |
-| 7 | `writeStoredRuntimeDescriptor` | export function | 76 |
-| 8 | `shouldResetForRuntimeChange` | export function | 90 |
-| 9 | `buildQueuedOperationScope` | export function | 107 |
-| 10 | `doesQueuedScopeMatchCurrent` | export function | 115 |
-| 11 | `unregisterServiceWorkers` | function | 152 |
-| 12 | `deleteBusinessOsCaches` | function | 156 |
-| 13 | `clearServiceWorkersAndCaches` | function | 162 |
-| 14 | `snapshotStorage` | function | 178 |
-| 15 | `clearStorage` | function | 191 |
-| 16 | `restoreStorage` | function | 204 |
-| 17 | `resetClientRuntimeState` | export function | 214 |
+| 1 | `canUseBrowserStorage` | function | 30 |
+| 2 | `isBusinessOsStorageKey` | function | 34 |
+| 3 | `sanitizeText` | function | 39 |
+| 4 | `sanitizeSyncServerUrl` | export function | 43 |
+| 5 | `normalizeRuntimeDescriptor` | export function | 55 |
+| 6 | `readStoredRuntimeDescriptor` | export function | 64 |
+| 7 | `writeStoredRuntimeDescriptor` | export function | 75 |
+| 8 | `shouldResetForRuntimeChange` | export function | 89 |
+| 9 | `buildQueuedOperationScope` | export function | 106 |
+| 10 | `doesQueuedScopeMatchCurrent` | export function | 114 |
+| 11 | `unregisterServiceWorkers` | function | 151 |
+| 12 | `deleteBusinessOsCaches` | function | 155 |
+| 13 | `clearServiceWorkersAndCaches` | function | 161 |
+| 14 | `snapshotStorage` | function | 177 |
+| 15 | `clearStorage` | function | 190 |
+| 16 | `restoreStorage` | function | 203 |
+| 17 | `resetClientRuntimeState` | export function | 213 |
 
 ### 3.334 `frontend/src/platform/storage/storagePolicy.ts`
 

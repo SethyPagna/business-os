@@ -1,5 +1,4 @@
 import { STORAGE_KEYS } from '../../constants.ts'
-import { resetLocalMirrorDb } from '../../api/localDb.ts'
 
 type RuntimeDescriptor = {
   serverStartTime: string
@@ -241,6 +240,7 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys)
 
   await clearServiceWorkersAndCaches()
+  const { resetLocalMirrorDb } = await import('../../api/localDb.ts')
   await resetLocalMirrorDb()
 
   restoreStorage(canUseBrowserStorage() ? window.localStorage : null, keptLocal)

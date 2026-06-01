@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 706.
+- Latest completed implementation move in this roadmap: Move 707.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8401,3 +8401,24 @@ Move 706 status:
   errors, and enforced CSP; post-live hygiene passed. Dexie/local DB remains
   visible as a startup side-effect through the synchronous web-api bootstrap
   and is the next deeper optimization target.
+
+Move 707 status:
+- Move 707 removes Dexie/local IndexedDB from the initial startup static import
+  graph. `frontend/src/platform/runtime/clientRuntime.ts` no longer imports
+  `resetLocalMirrorDb` at module scope; `resetClientRuntimeState()` dynamically
+  imports it only when a runtime reset is actually running. This keeps the pure
+  runtime descriptor helpers cheap for AppContext and web-api startup while
+  preserving the reset cleanup behavior. The local and Docker-served
+  production output now has no startup preload or static import for
+  `notification-center`, `catalog-*`, `catalog-preview-*`, `catalog-editor-*`,
+  `portal-tools`, `media-upload-utils`, `file-picker-modal`,
+  `UserProfileModal`, `app-local-db`, or `vendor-dexie`; the live entry is
+  `assets/index-sOwFDnkY.js` at 80,434 bytes. Proof: performance loading UX
+  guard, source syntax check, typecheck, frontend utility suite, JSX/source
+  check, production build hash `1d2c42ce528647f9`, exhaustive Playwright
+  all-pages control audit across 34 desktop/mobile routes with 518 visible
+  controls, 392 exercised controls, 68 screenshots, zero failed controls, and
+  zero findings; broad Phase 8.4 UI live check passed with 72 checked signals
+  and no relevant console messages; public Cloudflare portal check passed with
+  20 rendered products, zero failed responses, zero page errors, and enforced
+  CSP; post-live hygiene passed.

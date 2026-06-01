@@ -8,27 +8,27 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 706, shrink authenticated shell startup imports
+- Latest completed move: Move 707, remove Dexie/local DB from startup static imports
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `960afc698c5a3a4d`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `1d2c42ce528647f9`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `960afc698c5a3a4d`
+  `1d2c42ce528647f9`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T14-07-07-348Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T14-32-55-858Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T14-21-27-688Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T14-47-03-773Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T14-24-21-407Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T14-49-57-643Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -36,8 +36,8 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` in the 2026-06-01 Move 706
-  verification pass removed three old all-pages report folders for 1,431,381
+- `npm.cmd --prefix ops run prune-storage` in the 2026-06-01 Move 707
+  verification pass removed three old all-pages report folders for 10,273,165
   bytes, kept the latest local backups, kept the newest R2 backup object, and
   found no stopped containers or Docker builder cache to reclaim.
 
@@ -47,7 +47,7 @@ Current honest pockets:
   34 routes, with 518 visible controls discovered, 392 controls exercised, 126
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `960afc698c5a3a4d`
+- broad Phase 8.4 UI live check passed on frontend hash `1d2c42ce528647f9`
   with 72 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -56,6 +56,25 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Frontend startup now removes Dexie/local IndexedDB from the initial static
+  import graph entirely. The remaining blocker was
+  `frontend/src/platform/runtime/clientRuntime.ts`, where the pure runtime
+  descriptor helpers shared a static import with the rare runtime reset path.
+  `resetClientRuntimeState()` now dynamically imports `resetLocalMirrorDb()`
+  only while a reset is actually running, so normal app boot keeps
+  `app-local-db` and `vendor-dexie` out of both modulepreload and top-level
+  entry imports. The live Docker-served `http://127.0.0.1:4000/` entry is
+  `assets/index-sOwFDnkY.js` at 80,434 bytes, and its startup graph contains
+  only React/vendor, lucide, English language, app API, app shell, and shared
+  UI chunks. No startup preload or static import remains for
+  `notification-center`, `catalog-*`, `catalog-preview-*`,
+  `catalog-editor-*`, `portal-tools`, `media-upload-utils`,
+  `file-picker-modal`, `UserProfileModal`, `app-local-db`, or `vendor-dexie`.
+  Production build hash: `1d2c42ce528647f9`; exhaustive Playwright all-pages
+  control audit passed across 34 desktop/mobile routes with 392 exercised
+  controls and zero failures; broad Phase 8.4 UI live check, public Cloudflare
+  portal check, and post-live hygiene also passed.
 
 - Frontend startup now keeps the user profile modal, file picker stack,
   notification center, catalog route, public portal route tools, and favicon
