@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 696.
+- Latest completed implementation move in this roadmap: Move 697.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8216,6 +8216,21 @@ Move 696 status:
   focused loading UX guard verifies the deferred/on-demand gate, the source
   guard parsed 227 frontend source files, the production build hash is
   `5ad9eba769d0526d`, and the focused Dashboard desktop/mobile live control
+  audit passed with 36/46 controls tested, 10 long-label controls skipped, and
+  zero findings; Phase 29 and live hygiene checks are rerun after reference
+  refresh.
+
+Move 697 status:
+- Move 697 defers custom favicon canvas processing out of the first shell
+  render. `frontend/src/App.tsx` still applies the configured favicon source
+  immediately so the browser has an icon, but the circular favicon data-URL
+  generation now waits for `APP_FAVICON_PROCESSING_DELAY_MS` and then prefers
+  `requestIdleCallback` with `APP_FAVICON_IDLE_TIMEOUT_MS`. This avoids doing
+  image decode, canvas drawing, and PNG serialization during the initial app
+  boot path while keeping the polished rounded favicon after the shell is
+  settled. The focused loading UX guard verifies the deferred processing, the
+  source guard parsed 227 frontend source files, the production build hash is
+  `2e6cd6a7af03e203`, and the focused Dashboard desktop/mobile live control
   audit passed with 36/46 controls tested, 10 long-label controls skipped, and
   zero findings; Phase 29 and live hygiene checks are rerun after reference
   refresh.

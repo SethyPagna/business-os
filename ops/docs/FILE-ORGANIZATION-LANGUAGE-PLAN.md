@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 696 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 697 in this file.
 
 ## Goal
 
@@ -6500,6 +6500,19 @@ Decision rule:
     live control audit passed with 36/46 controls tested, 10 long-label
     controls skipped, and zero findings; Phase 29 and live hygiene checks are
     rerun after reference refresh.
+
+697. Defer custom favicon canvas processing until after shell paint.
+    Done: `frontend/src/App.tsx` now sets the configured favicon source
+    immediately, then waits for a short delay plus idle time before calling
+    `createCircularFaviconDataUrl()`. This keeps image decode, canvas draw,
+    and PNG data-URL serialization out of the first render path while
+    preserving the rounded favicon polish once the browser is idle. Proof:
+    focused performance loading UX test, frontend source guard, frontend
+    typecheck, frontend utility suite, frontend production build with hash
+    `2e6cd6a7af03e203`, and focused Dashboard desktop/mobile live control
+    audit passed with 36/46 controls tested, 10 long-label controls skipped,
+    and zero findings; Phase 29 and live hygiene checks are rerun after
+    reference refresh.
 
 ## Safety Gates
 

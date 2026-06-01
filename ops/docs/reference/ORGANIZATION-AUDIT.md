@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-01T09:05:14.381Z
+Generated: 2026-06-01T09:17:56.978Z
 
 ## Summary
 
@@ -64,9 +64,9 @@ Generated: 2026-06-01T09:05:14.381Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8931 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 8222 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 8237 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7613 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6522 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6535 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
@@ -81,13 +81,13 @@ Generated: 2026-06-01T09:05:14.381Z
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2101 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2105 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1813 | ops/docs/reference |
-| frontend/src/App.tsx | 1752 | frontend/src/App.tsx |
+| frontend/src/App.tsx | 1766 | frontend/src/App.tsx |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |

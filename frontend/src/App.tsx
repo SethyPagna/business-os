@@ -233,6 +233,8 @@ const PAGE_IMPORTERS = {
 } satisfies Record<PageId, ChunkImporter>
 
 const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
+const APP_FAVICON_PROCESSING_DELAY_MS = 1800
+const APP_FAVICON_IDLE_TIMEOUT_MS = 7000
 
 // Keep route chunks cold until the user asks for them. Background dynamic
 // imports were evaluating large bundles during real clicks, which showed up as
@@ -1581,6 +1583,8 @@ export default function App() {
     let iconEl = document.querySelector('link[rel="icon"]')
     let createdIcon = false
     let previousHref = ''
+    let idleId: number | null = null
+    let timerId: number | null = null
     const requestId = (Number(faviconRequestRef.current) || 0) + 1
     faviconRequestRef.current = requestId
 
@@ -1593,7 +1597,7 @@ export default function App() {
     }
     iconEl.setAttribute('href', iconSource)
 
-    async function loadFavicon() {
+    async function processFavicon() {
       try {
         const faviconHref = await withLoaderTimeout(
           () => createCircularFaviconDataUrl(iconSource, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
@@ -1607,10 +1611,20 @@ export default function App() {
         iconEl.setAttribute('href', iconSource)
       }
     }
-    loadFavicon()
+    timerId = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(processFavicon, { timeout: APP_FAVICON_IDLE_TIMEOUT_MS })
+      } else {
+        processFavicon()
+      }
+    }, APP_FAVICON_PROCESSING_DELAY_MS)
 
     return () => {
       faviconRequestRef.current = requestId + 1
+      if (timerId != null) window.clearTimeout(timerId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
       if (createdIcon && iconEl) {
         iconEl.remove()
       } else if (iconEl) {
