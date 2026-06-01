@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 686, typed file and upload transport extraction
+- Latest completed move: Move 687, typed contacts transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `aff5b87eee1be89d`
+  `0d25bcfa6f40f78e`
 
 Latest verified reports:
 
@@ -27,6 +27,8 @@ Latest verified reports:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Library desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-14-04-097Z/summary.json`
+- latest focused Contacts desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-31-14-438Z/summary.json`
 - latest focused public catalog desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
 - latest focused Audit Log desktop/mobile control audit:
@@ -52,6 +54,17 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend contacts transport is now `frontend/src/api/contactsTransport.ts`
+  with typed customer, supplier, and delivery-contact reads/writes, bulk
+  imports, loyalty point summaries, and contact CSV templates. Mirrored
+  unpaged reads, cached paged customer reads, device-attributed creates,
+  expected-updated-at mutations, encoded row ids, and import-template
+  ownership now live outside the large API registry. The source guard now
+  parses 221 frontend TypeScript files, the production build reports the
+  `app-api-methods` chunk around 29.42 kB, and the focused Contacts
+  desktop/mobile live audit passed with 24/26 controls tested, 2 controls
+  skipped by visibility/label guardrails, and zero findings.
 
 - Frontend file transport is now `frontend/src/api/fileTransport.ts` with
   typed Library file list/delete, generic asset upload, product image upload,

@@ -155,6 +155,26 @@ import {
   uploadUserAvatar as uploadUserAvatarRequest,
 } from './fileTransport.ts'
 import {
+  bulkImportCustomers as bulkImportCustomersRequest,
+  bulkImportDeliveryContacts as bulkImportDeliveryContactsRequest,
+  bulkImportSuppliers as bulkImportSuppliersRequest,
+  createCustomer as createCustomerRequest,
+  createDeliveryContact as createDeliveryContactRequest,
+  createSupplier as createSupplierRequest,
+  deleteCustomer as deleteCustomerRequest,
+  deleteDeliveryContact as deleteDeliveryContactRequest,
+  deleteSupplier as deleteSupplierRequest,
+  downloadCustomerTemplate as downloadCustomerTemplateRequest,
+  downloadSupplierTemplate as downloadSupplierTemplateRequest,
+  getCustomerPointSummaries as getCustomerPointSummariesRequest,
+  getCustomers as getCustomersRequest,
+  getDeliveryContacts as getDeliveryContactsRequest,
+  getSuppliers as getSuppliersRequest,
+  updateCustomer as updateCustomerRequest,
+  updateDeliveryContact as updateDeliveryContactRequest,
+  updateSupplier as updateSupplierRequest,
+} from './contactsTransport.ts'
+import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
   getCurrentOrganization as getCurrentOrganizationRequest,
@@ -186,8 +206,6 @@ import {
 } from './driveSync.ts'
 import {
   clearCachedQueryResults,
-  readCachedQueryResult,
-  writeCachedQueryResult,
 } from './queryCache.ts'
 import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from './expectedUpdatedAt.ts'
 import { mirrorTable, purgeSensitiveLiveServerMirrors, routeMirrored } from './localMirrors.ts'
@@ -1098,97 +1116,58 @@ export const getAnalytics = (params) => {
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 export const getCustomers = (params = {}) => {
-  const q = buildQueryString(params)
-  const hasPagination = Object.prototype.hasOwnProperty.call(params || {}, 'page')
-    || Object.prototype.hasOwnProperty.call(params || {}, 'pageSize')
-  const cacheKey = `customers:get:${q}`
-  const mirror = !q ? mirrorTable('customers') : null
-  if (!hasPagination) {
-    return routeMirrored(
-      cacheKey,
-      () => apiFetch('GET', appendQuery('/api/customers', q)),
-      () => dexieDb.customers.orderBy('name').toArray(),
-      mirror,
-    )
-  }
-  return routeMirrored(
-    cacheKey,
-    () => apiFetch('GET', appendQuery('/api/customers', q)),
-    () => readCachedQueryResult(cacheKey),
-    (result) => writeCachedQueryResult(cacheKey, result),
-  )
+  return getCustomersRequest(params)
 }
 export const getCustomerPointSummaries = (params = {}) => {
-  const q = buildQueryString(params)
-  return route(`customers:points:${q}`, () => apiFetch('GET', appendQuery('/api/customers/points-summary', q)), () => [])
+  return getCustomerPointSummariesRequest(params)
 }
 export async function createCustomer(d) {
-  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'customer')
-  return route('customers:create', () => apiFetch('POST', '/api/customers', payload), null, true)
+  return createCustomerRequest(d)
 }
 export const updateCustomer = async (id, d) => {
-  const payload = await withExpectedUpdatedAt('customers', id, d)
-  return route('customers:update', () => apiFetch('PUT', `/api/customers/${id}`, payload), null, true)
+  return updateCustomerRequest(id, d)
 }
 export const deleteCustomer = async (id) => {
-  const payload = await withExpectedUpdatedAt('customers', id, {})
-  return route('customers:delete', () => apiFetch('DELETE', `/api/customers/${id}`, payload), null, true)
+  return deleteCustomerRequest(id)
 }
-export const bulkImportCustomers = d        => route('customers:bulkImport', () => apiFetch('POST', '/api/customers/bulk-import', d),      null, true)
-export const downloadCustomerTemplate = ()  => buildCSVTemplate([
-  '_conflict_mode','_field_rules',
-  'name','membership_number','phone','email','address','company','notes',
-  'contact_label_1','contact_name_1','contact_phone_1','contact_email_1','contact_address_1',
-  'contact_label_2','contact_name_2','contact_phone_2','contact_email_2','contact_address_2',
-  'contact_label_3','contact_name_3','contact_phone_3','contact_email_3','contact_address_3',
-], 'customers-template.csv')
+export const bulkImportCustomers = d =>
+  bulkImportCustomersRequest(d)
+export const downloadCustomerTemplate = () =>
+  downloadCustomerTemplateRequest()
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 export const getSuppliers = (params = {}) => {
-  const q = buildQueryString(params)
-  const mirror = q ? null : mirrorTable('suppliers')
-  return routeMirrored(`suppliers:get:${q}`, () => apiFetch('GET', appendQuery('/api/suppliers', q)), () => dexieDb.suppliers.orderBy('name').toArray(), mirror)
+  return getSuppliersRequest(params)
 }
 export async function createSupplier(d) {
-  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier')
-  return route('suppliers:create', () => apiFetch('POST', '/api/suppliers', payload), null, true)
+  return createSupplierRequest(d)
 }
 export const updateSupplier = async (id, d) => {
-  const payload = await withExpectedUpdatedAt('suppliers', id, d)
-  return route('suppliers:update', () => apiFetch('PUT', `/api/suppliers/${id}`, payload), null, true)
+  return updateSupplierRequest(id, d)
 }
 export const deleteSupplier = async (id) => {
-  const payload = await withExpectedUpdatedAt('suppliers', id, {})
-  return route('suppliers:delete', () => apiFetch('DELETE', `/api/suppliers/${id}`, payload), null, true)
+  return deleteSupplierRequest(id)
 }
-export const bulkImportSuppliers = d        => route('suppliers:bulkImport', () => apiFetch('POST', '/api/suppliers/bulk-import', d),      null, true)
-export const downloadSupplierTemplate = ()  => buildCSVTemplate([
-  '_conflict_mode','_field_rules',
-  'name','phone','email','address','company','contact_person','notes',
-  'contact_label_1','contact_name_1','contact_phone_1','contact_email_1','contact_address_1',
-  'contact_label_2','contact_name_2','contact_phone_2','contact_email_2','contact_address_2',
-  'contact_label_3','contact_name_3','contact_phone_3','contact_email_3','contact_address_3',
-], 'suppliers-template.csv')
+export const bulkImportSuppliers = d =>
+  bulkImportSuppliersRequest(d)
+export const downloadSupplierTemplate = () =>
+  downloadSupplierTemplateRequest()
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
 export const getDeliveryContacts = (params = {}) => {
-  const q = buildQueryString(params)
-  const mirror = q ? null : mirrorTable('delivery_contacts')
-  return routeMirrored(`deliveryContacts:get:${q}`, () => apiFetch('GET', appendQuery('/api/delivery-contacts', q)), () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirror)
+  return getDeliveryContactsRequest(params)
 }
 export async function createDeliveryContact(d) {
-  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'delivery_contact')
-  return route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', payload), null, true)
+  return createDeliveryContactRequest(d)
 }
 export const updateDeliveryContact = async (id, d) => {
-  const payload = await withExpectedUpdatedAt('delivery_contacts', id, d)
-  return route('deliveryContacts:update', () => apiFetch('PUT', `/api/delivery-contacts/${id}`, payload), null, true)
+  return updateDeliveryContactRequest(id, d)
 }
 export const deleteDeliveryContact = async (id) => {
-  const payload = await withExpectedUpdatedAt('delivery_contacts', id, {})
-  return route('deliveryContacts:delete', () => apiFetch('DELETE', `/api/delivery-contacts/${id}`, payload), null, true)
+  return deleteDeliveryContactRequest(id)
 }
-export const bulkImportDeliveryContacts = d   => route('deliveryContacts:bulkImport', () => apiFetch('POST', '/api/delivery-contacts/bulk-import', d), null, true)
+export const bulkImportDeliveryContacts = d =>
+  bulkImportDeliveryContactsRequest(d)
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 export const getUsers      = ()       => routeMirrored('users:get',           () => apiFetch('GET', appendActorQuery('/api/users')),        () => dexieDb.users.toArray(), mirrorTable('users'))

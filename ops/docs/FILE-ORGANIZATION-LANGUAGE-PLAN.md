@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 686 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 687 in this file.
 
 ## Goal
 
@@ -6320,6 +6320,27 @@ Decision rule:
     desktop/mobile live control audit passed with 16/18 controls tested, 2
     hidden controls skipped, and zero findings; Phase 29 and live hygiene
     checks are rerun after reference refresh.
+
+687. Extract typed contacts transport from the large domain registry.
+    Done: `frontend/src/api/contactsTransport.ts` now owns customer, supplier,
+    and delivery-contact reads/writes, bulk imports, loyalty point summaries,
+    and customer/supplier CSV templates previously embedded in
+    `frontend/src/api/methods.ts`. The helper keeps typed entity config,
+    mirrored unpaged reads, cached paged customer reads, device-attributed
+    creates, expected-updated-at mutations, encoded ids, and shared contact
+    mutation/template helpers in a typed boundary, while `methods.ts` keeps
+    public `window.api` wrapper names for compatibility. The API guide
+    documents the new contacts transport split, and focused API HTTP tests
+    verify source placement, cached customer pagination ownership, request-id
+    creation, expected-updated-at handling, and no direct contact fetch calls
+    in the large registry. The source guard parsed 221 frontend files and the
+    production build now reports the `app-api-methods` chunk around 29.42 kB
+    with no circular chunk warning. Proof: focused API HTTP tests, frontend
+    source guard, frontend typecheck, frontend utility suite, frontend
+    production build, and focused Contacts desktop/mobile live control audit
+    passed with 24/26 controls tested, 2 controls skipped by visibility/label
+    guardrails, and zero findings; Phase 29 and live hygiene checks are rerun
+    after reference refresh.
 
 ## Safety Gates
 

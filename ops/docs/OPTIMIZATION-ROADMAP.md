@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 686.
+- Latest completed implementation move in this roadmap: Move 687.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8046,3 +8046,23 @@ Move 686 status:
   Library desktop/mobile live control audit passed with 16/18 controls tested,
   2 hidden controls skipped, and zero findings; Phase 29 and live hygiene
   checks are rerun after reference refresh.
+
+Move 687 status:
+- Move 687 extracts contacts transport from the large frontend API registry.
+  `frontend/src/api/contactsTransport.ts` now owns customer, supplier, and
+  delivery-contact reads/writes, bulk imports, loyalty point summaries, and
+  contact CSV template downloads with typed entity config, mirrored unpaged
+  reads, cached paged customer reads, device-attributed creates,
+  expected-updated-at mutations, encoded ids, and shared contact mutation
+  helpers. `methods.ts` keeps public `window.api` wrapper names for
+  compatibility while no longer carrying direct `/api/customers`,
+  `/api/suppliers`, or `/api/delivery-contacts` request code. The API guide
+  documents the new contacts boundary, and focused API HTTP tests verify
+  source placement, cached customer pagination ownership, request-id creation,
+  expected-updated-at handling, and no direct contact fetch calls in the large
+  registry. The source guard parsed 221 frontend source files, the production
+  build shows the `app-api-methods` chunk at about 29.42 kB with no circular
+  chunk warning, and the focused Contacts desktop/mobile live control audit
+  passed with 24/26 controls tested, 2 controls skipped by visibility/label
+  guardrails, and zero findings; Phase 29 and live hygiene checks are rerun
+  after reference refresh.
