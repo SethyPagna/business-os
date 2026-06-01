@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 697 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 698 in this file.
 
 ## Goal
 
@@ -6513,6 +6513,19 @@ Decision rule:
     audit passed with 36/46 controls tested, 10 long-label controls skipped,
     and zero findings; Phase 29 and live hygiene checks are rerun after
     reference refresh.
+
+698. Defer startup retry-marker storage cleanup until after shell paint.
+    Done: `frontend/src/App.tsx` now keeps chunk-recovery URL cleanup
+    immediate, but moves stale `business_os_page_loader_retry:` and
+    `bos-lazy-reload:` marker enumeration/removal behind a short delay plus
+    browser idle time. This keeps a synchronous `sessionStorage` key scan out
+    of successful startup while preserving retry-marker hygiene through a
+    timeout fallback. Proof: focused performance loading UX test, frontend
+    source guard, frontend typecheck, frontend utility suite, frontend
+    production build with hash `f75e2c8d3320d0ec`, and focused Dashboard
+    desktop/mobile live control audit passed with 36/46 controls tested, 10
+    long-label controls skipped, and zero findings; Phase 29 and live hygiene
+    checks are rerun after reference refresh.
 
 ## Safety Gates
 

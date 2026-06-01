@@ -293,6 +293,8 @@ const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 15000
 const STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 const PAGE_LOADER_STALL_WARNING_MS = 15000
+const STARTUP_STORAGE_CLEANUP_DELAY_MS = 2000
+const STARTUP_STORAGE_CLEANUP_IDLE_TIMEOUT_MS = 9000
 const CHUNK_RECOVERY_QUERY_KEYS = ['__bos_reload', '__bos_build', '__bos_reason', '__bos_server_build']
 const FRONTEND_BUILD_HASH = typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev'
 
@@ -1488,7 +1490,7 @@ export default function App() {
   usePageEntryWarmup(authReady ? user : null, page, canAccessPage)
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
+    if (typeof window === 'undefined') return undefined
     const url = new URL(window.location.href)
     let changed = false
     CHUNK_RECOVERY_QUERY_KEYS.forEach((key) => {
@@ -1500,12 +1502,33 @@ export default function App() {
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
     }
-    try {
-      Object.keys(window.sessionStorage)
-        .filter((key) => key.startsWith('business_os_page_loader_retry:') || key.startsWith('bos-lazy-reload:'))
-        .forEach((key) => window.sessionStorage.removeItem(key))
-    } catch {
-      // Ignore storage cleanup failures.
+
+    let idleId: number | null = null
+    let timerId: number | null = null
+    const cleanupRecoveryStorageMarkers = () => {
+      try {
+        for (const key of Object.keys(window.sessionStorage)) {
+          if (key.startsWith('business_os_page_loader_retry:') || key.startsWith('bos-lazy-reload:')) {
+            window.sessionStorage.removeItem(key)
+          }
+        }
+      } catch {
+        // Ignore storage cleanup failures.
+      }
+    }
+    timerId = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(cleanupRecoveryStorageMarkers, { timeout: STARTUP_STORAGE_CLEANUP_IDLE_TIMEOUT_MS })
+      } else {
+        cleanupRecoveryStorageMarkers()
+      }
+    }, STARTUP_STORAGE_CLEANUP_DELAY_MS)
+
+    return () => {
+      if (timerId != null) window.clearTimeout(timerId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
     }
   }, [])
 

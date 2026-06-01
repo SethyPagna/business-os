@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 697, deferred custom favicon canvas processing
+- Latest completed move: Move 698, deferred startup retry-marker storage cleanup
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `2e6cd6a7af03e203`
+  `f75e2c8d3320d0ec`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T09-14-15-614Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T09-36-14-155Z/summary.json`
 - latest focused Sales desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
 - latest focused POS desktop/mobile control audit:
@@ -64,6 +64,18 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent runtime/load win:
+
+- Frontend startup now defers retry-marker storage cleanup in
+  `frontend/src/App.tsx`. URL recovery parameters are still removed
+  immediately, but old `business_os_page_loader_retry:` and `bos-lazy-reload:`
+  markers are no longer enumerated from `sessionStorage` during the first app
+  boot. The cleanup waits for a short delay and then browser idle time, with a
+  timeout fallback so stale markers still get removed. This avoids a
+  synchronous storage scan on the visible render path while preserving loader
+  recovery hygiene. The source guard parsed 227 frontend TypeScript files, the
+  production build hash is `f75e2c8d3320d0ec`, and the focused Dashboard
+  desktop/mobile live audit passed with 36/46 controls tested, 10 long-label
+  controls skipped by stable broad-audit guardrails, and zero findings.
 
 - Frontend startup now defers custom favicon canvas processing in
   `frontend/src/App.tsx`. When a custom logo/favicon is configured, the shell

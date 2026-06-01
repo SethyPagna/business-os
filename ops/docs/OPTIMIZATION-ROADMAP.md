@@ -8234,3 +8234,18 @@ Move 697 status:
   audit passed with 36/46 controls tested, 10 long-label controls skipped, and
   zero findings; Phase 29 and live hygiene checks are rerun after reference
   refresh.
+
+Move 698 status:
+- Move 698 defers startup retry-marker storage cleanup out of the first shell
+  render. `frontend/src/App.tsx` still removes chunk-recovery URL parameters
+  immediately, but the old page-loader and lazy-reload retry markers are now
+  enumerated from `sessionStorage` only after a short delay and browser idle
+  time, with a timeout fallback for busy browsers. This removes a synchronous
+  storage key scan from successful app boot while keeping stale recovery
+  marker cleanup intact. The focused loading UX guard verifies the deferred
+  cleanup and blocks a regression back to immediate `sessionStorage`
+  enumeration, the source guard parsed 227 frontend source files, the
+  production build hash is `f75e2c8d3320d0ec`, and the focused Dashboard
+  desktop/mobile live control audit passed with 36/46 controls tested, 10
+  long-label controls skipped, and zero findings; Phase 29 and live hygiene
+  checks are rerun after reference refresh.
