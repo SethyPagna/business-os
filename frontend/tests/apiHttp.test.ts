@@ -15,6 +15,7 @@ import {
   setSyncServerUrl,
   setSyncToken,
 } from '../src/api/http.ts'
+import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 
 type TestCallback = () => void | Promise<void>
 type FetchCall = Parameters<typeof fetch>
@@ -318,11 +319,18 @@ await runTest('paged audit and user-attributed activity APIs expose user filters
 
 await runTest('client API query strings use one shared builder', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  const querySource = fs.readFileSync(new URL('../src/api/query.ts', import.meta.url), 'utf8')
+  assert.match(source, /import \{ appendQuery, buildQueryString, normalizePositiveUniqueIds \} from '\.\/query\.ts'/)
   assert.match(
-    source,
-    /function buildQueryString\(params = \{\}, \{ skipEmpty = true \} = \{\}\)[\s\S]*for \(const key of Object\.keys\(params \|\| \{\}\)\)[\s\S]*const value = params\[key\][\s\S]*query\.append\(key, value\)/,
+    querySource,
+    /export function buildQueryString\([\s\S]*for \(const key of Object\.keys\(params \|\| \{\}\)\)[\s\S]*appendQueryValue\(query, key, value, skipEmpty\)/,
   )
-  assert.match(source, /function appendQuery\(path, query\)[\s\S]*return query \? `\$\{path\}\?\$\{query\}` : path/)
+  assert.match(querySource, /export function appendQuery\(path: string, query: string\): string/)
+  assert.equal(buildQueryString({ userId: 7, search: '', active: false }), 'userId=7&active=false')
+  assert.equal(buildQueryString({ search: '' }, { skipEmpty: false }), 'search=')
+  assert.equal(buildQueryString({ initial: ['A', 'B'], empty: '' }), 'initial=A&initial=B')
+  assert.equal(appendQuery('/api/products', 'page=2'), '/api/products?page=2')
+  assert.equal(appendQuery('/api/products', ''), '/api/products')
   assert.match(source, /const q = buildQueryString\(params\)/)
   assert.match(source, /const query = buildQueryString\(\{ scope, limit, \.\.\.\(params \|\| \{\}\) \}\)/)
   assert.match(source, /getSales\s*=\s*\(params\)[\s\S]*buildQueryString\(params, \{ skipEmpty: false \}\)/)
@@ -334,11 +342,13 @@ await runTest('client API query strings use one shared builder', () => {
 
 await runTest('product id lookup normalizes ids without intermediate map/filter arrays', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  const querySource = fs.readFileSync(new URL('../src/api/query.ts', import.meta.url), 'utf8')
   assert.match(
-    source,
-    /function normalizePositiveUniqueIds\(ids = \[\], limit = 100\)[\s\S]*const seen = new Set\(\)[\s\S]*for \(const value of ids \|\| \[\]\)[\s\S]*uniqueIds\.push\(id\)[\s\S]*if \(uniqueIds\.length >= limit\) break/,
+    querySource,
+    /export function normalizePositiveUniqueIds\(ids: unknown\[\] = \[\], limit = 100\): number\[\][\s\S]*const seen = new Set<number>\(\)[\s\S]*for \(const value of ids \|\| \[\]\)[\s\S]*uniqueIds\.push\(id\)[\s\S]*if \(uniqueIds\.length >= limit\) break/,
   )
   assert.match(source, /const uniqueIds = normalizePositiveUniqueIds\(ids, 100\)/)
+  assert.deepEqual(normalizePositiveUniqueIds([3, '3', '2', 0, -1, 'x', 4], 2), [3, 2])
   assert.doesNotMatch(source, /Array\.from\(new Set\(\(ids \|\| \[\]\)\.map/)
 })
 

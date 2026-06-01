@@ -30,6 +30,7 @@ import {
   getApiVersionMismatchCooldown,
   markApiVersionMismatch,
 } from './http.ts'
+import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from './query.ts'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { STORAGE_KEYS, SYNC } from '../constants'
@@ -55,34 +56,6 @@ import {
 function getPortalBaseUrl() {
   const browserOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : ''
   return (browserOrigin || getSyncServerUrl() || '').replace(/\/$/, '')
-}
-
-function buildQueryString(params = {}, { skipEmpty = true } = {}) {
-  const query = new URLSearchParams()
-  for (const key of Object.keys(params || {})) {
-    const value = params[key]
-    if (value == null) continue
-    if (skipEmpty && value === '') continue
-    query.append(key, value)
-  }
-  return query.toString()
-}
-
-function appendQuery(path, query) {
-  return query ? `${path}?${query}` : path
-}
-
-function normalizePositiveUniqueIds(ids = [], limit = 100) {
-  const uniqueIds = []
-  const seen = new Set()
-  for (const value of ids || []) {
-    const id = Number(value)
-    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
-    seen.add(id)
-    uniqueIds.push(id)
-    if (uniqueIds.length >= limit) break
-  }
-  return uniqueIds
 }
 
 const SETTINGS_CONFLICT_META_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'])

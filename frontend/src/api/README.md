@@ -14,6 +14,10 @@ This folder is the browser-side transport layer for Business OS.
   - keeps request/response shapes centralized so UI pages do not hand-roll endpoints
   - next high-risk TypeScript target because it is still the large domain registry
 
+- `query.ts`
+  - typed query-string and positive-id normalization helpers shared by `methods.ts`
+  - keeps pure request-shaping logic outside the remaining `ts-nocheck` domain registry
+
 - `localDb.ts`
   - Dexie-based browser storage for offline queues and local cache helpers
 

@@ -5855,6 +5855,18 @@ Decision rule:
     Proof: status-doc stale wording scans, frontend source guard, Phase 29
     audit, and focused Products desktop/mobile live control audit passed.
 
+658. Extract typed API query helpers from the large domain registry.
+    Done: `frontend/src/api/query.ts` now contains the typed
+    `buildQueryString`, `appendQuery`, and `normalizePositiveUniqueIds`
+    helpers that were previously embedded inside
+    `frontend/src/api/methods.ts`. This is the first executable split toward
+    shrinking the remaining `ts-nocheck` API registry: pure request-shaping
+    logic now has explicit types, direct tests, and a documented folder
+    boundary in `frontend/src/api/README.md`. Proof: focused API HTTP tests,
+    frontend source guard, frontend typecheck, frontend utility suite,
+    frontend production build, Phase 29 audit, and focused Products
+    desktop/mobile live control audit passed.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

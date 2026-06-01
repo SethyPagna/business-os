@@ -7591,3 +7591,16 @@ Move 657 status:
   guardrails. Proof: status-doc stale wording scans, frontend source guard,
   Phase 29 audit, and focused Products desktop/mobile live control audit
   passed.
+
+Move 658 status:
+- Move 658 starts the `frontend/src/api/methods.ts` split with a pure typed
+  helper extraction. `frontend/src/api/query.ts` now owns
+  `buildQueryString`, `appendQuery`, and `normalizePositiveUniqueIds` with
+  explicit query-value and options types, while `methods.ts` imports those
+  helpers from the typed module instead of defining them inside the remaining
+  `ts-nocheck` registry. The API guide now documents the new helper boundary,
+  and the API HTTP utility tests exercise query-string skipping, array query
+  values, append behavior, and bounded positive-id normalization directly.
+  Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
+  frontend utility suite, frontend production build, Phase 29 audit, and
+  focused Products desktop/mobile live control audit passed.
