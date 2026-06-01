@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 681 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 682 in this file.
 
 ## Goal
 
@@ -6222,6 +6222,25 @@ Decision rule:
     build, and focused Products desktop/mobile live control audit passed with
     42/42 controls tested and zero findings; Phase 29 and live hygiene checks
     are rerun after reference refresh.
+
+682. Extract typed branch transport from the large domain registry.
+    Done: `frontend/src/api/branchTransport.ts` now owns branch list, summary,
+    stock lookup, branch create/update/delete, transfer list/write, and branch
+    stock-integrity transport previously embedded in
+    `frontend/src/api/methods.ts`. The helper keeps mirrored branch reads,
+    encoded branch id paths, device-attributed write payloads, transfer
+    fallbacks, and expected-updated-at guarded branch mutations in a typed
+    boundary, while `methods.ts` keeps public `window.api` wrapper names for
+    compatibility. The API guide documents the new branch transport split, and
+    focused API HTTP tests verify source placement, mirrored reads, id encoding,
+    expected-updated-at handling, and no direct branch fetch calls in the large
+    registry. The source guard parsed 216 frontend files and the production
+    build now reports the `app-api-methods` chunk around 41.91 kB with no
+    circular chunk warning. Proof: focused API HTTP tests, frontend source
+    guard, frontend typecheck, frontend utility suite, frontend production
+    build, and focused Branch desktop/mobile live control audit passed with
+    zero findings; Phase 29 and live hygiene checks are rerun after reference
+    refresh.
 
 ## Safety Gates
 

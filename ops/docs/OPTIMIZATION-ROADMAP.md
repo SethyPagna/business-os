@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 681.
+- Latest completed implementation move in this roadmap: Move 682.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7958,3 +7958,19 @@ Move 681 status:
   Products desktop/mobile live control audit passed with 42/42 controls tested
   and zero findings; Phase 29 and live hygiene checks are rerun after
   reference refresh.
+
+Move 682 status:
+- Move 682 extracts branch transport from the large frontend API registry.
+  `frontend/src/api/branchTransport.ts` now owns branch list, summary, stock,
+  create/update/delete, transfer list/write, and branch stock-integrity
+  transport with typed query-building, id encoding, mirrored branch reads,
+  device-attributed write payloads, and expected-updated-at guarded branch
+  mutations. `methods.ts` keeps public `window.api` wrapper names for
+  compatibility while no longer carrying direct `/api/branches*` request
+  calls. The API guide documents the new branch boundary, focused API HTTP
+  tests verify source placement, mirrored reads, expected-updated-at handling,
+  id encoding, and branch integrity ownership. The source guard parsed 216
+  frontend source files, the production build shows the `app-api-methods`
+  chunk at about 41.91 kB with no circular chunk warning, and the focused
+  Branch desktop/mobile live control audit passed with zero findings; Phase 29
+  and live hygiene checks are rerun after reference refresh.

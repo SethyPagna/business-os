@@ -625,6 +625,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
   const portalTransportSource = fs.readFileSync(new URL('../src/api/portalTransport.ts', import.meta.url), 'utf8')
   const lookupTransportSource = fs.readFileSync(new URL('../src/api/lookupTransport.ts', import.meta.url), 'utf8')
+  const branchTransportSource = fs.readFileSync(new URL('../src/api/branchTransport.ts', import.meta.url), 'utf8')
   const actionHistoryTransportSource = fs.readFileSync(new URL('../src/api/actionHistoryTransport.ts', import.meta.url), 'utf8')
   const inventoryTransportSource = fs.readFileSync(new URL('../src/api/inventoryTransport.ts', import.meta.url), 'utf8')
   const rfidTransportSource = fs.readFileSync(new URL('../src/api/rfidTransport.ts', import.meta.url), 'utf8')
@@ -641,6 +642,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.equal(buildQueryCacheStorageKey(' products:search:x '), 'read_cache:products:search:x')
   assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
   assert.match(source, /from '\.\/lookupTransport\.ts'/)
+  assert.match(source, /from '\.\/branchTransport\.ts'/)
   assert.match(source, /from '\.\/aiTransport\.ts'/)
   assert.match(source, /from '\.\/actionHistoryTransport\.ts'/)
   assert.match(source, /from '\.\/inventoryTransport\.ts'/)
@@ -665,6 +667,11 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(lookupTransportSource, /withExpectedUpdatedAt\(config\.kind, id, payload\)/)
   assert.match(lookupTransportSource, /config\.kind === 'units' \? 'PATCH' : 'PUT'/)
   assert.doesNotMatch(lookupTransportSource, /refreshAppData/)
+  assert.match(branchTransportSource, /export function getBranches/)
+  assert.match(branchTransportSource, /mirrorTable\('branches'\)/)
+  assert.match(branchTransportSource, /withExpectedUpdatedAt\('branches', id/)
+  assert.match(branchTransportSource, /export function getBranchStockIntegrity/)
+  assert.match(branchTransportSource, /encodeURIComponent\(String\(id\)\)/)
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
@@ -701,6 +708,9 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/login'/)
   assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/categories'/)
   assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/units'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/branches'/)
+  assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/branches'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/branches\/summary'/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/otp\/setup'/)
   assert.doesNotMatch(source, /apiFetch\('GET', appendActorQuery\('\/api\/ai\/providers'\)/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/ai\/providers'/)

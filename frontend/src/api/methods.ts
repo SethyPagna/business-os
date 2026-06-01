@@ -54,6 +54,18 @@ import {
   updateUnit as updateUnitRequest,
 } from './lookupTransport.ts'
 import {
+  createBranch as createBranchRequest,
+  deleteBranch as deleteBranchRequest,
+  getBranches as getBranchesRequest,
+  getBranchStock as getBranchStockRequest,
+  getBranchStockIntegrity as getBranchStockIntegrityRequest,
+  getBranchSummary as getBranchSummaryRequest,
+  getTransfers as getTransfersRequest,
+  repairBranchStockIntegrity as repairBranchStockIntegrityRequest,
+  transferStock as transferStockRequest,
+  updateBranch as updateBranchRequest,
+} from './branchTransport.ts'
+import {
   createAiProvider as createAiProviderRequest,
   deleteAiProvider as deleteAiProviderRequest,
   getAiProviders as getAiProvidersRequest,
@@ -571,25 +583,26 @@ export const deleteUnit = async (id, payload) => {
 }
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
-export const getBranches    = ()       => routeMirrored('branches:get',    () => apiFetch('GET', '/api/branches'),              () => dexieDb.branches.toArray(), mirrorTable('branches'))
-export const getBranchSummary = () => route('branches:summary', () => apiFetch('GET', '/api/branches/summary'), () => ({ branch_count: 0, total_products: 0, in_stock: 0, low_stock: 0, out_of_stock: 0, stock_value_usd: 0 }))
-export const createBranch   = d        => route('branches:create', () => apiFetch('POST', '/api/branches', { ...getDeviceInfo(), ...d }),           null, true)
-export const updateBranch = async (id, d) => {
-  const payload = await withExpectedUpdatedAt('branches', id, { ...getDeviceInfo(), ...d })
-  return route('branches:update', () => apiFetch('PUT', `/api/branches/${id}`, payload), null, true)
-}
-export const deleteBranch = async (id, userId, userName) => {
-  const payload = await withExpectedUpdatedAt('branches', id, { userId, userName })
-  return route('branches:delete', () => apiFetch('DELETE', `/api/branches/${id}`, payload), null, true)
-}
-export const getBranchStock = (id, params = {}) => {
-  const q = buildQueryString(params)
-  return route(`branches:stock:${id}:${q}`,  () => apiFetch('GET', appendQuery(`/api/branches/${id}/stock`, q)),   () => [])
-}
-export const getTransfers   = ()       => route('transfers:get',   () => apiFetch('GET', '/api/transfers'),              () => dexieDb.stock_transfers.orderBy('created_at').reverse().toArray())
-export const transferStock  = d        => route('branches:transfer', () => apiFetch('POST', '/api/branches/transfer', { ...getDeviceInfo(), ...d }), null, true)
-export const getBranchStockIntegrity = () => route('branches:stockIntegrity', () => apiFetch('GET', '/api/branches/stock-integrity'), () => ({ issues: [], summary: {} }))
-export const repairBranchStockIntegrity = payload => route('branches:stockIntegrity:repair', () => apiFetch('POST', '/api/branches/stock-integrity/repair', payload), null, true)
+export const getBranches = () =>
+  getBranchesRequest()
+export const getBranchSummary = () =>
+  getBranchSummaryRequest()
+export const createBranch = payload =>
+  createBranchRequest(payload)
+export const updateBranch = (id, payload) =>
+  updateBranchRequest(id, payload)
+export const deleteBranch = (id, userId, userName) =>
+  deleteBranchRequest(id, userId, userName)
+export const getBranchStock = (id, params = {}) =>
+  getBranchStockRequest(id, params)
+export const getTransfers = () =>
+  getTransfersRequest()
+export const transferStock = payload =>
+  transferStockRequest(payload)
+export const getBranchStockIntegrity = () =>
+  getBranchStockIntegrityRequest()
+export const repairBranchStockIntegrity = payload =>
+  repairBranchStockIntegrityRequest(payload)
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 export const getProducts        = ()       => routeMirrored('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray(), mirrorTable('products'))

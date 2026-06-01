@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 681, typed category/unit lookup transport extraction
+- Latest completed move: Move 682, typed branch transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `aae8120c2e51dc6b`
+  `06f55a3c5af78212`
 
 Latest verified reports:
 
@@ -31,6 +31,8 @@ Latest verified reports:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-00-11-876Z/summary.json`
 - latest focused Inventory desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-26-48-123Z/summary.json`
+- latest focused Branch desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-00-35-669Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,6 +50,15 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend branch transport is now `frontend/src/api/branchTransport.ts` with
+  typed branch list/summary/stock reads, create/update/delete writes, transfer
+  reads/writes, and branch stock-integrity transport. Branch id path segments,
+  device-attributed writes, mirrored branch reads, and expected-updated-at
+  branch mutations now live outside the large API registry. The source guard
+  now parses 216 frontend TypeScript files, the production build reports the
+  `app-api-methods` chunk around 41.91 kB, and the focused Branch
+  desktop/mobile live audit passed with zero findings.
 
 - Frontend category/unit lookup transport is now
   `frontend/src/api/lookupTransport.ts` with typed mirrored lookup reads,
