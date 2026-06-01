@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 680, typed RFID transport extraction
+- Latest completed move: Move 681, typed category/unit lookup transport extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `d782f88511b84022`
+  `aae8120c2e51dc6b`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-28-28-590Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-45-30-017Z/summary.json`
 - latest focused public catalog desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
 - latest focused Audit Log desktop/mobile control audit:
@@ -48,6 +48,17 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend category/unit lookup transport is now
+  `frontend/src/api/lookupTransport.ts` with typed mirrored lookup reads,
+  expected-updated-at guarded create/update/delete transport, and explicit
+  category versus unit write methods. UI refresh side effects stay in the
+  public `methods.ts` wrappers, keeping the transport boundary pure and
+  avoiding circular chunk warnings. The source guard now parses 215 frontend
+  TypeScript files, the production build reports the `app-api-methods` chunk
+  around 42.83 kB and the main `app-api` chunk around 60.66 kB, and the
+  focused Products desktop/mobile live audit passed with 42/42 controls tested
+  and zero findings.
 
 - Frontend RFID inventory transport is now `frontend/src/api/rfidTransport.ts`
   with typed gateway status, tag search/create, session event, review, and

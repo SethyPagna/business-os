@@ -44,6 +44,16 @@ import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
 import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
 import {
+  createCategory as createCategoryRequest,
+  createUnit as createUnitRequest,
+  deleteCategory as deleteCategoryRequest,
+  deleteUnit as deleteUnitRequest,
+  getCategories as getCategoriesRequest,
+  getUnits as getUnitsRequest,
+  updateCategory as updateCategoryRequest,
+  updateUnit as updateUnitRequest,
+} from './lookupTransport.ts'
+import {
   createAiProvider as createAiProviderRequest,
   deleteAiProvider as deleteAiProviderRequest,
   getAiProviders as getAiProvidersRequest,
@@ -523,37 +533,39 @@ export async function saveSettings(updates, options = {}) {
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
-export const getCategories  = ()       => routeMirrored('categories:get',    () => apiFetch('GET', '/api/categories'),              () => dexieDb.categories.orderBy('name').toArray(), mirrorTable('categories'))
-export const createCategory = async (d) => {
-  const result = await route('categories:create', () => apiFetch('POST', '/api/categories', d), null, true)
+export const getCategories = () =>
+  getCategoriesRequest()
+export const createCategory = async payload => {
+  const result = await createCategoryRequest(payload)
   refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:create' })
   return result
 }
-export const updateCategory = async (id, d) => {
-  const result = await route('categories:update', async () => apiFetch('PUT', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, d)), null, true)
+export const updateCategory = async (id, payload) => {
+  const result = await updateCategoryRequest(id, payload)
   refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:update' })
   return result
 }
 export const deleteCategory = async (id, payload) => {
-  const result = await route('categories:delete', async () => apiFetch('DELETE', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, payload)), null, true)
+  const result = await deleteCategoryRequest(id, payload)
   refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-deleted', source: 'categories:delete' })
   return result
 }
 
 // ─── Units ────────────────────────────────────────────────────────────────────
-export const getUnits   = ()  => routeMirrored('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray(), mirrorTable('units'))
-export const createUnit = async (d) => {
-  const result = await route('units:create', () => apiFetch('POST', '/api/units', d), null, true)
+export const getUnits = () =>
+  getUnitsRequest()
+export const createUnit = async payload => {
+  const result = await createUnitRequest(payload)
   refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:create' })
   return result
 }
-export const updateUnit = async (id, d) => {
-  const result = await route('units:update', async () => apiFetch('PATCH', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, d)), null, true)
+export const updateUnit = async (id, payload) => {
+  const result = await updateUnitRequest(id, payload)
   refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:update' })
   return result
 }
 export const deleteUnit = async (id, payload) => {
-  const result = await route('units:delete', async () => apiFetch('DELETE', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, payload)), null, true)
+  const result = await deleteUnitRequest(id, payload)
   refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-deleted', source: 'units:delete' })
   return result
 }

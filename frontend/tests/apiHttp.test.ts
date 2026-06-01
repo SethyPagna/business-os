@@ -624,6 +624,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const localMirrorsSource = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
   const portalTransportSource = fs.readFileSync(new URL('../src/api/portalTransport.ts', import.meta.url), 'utf8')
+  const lookupTransportSource = fs.readFileSync(new URL('../src/api/lookupTransport.ts', import.meta.url), 'utf8')
   const actionHistoryTransportSource = fs.readFileSync(new URL('../src/api/actionHistoryTransport.ts', import.meta.url), 'utf8')
   const inventoryTransportSource = fs.readFileSync(new URL('../src/api/inventoryTransport.ts', import.meta.url), 'utf8')
   const rfidTransportSource = fs.readFileSync(new URL('../src/api/rfidTransport.ts', import.meta.url), 'utf8')
@@ -639,6 +640,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const notificationSummarySource = fs.readFileSync(new URL('../src/api/notificationSummary.ts', import.meta.url), 'utf8')
   assert.equal(buildQueryCacheStorageKey(' products:search:x '), 'read_cache:products:search:x')
   assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
+  assert.match(source, /from '\.\/lookupTransport\.ts'/)
   assert.match(source, /from '\.\/aiTransport\.ts'/)
   assert.match(source, /from '\.\/actionHistoryTransport\.ts'/)
   assert.match(source, /from '\.\/inventoryTransport\.ts'/)
@@ -658,6 +660,11 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(expectedUpdatedAtSource, /export async function withExpectedUpdatedAt\([\s\S]*body\.expectedUpdatedAt = body\.updated_at[\s\S]*table\?\.get\?\.\(id\)/)
   assert.match(localMirrorsSource, /export function mirrorReadResult[\s\S]*return result/)
   assert.match(localMirrorsSource, /export function mirrorTable[\s\S]*for \(const row of Array\.isArray\(rows\) \? rows : \[\]\)[\s\S]*replaceTableContents/)
+  assert.match(lookupTransportSource, /export function getCategories/)
+  assert.match(lookupTransportSource, /routeMirrored\(/)
+  assert.match(lookupTransportSource, /withExpectedUpdatedAt\(config\.kind, id, payload\)/)
+  assert.match(lookupTransportSource, /config\.kind === 'units' \? 'PATCH' : 'PUT'/)
+  assert.doesNotMatch(lookupTransportSource, /refreshAppData/)
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
@@ -692,6 +699,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   )
   assert.doesNotMatch(source, /Object\.entries\(extra \|\| \{\}\)\.forEach/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/login'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/categories'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/units'/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/otp\/setup'/)
   assert.doesNotMatch(source, /apiFetch\('GET', appendActorQuery\('\/api\/ai\/providers'\)/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/ai\/providers'/)

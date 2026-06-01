@@ -58,6 +58,10 @@ This folder is the browser-side transport layer for Business OS.
   - inventory stock actions, summary/stats, product search, movement history, and reason transport
   - keeps inventory query caching, page bounds, and device-attributed stock writes outside the large domain registry
 
+- `lookupTransport.ts`
+  - category and unit lookup reads/writes with mirrored offline reads and expected-updated-at mutation guards
+  - keeps lookup refresh channels and create/update/delete route behavior outside the large domain registry
+
 - `rfidTransport.ts`
   - RFID gateway status, tag search/create, session event/review/apply transport
   - keeps RFID route keys, id encoding, and device-attributed RFID writes outside the large domain registry

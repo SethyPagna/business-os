@@ -27,8 +27,8 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/products.ts` | 99.1 | 2218 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 85.1 | 1846 |
 | `backend/src/routes/inventory.ts` | 83.8 | 1881 |
-| `frontend/src/api/methods.ts` | 78.7 | 1745 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 78.5 | 1732 |
+| `frontend/src/api/methods.ts` | 78.2 | 1757 |
 | `frontend/src/AppContext.tsx` | 73.5 | 1826 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 67.7 | 1311 |
@@ -57,7 +57,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/inventory.ts` | 1881 | 83.8 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1846 | 85.1 |
 | `frontend/src/AppContext.tsx` | 1826 | 73.5 |
-| `frontend/src/api/methods.ts` | 1745 | 78.7 |
+| `frontend/src/api/methods.ts` | 1757 | 78.2 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 1732 | 78.5 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |
 | `backend/src/routes/system/index.ts` | 1659 | 65.3 |
@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-bHHAd3fH.js` | 184.2 |
+| `frontend/dist/assets/catalog-Cg6_Zaxd.js` | 184.2 |
 | `frontend/dist/assets/index-DQztsXP7.css` | 151.6 |
-| `frontend/dist/assets/Inventory-BDcYrSX4.js` | 144.0 |
-| `frontend/dist/assets/index-BFErBIre.js` | 128.7 |
+| `frontend/dist/assets/Inventory-Al4xoZzn.js` | 144.0 |
+| `frontend/dist/assets/index-CE5szJ3q.js` | 128.7 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/Products-B1VCppLq.js` | 93.0 |
-| `frontend/dist/assets/app-shared-D9w5v1Ch.js` | 82.4 |
-| `frontend/dist/assets/POS-BwN0Bf78.js` | 76.6 |
+| `frontend/dist/assets/Products-BxSsCb1I.js` | 93.0 |
+| `frontend/dist/assets/app-shared-DHdZ9wxF.js` | 82.4 |
+| `frontend/dist/assets/POS-DieC70eR.js` | 76.6 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-DUVCn1bZ.js` | 70.8 |
-| `frontend/dist/assets/catalog-editor-CK8eS2uW.js` | 70.5 |
-| `frontend/dist/assets/BulkImportModal-BFlHlU7Z.js` | 68.3 |
-| `frontend/dist/assets/catalog-preview-F0ff5hef.js` | 64.3 |
-| `frontend/dist/assets/app-api-sY3y1C5k.js` | 58.3 |
-| `frontend/dist/assets/Backup-BaXavUQZ.js` | 57.9 |
+| `frontend/dist/assets/Dashboard-BN1vSE9C.js` | 70.8 |
+| `frontend/dist/assets/catalog-editor-B2-_zUGP.js` | 70.5 |
+| `frontend/dist/assets/BulkImportModal-CWSL0zZl.js` | 68.3 |
+| `frontend/dist/assets/catalog-preview-DhZvJsPU.js` | 64.3 |
+| `frontend/dist/assets/app-api-9p1qgN_q.js` | 59.2 |
+| `frontend/dist/assets/Backup-Bno1J31s.js` | 57.9 |
 | `frontend/dist/assets/vendor-lucide-RAvr19U5.js` | 52.5 |
-| `frontend/dist/assets/Settings-n1Qr37nU.js` | 52.3 |
-| `frontend/dist/assets/app-api-methods-DPJEiIBj.js` | 42.4 |
-| `frontend/dist/assets/Users-B1tOyVsj.js` | 40.4 |
-| `frontend/dist/assets/Branches-DLDJnyku.js` | 38.1 |
-| `frontend/dist/assets/ReceiptSettings-D4FhGnJ1.js` | 37.5 |
-| `frontend/dist/assets/Sales-CHAhoAm5.js` | 35.2 |
+| `frontend/dist/assets/Settings-DkhhMMEZ.js` | 52.3 |
+| `frontend/dist/assets/app-api-methods-ZY_5daaS.js` | 41.8 |
+| `frontend/dist/assets/Users-CQ5CElTy.js` | 40.4 |
+| `frontend/dist/assets/Branches-eW0Wh2hm.js` | 38.1 |
+| `frontend/dist/assets/ReceiptSettings-B0F8wA_d.js` | 37.5 |
+| `frontend/dist/assets/Sales-C4xusq87.js` | 35.2 |
 
 ## 5. Notes
 

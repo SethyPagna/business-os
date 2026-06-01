@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 680.
+- Latest completed implementation move in this roadmap: Move 681.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7939,3 +7939,22 @@ Move 680 status:
   build, and focused Inventory desktop/mobile live control audit passed with
   zero findings; Phase 29 and live hygiene checks are rerun after reference
   refresh.
+
+Move 681 status:
+- Move 681 extracts category/unit lookup transport from the large frontend API
+  registry. `frontend/src/api/lookupTransport.ts` now owns category and unit
+  list/create/update/delete transport with mirrored offline reads and
+  expected-updated-at guarded mutations. `methods.ts` keeps public
+  `window.api` wrapper names and lookup refresh side effects for compatibility,
+  while the transport remains pure API/local-mirror code to avoid circular
+  chunk warnings. The API guide documents the new lookup boundary, focused API
+  HTTP tests verify source placement, mirrored reads, expected-updated-at
+  handling, and the absence of direct `/api/categories` and `/api/units` calls
+  in the large registry. The source guard parsed 215 frontend source files,
+  the production build shows the `app-api-methods` chunk at about 42.83 kB
+  and the main `app-api` chunk at about 60.66 kB with no circular chunk
+  warning. Proof: focused API HTTP tests, frontend source guard, frontend
+  typecheck, frontend utility suite, frontend production build, and focused
+  Products desktop/mobile live control audit passed with 42/42 controls tested
+  and zero findings; Phase 29 and live hygiene checks are rerun after
+  reference refresh.
