@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-05-31T23:57:54.648Z
+Generated: 2026-06-01T00:08:25.741Z
 
 ## Summary
 
@@ -63,15 +63,15 @@ Generated: 2026-05-31T23:57:54.648Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8264 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7551 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7165 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5840 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8271 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7566 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7167 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5853 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3399 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2767 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2762 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/api/methods.ts | 2354 | frontend/api |
@@ -87,7 +87,7 @@ Generated: 2026-05-31T23:57:54.648Z
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1878 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1775 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1777 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |

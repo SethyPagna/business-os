@@ -243,75 +243,75 @@ Code files documented: **479**
 | 231 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 1 | 3 | 1 | 0 |
 | 232 | `frontend/src/components/products/Products.tsx` | 32 | 1 | 30 | 1 |
 | 233 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 1 | 1 | 0 | 2 |
-| 234 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 7 | 1 | 4 | 1 |
+| 234 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 8 | 1 | 5 | 1 |
 | 235 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 | 1 | 0 | 2 |
-| 236 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 0 | 3 | 0 | 2 |
-| 237 | `frontend/src/components/products/shared/primitives.tsx` | 3 | 0 | 1 | 9 |
-| 238 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 3 | 1 | 2 | 1 |
-| 239 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 6 | 1 | 4 | 1 |
-| 240 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 4 | 4 | 3 | 0 |
-| 241 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 2 | 1 | 0 | 1 |
-| 242 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 3 | 1 | 2 | 1 |
-| 243 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 4 |
-| 244 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 | 1 | 0 | 1 |
-| 245 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 2 | 1 | 0 | 1 |
-| 246 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 4 | 1 | 2 | 1 |
-| 247 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 4 | 1 | 3 | 1 |
-| 248 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 12 | 1 | 10 | 1 |
-| 249 | `frontend/src/components/receipt-settings/template.ts` | 1 | 2 | 1 | 4 |
-| 250 | `frontend/src/components/receipt/Receipt.tsx` | 7 | 1 | 5 | 3 |
-| 251 | `frontend/src/components/returns/EditReturnModal.tsx` | 4 | 1 | 3 | 1 |
-| 252 | `frontend/src/components/returns/NewReturnModal.tsx` | 4 | 1 | 3 | 1 |
-| 253 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 3 | 1 | 2 | 1 |
-| 254 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
-| 255 | `frontend/src/components/returns/Returns.tsx` | 19 | 1 | 17 | 1 |
-| 256 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 2 | 1 | 0 | 1 |
-| 257 | `frontend/src/components/sales/ExportModal.tsx` | 5 | 1 | 3 | 1 |
-| 258 | `frontend/src/components/sales/SaleDetailModal.tsx` | 3 | 1 | 2 | 1 |
-| 259 | `frontend/src/components/sales/Sales.tsx` | 22 | 1 | 20 | 1 |
-| 260 | `frontend/src/components/sales/SalesImportModal.tsx` | 5 | 1 | 4 | 1 |
-| 261 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 0 |
-| 262 | `frontend/src/components/sales/SalesListSurface.tsx` | 3 | 1 | 1 | 1 |
-| 263 | `frontend/src/components/sales/StatusBadge.tsx` | 0 | 5 | 0 | 6 |
-| 264 | `frontend/src/components/server/ServerPage.tsx` | 5 | 1 | 4 | 1 |
-| 265 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 | 1 | 1 | 17 |
-| 266 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 7 | 1 | 5 | 1 |
-| 267 | `frontend/src/components/shared/ExportMenu.tsx` | 3 | 1 | 1 | 7 |
-| 268 | `frontend/src/components/shared/FilterMenu.tsx` | 3 | 1 | 1 | 8 |
-| 269 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 2 |
-| 270 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 2 | 1 | 0 | 3 |
-| 271 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 6 |
-| 272 | `frontend/src/components/shared/Modal.tsx` | 1 | 1 | 0 | 22 |
-| 273 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
-| 274 | `frontend/src/components/shared/NotificationCenter.tsx` | 4 | 1 | 1 | 2 |
-| 275 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
-| 276 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
-| 277 | `frontend/src/components/shared/PaginationControls.tsx` | 2 | 4 | 0 | 9 |
-| 278 | `frontend/src/components/shared/PortalMenu.tsx` | 3 | 2 | 0 | 9 |
-| 279 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 | 1 | 1 | 3 |
-| 280 | `frontend/src/components/shared/SectionSwitcher.tsx` | 1 | 1 | 0 | 4 |
-| 281 | `frontend/src/components/shared/WriteConflictModal.tsx` | 1 | 1 | 1 | 1 |
-| 282 | `frontend/src/components/users/PermissionEditor.tsx` | 0 | 3 | 0 | 2 |
-| 283 | `frontend/src/components/users/UserDetailSheet.tsx` | 2 | 1 | 2 | 1 |
-| 284 | `frontend/src/components/users/UserProfileModal.tsx` | 10 | 1 | 8 | 2 |
-| 285 | `frontend/src/components/users/Users.tsx` | 14 | 1 | 12 | 1 |
-| 286 | `frontend/src/components/utils-settings/AuditLog.tsx` | 10 | 1 | 8 | 1 |
-| 287 | `frontend/src/components/utils-settings/Backup.tsx` | 10 | 1 | 8 | 1 |
-| 288 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 2 | 1 | 0 | 1 |
-| 289 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
-| 290 | `frontend/src/components/utils-settings/OtpModal.tsx` | 3 | 1 | 2 | 2 |
-| 291 | `frontend/src/components/utils-settings/ResetData.tsx` | 6 | 0 | 4 | 1 |
-| 292 | `frontend/src/components/utils-settings/Settings.tsx` | 13 | 1 | 11 | 1 |
-| 293 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 2 |
-| 294 | `frontend/src/constants.ts` | 0 | 12 | 0 | 8 |
-| 295 | `frontend/src/index.tsx` | 9 | 0 | 4 | 0 |
-| 296 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 2 |
-| 297 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
-| 298 | `frontend/src/public-runtime/runtime-noise-guard.ts` | 0 | 0 | 0 | 0 |
-| 299 | `frontend/src/public-runtime/service-worker.ts` | 0 | 0 | 0 | 0 |
-| 300 | `frontend/src/public-runtime/theme-bootstrap.ts` | 0 | 0 | 0 | 0 |
-| 301 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
-| 302 | `frontend/src/types/jsx-modules.d.ts` | 0 | 11 | 0 | 0 |
+| 236 | `frontend/src/components/products/scanning/cameraPermission.ts` | 0 | 2 | 0 | 3 |
+| 237 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 1 | 3 | 1 | 2 |
+| 238 | `frontend/src/components/products/shared/primitives.tsx` | 3 | 0 | 1 | 9 |
+| 239 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 3 | 1 | 2 | 1 |
+| 240 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 6 | 1 | 4 | 1 |
+| 241 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 4 | 4 | 3 | 0 |
+| 242 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 2 | 1 | 0 | 1 |
+| 243 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 3 | 1 | 2 | 1 |
+| 244 | `frontend/src/components/receipt-settings/constants.ts` | 0 | 3 | 0 | 4 |
+| 245 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 | 1 | 0 | 1 |
+| 246 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 2 | 1 | 0 | 1 |
+| 247 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 4 | 1 | 2 | 1 |
+| 248 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 4 | 1 | 3 | 1 |
+| 249 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 12 | 1 | 10 | 1 |
+| 250 | `frontend/src/components/receipt-settings/template.ts` | 1 | 2 | 1 | 4 |
+| 251 | `frontend/src/components/receipt/Receipt.tsx` | 7 | 1 | 5 | 3 |
+| 252 | `frontend/src/components/returns/EditReturnModal.tsx` | 4 | 1 | 3 | 1 |
+| 253 | `frontend/src/components/returns/NewReturnModal.tsx` | 4 | 1 | 3 | 1 |
+| 254 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 3 | 1 | 2 | 1 |
+| 255 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
+| 256 | `frontend/src/components/returns/Returns.tsx` | 19 | 1 | 17 | 1 |
+| 257 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 2 | 1 | 0 | 1 |
+| 258 | `frontend/src/components/sales/ExportModal.tsx` | 5 | 1 | 3 | 1 |
+| 259 | `frontend/src/components/sales/SaleDetailModal.tsx` | 3 | 1 | 2 | 1 |
+| 260 | `frontend/src/components/sales/Sales.tsx` | 22 | 1 | 20 | 1 |
+| 261 | `frontend/src/components/sales/SalesImportModal.tsx` | 5 | 1 | 4 | 1 |
+| 262 | `frontend/src/components/sales/salesImportWorker.ts` | 1 | 0 | 1 | 0 |
+| 263 | `frontend/src/components/sales/SalesListSurface.tsx` | 3 | 1 | 1 | 1 |
+| 264 | `frontend/src/components/sales/StatusBadge.tsx` | 0 | 5 | 0 | 6 |
+| 265 | `frontend/src/components/server/ServerPage.tsx` | 5 | 1 | 4 | 1 |
+| 266 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 | 1 | 1 | 17 |
+| 267 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 7 | 1 | 5 | 1 |
+| 268 | `frontend/src/components/shared/ExportMenu.tsx` | 3 | 1 | 1 | 7 |
+| 269 | `frontend/src/components/shared/FilterMenu.tsx` | 3 | 1 | 1 | 8 |
+| 270 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 2 |
+| 271 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 2 | 1 | 0 | 3 |
+| 272 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 6 |
+| 273 | `frontend/src/components/shared/Modal.tsx` | 1 | 1 | 0 | 22 |
+| 274 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
+| 275 | `frontend/src/components/shared/NotificationCenter.tsx` | 4 | 1 | 1 | 2 |
+| 276 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
+| 277 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
+| 278 | `frontend/src/components/shared/PaginationControls.tsx` | 2 | 4 | 0 | 9 |
+| 279 | `frontend/src/components/shared/PortalMenu.tsx` | 3 | 2 | 0 | 9 |
+| 280 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 | 1 | 1 | 3 |
+| 281 | `frontend/src/components/shared/SectionSwitcher.tsx` | 1 | 1 | 0 | 4 |
+| 282 | `frontend/src/components/shared/WriteConflictModal.tsx` | 1 | 1 | 1 | 1 |
+| 283 | `frontend/src/components/users/PermissionEditor.tsx` | 0 | 3 | 0 | 2 |
+| 284 | `frontend/src/components/users/UserDetailSheet.tsx` | 2 | 1 | 2 | 1 |
+| 285 | `frontend/src/components/users/UserProfileModal.tsx` | 10 | 1 | 8 | 2 |
+| 286 | `frontend/src/components/users/Users.tsx` | 14 | 1 | 12 | 1 |
+| 287 | `frontend/src/components/utils-settings/AuditLog.tsx` | 10 | 1 | 8 | 1 |
+| 288 | `frontend/src/components/utils-settings/Backup.tsx` | 10 | 1 | 8 | 1 |
+| 289 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 2 | 1 | 0 | 1 |
+| 290 | `frontend/src/components/utils-settings/index.ts` | 0 | 0 | 0 | 0 |
+| 291 | `frontend/src/components/utils-settings/OtpModal.tsx` | 3 | 1 | 2 | 2 |
+| 292 | `frontend/src/components/utils-settings/ResetData.tsx` | 6 | 0 | 4 | 1 |
+| 293 | `frontend/src/components/utils-settings/Settings.tsx` | 13 | 1 | 11 | 1 |
+| 294 | `frontend/src/components/utils-settings/settingsConflict.ts` | 0 | 2 | 0 | 2 |
+| 295 | `frontend/src/constants.ts` | 0 | 12 | 0 | 8 |
+| 296 | `frontend/src/index.tsx` | 9 | 0 | 4 | 0 |
+| 297 | `frontend/src/platform/runtime/clientRuntime.ts` | 2 | 8 | 2 | 2 |
+| 298 | `frontend/src/platform/storage/storagePolicy.ts` | 0 | 8 | 0 | 0 |
+| 299 | `frontend/src/public-runtime/runtime-noise-guard.ts` | 0 | 0 | 0 | 0 |
+| 300 | `frontend/src/public-runtime/service-worker.ts` | 0 | 0 | 0 | 0 |
+| 301 | `frontend/src/public-runtime/theme-bootstrap.ts` | 0 | 0 | 0 | 0 |
+| 302 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 0 | 8 | 0 | 0 |
 | 303 | `frontend/src/types/receiptContracts.ts` | 0 | 0 | 0 | 4 |
 | 304 | `frontend/src/types/settingsContracts.ts` | 0 | 1 | 0 | 2 |
 | 305 | `frontend/src/utils/actionGuards.ts` | 0 | 6 | 0 | 33 |
@@ -376,52 +376,52 @@ Code files documented: **479**
 | 364 | `frontend/tests/inventoryMobileCardLayout.test.ts` | 2 | 0 | 0 | 0 |
 | 365 | `frontend/tests/inventoryMovementGroups.test.ts` | 2 | 0 | 1 | 0 |
 | 366 | `frontend/tests/inventoryRfidSection.test.ts` | 2 | 0 | 0 | 0 |
-| 367 | `frontend/tests/jsxSyntaxCheck.ts` | 5 | 0 | 0 | 0 |
-| 368 | `frontend/tests/loaders.test.ts` | 1 | 0 | 0 | 0 |
-| 369 | `frontend/tests/mediaUploadHelpers.test.ts` | 2 | 0 | 1 | 0 |
-| 370 | `frontend/tests/navigationConfig.test.ts` | 2 | 0 | 1 | 0 |
-| 371 | `frontend/tests/notificationBadge.test.ts` | 2 | 0 | 0 | 0 |
-| 372 | `frontend/tests/offlineSalesQueue.test.ts` | 2 | 0 | 0 | 0 |
-| 373 | `frontend/tests/offlineSecurityHardening.test.ts` | 2 | 0 | 0 | 0 |
-| 374 | `frontend/tests/offlineSyncArchitecture.test.ts` | 2 | 0 | 0 | 0 |
-| 375 | `frontend/tests/ownedGoogleAuth.test.ts` | 2 | 0 | 0 | 0 |
-| 376 | `frontend/tests/performanceLoadingUx.test.ts` | 2 | 0 | 0 | 0 |
-| 377 | `frontend/tests/permissionEditor.test.ts` | 2 | 0 | 0 | 0 |
-| 378 | `frontend/tests/permissions.test.ts` | 2 | 0 | 1 | 0 |
-| 379 | `frontend/tests/portalCatalogDisplay.test.ts` | 2 | 0 | 0 | 0 |
-| 380 | `frontend/tests/portalContentI18n.test.ts` | 1 | 0 | 0 | 0 |
-| 381 | `frontend/tests/portalEditorUtils.test.ts` | 1 | 0 | 0 | 0 |
-| 382 | `frontend/tests/portalFaqVocabulary.test.ts` | 1 | 0 | 0 | 0 |
-| 383 | `frontend/tests/portalLanguagePacks.test.ts` | 1 | 0 | 0 | 0 |
-| 384 | `frontend/tests/portalTranslateController.test.ts` | 1 | 0 | 0 | 0 |
-| 385 | `frontend/tests/posCore.test.ts` | 1 | 0 | 0 | 0 |
-| 386 | `frontend/tests/pricingContacts.test.ts` | 3 | 0 | 1 | 0 |
-| 387 | `frontend/tests/productBatches.test.ts` | 2 | 0 | 1 | 0 |
-| 388 | `frontend/tests/productDiscountUx.test.ts` | 2 | 0 | 0 | 0 |
-| 389 | `frontend/tests/productDisplayHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 390 | `frontend/tests/productFilterHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 391 | `frontend/tests/productGalleryHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 392 | `frontend/tests/productGrouping.test.ts` | 2 | 0 | 1 | 0 |
-| 393 | `frontend/tests/productGroupViewHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 394 | `frontend/tests/productHistoryHelpers.test.ts` | 2 | 0 | 1 | 0 |
-| 395 | `frontend/tests/productImportPlanner.test.ts` | 3 | 0 | 1 | 0 |
-| 396 | `frontend/tests/productImportWorkerFallback.test.ts` | 3 | 0 | 1 | 0 |
-| 397 | `frontend/tests/productMenuHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 398 | `frontend/tests/productPageHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 399 | `frontend/tests/productSearchPagination.test.ts` | 2 | 0 | 0 | 0 |
-| 400 | `frontend/tests/productSelectionHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 401 | `frontend/tests/productWriteHelpers.test.ts` | 1 | 0 | 0 | 0 |
-| 402 | `frontend/tests/publicErrorRecovery.test.ts` | 1 | 0 | 0 | 0 |
-| 403 | `frontend/tests/receiptSettingsSync.test.ts` | 2 | 0 | 0 | 0 |
-| 404 | `frontend/tests/receiptTemplate.test.ts` | 4 | 0 | 2 | 0 |
-| 405 | `frontend/tests/returnsLayout.test.ts` | 2 | 0 | 0 | 0 |
-| 406 | `frontend/tests/runtimeErrorClassifier.test.ts` | 1 | 0 | 0 | 0 |
-| 407 | `frontend/tests/salesImportWorker.test.ts` | 3 | 0 | 1 | 0 |
-| 408 | `frontend/tests/scanbotScanner.test.ts` | 2 | 0 | 1 | 0 |
-| 409 | `frontend/tests/scriptTypography.test.ts` | 2 | 0 | 1 | 0 |
-| 410 | `frontend/tests/sectionNavigation.test.ts` | 2 | 0 | 0 | 0 |
-| 411 | `frontend/tests/settingsConflictHelpers.test.ts` | 2 | 0 | 1 | 0 |
-| 412 | `frontend/tests/settingsRefresh.test.ts` | 1 | 0 | 0 | 0 |
+| 367 | `frontend/tests/loaders.test.ts` | 1 | 0 | 0 | 0 |
+| 368 | `frontend/tests/mediaUploadHelpers.test.ts` | 2 | 0 | 1 | 0 |
+| 369 | `frontend/tests/navigationConfig.test.ts` | 2 | 0 | 1 | 0 |
+| 370 | `frontend/tests/notificationBadge.test.ts` | 2 | 0 | 0 | 0 |
+| 371 | `frontend/tests/offlineSalesQueue.test.ts` | 2 | 0 | 0 | 0 |
+| 372 | `frontend/tests/offlineSecurityHardening.test.ts` | 2 | 0 | 0 | 0 |
+| 373 | `frontend/tests/offlineSyncArchitecture.test.ts` | 2 | 0 | 0 | 0 |
+| 374 | `frontend/tests/ownedGoogleAuth.test.ts` | 2 | 0 | 0 | 0 |
+| 375 | `frontend/tests/performanceLoadingUx.test.ts` | 2 | 0 | 0 | 0 |
+| 376 | `frontend/tests/permissionEditor.test.ts` | 2 | 0 | 0 | 0 |
+| 377 | `frontend/tests/permissions.test.ts` | 2 | 0 | 1 | 0 |
+| 378 | `frontend/tests/portalCatalogDisplay.test.ts` | 2 | 0 | 0 | 0 |
+| 379 | `frontend/tests/portalContentI18n.test.ts` | 1 | 0 | 0 | 0 |
+| 380 | `frontend/tests/portalEditorUtils.test.ts` | 1 | 0 | 0 | 0 |
+| 381 | `frontend/tests/portalFaqVocabulary.test.ts` | 1 | 0 | 0 | 0 |
+| 382 | `frontend/tests/portalLanguagePacks.test.ts` | 1 | 0 | 0 | 0 |
+| 383 | `frontend/tests/portalTranslateController.test.ts` | 1 | 0 | 0 | 0 |
+| 384 | `frontend/tests/posCore.test.ts` | 1 | 0 | 0 | 0 |
+| 385 | `frontend/tests/pricingContacts.test.ts` | 3 | 0 | 1 | 0 |
+| 386 | `frontend/tests/productBatches.test.ts` | 2 | 0 | 1 | 0 |
+| 387 | `frontend/tests/productDiscountUx.test.ts` | 2 | 0 | 0 | 0 |
+| 388 | `frontend/tests/productDisplayHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 389 | `frontend/tests/productFilterHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 390 | `frontend/tests/productGalleryHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 391 | `frontend/tests/productGrouping.test.ts` | 2 | 0 | 1 | 0 |
+| 392 | `frontend/tests/productGroupViewHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 393 | `frontend/tests/productHistoryHelpers.test.ts` | 2 | 0 | 1 | 0 |
+| 394 | `frontend/tests/productImportPlanner.test.ts` | 3 | 0 | 1 | 0 |
+| 395 | `frontend/tests/productImportWorkerFallback.test.ts` | 3 | 0 | 1 | 0 |
+| 396 | `frontend/tests/productMenuHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 397 | `frontend/tests/productPageHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 398 | `frontend/tests/productSearchPagination.test.ts` | 2 | 0 | 0 | 0 |
+| 399 | `frontend/tests/productSelectionHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 400 | `frontend/tests/productWriteHelpers.test.ts` | 1 | 0 | 0 | 0 |
+| 401 | `frontend/tests/publicErrorRecovery.test.ts` | 1 | 0 | 0 | 0 |
+| 402 | `frontend/tests/receiptSettingsSync.test.ts` | 2 | 0 | 0 | 0 |
+| 403 | `frontend/tests/receiptTemplate.test.ts` | 4 | 0 | 2 | 0 |
+| 404 | `frontend/tests/returnsLayout.test.ts` | 2 | 0 | 0 | 0 |
+| 405 | `frontend/tests/runtimeErrorClassifier.test.ts` | 1 | 0 | 0 | 0 |
+| 406 | `frontend/tests/salesImportWorker.test.ts` | 3 | 0 | 1 | 0 |
+| 407 | `frontend/tests/scanbotScanner.test.ts` | 3 | 0 | 2 | 0 |
+| 408 | `frontend/tests/scriptTypography.test.ts` | 2 | 0 | 1 | 0 |
+| 409 | `frontend/tests/sectionNavigation.test.ts` | 2 | 0 | 0 | 0 |
+| 410 | `frontend/tests/settingsConflictHelpers.test.ts` | 2 | 0 | 1 | 0 |
+| 411 | `frontend/tests/settingsRefresh.test.ts` | 1 | 0 | 0 | 0 |
+| 412 | `frontend/tests/sourceSyntaxCheck.ts` | 5 | 0 | 0 | 0 |
 | 413 | `frontend/tests/storagePolicy.test.ts` | 1 | 0 | 0 | 0 |
 | 414 | `frontend/tests/utilsSettingsBarrel.test.ts` | 2 | 0 | 0 | 0 |
 | 415 | `frontend/vite.config.ts` | 8 | 1 | 0 | 0 |
@@ -441,7 +441,7 @@ Code files documented: **479**
 | 429 | `ops/scripts/frontend/verify-ui.ts` | 3 | 0 | 1 | 0 |
 | 430 | `ops/scripts/lib/fs-utils.ts` | 2 | 1 | 0 | 14 |
 | 431 | `ops/scripts/lib/report-utils.ts` | 1 | 1 | 0 | 6 |
-| 432 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 4 | 0 | 1 | 0 |
+| 432 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 5 | 0 | 1 | 0 |
 | 433 | `ops/scripts/runtime/audits/audit-auth.ts` | 0 | 4 | 0 | 20 |
 | 434 | `ops/scripts/runtime/audits/audit-manifest.ts` | 0 | 7 | 0 | 4 |
 | 435 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
@@ -4757,17 +4757,19 @@ Code files documented: **479**
 ### 3.234 `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
 
 - Declared exports: `function`
-- Imports (7)
+- Imports (8)
   - `../../shared/Modal`
   - `./barcodeImageScanner.ts`
   - `./barcodeScannerState.ts`
+  - `./cameraPermission.ts`
   - `./scanbotScanner.ts`
   - `@zxing/browser`
   - `lucide-react`
   - `react`
-- Internal dependencies (4)
+- Internal dependencies (5)
   - `frontend/src/components/products/scanning/barcodeImageScanner.ts`
   - `frontend/src/components/products/scanning/barcodeScannerState.ts`
+  - `frontend/src/components/products/scanning/cameraPermission.ts`
   - `frontend/src/components/products/scanning/scanbotScanner.ts`
   - `frontend/src/components/shared/Modal.tsx`
 - Referenced by (1)
@@ -4784,18 +4786,30 @@ Code files documented: **479**
   - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/tests/barcodeScannerState.test.ts`
 
-### 3.236 `frontend/src/components/products/scanning/scanbotScanner.ts`
+### 3.236 `frontend/src/components/products/scanning/cameraPermission.ts`
 
-- Declared exports: `getPreferredScannerMode`, `isCameraBlockedByDocumentPolicy`, `scanBarcodeWithScanbot`
+- Declared exports: `readCameraPermissionState`, `watchCameraPermission`
 - Imports (0)
   - none
 - Internal dependencies (0)
   - none
+- Referenced by (3)
+  - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
+  - `frontend/src/components/products/scanning/scanbotScanner.ts`
+  - `frontend/tests/scanbotScanner.test.ts`
+
+### 3.237 `frontend/src/components/products/scanning/scanbotScanner.ts`
+
+- Declared exports: `getPreferredScannerMode`, `isCameraBlockedByDocumentPolicy`, `scanBarcodeWithScanbot`
+- Imports (1)
+  - `./cameraPermission.ts`
+- Internal dependencies (1)
+  - `frontend/src/components/products/scanning/cameraPermission.ts`
 - Referenced by (2)
   - `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
   - `frontend/tests/scanbotScanner.test.ts`
 
-### 3.237 `frontend/src/components/products/shared/primitives.tsx`
+### 3.238 `frontend/src/components/products/shared/primitives.tsx`
 
 - Declared exports: none detected
 - Imports (3)
@@ -4815,7 +4829,7 @@ Code files documented: **479**
   - `frontend/src/components/products/Products.tsx`
   - `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
-### 3.238 `frontend/src/components/products/surfaces/HeaderActions.tsx`
+### 3.239 `frontend/src/components/products/surfaces/HeaderActions.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4828,7 +4842,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/products/Products.tsx`
 
-### 3.239 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
+### 3.240 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -4846,7 +4860,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/products/Products.tsx`
 
-### 3.240 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
+### 3.241 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
 - Declared exports: `ProductBatchPreview`, `ProductDetailsCell`, `ProductDiscountBadge`, `ProductRowActions`
 - Imports (4)
@@ -4861,7 +4875,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.241 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
+### 3.242 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -4872,7 +4886,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/products/Products.tsx`
 
-### 3.242 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
+### 3.243 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -4885,7 +4899,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
-### 3.243 `frontend/src/components/receipt-settings/constants.ts`
+### 3.244 `frontend/src/components/receipt-settings/constants.ts`
 
 - Declared exports: `ALL_FIELD_ITEMS`, `DEFAULT_TEMPLATE`, `getFieldItems`
 - Imports (0)
@@ -4898,7 +4912,7 @@ Code files documented: **479**
   - `frontend/src/components/receipt-settings/template.ts`
   - `frontend/tests/receiptTemplate.test.ts`
 
-### 3.244 `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
+### 3.245 `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
 
 - Declared exports: `class`
 - Imports (1)
@@ -4908,7 +4922,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
-### 3.245 `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
+### 3.246 `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -4919,7 +4933,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
-### 3.246 `frontend/src/components/receipt-settings/PrintSettings.tsx`
+### 3.247 `frontend/src/components/receipt-settings/PrintSettings.tsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -4933,7 +4947,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
-### 3.247 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
+### 3.248 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -4948,7 +4962,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
-### 3.248 `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
+### 3.249 `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
 - Declared exports: `function`
 - Imports (12)
@@ -4978,7 +4992,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.249 `frontend/src/components/receipt-settings/template.ts`
+### 3.250 `frontend/src/components/receipt-settings/template.ts`
 
 - Declared exports: `parseReceiptTemplate`, `serializeReceiptTemplate`
 - Imports (1)
@@ -4991,7 +5005,7 @@ Code files documented: **479**
   - `frontend/tests/receiptTemplate.test.ts`
   - `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts`
 
-### 3.250 `frontend/src/components/receipt/Receipt.tsx`
+### 3.251 `frontend/src/components/receipt/Receipt.tsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -5013,7 +5027,7 @@ Code files documented: **479**
   - `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
   - `frontend/src/components/sales/Sales.tsx`
 
-### 3.251 `frontend/src/components/returns/EditReturnModal.tsx`
+### 3.252 `frontend/src/components/returns/EditReturnModal.tsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -5028,7 +5042,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.tsx`
 
-### 3.252 `frontend/src/components/returns/NewReturnModal.tsx`
+### 3.253 `frontend/src/components/returns/NewReturnModal.tsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -5043,7 +5057,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.tsx`
 
-### 3.253 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
+### 3.254 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5056,7 +5070,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.tsx`
 
-### 3.254 `frontend/src/components/returns/ReturnDetailModal.tsx`
+### 3.255 `frontend/src/components/returns/ReturnDetailModal.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5068,7 +5082,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.tsx`
 
-### 3.255 `frontend/src/components/returns/Returns.tsx`
+### 3.256 `frontend/src/components/returns/Returns.tsx`
 
 - Declared exports: `function`
 - Imports (19)
@@ -5112,7 +5126,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.256 `frontend/src/components/returns/ReturnsListSurface.tsx`
+### 3.257 `frontend/src/components/returns/ReturnsListSurface.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5123,7 +5137,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.tsx`
 
-### 3.257 `frontend/src/components/sales/ExportModal.tsx`
+### 3.258 `frontend/src/components/sales/ExportModal.tsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5139,7 +5153,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.tsx`
 
-### 3.258 `frontend/src/components/sales/SaleDetailModal.tsx`
+### 3.259 `frontend/src/components/sales/SaleDetailModal.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5152,7 +5166,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.tsx`
 
-### 3.259 `frontend/src/components/sales/Sales.tsx`
+### 3.260 `frontend/src/components/sales/Sales.tsx`
 
 - Declared exports: `function`
 - Imports (22)
@@ -5202,7 +5216,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.260 `frontend/src/components/sales/SalesImportModal.tsx`
+### 3.261 `frontend/src/components/sales/SalesImportModal.tsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5219,7 +5233,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.tsx`
 
-### 3.261 `frontend/src/components/sales/salesImportWorker.ts`
+### 3.262 `frontend/src/components/sales/salesImportWorker.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -5229,7 +5243,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.262 `frontend/src/components/sales/SalesListSurface.tsx`
+### 3.263 `frontend/src/components/sales/SalesListSurface.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5241,7 +5255,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.tsx`
 
-### 3.263 `frontend/src/components/sales/StatusBadge.tsx`
+### 3.264 `frontend/src/components/sales/StatusBadge.tsx`
 
 - Declared exports: `ALL_STATUSES`, `STATUS_COLORS`, `STATUS_LABELS`, `function`, `getStatusLabel`
 - Imports (0)
@@ -5256,7 +5270,7 @@ Code files documented: **479**
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/sales/SalesListSurface.tsx`
 
-### 3.264 `frontend/src/components/server/ServerPage.tsx`
+### 3.265 `frontend/src/components/server/ServerPage.tsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -5273,7 +5287,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.265 `frontend/src/components/shared/ActionHistoryBar.tsx`
+### 3.266 `frontend/src/components/shared/ActionHistoryBar.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5301,7 +5315,7 @@ Code files documented: **479**
   - `frontend/src/components/users/Users.tsx`
   - `frontend/src/components/utils-settings/Backup.tsx`
 
-### 3.266 `frontend/src/components/shared/BackgroundImportTracker.tsx`
+### 3.267 `frontend/src/components/shared/BackgroundImportTracker.tsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -5321,7 +5335,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.267 `frontend/src/components/shared/ExportMenu.tsx`
+### 3.268 `frontend/src/components/shared/ExportMenu.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5339,7 +5353,7 @@ Code files documented: **479**
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.tsx`
 
-### 3.268 `frontend/src/components/shared/FilterMenu.tsx`
+### 3.269 `frontend/src/components/shared/FilterMenu.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5358,7 +5372,7 @@ Code files documented: **479**
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.tsx`
 
-### 3.269 `frontend/src/components/shared/globalScroll.ts`
+### 3.270 `frontend/src/components/shared/globalScroll.ts`
 
 - Declared exports: `getScrollTarget`, `getScrollToPosition`
 - Imports (0)
@@ -5369,7 +5383,7 @@ Code files documented: **479**
   - `frontend/src/App.tsx`
   - `frontend/tests/globalScrollControls.test.ts`
 
-### 3.270 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
+### 3.271 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5382,7 +5396,7 @@ Code files documented: **479**
   - `frontend/src/components/pos/POS.tsx`
   - `frontend/src/components/products/Products.tsx`
 
-### 3.271 `frontend/src/components/shared/LoadingWatchdog.tsx`
+### 3.272 `frontend/src/components/shared/LoadingWatchdog.tsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5397,7 +5411,7 @@ Code files documented: **479**
   - `frontend/src/components/utils-settings/Backup.tsx`
   - `frontend/src/components/utils-settings/Settings.tsx`
 
-### 3.272 `frontend/src/components/shared/Modal.tsx`
+### 3.273 `frontend/src/components/shared/Modal.tsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5428,7 +5442,7 @@ Code files documented: **479**
   - `frontend/src/components/users/UserProfileModal.tsx`
   - `frontend/src/components/users/Users.tsx`
 
-### 3.273 `frontend/src/components/shared/navigationConfig.ts`
+### 3.274 `frontend/src/components/shared/navigationConfig.ts`
 
 - Declared exports: `DEFAULT_MOBILE_PINNED`, `NAV_ITEMS`, `orderNavItems`, `parseNavSetting`
 - Imports (0)
@@ -5440,7 +5454,7 @@ Code files documented: **479**
   - `frontend/src/components/utils-settings/Settings.tsx`
   - `frontend/tests/navigationConfig.test.ts`
 
-### 3.274 `frontend/src/components/shared/NotificationCenter.tsx`
+### 3.275 `frontend/src/components/shared/NotificationCenter.tsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -5454,7 +5468,7 @@ Code files documented: **479**
   - `frontend/src/App.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
 
-### 3.275 `frontend/src/components/shared/pageActivity.ts`
+### 3.276 `frontend/src/components/shared/pageActivity.ts`
 
 - Declared exports: `useIsPageActive`
 - Imports (2)
@@ -5479,7 +5493,7 @@ Code files documented: **479**
   - `frontend/src/components/utils-settings/AuditLog.tsx`
   - `frontend/src/components/utils-settings/Backup.tsx`
 
-### 3.276 `frontend/src/components/shared/PageHeader.tsx`
+### 3.277 `frontend/src/components/shared/PageHeader.tsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5494,7 +5508,7 @@ Code files documented: **479**
   - `frontend/src/components/utils-settings/Backup.tsx`
   - `frontend/src/components/utils-settings/Settings.tsx`
 
-### 3.277 `frontend/src/components/shared/PaginationControls.tsx`
+### 3.278 `frontend/src/components/shared/PaginationControls.tsx`
 
 - Declared exports: `PAGE_SIZE_OPTIONS`, `clampPage`, `function`, `paginateItems`
 - Imports (2)
@@ -5513,7 +5527,7 @@ Code files documented: **479**
   - `frontend/src/components/sales/Sales.tsx`
   - `frontend/src/components/utils-settings/AuditLog.tsx`
 
-### 3.278 `frontend/src/components/shared/PortalMenu.tsx`
+### 3.279 `frontend/src/components/shared/PortalMenu.tsx`
 
 - Declared exports: `ThreeDotPortal`, `function`
 - Imports (3)
@@ -5533,7 +5547,7 @@ Code files documented: **479**
   - `frontend/src/components/shared/FilterMenu.tsx`
   - `frontend/src/components/users/Users.tsx`
 
-### 3.279 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
+### 3.280 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5547,7 +5561,7 @@ Code files documented: **479**
   - `frontend/src/components/auth/Login.tsx`
   - `frontend/src/components/navigation/Sidebar.tsx`
 
-### 3.280 `frontend/src/components/shared/SectionSwitcher.tsx`
+### 3.281 `frontend/src/components/shared/SectionSwitcher.tsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5560,7 +5574,7 @@ Code files documented: **479**
   - `frontend/src/components/utils-settings/Backup.tsx`
   - `frontend/src/components/utils-settings/Settings.tsx`
 
-### 3.281 `frontend/src/components/shared/WriteConflictModal.tsx`
+### 3.282 `frontend/src/components/shared/WriteConflictModal.tsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -5570,7 +5584,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.282 `frontend/src/components/users/PermissionEditor.tsx`
+### 3.283 `frontend/src/components/users/PermissionEditor.tsx`
 
 - Declared exports: `PERMISSION_DEFS`, `PERMISSION_SECTIONS`, `function`
 - Imports (0)
@@ -5581,7 +5595,7 @@ Code files documented: **479**
   - `frontend/src/components/users/UserDetailSheet.tsx`
   - `frontend/src/components/users/Users.tsx`
 
-### 3.283 `frontend/src/components/users/UserDetailSheet.tsx`
+### 3.284 `frontend/src/components/users/UserDetailSheet.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5593,7 +5607,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/users/Users.tsx`
 
-### 3.284 `frontend/src/components/users/UserProfileModal.tsx`
+### 3.285 `frontend/src/components/users/UserProfileModal.tsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -5620,7 +5634,7 @@ Code files documented: **479**
   - `frontend/src/components/navigation/Sidebar.tsx`
   - `frontend/src/components/users/Users.tsx`
 
-### 3.285 `frontend/src/components/users/Users.tsx`
+### 3.286 `frontend/src/components/users/Users.tsx`
 
 - Declared exports: `function`
 - Imports (14)
@@ -5654,7 +5668,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.286 `frontend/src/components/utils-settings/AuditLog.tsx`
+### 3.287 `frontend/src/components/utils-settings/AuditLog.tsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -5680,7 +5694,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.287 `frontend/src/components/utils-settings/Backup.tsx`
+### 3.288 `frontend/src/components/utils-settings/Backup.tsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -5706,7 +5720,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.288 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
+### 3.289 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -5717,7 +5731,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Settings.tsx`
 
-### 3.289 `frontend/src/components/utils-settings/index.ts`
+### 3.290 `frontend/src/components/utils-settings/index.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5727,7 +5741,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.290 `frontend/src/components/utils-settings/OtpModal.tsx`
+### 3.291 `frontend/src/components/utils-settings/OtpModal.tsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -5741,7 +5755,7 @@ Code files documented: **479**
   - `frontend/src/components/users/UserProfileModal.tsx`
   - `frontend/src/components/utils-settings/Settings.tsx`
 
-### 3.291 `frontend/src/components/utils-settings/ResetData.tsx`
+### 3.292 `frontend/src/components/utils-settings/ResetData.tsx`
 
 - Declared exports: none detected
 - Imports (6)
@@ -5759,7 +5773,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Backup.tsx`
 
-### 3.292 `frontend/src/components/utils-settings/Settings.tsx`
+### 3.293 `frontend/src/components/utils-settings/Settings.tsx`
 
 - Declared exports: `function`
 - Imports (13)
@@ -5791,7 +5805,7 @@ Code files documented: **479**
 - Referenced by (1)
   - `frontend/src/App.tsx`
 
-### 3.293 `frontend/src/components/utils-settings/settingsConflict.ts`
+### 3.294 `frontend/src/components/utils-settings/settingsConflict.ts`
 
 - Declared exports: `buildSettingsConflictState`, `diffSettingsConflictFields`
 - Imports (0)
@@ -5802,7 +5816,7 @@ Code files documented: **479**
   - `frontend/src/components/utils-settings/Settings.tsx`
   - `frontend/tests/settingsConflictHelpers.test.ts`
 
-### 3.294 `frontend/src/constants.ts`
+### 3.295 `frontend/src/constants.ts`
 
 - Declared exports: `CURRENCY`, `DELIVERY_FEE_PAYER`, `EMPTY_CUSTOMER`, `LAYOUT`, `PAYMENT_METHODS`, `STOCK`, `STORAGE_KEYS`, `SYNC`, `WRITE_CHANNELS`, `createEmptyOrder`, `formatDate`, `isNetworkError`
 - Imports (0)
@@ -5819,7 +5833,7 @@ Code files documented: **479**
   - `frontend/src/platform/runtime/clientRuntime.ts`
   - `frontend/src/web-api.ts`
 
-### 3.295 `frontend/src/index.tsx`
+### 3.296 `frontend/src/index.tsx`
 
 - Declared exports: none detected
 - Imports (9)
@@ -5840,7 +5854,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.296 `frontend/src/platform/runtime/clientRuntime.ts`
+### 3.297 `frontend/src/platform/runtime/clientRuntime.ts`
 
 - Declared exports: `buildQueuedOperationScope`, `doesQueuedScopeMatchCurrent`, `normalizeRuntimeDescriptor`, `readStoredRuntimeDescriptor`, `resetClientRuntimeState`, `sanitizeSyncServerUrl`, `shouldResetForRuntimeChange`, `writeStoredRuntimeDescriptor`
 - Imports (2)
@@ -5853,7 +5867,7 @@ Code files documented: **479**
   - `frontend/src/api/methods.ts`
   - `frontend/src/web-api.ts`
 
-### 3.297 `frontend/src/platform/storage/storagePolicy.ts`
+### 3.298 `frontend/src/platform/storage/storagePolicy.ts`
 
 - Declared exports: `DRIVE_SYNC_STATUS_COOLDOWN_KEY`, `DRIVE_SYNC_STATUS_COOLDOWN_MS`, `LIVE_SERVER_SENSITIVE_MIRROR_TABLES`, `NOTIFICATION_SUMMARY_MISSING_TTL_MS`, `NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY`, `isCooldownActive`, `maxStoredNumber`, `shouldPersistLocalMirror`
 - Imports (0)
@@ -5863,7 +5877,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.298 `frontend/src/public-runtime/runtime-noise-guard.ts`
+### 3.299 `frontend/src/public-runtime/runtime-noise-guard.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5873,7 +5887,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.299 `frontend/src/public-runtime/service-worker.ts`
+### 3.300 `frontend/src/public-runtime/service-worker.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5883,7 +5897,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.300 `frontend/src/public-runtime/theme-bootstrap.ts`
+### 3.301 `frontend/src/public-runtime/theme-bootstrap.ts`
 
 - Declared exports: none detected
 - Imports (0)
@@ -5893,19 +5907,9 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.301 `frontend/src/runtime/runtimeErrorClassifier.ts`
+### 3.302 `frontend/src/runtime/runtimeErrorClassifier.ts`
 
 - Declared exports: `isFirstPartyBuiltAssetSource`, `isGuardableStyleSheetError`, `isKnownBridgeMessage`, `isKnownEvalCspNoise`, `isKnownStyleInjectionNoise`, `isLikelyInjectedRuntimeSource`, `shouldSuppressRuntimeError`, `shouldSuppressSecurityPolicyViolation`
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
-- Referenced by (0)
-  - none
-
-### 3.302 `frontend/src/types/jsx-modules.d.ts`
-
-- Declared exports: `AppProvider`, `CustomersTab`, `DeliveryTab`, `PERMISSION_DEFS`, `ProductImagePlaceholder`, `ProductImg`, `SuppliersTab`, `component`, `isBrokenLocalizedString`, `useApp`, `useSync`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -6803,21 +6807,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.367 `frontend/tests/jsxSyntaxCheck.ts`
-
-- Declared exports: none detected
-- Imports (5)
-  - `node:assert/strict`
-  - `node:fs/promises`
-  - `node:path`
-  - `node:url`
-  - `vite`
-- Internal dependencies (0)
-  - none
-- Referenced by (0)
-  - none
-
-### 3.368 `frontend/tests/loaders.test.ts`
+### 3.367 `frontend/tests/loaders.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6827,7 +6817,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.369 `frontend/tests/mediaUploadHelpers.test.ts`
+### 3.368 `frontend/tests/mediaUploadHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6838,7 +6828,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.370 `frontend/tests/navigationConfig.test.ts`
+### 3.369 `frontend/tests/navigationConfig.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6849,7 +6839,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.371 `frontend/tests/notificationBadge.test.ts`
+### 3.370 `frontend/tests/notificationBadge.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6860,7 +6850,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.372 `frontend/tests/offlineSalesQueue.test.ts`
+### 3.371 `frontend/tests/offlineSalesQueue.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6871,7 +6861,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.373 `frontend/tests/offlineSecurityHardening.test.ts`
+### 3.372 `frontend/tests/offlineSecurityHardening.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6882,7 +6872,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.374 `frontend/tests/offlineSyncArchitecture.test.ts`
+### 3.373 `frontend/tests/offlineSyncArchitecture.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6893,7 +6883,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.375 `frontend/tests/ownedGoogleAuth.test.ts`
+### 3.374 `frontend/tests/ownedGoogleAuth.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6904,7 +6894,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.376 `frontend/tests/performanceLoadingUx.test.ts`
+### 3.375 `frontend/tests/performanceLoadingUx.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6915,7 +6905,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.377 `frontend/tests/permissionEditor.test.ts`
+### 3.376 `frontend/tests/permissionEditor.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6926,7 +6916,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.378 `frontend/tests/permissions.test.ts`
+### 3.377 `frontend/tests/permissions.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6937,7 +6927,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.379 `frontend/tests/portalCatalogDisplay.test.ts`
+### 3.378 `frontend/tests/portalCatalogDisplay.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -6948,7 +6938,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.380 `frontend/tests/portalContentI18n.test.ts`
+### 3.379 `frontend/tests/portalContentI18n.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6958,7 +6948,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.381 `frontend/tests/portalEditorUtils.test.ts`
+### 3.380 `frontend/tests/portalEditorUtils.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6968,7 +6958,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.382 `frontend/tests/portalFaqVocabulary.test.ts`
+### 3.381 `frontend/tests/portalFaqVocabulary.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6978,7 +6968,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.383 `frontend/tests/portalLanguagePacks.test.ts`
+### 3.382 `frontend/tests/portalLanguagePacks.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6988,7 +6978,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.384 `frontend/tests/portalTranslateController.test.ts`
+### 3.383 `frontend/tests/portalTranslateController.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -6998,7 +6988,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.385 `frontend/tests/posCore.test.ts`
+### 3.384 `frontend/tests/posCore.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7008,7 +6998,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.386 `frontend/tests/pricingContacts.test.ts`
+### 3.385 `frontend/tests/pricingContacts.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7020,7 +7010,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.387 `frontend/tests/productBatches.test.ts`
+### 3.386 `frontend/tests/productBatches.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7031,7 +7021,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.388 `frontend/tests/productDiscountUx.test.ts`
+### 3.387 `frontend/tests/productDiscountUx.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7042,7 +7032,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.389 `frontend/tests/productDisplayHelpers.test.ts`
+### 3.388 `frontend/tests/productDisplayHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7052,7 +7042,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.390 `frontend/tests/productFilterHelpers.test.ts`
+### 3.389 `frontend/tests/productFilterHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7062,7 +7052,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.391 `frontend/tests/productGalleryHelpers.test.ts`
+### 3.390 `frontend/tests/productGalleryHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7072,7 +7062,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.392 `frontend/tests/productGrouping.test.ts`
+### 3.391 `frontend/tests/productGrouping.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7083,7 +7073,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.393 `frontend/tests/productGroupViewHelpers.test.ts`
+### 3.392 `frontend/tests/productGroupViewHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7093,7 +7083,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.394 `frontend/tests/productHistoryHelpers.test.ts`
+### 3.393 `frontend/tests/productHistoryHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7104,7 +7094,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.395 `frontend/tests/productImportPlanner.test.ts`
+### 3.394 `frontend/tests/productImportPlanner.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7116,7 +7106,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.396 `frontend/tests/productImportWorkerFallback.test.ts`
+### 3.395 `frontend/tests/productImportWorkerFallback.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7128,7 +7118,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.397 `frontend/tests/productMenuHelpers.test.ts`
+### 3.396 `frontend/tests/productMenuHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7138,7 +7128,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.398 `frontend/tests/productPageHelpers.test.ts`
+### 3.397 `frontend/tests/productPageHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7148,7 +7138,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.399 `frontend/tests/productSearchPagination.test.ts`
+### 3.398 `frontend/tests/productSearchPagination.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7159,7 +7149,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.400 `frontend/tests/productSelectionHelpers.test.ts`
+### 3.399 `frontend/tests/productSelectionHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7169,7 +7159,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.401 `frontend/tests/productWriteHelpers.test.ts`
+### 3.400 `frontend/tests/productWriteHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7179,7 +7169,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.402 `frontend/tests/publicErrorRecovery.test.ts`
+### 3.401 `frontend/tests/publicErrorRecovery.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7189,7 +7179,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.403 `frontend/tests/receiptSettingsSync.test.ts`
+### 3.402 `frontend/tests/receiptSettingsSync.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7200,7 +7190,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.404 `frontend/tests/receiptTemplate.test.ts`
+### 3.403 `frontend/tests/receiptTemplate.test.ts`
 
 - Declared exports: none detected
 - Imports (4)
@@ -7214,7 +7204,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.405 `frontend/tests/returnsLayout.test.ts`
+### 3.404 `frontend/tests/returnsLayout.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7225,7 +7215,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.406 `frontend/tests/runtimeErrorClassifier.test.ts`
+### 3.405 `frontend/tests/runtimeErrorClassifier.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
@@ -7235,7 +7225,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.407 `frontend/tests/salesImportWorker.test.ts`
+### 3.406 `frontend/tests/salesImportWorker.test.ts`
 
 - Declared exports: none detected
 - Imports (3)
@@ -7247,18 +7237,20 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.408 `frontend/tests/scanbotScanner.test.ts`
+### 3.407 `frontend/tests/scanbotScanner.test.ts`
 
 - Declared exports: none detected
-- Imports (2)
+- Imports (3)
+  - `../src/components/products/scanning/cameraPermission.ts`
   - `../src/components/products/scanning/scanbotScanner.ts`
   - `node:assert/strict`
-- Internal dependencies (1)
+- Internal dependencies (2)
+  - `frontend/src/components/products/scanning/cameraPermission.ts`
   - `frontend/src/components/products/scanning/scanbotScanner.ts`
 - Referenced by (0)
   - none
 
-### 3.409 `frontend/tests/scriptTypography.test.ts`
+### 3.408 `frontend/tests/scriptTypography.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7269,7 +7261,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.410 `frontend/tests/sectionNavigation.test.ts`
+### 3.409 `frontend/tests/sectionNavigation.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7280,7 +7272,7 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.411 `frontend/tests/settingsConflictHelpers.test.ts`
+### 3.410 `frontend/tests/settingsConflictHelpers.test.ts`
 
 - Declared exports: none detected
 - Imports (2)
@@ -7291,11 +7283,25 @@ Code files documented: **479**
 - Referenced by (0)
   - none
 
-### 3.412 `frontend/tests/settingsRefresh.test.ts`
+### 3.411 `frontend/tests/settingsRefresh.test.ts`
 
 - Declared exports: none detected
 - Imports (1)
   - `node:assert/strict`
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.412 `frontend/tests/sourceSyntaxCheck.ts`
+
+- Declared exports: none detected
+- Imports (5)
+  - `node:assert/strict`
+  - `node:fs/promises`
+  - `node:path`
+  - `node:url`
+  - `vite`
 - Internal dependencies (0)
   - none
 - Referenced by (0)
@@ -7558,11 +7564,12 @@ Code files documented: **479**
 ### 3.432 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
 
 - Declared exports: none detected
-- Imports (4)
+- Imports (5)
   - `./audit-auth.ts`
   - `node:child_process`
   - `node:fs`
   - `node:path`
+  - `node:url`
 - Internal dependencies (1)
   - `ops/scripts/runtime/audits/audit-auth.ts`
 - Referenced by (0)

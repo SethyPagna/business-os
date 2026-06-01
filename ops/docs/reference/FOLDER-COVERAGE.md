@@ -55,7 +55,7 @@ Total folders documented: **82**
 | 43 | `frontend/src/components/products/history` | UI pages/components domain | 1 | 0 |
 | 44 | `frontend/src/components/products/import` | UI pages/components domain | 3 | 0 |
 | 45 | `frontend/src/components/products/lookups` | UI pages/components domain | 4 | 0 |
-| 46 | `frontend/src/components/products/scanning` | UI pages/components domain | 4 | 0 |
+| 46 | `frontend/src/components/products/scanning` | UI pages/components domain | 5 | 0 |
 | 47 | `frontend/src/components/products/shared` | UI pages/components domain | 1 | 0 |
 | 48 | `frontend/src/components/products/surfaces` | UI pages/components domain | 4 | 0 |
 | 49 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
@@ -73,7 +73,7 @@ Total folders documented: **82**
 | 61 | `frontend/src/public-runtime` | Project folder | 3 | 0 |
 | 62 | `frontend/src/runtime` | Project folder | 1 | 0 |
 | 63 | `frontend/src/styles` | Project folder | 1 | 0 |
-| 64 | `frontend/src/types` | Project folder | 3 | 0 |
+| 64 | `frontend/src/types` | Project folder | 2 | 0 |
 | 65 | `frontend/src/utils` | Project folder | 33 | 0 |
 | 66 | `frontend/tests` | Project folder | 76 | 0 |
 | 67 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
@@ -83,9 +83,9 @@ Total folders documented: **82**
 | 71 | `ops/scripts/lib` | Project folder | 2 | 0 |
 | 72 | `ops/scripts/powershell` | Project folder | 8 | 0 |
 | 73 | `ops/scripts/runtime` | Project folder | 2 | 5 |
-| 74 | `ops/scripts/runtime/audits` | Project folder | 6 | 0 |
+| 74 | `ops/scripts/runtime/audits` | Project folder | 7 | 0 |
 | 75 | `ops/scripts/runtime/cloudflare` | Project folder | 4 | 0 |
-| 76 | `ops/scripts/runtime/live-checks` | Project folder | 19 | 0 |
+| 76 | `ops/scripts/runtime/live-checks` | Project folder | 20 | 0 |
 | 77 | `ops/scripts/runtime/smoke` | Project folder | 4 | 0 |
 | 78 | `ops/scripts/runtime/storage` | Project folder | 7 | 0 |
 | 79 | `ops/scripts/verification` | Project folder | 6 | 0 |
@@ -1029,7 +1029,7 @@ Total folders documented: **82**
 ### 3.46 Folder: `frontend/src/components/products/scanning`
 
 - Purpose: UI pages/components domain
-- Direct files: **4**
+- Direct files: **5**
 - Direct subfolders: **0**
 
 #### 3.46.2 Files
@@ -1039,7 +1039,8 @@ Total folders documented: **82**
 | 1 | `barcodeImageScanner.ts` | UI component/page |
 | 2 | `BarcodeScannerModal.tsx` | UI component/page |
 | 3 | `barcodeScannerState.ts` | UI component/page |
-| 4 | `scanbotScanner.ts` | UI component/page |
+| 4 | `cameraPermission.ts` | UI component/page |
+| 5 | `scanbotScanner.ts` | UI component/page |
 
 
 ### 3.47 Folder: `frontend/src/components/products/shared`
@@ -1317,16 +1318,15 @@ Total folders documented: **82**
 ### 3.64 Folder: `frontend/src/types`
 
 - Purpose: Project folder
-- Direct files: **3**
+- Direct files: **2**
 - Direct subfolders: **0**
 
 #### 3.64.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `jsx-modules.d.ts` | Project source/support file |
-| 2 | `receiptContracts.ts` | Project source/support file |
-| 3 | `settingsContracts.ts` | Project source/support file |
+| 1 | `receiptContracts.ts` | Project source/support file |
+| 2 | `settingsContracts.ts` | Project source/support file |
 
 
 ### 3.65 Folder: `frontend/src/utils`
@@ -1412,52 +1412,52 @@ Total folders documented: **82**
 | 26 | `inventoryMobileCardLayout.test.ts` | Project source/support file |
 | 27 | `inventoryMovementGroups.test.ts` | Project source/support file |
 | 28 | `inventoryRfidSection.test.ts` | Project source/support file |
-| 29 | `jsxSyntaxCheck.ts` | Project source/support file |
-| 30 | `loaders.test.ts` | Project source/support file |
-| 31 | `mediaUploadHelpers.test.ts` | Project source/support file |
-| 32 | `navigationConfig.test.ts` | Project source/support file |
-| 33 | `notificationBadge.test.ts` | Project source/support file |
-| 34 | `offlineSalesQueue.test.ts` | Project source/support file |
-| 35 | `offlineSecurityHardening.test.ts` | Project source/support file |
-| 36 | `offlineSyncArchitecture.test.ts` | Project source/support file |
-| 37 | `ownedGoogleAuth.test.ts` | Project source/support file |
-| 38 | `performanceLoadingUx.test.ts` | Project source/support file |
-| 39 | `permissionEditor.test.ts` | Project source/support file |
-| 40 | `permissions.test.ts` | Project source/support file |
-| 41 | `portalCatalogDisplay.test.ts` | Project source/support file |
-| 42 | `portalContentI18n.test.ts` | Project source/support file |
-| 43 | `portalEditorUtils.test.ts` | Project source/support file |
-| 44 | `portalFaqVocabulary.test.ts` | Project source/support file |
-| 45 | `portalLanguagePacks.test.ts` | Project source/support file |
-| 46 | `portalTranslateController.test.ts` | Project source/support file |
-| 47 | `posCore.test.ts` | Project source/support file |
-| 48 | `pricingContacts.test.ts` | Project source/support file |
-| 49 | `productBatches.test.ts` | Project source/support file |
-| 50 | `productDiscountUx.test.ts` | Project source/support file |
-| 51 | `productDisplayHelpers.test.ts` | Project source/support file |
-| 52 | `productFilterHelpers.test.ts` | Project source/support file |
-| 53 | `productGalleryHelpers.test.ts` | Project source/support file |
-| 54 | `productGrouping.test.ts` | Project source/support file |
-| 55 | `productGroupViewHelpers.test.ts` | Project source/support file |
-| 56 | `productHistoryHelpers.test.ts` | Project source/support file |
-| 57 | `productImportPlanner.test.ts` | Project source/support file |
-| 58 | `productImportWorkerFallback.test.ts` | Project source/support file |
-| 59 | `productMenuHelpers.test.ts` | Project source/support file |
-| 60 | `productPageHelpers.test.ts` | Project source/support file |
-| 61 | `productSearchPagination.test.ts` | Project source/support file |
-| 62 | `productSelectionHelpers.test.ts` | Project source/support file |
-| 63 | `productWriteHelpers.test.ts` | Project source/support file |
-| 64 | `publicErrorRecovery.test.ts` | Project source/support file |
-| 65 | `receiptSettingsSync.test.ts` | Project source/support file |
-| 66 | `receiptTemplate.test.ts` | Project source/support file |
-| 67 | `returnsLayout.test.ts` | Project source/support file |
-| 68 | `runtimeErrorClassifier.test.ts` | Project source/support file |
-| 69 | `salesImportWorker.test.ts` | Project source/support file |
-| 70 | `scanbotScanner.test.ts` | Project source/support file |
-| 71 | `scriptTypography.test.ts` | Project source/support file |
-| 72 | `sectionNavigation.test.ts` | Project source/support file |
-| 73 | `settingsConflictHelpers.test.ts` | Project source/support file |
-| 74 | `settingsRefresh.test.ts` | Project source/support file |
+| 29 | `loaders.test.ts` | Project source/support file |
+| 30 | `mediaUploadHelpers.test.ts` | Project source/support file |
+| 31 | `navigationConfig.test.ts` | Project source/support file |
+| 32 | `notificationBadge.test.ts` | Project source/support file |
+| 33 | `offlineSalesQueue.test.ts` | Project source/support file |
+| 34 | `offlineSecurityHardening.test.ts` | Project source/support file |
+| 35 | `offlineSyncArchitecture.test.ts` | Project source/support file |
+| 36 | `ownedGoogleAuth.test.ts` | Project source/support file |
+| 37 | `performanceLoadingUx.test.ts` | Project source/support file |
+| 38 | `permissionEditor.test.ts` | Project source/support file |
+| 39 | `permissions.test.ts` | Project source/support file |
+| 40 | `portalCatalogDisplay.test.ts` | Project source/support file |
+| 41 | `portalContentI18n.test.ts` | Project source/support file |
+| 42 | `portalEditorUtils.test.ts` | Project source/support file |
+| 43 | `portalFaqVocabulary.test.ts` | Project source/support file |
+| 44 | `portalLanguagePacks.test.ts` | Project source/support file |
+| 45 | `portalTranslateController.test.ts` | Project source/support file |
+| 46 | `posCore.test.ts` | Project source/support file |
+| 47 | `pricingContacts.test.ts` | Project source/support file |
+| 48 | `productBatches.test.ts` | Project source/support file |
+| 49 | `productDiscountUx.test.ts` | Project source/support file |
+| 50 | `productDisplayHelpers.test.ts` | Project source/support file |
+| 51 | `productFilterHelpers.test.ts` | Project source/support file |
+| 52 | `productGalleryHelpers.test.ts` | Project source/support file |
+| 53 | `productGrouping.test.ts` | Project source/support file |
+| 54 | `productGroupViewHelpers.test.ts` | Project source/support file |
+| 55 | `productHistoryHelpers.test.ts` | Project source/support file |
+| 56 | `productImportPlanner.test.ts` | Project source/support file |
+| 57 | `productImportWorkerFallback.test.ts` | Project source/support file |
+| 58 | `productMenuHelpers.test.ts` | Project source/support file |
+| 59 | `productPageHelpers.test.ts` | Project source/support file |
+| 60 | `productSearchPagination.test.ts` | Project source/support file |
+| 61 | `productSelectionHelpers.test.ts` | Project source/support file |
+| 62 | `productWriteHelpers.test.ts` | Project source/support file |
+| 63 | `publicErrorRecovery.test.ts` | Project source/support file |
+| 64 | `receiptSettingsSync.test.ts` | Project source/support file |
+| 65 | `receiptTemplate.test.ts` | Project source/support file |
+| 66 | `returnsLayout.test.ts` | Project source/support file |
+| 67 | `runtimeErrorClassifier.test.ts` | Project source/support file |
+| 68 | `salesImportWorker.test.ts` | Project source/support file |
+| 69 | `scanbotScanner.test.ts` | Project source/support file |
+| 70 | `scriptTypography.test.ts` | Project source/support file |
+| 71 | `sectionNavigation.test.ts` | Project source/support file |
+| 72 | `settingsConflictHelpers.test.ts` | Project source/support file |
+| 73 | `settingsRefresh.test.ts` | Project source/support file |
+| 74 | `sourceSyntaxCheck.ts` | Project source/support file |
 | 75 | `storagePolicy.test.ts` | Project source/support file |
 | 76 | `utilsSettingsBarrel.test.ts` | Project source/support file |
 
@@ -1593,7 +1593,7 @@ Total folders documented: **82**
 ### 3.74 Folder: `ops/scripts/runtime/audits`
 
 - Purpose: Project folder
-- Direct files: **6**
+- Direct files: **7**
 - Direct subfolders: **0**
 
 #### 3.74.2 Files
@@ -1606,6 +1606,7 @@ Total folders documented: **82**
 | 4 | `audit-report-html.ts` | Project source/support file |
 | 5 | `deep-live-audit.ts` | Project source/support file |
 | 6 | `full-app-audit.ts` | Project source/support file |
+| 7 | `package.json` | Configuration/data manifest |
 
 
 ### 3.75 Folder: `ops/scripts/runtime/cloudflare`
@@ -1627,7 +1628,7 @@ Total folders documented: **82**
 ### 3.76 Folder: `ops/scripts/runtime/live-checks`
 
 - Purpose: Project folder
-- Direct files: **19**
+- Direct files: **20**
 - Direct subfolders: **0**
 
 #### 3.76.2 Files
@@ -1636,23 +1637,24 @@ Total folders documented: **82**
 |---:|---|---|
 | 1 | `all-pages-control-audit.ts` | Project source/support file |
 | 2 | `live-check-utils.ts` | Project source/support file |
-| 3 | `phase84-branches-actions-live-check.ts` | Project source/support file |
-| 4 | `phase84-contacts-live-check.ts` | Project source/support file |
-| 5 | `phase84-files-providers-actions-live-check.ts` | Project source/support file |
-| 6 | `phase84-inventory-actions-live-check.ts` | Project source/support file |
-| 7 | `phase84-live-suite.ts` | Project source/support file |
-| 8 | `phase84-product-brands-actions-live-check.ts` | Project source/support file |
-| 9 | `phase84-product-categories-actions-live-check.ts` | Project source/support file |
-| 10 | `phase84-product-page-actions-live-check.ts` | Project source/support file |
-| 11 | `phase84-product-scanning-actions-live-check.ts` | Project source/support file |
-| 12 | `phase84-product-stock-actions-live-check.ts` | Project source/support file |
-| 13 | `phase84-product-units-actions-live-check.ts` | Project source/support file |
-| 14 | `phase84-product-variant-actions-live-check.ts` | Project source/support file |
-| 15 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
-| 16 | `phase84-receipt-settings-rollback-check.ts` | Project source/support file |
-| 17 | `phase84-sales-actions-live-check.ts` | Project source/support file |
-| 18 | `phase84-ui-live-check.ts` | Project source/support file |
-| 19 | `phase84-users-actions-live-check.ts` | Project source/support file |
+| 3 | `package.json` | Configuration/data manifest |
+| 4 | `phase84-branches-actions-live-check.ts` | Project source/support file |
+| 5 | `phase84-contacts-live-check.ts` | Project source/support file |
+| 6 | `phase84-files-providers-actions-live-check.ts` | Project source/support file |
+| 7 | `phase84-inventory-actions-live-check.ts` | Project source/support file |
+| 8 | `phase84-live-suite.ts` | Project source/support file |
+| 9 | `phase84-product-brands-actions-live-check.ts` | Project source/support file |
+| 10 | `phase84-product-categories-actions-live-check.ts` | Project source/support file |
+| 11 | `phase84-product-page-actions-live-check.ts` | Project source/support file |
+| 12 | `phase84-product-scanning-actions-live-check.ts` | Project source/support file |
+| 13 | `phase84-product-stock-actions-live-check.ts` | Project source/support file |
+| 14 | `phase84-product-units-actions-live-check.ts` | Project source/support file |
+| 15 | `phase84-product-variant-actions-live-check.ts` | Project source/support file |
+| 16 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
+| 17 | `phase84-receipt-settings-rollback-check.ts` | Project source/support file |
+| 18 | `phase84-sales-actions-live-check.ts` | Project source/support file |
+| 19 | `phase84-ui-live-check.ts` | Project source/support file |
+| 20 | `phase84-users-actions-live-check.ts` | Project source/support file |
 
 
 ### 3.77 Folder: `ops/scripts/runtime/smoke`

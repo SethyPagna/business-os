@@ -1611,7 +1611,8 @@ Tests and analysis:
 - Run `node ops/scripts/architecture/organization-audit.ts` before and after
   moves.
 - Use `rg` to update every old path reference.
-- Run `npm.cmd run check:jsx`, focused source tests, `npm.cmd run build`, and
+- Run `npm.cmd run check:source` (or compatibility alias
+  `npm.cmd run check:jsx`), focused source tests, `npm.cmd run build`, and
   focused Playwright checks for each frontend move.
 - Run backend utility tests and route contract tests for each backend move.
 
@@ -7548,3 +7549,17 @@ Move 654 status:
   Proof: stale-path scans, focused utils-settings and scanner tests, frontend
   typecheck, frontend utility suite, frontend production build, regenerated
   documentation references, and Phase 29 audit passed.
+
+Move 655 status:
+- Move 655 renames the frontend source syntax guard from the obsolete
+  JSX-era test name to `sourceSyntaxCheck.ts` and makes it enforce the current
+  TypeScript-only `frontend/src` contract. The checker now parses only `.ts`
+  and `.tsx` source files with Vite/esbuild and fails if any first-party
+  `.js`, `.jsx`, `.mjs`, or `.cjs` file appears under `frontend/src`; runtime
+  JavaScript remains allowed only in the existing generated/config/public
+  lanes. `npm run check:source` is the primary command, while
+  `npm run check:jsx` remains as a compatibility alias for older runbooks.
+  Proof: focused source checker, compatibility alias checker, stale
+  `jsxSyntaxCheck` scans, frontend utility suite, frontend production build,
+  regenerated documentation references, Phase 29 audit, and focused Products
+  desktop/mobile live control audit passed.

@@ -81,7 +81,8 @@ First safe candidates:
 - Product import planner/worker files.
 
 Verification:
-- `npm.cmd run check:jsx`
+- `npm.cmd run check:source` (or the compatibility alias
+  `npm.cmd run check:jsx`)
 - `node tests/actionStability.test.ts`
 - `npm.cmd run build`
 - focused Products Playwright checks.
@@ -5818,6 +5819,18 @@ Decision rule:
     utils-settings and scanner tests, frontend typecheck, frontend utility
     suite, frontend production build, regenerated references, and Phase 29 audit
     passed.
+
+655. Rename the frontend syntax guard to the TypeScript source contract.
+    Done: `frontend/tests/jsxSyntaxCheck.ts` moved to
+    `frontend/tests/sourceSyntaxCheck.ts`, and the checker now enforces that
+    `frontend/src` contains only `.ts` and `.tsx` source files. Any new
+    first-party `.js`, `.jsx`, `.mjs`, or `.cjs` under `frontend/src` now fails
+    the guard before it can drift into the active app. `npm run check:source`
+    is the primary script, while `npm run check:jsx` remains as a compatibility
+    alias so old wrappers do not break. Proof: focused source checker,
+    compatibility alias checker, stale `jsxSyntaxCheck` scans, frontend utility
+    suite, frontend production build, regenerated references, Phase 29 audit,
+    and focused Products desktop/mobile live control audit passed.
 
 ## Safety Gates
 
