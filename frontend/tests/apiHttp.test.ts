@@ -17,6 +17,16 @@ import {
 } from '../src/api/http.ts'
 import { appendActorQuery, getCurrentUserContext } from '../src/api/actorQuery.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from '../src/api/conflicts.ts'
+import {
+  clearDriveSyncStatusCooldown,
+  clearNotificationSummaryMissing,
+  getDriveSyncStatusFallback,
+  getNotificationSummaryFallback,
+  markDriveSyncStatusCooldown,
+  markNotificationSummaryMissing,
+  readDriveSyncStatusCooldown,
+  readNotificationSummaryMissingUntil,
+} from '../src/api/cooldownFallbacks.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from '../src/api/importTransport.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
@@ -506,6 +516,35 @@ await runTest('import transport helper posts multipart forms through the live se
     globalThis.fetch = originalFetch
     resetApiState()
   }
+})
+
+await runTest('cooldown fallback helpers keep typed notification and Drive fallbacks', () => {
+  clearNotificationSummaryMissing()
+  clearDriveSyncStatusCooldown()
+
+  assert.deepEqual(getNotificationSummaryFallback({ unavailable: true }), {
+    unreadCount: 0,
+    sections: [],
+    preferences: {},
+    unavailable: true,
+  })
+  assert.deepEqual(getDriveSyncStatusFallback({ cooldownUntil: 123 }), {
+    item: null,
+    unavailable: true,
+    cooldownUntil: 123,
+  })
+
+  const notificationUntil = markNotificationSummaryMissing(1_000)
+  const driveUntil = markDriveSyncStatusCooldown(2_000)
+  assert.ok(notificationUntil > 1_000)
+  assert.ok(driveUntil > 2_000)
+  assert.equal(readNotificationSummaryMissingUntil(), notificationUntil)
+  assert.equal(readDriveSyncStatusCooldown(), driveUntil)
+
+  clearNotificationSummaryMissing()
+  clearDriveSyncStatusCooldown()
+  assert.equal(readNotificationSummaryMissingUntil(), 0)
+  assert.equal(readDriveSyncStatusCooldown(), 0)
 })
 
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {

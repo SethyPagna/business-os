@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 662.
+- Latest completed implementation move in this roadmap: Move 663.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7662,3 +7662,18 @@ Move 662 status:
   focused API HTTP tests, frontend source guard, frontend typecheck, frontend
   utility suite, frontend production build, Phase 29 audit, and focused
   Products desktop/mobile live control audit passed.
+
+Move 663 status:
+- Move 663 extracts transient notification and Drive sync cooldown fallback
+  logic from the large frontend API registry. `frontend/src/api/cooldownFallbacks.ts`
+  now owns typed notification-summary and Drive-sync fallback payloads, browser
+  storage read/write/clear helpers, and memory-backed cooldown state for
+  no-window test/SSR environments. `methods.ts` now imports these named
+  helpers instead of carrying storage-key, max-number, and TTL logic inside the
+  remaining `ts-nocheck` registry. The API guide documents the new boundary,
+  focused API HTTP tests cover fallback shapes plus mark/read/clear behavior,
+  the source guard parsed 199 frontend source files, and the production build
+  shows the `app-api-methods` chunk at about 56.80 kB. Proof: focused API HTTP
+  tests, frontend source guard, frontend typecheck, frontend utility suite,
+  frontend production build, Phase 29 audit, and focused Products
+  desktop/mobile live control audit passed.

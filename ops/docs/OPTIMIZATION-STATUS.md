@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 662, typed import multipart transport extraction
+- Latest completed move: Move 663, typed notification and Drive cooldown fallback extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `495667441af290b3`
+  `791b454a5028cb11`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T01-06-58-835Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T01-16-25-553Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -172,9 +172,9 @@ Recent route-level win:
 - The large frontend API domain registry is being split into typed helper
   modules. Query-string/id normalization, request-id idempotency, conflict
   preview shaping, pending-sync preview serialization, actor/user query
-  attribution, public portal base URL resolution, abortable portal fetches, and
-  multipart import transport now live outside `frontend/src/api/methods.ts`
-  with direct focused coverage.
+  attribution, public portal base URL resolution, abortable portal fetches,
+  multipart import transport, and notification/Drive cooldown fallbacks now
+  live outside `frontend/src/api/methods.ts` with direct focused coverage.
 
 ## Recently Rejected Candidates
 

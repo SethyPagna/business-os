@@ -44,12 +44,7 @@ import {
 } from '../utils/settingsRefresh.ts'
 import {
   LIVE_SERVER_SENSITIVE_MIRROR_TABLES,
-  NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
-  NOTIFICATION_SUMMARY_MISSING_TTL_MS,
-  DRIVE_SYNC_STATUS_COOLDOWN_KEY,
-  DRIVE_SYNC_STATUS_COOLDOWN_MS,
   shouldPersistLocalMirror as shouldPersistLocalMirrorByPolicy,
-  maxStoredNumber,
   isCooldownActive,
 } from '../platform/storage/storagePolicy.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.ts'
@@ -58,6 +53,16 @@ import { serializePendingSyncPreview } from './syncPreview.ts'
 import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './importTransport.ts'
+import {
+  clearDriveSyncStatusCooldown,
+  clearNotificationSummaryMissing,
+  getDriveSyncStatusFallback,
+  getNotificationSummaryFallback,
+  markDriveSyncStatusCooldown,
+  markNotificationSummaryMissing,
+  readDriveSyncStatusCooldown,
+  readNotificationSummaryMissingUntil,
+} from './cooldownFallbacks.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
@@ -403,102 +408,9 @@ if (typeof window !== 'undefined') {
   })
 }
 
-let notificationSummaryMissingUntilMemory = 0
 let notificationSummaryRequestPromise = null
 const lastImportJobsByQuery = new Map()
-let driveSyncStatusCooldownMemory = 0
 let driveSyncStatusRequestPromise = null
-
-function getNotificationSummaryFallback(extra = {}) {
-  return {
-    unreadCount: 0,
-    sections: [],
-    preferences: {},
-    ...extra,
-  }
-}
-
-function getDriveSyncStatusFallback(extra = {}) {
-  return {
-    item: null,
-    unavailable: true,
-    ...extra,
-  }
-}
-
-function readNotificationSummaryMissingUntil() {
-  const memoryValue = Number(notificationSummaryMissingUntilMemory || 0)
-  if (typeof window === 'undefined') return 0
-  try {
-    const sessionValue = Number(window.sessionStorage.getItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY) || 0)
-    const localValue = Number(window.localStorage.getItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY) || 0)
-    return maxStoredNumber([sessionValue, localValue, memoryValue])
-  } catch (_) {
-    return Number.isFinite(memoryValue) ? memoryValue : 0
-  }
-}
-
-function markNotificationSummaryMissing() {
-  notificationSummaryMissingUntilMemory = Date.now() + NOTIFICATION_SUMMARY_MISSING_TTL_MS
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.setItem(
-      NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
-      String(notificationSummaryMissingUntilMemory),
-    )
-    window.localStorage.setItem(
-      NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
-      String(notificationSummaryMissingUntilMemory),
-    )
-  } catch (_) {}
-}
-
-function clearNotificationSummaryMissing() {
-  notificationSummaryMissingUntilMemory = 0
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.removeItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY)
-    window.localStorage.removeItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY)
-  } catch (_) {}
-}
-
-function readStorageNumber(key) {
-  const memoryValue = key === DRIVE_SYNC_STATUS_COOLDOWN_KEY
-    ? Number(driveSyncStatusCooldownMemory || 0)
-    : 0
-  if (typeof window === 'undefined') {
-    return Number.isFinite(memoryValue) ? memoryValue : 0
-  }
-  try {
-    const sessionValue = Number(window.sessionStorage.getItem(key) || 0)
-    const localValue = Number(window.localStorage.getItem(key) || 0)
-    return maxStoredNumber([memoryValue, sessionValue, localValue])
-  } catch (_) {
-    return Number.isFinite(memoryValue) ? memoryValue : 0
-  }
-}
-
-function writeStorageNumber(key, value) {
-  if (key === DRIVE_SYNC_STATUS_COOLDOWN_KEY) {
-    driveSyncStatusCooldownMemory = Number(value || 0) || 0
-  }
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.setItem(key, String(value))
-    window.localStorage.setItem(key, String(value))
-  } catch (_) {}
-}
-
-function clearStorageNumber(key) {
-  if (key === DRIVE_SYNC_STATUS_COOLDOWN_KEY) {
-    driveSyncStatusCooldownMemory = 0
-  }
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.removeItem(key)
-    window.localStorage.removeItem(key)
-  } catch (_) {}
-}
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export async function login({ username, password, organization, sessionDuration, clientTime, deviceTz, deviceName }) {
@@ -1929,7 +1841,7 @@ export async function importBackupFolder(sourceDir) {
 // fresh data immediately instead of showing stale results for up to 45 s.
 export const getGoogleDriveSyncStatus = () =>
   route('system:driveSyncStatus', async () => {
-    const cooldownUntil = readStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY)
+    const cooldownUntil = readDriveSyncStatusCooldown()
     if (isCooldownActive(cooldownUntil)) {
       return getDriveSyncStatusFallback({ cooldownUntil })
     }
@@ -1937,7 +1849,7 @@ export const getGoogleDriveSyncStatus = () =>
     driveSyncStatusRequestPromise = (async () => {
       try {
         const result = await apiFetch('GET', '/api/system/drive-sync/status')
-        clearStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY)
+        clearDriveSyncStatusCooldown()
         return result
       } catch (error) {
         const status = Number(error?.status || 0)
@@ -1946,8 +1858,7 @@ export const getGoogleDriveSyncStatus = () =>
           || message.includes('insufficient_resources')
           || [404, 429, 500, 502, 503, 504].includes(status)
         if (retryable) {
-          const nextUntil = Date.now() + DRIVE_SYNC_STATUS_COOLDOWN_MS
-          writeStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY, nextUntil)
+          const nextUntil = markDriveSyncStatusCooldown()
           return getDriveSyncStatusFallback({
             cooldownUntil: nextUntil,
             lastError: error?.message || 'Drive sync status temporarily unavailable',

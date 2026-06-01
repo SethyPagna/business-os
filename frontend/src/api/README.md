@@ -42,6 +42,10 @@ This folder is the browser-side transport layer for Business OS.
   - import-job multipart headers, live-server form POSTs, and import payload device metadata
   - keeps CSV, ZIP, image, and error-download transport details out of the large domain registry
 
+- `cooldownFallbacks.ts`
+  - notification summary and Drive sync status fallback/cooldown helpers
+  - keeps transient-gateway backoff state and typed fallback payloads outside the large domain registry
+
 - `localDb.ts`
   - Dexie-based browser storage for offline queues and local cache helpers
 
