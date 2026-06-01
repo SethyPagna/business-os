@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const index = fs.readFileSync(new URL('../src/index.tsx', import.meta.url), 'utf8')
 const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
@@ -106,6 +107,14 @@ assert.doesNotMatch(app, /Promise\.all\(\s*keys\s*\.filter\(\(key\) => key\.star
 assert.match(app, /window\.history\.replaceState/, 'successful boot should clean recovery params from the URL')
 assert.match(app, /business_os_page_loader_warning:\$\{window\.location\.pathname\}:\$\{FRONTEND_BUILD_HASH \|\| 'dev'\}/, 'page loader warnings should be scoped per build hash')
 assert.match(app, /window\.location\.replace\(target\)/, 'failed chunk recovery should use hard location replacement')
+assert.match(index, /const SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS = 5000/, 'service worker registration should be delayed until after load and idle time')
+assert.match(index, /const SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS = 1200/, 'service worker registration should still run without idle callback support')
+assert.match(index, /const FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS = 3000/, 'form accessibility wiring should be delayed until after first render')
+assert.match(index, /function scheduleAfterLoadIdle\(task: \(\) => void, idleTimeoutMs: number, fallbackDelayMs: number\)/, 'startup helpers should share an after-load idle scheduler')
+assert.match(index, /scheduleAfterLoadIdle\(\s*\(\) => \{ register\(\)\.catch\(\(\) => \{\}\) \},\s*SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS,\s*SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS,\s*\)/, 'service worker registration should use the after-load idle scheduler')
+assert.match(index, /scheduleAfterLoadIdle\(\s*installFormFieldAccessibility,\s*FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS,\s*FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS,\s*\)/, 'form field accessibility scan should use the after-load idle scheduler')
+assert.match(index, /ReactDOM\.createRoot\(rootElement\)\.render\([\s\S]*\)\s*\n\s*registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)/, 'React should render before startup maintenance jobs are scheduled')
+assert.doesNotMatch(index, /registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)\s*\n\s*const publicCatalogMode/, 'startup maintenance jobs should not be scheduled before root render setup')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')

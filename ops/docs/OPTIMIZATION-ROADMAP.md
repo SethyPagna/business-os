@@ -8249,3 +8249,19 @@ Move 698 status:
   desktop/mobile live control audit passed with 36/46 controls tested, 10
   long-label controls skipped, and zero findings; Phase 29 and live hygiene
   checks are rerun after reference refresh.
+
+Move 699 status:
+- Move 699 defers post-render startup maintenance out of root setup.
+  `frontend/src/index.tsx` now renders the React root first, then schedules
+  offline app-shell service-worker registration and form-field accessibility
+  wiring through a shared after-load idle scheduler. Service-worker
+  registration still runs after load and has a timeout fallback, so offline
+  support is preserved without registering/updating the worker while the app is
+  trying to reach first paint. Form-field scanning keeps the same generated
+  id/name/label behavior, but no longer queues before root render. The focused
+  loading UX guard verifies the scheduler, render-before-maintenance order,
+  service-worker path, and form scanner path; the source guard parsed 227
+  frontend source files, the production build hash is `f41fed1ff54d30f9`, and
+  the focused Dashboard desktop/mobile live control audit passed with 36/46
+  controls tested, 10 long-label controls skipped, and zero findings; Phase 29
+  and live hygiene checks are rerun after reference refresh.

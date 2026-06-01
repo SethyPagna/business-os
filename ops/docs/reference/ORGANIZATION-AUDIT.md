@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-01T09:39:11.799Z
+Generated: 2026-06-01T09:51:00.190Z
 
 ## Summary
 
@@ -64,9 +64,9 @@ Generated: 2026-06-01T09:39:11.799Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8931 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 8252 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 8268 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7614 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6548 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6562 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
@@ -81,7 +81,7 @@ Generated: 2026-06-01T09:39:11.799Z
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2109 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2118 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |

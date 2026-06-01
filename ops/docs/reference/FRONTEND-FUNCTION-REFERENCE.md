@@ -195,7 +195,7 @@ Total files documented: **233**
 | 183 | `frontend/src/components/utils-settings/Settings.tsx` | 26 |
 | 184 | `frontend/src/components/utils-settings/settingsConflict.ts` | 1 |
 | 185 | `frontend/src/constants.ts` | 0 |
-| 186 | `frontend/src/index.tsx` | 10 |
+| 186 | `frontend/src/index.tsx` | 12 |
 | 187 | `frontend/src/platform/runtime/clientRuntime.ts` | 9 |
 | 188 | `frontend/src/platform/storage/storagePolicy.ts` | 0 |
 | 189 | `frontend/src/public-runtime/runtime-noise-guard.ts` | 8 |
@@ -2550,16 +2550,18 @@ Total files documented: **233**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `registerOfflineAppShell` | function | 22 |
-| 2 | `register` | const arrow | 25 |
-| 3 | `installFormFieldAccessibility` | function | 41 |
-| 4 | `escapeSelectorValue` | const arrow | 46 |
-| 5 | `wireField` | const arrow | 51 |
-| 6 | `scan` | const arrow | 73 |
-| 7 | `safeInsertRule` | const function | 111 |
-| 8 | `safeCssRulesGetter` | const function | 129 |
-| 9 | `stopKnownStartupNoise` | const arrow | 145 |
-| 10 | `scheduleFormFieldAccessibility` | function | 180 |
+| 1 | `scheduleAfterLoadIdle` | function | 26 |
+| 2 | `schedule` | const arrow | 29 |
+| 3 | `registerOfflineAppShell` | function | 45 |
+| 4 | `register` | const arrow | 48 |
+| 5 | `installFormFieldAccessibility` | function | 62 |
+| 6 | `escapeSelectorValue` | const arrow | 67 |
+| 7 | `wireField` | const arrow | 72 |
+| 8 | `scan` | const arrow | 94 |
+| 9 | `safeInsertRule` | const function | 132 |
+| 10 | `safeCssRulesGetter` | const function | 150 |
+| 11 | `stopKnownStartupNoise` | const arrow | 166 |
+| 12 | `scheduleFormFieldAccessibility` | function | 201 |
 
 ### 3.187 `frontend/src/platform/runtime/clientRuntime.ts`
 

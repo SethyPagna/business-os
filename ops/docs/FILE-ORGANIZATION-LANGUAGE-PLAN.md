@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 698 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 699 in this file.
 
 ## Goal
 
@@ -6523,6 +6523,20 @@ Decision rule:
     timeout fallback. Proof: focused performance loading UX test, frontend
     source guard, frontend typecheck, frontend utility suite, frontend
     production build with hash `f75e2c8d3320d0ec`, and focused Dashboard
+    desktop/mobile live control audit passed with 36/46 controls tested, 10
+    long-label controls skipped, and zero findings; Phase 29 and live hygiene
+    checks are rerun after reference refresh.
+
+699. Defer post-render startup maintenance until after load and idle time.
+    Done: `frontend/src/index.tsx` now renders the React root before scheduling
+    non-critical startup maintenance. Service-worker registration still
+    preserves offline app-shell support, but it now waits until page load plus
+    browser idle time with a timeout fallback. Form-field accessibility wiring
+    uses the same shared after-load idle scheduler, so generated field ids,
+    names, and labels still recover without running before root render. Proof:
+    focused performance loading UX test, app shell utility test, frontend
+    source guard, frontend typecheck, frontend utility suite, frontend
+    production build with hash `f41fed1ff54d30f9`, and focused Dashboard
     desktop/mobile live control audit passed with 36/46 controls tested, 10
     long-label controls skipped, and zero findings; Phase 29 and live hygiene
     checks are rerun after reference refresh.

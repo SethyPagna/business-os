@@ -18,6 +18,29 @@ type GuardedInsertRule = CSSStyleSheet['insertRule'] & { __businessOsGuarded?: b
 type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }
 const BusinessOsApp = App as ComponentType
 const AppProvider = AppProviderBase as ComponentType<{ publicMode: boolean; children: ReactNode }>
+const SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS = 5000
+const SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS = 1200
+const FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS = 3000
+const FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS = 1200
+
+function scheduleAfterLoadIdle(task: () => void, idleTimeoutMs: number, fallbackDelayMs: number) {
+  if (typeof window === 'undefined') return
+
+  const schedule = () => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(task, { timeout: idleTimeoutMs })
+      return
+    }
+    window.setTimeout(task, fallbackDelayMs)
+  }
+
+  if (document.readyState === 'complete') {
+    schedule()
+    return
+  }
+
+  window.addEventListener('load', schedule, { once: true })
+}
 
 function registerOfflineAppShell() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
@@ -29,13 +52,11 @@ function registerOfflineAppShell() {
     } catch (_) {}
   }
 
-  if (document.readyState === 'complete') {
-    register().catch(() => {})
-  } else {
-    window.addEventListener('load', () => {
-      register().catch(() => {})
-    }, { once: true })
-  }
+  scheduleAfterLoadIdle(
+    () => { register().catch(() => {}) },
+    SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS,
+    SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS,
+  )
 }
 
 function installFormFieldAccessibility() {
@@ -179,15 +200,12 @@ if (typeof window !== 'undefined') {
 
 function scheduleFormFieldAccessibility() {
   if (typeof window === 'undefined') return
-  if (typeof window.requestIdleCallback === 'function') {
-    window.requestIdleCallback(() => installFormFieldAccessibility(), { timeout: 2000 })
-    return
-  }
-  window.setTimeout(() => installFormFieldAccessibility(), 750)
+  scheduleAfterLoadIdle(
+    installFormFieldAccessibility,
+    FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS,
+    FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS,
+  )
 }
-
-registerOfflineAppShell()
-scheduleFormFieldAccessibility()
 
 const publicCatalogMode = typeof window !== 'undefined'
   ? isPublicCatalogPath(window.location.pathname)
@@ -203,3 +221,6 @@ ReactDOM.createRoot(rootElement).render(
     </AppProvider>
   </React.StrictMode>
 )
+
+registerOfflineAppShell()
+scheduleFormFieldAccessibility()
