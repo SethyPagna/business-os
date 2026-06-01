@@ -222,7 +222,7 @@ Total files documented: **580**
 | 210 | `frontend/src/App.tsx` | frontend-core | 1789 | 67.6 | Main app shell and page mounting |
 | 211 | `frontend/src/app/appShellUtils.ts` | frontend-core | 159 | 5.2 | Project source/support file |
 | 212 | `frontend/src/app/publicErrorRecovery.ts` | frontend-core | 35 | 1.3 | Project source/support file |
-| 213 | `frontend/src/AppContext.tsx` | frontend-core | 1826 | 73.5 | Global app state/context provider |
+| 213 | `frontend/src/AppContext.tsx` | frontend-core | 1853 | 74.6 | Global app state/context provider |
 | 214 | `frontend/src/components/auth/Login.tsx` | frontend-ui | 1245 | 53.8 | UI component/page |
 | 215 | `frontend/src/components/branches/Branches.tsx` | frontend-ui | 1076 | 49.6 | UI component/page |
 | 216 | `frontend/src/components/branches/BranchForm.tsx` | frontend-ui | 202 | 6.4 | UI component/page |
@@ -449,7 +449,7 @@ Total files documented: **580**
 | 437 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 438 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 97 | 4.8 | Project source/support file |
 | 439 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 440 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2124 | 102.4 | Project source/support file |
+| 440 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2141 | 103.5 | Project source/support file |
 | 441 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 442 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 443 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |

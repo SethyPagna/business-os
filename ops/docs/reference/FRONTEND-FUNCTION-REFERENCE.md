@@ -53,7 +53,7 @@ Total files documented: **233**
 | 41 | `frontend/src/App.tsx` | 82 |
 | 42 | `frontend/src/app/appShellUtils.ts` | 0 |
 | 43 | `frontend/src/app/publicErrorRecovery.ts` | 1 |
-| 44 | `frontend/src/AppContext.tsx` | 37 |
+| 44 | `frontend/src/AppContext.tsx` | 38 |
 | 45 | `frontend/src/components/auth/Login.tsx` | 23 |
 | 46 | `frontend/src/components/branches/Branches.tsx` | 15 |
 | 47 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
@@ -767,43 +767,44 @@ Total files documented: **233**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getAppApi` | function | 195 |
-| 2 | `getErrorMessage` | function | 205 |
-| 3 | `flattenTranslationTree` | function | 209 |
-| 4 | `safeStorageGet` | function | 265 |
-| 5 | `safeStorageSet` | function | 273 |
-| 6 | `safeStorageRemove` | function | 279 |
-| 7 | `getStoredUserPayload` | function | 285 |
-| 8 | `getStoredUserExpiry` | function | 289 |
-| 9 | `clearPersistedAuthState` | function | 293 |
-| 10 | `persistAuthState` | function | 306 |
-| 11 | `computeSessionExpiryMs` | function | 328 |
-| 12 | `readDeviceSettings` | function | 344 |
-| 13 | `writeDeviceSettings` | function | 353 |
-| 14 | `writeStoredSessionDuration` | function | 359 |
-| 15 | `readPendingOauthLink` | function | 367 |
-| 16 | `clearPendingOauthLink` | function | 381 |
-| 17 | `readOauthCallbackResult` | function | 387 |
-| 18 | `clearOauthCallbackResult` | function | 398 |
-| 19 | `mergeSettingsWithDeviceOverrides` | function | 404 |
-| 20 | `normalizeDateInput` | function | 408 |
-| 21 | `buildRuntimeDescriptorFromBootstrap` | function | 426 |
-| 22 | `LoadingScreen` | function | 455 |
-| 23 | `AccessDenied` | function | 468 |
-| 24 | `onUpdate` | const arrow | 722 |
-| 25 | `onStatus` | const arrow | 754 |
-| 26 | `poll` | const arrow | 763 |
-| 27 | `onError` | const arrow | 783 |
-| 28 | `onWriteBlocked` | const arrow | 805 |
-| 29 | `onRuntimeMismatch` | const arrow | 815 |
-| 30 | `onConflict` | const arrow | 835 |
-| 31 | `onUnauthorized` | const arrow | 904 |
-| 32 | `handleOtpLogin` | const arrow | 963 |
-| 33 | `handleUserUpdated` | const arrow | 1005 |
-| 34 | `discoverSyncUrl` | const arrow | 1042 |
-| 35 | `clearCallbackUrl` | const arrow | 1431 |
-| 36 | `clearPendingLink` | const arrow | 1435 |
-| 37 | `run` | const arrow | 1439 |
+| 1 | `getAppApi` | function | 197 |
+| 2 | `getErrorMessage` | function | 207 |
+| 3 | `flattenTranslationTree` | function | 211 |
+| 4 | `safeStorageGet` | function | 267 |
+| 5 | `safeStorageSet` | function | 275 |
+| 6 | `safeStorageRemove` | function | 281 |
+| 7 | `getStoredUserPayload` | function | 287 |
+| 8 | `getStoredUserExpiry` | function | 291 |
+| 9 | `clearPersistedAuthState` | function | 295 |
+| 10 | `persistAuthState` | function | 308 |
+| 11 | `computeSessionExpiryMs` | function | 330 |
+| 12 | `readDeviceSettings` | function | 346 |
+| 13 | `writeDeviceSettings` | function | 355 |
+| 14 | `writeStoredSessionDuration` | function | 361 |
+| 15 | `readPendingOauthLink` | function | 369 |
+| 16 | `clearPendingOauthLink` | function | 383 |
+| 17 | `readOauthCallbackResult` | function | 389 |
+| 18 | `clearOauthCallbackResult` | function | 400 |
+| 19 | `mergeSettingsWithDeviceOverrides` | function | 406 |
+| 20 | `normalizeDateInput` | function | 410 |
+| 21 | `buildRuntimeDescriptorFromBootstrap` | function | 428 |
+| 22 | `LoadingScreen` | function | 457 |
+| 23 | `AccessDenied` | function | 470 |
+| 24 | `persistAutoSyncUrl` | const arrow | 558 |
+| 25 | `onUpdate` | const arrow | 749 |
+| 26 | `onStatus` | const arrow | 781 |
+| 27 | `poll` | const arrow | 790 |
+| 28 | `onError` | const arrow | 810 |
+| 29 | `onWriteBlocked` | const arrow | 832 |
+| 30 | `onRuntimeMismatch` | const arrow | 842 |
+| 31 | `onConflict` | const arrow | 862 |
+| 32 | `onUnauthorized` | const arrow | 931 |
+| 33 | `handleOtpLogin` | const arrow | 990 |
+| 34 | `handleUserUpdated` | const arrow | 1032 |
+| 35 | `discoverSyncUrl` | const arrow | 1069 |
+| 36 | `clearCallbackUrl` | const arrow | 1458 |
+| 37 | `clearPendingLink` | const arrow | 1462 |
+| 38 | `run` | const arrow | 1466 |
 
 ### 3.45 `frontend/src/components/auth/Login.tsx`
 

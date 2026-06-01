@@ -42,6 +42,8 @@ const APP_LOGOUT_TIMEOUT_MS = 10000
 const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000
 const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000
 const APP_SESSION_DURATION_TIMEOUT_MS = 12000
+const INITIAL_SYNC_URL_PERSIST_DELAY_MS = 1500
+const INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS = 8000
 
 type TranslationPack = Record<string, string>
 type AppRecord = Record<string, unknown>
@@ -537,15 +539,40 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const isViteDev = window.location.hostname === 'localhost' &&
         (window.location.port === '5173' || window.location.port === '5174')
       if (!isViteDev) {
-        // Served by the Node backend: current origin is the API server, so always update.
-        const auto = window.location.origin
-        try { localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, auto) } catch (_) {}
-        return auto
+        // Served by the Node backend: current origin is the API server.
+        // Persisting it can wait until after first paint.
+        return window.location.origin
       }
       // Vite dev: use stored value (normally points to localhost:4000 backend)
       return localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || ''
     } catch { return '' }
   })
+
+  useEffect(() => {
+    if (publicMode || typeof window === 'undefined' || !syncUrl) return undefined
+    const isViteDev = window.location.hostname === 'localhost' &&
+      (window.location.port === '5173' || window.location.port === '5174')
+    if (isViteDev || sanitizeSyncServerUrl(syncUrl) !== sanitizeSyncServerUrl(window.location.origin)) return undefined
+
+    let idleId: number | null = null
+    const persistAutoSyncUrl = () => {
+      safeStorageSet(localStorage, STORAGE_KEYS.SYNC_SERVER, syncUrl)
+    }
+    const timerId = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(persistAutoSyncUrl, { timeout: INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS })
+      } else {
+        persistAutoSyncUrl()
+      }
+    }, INITIAL_SYNC_URL_PERSIST_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(timerId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [publicMode, syncUrl])
 
   // Define translation lookup before any hook dependency arrays or callbacks
   // reference it, avoiding render-time TDZ crashes in production bundles.

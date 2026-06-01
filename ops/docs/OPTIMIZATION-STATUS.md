@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 700, defer initial offline maintenance
+- Latest completed move: Move 701, defer auto sync URL persistence
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `7166cf124209d1aa`
+  `5bb3317e6301aad9`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T10-03-39-806Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T10-17-12-496Z/summary.json`
 - latest focused Sales desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
 - latest focused POS desktop/mobile control audit:
@@ -64,6 +64,19 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent runtime/load win:
+
+- Frontend `AppProvider` now avoids writing the backend-origin sync URL to
+  `localStorage` during state initialization in `frontend/src/AppContext.tsx`.
+  The current origin still becomes the active `syncUrl` immediately for
+  backend-served pages, and Vite dev still reads the saved sync server URL,
+  but persisting the backend-origin value now waits for a short delay plus
+  browser idle time with a timeout fallback. This removes a synchronous
+  storage write from the first render setup while preserving settings
+  persistence and user-selected sync URL behavior. The source guard parsed 227
+  frontend TypeScript files, the production build hash is
+  `5bb3317e6301aad9`, and the focused Dashboard desktop/mobile live audit
+  passed with 36/46 controls tested, 10 long-label controls skipped by stable
+  broad-audit guardrails, and zero findings.
 
 - Frontend API bootstrap now defers initial offline maintenance in
   `frontend/src/web-api.ts`. The sync server URL, websocket connection, and

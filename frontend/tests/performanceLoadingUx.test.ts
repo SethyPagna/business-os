@@ -166,6 +166,23 @@ assert.match(appContext, /const APP_LOGOUT_TIMEOUT_MS = 10000/, 'app logout shou
 assert.match(appContext, /const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000/, 'Google OAuth completion should use an explicit timeout constant')
 assert.match(appContext, /const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000/, 'settings save should use an explicit timeout constant')
 assert.match(appContext, /const APP_SESSION_DURATION_TIMEOUT_MS = 12000/, 'session duration refresh should use an explicit timeout constant')
+assert.match(appContext, /const INITIAL_SYNC_URL_PERSIST_DELAY_MS = 1500/, 'auto sync URL persistence should be deferred past first paint')
+assert.match(appContext, /const INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS = 8000/, 'deferred auto sync URL persistence should still run when idle time is scarce')
+assert.match(
+  appContext,
+  /const \[syncUrl, _setSyncUrl\] = useState\(\(\) => \{[\s\S]*if \(!isViteDev\) \{[\s\S]*return window\.location\.origin[\s\S]*return localStorage\.getItem\(STORAGE_KEYS\.SYNC_SERVER\) \|\| ''/,
+  'sync URL state should stay immediate without writing localStorage during initialization',
+)
+assert.match(
+  appContext,
+  /const persistAutoSyncUrl = \(\) => \{[\s\S]*safeStorageSet\(localStorage, STORAGE_KEYS\.SYNC_SERVER, syncUrl\)[\s\S]*window\.requestIdleCallback\(persistAutoSyncUrl, \{ timeout: INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS \}\)/,
+  'auto sync URL persistence should run through a deferred idle effect',
+)
+assert.doesNotMatch(
+  appContext,
+  /if \(!isViteDev\) \{[\s\S]{0,260}localStorage\.setItem\(STORAGE_KEYS\.SYNC_SERVER/,
+  'sync URL initializer should not write localStorage before first render',
+)
 assert.match(
   appContext,
   /withLoaderTimeout\(\s*\(\) => api\.getSettings\?\.\(\{ force: options\?\.force === true \}\),\s*'App settings',\s*APP_SETTINGS_LOAD_TIMEOUT_MS,\s*\)/,

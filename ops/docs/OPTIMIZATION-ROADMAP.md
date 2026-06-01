@@ -8282,3 +8282,20 @@ Move 700 status:
   `7166cf124209d1aa`; focused Dashboard desktop/mobile live control audit
   passed with 36/46 controls tested, 10 long-label controls skipped, and zero
   findings; Phase 29 and live hygiene checks are rerun after reference refresh.
+
+Move 701 status:
+- Move 701 defers automatic backend-origin sync URL persistence out of
+  `AppProvider` state initialization. `frontend/src/AppContext.tsx` still
+  returns `window.location.origin` immediately for backend-served pages and
+  still reads the saved sync server URL for Vite dev, but it no longer calls
+  `localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, ...)` while creating the
+  `syncUrl` state. The automatic persistence now waits for a short delay and
+  browser idle time with an eight-second fallback, while explicit user sync URL
+  updates continue to save immediately. This removes one synchronous storage
+  write from the first render setup without losing sync URL behavior. The
+  focused loading UX guard verifies the deferred idle effect and blocks a
+  regression back to initializer writes; source guard, typecheck, frontend
+  utility suite, and production build passed. Production build hash:
+  `5bb3317e6301aad9`; focused Dashboard desktop/mobile live control audit
+  passed with 36/46 controls tested, 10 long-label controls skipped, and zero
+  findings; Phase 29 and live hygiene checks are rerun after reference refresh.

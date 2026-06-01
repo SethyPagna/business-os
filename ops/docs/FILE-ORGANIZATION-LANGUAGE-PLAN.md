@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 700 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 701 in this file.
 
 ## Goal
 
@@ -6553,6 +6553,22 @@ Decision rule:
     offline sync/security tests, frontend source guard, frontend typecheck,
     frontend utility suite, frontend production build with hash
     `7166cf124209d1aa`, and focused Dashboard desktop/mobile live control
+    audit passed with 36/46 controls tested, 10 long-label controls skipped,
+    and zero findings; Phase 29 and live hygiene checks are rerun after
+    reference refresh.
+
+701. Defer automatic sync URL persistence until after render and idle time.
+    Done: `frontend/src/AppContext.tsx` still returns the backend origin as
+    the active `syncUrl` immediately for backend-served pages and still reads
+    the saved sync server URL in Vite dev, but it no longer writes
+    `STORAGE_KEYS.SYNC_SERVER` during `useState` initialization. Automatic
+    backend-origin persistence now runs from a delayed idle effect with a
+    timeout fallback, while explicit user sync URL edits keep saving
+    immediately. This removes a synchronous `localStorage` write from the
+    first render setup without weakening connection behavior. Proof: focused
+    performance loading UX test, frontend source guard, frontend typecheck,
+    frontend utility suite, frontend production build with hash
+    `5bb3317e6301aad9`, and focused Dashboard desktop/mobile live control
     audit passed with 36/46 controls tested, 10 long-label controls skipped,
     and zero findings; Phase 29 and live hygiene checks are rerun after
     reference refresh.
