@@ -73,6 +73,14 @@ import {
   hasStoredUserSession,
   registerOutboxBackgroundSync,
 } from './syncRuntime.ts'
+import {
+  LONG_SYSTEM_ACTION_TIMEOUT_MS,
+  cancelSystemJob as cancelSystemJobRequest,
+  getSystemJob as getSystemJobRequest,
+  pollSystemJob as pollSystemJobRequest,
+  queueBackupFolderExport as queueBackupFolderExportRequest,
+  queueBackupFolderRestore as queueBackupFolderRestoreRequest,
+} from './systemJobs.ts'
 export { getImageDataUrl, openCSVDialog, openImageDialog } from './browserDialogs.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
@@ -1582,52 +1590,16 @@ export const deleteAuditLogsRetention = (olderThanDays = 30) =>
   route('audit_log:retention:delete', () => apiFetch('DELETE', `/api/system/audit-logs/retention?olderThanDays=${encodeURIComponent(olderThanDays)}&confirm=1`, undefined), null, true)
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 export async function getSystemJob(id) {
-  if (!id) throw new Error('Missing job id')
-  return apiFetch('GET', `/api/system/jobs/${encodeURIComponent(id)}`)
+  return getSystemJobRequest(id)
 }
 
 export async function cancelSystemJob(id, reason = 'Cancelled by user') {
-  if (!id) throw new Error('Missing job id')
-  return apiFetch('POST', `/api/system/jobs/${encodeURIComponent(id)}/cancel`, { reason }, SYNC.REQUEST_TIMEOUT_MS)
+  return cancelSystemJobRequest(id, reason)
 }
 
-export async function pollSystemJob(jobId, {
-  timeoutMs = LONG_SYSTEM_ACTION_TIMEOUT_MS,
-  pollMs = 1200,
-  reason = 'system-job',
-  onUpdate = null,
-} = {}) {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    const result = await getSystemJob(jobId)
-    const item = result?.item || result
-    if (typeof onUpdate === 'function') onUpdate(item)
-    if (item?.status === 'completed') {
-      return {
-        success: true,
-        job: item,
-        ...(item.result || {}),
-      }
-    }
-    if (item?.status === 'failed' || item?.status === 'cancelled') {
-      throw new Error(item.error || item.message || `${reason} failed`)
-    }
-    await wait(pollMs)
-  }
-  throw new Error(`${reason} is still running. Check the Backup page or server logs for progress.`)
-}
-
-async function waitForSystemJob(jobId, {
-  timeoutMs = LONG_SYSTEM_ACTION_TIMEOUT_MS,
-  pollMs = 1200,
-  reason = 'system-job',
-} = {}) {
-  return pollSystemJob(jobId, { timeoutMs, pollMs, reason })
+export async function pollSystemJob(jobId, options = {}) {
+  return pollSystemJobRequest(jobId, options)
 }
 
 export async function getIntegrationDoctor(options = {}) {
@@ -1642,12 +1614,7 @@ export async function getIntegrationDoctor(options = {}) {
 }
 
 export async function queueBackupFolderExport(destinationDir = '') {
-  const payload = {
-    type: 'export-folder',
-  }
-  const safeDestination = String(destinationDir || '').trim()
-  if (safeDestination) payload.destinationDir = safeDestination
-  return apiFetch('POST', '/api/backups', payload, SYNC.REQUEST_TIMEOUT_MS)
+  return queueBackupFolderExportRequest(destinationDir)
 }
 
 export async function exportBackupFolder(destinationDir) {
@@ -1655,10 +1622,7 @@ export async function exportBackupFolder(destinationDir) {
 }
 
 export async function queueBackupFolderRestore(sourceDir) {
-  return apiFetch('POST', '/api/backups', {
-    type: 'import-folder',
-    sourceDir,
-  }, SYNC.REQUEST_TIMEOUT_MS)
+  return queueBackupFolderRestoreRequest(sourceDir)
 }
 
 export async function importBackupFolder(sourceDir) {
@@ -1899,8 +1863,6 @@ export async function testSyncServer(url) {
 
 // ─── Folder dialog (optional — only available in Electron/Tauri contexts) ─────
 // In web mode this is a no-op; callers use optional chaining (?.) defensively.
-const LONG_SYSTEM_ACTION_TIMEOUT_MS = 10 * 60 * 1000
-
 export async function openFolderDialog(initialPath = '') {
   const result = await route(
     'system:pickFolder',

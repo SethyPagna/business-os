@@ -34,6 +34,10 @@ This folder is the browser-side transport layer for Business OS.
   - browser CSV picker and image/data-url compatibility fallbacks
   - keeps DOM file-input behavior and CSV decoding outside the large domain registry
 
+- `systemJobs.ts`
+  - system job polling, cancellation, and backup folder queue transport helpers
+  - keeps long-running backup job API mechanics outside the large domain registry
+
 - `expectedUpdatedAt.ts`
   - optimistic-update payload helpers for row and settings writes
   - keeps updated-at conflict metadata lookup outside the large domain registry

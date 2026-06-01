@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 668 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 669 in this file.
 
 ## Goal
 
@@ -6013,6 +6013,21 @@ Decision rule:
     behavior plus source placement. The source guard parsed 204 frontend files
     and the production build now reports the `app-api-methods` chunk around
     53.85 kB. Proof: focused API HTTP tests, frontend source guard, frontend
+    typecheck, frontend utility suite, and frontend production build passed.
+
+669. Extract typed system job and backup queue helpers from the large domain
+    registry.
+    Done: `frontend/src/api/systemJobs.ts` now owns long-running system job
+    polling, cancellation transport, job id validation, backup folder export
+    queue payloads, and backup folder restore queue payloads previously
+    embedded in `frontend/src/api/methods.ts`. The public wrappers remain in
+    `methods.ts` so existing `window.api` calls keep working, while the large
+    registry no longer carries the wait loop, poll loop, or backup queue
+    assembly. The API guide documents the split, focused API HTTP tests verify
+    source placement, and Backup tests verify the queued job methods remain
+    exposed. The source guard parsed 205 frontend files and the production
+    build now reports the `app-api-methods` chunk around 52.93 kB. Proof:
+    focused API HTTP tests, Backup job tests, frontend source guard, frontend
     typecheck, frontend utility suite, and frontend production build passed.
 
 ## Safety Gates

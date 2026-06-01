@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 668, typed browser dialog helper extraction
+- Latest completed move: Move 669, typed system job helper extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `46ff3098c2fae877`
+  `1b4aa6d9a013f278`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T02-05-43-518Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T02-14-34-368Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -181,7 +181,10 @@ Recent route-level win:
   `frontend/src/api/syncRuntime.ts` and are shared by both the API registry and
   browser bootstrap. Browser CSV picker and image/data-url compatibility
   fallbacks now live in `frontend/src/api/browserDialogs.ts`, keeping DOM file
-  inputs and CSV decoding out of the remaining domain registry.
+  inputs and CSV decoding out of the remaining domain registry. System job
+  polling, cancellation, and backup folder queue helpers now live in
+  `frontend/src/api/systemJobs.ts`, keeping long-running Backup transport
+  mechanics out of the remaining domain registry.
 
 ## Recently Rejected Candidates
 

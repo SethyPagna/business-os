@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 668.
+- Latest completed implementation move in this roadmap: Move 669.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7754,3 +7754,18 @@ Move 668 status:
   files, and the production build shows the `app-api-methods` chunk at about
   53.85 kB. Proof: focused API HTTP tests, frontend source guard, frontend
   typecheck, frontend utility suite, and frontend production build passed.
+
+Move 669 status:
+- Move 669 extracts long-running system job and backup folder queue helpers
+  from the large frontend API registry. `frontend/src/api/systemJobs.ts` now
+  owns job id validation, system job fetch/cancel transport, poll timing,
+  completed/failed/cancelled job handling, and backup folder export/import
+  queue payloads. `methods.ts` keeps the same public wrapper names for
+  `window.api` compatibility while no longer carrying the polling loop,
+  wait helper, or backup queue payload assembly. The API guide documents the
+  boundary, focused API HTTP tests verify source placement, Backup tests verify
+  queued job flows remain exposed, the source guard parsed 205 frontend source
+  files, and the production build shows the `app-api-methods` chunk at about
+  52.93 kB. Proof: focused API HTTP tests, Backup job tests, frontend source
+  guard, frontend typecheck, frontend utility suite, and frontend production
+  build passed.
