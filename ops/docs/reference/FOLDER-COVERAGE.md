@@ -33,7 +33,7 @@ Total folders documented: **82**
 | 21 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
 | 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
 | 23 | `frontend/src` | Project folder | 6 | 10 |
-| 24 | `frontend/src/api` | Frontend API and sync transport | 40 | 0 |
+| 24 | `frontend/src/api` | Frontend API and sync transport | 41 | 0 |
 | 25 | `frontend/src/app` | Project folder | 2 | 0 |
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
@@ -634,7 +634,7 @@ Total folders documented: **82**
 ### 3.24 Folder: `frontend/src/api`
 
 - Purpose: Frontend API and sync transport
-- Direct files: **40**
+- Direct files: **41**
 - Direct subfolders: **0**
 
 #### 3.24.2 Files
@@ -676,11 +676,12 @@ Total folders documented: **82**
 | 33 | `README.md` | Frontend API/sync helper |
 | 34 | `requestIds.ts` | Frontend API/sync helper |
 | 35 | `rfidTransport.ts` | Frontend API/sync helper |
-| 36 | `syncPreview.ts` | Frontend API/sync helper |
-| 37 | `syncRuntime.ts` | Frontend API/sync helper |
-| 38 | `systemJobs.ts` | Frontend API/sync helper |
-| 39 | `systemRuntime.ts` | Frontend API/sync helper |
-| 40 | `websocket.ts` | Frontend API/sync helper |
+| 36 | `salesTransport.ts` | Frontend API/sync helper |
+| 37 | `syncPreview.ts` | Frontend API/sync helper |
+| 38 | `syncRuntime.ts` | Frontend API/sync helper |
+| 39 | `systemJobs.ts` | Frontend API/sync helper |
+| 40 | `systemRuntime.ts` | Frontend API/sync helper |
+| 41 | `websocket.ts` | Frontend API/sync helper |
 
 
 ### 3.25 Folder: `frontend/src/app`

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 692.
+- Latest completed implementation move in this roadmap: Move 693.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8156,3 +8156,19 @@ Move 692 status:
   audit passed with 36/46 controls tested, 10 long-label controls skipped, and
   zero findings; Phase 29 and live hygiene checks are rerun after reference
   refresh.
+
+Move 693 status:
+- Move 693 extracts sales transport from the large frontend API registry.
+  `frontend/src/api/salesTransport.ts` now owns sale creation, queued-offline
+  retry POST transport with write-dedupe bypass, and sales list reads with
+  mirrored local fallback. `methods.ts` keeps public `window.api` wrapper names
+  and offline queue orchestration while no longer carrying direct `/api/sales`
+  create/list fetches. The API guide documents the new sales boundary, and
+  focused API HTTP, offline-sales, and action-stability tests verify source
+  placement, idempotent POS sale creation, queued retry replay, sales query
+  construction, mirrored Dexie fallback, and no direct sales create/list fetch
+  calls in the large registry. The source guard parsed 227 frontend source
+  files, the production build shows the `app-api-methods` chunk at about
+  26.59 kB with no circular chunk warning, and the focused Sales and POS
+  desktop/mobile live control audits passed with zero findings; Phase 29 and
+  live hygiene checks are rerun after reference refresh.

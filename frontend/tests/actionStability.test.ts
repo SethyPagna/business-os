@@ -33,6 +33,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 await runTest('POS checkout keeps client, API, and backend duplicate guards', () => {
   const pos = readFrontend('src/components/pos/POS.tsx')
   const methods = readFrontend('src/api/methods.ts')
+  const salesTransport = readFrontend('src/api/salesTransport.ts')
   const salesRoute = readRepo('backend/src/routes/sales.ts')
 
   assert.match(pos, /if \(loading \|\| checkoutInFlightRef\.current\) return/)
@@ -42,8 +43,11 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
   assert.match(pos, /finally \{[\s\S]*checkoutInFlightRef\.current = false[\s\S]*setLoading\(false\)/)
 
   assert.match(methods, /export async function createSale\(d\) \{[\s\S]*ensureClientRequestId\(\{ \.\.\.getDeviceInfo\(\), \.\.\.d \}, 'sale'\)/)
-  assert.match(methods, /route\('sales:create', \(\) => apiFetch\('POST', '\/api\/sales', payload\), null, true\)/)
+  assert.match(methods, /return await createSaleRequest\(payload\)/)
   assert.match(methods, /return queueOfflineSale\(payload, error\?\.reason \|\| 'server_offline'\)/)
+  assert.match(salesTransport, /route\(\s*'sales:create',[\s\S]*apiFetch\('POST', '\/api\/sales', payload\)[\s\S]*null,[\s\S]*true,/)
+  assert.match(salesTransport, /export function createSaleWithoutWriteDedupe/)
+  assert.match(salesTransport, /skipWriteDedupe: true/)
 
   assert.match(salesRoute, /function findSaleByClientRequestId\(clientRequestId\)/)
   assert.match(salesRoute, /const existingSale = findSaleByClientRequestId\(clientRequestId\)[\s\S]*if \(existingSale\)/)

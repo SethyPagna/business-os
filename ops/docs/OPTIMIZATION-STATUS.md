@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 692, typed dashboard transport extraction
+- Latest completed move: Move 693, typed sales transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `76e995c2f07f60d3`
+  `bd7b109eb975de6d`
 
 Latest verified reports:
 
@@ -27,6 +27,10 @@ Latest verified reports:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-48-21-182Z/summary.json`
+- latest focused Sales desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
+- latest focused POS desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-14-57-739Z/summary.json`
 - latest focused Settings desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-16-31-085Z/summary.json`
 - latest focused Library desktop/mobile control audit:
@@ -60,6 +64,14 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend sales transport is now `frontend/src/api/salesTransport.ts` with
+  typed sale creation, queued-offline retry POST transport, and sales list
+  reads. Sale route keys, write-dedupe bypass for queued retries, mirrored
+  sales fallback, and paged query construction now live outside the large API
+  registry. The source guard now parses 227 frontend TypeScript files, the
+  production build reports the `app-api-methods` chunk around 26.59 kB, and
+  focused Sales and POS desktop/mobile live audits passed with zero findings.
 
 - Frontend dashboard transport is now
   `frontend/src/api/dashboardTransport.ts` with typed dashboard summary and

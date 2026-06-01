@@ -17,6 +17,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 }
 
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+const salesTransportSource = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
@@ -31,8 +32,9 @@ await runTest('createSale queues retryable offline writes with an idempotency ke
 
 await runTest('retryPendingSyncNow syncs pending sales instead of discarding them', () => {
   assert.match(methodsSource, /async function syncPendingSalesQueue/)
-  assert.match(methodsSource, /apiFetch\('POST', '\/api\/sales'/)
-  assert.match(methodsSource, /skipWriteDedupe:\s*true/)
+  assert.match(methodsSource, /createSaleWithoutWriteDedupeRequest\(payload\)/)
+  assert.match(salesTransportSource, /apiFetch\(\s*'POST',\s*'\/api\/sales'/)
+  assert.match(salesTransportSource, /skipWriteDedupe:\s*true/)
   const retryBody = methodsSource.match(/export async function retryPendingSyncNow\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
   assert.match(retryBody, /syncPendingSalesQueue/)
   assert.doesNotMatch(retryBody, /discardPendingSyncQueue/)

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 692 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 693 in this file.
 
 ## Goal
 
@@ -6434,6 +6434,26 @@ Decision rule:
     build, and focused Dashboard desktop/mobile live control audit passed with
     36/46 controls tested, 10 long-label controls skipped, and zero findings;
     Phase 29 and live hygiene checks are rerun after reference refresh.
+
+693. Extract typed sales transport from the large domain registry.
+    Done: `frontend/src/api/salesTransport.ts` now owns sale creation,
+    queued-offline retry POST transport with write-dedupe bypass, and sales
+    list reads previously embedded in `frontend/src/api/methods.ts`. The
+    helper keeps sale route keys, mirrored sales fallback, paged query
+    construction, and typed Dexie table access in a focused boundary, while
+    `methods.ts` keeps public `window.api` wrapper names and offline queue
+    orchestration for compatibility. The API guide documents the new sales
+    split, and focused API HTTP, offline-sales, and action-stability tests
+    verify idempotent POS sale creation, queued retry replay, sales query
+    construction, mirrored local fallback, source placement, and no direct
+    sales create/list fetch calls in the large registry. The source guard
+    parsed 227 frontend files and the production build now reports the
+    `app-api-methods` chunk around 26.59 kB with no circular chunk warning.
+    Proof: focused API HTTP tests, offline sales queue tests, action stability
+    tests, frontend source guard, frontend typecheck, frontend utility suite,
+    frontend production build, and focused Sales plus POS desktop/mobile live
+    control audits passed with zero findings; Phase 29 and live hygiene checks
+    are rerun after reference refresh.
 
 ## Safety Gates
 

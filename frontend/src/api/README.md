@@ -150,6 +150,10 @@ This folder is the browser-side transport layer for Business OS.
   - dashboard summary and analytics reads
   - keeps analytics query construction and per-range route cache keys outside the large domain registry
 
+- `salesTransport.ts`
+  - sale creation, offline retry post transport, and sales list reads
+  - keeps sale route keys, write-dedupe bypass for queued retries, mirrored sales fallback, and paged query construction outside the large domain registry
+
 - `cooldownFallbacks.ts`
   - notification summary and Drive sync status fallback/cooldown helpers
   - keeps transient-gateway backoff state and typed fallback payloads outside the large domain registry

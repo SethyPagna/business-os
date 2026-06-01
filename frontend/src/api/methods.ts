@@ -30,7 +30,6 @@ import {
 import { appendQuery, buildQueryString } from './query.ts'
 import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate } from './localDb.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
-import { SYNC } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
 import {
@@ -204,6 +203,11 @@ import {
   getAnalytics as getAnalyticsRequest,
   getDashboard as getDashboardRequest,
 } from './dashboardTransport.ts'
+import {
+  createSale as createSaleRequest,
+  createSaleWithoutWriteDedupe as createSaleWithoutWriteDedupeRequest,
+  getSales as getSalesRequest,
+} from './salesTransport.ts'
 import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
@@ -1024,7 +1028,7 @@ async function syncPendingSalesQueue({ force = false } = {}) {
     await updateQueuedRow(row, { status: 'syncing', error: null })
     try {
       const payload = ensureClientRequestId({ ...(row.payload || {}) }, 'sale')
-      const response = await apiFetch('POST', '/api/sales', payload, SYNC.REQUEST_TIMEOUT_MS, { skipWriteDedupe: true })
+      const response = await createSaleWithoutWriteDedupeRequest(payload)
       await completeQueuedSale(row, response)
       result.synced += 1
     } catch (error) {
@@ -1064,7 +1068,7 @@ export const applyRfidSession = (id, payload = {}) =>
 export async function createSale(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'sale')
   try {
-    return await route('sales:create', () => apiFetch('POST', '/api/sales', payload), null, true)
+    return await createSaleRequest(payload)
   } catch (error) {
     if (isRetryableOfflineSaleError(error)) {
       return queueOfflineSale(payload, error?.reason || 'server_offline')
@@ -1074,9 +1078,7 @@ export async function createSale(d) {
 }
 
 export const getSales   = (params) => {
-  const q = buildQueryString(params, { skipEmpty: false })
-  const mirror = q ? null : mirrorTable('sales')
-  return routeMirrored(`sales:get:${q}`, () => apiFetch('GET', appendQuery('/api/sales', q)), () => dexieDb.sales.orderBy('created_at').reverse().limit(1000).toArray(), mirror)
+  return getSalesRequest(params)
 }
 
 // ─── Dashboard & analytics ────────────────────────────────────────────────────
