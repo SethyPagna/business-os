@@ -3636,90 +3636,90 @@ Code files scanned: **515**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `asPageModule` | function | 179 |
-| 2 | `getAppShellApi` | function | 183 |
-| 3 | `getConnection` | function | 187 |
-| 4 | `isPageId` | function | 193 |
-| 5 | `normalizePageId` | function | 197 |
-| 6 | `getErrorMessage` | function | 201 |
-| 7 | `getChunkErrorMessage` | function | 301 |
-| 8 | `isChunkLoadError` | function | 306 |
-| 9 | `createChunkTimeoutError` | function | 315 |
-| 10 | `isRetryableImportError` | function | 321 |
-| 11 | `importWithTimeout` | function | 329 |
-| 12 | `clearRetryMarker` | function | 345 |
-| 13 | `buildChunkRecoveryUrl` | function | 352 |
-| 14 | `deleteStaleShellCaches` | function | 363 |
-| 15 | `clearStaleShellCaches` | function | 376 |
-| 16 | `triggerChunkRecoveryReload` | function | 386 |
-| 17 | `reload` | const arrow | 393 |
-| 18 | `createChunkReloadStallError` | function | 403 |
-| 19 | `shouldRetryChunk` | function | 409 |
-| 20 | `lazyWithRetry` | function | 419 |
-| 21 | `getWarmupImporters` | function | 494 |
-| 22 | `shouldSkipBackgroundWarmup` | function | 505 |
-| 23 | `shouldSkipIntentWarmup` | function | 514 |
-| 24 | `getIntentPageId` | function | 523 |
-| 25 | `scheduleIntentChunkLoad` | function | 529 |
-| 26 | `run` | const arrow | 536 |
-| 27 | `scheduleInitialPendingSyncRefresh` | function | 560 |
-| 28 | `run` | const arrow | 566 |
-| 29 | `isImportTrackerWakeEvent` | function | 588 |
-| 30 | `isNotificationCenterWakeEvent` | function | 595 |
-| 31 | `getDataWarmupLoaders` | function | 602 |
-| 32 | `createWarmupLoader` | function | 611 |
-| 33 | `runWarmupBatches` | function | 616 |
-| 34 | `scheduleWarmupAfterLoad` | function | 625 |
-| 35 | `run` | const arrow | 630 |
-| 36 | `getPageEntryWarmupLoaders` | function | 648 |
-| 37 | `useMountedPages` | function | 655 |
-| 38 | `syncProfile` | const arrow | 669 |
-| 39 | `useSyncErrorBanner` | function | 698 |
-| 40 | `refreshPendingSync` | const arrow | 708 |
-| 41 | `onSyncError` | const arrow | 713 |
-| 42 | `onTransientOutage` | const arrow | 719 |
-| 43 | `onSyncRecovered` | const arrow | 727 |
-| 44 | `onQueueChanged` | const arrow | 735 |
-| 45 | `onVaultLocked` | const arrow | 736 |
-| 46 | `onAppUpdate` | const arrow | 737 |
-| 47 | `onConflictReview` | const arrow | 738 |
-| 48 | `useDeferredImportTrackerMount` | function | 786 |
-| 49 | `enable` | const arrow | 799 |
-| 50 | `enableWhenVisible` | const arrow | 803 |
-| 51 | `onSyncUpdate` | const arrow | 808 |
-| 52 | `onVisible` | const arrow | 811 |
-| 53 | `useDeferredNotificationCenterMount` | function | 840 |
-| 54 | `enable` | const arrow | 856 |
-| 55 | `enableWhenVisible` | const arrow | 860 |
-| 56 | `onSyncUpdate` | const arrow | 864 |
-| 57 | `useVisibilityRecovery` | function | 893 |
-| 58 | `onVisible` | const arrow | 897 |
-| 59 | `onFocus` | const arrow | 907 |
-| 60 | `useChunkWarmup` | function | 925 |
-| 61 | `runWarmup` | const arrow | 936 |
-| 62 | `useIntentChunkWarmup` | function | 978 |
-| 63 | `warmIntentPage` | const arrow | 985 |
-| 64 | `useDataWarmup` | function | 1005 |
-| 65 | `runWarmup` | const arrow | 1017 |
-| 66 | `usePageEntryWarmup` | function | 1042 |
-| 67 | `run` | const arrow | 1071 |
-| 68 | `PageErrorBoundary` | class | 1100 |
-| 69 | `Notification` | function | 1153 |
-| 70 | `SyncErrorBanner` | function | 1166 |
-| 71 | `GlobalScrollControls` | function | 1188 |
-| 72 | `scrollTo` | const arrow | 1189 |
-| 73 | `formatSyncTimestamp` | function | 1226 |
-| 74 | `OfflineModeBanner` | function | 1241 |
-| 75 | `PageLoader` | function | 1390 |
-| 76 | `NotificationCenterFallback` | function | 1433 |
-| 77 | `PageSlot` | function | 1448 |
-| 78 | `PublicCatalogView` | function | 1474 |
-| 79 | `App` | export default function | 1484 |
-| 80 | `cleanupRecoveryStorageMarkers` | const arrow | 1546 |
-| 81 | `onQueued` | const arrow | 1575 |
-| 82 | `onSynced` | const arrow | 1588 |
-| 83 | `handleLocationChange` | const arrow | 1613 |
-| 84 | `processFavicon` | function | 1661 |
+| 1 | `asPageModule` | function | 178 |
+| 2 | `getAppShellApi` | function | 182 |
+| 3 | `getConnection` | function | 186 |
+| 4 | `isPageId` | function | 192 |
+| 5 | `normalizePageId` | function | 196 |
+| 6 | `getErrorMessage` | function | 200 |
+| 7 | `getChunkErrorMessage` | function | 300 |
+| 8 | `isChunkLoadError` | function | 305 |
+| 9 | `createChunkTimeoutError` | function | 314 |
+| 10 | `isRetryableImportError` | function | 320 |
+| 11 | `importWithTimeout` | function | 328 |
+| 12 | `clearRetryMarker` | function | 344 |
+| 13 | `buildChunkRecoveryUrl` | function | 351 |
+| 14 | `deleteStaleShellCaches` | function | 362 |
+| 15 | `clearStaleShellCaches` | function | 375 |
+| 16 | `triggerChunkRecoveryReload` | function | 385 |
+| 17 | `reload` | const arrow | 392 |
+| 18 | `createChunkReloadStallError` | function | 402 |
+| 19 | `shouldRetryChunk` | function | 408 |
+| 20 | `lazyWithRetry` | function | 418 |
+| 21 | `getWarmupImporters` | function | 493 |
+| 22 | `shouldSkipBackgroundWarmup` | function | 504 |
+| 23 | `shouldSkipIntentWarmup` | function | 513 |
+| 24 | `getIntentPageId` | function | 522 |
+| 25 | `scheduleIntentChunkLoad` | function | 528 |
+| 26 | `run` | const arrow | 535 |
+| 27 | `scheduleInitialPendingSyncRefresh` | function | 559 |
+| 28 | `run` | const arrow | 565 |
+| 29 | `isImportTrackerWakeEvent` | function | 587 |
+| 30 | `isNotificationCenterWakeEvent` | function | 594 |
+| 31 | `getDataWarmupLoaders` | function | 601 |
+| 32 | `createWarmupLoader` | function | 610 |
+| 33 | `runWarmupBatches` | function | 615 |
+| 34 | `scheduleWarmupAfterLoad` | function | 624 |
+| 35 | `run` | const arrow | 629 |
+| 36 | `getPageEntryWarmupLoaders` | function | 647 |
+| 37 | `useMountedPages` | function | 654 |
+| 38 | `syncProfile` | const arrow | 668 |
+| 39 | `useSyncErrorBanner` | function | 697 |
+| 40 | `refreshPendingSync` | const arrow | 707 |
+| 41 | `onSyncError` | const arrow | 712 |
+| 42 | `onTransientOutage` | const arrow | 718 |
+| 43 | `onSyncRecovered` | const arrow | 726 |
+| 44 | `onQueueChanged` | const arrow | 734 |
+| 45 | `onVaultLocked` | const arrow | 735 |
+| 46 | `onAppUpdate` | const arrow | 736 |
+| 47 | `onConflictReview` | const arrow | 737 |
+| 48 | `useDeferredImportTrackerMount` | function | 785 |
+| 49 | `enable` | const arrow | 798 |
+| 50 | `enableWhenVisible` | const arrow | 802 |
+| 51 | `onSyncUpdate` | const arrow | 807 |
+| 52 | `onVisible` | const arrow | 810 |
+| 53 | `useDeferredNotificationCenterMount` | function | 839 |
+| 54 | `enable` | const arrow | 855 |
+| 55 | `enableWhenVisible` | const arrow | 859 |
+| 56 | `onSyncUpdate` | const arrow | 863 |
+| 57 | `useVisibilityRecovery` | function | 892 |
+| 58 | `onVisible` | const arrow | 896 |
+| 59 | `onFocus` | const arrow | 906 |
+| 60 | `useChunkWarmup` | function | 924 |
+| 61 | `runWarmup` | const arrow | 935 |
+| 62 | `useIntentChunkWarmup` | function | 977 |
+| 63 | `warmIntentPage` | const arrow | 984 |
+| 64 | `useDataWarmup` | function | 1004 |
+| 65 | `runWarmup` | const arrow | 1016 |
+| 66 | `usePageEntryWarmup` | function | 1041 |
+| 67 | `run` | const arrow | 1070 |
+| 68 | `PageErrorBoundary` | class | 1099 |
+| 69 | `Notification` | function | 1152 |
+| 70 | `SyncErrorBanner` | function | 1165 |
+| 71 | `GlobalScrollControls` | function | 1187 |
+| 72 | `scrollTo` | const arrow | 1188 |
+| 73 | `formatSyncTimestamp` | function | 1225 |
+| 74 | `OfflineModeBanner` | function | 1240 |
+| 75 | `PageLoader` | function | 1389 |
+| 76 | `NotificationCenterFallback` | function | 1432 |
+| 77 | `PageSlot` | function | 1447 |
+| 78 | `PublicCatalogView` | function | 1473 |
+| 79 | `App` | export default function | 1483 |
+| 80 | `cleanupRecoveryStorageMarkers` | const arrow | 1559 |
+| 81 | `onQueued` | const arrow | 1588 |
+| 82 | `onSynced` | const arrow | 1601 |
+| 83 | `handleLocationChange` | const arrow | 1626 |
+| 84 | `processFavicon` | function | 1674 |
 
 ### 3.188 `frontend/src/app/appShellUtils.ts`
 
@@ -4545,15 +4545,15 @@ Code files scanned: **515**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getFallbackLabel` | function | 93 |
-| 2 | `getNavLabel` | function | 101 |
-| 3 | `isDarkColor` | function | 117 |
-| 4 | `withAlpha` | function | 127 |
-| 5 | `mergeStyles` | function | 133 |
-| 6 | `announcePageIntent` | function | 137 |
-| 7 | `getIconForItem` | function | 144 |
-| 8 | `isNavigationItemWithIcon` | function | 148 |
-| 9 | `Sidebar` | export default function | 152 |
+| 1 | `getFallbackLabel` | function | 97 |
+| 2 | `getNavLabel` | function | 105 |
+| 3 | `isDarkColor` | function | 121 |
+| 4 | `withAlpha` | function | 131 |
+| 5 | `mergeStyles` | function | 137 |
+| 6 | `announcePageIntent` | function | 141 |
+| 7 | `getIconForItem` | function | 148 |
+| 8 | `isNavigationItemWithIcon` | function | 152 |
+| 9 | `Sidebar` | export default function | 156 |
 
 ### 3.241 `frontend/src/components/pos/CartItem.tsx`
 
@@ -6667,8 +6667,8 @@ Code files scanned: **515**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 121 |
-| 5 | `manualChunks` | function | 125 |
+| 4 | `shouldDeferModulePreload` | function | 122 |
+| 5 | `manualChunks` | function | 126 |
 
 ### 3.452 `ops/scripts/architecture/generated-bulk-audit.ts`
 

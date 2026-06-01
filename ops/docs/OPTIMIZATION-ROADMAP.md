@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 705.
+- Latest completed implementation move in this roadmap: Move 706.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8375,3 +8375,29 @@ Move 705 status:
   products, zero failed responses, zero page errors, and enforced CSP; post-live
   hygiene passed with loaded dataset status and zero generated integrity
   matches.
+
+Move 706 status:
+- Move 706 shrinks the authenticated shell's initial static import graph.
+  `frontend/src/components/navigation/Sidebar.tsx` now receives mobile
+  notification UI from the app-level deferred notification gate and lazy-loads
+  `UserProfileModal` only when the profile button opens, keeping the
+  notification center, profile, avatar, and file-picker stack out of first
+  shell evaluation. `frontend/src/App.tsx` loads the circular favicon canvas
+  helper only inside the delayed idle favicon task. `frontend/vite.config.ts`
+  excludes `media-upload-utils` from eager modulepreload and keeps shared
+  `PortalMenu` with the shared UI chunk instead of a separate startup
+  `portal-tools` request. The local and Docker-served production output now
+  has no startup preload or static import for `notification-center`,
+  `catalog-*`, `catalog-preview-*`, `catalog-editor-*`, `portal-tools`,
+  `media-upload-utils`, `file-picker-modal`, or `UserProfileModal`; the live
+  entry is `assets/index-B0XA2Z2L.js` at 80,504 bytes. Proof: performance
+  loading UX guard, source syntax check, typecheck, frontend utility suite,
+  JSX/source check, production build hash `960afc698c5a3a4d`, exhaustive
+  Playwright all-pages control audit across 34 desktop/mobile routes with 518
+  visible controls, 392 exercised controls, 68 screenshots, zero failed
+  controls, and zero findings; broad Phase 8.4 UI live check passed with 72
+  checked signals and no relevant console messages; public Cloudflare portal
+  check passed with 20 rendered products, zero failed responses, zero page
+  errors, and enforced CSP; post-live hygiene passed. Dexie/local DB remains
+  visible as a startup side-effect through the synchronous web-api bootstrap
+  and is the next deeper optimization target.

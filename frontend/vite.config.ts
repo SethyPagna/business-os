@@ -106,6 +106,7 @@ function emitBuildManifest(): Plugin {
 const deferredModulePreloadPrefixes = [
   'assets/file-picker-modal-',
   'assets/image-lightbox-',
+  'assets/media-upload-utils-',
   'assets/notification-center-',
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
@@ -161,8 +162,7 @@ function manualChunks(id: string): string | undefined {
       return 'file-picker-modal'
     }
     if (
-      normalized.includes('/src/components/shared/PortalMenu.tsx')
-      || normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
+      normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
       || normalized.includes('/src/components/catalog/portalContentI18n.ts')
       || normalized.includes('/src/components/catalog/portalTranslateController.ts')
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')

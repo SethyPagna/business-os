@@ -219,7 +219,7 @@ Total files documented: **580**
 | 207 | `frontend/src/api/systemJobs.ts` | frontend-api | 106 | 3.2 | Frontend API/sync helper |
 | 208 | `frontend/src/api/systemRuntime.ts` | frontend-api | 130 | 4.3 | Frontend API/sync helper |
 | 209 | `frontend/src/api/websocket.ts` | frontend-api | 230 | 7.6 | Frontend API/sync helper |
-| 210 | `frontend/src/App.tsx` | frontend-core | 1827 | 68.5 | Main app shell and page mounting |
+| 210 | `frontend/src/App.tsx` | frontend-core | 1837 | 68.9 | Main app shell and page mounting |
 | 211 | `frontend/src/app/appShellUtils.ts` | frontend-core | 159 | 5.2 | Project source/support file |
 | 212 | `frontend/src/app/publicErrorRecovery.ts` | frontend-core | 35 | 1.3 | Project source/support file |
 | 213 | `frontend/src/AppContext.tsx` | frontend-core | 1853 | 74.6 | Global app state/context provider |
@@ -272,7 +272,7 @@ Total files documented: **580**
 | 260 | `frontend/src/components/inventory/movementGroups.ts` | frontend-ui | 287 | 12.9 | UI component/page |
 | 261 | `frontend/src/components/inventory/ProductDetailModal.tsx` | frontend-ui | 267 | 15.0 | UI component/page |
 | 262 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | frontend-ui | 717 | 39.5 | UI component/page |
-| 263 | `frontend/src/components/navigation/Sidebar.tsx` | frontend-ui | 386 | 17.1 | UI component/page |
+| 263 | `frontend/src/components/navigation/Sidebar.tsx` | frontend-ui | 394 | 17.2 | UI component/page |
 | 264 | `frontend/src/components/pos/CartItem.tsx` | frontend-ui | 158 | 6.3 | UI component/page |
 | 265 | `frontend/src/components/pos/FilterPanel.tsx` | frontend-ui | 289 | 9.3 | UI component/page |
 | 266 | `frontend/src/components/pos/POS.tsx` | frontend-ui | 2218 | 117.4 | UI component/page |
@@ -449,7 +449,7 @@ Total files documented: **580**
 | 437 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 438 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 97 | 4.8 | Project source/support file |
 | 439 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 440 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2163 | 108.2 | Project source/support file |
+| 440 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 2175 | 110.5 | Project source/support file |
 | 441 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 36 | 1.3 | Project source/support file |
 | 442 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 443 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 126 | 4.6 | Project source/support file |
@@ -490,7 +490,7 @@ Total files documented: **580**
 | 478 | `frontend/tests/storagePolicy.test.ts` | frontend-root | 44 | 1.4 | Project source/support file |
 | 479 | `frontend/tests/utilsSettingsBarrel.test.ts` | frontend-root | 16 | 0.8 | Project source/support file |
 | 480 | `frontend/tsconfig.json` | frontend-root | 47 | 1.3 | Configuration/data manifest |
-| 481 | `frontend/vite.config.ts` | frontend-root | 260 | 10.0 | Project source/support file |
+| 481 | `frontend/vite.config.ts` | frontend-root | 260 | 9.9 | Project source/support file |
 | 482 | `ops/scripts/architecture/generated-bulk-audit.ts` | project-scripts | 603 | 22.8 | Project source/support file |
 | 483 | `ops/scripts/architecture/language-runtime-audit.ts` | project-scripts | 1666 | 71.6 | Project source/support file |
 | 484 | `ops/scripts/architecture/organization-audit.ts` | project-scripts | 446 | 18.9 | Project source/support file |

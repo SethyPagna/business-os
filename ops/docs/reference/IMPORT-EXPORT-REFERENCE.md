@@ -249,7 +249,7 @@ Code files documented: **515**
 | 237 | `frontend/src/components/inventory/movementGroups.ts` | 0 | 4 | 0 | 2 |
 | 238 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 | 1 | 2 | 1 |
 | 239 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 7 | 1 | 5 | 1 |
-| 240 | `frontend/src/components/navigation/Sidebar.tsx` | 8 | 1 | 6 | 1 |
+| 240 | `frontend/src/components/navigation/Sidebar.tsx` | 7 | 1 | 5 | 1 |
 | 241 | `frontend/src/components/pos/CartItem.tsx` | 2 | 1 | 2 | 1 |
 | 242 | `frontend/src/components/pos/FilterPanel.tsx` | 2 | 1 | 0 | 1 |
 | 243 | `frontend/src/components/pos/POS.tsx` | 19 | 1 | 17 | 1 |
@@ -320,7 +320,7 @@ Code files documented: **515**
 | 308 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 6 |
 | 309 | `frontend/src/components/shared/Modal.tsx` | 1 | 1 | 0 | 22 |
 | 310 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
-| 311 | `frontend/src/components/shared/NotificationCenter.tsx` | 4 | 1 | 1 | 2 |
+| 311 | `frontend/src/components/shared/NotificationCenter.tsx` | 4 | 1 | 1 | 1 |
 | 312 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
 | 313 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
 | 314 | `frontend/src/components/shared/PaginationControls.tsx` | 2 | 4 | 0 | 9 |
@@ -4887,19 +4887,17 @@ Code files documented: **515**
 ### 3.240 `frontend/src/components/navigation/Sidebar.tsx`
 
 - Declared exports: `function`
-- Imports (8)
+- Imports (7)
   - `../../AppContext.tsx`
   - `../../app/appShellUtils.ts`
-  - `../shared/NotificationCenter`
   - `../shared/QuickPreferenceToggles`
   - `../shared/navigationConfig`
   - `../users/UserProfileModal`
   - `lucide-react`
   - `react`
-- Internal dependencies (6)
+- Internal dependencies (5)
   - `frontend/src/AppContext.tsx`
   - `frontend/src/app/appShellUtils.ts`
-  - `frontend/src/components/shared/NotificationCenter.tsx`
   - `frontend/src/components/shared/QuickPreferenceToggles.tsx`
   - `frontend/src/components/shared/navigationConfig.ts`
   - `frontend/src/components/users/UserProfileModal.tsx`
@@ -6083,9 +6081,8 @@ Code files documented: **515**
   - `react-dom`
 - Internal dependencies (1)
   - `frontend/src/AppContext.tsx`
-- Referenced by (2)
+- Referenced by (1)
   - `frontend/src/App.tsx`
-  - `frontend/src/components/navigation/Sidebar.tsx`
 
 ### 3.312 `frontend/src/components/shared/pageActivity.ts`
 

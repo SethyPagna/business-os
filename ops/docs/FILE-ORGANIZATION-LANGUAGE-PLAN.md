@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 705 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 706 in this file.
 
 ## Goal
 
@@ -6640,6 +6640,34 @@ Decision rule:
     all-pages audit covered 34 desktop/mobile routes, 518 visible controls,
     391 exercised controls, 68 screenshots, zero failed controls, and zero
     findings.
+
+706. Shrink authenticated shell startup imports with lazy profile,
+    notification, favicon, and portal-menu boundaries.
+    Done: `frontend/src/components/navigation/Sidebar.tsx` no longer imports
+    `NotificationCenter` or `UserProfileModal` during shell startup. The app
+    passes mobile notification UI through the deferred app-level notification
+    gate, and the profile modal loads only after the profile button opens,
+    which keeps the avatar/file-picker stack out of the first shell parse.
+    `frontend/src/App.tsx` now imports `createCircularFaviconDataUrl()` only
+    inside the delayed idle favicon processing task. `frontend/vite.config.ts`
+    excludes `media-upload-utils` from eager preload and leaves shared
+    `PortalMenu` in the shared UI chunk instead of forcing a separate
+    `portal-tools` startup request. Proof: performance loading UX guard,
+    source syntax check, typecheck, frontend utility suite, JSX/source check,
+    production build hash `960afc698c5a3a4d`, Docker live build sync, live
+    entry verification showing `assets/index-B0XA2Z2L.js` at 80,504 bytes with
+    no startup preload or static import for `notification-center`,
+    `catalog-*`, `catalog-preview-*`, `catalog-editor-*`, `portal-tools`,
+    `media-upload-utils`, `file-picker-modal`, or `UserProfileModal`;
+    exhaustive Playwright all-pages control audit passed across 34
+    desktop/mobile routes with 518 visible controls, 392 exercised controls,
+    68 screenshots, zero failed controls, and zero findings; broad Phase 8.4
+    UI live check passed with 72 checked signals and no relevant console
+    messages; public Cloudflare portal check passed with 20 rendered products,
+    zero failed responses, zero page errors, and enforced CSP; post-live
+    hygiene passed. Remaining deeper target: remove the synchronous
+    Dexie/local DB side-effect from `web-api` bootstrap without regressing the
+    guaranteed `window.api` install.
 
 ## Safety Gates
 

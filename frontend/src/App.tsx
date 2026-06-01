@@ -9,7 +9,6 @@ import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
-import { createCircularFaviconDataUrl } from './utils/favicon.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
@@ -1520,6 +1519,20 @@ export default function App() {
     shouldMountNotificationCenter,
     requestNotificationCenterMount,
   } = useDeferredNotificationCenterMount(authReady ? user : null)
+  const desktopNotificationSlot = shouldMountNotificationCenter ? (
+    <Suspense fallback={<NotificationCenterFallback compact />}>
+      <NotificationCenter compact visibility="desktop" />
+    </Suspense>
+  ) : (
+    <NotificationCenterFallback compact onClick={requestNotificationCenterMount} />
+  )
+  const mobileNotificationSlot = shouldMountNotificationCenter ? (
+    <Suspense fallback={<NotificationCenterFallback compact />}>
+      <NotificationCenter compact visibility="mobile" />
+    </Suspense>
+  ) : (
+    <NotificationCenterFallback compact onClick={requestNotificationCenterMount} />
+  )
 
   useVisibilityRecovery()
   useChunkWarmup(authReady ? user : null, page)
@@ -1661,7 +1674,10 @@ export default function App() {
     async function processFavicon() {
       try {
         const faviconHref = await withLoaderTimeout(
-          () => createCircularFaviconDataUrl(iconSource, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
+          async () => {
+            const { createCircularFaviconDataUrl } = await import('./utils/favicon.ts')
+            return createCircularFaviconDataUrl(iconSource, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 })
+          },
           'App favicon',
           APP_FAVICON_REQUEST_TIMEOUT_MS,
         )
@@ -1754,19 +1770,13 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {shouldMountNotificationCenter ? (
-            <Suspense fallback={<NotificationCenterFallback compact />}>
-              <NotificationCenter compact visibility="desktop" />
-            </Suspense>
-          ) : (
-            <NotificationCenterFallback compact onClick={requestNotificationCenterMount} />
-          )}
+          {desktopNotificationSlot}
           <QuickPreferenceToggles />
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Sidebar />
+        <Sidebar notificationSlot={mobileNotificationSlot} />
 
         <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 pb-16 md:pt-0 md:pb-0">
           <div className="flex min-w-0 items-center gap-3">

@@ -8,27 +8,27 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 705, defer catalog and public portal preloads from startup
+- Latest completed move: Move 706, shrink authenticated shell startup imports
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `035370df0dd56898`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `960afc698c5a3a4d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `035370df0dd56898`
+  `960afc698c5a3a4d`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T13-27-57-468Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T14-07-07-348Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T13-42-12-482Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T14-21-27-688Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T13-45-04-827Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T14-24-21-407Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -36,16 +36,18 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` removed old generated reports and
-  Docker builder cache in the 2026-06-01 Move 704 verification pass.
+- `npm.cmd --prefix ops run prune-storage` in the 2026-06-01 Move 706
+  verification pass removed three old all-pages report folders for 1,431,381
+  bytes, kept the latest local backups, kept the newest R2 backup object, and
+  found no stopped containers or Docker builder cache to reclaim.
 
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed across
-  34 routes, with 518 visible controls discovered, 391 controls exercised, 127
+  34 routes, with 518 visible controls discovered, 392 controls exercised, 126
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `035370df0dd56898`
+- broad Phase 8.4 UI live check passed on frontend hash `960afc698c5a3a4d`
   with 72 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -54,6 +56,28 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Frontend startup now keeps the user profile modal, file picker stack,
+  notification center, catalog route, public portal route tools, and favicon
+  canvas helpers out of the authenticated shell's initial static imports.
+  `frontend/src/components/navigation/Sidebar.tsx` lazy-loads
+  `UserProfileModal` only after the profile button opens, and receives the
+  mobile notification UI from the app-level deferred notification gate instead
+  of importing `NotificationCenter` directly. `frontend/src/App.tsx`
+  dynamically imports the circular favicon helper inside the delayed idle
+  favicon task, and `frontend/vite.config.ts` prevents media-upload helper
+  preloads while keeping shared `PortalMenu` in the shared UI chunk instead of
+  creating a separate startup portal-tools request. The live Docker-served
+  `http://127.0.0.1:4000/` entry dropped from roughly 130 KB to 80,504 bytes
+  and its startup HTML/entry no longer preloads or statically imports
+  `notification-center`, `catalog-*`, `catalog-preview-*`,
+  `catalog-editor-*`, `portal-tools`, `media-upload-utils`,
+  `file-picker-modal`, or `UserProfileModal`. Dexie/local DB still appears as
+  a synchronous web-api side-effect and remains the next deeper startup
+  bootstrap target. Production build hash: `960afc698c5a3a4d`; exhaustive
+  Playwright all-pages control audit passed across 34 desktop/mobile routes
+  with 392 exercised controls and zero failures; broad Phase 8.4 UI live check,
+  public Cloudflare portal check, and post-live hygiene also passed.
 
 - Frontend startup now defers catalog and public portal route chunks from
   eager modulepreload. `frontend/vite.config.ts` excludes `catalog`,
