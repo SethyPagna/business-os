@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-06-01T06:34:18.473Z
+Generated: 2026-06-01T06:54:47.165Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 488
+- Files scanned: 489
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/config`, `run`
 - Default frontend runtime: React/TypeScript source with Vite-emitted browser JavaScript
 - Default backend runtime: Node.js
@@ -22,7 +22,7 @@ Generated: 2026-06-01T06:34:18.473Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 349 |
+| TypeScript | 350 |
 | React TSX | 107 |
 | Windows batch | 16 |
 | PowerShell | 8 |

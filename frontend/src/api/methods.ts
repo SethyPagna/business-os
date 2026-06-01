@@ -41,7 +41,6 @@ import {
 import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.ts'
 import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
-import { appendActorQuery } from './actorQuery.ts'
 import {
   createCategory as createCategoryRequest,
   createUnit as createUnitRequest,
@@ -174,6 +173,21 @@ import {
   updateDeliveryContact as updateDeliveryContactRequest,
   updateSupplier as updateSupplierRequest,
 } from './contactsTransport.ts'
+import {
+  changeUserPassword as changeUserPasswordRequest,
+  createRole as createRoleRequest,
+  createUser as createUserRequest,
+  deleteRole as deleteRoleRequest,
+  disconnectUserAuthProvider as disconnectUserAuthProviderRequest,
+  getRoles as getRolesRequest,
+  getUserAuthMethods as getUserAuthMethodsRequest,
+  getUserProfile as getUserProfileRequest,
+  getUsers as getUsersRequest,
+  resetPassword as resetPasswordRequest,
+  updateRole as updateRoleRequest,
+  updateUser as updateUserRequest,
+  updateUserProfile as updateUserProfileRequest,
+} from './accessControlTransport.ts'
 import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
@@ -1170,25 +1184,25 @@ export const bulkImportDeliveryContacts = d =>
   bulkImportDeliveryContactsRequest(d)
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-export const getUsers      = ()       => routeMirrored('users:get',           () => apiFetch('GET', appendActorQuery('/api/users')),        () => dexieDb.users.toArray(), mirrorTable('users'))
-export const createUser    = d        => route('users:create',        () => apiFetch('POST', '/api/users', d),                      null, true)
-export const updateUser    = (id, d)  => route('users:update',        async () => apiFetch('PUT', `/api/users/${id}`, await withExpectedUpdatedAt('users', id, d)), null, true)
-export const getUserProfile = (id)    => route(`users:profile:${id}`, () => apiFetch('GET', appendActorQuery(`/api/users/${id}/profile`)), () => null)
+export const getUsers      = ()       => getUsersRequest()
+export const createUser    = d        => createUserRequest(d)
+export const updateUser    = (id, d)  => updateUserRequest(id, d)
+export const getUserProfile = (id)    => getUserProfileRequest(id)
 export const getUserAuthMethods = (id) =>
-  route(`users:authMethods:${id}`, () => apiFetch('GET', appendActorQuery(`/api/users/${id}/auth-methods`)), () => null)
+  getUserAuthMethodsRequest(id)
 export const updateUserProfile = (id, d) =>
-  route('users:updateProfile', async () => apiFetch('PUT', `/api/users/${id}/profile`, await withExpectedUpdatedAt('users', id, d)), null, true)
+  updateUserProfileRequest(id, d)
 export const disconnectUserAuthProvider = (id, d) =>
-  route('users:disconnectProvider', () => apiFetch('POST', `/api/users/${id}/provider-disconnect`, d), null, true)
+  disconnectUserAuthProviderRequest(id, d)
 export const changeUserPassword = (id, d) =>
-  route('users:changePassword', () => apiFetch('POST', `/api/users/${id}/change-password`, d), null, true)
-export const resetPassword = (id, d)  => route('users:resetPassword', () => apiFetch('POST', `/api/users/${id}/reset-password`, d), null, true)
+  changeUserPasswordRequest(id, d)
+export const resetPassword = (id, d)  => resetPasswordRequest(id, d)
 
 // ─── Roles ────────────────────────────────────────────────────────────────────
-export const getRoles   = ()       => routeMirrored('roles:get',    () => apiFetch('GET', appendActorQuery('/api/roles')), () => dexieDb.roles.toArray(), mirrorTable('roles'))
-export const createRole = d        => route('roles:create', () => apiFetch('POST', '/api/roles', d),           null, true)
-export const updateRole = (id, d)  => route('roles:update', async () => apiFetch('PUT', `/api/roles/${id}`, await withExpectedUpdatedAt('roles', id, d)), null, true)
-export const deleteRole = (id, payload) => route('roles:delete', async () => apiFetch('DELETE', `/api/roles/${id}`, await withExpectedUpdatedAt('roles', id, payload)), null, true)
+export const getRoles   = ()       => getRolesRequest()
+export const createRole = d        => createRoleRequest(d)
+export const updateRole = (id, d)  => updateRoleRequest(id, d)
+export const deleteRole = (id, payload) => deleteRoleRequest(id, payload)
 
 // ─── Custom tables ────────────────────────────────────────────────────────────
 export const getCustomTables    = ()                      => route('customTables:get',       () => apiFetch('GET', '/api/custom-tables'),                                             () => dexieDb.custom_tables.toArray())

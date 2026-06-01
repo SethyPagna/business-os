@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 687, typed contacts transport extraction
+- Latest completed move: Move 688, typed access-control transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `0d25bcfa6f40f78e`
+  `bc9b9aede4eb66ed`
 
 Latest verified reports:
 
@@ -29,6 +29,8 @@ Latest verified reports:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-14-04-097Z/summary.json`
 - latest focused Contacts desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-31-14-438Z/summary.json`
+- latest focused Users desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-50-58-307Z/summary.json`
 - latest focused public catalog desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
 - latest focused Audit Log desktop/mobile control audit:
@@ -54,6 +56,17 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend access-control transport is now
+  `frontend/src/api/accessControlTransport.ts` with typed user, profile,
+  auth-method, password, role, and permission-management transport. Actor
+  attribution, mirrored user/role fallbacks, encoded row ids, provider
+  disconnect paths, and expected-updated-at security mutations now live
+  outside the large API registry. The source guard now parses 222 frontend
+  TypeScript files, the production build reports the `app-api-methods` chunk
+  around 28.58 kB, and the focused Users desktop/mobile live audit passed with
+  14/16 controls tested, 2 controls skipped by low-value control guardrails,
+  and zero findings.
 
 - Frontend contacts transport is now `frontend/src/api/contactsTransport.ts`
   with typed customer, supplier, and delivery-contact reads/writes, bulk

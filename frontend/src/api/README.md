@@ -130,6 +130,10 @@ This folder is the browser-side transport layer for Business OS.
   - customer, supplier, and delivery-contact reads/writes, bulk imports, loyalty point summaries, and contact CSV templates
   - keeps mirrored unpaged reads, cached paged customer reads, device-attributed creates, expected-updated-at mutations, and contact import-template ownership outside the large domain registry
 
+- `accessControlTransport.ts`
+  - user, profile, authentication-method, password, role, and permission-management transport
+  - keeps actor-attributed user/role reads, mirrored user/role fallbacks, encoded ids, and expected-updated-at security mutations outside the large domain registry
+
 - `cooldownFallbacks.ts`
   - notification summary and Drive sync status fallback/cooldown helpers
   - keeps transient-gateway backoff state and typed fallback payloads outside the large domain registry

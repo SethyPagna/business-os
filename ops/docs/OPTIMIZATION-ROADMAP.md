@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 687.
+- Latest completed implementation move in this roadmap: Move 688.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8066,3 +8066,23 @@ Move 687 status:
   passed with 24/26 controls tested, 2 controls skipped by visibility/label
   guardrails, and zero findings; Phase 29 and live hygiene checks are rerun
   after reference refresh.
+
+Move 688 status:
+- Move 688 extracts access-control transport from the large frontend API
+  registry. `frontend/src/api/accessControlTransport.ts` now owns user,
+  profile, auth-method, password, role, and permission-management transport
+  with actor-attributed reads, mirrored user/role fallbacks, encoded row ids,
+  provider disconnect paths, and expected-updated-at security mutations.
+  `methods.ts` keeps public `window.api` wrapper names for compatibility while
+  no longer carrying direct `/api/users`, `/api/users/*/profile`,
+  `/api/users/*/auth-methods`, `/api/users/*/provider-disconnect`,
+  `/api/users/*/change-password`, `/api/users/*/reset-password`, or
+  `/api/roles` request code. The API guide documents the new access-control
+  boundary, and focused API HTTP tests verify source placement, mirrored
+  role reads, encoded ids, expected-updated-at role mutation ownership, and no
+  direct user/role fetch calls in the large registry. The source guard parsed
+  222 frontend source files, the production build shows the `app-api-methods`
+  chunk at about 28.58 kB with no circular chunk warning, and the focused
+  Users desktop/mobile live control audit passed with 14/16 controls tested, 2
+  low-value controls skipped, and zero findings; Phase 29 and live hygiene
+  checks are rerun after reference refresh.
