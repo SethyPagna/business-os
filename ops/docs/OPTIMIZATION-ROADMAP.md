@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 669.
+- Latest completed implementation move in this roadmap: Move 673.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7815,3 +7815,18 @@ Move 672 status:
   frontend source guard, frontend typecheck, frontend utility suite, frontend
   production build, Phase 29 audit, focused Products desktop/mobile live
   control audit, and post-live hygiene passed.
+
+Move 673 status:
+- Move 673 extracts auth and organization transport helpers from the large
+  frontend API registry. `frontend/src/api/authTransport.ts` now owns
+  login/logout, password reset, session-duration updates, verification
+  capabilities, owned Google OAuth, organization bootstrap/search, and current
+  organization transport. `methods.ts` keeps the public `window.api` wrapper
+  names while no longer carrying auth endpoint strings or direct organization
+  lookup URLs. The API guide documents the boundary, focused API HTTP tests
+  verify source placement and device metadata enrichment, the source guard
+  parsed 209 frontend source files, and the production build shows the
+  `app-api-methods` chunk at about 48.96 kB with no circular chunk warning.
+  Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
+  frontend utility suite, frontend production build, Phase 29 audit, focused
+  Products desktop/mobile live control audit, and post-live hygiene passed.

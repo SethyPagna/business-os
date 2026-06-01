@@ -47,6 +47,21 @@ import { serializePendingSyncPreview } from './syncPreview.ts'
 import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './importTransport.ts'
+import {
+  completeGoogleOauth as completeGoogleOauthRequest,
+  completePasswordReset as completePasswordResetRequest,
+  getCurrentOrganization as getCurrentOrganizationRequest,
+  getOrganizationBootstrap as getOrganizationBootstrapRequest,
+  getVerificationCapabilities as getVerificationCapabilitiesRequest,
+  login as loginRequest,
+  logout as logoutRequest,
+  requestPasswordResetEmail as requestPasswordResetEmailRequest,
+  resetPasswordWithOtp as resetPasswordWithOtpRequest,
+  searchOrganizations as searchOrganizationsRequest,
+  startGoogleOauth as startGoogleOauthRequest,
+  unlinkGoogleOauth as unlinkGoogleOauthRequest,
+  updateSessionDuration as updateSessionDurationRequest,
+} from './authTransport.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from './notificationSummary.ts'
 import {
   disconnectGoogleDriveSync as disconnectGoogleDriveSyncRequest,
@@ -279,36 +294,20 @@ if (typeof window !== 'undefined') {
 const lastImportJobsByQuery = new Map()
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-export async function login({ username, password, organization, sessionDuration, clientTime, deviceTz, deviceName }) {
-  const device = getDeviceInfo()
-  return apiFetch('POST', '/api/auth/login', {
-    username,
-    password,
-    organization,
-    sessionDuration,
-    clientTime: clientTime || device.clientTime || '',
-    deviceTz: deviceTz || device.deviceTz || '',
-    deviceName: deviceName || device.deviceName || '',
-  })
-}
-export async function logout() {
-  return apiFetch('POST', '/api/auth/logout', {})
-}
-export async function resetPasswordWithOtp(payload) {
-  return apiFetch('POST', '/api/auth/password-reset/otp', payload || {})
-}
-export async function requestPasswordResetEmail(payload) {
-  return apiFetch('POST', '/api/auth/password-reset/email', payload || {})
-}
-export async function completePasswordReset(payload) {
-  return apiFetch('POST', '/api/auth/password-reset/complete', payload || {})
-}
-export async function updateSessionDuration(payload) {
-  return apiFetch('POST', '/api/auth/session-duration', { ...getDeviceInfo(), ...(payload || {}) })
-}
-export async function getVerificationCapabilities() {
-  return apiFetch('GET', '/api/auth/verification-capabilities')
-}
+export const login = (payload) =>
+  loginRequest(payload)
+export const logout = () =>
+  logoutRequest()
+export const resetPasswordWithOtp = (payload) =>
+  resetPasswordWithOtpRequest(payload)
+export const requestPasswordResetEmail = (payload) =>
+  requestPasswordResetEmailRequest(payload)
+export const completePasswordReset = (payload) =>
+  completePasswordResetRequest(payload)
+export const updateSessionDuration = (payload) =>
+  updateSessionDurationRequest(payload)
+export const getVerificationCapabilities = () =>
+  getVerificationCapabilitiesRequest()
 export async function getSystemConfig() {
   return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
 }
@@ -318,15 +317,12 @@ export async function getNotificationSummary() {
 export async function getSystemDebugLog() {
   return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
 }
-export async function startGoogleOauth(payload) {
-  return apiFetch('POST', '/api/auth/oauth/start', payload || {})
-}
-export async function completeGoogleOauth(payload) {
-  return apiFetch('POST', '/api/auth/oauth/complete', payload || {})
-}
-export async function unlinkGoogleOauth(payload) {
-  return apiFetch('POST', '/api/auth/oauth/unlink', payload || {})
-}
+export const startGoogleOauth = (payload) =>
+  startGoogleOauthRequest(payload)
+export const completeGoogleOauth = (payload) =>
+  completeGoogleOauthRequest(payload)
+export const unlinkGoogleOauth = (payload) =>
+  unlinkGoogleOauthRequest(payload)
 export async function getAppBootstrap() {
   const buildLocalBootstrap = async () => {
     let user = null
@@ -385,16 +381,12 @@ export async function getAppBootstrap() {
     throw error
   }
 }
-export async function getOrganizationBootstrap() {
-  return apiFetch('GET', '/api/organizations/bootstrap')
-}
-export async function searchOrganizations(query) {
-  const q = encodeURIComponent(String(query || '').trim())
-  return apiFetch('GET', `/api/organizations/search${q ? `?q=${q}` : ''}`)
-}
-export async function getCurrentOrganization() {
-  return apiFetch('GET', '/api/organizations/current')
-}
+export const getOrganizationBootstrap = () =>
+  getOrganizationBootstrapRequest()
+export const searchOrganizations = (query) =>
+  searchOrganizationsRequest(query)
+export const getCurrentOrganization = () =>
+  getCurrentOrganizationRequest()
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 export async function getSettings(options = {}) {

@@ -620,6 +620,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const expectedUpdatedAtSource = fs.readFileSync(new URL('../src/api/expectedUpdatedAt.ts', import.meta.url), 'utf8')
   const localMirrorsSource = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
+  const authTransportSource = fs.readFileSync(new URL('../src/api/authTransport.ts', import.meta.url), 'utf8')
   const browserDialogsSource = fs.readFileSync(new URL('../src/api/browserDialogs.ts', import.meta.url), 'utf8')
   const importTransportSource = fs.readFileSync(new URL('../src/api/importTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
@@ -631,6 +632,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.equal(buildQueryCacheStorageKey(' products:search:x '), 'read_cache:products:search:x')
   assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
   assert.match(source, /import \{ fetchJsonWithTimeout, getPortalBaseUrl \} from '\.\/portalHttp\.ts'/)
+  assert.match(source, /from '\.\/authTransport\.ts'/)
   assert.match(source, /import \{ apiFormPost, buildMultipartHeaders, withImportDeviceInfo \} from '\.\/importTransport\.ts'/)
   assert.match(source, /from '\.\/queryCache\.ts'/)
   assert.match(source, /import \{ withExpectedUpdatedAt, withSettingsExpectedUpdatedAt \} from '\.\/expectedUpdatedAt\.ts'/)
@@ -649,12 +651,18 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
   )
   assert.match(portalHttpSource, /export async function fetchJsonWithTimeout\([\s\S]*const controller = new AbortController\(\)[\s\S]*signal: controller\.signal/)
+  assert.match(authTransportSource, /export function login/)
+  assert.match(authTransportSource, /getClientDeviceInfo\(\)/)
+  assert.match(authTransportSource, /export function startGoogleOauth/)
+  assert.match(authTransportSource, /export function searchOrganizations/)
   assert.match(importTransportSource, /export async function apiFormPost\([\s\S]*requireLiveServerWrite\(channel,[\s\S]*credentials: 'include'[\s\S]*body: form/)
   assert.match(
     queryCacheSource,
     /export async function clearCachedQueryResults\(prefixes: string\[\] = \[\]\): Promise<void>[\s\S]*const keys: string\[\] = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys: string\[\] = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,
   )
   assert.doesNotMatch(source, /Object\.entries\(extra \|\| \{\}\)\.forEach/)
+  assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/login'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/organizations\/bootstrap'/)
   assert.doesNotMatch(source, /\.map\(\(row\) => String\(row\?\.key \|\| ''\)\)\s*\.filter/)
   assert.doesNotMatch(source, /const QUERY_CACHE_PREFIX/)
   assert.doesNotMatch(source, /LIVE_SERVER_SENSITIVE_MIRROR_TABLES/)

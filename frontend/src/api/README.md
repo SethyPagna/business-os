@@ -42,6 +42,10 @@ This folder is the browser-side transport layer for Business OS.
   - reset/factory reset, sync server URL test, folder/path helpers, and scale migration transport
   - keeps filesystem-facing system calls and long-timeout system transport outside the large domain registry
 
+- `authTransport.ts`
+  - login/logout, password reset, session-duration, owned Google OAuth, and organization lookup transport
+  - keeps direct auth and organization HTTP calls outside the large domain registry
+
 - `driveSync.ts`
   - Google Drive sync status, cooldown-aware fallback, preferences, OAuth, and job queue transport
   - keeps Drive sync polling/action mechanics outside the large domain registry

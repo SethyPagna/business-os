@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 672 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 673 in this file.
 
 ## Goal
 
@@ -6074,6 +6074,22 @@ Decision rule:
     source guard, frontend typecheck, frontend utility suite, frontend
     production build, Phase 29 audit, focused Products desktop/mobile live
     control audit, and post-live hygiene passed.
+
+673. Extract typed auth and organization transport from the large domain
+    registry.
+    Done: `frontend/src/api/authTransport.ts` now owns login/logout, password
+    reset, session-duration updates, verification capabilities, owned Google
+    OAuth, organization bootstrap/search, and current-organization transport
+    previously embedded in `frontend/src/api/methods.ts`. The public wrappers
+    remain in `methods.ts`, while direct auth endpoint strings, device metadata
+    enrichment, OAuth route calls, and organization lookup URLs now live in one
+    typed boundary. The API guide documents the split and focused API HTTP
+    tests verify source placement plus login device metadata enrichment. The
+    source guard parsed 209 frontend files and the production build now reports
+    the `app-api-methods` chunk around 48.96 kB with no circular chunk warning.
+    Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
+    frontend utility suite, frontend production build, Phase 29 audit, focused
+    Products desktop/mobile live control audit, and post-live hygiene passed.
 
 ## Safety Gates
 

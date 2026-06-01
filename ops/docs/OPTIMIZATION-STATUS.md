@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 672, typed system runtime transport extraction
+- Latest completed move: Move 673, typed auth and organization transport extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `b8ac9cc278164c96`
+  `693aaab5fc6b1961`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T02-49-03-545Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-00-12-263Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -42,6 +42,12 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend auth and organization transport is now
+  `frontend/src/api/authTransport.ts` with typed login/logout, password reset,
+  session-duration, owned Google OAuth, and organization lookup transport. The
+  large API registry keeps only public `window.api` compatibility wrappers, and
+  the source guard now parses 209 frontend TypeScript files.
 
 - Frontend system runtime transport is now `frontend/src/api/systemRuntime.ts`
   with typed reset/factory-reset, sync-server health test, open-path/folder,
