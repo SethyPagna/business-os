@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 664.
+- Latest completed implementation move in this roadmap: Move 665.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7693,3 +7693,20 @@ Move 664 status:
   guard, frontend typecheck, frontend utility suite, frontend production build,
   Phase 29 audit, and focused Products desktop/mobile live control audit
   passed.
+
+Move 665 status:
+- Move 665 extracts optimistic updated-at payload helpers from the large
+  frontend API registry. `frontend/src/api/expectedUpdatedAt.ts` now owns
+  `withExpectedUpdatedAt` and `withSettingsExpectedUpdatedAt`, preserving
+  explicit `expectedUpdatedAt`/`expected_updated_at` values, row-level
+  `updated_at` promotion, Dexie row lookup fallback, and settings metadata
+  fallback for write-conflict prevention. Category, unit, branch, product,
+  contact, user, role, sale, return, and settings writes now import this typed
+  helper instead of carrying update metadata lookup code in the remaining
+  `ts-nocheck` registry. The API guide documents the boundary, focused API HTTP
+  tests cover explicit and row timestamp preservation, the source guard parsed
+  201 frontend source files, and the production build shows the
+  `app-api-methods` chunk at about 55.46 kB. Proof: focused API HTTP tests,
+  frontend source guard, frontend typecheck, frontend utility suite, frontend
+  production build, Phase 29 audit, and focused Products desktop/mobile live
+  control audit passed.

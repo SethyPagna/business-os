@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 664 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 665 in this file.
 
 ## Goal
 
@@ -5955,6 +5955,20 @@ Decision rule:
     guard, frontend typecheck, frontend utility suite, frontend production
     build, Phase 29 audit, and focused Products desktop/mobile live control
     audit passed.
+
+665. Extract typed optimistic updated-at helpers from the large domain registry.
+    Done: `frontend/src/api/expectedUpdatedAt.ts` now owns row and settings
+    expected-updated-at payload shaping previously embedded in
+    `frontend/src/api/methods.ts`. The helper preserves explicit
+    `expectedUpdatedAt` and `expected_updated_at` values, promotes row
+    `updated_at` into `expectedUpdatedAt`, falls back to Dexie table rows, and
+    uses settings metadata for settings saves. The API guide documents the
+    boundary and the focused API HTTP test covers explicit and row timestamp
+    behavior. The source guard parsed 201 frontend files and the production
+    build now reports the `app-api-methods` chunk around 55.46 kB. Proof:
+    focused API HTTP tests, frontend source guard, frontend typecheck,
+    frontend utility suite, frontend production build, Phase 29 audit, and
+    focused Products desktop/mobile live control audit passed.
 
 ## Safety Gates
 

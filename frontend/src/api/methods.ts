@@ -31,7 +31,7 @@ import {
   markApiVersionMismatch,
 } from './http.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from './query.ts'
-import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.ts'
+import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { STORAGE_KEYS, SYNC } from '../constants'
 import { decodeTextBuffer } from '../utils/csvImport.ts'
@@ -68,6 +68,7 @@ import {
   readCachedQueryResult,
   writeCachedQueryResult,
 } from './queryCache.ts'
+import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from './expectedUpdatedAt.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
@@ -271,30 +272,6 @@ async function invalidateClientRuntimeState(reason = 'server-mutation') {
       detail: { channel: 'runtime', reason, ts: Date.now() },
     }))
   }
-}
-
-async function withExpectedUpdatedAt(tableName, id, payload = {}) {
-  const body = { ...(payload || {}) }
-  if (body.expectedUpdatedAt || body.expected_updated_at) return body
-  if (body.updated_at) {
-    body.expectedUpdatedAt = body.updated_at
-    return body
-  }
-  try {
-    const row = await dexieDb[tableName]?.get?.(id)
-    if (row?.updated_at) body.expectedUpdatedAt = row.updated_at
-  } catch (_) {}
-  return body
-}
-
-async function withSettingsExpectedUpdatedAt(payload = {}) {
-  const body = { ...(payload || {}) }
-  if (body.expectedUpdatedAt || body.expected_updated_at) return body
-  try {
-    const meta = await localGetSettingsMeta()
-    if (meta?.updatedAt) body.expectedUpdatedAt = meta.updatedAt
-  } catch (_) {}
-  return body
 }
 
 function mirrorReadResult(mirrorFn, result) {

@@ -27,6 +27,7 @@ import {
   readDriveSyncStatusCooldown,
   readNotificationSummaryMissingUntil,
 } from '../src/api/cooldownFallbacks.ts'
+import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from '../src/api/expectedUpdatedAt.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from '../src/api/importTransport.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
@@ -548,9 +549,25 @@ await runTest('cooldown fallback helpers keep typed notification and Drive fallb
   assert.equal(readDriveSyncStatusCooldown(), 0)
 })
 
+await runTest('expected updated-at helpers preserve explicit and row timestamp metadata', async () => {
+  assert.deepEqual(
+    await withExpectedUpdatedAt('products', 1, { name: 'Serum', expected_updated_at: 'server-value' }),
+    { name: 'Serum', expected_updated_at: 'server-value' },
+  )
+  assert.deepEqual(
+    await withExpectedUpdatedAt('products', 1, { name: 'Serum', updated_at: 'row-value' }),
+    { name: 'Serum', updated_at: 'row-value', expectedUpdatedAt: 'row-value' },
+  )
+  assert.deepEqual(
+    await withSettingsExpectedUpdatedAt({ theme: 'dark', expectedUpdatedAt: 'existing' }),
+    { theme: 'dark', expectedUpdatedAt: 'existing' },
+  )
+})
+
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
+  const expectedUpdatedAtSource = fs.readFileSync(new URL('../src/api/expectedUpdatedAt.ts', import.meta.url), 'utf8')
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
   const importTransportSource = fs.readFileSync(new URL('../src/api/importTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
@@ -559,6 +576,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /import \{ fetchJsonWithTimeout, getPortalBaseUrl \} from '\.\/portalHttp\.ts'/)
   assert.match(source, /import \{ apiFormPost, buildMultipartHeaders, withImportDeviceInfo \} from '\.\/importTransport\.ts'/)
   assert.match(source, /from '\.\/queryCache\.ts'/)
+  assert.match(source, /import \{ withExpectedUpdatedAt, withSettingsExpectedUpdatedAt \} from '\.\/expectedUpdatedAt\.ts'/)
+  assert.match(expectedUpdatedAtSource, /export async function withExpectedUpdatedAt\([\s\S]*body\.expectedUpdatedAt = body\.updated_at[\s\S]*table\?\.get\?\.\(id\)/)
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
