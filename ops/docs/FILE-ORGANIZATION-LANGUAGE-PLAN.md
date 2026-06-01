@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 683 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 684 in this file.
 
 ## Goal
 
@@ -6262,6 +6262,25 @@ Decision rule:
     Products desktop/mobile live control audit passed with 42/42 controls
     tested and zero findings; Phase 29 and live hygiene checks are rerun after
     reference refresh.
+
+684. Extract typed product write transport from the large domain registry.
+    Done: `frontend/src/api/productWriteTransport.ts` now owns product
+    create/update/delete, product variant creation, and product bulk import
+    writes previously embedded in `frontend/src/api/methods.ts`. The helper
+    keeps supplier auto-create checks, supplier cache invalidation, client
+    request ids, device metadata, expected-updated-at product guards, encoded
+    product ids, and product mutation route keys in a typed boundary, while
+    `methods.ts` keeps public `window.api` wrapper names for compatibility.
+    The API guide documents the new product write transport split, and focused
+    API HTTP tests verify source placement, supplier auto-create ownership,
+    request-id creation, expected-updated-at handling, and no direct product
+    mutation fetch calls in the large registry. The source guard parsed 218
+    frontend files and the production build now reports the `app-api-methods`
+    chunk around 40.23 kB with no circular chunk warning. Proof: focused API
+    HTTP tests, frontend source guard, frontend typecheck, frontend utility
+    suite, frontend production build, and focused Products desktop/mobile live
+    control audit passed with 42/42 controls tested and zero findings; Phase
+    29 and live hygiene checks are rerun after reference refresh.
 
 ## Safety Gates
 

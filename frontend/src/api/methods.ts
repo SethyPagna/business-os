@@ -74,6 +74,13 @@ import {
   searchProducts as searchProductsRequest,
 } from './productReadTransport.ts'
 import {
+  bulkImportProducts as bulkImportProductsRequest,
+  createProduct as createProductRequest,
+  createProductVariant as createProductVariantRequest,
+  deleteProduct as deleteProductRequest,
+  updateProduct as updateProductRequest,
+} from './productWriteTransport.ts'
+import {
   createAiProvider as createAiProviderRequest,
   deleteAiProvider as deleteAiProviderRequest,
   getAiProviders as getAiProvidersRequest,
@@ -675,37 +682,12 @@ export const testAiProvider = (id, payload) =>
   testAiProviderRequest(id, payload)
 export const getAiResponses = (limit = 80) =>
   getAiResponsesRequest(limit)
-export async function createProduct(d) {
-  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'product')
-  // Auto-create supplier if new
-  if (payload.supplier?.trim()) {
-    try {
-      const existing = await dexieDb.suppliers.where('name').equalsIgnoreCase(payload.supplier.trim()).first()
-      if (!existing) {
-        await apiFetch('POST', '/api/suppliers', { name: payload.supplier.trim(), ...getDeviceInfo() })
-        cacheInvalidate('suppliers')
-      }
-    } catch (_) {}
-  }
-  return route('products:create', () => apiFetch('POST', '/api/products', payload), null, true)
-}
-export async function updateProduct(id, d) {
-  if (d.supplier?.trim()) {
-    try {
-      const existing = await dexieDb.suppliers.where('name').equalsIgnoreCase(d.supplier.trim()).first()
-      if (!existing) {
-        await apiFetch('POST', '/api/suppliers', { name: d.supplier.trim(), ...getDeviceInfo() })
-        cacheInvalidate('suppliers')
-      }
-    } catch (_) {}
-  }
-  const payload = await withExpectedUpdatedAt('products', id, { ...getDeviceInfo(), ...d })
-  return route('products:update', () => apiFetch('PUT', `/api/products/${id}`, payload), null, true)
-}
-export const deleteProduct = async (id) => {
-  const payload = await withExpectedUpdatedAt('products', id, {})
-  return route('products:delete', () => apiFetch('DELETE', `/api/products/${id}`, payload), null, true)
-}
+export const createProduct = (payload) =>
+  createProductRequest(payload)
+export const updateProduct = (id, payload) =>
+  updateProductRequest(id, payload)
+export const deleteProduct = (id) =>
+  deleteProductRequest(id)
 
 // ─── OTP / 2FA ────────────────────────────────────────────────────────────────
 export const otpSetup = (payload) =>
@@ -720,9 +702,11 @@ export const otpStatus = (id) =>
   otpStatusRequest(id)
 
 // ─── Product Variants ─────────────────────────────────────────────────────────
-export const createProductVariant = d => route('products:create', () => apiFetch('POST', '/api/products/variant', d), null, true)
+export const createProductVariant = payload =>
+  createProductVariantRequest(payload)
 
-export const bulkImportProducts = d        => route('products:bulkImport', () => apiFetch('POST', '/api/products/bulk-import', d),     null, true)
+export const bulkImportProducts = payload =>
+  bulkImportProductsRequest(payload)
 
 export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', withImportDeviceInfo(d)), null, true)
 export const listImportJobs = (params = {}) => {

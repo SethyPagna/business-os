@@ -70,6 +70,10 @@ This folder is the browser-side transport layer for Business OS.
   - product list/search, id lookups, filter metadata, lookup usage, and lookup replacement transport
   - keeps product query-cache keys, id normalization, mirrored reads, and live-server lookup replacement gating outside the large domain registry
 
+- `productWriteTransport.ts`
+  - product create/update/delete, variant creation, and bulk import write transport
+  - keeps supplier auto-create checks, client request ids, device metadata, expected-updated-at guards, and product mutation route keys outside the large domain registry
+
 - `rfidTransport.ts`
   - RFID gateway status, tag search/create, session event/review/apply transport
   - keeps RFID route keys, id encoding, and device-attributed RFID writes outside the large domain registry

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 683.
+- Latest completed implementation move in this roadmap: Move 684.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7991,3 +7991,21 @@ Move 683 status:
   Products desktop/mobile live control audit passed with 42/42 controls tested
   and zero findings; Phase 29 and live hygiene checks are rerun after
   reference refresh.
+
+Move 684 status:
+- Move 684 extracts product write transport from the large frontend API
+  registry. `frontend/src/api/productWriteTransport.ts` now owns product
+  create/update/delete, product variant creation, and product bulk import
+  writes with typed device metadata, client request-id creation,
+  expected-updated-at product guards, supplier auto-create checks, supplier
+  cache invalidation, and encoded product ids. `methods.ts` keeps public
+  `window.api` wrapper names for compatibility while no longer carrying direct
+  product mutation request calls. The API guide documents the new product
+  write boundary, focused API HTTP tests verify source placement, supplier
+  auto-create ownership, request-id creation, expected-updated-at handling,
+  and no direct product mutation fetch calls in the large registry. The source
+  guard parsed 218 frontend source files, the production build shows the
+  `app-api-methods` chunk at about 40.23 kB with no circular chunk warning,
+  and the focused Products desktop/mobile live control audit passed with 42/42
+  controls tested and zero findings; Phase 29 and live hygiene checks are
+  rerun after reference refresh.
