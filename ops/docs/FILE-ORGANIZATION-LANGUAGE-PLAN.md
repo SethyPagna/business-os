@@ -5843,6 +5843,18 @@ Decision rule:
     language/runtime audit, frontend source guard, Phase 29 audit, and focused
     Products desktop/mobile live control audit passed.
 
+657. Refresh the live optimization status baseline.
+    Done: `ops/docs/OPTIMIZATION-STATUS.md` now points future sessions at the
+    June 1 state instead of the older May 30 migration snapshot. It records
+    Move 656 as the latest completed move, the latest focused Products
+    desktop/mobile control-audit report, the latest local production build
+    hash, the TypeScript/TSX-only `frontend/src` contract, and the runtime
+    JavaScript inventory as the authority for generated wrappers and vendor
+    JavaScript. The current working rules and accepted-win proof wording now
+    refer to the TypeScript source guard instead of the old JSX scan label.
+    Proof: status-doc stale wording scans, frontend source guard, Phase 29
+    audit, and focused Products desktop/mobile live control audit passed.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

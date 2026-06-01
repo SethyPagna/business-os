@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-05-30
+Last updated: 2026-06-01
 
 ## Phase Board
 
@@ -8,6 +8,7 @@ Last updated: 2026-05-30
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
+- Latest completed move: Move 656, language/runtime audit baseline aligned to React/TypeScript source
 
 ## Current Baseline
 
@@ -16,12 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `756d985623fba5b1`
+  `86d4af8084f23aed`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
+- latest focused Products desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T00-18-54-327Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -83,8 +86,8 @@ Recent route-level win:
   recommendations, and portal tab boundaries.
 - POS page is now `frontend/src/components/pos/POS.tsx` with typed product,
   order, cart, contact, membership, receipt, lightbox, app/sync, and POS API
-  gateway boundaries. Remaining JSX shells are Inventory, Products, Catalog
-  page, and Catalog editor.
+  gateway boundaries. Subsequent moves finished the active frontend source
+  migration; `frontend/src` is now guarded as TypeScript/TSX-only source.
 - Users administration is now `frontend/src/components/users/Users.tsx` with
   typed user rows, role rows, form state, API gateway calls, modal/tab state,
   loading watchdog timers, permission maps, mutation results, and undo/redo
@@ -139,8 +142,9 @@ Recent route-level win:
 - Prefer hidden-work reduction, derived-data tightening, and helper reuse.
 - Use route-scoped audits before whole-app reruns.
 - Reject any route-local win that wakes unrelated warm whole-app findings.
-- Keep `.js` compatibility wrappers stable until all JSX callers and source
-  inspection tests have moved to TypeScript-aware paths.
+- Keep generated/browser/server `.js` wrappers stable only where the runtime
+  inventory explicitly allows them; active frontend source must stay
+  TypeScript/TSX-only.
 - TypeScript conversions must add real safety, not only rename files: type
   public boundaries, payloads, timers, event details, dynamic imports, and
   browser/runtime gateways.
@@ -162,9 +166,9 @@ Recent route-level win:
 - Dashboard export helpers now load on demand.
 - Backup version list and route hot paths were hardened in earlier passes.
 - API HTTP, local Dexie, websocket, and browser API bootstrap were converted to
-  TypeScript and verified through frontend utility tests, JSX scan, production
-  build, Phase 29 audit, schema audit, organization audit, and runtime
-  dependency guardrails.
+  TypeScript and verified through frontend utility tests, the TypeScript source
+  guard, production build, Phase 29 audit, schema audit, organization audit,
+  and runtime dependency guardrails.
 
 ## Recently Rejected Candidates
 
@@ -189,9 +193,9 @@ Recent route-level win:
    bounded helpers and low-risk domain clusters, then remove its temporary
    `ts-nocheck` marker when request payloads, retries, cache invalidation,
    import jobs, and offline mirrors are covered by explicit types.
-2. Begin the backend JavaScript-to-TypeScript lane only after the runtime,
-   worker, package, Docker, and release scripts prove how `.ts` backend source
-   will execute and package without data loss.
+2. Keep backend TypeScript packaging and generated runtime wrappers guarded by
+   the runtime JavaScript inventory, Docker release guardrail, and backend
+   package staging checks before deleting any generated startup file.
 3. Update source-inspection tests and ops verification scripts whenever a real
    implementation moves behind a compatibility wrapper.
 4. Refresh Phase 29 references after each migration and keep the public

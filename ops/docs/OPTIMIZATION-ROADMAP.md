@@ -7576,3 +7576,18 @@ Move 656 status:
   still require benchmark, packaging, and rollback proof. Proof:
   regenerated language/runtime audit, frontend source guard, Phase 29 audit,
   and focused Products desktop/mobile live control audit passed.
+
+Move 657 status:
+- Move 657 refreshes the live optimization status document so future sessions
+  start from the current plan instead of stale May 30 TypeScript-migration
+  notes. `ops/docs/OPTIMIZATION-STATUS.md` now records the June 1 baseline,
+  Move 656 as the latest completed move, the latest focused Products
+  desktop/mobile control-audit report, the latest local production build hash,
+  the TypeScript/TSX-only `frontend/src` source contract, and the runtime
+  JavaScript inventory as the guard for generated/browser/server/vendor
+  JavaScript. It also replaces the stale `JSX scan` proof wording with the
+  TypeScript source guard and updates the next backend/runtime move to protect
+  generated startup wrappers through the runtime inventory and Docker/package
+  guardrails. Proof: status-doc stale wording scans, frontend source guard,
+  Phase 29 audit, and focused Products desktop/mobile live control audit
+  passed.
