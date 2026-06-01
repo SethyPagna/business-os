@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 699 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 700 in this file.
 
 ## Goal
 
@@ -6540,6 +6540,22 @@ Decision rule:
     desktop/mobile live control audit passed with 36/46 controls tested, 10
     long-label controls skipped, and zero findings; Phase 29 and live hygiene
     checks are rerun after reference refresh.
+
+700. Defer initial web API offline maintenance until after load and idle time.
+    Done: `frontend/src/web-api.ts` still installs `window.api`
+    synchronously and keeps sync URL setup, websocket connect, and health
+    checks immediate, but the first offline maintenance pass now runs through
+    `scheduleInitialOfflineMaintenance()`. That pass waits for page load, a
+    short delay, and browser idle time before retrying pending sync, refreshing
+    the offline snapshot, registering background sync, or updating the service
+    worker. Online, focus, visibility, and reconnect maintenance paths remain
+    immediate after startup. Proof: focused performance loading UX test,
+    offline sync/security tests, frontend source guard, frontend typecheck,
+    frontend utility suite, frontend production build with hash
+    `7166cf124209d1aa`, and focused Dashboard desktop/mobile live control
+    audit passed with 36/46 controls tested, 10 long-label controls skipped,
+    and zero findings; Phase 29 and live hygiene checks are rerun after
+    reference refresh.
 
 ## Safety Gates
 

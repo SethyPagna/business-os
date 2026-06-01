@@ -8265,3 +8265,20 @@ Move 699 status:
   the focused Dashboard desktop/mobile live control audit passed with 36/46
   controls tested, 10 long-label controls skipped, and zero findings; Phase 29
   and live hygiene checks are rerun after reference refresh.
+
+Move 700 status:
+- Move 700 defers the web API shim's initial offline maintenance pass.
+  `frontend/src/web-api.ts` still installs `window.api` synchronously and keeps
+  sync URL setup, websocket connect, and health checks immediate, but the
+  first offline queue retry, offline snapshot refresh, background-sync
+  registration, and service-worker update now run through
+  `scheduleInitialOfflineMaintenance()` after page load, a short delay, and
+  browser idle time. This avoids pulling lazy domain methods and offline queue
+  scans into the first paint path while preserving later online/focus/reconnect
+  maintenance behavior. The focused loading UX guard verifies the deferred
+  scheduler and blocks a regression back to synchronous bootstrap maintenance;
+  offline sync/security tests, source guard, typecheck, frontend utility
+  suite, and production build passed. Production build hash:
+  `7166cf124209d1aa`; focused Dashboard desktop/mobile live control audit
+  passed with 36/46 controls tested, 10 long-label controls skipped, and zero
+  findings; Phase 29 and live hygiene checks are rerun after reference refresh.

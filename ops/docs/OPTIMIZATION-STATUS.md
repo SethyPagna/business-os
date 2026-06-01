@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 699, defer post-render startup maintenance
+- Latest completed move: Move 700, defer initial offline maintenance
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `f41fed1ff54d30f9`
+  `7166cf124209d1aa`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T09-47-18-062Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T10-03-39-806Z/summary.json`
 - latest focused Sales desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
 - latest focused POS desktop/mobile control audit:
@@ -64,6 +64,19 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent runtime/load win:
+
+- Frontend API bootstrap now defers initial offline maintenance in
+  `frontend/src/web-api.ts`. The sync server URL, websocket connection, and
+  health checks still start immediately so auth/bootstrap remains responsive,
+  but the first `retryPendingSyncNow`, offline snapshot refresh, background
+  sync registration, and service-worker update pass now wait until page load
+  plus a short delay and browser idle time. This keeps offline recovery active
+  without lazy-loading the larger domain methods module or scanning offline
+  queues during first paint. The source guard parsed 227 frontend TypeScript
+  files, the production build hash is `7166cf124209d1aa`, and the focused
+  Dashboard desktop/mobile live audit passed with 36/46 controls tested, 10
+  long-label controls skipped by stable broad-audit guardrails, and zero
+  findings.
 
 - Frontend startup now lets React render before scheduling non-critical
   maintenance in `frontend/src/index.tsx`. Offline service-worker

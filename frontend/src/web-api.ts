@@ -63,11 +63,14 @@ type OfflineFileOwner = OfflineOperation & { upload_id?: string }
 const OFFLINE_REFRESH_INTERVAL_MS = 5 * 60_000
 const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000
 const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000
+const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 3500
+const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 10_000
 const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
 const OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3
 let offlineMaintenanceStarted = false
+let initialOfflineMaintenanceScheduled = false
 let lastServiceWorkerUpdateAt = 0
 let offlineSnapshotTimer: number = 0
 let offlineSnapshotIdleId: number = 0
@@ -582,6 +585,31 @@ function startOfflineMaintenanceLoop(): void {
   }, OFFLINE_REFRESH_INTERVAL_MS)
 }
 
+function scheduleInitialOfflineMaintenance(): void {
+  if (typeof window === 'undefined' || initialOfflineMaintenanceScheduled) return
+  initialOfflineMaintenanceScheduled = true
+
+  const run = () => {
+    startOfflineMaintenanceLoop()
+    runOfflineMaintenance(false)
+  }
+  const scheduleIdle = () => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.setTimeout(() => {
+        window.requestIdleCallback(run, { timeout: INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS })
+      }, INITIAL_OFFLINE_MAINTENANCE_DELAY_MS)
+      return
+    }
+    window.setTimeout(run, INITIAL_OFFLINE_MAINTENANCE_DELAY_MS)
+  }
+
+  if (document.readyState === 'complete') {
+    scheduleIdle()
+    return
+  }
+  window.addEventListener('load', scheduleIdle, { once: true })
+}
+
 function forwardServiceWorkerOutboxEvent(event: MessageEvent): void {
   if (typeof window === 'undefined') return
   const type = event?.data?.type
@@ -780,7 +808,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('sync:reconnected', () => {
     runOfflineMaintenance(true)
   })
-  startOfflineMaintenanceLoop()
 }
 
 // ?€?€ Bootstrap: read stored token, auto-detect server URL from page origin ?€?€?€?€?€
@@ -822,7 +849,7 @@ if (typeof window !== 'undefined') {
       setSyncServerUrl(url)
       connectWS()
       startHealthCheck()  // ping every 12 s so offline?nline recovery works
-      runOfflineMaintenance()
+      scheduleInitialOfflineMaintenance()
     }
   } catch (e: any) {
     console.warn('[web-api] Bootstrap error:', e.message)

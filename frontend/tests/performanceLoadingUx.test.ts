@@ -3,6 +3,7 @@ import fs from 'node:fs'
 
 const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const index = fs.readFileSync(new URL('../src/index.tsx', import.meta.url), 'utf8')
+const webApi = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
@@ -115,6 +116,11 @@ assert.match(index, /scheduleAfterLoadIdle\(\s*\(\) => \{ register\(\)\.catch\(\
 assert.match(index, /scheduleAfterLoadIdle\(\s*installFormFieldAccessibility,\s*FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS,\s*FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS,\s*\)/, 'form field accessibility scan should use the after-load idle scheduler')
 assert.match(index, /ReactDOM\.createRoot\(rootElement\)\.render\([\s\S]*\)\s*\n\s*registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)/, 'React should render before startup maintenance jobs are scheduled')
 assert.doesNotMatch(index, /registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)\s*\n\s*const publicCatalogMode/, 'startup maintenance jobs should not be scheduled before root render setup')
+assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 3500/, 'offline queue and snapshot maintenance should be delayed past first paint')
+assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 10_000/, 'initial offline maintenance should still run when idle time is scarce')
+assert.match(webApi, /function scheduleInitialOfflineMaintenance\(\): void \{[\s\S]*window\.requestIdleCallback\(run, \{ timeout: INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS \}\)[\s\S]*window\.addEventListener\('load', scheduleIdle, \{ once: true \}\)/, 'initial offline maintenance should wait for load and idle time')
+assert.match(webApi, /startHealthCheck\(\)[^\n]*\n\s*scheduleInitialOfflineMaintenance\(\)/, 'web API bootstrap should keep health checks immediate but defer offline maintenance')
+assert.doesNotMatch(webApi, /startHealthCheck\(\)[^\n]*\n\s*runOfflineMaintenance\(\)/, 'web API bootstrap should not run offline maintenance synchronously')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')

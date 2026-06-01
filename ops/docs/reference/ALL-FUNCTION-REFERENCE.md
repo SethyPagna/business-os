@@ -382,7 +382,7 @@ Code files scanned: **515**
 | 370 | `frontend/src/utils/scriptTypography.ts` | 3 |
 | 371 | `frontend/src/utils/settingsRefresh.ts` | 2 |
 | 372 | `frontend/src/utils/settingsWriteOptions.ts` | 1 |
-| 373 | `frontend/src/web-api.ts` | 32 |
+| 373 | `frontend/src/web-api.ts` | 35 |
 | 374 | `frontend/tailwind.config.ts` | 0 |
 | 375 | `frontend/tests/actionGuards.test.ts` | 1 |
 | 376 | `frontend/tests/actionStability.test.ts` | 3 |
@@ -6195,38 +6195,41 @@ Code files scanned: **515**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `sanitizeBaseUrl` | function | 81 |
-| 2 | `loadMethodsModule` | function | 85 |
-| 3 | `getLazyApiMethod` | function | 90 |
-| 4 | `mapOfflineFileChunkStatusUpdates` | function | 104 |
-| 5 | `asArrayBuffer` | function | 120 |
-| 6 | `bytesToBase64` | function | 124 |
-| 7 | `base64ToBytes` | function | 135 |
-| 8 | `stableStringify` | function | 142 |
-| 9 | `sha256Hex` | function | 148 |
-| 10 | `deriveOfflineVaultKey` | function | 156 |
-| 11 | `encryptOfflineVaultValue` | function | 173 |
-| 12 | `decryptOfflineVaultValue` | function | 181 |
-| 13 | `requestOfflinePersistentStorage` | function | 191 |
-| 14 | `dispatchVaultLocked` | function | 198 |
-| 15 | `scheduleOfflineVaultIdleLock` | function | 203 |
-| 16 | `lockOfflineVault` | function | 209 |
-| 17 | `unlockOfflineVault` | function | 217 |
-| 18 | `queueBusinessOutboxOperation` | function | 242 |
-| 19 | `queueOfflineFileChunks` | function | 278 |
-| 20 | `dispatchOutboxProgress` | function | 331 |
-| 21 | `dispatchOutboxFileProgress` | function | 338 |
-| 22 | `dispatchOutboxConflict` | function | 345 |
-| 23 | `getSyncOutboxKey` | function | 352 |
-| 24 | `syncUnlockedOfflineOutbox` | function | 356 |
-| 25 | `syncUnlockedOfflineFileChunks` | function | 465 |
-| 26 | `refreshOfflineSnapshotSoon` | function | 526 |
-| 27 | `run` | const arrow | 536 |
-| 28 | `refreshServiceWorkerSoon` | function | 555 |
-| 29 | `runOfflineMaintenance` | function | 565 |
-| 30 | `startOfflineMaintenanceLoop` | function | 577 |
-| 31 | `forwardServiceWorkerOutboxEvent` | function | 585 |
-| 32 | `forwardServiceWorkerAppEvent` | function | 673 |
+| 1 | `sanitizeBaseUrl` | function | 84 |
+| 2 | `loadMethodsModule` | function | 88 |
+| 3 | `getLazyApiMethod` | function | 93 |
+| 4 | `mapOfflineFileChunkStatusUpdates` | function | 107 |
+| 5 | `asArrayBuffer` | function | 123 |
+| 6 | `bytesToBase64` | function | 127 |
+| 7 | `base64ToBytes` | function | 138 |
+| 8 | `stableStringify` | function | 145 |
+| 9 | `sha256Hex` | function | 151 |
+| 10 | `deriveOfflineVaultKey` | function | 159 |
+| 11 | `encryptOfflineVaultValue` | function | 176 |
+| 12 | `decryptOfflineVaultValue` | function | 184 |
+| 13 | `requestOfflinePersistentStorage` | function | 194 |
+| 14 | `dispatchVaultLocked` | function | 201 |
+| 15 | `scheduleOfflineVaultIdleLock` | function | 206 |
+| 16 | `lockOfflineVault` | function | 212 |
+| 17 | `unlockOfflineVault` | function | 220 |
+| 18 | `queueBusinessOutboxOperation` | function | 245 |
+| 19 | `queueOfflineFileChunks` | function | 281 |
+| 20 | `dispatchOutboxProgress` | function | 334 |
+| 21 | `dispatchOutboxFileProgress` | function | 341 |
+| 22 | `dispatchOutboxConflict` | function | 348 |
+| 23 | `getSyncOutboxKey` | function | 355 |
+| 24 | `syncUnlockedOfflineOutbox` | function | 359 |
+| 25 | `syncUnlockedOfflineFileChunks` | function | 468 |
+| 26 | `refreshOfflineSnapshotSoon` | function | 529 |
+| 27 | `run` | const arrow | 539 |
+| 28 | `refreshServiceWorkerSoon` | function | 558 |
+| 29 | `runOfflineMaintenance` | function | 568 |
+| 30 | `startOfflineMaintenanceLoop` | function | 580 |
+| 31 | `scheduleInitialOfflineMaintenance` | function | 588 |
+| 32 | `run` | const arrow | 592 |
+| 33 | `scheduleIdle` | const arrow | 596 |
+| 34 | `forwardServiceWorkerOutboxEvent` | function | 613 |
+| 35 | `forwardServiceWorkerAppEvent` | function | 701 |
 
 ### 3.374 `frontend/tailwind.config.ts`
 
