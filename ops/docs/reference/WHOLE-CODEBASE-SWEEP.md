@@ -678,7 +678,8 @@ Phase 29 performance slice. The accepted rewire keeps route chunks cold until
 intent, moves non-critical sync/notification/import/offline work behind
 delays, removes local DB/local mirror imports from bootstrap fallback, and
 keeps Dashboard on the narrow data transport plus on-demand export helpers.
-The Docker-served Playwright trace on hash `0ac6c0dba02d6ba5` is the proof
-gate: 12 JavaScript chunks and 3 API calls in the first 12 seconds, down from
-the earlier 34 chunks and 5 API calls, with no failed responses or relevant
-console messages.
+The Docker-served Playwright trace on hash `9b132859aa24909c` is the proof
+gate: 12 JavaScript chunks and 3 app data/auth API calls in the first 12
+seconds, plus 3 expected health probes, down from the earlier 34 chunks and 5
+app data/auth API calls, with no failed responses or relevant console
+messages.

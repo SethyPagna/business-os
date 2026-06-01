@@ -6732,12 +6732,13 @@ Decision rule:
     `app-api`, so Dashboard reads avoid the full method registry. Proof:
     performance loading UX guard, API HTTP guard, source check, typecheck,
     frontend utility suite, backend utility suite, production build hash
-    `0ac6c0dba02d6ba5`, Docker live build sync, authenticated Playwright
+    `9b132859aa24909c`, Docker live build sync, authenticated Playwright
     first-12-seconds trace, broad Phase 8.4 live suite, public Cloudflare
     portal check, exhaustive all-pages control audit, and exhaustive
     browser-action smoke. The live trace reduced Dashboard startup from the
-    earlier 34 JavaScript chunks and 5 API calls to 12 JavaScript chunks and 3
-    API calls, with zero unrelated product/POS/inventory/catalog/file-picker/
+    earlier 34 JavaScript chunks and 5 app data/auth API calls to 12
+    JavaScript chunks and 3 app data/auth API calls, plus 3 expected health
+    probes, with zero unrelated product/POS/inventory/catalog/file-picker/
     local-DB/import-tracker/notification-center requests, zero failed
     responses, and zero relevant console messages. The all-pages audit covered
     34 desktop/mobile routes with 519 visible controls, 392 exercised controls,

@@ -15,9 +15,9 @@ Last updated: 2026-06-02
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `0ac6c0dba02d6ba5`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `9b132859aa24909c`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `0ac6c0dba02d6ba5`
+  `9b132859aa24909c`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T17-47-36-474Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T18-01-08-129Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T17-50-15-259Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T18-03-40-430Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,7 +48,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `0ac6c0dba02d6ba5`
+- broad Phase 8.4 UI live check passed on frontend hash `9b132859aa24909c`
   with 72 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -70,9 +70,10 @@ Recent runtime/load win:
   uses the narrow dashboard transport directly and lazy-loads CSV/report/ZIP
   export helpers only when an export command is used. Real Docker-served
   authenticated Playwright proof against `http://127.0.0.1:4000/` on build
-  hash `0ac6c0dba02d6ba5` reduced the first 12 seconds from the earlier
-  baseline of 34 JavaScript chunks and 5 API calls to 12 JavaScript chunks and
-  3 API calls. The final trace loaded only entry/vendor/language, `app-api`,
+  hash `9b132859aa24909c` reduced the first 12 seconds from the earlier
+  baseline of 34 JavaScript chunks and 5 app data/auth API calls to 12
+  JavaScript chunks and 3 app data/auth API calls, plus 3 expected health
+  probes. The final trace loaded only entry/vendor/language, `app-api`,
   shell/shared/bootstrap, Dashboard, DonutChart, and formatters chunks; it had
   zero product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
   notification-center requests, zero failed responses, and zero relevant

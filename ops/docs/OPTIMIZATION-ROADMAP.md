@@ -8456,9 +8456,10 @@ Move 709 status:
   helpers only when an export action runs. `frontend/vite.config.ts` keeps the
   dashboard transport and query helper inside `app-api` so Dashboard reads do
   not pull the full method registry. Proof: production build hash
-  `0ac6c0dba02d6ba5`, Docker live sync, authenticated Playwright first
+  `9b132859aa24909c`, Docker live sync, authenticated Playwright first
   12-seconds network trace reduced the startup from the earlier 34 JavaScript
-  chunks and 5 API calls to 12 JavaScript chunks and 3 API calls, with zero
+  chunks and 5 app data/auth API calls to 12 JavaScript chunks and 3 app
+  data/auth API calls, plus 3 expected health probes, with zero
   product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
   notification-center requests, zero failed responses, and zero relevant
   console messages. Focused loading/API HTTP guards, frontend typecheck,

@@ -1077,8 +1077,9 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   maintenance work is delayed past the first interaction window, Dashboard
   reads use the narrow dashboard transport, and export helper modules load
   only on export commands. Real Docker-served authenticated Playwright proof on
-  hash `0ac6c0dba02d6ba5` reduced first-12-seconds startup from 34 JavaScript
-  chunks and 5 API calls to 12 JavaScript chunks and 3 API calls, with no
+  hash `9b132859aa24909c` reduced first-12-seconds startup from 34 JavaScript
+  chunks and 5 app data/auth API calls to 12 JavaScript chunks and 3 app
+  data/auth API calls, plus 3 expected health probes, with no
   unrelated product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
   notification-center requests and no relevant console or failed-response
   noise.

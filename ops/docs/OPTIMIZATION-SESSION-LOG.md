@@ -1280,9 +1280,10 @@ Use this shape for future entries:
   hiding loading states, and every deferred path still has an interaction or
   delayed background trigger
 - route-scoped result: real Docker-served authenticated Playwright trace
-  against `http://127.0.0.1:4000/` on frontend hash `0ac6c0dba02d6ba5`
-  reduced the first 12 seconds from the earlier 34 JavaScript chunks and 5 API
-  calls to 12 JavaScript chunks and 3 API calls. The final trace loaded only
+  against `http://127.0.0.1:4000/` on frontend hash `9b132859aa24909c`
+  reduced the first 12 seconds from the earlier 34 JavaScript chunks and 5 app
+  data/auth API calls to 12 JavaScript chunks and 3 app data/auth API calls,
+  plus 3 expected health probes. The final trace loaded only
   entry/vendor/language, `app-api`, shell/shared/bootstrap, Dashboard,
   DonutChart, and formatters chunks; it had zero product/POS/inventory/catalog/
   file-picker/local-DB/import-tracker/notification-center requests, zero
@@ -1292,8 +1293,8 @@ Use this shape for future entries:
   suite, production build, Docker live build sync, broad Phase 8.4 live suite,
   public Cloudflare portal check, exhaustive all-pages control audit, and
   exhaustive browser-action smoke passed. Broad Phase 8.4 live report:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T17-47-36-474Z/report.json`.
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T18-01-08-129Z/report.json`.
   Public portal report:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T17-50-15-259Z/report.json`.
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T18-03-40-430Z/report.json`.
   Exhaustive all-pages report:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`.
