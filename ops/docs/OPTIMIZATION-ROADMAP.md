@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 695.
+- Latest completed implementation move in this roadmap: Move 696.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8200,6 +8200,22 @@ Move 695 status:
   shell mounted. The focused loading UX guard verifies both gates, the source
   guard parsed 227 frontend source files, the production build hash is
   `b3f0c3283db09f7f`, and the focused Dashboard desktop/mobile live control
+  audit passed with 36/46 controls tested, 10 long-label controls skipped, and
+  zero findings; Phase 29 and live hygiene checks are rerun after reference
+  refresh.
+
+Move 696 status:
+- Move 696 defers desktop notification-center startup work. `frontend/src/App.tsx`
+  now mounts `NotificationCenter` through `useDeferredNotificationCenterMount()`
+  instead of rendering the lazy chunk immediately in the top bar. The fallback
+  bell remains clickable so staff can load notifications on demand, while the
+  real notification center wakes automatically after idle time or immediately
+  on relevant sync updates. This removes the normal-startup request for the
+  17.98 kB notification-center chunk and delays the notification summary API
+  read until the shell has painted or notifications are actually requested. The
+  focused loading UX guard verifies the deferred/on-demand gate, the source
+  guard parsed 227 frontend source files, the production build hash is
+  `5ad9eba769d0526d`, and the focused Dashboard desktop/mobile live control
   audit passed with 36/46 controls tested, 10 long-label controls skipped, and
   zero findings; Phase 29 and live hygiene checks are rerun after reference
   refresh.

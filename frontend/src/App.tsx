@@ -169,6 +169,11 @@ interface PageSlotProps {
   pageId: AdminPageId
 }
 
+interface NotificationCenterFallbackProps {
+  compact?: boolean
+  onClick?: () => void
+}
+
 const useApp = useAppHook as () => AppContextValue
 
 function asPageModule(importer: () => Promise<unknown>): ChunkImporter {
@@ -279,6 +284,8 @@ const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
 const INTENT_CHUNK_WARMUP_DELAY_MS = 80
 const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 2500
 const PENDING_SYNC_IDLE_TIMEOUT_MS = 8000
+const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 2200
+const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 10000
 const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 5000
 const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 15000
 const STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2
@@ -581,6 +588,13 @@ function isImportTrackerWakeEvent(event: Event): boolean {
   return channel === 'importjobs' || channel === 'import_jobs' || channel === 'imports'
 }
 
+function isNotificationCenterWakeEvent(event: Event): boolean {
+  if (!(event instanceof CustomEvent)) return false
+  const detail = event.detail as SyncUpdateDetail | null
+  const channel = String(detail?.channel || '').trim().toLowerCase()
+  return ['inventory', 'sales', 'returns', 'customers', 'contacts', 'catalog', 'settings', 'backup'].includes(channel)
+}
+
 function getDataWarmupLoaders(_canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
   // Data warmups used to prefetch many page reads in the background. In
   // practice that created first-visit contention: the real page load would
@@ -794,6 +808,59 @@ function useDeferredImportTrackerMount(user: AppUser | null): boolean {
   }, [enabled, user])
 
   return !!user && enabled
+}
+
+function useDeferredNotificationCenterMount(user: AppUser | null): {
+  shouldMountNotificationCenter: boolean
+  requestNotificationCenterMount: () => void
+} {
+  const [enabled, setEnabled] = useState(false)
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') {
+      setEnabled(false)
+      return undefined
+    }
+    if (enabled) return undefined
+
+    let cancelled = false
+    let idleId: number | null = null
+    let timerId: number | null = null
+    const enable = () => {
+      if (cancelled) return
+      setEnabled(true)
+    }
+    const enableWhenVisible = () => {
+      if (cancelled || document.visibilityState === 'hidden') return
+      enable()
+    }
+    const onSyncUpdate = (event: Event) => {
+      if (isNotificationCenterWakeEvent(event)) enable()
+    }
+
+    window.addEventListener('sync:update', onSyncUpdate)
+    timerId = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(enableWhenVisible, { timeout: NOTIFICATION_CENTER_IDLE_TIMEOUT_MS })
+      } else {
+        enableWhenVisible()
+      }
+    }, NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS)
+
+    return () => {
+      cancelled = true
+      window.removeEventListener('sync:update', onSyncUpdate)
+      if (timerId != null) window.clearTimeout(timerId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [enabled, user])
+
+  return {
+    shouldMountNotificationCenter: !!user && enabled,
+    requestNotificationCenterMount: () => setEnabled(true),
+  }
 }
 
 function useVisibilityRecovery() {
@@ -1321,14 +1388,15 @@ function PageLoader() {
   )
 }
 
-function NotificationCenterFallback({ compact = false }: { compact?: boolean }) {
+function NotificationCenterFallback({ compact = false, onClick }: NotificationCenterFallbackProps) {
   return (
     <button
       type="button"
       className={`relative inline-flex items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-400 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 ${compact ? 'h-8 w-8 sm:h-9 sm:w-9' : 'h-10 w-10'}`}
       aria-label="Notifications"
       title="Notifications"
-      disabled
+      onClick={onClick}
+      disabled={!onClick}
     >
       <Bell className={compact ? 'h-4 w-4' : 'h-[18px] w-[18px]'} />
     </button>
@@ -1406,6 +1474,10 @@ export default function App() {
   } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
   const shouldMountImportTracker = useDeferredImportTrackerMount(authReady ? user : null)
+  const {
+    shouldMountNotificationCenter,
+    requestNotificationCenterMount,
+  } = useDeferredNotificationCenterMount(authReady ? user : null)
 
   useVisibilityRecovery()
   useChunkWarmup(authReady ? user : null, page)
@@ -1607,9 +1679,13 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Suspense fallback={<NotificationCenterFallback compact />}>
-            <NotificationCenter compact visibility="desktop" />
-          </Suspense>
+          {shouldMountNotificationCenter ? (
+            <Suspense fallback={<NotificationCenterFallback compact />}>
+              <NotificationCenter compact visibility="desktop" />
+            </Suspense>
+          ) : (
+            <NotificationCenterFallback compact onClick={requestNotificationCenterMount} />
+          )}
           <QuickPreferenceToggles />
         </div>
       </div>

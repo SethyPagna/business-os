@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 695 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 696 in this file.
 
 ## Goal
 
@@ -6485,6 +6485,21 @@ Decision rule:
     audit passed with 36/46 controls tested, 10 long-label controls skipped,
     and zero findings; Phase 29 and live hygiene checks are rerun after
     reference refresh.
+
+696. Defer desktop notification-center startup work.
+    Done: `frontend/src/App.tsx` now gates `NotificationCenter` behind
+    `useDeferredNotificationCenterMount()` instead of mounting the lazy
+    notification chunk during the first shell render. The fallback bell remains
+    clickable for immediate user intent, and the real notification center wakes
+    automatically after idle time or when relevant sync updates arrive. This
+    avoids the normal-startup `notification-center` chunk request and the
+    notification summary API read until notifications are needed or the shell
+    is idle. Proof: focused performance loading UX test, frontend source
+    guard, frontend typecheck, frontend utility suite, frontend production
+    build with hash `5ad9eba769d0526d`, and focused Dashboard desktop/mobile
+    live control audit passed with 36/46 controls tested, 10 long-label
+    controls skipped, and zero findings; Phase 29 and live hygiene checks are
+    rerun after reference refresh.
 
 ## Safety Gates
 

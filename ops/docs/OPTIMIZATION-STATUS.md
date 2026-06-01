@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 695, deferred global background chunks
+- Latest completed move: Move 696, deferred notification-center startup work
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `b3f0c3283db09f7f`
+  `5ad9eba769d0526d`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-48-20-110Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T09-01-27-174Z/summary.json`
 - latest focused Sales desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
 - latest focused POS desktop/mobile control audit:
@@ -64,6 +64,18 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent runtime/load win:
+
+- Frontend startup now defers the desktop notification center through
+  `useDeferredNotificationCenterMount()` in `frontend/src/App.tsx`. Normal
+  shell boot no longer immediately requests the 17.98 kB `notification-center`
+  chunk or starts the notification summary read. The bell remains visible and
+  clickable, and notification loading still wakes automatically after idle time
+  or immediately on relevant sync updates for inventory, sales, returns,
+  customers, contacts, catalog, settings, and backup. The source guard parsed
+  227 frontend TypeScript files, the production build hash is
+  `5ad9eba769d0526d`, and the focused Dashboard desktop/mobile live audit
+  passed with 36/46 controls tested, 10 long-label controls skipped by stable
+  broad-audit guardrails, and zero findings.
 
 - Frontend startup now gates two global lazy chunks that were being requested
   during normal shell boot. `frontend/src/App.tsx` mounts
