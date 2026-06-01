@@ -142,6 +142,10 @@ This folder is the browser-side transport layer for Business OS.
   - custom table list/create and custom row read/create/update/delete transport
   - keeps encoded custom table/row path segments and Dexie custom-table fallback outside the large domain registry
 
+- `auditLogTransport.ts`
+  - audit log paged reads and retention cleanup transport
+  - keeps audit row mirroring, local paged fallback shape, and encoded retention query parameters outside the large domain registry
+
 - `cooldownFallbacks.ts`
   - notification summary and Drive sync status fallback/cooldown helpers
   - keeps transient-gateway backoff state and typed fallback payloads outside the large domain registry

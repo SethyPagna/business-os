@@ -197,6 +197,10 @@ import {
   updateCustomRow as updateCustomRowRequest,
 } from './customTablesTransport.ts'
 import {
+  deleteAuditLogsRetention as deleteAuditLogsRetentionRequest,
+  getAuditLogs as getAuditLogsRequest,
+} from './auditLogTransport.ts'
+import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
   getCurrentOrganization as getCurrentOrganizationRequest,
@@ -1166,34 +1170,11 @@ export const updateCustomRow    = ({ tableName, id, data, expectedUpdatedAt }) =
 export const deleteCustomRow    = ({ tableName, id, payload })     => deleteCustomRowRequest({ tableName, id, payload })
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
-export const getAuditLogs = (params = {}) => {
-  const q = buildQueryString(params)
-  return route(
-    `audit_log:get:${q}`,
-    async () => {
-      const result = await apiFetch('GET', appendQuery('/api/system/audit-logs', q))
-      const auditRows = Array.isArray(result) ? result : (result?.items || [])
-      await mirrorTable('audit_logs')(auditRows).catch(() => {})
-      return result
-    },
-    async () => {
-      const rows = await dexieDb.audit_logs.orderBy('created_at').reverse().limit(params?.pageSize || 50).toArray()
-      return {
-        items: rows,
-        total: rows.length,
-        page: 1,
-        pageSize: rows.length || Number(params?.pageSize || 50),
-        totalPages: 1,
-        filters: { users: [] },
-        source: 'local',
-        partial: true,
-      }
-    },
-  )
-}
+export const getAuditLogs = (params = {}) =>
+  getAuditLogsRequest(params)
 
 export const deleteAuditLogsRetention = (olderThanDays = 30) =>
-  route('audit_log:retention:delete', () => apiFetch('DELETE', `/api/system/audit-logs/retention?olderThanDays=${encodeURIComponent(olderThanDays)}&confirm=1`, undefined), null, true)
+  deleteAuditLogsRetentionRequest(olderThanDays)
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
 export async function getSystemJob(id) {

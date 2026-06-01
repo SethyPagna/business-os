@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 690.
+- Latest completed implementation move in this roadmap: Move 691.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8122,3 +8122,20 @@ Move 690 status:
   Settings desktop/mobile live control audit passed with 12/34 controls tested,
   22 controls skipped by stable guardrails, and zero findings; Phase 29 and
   live hygiene checks are rerun after reference refresh.
+
+Move 691 status:
+- Move 691 extracts audit log transport from the large frontend API registry.
+  `frontend/src/api/auditLogTransport.ts` now owns paged audit-log reads,
+  audit row mirroring, local paged fallback shape, shared query construction,
+  and retention cleanup with encoded query parameters. `methods.ts` keeps
+  public `window.api` wrapper names for compatibility while no longer carrying
+  direct `/api/system/audit-logs` fetches, retention cleanup path construction,
+  or audit-log mirror fallback code. The API guide documents the new audit log
+  boundary, and focused API HTTP tests verify source placement, user filter
+  exposure, server result return behavior, local fallback shape, shared query
+  builder usage, and no direct audit-log fetch calls in the large registry. The
+  source guard parsed 225 frontend source files, the production build shows the
+  `app-api-methods` chunk at about 26.97 kB with no circular chunk warning, and
+  the focused Audit Log desktop/mobile live control audit passed with 28/29
+  controls tested, 1 empty-label control skipped, and zero findings; Phase 29
+  and live hygiene checks are rerun after reference refresh.

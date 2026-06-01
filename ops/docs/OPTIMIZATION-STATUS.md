@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 690, typed custom tables transport extraction
+- Latest completed move: Move 691, typed audit log transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `f0bd9c4c253b521e`
+  `5a08bbe2656abb76`
 
 Latest verified reports:
 
@@ -38,7 +38,7 @@ Latest verified reports:
 - latest focused public catalog desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
 - latest focused Audit Log desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-00-11-876Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-30-39-435Z/summary.json`
 - latest focused Inventory desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-26-48-123Z/summary.json`
 - latest focused Branch desktop/mobile control audit:
@@ -60,6 +60,15 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend audit log transport is now
+  `frontend/src/api/auditLogTransport.ts` with typed paged audit-log reads and
+  retention cleanup transport. Audit row mirroring, local paged fallback shape,
+  shared query building, and encoded retention query parameters now live
+  outside the large API registry. The source guard now parses 225 frontend
+  TypeScript files, the production build reports the `app-api-methods` chunk
+  around 26.97 kB, and the focused Audit Log desktop/mobile live audit passed
+  with 28/29 controls tested, 1 empty-label control skipped, and zero findings.
 
 - Frontend custom tables transport is now
   `frontend/src/api/customTablesTransport.ts` with typed custom table
