@@ -56,11 +56,7 @@ import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.t
 import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
 import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
-
-function getPortalBaseUrl() {
-  const browserOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : ''
-  return (browserOrigin || getSyncServerUrl() || '').replace(/\/$/, '')
-}
+import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
@@ -288,24 +284,6 @@ async function withSettingsExpectedUpdatedAt(payload = {}) {
     if (meta?.updatedAt) body.expectedUpdatedAt = meta.updatedAt
   } catch (_) {}
   return body
-}
-
-async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 10000) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    })
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
-    }
-    throw error
-  } finally {
-    clearTimeout(timer)
-  }
 }
 
 function mirrorReadResult(mirrorFn, result) {

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 660.
+- Latest completed implementation move in this roadmap: Move 661.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7632,3 +7632,17 @@ Move 660 status:
   Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
   frontend utility suite, frontend production build, Phase 29 audit, and
   focused Products desktop/mobile live control audit passed.
+
+Move 661 status:
+- Move 661 extracts the public portal HTTP boundary from the large frontend API
+  registry. `frontend/src/api/portalHttp.ts` now owns `getPortalBaseUrl` and
+  `fetchJsonWithTimeout`, preserving browser-origin preference, sync-server
+  fallback trimming, abort-controller wiring, and the existing timeout error
+  message. Portal catalog, membership, submission, and portal AI methods now
+  import this typed helper instead of keeping the fetch wrapper inside
+  `methods.ts`. The focused API HTTP test covers origin selection and abort
+  signal wiring directly, and the production build shows the `app-api-methods`
+  chunk at about 59.16 kB. Proof: focused API HTTP tests, frontend source
+  guard, frontend typecheck, frontend utility suite, frontend production build,
+  Phase 29 audit, and focused Products desktop/mobile live control audit
+  passed.

@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 660, typed API actor query helper extraction
+- Latest completed move: Move 661, typed public portal HTTP helper extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `37d8cbe2266668b1`
+  `fc9ea89af330c715`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T00-49-29-526Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T00-56-14-621Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -173,7 +173,8 @@ Recent route-level win:
   modules. Query-string/id normalization, request-id idempotency, conflict
   preview shaping, pending-sync preview serialization, and actor/user query
   attribution now live outside `frontend/src/api/methods.ts` with direct
-  focused coverage.
+  focused coverage. Public portal base URL resolution and abortable portal
+  fetches are also split into `frontend/src/api/portalHttp.ts`.
 
 ## Recently Rejected Candidates
 

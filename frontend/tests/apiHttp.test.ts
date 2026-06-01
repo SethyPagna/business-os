@@ -17,6 +17,7 @@ import {
 } from '../src/api/http.ts'
 import { appendActorQuery, getCurrentUserContext } from '../src/api/actorQuery.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from '../src/api/conflicts.ts'
+import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
 import { PENDING_SYNC_PREVIEW_LIMIT, serializePendingSyncPreview } from '../src/api/syncPreview.ts'
@@ -439,14 +440,51 @@ await runTest('actor query helper appends current user context and extra paramet
   }
 })
 
+await runTest('portal HTTP helper prefers browser origin and keeps fetch abort signals wired', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test/')
+  assert.equal(getPortalBaseUrl(), 'https://sync.example.test')
+
+  const originalWindow = globalThis.window
+  const originalFetch = globalThis.fetch
+  const calls: FetchCall[] = []
+  globalThis.window = {
+    location: { origin: 'https://browser.example.test/' },
+  } as unknown as Window & typeof globalThis
+  globalThis.fetch = ((...args: FetchCall) => {
+    calls.push(args)
+    return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+  }) as typeof fetch
+
+  try {
+    assert.equal(getPortalBaseUrl(), 'https://browser.example.test')
+    const response = await fetchJsonWithTimeout('https://browser.example.test/api/portal/config', {
+      headers: { 'bypass-tunnel-reminder': 'true' },
+    }, 500)
+    assert.equal(response.ok, true)
+    assert.equal(calls.length, 1)
+    assert.ok(calls[0][1]?.signal instanceof AbortSignal)
+  } finally {
+    globalThis.window = originalWindow
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
+  const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
   assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
+  assert.match(source, /import \{ fetchJsonWithTimeout, getPortalBaseUrl \} from '\.\/portalHttp\.ts'/)
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
   )
+  assert.match(portalHttpSource, /export async function fetchJsonWithTimeout\([\s\S]*const controller = new AbortController\(\)[\s\S]*signal: controller\.signal/)
   assert.match(
     source,
     /async function clearCachedQueryResults\(prefixes = \[\]\)[\s\S]*const keys = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,

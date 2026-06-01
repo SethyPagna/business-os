@@ -34,6 +34,10 @@ This folder is the browser-side transport layer for Business OS.
   - current-user context reader and actor query-string helper
   - keeps user attribution parameters consistent for AI, user, role, upload, and delete calls
 
+- `portalHttp.ts`
+  - portal base URL resolver and abortable public-portal fetch helper
+  - keeps public catalog, membership, submission, and portal AI reads on one timeout path
+
 - `localDb.ts`
   - Dexie-based browser storage for offline queues and local cache helpers
 
