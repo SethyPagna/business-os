@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-01T01:16:15.326Z
+Generated: 2026-06-01T01:25:26.674Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 569
+- Files scanned: 570
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-01T01:16:15.326Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 370 |
+| .ts | 371 |
 | .tsx | 107 |
 | .md | 45 |
 | .json | 17 |
@@ -34,8 +34,8 @@ Generated: 2026-06-01T01:16:15.326Z
 | backend/routes | 24 |
 | ops/scripts/runtime/live-checks | 20 |
 | frontend/components/shared | 17 |
+| frontend/api | 14 |
 | ops/docs | 14 |
-| frontend/api | 13 |
 | frontend/components/catalog | 13 |
 | backend/services | 12 |
 | frontend/components/contacts | 10 |
@@ -63,15 +63,15 @@ Generated: 2026-06-01T01:16:15.326Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8399 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7680 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7217 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5962 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8413 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7696 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7221 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5977 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3399 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2785 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2786 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
@@ -81,13 +81,13 @@ Generated: 2026-06-01T01:16:15.326Z
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
-| frontend/src/api/methods.ts | 2100 | frontend/api |
 | frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/src/api/methods.ts | 2047 | frontend/api |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1878 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1785 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1786 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |
@@ -106,10 +106,10 @@ Generated: 2026-06-01T01:16:15.326Z
 | backend/src/routes/system/index.ts | 20 | backend/routes |
 | frontend/src/components/pos/POS.tsx | 20 | frontend/components/pos |
 | frontend/src/components/catalog/CatalogPage.tsx | 19 | frontend/components/catalog |
+| frontend/src/api/methods.ts | 18 | frontend/api |
 | frontend/src/components/contacts/CustomersTab.tsx | 18 | frontend/components/contacts |
 | frontend/src/components/returns/Returns.tsx | 18 | frontend/components/returns |
 | backend/src/routes/products.ts | 17 | backend/routes |
-| frontend/src/api/methods.ts | 17 | frontend/api |
 | frontend/src/components/contacts/DeliveryTab.tsx | 17 | frontend/components/contacts |
 | frontend/src/components/contacts/SuppliersTab.tsx | 17 | frontend/components/contacts |
 | backend/test/routeContracts.test.ts | 15 | backend/test/routeContracts.test.ts |
@@ -124,6 +124,7 @@ Generated: 2026-06-01T01:16:15.326Z
 | frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |
 | frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |
 | frontend/src/components/contacts/Contacts.tsx | 10 | frontend/components/contacts |
+| frontend/tests/apiHttp.test.ts | 10 | frontend/tests/apiHttp.test.ts |
 
 ## Compatibility Wrappers
 

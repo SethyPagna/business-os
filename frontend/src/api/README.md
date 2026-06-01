@@ -18,6 +18,10 @@ This folder is the browser-side transport layer for Business OS.
   - typed query-string and positive-id normalization helpers shared by `methods.ts`
   - keeps pure request-shaping logic outside the remaining `ts-nocheck` domain registry
 
+- `queryCache.ts`
+  - bounded read-query cache helpers stored in Dexie settings rows
+  - keeps cache key construction, TTL reads, writes, and sync-update invalidation scans outside the large domain registry
+
 - `requestIds.ts`
   - idempotency key helpers for write payloads
   - keeps client request-id creation and trimming consistent across products, POS, contacts, inventory, and returns

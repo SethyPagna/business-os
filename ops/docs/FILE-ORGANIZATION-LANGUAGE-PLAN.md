@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 663 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 664 in this file.
 
 ## Goal
 
@@ -5940,6 +5940,21 @@ Decision rule:
     frontend source guard, frontend typecheck, frontend utility suite,
     frontend production build, Phase 29 audit, and focused Products
     desktop/mobile live control audit passed.
+
+664. Extract typed read-query cache helpers from the large domain registry.
+    Done: `frontend/src/api/queryCache.ts` now owns read-cache key
+    construction, six-hour TTL reads, Dexie settings writes, and prefix-based
+    invalidation scans previously embedded in `frontend/src/api/methods.ts`.
+    The helper preserves the explicit nested loops used to avoid chained
+    map/filter allocations while giving product search/filter/lookup and
+    inventory product search flows one typed cache boundary. The API guide
+    documents the split and the focused API HTTP test covers cache-key trimming
+    plus the typed invalidation loop location. The source guard parsed 200
+    frontend files and the production build now reports the `app-api-methods`
+    chunk around 55.95 kB. Proof: focused API HTTP tests, frontend source
+    guard, frontend typecheck, frontend utility suite, frontend production
+    build, Phase 29 audit, and focused Products desktop/mobile live control
+    audit passed.
 
 ## Safety Gates
 

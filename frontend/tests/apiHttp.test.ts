@@ -30,6 +30,7 @@ import {
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from '../src/api/importTransport.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
+import { buildQueryCacheStorageKey } from '../src/api/queryCache.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
 import { PENDING_SYNC_PREVIEW_LIMIT, serializePendingSyncPreview } from '../src/api/syncPreview.ts'
 
@@ -552,9 +553,12 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
   const importTransportSource = fs.readFileSync(new URL('../src/api/importTransport.ts', import.meta.url), 'utf8')
+  const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
+  assert.equal(buildQueryCacheStorageKey(' products:search:x '), 'read_cache:products:search:x')
   assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
   assert.match(source, /import \{ fetchJsonWithTimeout, getPortalBaseUrl \} from '\.\/portalHttp\.ts'/)
   assert.match(source, /import \{ apiFormPost, buildMultipartHeaders, withImportDeviceInfo \} from '\.\/importTransport\.ts'/)
+  assert.match(source, /from '\.\/queryCache\.ts'/)
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
@@ -562,11 +566,12 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(portalHttpSource, /export async function fetchJsonWithTimeout\([\s\S]*const controller = new AbortController\(\)[\s\S]*signal: controller\.signal/)
   assert.match(importTransportSource, /export async function apiFormPost\([\s\S]*requireLiveServerWrite\(channel,[\s\S]*credentials: 'include'[\s\S]*body: form/)
   assert.match(
-    source,
-    /async function clearCachedQueryResults\(prefixes = \[\]\)[\s\S]*const keys = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,
+    queryCacheSource,
+    /export async function clearCachedQueryResults\(prefixes: string\[\] = \[\]\): Promise<void>[\s\S]*const keys: string\[\] = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys: string\[\] = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,
   )
   assert.doesNotMatch(source, /Object\.entries\(extra \|\| \{\}\)\.forEach/)
   assert.doesNotMatch(source, /\.map\(\(row\) => String\(row\?\.key \|\| ''\)\)\s*\.filter/)
+  assert.doesNotMatch(source, /const QUERY_CACHE_PREFIX/)
 })
 
 await runTest('empty local mirrors are not treated as usable server read fallback data', () => {

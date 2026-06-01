@@ -63,6 +63,11 @@ import {
   readDriveSyncStatusCooldown,
   readNotificationSummaryMissingUntil,
 } from './cooldownFallbacks.ts'
+import {
+  clearCachedQueryResults,
+  readCachedQueryResult,
+  writeCachedQueryResult,
+} from './queryCache.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
@@ -334,64 +339,6 @@ function mirrorTable(tableName) {
     }
     return replaceTableContents(tableName, incomingRows)
   }
-}
-
-const QUERY_CACHE_PREFIX = 'read_cache:'
-const QUERY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000
-
-function buildQueryCacheStorageKey(key) {
-  return `${QUERY_CACHE_PREFIX}${String(key || '').trim()}`
-}
-
-async function readCachedQueryResult(key) {
-  const storageKey = buildQueryCacheStorageKey(key)
-  try {
-    const row = await dexieDb.settings.get(storageKey)
-    if (!row?.value) return null
-    const parsed = JSON.parse(row.value)
-    const savedAtMs = Date.parse(parsed?.savedAt || '')
-    if (Number.isFinite(savedAtMs) && Date.now() - savedAtMs > QUERY_CACHE_MAX_AGE_MS) return null
-    return parsed?.data ?? null
-  } catch (_) {
-    return null
-  }
-}
-
-async function writeCachedQueryResult(key, data) {
-  const storageKey = buildQueryCacheStorageKey(key)
-  try {
-    await dexieDb.settings.put({
-      key: storageKey,
-      value: JSON.stringify({
-        savedAt: new Date().toISOString(),
-        data,
-      }),
-    })
-  } catch (_) {}
-  return data
-}
-
-async function clearCachedQueryResults(prefixes = []) {
-  const keys = []
-  for (const value of Array.isArray(prefixes) ? prefixes : []) {
-    const key = String(value || '').trim()
-    if (key) keys.push(key)
-  }
-  if (!keys.length) return
-  try {
-    const rows = await dexieDb.settings.toArray()
-    const matchingKeys = []
-    for (const row of rows) {
-      const rowKey = String(row?.key || '')
-      if (!rowKey.startsWith(QUERY_CACHE_PREFIX)) continue
-      for (const prefix of keys) {
-        if (!rowKey.includes(prefix)) continue
-        matchingKeys.push(rowKey)
-        break
-      }
-    }
-    if (matchingKeys.length) await dexieDb.settings.bulkDelete(matchingKeys)
-  } catch (_) {}
 }
 
 if (typeof window !== 'undefined') {

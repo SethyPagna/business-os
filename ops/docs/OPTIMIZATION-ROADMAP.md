@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 663.
+- Latest completed implementation move in this roadmap: Move 664.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7677,3 +7677,19 @@ Move 663 status:
   tests, frontend source guard, frontend typecheck, frontend utility suite,
   frontend production build, Phase 29 audit, and focused Products
   desktop/mobile live control audit passed.
+
+Move 664 status:
+- Move 664 extracts the read-query cache boundary from the large frontend API
+  registry. `frontend/src/api/queryCache.ts` now owns cache key construction,
+  the six-hour TTL read path, Dexie settings writes, and sync-update
+  invalidation scans with the same explicit nested-loop matching strategy.
+  Product search/filter/lookup and inventory product search methods now import
+  typed cache helpers instead of carrying cache constants and Dexie loops inside
+  the remaining `ts-nocheck` registry. The API guide documents the new boundary,
+  focused API HTTP tests cover cache-key trimming and verify the allocation-light
+  invalidation loop lives in the typed helper, the source guard parsed 200
+  frontend source files, and the production build shows the `app-api-methods`
+  chunk at about 55.95 kB. Proof: focused API HTTP tests, frontend source
+  guard, frontend typecheck, frontend utility suite, frontend production build,
+  Phase 29 audit, and focused Products desktop/mobile live control audit
+  passed.
