@@ -15,7 +15,6 @@
 
 import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.ts'
 import { connectWS, disconnectWS, reconnectWS } from './api/websocket.ts'
-import { dexieDb }                 from './api/localDb.ts'
 import {
   dispatchSyncUpdates,
   emitSyncQueueChanged,
@@ -80,11 +79,16 @@ let offlineVaultKey: OfflineVaultKey = null
 let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer: number | null = null
 let methodsModulePromise: Promise<MethodsModule> | null = null
+let localDbPromise: Promise<any> | null = null
 const lazyApiMethodCache = new Map<string, LazyApiMethod>()
-const offlineDb = dexieDb as any
 
 function sanitizeBaseUrl(value: unknown): string {
   return String(value || '').trim().replace(/\/$/, '')
+}
+
+function getOfflineDb(): Promise<any> {
+  if (!localDbPromise) localDbPromise = import('./api/localDb.ts').then((module) => module.dexieDb as any)
+  return localDbPromise
 }
 
 function loadMethodsModule(): Promise<MethodsModule> {
@@ -221,6 +225,7 @@ function lockOfflineVault(reason = 'manual'): void {
 
 async function unlockOfflineVault(pin: unknown): Promise<AnyRecord> {
   if (!String(pin || '').trim()) throw new Error('PIN is required to unlock offline mode.')
+  const offlineDb = await getOfflineDb()
   let saltRow = await offlineDb.offline_vault.get('device_salt').catch(() => null)
   if (!saltRow?.value) {
     saltRow = {
@@ -252,6 +257,7 @@ async function queueBusinessOutboxOperation(operation: OfflineOperation = {}): P
     return { success: false, locked: true, status: 'vault_locked' }
   }
   scheduleOfflineVaultIdleLock()
+  const offlineDb = await getOfflineDb()
   const now = new Date().toISOString()
   const payload = operation.payload || {}
   const encrypted = await encryptOfflineVaultValue(payload)
@@ -287,6 +293,7 @@ async function queueOfflineFileChunks(file: File, ownerOperation: OfflineFileOwn
     return { success: false, locked: true, status: 'vault_locked' }
   }
   scheduleOfflineVaultIdleLock()
+  const offlineDb = await getOfflineDb()
   const upload_id = ownerOperation.upload_id || `offline_file_${Date.now()}_${Math.random().toString(36).slice(2)}`
   const chunkCount = Math.ceil(Number(file.size || 0) / OFFLINE_FILE_CHUNK_SIZE)
   const wholeBytes = new Uint8Array(await file.arrayBuffer())
@@ -364,6 +371,7 @@ async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Prom
     return { success: false, locked: true, status: 'vault_locked' }
   }
   scheduleOfflineVaultIdleLock()
+  const offlineDb = await getOfflineDb()
   const rows = ((await offlineDb.sync_outbox.toArray().catch(() => [])) as OfflineRow[])
     .filter((row) => ['pending', 'failed', 'retry'].includes(String(row?.status || 'pending')))
     .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
@@ -473,6 +481,7 @@ async function syncUnlockedOfflineFileChunks(options: OfflineSyncOptions = {}): 
     return { success: false, locked: true, status: 'vault_locked' }
   }
   scheduleOfflineVaultIdleLock()
+  const offlineDb = await getOfflineDb()
   const allRows = (await offlineDb.offline_file_chunks.toArray().catch(() => [])) as OfflineRow[]
   const uploadIds = [...new Set(allRows
     .filter((row) => row.status !== 'synced')
@@ -740,7 +749,7 @@ const staticApi = {
     setSyncServerUrl(clean)
     if (clean) {
       if (syncServerChanged) {
-        dexieDb.settings.put({ key: 'sync_server_url', value: clean }).catch(() => {})
+        getOfflineDb().then((db) => db.settings.put({ key: 'sync_server_url', value: clean })).catch(() => {})
         cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
       }
       connectWS()
@@ -750,7 +759,7 @@ const staticApi = {
       }
     } else {
       if (syncServerChanged) {
-        dexieDb.settings.delete('sync_server_url').catch(() => {})
+        getOfflineDb().then((db) => db.settings.delete('sync_server_url')).catch(() => {})
         disconnectWS()
       }
     }
@@ -784,7 +793,7 @@ const staticApi = {
       localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
       sessionStorage.removeItem('businessos_sync_token_session')
     } catch (_) {}
-    dexieDb.settings.delete('sync_token').catch(() => {})
+    getOfflineDb().then((db) => db.settings.delete('sync_token')).catch(() => {})
     if (clean) {
       console.warn('[web-api] Sync token support has been retired in favor of user sign-in sessions.')
     }
@@ -862,7 +871,7 @@ if (typeof window !== 'undefined') {
         localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
         sessionStorage.removeItem('businessos_sync_token_session')
       } catch (_) {}
-      dexieDb.settings.delete('sync_token').catch(() => {})
+      getOfflineDb().then((db) => db.settings.delete('sync_token')).catch(() => {})
     })
 
     // Determine the correct sync server URL
@@ -872,13 +881,14 @@ if (typeof window !== 'undefined') {
       url = sanitizeSyncServerUrl(location.origin)
       scheduleBootstrapStorageMaintenance(() => {
         try { localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, url) } catch (_) {}
-        dexieDb.settings.put({ key: 'sync_server_url', value: url }).catch(() => {})
+        getOfflineDb().then((db) => db.settings.put({ key: 'sync_server_url', value: url })).catch(() => {})
       })
     } else {
       // Vite dev ??use stored value (normally points to localhost:4000 backend)
       url = sanitizeSyncServerUrl(localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || '')
       try {
-        const stored = await dexieDb.settings.bulkGet(['sync_server_url'])
+        const db = await getOfflineDb()
+        const stored = await db.settings.bulkGet(['sync_server_url'])
         if (!url && stored[0]?.value) url = sanitizeSyncServerUrl(stored[0].value)
       } catch (_) {}
     }

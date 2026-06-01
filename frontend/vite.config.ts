@@ -109,6 +109,8 @@ const deferredModulePreloadPrefixes = [
   'assets/notification-center-',
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
+  'assets/app-local-db-',
+  'assets/vendor-dexie-',
   'assets/vendor-zxing-',
 ]
 
@@ -125,6 +127,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
+    if (normalized.endsWith('/src/api/localDb.ts')) return 'app-local-db'
     if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
     ) {
@@ -172,7 +175,14 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/NotificationCenter.tsx')) return 'notification-center'
     if (normalized.includes('/src/components/shared/BackgroundImportTracker.tsx')) return 'background-import-tracker'
     if (normalized.includes('/src/components/shared/WriteConflictModal.tsx')) return 'write-conflict-modal'
-    if (normalized.includes('/src/api/')) return 'app-api'
+    if (
+      normalized.endsWith('/src/api/http.ts')
+      || normalized.endsWith('/src/api/websocket.ts')
+      || normalized.endsWith('/src/api/syncRuntime.ts')
+    ) {
+      return 'app-api'
+    }
+    if (normalized.includes('/src/api/')) return 'app-api-methods'
     if (normalized.includes('/src/app/')) return 'app-shell'
     if (normalized.includes('/src/components/shared/')) return 'app-shared'
     return undefined

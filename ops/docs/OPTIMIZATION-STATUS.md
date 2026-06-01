@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 703, defer route warmups until after load
+- Latest completed move: Move 704, lazy-load local DB/Dexie out of startup
 
 ## Current Baseline
 
@@ -17,40 +17,23 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `830635f186b1e640`
+  `4ee9559e01210d68`
 
 Latest verified reports:
 
-- broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
-- latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
-- latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T12-56-51-694Z/summary.json`
-- latest focused Sales desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
-- latest focused POS desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-14-57-739Z/summary.json`
-- latest focused Settings desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-16-31-085Z/summary.json`
-- latest focused Library desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-14-04-097Z/summary.json`
-- latest focused Contacts desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-31-14-438Z/summary.json`
-- latest focused Users desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-50-58-307Z/summary.json`
-- latest focused public catalog desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
-- latest focused Audit Log desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-30-39-435Z/summary.json`
-- latest focused Inventory desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-26-48-123Z/summary.json`
-- latest focused Branch desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-00-35-669Z/summary.json`
+- latest retained all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-latest.json`
+- latest focused Dashboard desktop/mobile control audit retained after prune:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T13-11-44-170Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
   `ops/docs/reference/PHASE29-AUDIT.md`
+
+Latest cleanup run:
+
+- `npm.cmd --prefix ops run prune-storage` removed old generated reports and
+  Docker builder cache in the 2026-06-01 Move 704 verification pass.
 
 Current honest pockets:
 
@@ -64,6 +47,20 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent runtime/load win:
+
+- Frontend startup now keeps Dexie and the local IndexedDB schema out of the
+  critical browser load path. `frontend/src/web-api.ts` no longer statically
+  imports `frontend/src/api/localDb.ts`; offline vault, outbox, file chunks,
+  and persisted sync settings call `getOfflineDb()` only when those paths run.
+  `frontend/vite.config.ts` also separates startup API files from method/local
+  DB chunks and excludes `app-local-db` plus `vendor-dexie` from eager
+  modulepreload. The real production output confirms `index.html` no longer
+  preloads `vendor-dexie` or `app-local-db`, and the startup `app-api` chunk no
+  longer references Dexie. The source guard parsed 227 frontend TypeScript
+  files, the production build hash is `4ee9559e01210d68`, and the focused
+  Dashboard desktop/mobile live audit passed with 36/46 controls tested, 10
+  long-label controls skipped by stable broad-audit guardrails, and zero
+  findings.
 
 - Frontend route warmups now wait until the current document has finished
   loading in `frontend/src/App.tsx`. Primary route chunk warmups and

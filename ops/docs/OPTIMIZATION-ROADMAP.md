@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 697.
+- Latest completed implementation move in this roadmap: Move 704.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8335,3 +8335,20 @@ Move 703 status:
   `830635f186b1e640`; focused Dashboard desktop/mobile live control audit
   passed with 36/46 controls tested, 10 long-label controls skipped, and zero
   findings; Phase 29 and live hygiene checks are rerun after reference refresh.
+
+Move 704 status:
+- Move 704 removes local IndexedDB/Dexie from the initial browser load path.
+  `frontend/src/web-api.ts` now lazy-loads `frontend/src/api/localDb.ts`
+  through `getOfflineDb()` for offline vault, outbox, file chunk, and persisted
+  sync-settings work instead of importing Dexie during `window.api`
+  installation. `frontend/vite.config.ts` now keeps only `http.ts`,
+  `websocket.ts`, and `syncRuntime.ts` in the startup `app-api` chunk, moves
+  local DB schema work into `app-local-db`, keeps method transports behind
+  `app-api-methods`, and excludes `app-local-db` plus `vendor-dexie` from eager
+  modulepreload. The built `index.html` no longer preloads `vendor-dexie` or
+  `app-local-db`, while `app-api` no longer references Dexie. The performance
+  loading source guard, source syntax check, typecheck, frontend utility suite,
+  and production build passed. Production build hash: `4ee9559e01210d68`;
+  focused Dashboard desktop/mobile live control audit passed with 36/46
+  controls tested, 10 long-label controls skipped, and zero findings; Phase 29
+  and live hygiene checks are rerun after reference refresh.

@@ -236,7 +236,7 @@ Total files documented: **233**
 | 224 | `frontend/src/utils/scriptTypography.ts` | 0 |
 | 225 | `frontend/src/utils/settingsRefresh.ts` | 1 |
 | 226 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
-| 227 | `frontend/src/web-api.ts` | 37 |
+| 227 | `frontend/src/web-api.ts` | 38 |
 | 228 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | 5 |
 | 229 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 230 | `ops/scripts/frontend/verify-performance.ts` | 4 |
@@ -2917,43 +2917,44 @@ Total files documented: **233**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `sanitizeBaseUrl` | function | 86 |
-| 2 | `loadMethodsModule` | function | 90 |
-| 3 | `getLazyApiMethod` | function | 95 |
-| 4 | `mapOfflineFileChunkStatusUpdates` | function | 109 |
-| 5 | `asArrayBuffer` | function | 125 |
-| 6 | `bytesToBase64` | function | 129 |
-| 7 | `base64ToBytes` | function | 140 |
-| 8 | `stableStringify` | function | 147 |
-| 9 | `sha256Hex` | function | 153 |
-| 10 | `deriveOfflineVaultKey` | function | 161 |
-| 11 | `encryptOfflineVaultValue` | function | 178 |
-| 12 | `decryptOfflineVaultValue` | function | 186 |
-| 13 | `requestOfflinePersistentStorage` | function | 196 |
-| 14 | `dispatchVaultLocked` | function | 203 |
-| 15 | `scheduleOfflineVaultIdleLock` | function | 208 |
-| 16 | `lockOfflineVault` | function | 214 |
-| 17 | `unlockOfflineVault` | function | 222 |
-| 18 | `queueBusinessOutboxOperation` | function | 247 |
-| 19 | `queueOfflineFileChunks` | function | 283 |
-| 20 | `dispatchOutboxProgress` | function | 336 |
-| 21 | `dispatchOutboxFileProgress` | function | 343 |
-| 22 | `dispatchOutboxConflict` | function | 350 |
-| 23 | `getSyncOutboxKey` | function | 357 |
-| 24 | `syncUnlockedOfflineOutbox` | function | 361 |
-| 25 | `syncUnlockedOfflineFileChunks` | function | 470 |
-| 26 | `refreshOfflineSnapshotSoon` | function | 531 |
-| 27 | `run` | const arrow | 541 |
-| 28 | `refreshServiceWorkerSoon` | function | 560 |
-| 29 | `runOfflineMaintenance` | function | 570 |
-| 30 | `startOfflineMaintenanceLoop` | function | 582 |
-| 31 | `scheduleInitialOfflineMaintenance` | function | 590 |
-| 32 | `run` | const arrow | 594 |
-| 33 | `scheduleIdle` | const arrow | 598 |
-| 34 | `scheduleBootstrapStorageMaintenance` | function | 615 |
-| 35 | `run` | const arrow | 621 |
-| 36 | `forwardServiceWorkerOutboxEvent` | function | 638 |
-| 37 | `forwardServiceWorkerAppEvent` | function | 726 |
+| 1 | `sanitizeBaseUrl` | function | 85 |
+| 2 | `getOfflineDb` | function | 89 |
+| 3 | `loadMethodsModule` | function | 94 |
+| 4 | `getLazyApiMethod` | function | 99 |
+| 5 | `mapOfflineFileChunkStatusUpdates` | function | 113 |
+| 6 | `asArrayBuffer` | function | 129 |
+| 7 | `bytesToBase64` | function | 133 |
+| 8 | `base64ToBytes` | function | 144 |
+| 9 | `stableStringify` | function | 151 |
+| 10 | `sha256Hex` | function | 157 |
+| 11 | `deriveOfflineVaultKey` | function | 165 |
+| 12 | `encryptOfflineVaultValue` | function | 182 |
+| 13 | `decryptOfflineVaultValue` | function | 190 |
+| 14 | `requestOfflinePersistentStorage` | function | 200 |
+| 15 | `dispatchVaultLocked` | function | 207 |
+| 16 | `scheduleOfflineVaultIdleLock` | function | 212 |
+| 17 | `lockOfflineVault` | function | 218 |
+| 18 | `unlockOfflineVault` | function | 226 |
+| 19 | `queueBusinessOutboxOperation` | function | 252 |
+| 20 | `queueOfflineFileChunks` | function | 289 |
+| 21 | `dispatchOutboxProgress` | function | 343 |
+| 22 | `dispatchOutboxFileProgress` | function | 350 |
+| 23 | `dispatchOutboxConflict` | function | 357 |
+| 24 | `getSyncOutboxKey` | function | 364 |
+| 25 | `syncUnlockedOfflineOutbox` | function | 368 |
+| 26 | `syncUnlockedOfflineFileChunks` | function | 478 |
+| 27 | `refreshOfflineSnapshotSoon` | function | 540 |
+| 28 | `run` | const arrow | 550 |
+| 29 | `refreshServiceWorkerSoon` | function | 569 |
+| 30 | `runOfflineMaintenance` | function | 579 |
+| 31 | `startOfflineMaintenanceLoop` | function | 591 |
+| 32 | `scheduleInitialOfflineMaintenance` | function | 599 |
+| 33 | `run` | const arrow | 603 |
+| 34 | `scheduleIdle` | const arrow | 607 |
+| 35 | `scheduleBootstrapStorageMaintenance` | function | 624 |
+| 36 | `run` | const arrow | 630 |
+| 37 | `forwardServiceWorkerOutboxEvent` | function | 647 |
+| 38 | `forwardServiceWorkerAppEvent` | function | 735 |
 
 ### 3.228 `ops/scripts/frontend/build-public-runtime-scripts.ts`
 
@@ -3008,8 +3009,8 @@ Total files documented: **233**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 115 |
-| 5 | `manualChunks` | function | 119 |
+| 4 | `shouldDeferModulePreload` | function | 117 |
+| 5 | `manualChunks` | function | 121 |
 
 ### 3.233 `frontend/tailwind.config.ts`
 

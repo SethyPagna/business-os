@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 703 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 704 in this file.
 
 ## Goal
 
@@ -6603,6 +6603,24 @@ Decision rule:
     Dashboard desktop/mobile live control audit passed with 36/46 controls
     tested, 10 long-label controls skipped, and zero findings; Phase 29 and
     live hygiene checks are rerun after reference refresh.
+
+704. Lazy-load local DB and Dexie out of the startup browser path.
+    Done: `frontend/src/web-api.ts` now installs `window.api`, the sync URL,
+    websocket, health checks, and scheduled maintenance without statically
+    importing `frontend/src/api/localDb.ts`. Offline vault, business outbox,
+    file chunk, and persisted settings paths load the local DB through
+    `getOfflineDb()` only when those paths run. `frontend/vite.config.ts`
+    keeps only startup API files in `app-api`, separates the IndexedDB schema
+    into `app-local-db`, keeps method transports behind `app-api-methods`, and
+    excludes `app-local-db` plus `vendor-dexie` from eager modulepreload.
+    Proof: built `index.html` no longer preloads `vendor-dexie` or
+    `app-local-db`, the startup `app-api` chunk no longer references Dexie,
+    focused performance loading UX test, frontend source guard, frontend
+    typecheck, frontend utility suite, frontend production build with hash
+    `4ee9559e01210d68`, and focused Dashboard desktop/mobile live control
+    audit passed with 36/46 controls tested, 10 long-label controls skipped,
+    and zero findings; Phase 29 and live hygiene checks are rerun after
+    reference refresh.
 
 ## Safety Gates
 
