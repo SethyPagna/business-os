@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 694, deferred pending-sync startup refresh
+- Latest completed move: Move 695, deferred global background chunks
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `ec095d6fa2045c5a`
+  `b3f0c3283db09f7f`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-33-30-468Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-48-20-110Z/summary.json`
 - latest focused Sales desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
 - latest focused POS desktop/mobile control audit:
@@ -64,6 +64,18 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent runtime/load win:
+
+- Frontend startup now gates two global lazy chunks that were being requested
+  during normal shell boot. `frontend/src/App.tsx` mounts
+  `WriteConflictModal` only when a write conflict exists, and mounts
+  `BackgroundImportTracker` only after idle time or immediately when an
+  import-job sync update appears. That removes the normal-startup request and
+  parse cost for the 7.54 kB write-conflict chunk and the 15.82 kB background
+  import tracker chunk, and avoids the import tracker `listImportJobs` poll on
+  first render. The source guard parsed 227 frontend TypeScript files, the
+  production build hash is `b3f0c3283db09f7f`, and the focused Dashboard
+  desktop/mobile live audit passed with 36/46 controls tested, 10 long-label
+  controls skipped by stable broad-audit guardrails, and zero findings.
 
 - Frontend startup now defers the global pending-sync banner's first
   `getPendingSyncState()` read through a cancellable idle scheduler in

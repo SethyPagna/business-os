@@ -99,6 +99,11 @@ interface WriteConflictDetail {
   ts?: number | string
 }
 
+interface SyncUpdateDetail {
+  channel?: string
+  ts?: number | string
+}
+
 interface AppShellApi {
   getPendingSyncState?: () => Promise<PendingSyncState | null | undefined>
   retryPendingSyncNow?: () => Promise<unknown>
@@ -274,6 +279,8 @@ const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
 const INTENT_CHUNK_WARMUP_DELAY_MS = 80
 const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 2500
 const PENDING_SYNC_IDLE_TIMEOUT_MS = 8000
+const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 5000
+const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 15000
 const STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 const PAGE_LOADER_STALL_WARNING_MS = 15000
@@ -567,6 +574,13 @@ function scheduleInitialPendingSyncRefresh(refresh: () => void): CancelWarmup {
   }
 }
 
+function isImportTrackerWakeEvent(event: Event): boolean {
+  if (!(event instanceof CustomEvent)) return false
+  const detail = event.detail as SyncUpdateDetail | null
+  const channel = String(detail?.channel || '').trim().toLowerCase()
+  return channel === 'importjobs' || channel === 'import_jobs' || channel === 'imports'
+}
+
 function getDataWarmupLoaders(_canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
   // Data warmups used to prefetch many page reads in the background. In
   // practice that created first-visit contention: the real page load would
@@ -726,6 +740,60 @@ function useSyncErrorBanner() {
     clearConflictsNeedReview: () => setConflictsNeedReview(null),
     clearSyncError: () => setSyncError(null),
   }
+}
+
+function useDeferredImportTrackerMount(user: AppUser | null): boolean {
+  const [enabled, setEnabled] = useState(false)
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') {
+      setEnabled(false)
+      return undefined
+    }
+    if (enabled) return undefined
+
+    let cancelled = false
+    let idleId: number | null = null
+    let timerId: number | null = null
+    const enable = () => {
+      if (cancelled) return
+      setEnabled(true)
+    }
+    const enableWhenVisible = () => {
+      if (cancelled) return
+      if (document.visibilityState === 'hidden') return
+      enable()
+    }
+    const onSyncUpdate = (event: Event) => {
+      if (isImportTrackerWakeEvent(event)) enable()
+    }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      enable()
+    }
+
+    window.addEventListener('sync:update', onSyncUpdate)
+    document.addEventListener('visibilitychange', onVisible)
+    timerId = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(enableWhenVisible, { timeout: IMPORT_TRACKER_IDLE_TIMEOUT_MS })
+      } else {
+        enableWhenVisible()
+      }
+    }, IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS)
+
+    return () => {
+      cancelled = true
+      window.removeEventListener('sync:update', onSyncUpdate)
+      document.removeEventListener('visibilitychange', onVisible)
+      if (timerId != null) window.clearTimeout(timerId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [enabled, user])
+
+  return !!user && enabled
 }
 
 function useVisibilityRecovery() {
@@ -1337,6 +1405,7 @@ export default function App() {
     clearSyncError,
   } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
+  const shouldMountImportTracker = useDeferredImportTrackerMount(authReady ? user : null)
 
   useVisibilityRecovery()
   useChunkWarmup(authReady ? user : null, page)
@@ -1565,9 +1634,11 @@ export default function App() {
               window.setTimeout(() => window.location.reload(), 250)
             }}
           />
-          <Suspense fallback={null}>
-            <BackgroundImportTracker />
-          </Suspense>
+          {shouldMountImportTracker ? (
+            <Suspense fallback={null}>
+              <BackgroundImportTracker />
+            </Suspense>
+          ) : null}
           {mountedPages.map((mountedPage) => (
             <PageSlot
               key={mountedPage}
@@ -1582,13 +1653,15 @@ export default function App() {
 
       <Notification notification={notification} />
       <GlobalScrollControls />
-      <Suspense fallback={null}>
-        <WriteConflictModal
-          conflict={writeConflict}
-          onClose={dismissWriteConflict}
-          onReload={reloadWriteConflict}
-        />
-      </Suspense>
+      {writeConflict ? (
+        <Suspense fallback={null}>
+          <WriteConflictModal
+            conflict={writeConflict}
+            onClose={dismissWriteConflict}
+            onReload={reloadWriteConflict}
+          />
+        </Suspense>
+      ) : null}
       <SyncErrorBanner
         error={syncError}
         onDismiss={clearSyncError}

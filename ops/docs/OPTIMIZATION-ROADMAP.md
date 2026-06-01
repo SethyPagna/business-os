@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 694.
+- Latest completed implementation move in this roadmap: Move 695.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8184,6 +8184,22 @@ Move 694 status:
   idle scheduler and prevents a synchronous pending-sync read from returning,
   the source guard parsed 227 frontend source files, the production build hash
   is `ec095d6fa2045c5a`, and the focused Dashboard desktop/mobile live control
+  audit passed with 36/46 controls tested, 10 long-label controls skipped, and
+  zero findings; Phase 29 and live hygiene checks are rerun after reference
+  refresh.
+
+Move 695 status:
+- Move 695 defers global background chunks that do not need to participate in
+  normal first paint. `frontend/src/App.tsx` now mounts the write-conflict
+  modal only when `writeConflict` exists, and mounts the background import
+  tracker through `useDeferredImportTrackerMount()`, which wakes after idle
+  time or immediately on import-job sync updates. This keeps conflict review
+  behavior and import-job visibility intact while removing the normal-startup
+  chunk requests for `write-conflict-modal` and `background-import-tracker`,
+  plus the import tracker `listImportJobs` poll that used to run as soon as the
+  shell mounted. The focused loading UX guard verifies both gates, the source
+  guard parsed 227 frontend source files, the production build hash is
+  `b3f0c3283db09f7f`, and the focused Dashboard desktop/mobile live control
   audit passed with 36/46 controls tested, 10 long-label controls skipped, and
   zero findings; Phase 29 and live hygiene checks are rerun after reference
   refresh.

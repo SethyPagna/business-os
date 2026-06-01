@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 694 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 695 in this file.
 
 ## Goal
 
@@ -6470,6 +6470,21 @@ Decision rule:
     desktop/mobile live control audit passed with 36/46 controls tested, 10
     long-label controls skipped, and zero findings; Phase 29 and live hygiene
     checks are rerun after reference refresh.
+
+695. Defer global background chunks until they are needed.
+    Done: `frontend/src/App.tsx` now gates `WriteConflictModal` behind an
+    actual `writeConflict` value and gates `BackgroundImportTracker` behind
+    `useDeferredImportTrackerMount()`. The import tracker wakes after idle time
+    or immediately on import-job sync updates, so active imports still surface,
+    but normal startup no longer requests the write-conflict chunk, the import
+    tracker chunk, or the import tracker `listImportJobs` poll during first
+    render. The performance loading UX guard verifies both gates. Proof:
+    focused performance loading UX test, frontend source guard, frontend
+    typecheck, frontend utility suite, frontend production build with hash
+    `b3f0c3283db09f7f`, and focused Dashboard desktop/mobile live control
+    audit passed with 36/46 controls tested, 10 long-label controls skipped,
+    and zero findings; Phase 29 and live hygiene checks are rerun after
+    reference refresh.
 
 ## Safety Gates
 
