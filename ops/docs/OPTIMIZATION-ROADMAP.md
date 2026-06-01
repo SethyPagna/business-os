@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 685.
+- Latest completed implementation move in this roadmap: Move 686.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8027,3 +8027,22 @@ Move 685 status:
   circular chunk warning, and the focused Products desktop/mobile live control
   audit passed with 42/42 controls tested and zero findings; Phase 29 and live
   hygiene checks are rerun after reference refresh.
+
+Move 686 status:
+- Move 686 extracts file and upload transport from the large frontend API
+  registry. `frontend/src/api/fileTransport.ts` now owns Library file
+  list/delete transport, generic file asset uploads, product image uploads,
+  and user avatar uploads with typed list metadata normalization,
+  XMLHttpRequest upload progress, data-url image conversion, actor attribution,
+  and live-server upload gating. `methods.ts` keeps public `window.api`
+  wrapper names for compatibility while no longer carrying direct `/api/files`
+  list/delete calls, `/api/files/upload`, `/api/products/upload-image`, or
+  `/api/users/avatar-upload` request code. The API guide documents the new
+  file transport boundary, focused API HTTP tests verify source placement, and
+  action stability tests verify the Library upload/delete guard still points
+  at a live-server gated upload implementation. The source guard parsed 220
+  frontend source files, the production build shows the `app-api-methods`
+  chunk at about 32.01 kB with no circular chunk warning, and the focused
+  Library desktop/mobile live control audit passed with 16/18 controls tested,
+  2 hidden controls skipped, and zero findings; Phase 29 and live hygiene
+  checks are rerun after reference refresh.

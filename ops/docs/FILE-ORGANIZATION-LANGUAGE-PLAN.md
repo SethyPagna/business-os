@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 685 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 686 in this file.
 
 ## Goal
 
@@ -6300,6 +6300,26 @@ Decision rule:
     frontend production build, and focused Products desktop/mobile live control
     audit passed with 42/42 controls tested and zero findings; Phase 29 and
     live hygiene checks are rerun after reference refresh.
+
+686. Extract typed file and upload transport from the large domain registry.
+    Done: `frontend/src/api/fileTransport.ts` now owns Library file list/delete
+    transport, generic file asset uploads, product image uploads, and user
+    avatar uploads previously embedded in `frontend/src/api/methods.ts`. The
+    helper keeps file list metadata normalization, XMLHttpRequest upload
+    progress, data-url image conversion, actor attribution, upload headers, and
+    live-server gating in a typed boundary, while `methods.ts` keeps public
+    `window.api` wrapper names for compatibility. The API guide documents the
+    new file transport split, and focused API HTTP tests verify source
+    placement plus no direct file/upload fetch calls in the large registry.
+    Action stability tests now verify Library upload/delete guards against the
+    new transport. The source guard parsed 220 frontend files and the
+    production build now reports the `app-api-methods` chunk around 32.01 kB
+    with no circular chunk warning. Proof: focused API HTTP tests, action
+    stability tests, frontend source guard, frontend typecheck, frontend
+    utility suite, frontend production build, and focused Library
+    desktop/mobile live control audit passed with 16/18 controls tested, 2
+    hidden controls skipped, and zero findings; Phase 29 and live hygiene
+    checks are rerun after reference refresh.
 
 ## Safety Gates
 

@@ -122,6 +122,10 @@ This folder is the browser-side transport layer for Business OS.
   - import-job create/list/status/review/action transport, error CSV download, and CSV/ZIP/image upload helpers
   - keeps last-list fallback caching, canonical remove fallback, device metadata fields, and batched image upload progress outside the large domain registry
 
+- `fileTransport.ts`
+  - library file list/delete, generic asset upload, product image upload, and user avatar upload transport
+  - keeps file list metadata normalization, XMLHttpRequest upload progress, data-url image conversion, actor attribution, and live-server upload gating outside the large domain registry
+
 - `cooldownFallbacks.ts`
   - notification summary and Drive sync status fallback/cooldown helpers
   - keeps transient-gateway backoff state and typed fallback payloads outside the large domain registry

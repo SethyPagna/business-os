@@ -20,7 +20,6 @@ import {
   getSyncServerUrl,
   cacheInvalidate,
   cacheClearAll,
-  requireLiveServerWrite,
   isWriteBlockedError,
   isWriteConflictError,
   isInvalidSessionError,
@@ -42,7 +41,7 @@ import {
 import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.ts'
 import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
-import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
+import { appendActorQuery } from './actorQuery.ts'
 import {
   createCategory as createCategoryRequest,
   createUnit as createUnitRequest,
@@ -148,6 +147,13 @@ import {
   uploadImportJobImages as uploadImportJobImagesRequest,
   uploadImportJobZip as uploadImportJobZipRequest,
 } from './importJobsTransport.ts'
+import {
+  deleteFileAsset as deleteFileAssetRequest,
+  getFiles as getFilesRequest,
+  uploadFileAsset as uploadFileAssetRequest,
+  uploadProductImage as uploadProductImageRequest,
+  uploadUserAvatar as uploadUserAvatarRequest,
+} from './fileTransport.ts'
 import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
@@ -756,184 +762,20 @@ export const uploadImportJobZip = payload =>
 export const uploadImportJobImages = payload =>
   uploadImportJobImagesRequest(payload)
 
-export async function getFiles(params = {}) {
-  const q = buildQueryString(params)
-  const result = await route(`files:get:${q}`, () => apiFetch('GET', appendQuery('/api/files', q)), () => [])
-  const items = Array.isArray(result?.items) ? result.items : (Array.isArray(result) ? result : [])
-  if (params?.includeMeta) {
-    return {
-      items,
-      total: Number(result?.total || items.length || 0),
-      page: Number(result?.page || params?.page || 1),
-      pageSize: Number(result?.pageSize || result?.page_size || params?.pageSize || params?.limit || items.length || 0),
-      hasMore: Boolean(result?.hasMore || result?.has_more),
-    }
-  }
-  return items
-}
+export const getFiles = (params = {}) =>
+  getFilesRequest(params)
 
-export async function uploadFileAsset({ file, userId, userName, signal, onProgress } = {}) {
-  if (!(file instanceof File)) throw new Error('Choose a file first')
-  requireLiveServerWrite('files:upload', {
-    offlineMessage: 'Server is offline. File uploads are invalid until the server reconnects.',
-    notConfiguredMessage: 'Server is not connected. File uploads are invalid until a live server is configured.',
-  })
-  const base = getSyncServerUrl().replace(/\/$/, '')
-  const device = getDeviceInfo()
-  const headers = {
-    'bypass-tunnel-reminder': 'true',
-    'x-client-time': device.clientTime || '',
-    'x-device-tz': device.deviceTz || '',
-    'x-device-name': device.deviceName || '',
-  }
+export const uploadFileAsset = payload =>
+  uploadFileAssetRequest(payload)
 
-  const form = new FormData()
-  form.append('file', file, file.name)
-  if (userId) form.append('userId', String(userId))
-  if (userName) form.append('userName', String(userName))
-  if (device.deviceName) form.append('deviceName', String(device.deviceName))
-  if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
-  if (device.clientTime) form.append('clientTime', String(device.clientTime))
+export const deleteFileAsset = (id, payload = {}) =>
+  deleteFileAssetRequest(id, payload)
 
-  return await new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest()
-    let settled = false
+export const uploadProductImage = payload =>
+  uploadProductImageRequest(payload)
 
-    const finish = (handler, value) => {
-      if (settled) return
-      settled = true
-      if (signal && abortListener) signal.removeEventListener('abort', abortListener)
-      handler(value)
-    }
-
-    const abortListener = () => {
-      try { xhr.abort() } catch (_) {}
-    }
-
-    xhr.open('POST', `${base}/api/files/upload`, true)
-    xhr.withCredentials = true
-    for (const key of Object.keys(headers)) {
-      const value = headers[key]
-      if (!value) continue
-      xhr.setRequestHeader(key, value)
-    }
-
-    xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable || typeof onProgress !== 'function') return
-      onProgress({
-        loaded: event.loaded,
-        total: event.total,
-        percent: Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100))),
-      })
-    }
-
-    xhr.onerror = () => finish(reject, new Error('File upload failed. Check your server connection and try again.'))
-    xhr.onabort = () => finish(reject, new Error('Upload cancelled'))
-    xhr.onload = () => {
-      let parsed = null
-      try {
-        parsed = xhr.responseText ? JSON.parse(xhr.responseText) : null
-      } catch (_) {}
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = parsed?.error || parsed?.message || xhr.responseText || xhr.status
-        finish(reject, new Error(`File upload failed: ${message}`))
-        return
-      }
-      finish(resolve, parsed?.data || parsed)
-    }
-
-    if (signal) {
-      if (signal.aborted) {
-        finish(reject, new Error('Upload cancelled'))
-        return
-      }
-      signal.addEventListener('abort', abortListener, { once: true })
-    }
-
-    xhr.send(form)
-  })
-}
-
-export async function deleteFileAsset(id, payload = {}) {
-  return route('files:delete', () => apiFetch('DELETE', `/api/files/${id}`, {
-    ...getCurrentUserContext(),
-    ...(payload || {}),
-  }), null, true)
-}
-
-/**
- * uploadProductImage — accepts { productId, filePath, fileName } where filePath
- * is a base64 data-URL (set by Products.tsx browser file-picker), OR a native
- * file system path (Electron). Converts to FormData and POSTs as multipart.
- */
-export async function uploadProductImage({ productId, file, filePath, fileName }) {
-  void productId
-  requireLiveServerWrite('products:uploadImage', {
-    offlineMessage: 'Server is offline. Product image uploads are invalid until the server reconnects.',
-    notConfiguredMessage: 'Server is not connected. Product image uploads are invalid until a live server is configured.',
-  })
-  const base    = getSyncServerUrl().replace(/\/$/, '')
-  const headers = { 'bypass-tunnel-reminder': 'true' }
-
-  const fd = new FormData()
-
-  if (file instanceof File) {
-    fd.append('image', file, file.name || fileName || 'product.jpg')
-  } else if (filePath && filePath.startsWith('data:')) {
-    // Browser: convert base64 data-URL → Blob
-    const [meta, b64] = filePath.split(',')
-    const mime        = meta.match(/:(.*?);/)?.[1] || 'image/jpeg'
-    const bytes       = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
-    fd.append('image', new Blob([bytes], { type: mime }), fileName || 'product.jpg')
-  } else if (filePath) {
-    // Electron path — should never reach browser, but handle gracefully
-    throw new Error('Native file path upload not supported in browser mode')
-  } else {
-    throw new Error('No image file provided')
-  }
-
-  const res = await fetch(`${base}/api/products/upload-image`, { method: 'POST', headers, credentials: 'include', body: fd })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Image upload failed: ${text || res.status}`)
-  }
-  return res.json()
-}
-
-export async function uploadUserAvatar({ filePath, fileName, file }) {
-  if (file instanceof File) {
-    const { userId, userName } = getCurrentUserContext()
-    const asset = await uploadFileAsset({ file, userId, userName })
-    return {
-      path: asset?.public_path || '',
-      asset,
-    }
-  }
-  requireLiveServerWrite('users:uploadAvatar', {
-    offlineMessage: 'Server is offline. Avatar uploads are invalid until the server reconnects.',
-    notConfiguredMessage: 'Server is not connected. Avatar uploads are invalid until a live server is configured.',
-  })
-  const base = getSyncServerUrl().replace(/\/$/, '')
-  const headers = { 'bypass-tunnel-reminder': 'true' }
-
-  if (!filePath || !filePath.startsWith('data:')) {
-    throw new Error('No avatar image data provided')
-  }
-
-  const [meta, b64] = filePath.split(',')
-  const mime = meta.match(/:(.*?);/)?.[1] || 'image/jpeg'
-  const bytes = Uint8Array.from(atob(b64), (char) => char.charCodeAt(0))
-  const fd = new FormData()
-  fd.append('image', new Blob([bytes], { type: mime }), fileName || 'avatar.jpg')
-
-  const res = await fetch(`${base}/api/users/avatar-upload`, { method: 'POST', headers, credentials: 'include', body: fd })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Avatar upload failed: ${text || res.status}`)
-  }
-  return res.json()
-}
-
+export const uploadUserAvatar = payload =>
+  uploadUserAvatarRequest(payload)
 // ─── CSV / file dialog (browser implementations) ──────────────────────────────
 /**
  * openCSVDialog — opens a file picker, reads the selected CSV, and returns

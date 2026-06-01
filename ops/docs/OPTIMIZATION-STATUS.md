@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 685, typed import job transport extraction
+- Latest completed move: Move 686, typed file and upload transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `ab9cd36a2e268d0a`
+  `aff5b87eee1be89d`
 
 Latest verified reports:
 
@@ -25,6 +25,8 @@ Latest verified reports:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
+- latest focused Library desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-14-04-097Z/summary.json`
 - latest focused public catalog desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
 - latest focused Audit Log desktop/mobile control audit:
@@ -50,6 +52,16 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend file transport is now `frontend/src/api/fileTransport.ts` with
+  typed Library file list/delete, generic asset upload, product image upload,
+  and user avatar upload transport. File list metadata normalization,
+  XMLHttpRequest upload progress, data-url image conversion, actor
+  attribution, and live-server upload gating now live outside the large API
+  registry. The source guard now parses 220 frontend TypeScript files, the
+  production build reports the `app-api-methods` chunk around 32.01 kB, and
+  the focused Library desktop/mobile live audit passed with 16/18 controls
+  tested, 2 hidden controls skipped, and zero findings.
 
 - Frontend import job transport is now `frontend/src/api/importJobsTransport.ts`
   with typed import job create/list/status/review/action transport, canonical

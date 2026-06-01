@@ -160,7 +160,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
 await runTest('file picker and library upload/delete flows keep synchronous action guards', () => {
   const picker = readFrontend('src/components/files/FilePickerModal.tsx')
   const filesPage = readFrontend('src/components/files/FilesPage.tsx')
-  const methods = readFrontend('src/api/methods.ts')
+  const fileTransport = readFrontend('src/api/fileTransport.ts')
 
   for (const source of [picker, filesPage]) {
     assert.match(source, /const uploadInFlightRef = useRef\(false\)/)
@@ -187,8 +187,8 @@ await runTest('file picker and library upload/delete flows keep synchronous acti
   assert.match(picker, /withLoaderTimeout<FileAsset>\(\s*\(\) => getFilePickerApi\(\)\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/)
   assert.match(picker, /withLoaderTimeout\(\s*\(\) => getFilePickerApi\(\)\.deleteFileAsset\(assetId, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/)
 
-  assert.match(methods, /export async function uploadFileAsset\(\{ file, userId, userName, signal, onProgress \} = \{\}\) \{[\s\S]*requireLiveServerWrite\('files:upload'/)
-  assert.match(methods, /return route\('files:delete', \(\) => apiFetch\('DELETE', `\/api\/files\/\$\{id\}`/)
+  assert.match(fileTransport, /export async function uploadFileAsset\(payload: FileUploadPayload = \{\}\): Promise<unknown> \{[\s\S]*requireLiveServerWrite\('files:upload'/)
+  assert.match(fileTransport, /return route\([\s\S]*'files:delete'[\s\S]*apiFetch\('DELETE', `\/api\/files\/\$\{encodeURIComponent\(String\(id\)\)\}`/)
 })
 
 await runTest('product form image upload and save keep synchronous guards', () => {
