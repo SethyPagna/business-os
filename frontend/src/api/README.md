@@ -118,6 +118,10 @@ This folder is the browser-side transport layer for Business OS.
   - import-job multipart headers, live-server form POSTs, and import payload device metadata
   - keeps CSV, ZIP, image, and error-download transport details out of the large domain registry
 
+- `importJobsTransport.ts`
+  - import-job create/list/status/review/action transport, error CSV download, and CSV/ZIP/image upload helpers
+  - keeps last-list fallback caching, canonical remove fallback, device metadata fields, and batched image upload progress outside the large domain registry
+
 - `cooldownFallbacks.ts`
   - notification summary and Drive sync status fallback/cooldown helpers
   - keeps transient-gateway backoff state and typed fallback payloads outside the large domain registry

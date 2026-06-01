@@ -130,7 +130,24 @@ import {
   reviewPortalSubmission as reviewPortalSubmissionRequest,
   searchPortalCatalogProducts as searchPortalCatalogProductsRequest,
 } from './portalTransport.ts'
-import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './importTransport.ts'
+import {
+  approveImportJob as approveImportJobRequest,
+  cancelImportJob as cancelImportJobRequest,
+  createImportJob as createImportJobRequest,
+  deleteImportJob as deleteImportJobRequest,
+  downloadImportJobErrors as downloadImportJobErrorsRequest,
+  getImportJob as getImportJobRequest,
+  getImportJobReview as getImportJobReviewRequest,
+  getImportQueueStatus as getImportQueueStatusRequest,
+  listImportJobs as listImportJobsRequest,
+  preflightImportJob as preflightImportJobRequest,
+  retryImportJob as retryImportJobRequest,
+  startImportJob as startImportJobRequest,
+  updateImportJobDecisions as updateImportJobDecisionsRequest,
+  uploadImportJobCsv as uploadImportJobCsvRequest,
+  uploadImportJobImages as uploadImportJobImagesRequest,
+  uploadImportJobZip as uploadImportJobZipRequest,
+} from './importJobsTransport.ts'
 import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
@@ -378,8 +395,6 @@ if (typeof window !== 'undefined') {
     }
   })
 }
-
-const lastImportJobsByQuery = new Map()
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const login = (payload) =>
@@ -708,123 +723,38 @@ export const createProductVariant = payload =>
 export const bulkImportProducts = payload =>
   bulkImportProductsRequest(payload)
 
-export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', withImportDeviceInfo(d)), null, true)
-export const listImportJobs = (params = {}) => {
-  const q = buildQueryString(params)
-  return route(`importJobs:list:${q}`, async () => {
-    const result = await apiFetch('GET', appendQuery('/api/import-jobs', q))
-    lastImportJobsByQuery.set(q, result)
-    return result
-  }, () => lastImportJobsByQuery.get(q) || { jobs: [], unavailable: true, transient: true })
-}
-export const getImportJob = id => route(`importJobs:get:${id}`, () => apiFetch('GET', `/api/import-jobs/${id}`), null)
-export const getImportJobReview = (id, params = {}) => {
-  const q = buildQueryString(params)
-  return route(`importJobs:review:${id}:${q}`, () => apiFetch('GET', appendQuery(`/api/import-jobs/${encodeURIComponent(id)}/review`, q)), null)
-}
+export const createImportJob = payload =>
+  createImportJobRequest(payload)
+export const listImportJobs = (params = {}) =>
+  listImportJobsRequest(params)
+export const getImportJob = id =>
+  getImportJobRequest(id)
+export const getImportJobReview = (id, params = {}) =>
+  getImportJobReviewRequest(id, params)
 export const updateImportJobDecisions = (id, decisions = {}) =>
-  route(`importJobs:decisions:${id}`, () => apiFetch('PATCH', `/api/import-jobs/${encodeURIComponent(id)}/decisions`, withImportDeviceInfo({ decisions })), null, true)
-export const preflightImportJob = id => route(`importJobs:preflight:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/preflight`, withImportDeviceInfo({})), null, true)
+  updateImportJobDecisionsRequest(id, decisions)
+export const preflightImportJob = id =>
+  preflightImportJobRequest(id)
 export const startImportJob = (id, options = {}) =>
-  route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/start`, withImportDeviceInfo({ source: options.source || 'ui' })), null, true)
+  startImportJobRequest(id, options)
 export const approveImportJob = (id, options = {}) =>
-  route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/approve`, withImportDeviceInfo({ source: options.source || 'ui' })), null, true)
+  approveImportJobRequest(id, options)
 export const cancelImportJob = (id, options = {}) =>
-  route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/cancel`, withImportDeviceInfo({ source: options.source || 'ui' })), null, true)
+  cancelImportJobRequest(id, options)
 export const retryImportJob = (id, options = {}) =>
-  route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/retry`, withImportDeviceInfo({ source: options.source || 'ui' })), null, true)
-export const deleteImportJob = (id, options = {}) => route(`importJobs:delete:${id}`, async () => {
-  const encodedId = encodeURIComponent(id)
-  const force = options.force ? '?force=1' : ''
-  let firstError = null
-  try {
-    return await apiFetch('DELETE', `/api/import-jobs/${encodedId}${force}`, withImportDeviceInfo({ source: options.source || 'ui' }))
-  } catch (error) {
-    firstError = error
-  }
-  try {
-    return await apiFetch('POST', `/api/import-jobs/${encodedId}/delete`, withImportDeviceInfo({ force: !!options.force, source: options.source || 'ui' }))
-  } catch (error) {
-    const message = String(error?.message || firstError?.message || '')
-    if (Number(error?.status) === 404 || /Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(message)) {
-      throw new Error('Import remove route is unavailable. Restart or update the server, then try Remove import again.')
-    }
-    throw error
-  }
-}, null, true)
-export const getImportQueueStatus = () => route('importJobs:queueStatus', () => apiFetch('GET', '/api/import-jobs/queue/status'), null)
-
-export async function downloadImportJobErrors(jobId) {
-  const base = getSyncServerUrl().replace(/\/$/, '')
-  const res = await fetch(`${base}/api/import-jobs/${encodeURIComponent(jobId)}/errors.csv`, {
-    method: 'GET',
-    headers: buildMultipartHeaders(),
-    credentials: 'include',
-  })
-  if (!res.ok) throw new Error(await res.text().catch(() => 'Failed to download import errors'))
-  const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${jobId}-errors.csv`
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
-  return { success: true }
-}
-
-export async function uploadImportJobCsv({ jobId, text, fileName = 'products.csv' }) {
-  const device = getDeviceInfo()
-  const form = new FormData()
-  const source = String(text || '')
-  form.append('file', new Blob([source.startsWith('\uFEFF') ? '' : '\uFEFF', source], { type: 'text/csv;charset=utf-8' }), fileName)
-  if (device.deviceName) form.append('deviceName', String(device.deviceName))
-  if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
-  if (device.clientTime) form.append('clientTime', String(device.clientTime))
-  return apiFormPost(`/api/import-jobs/${jobId}/csv`, form, 'importJobs:csv')
-}
-
-export async function uploadImportJobZip({ jobId, file }) {
-  if (!(file instanceof File)) throw new Error('Choose a ZIP file first')
-  const device = getDeviceInfo()
-  const form = new FormData()
-  form.append('file', file, file.name || 'images.zip')
-  if (device.deviceName) form.append('deviceName', String(device.deviceName))
-  if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
-  if (device.clientTime) form.append('clientTime', String(device.clientTime))
-  return apiFormPost(`/api/import-jobs/${jobId}/zip`, form, 'importJobs:zip')
-}
-
-export async function uploadImportJobImages({ jobId, files = [], onProgress, batchSize = 100 }) {
-  const device = getDeviceInfo()
-  const browserFiles = []
-  for (const entry of Array.isArray(files) ? files : []) {
-    if (entry?.file instanceof File) browserFiles.push(entry)
-  }
-  const uploaded = []
-  for (let offset = 0; offset < browserFiles.length; offset += batchSize) {
-    const batch = browserFiles.slice(offset, offset + batchSize)
-    const form = new FormData()
-    const relativePaths = []
-    for (const entry of batch) {
-      form.append('files', entry.file, entry.file.name)
-      relativePaths.push(entry.relativePath || entry.file.webkitRelativePath || entry.file.name)
-    }
-    form.append('relative_paths', JSON.stringify(relativePaths))
-    if (device.deviceName) form.append('deviceName', String(device.deviceName))
-    if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
-    if (device.clientTime) form.append('clientTime', String(device.clientTime))
-    const result = await apiFormPost(`/api/import-jobs/${jobId}/images`, form, 'importJobs:images')
-    uploaded.push(...(result?.files || []))
-    onProgress?.({
-      progress: browserFiles.length ? Math.round(((offset + batch.length) / browserFiles.length) * 100) : 100,
-      label: `Uploading images ${Math.min(offset + batch.length, browserFiles.length)} / ${browserFiles.length}`,
-    })
-    await new Promise((resolve) => setTimeout(resolve, 0))
-  }
-  return uploaded
-}
+  retryImportJobRequest(id, options)
+export const deleteImportJob = (id, options = {}) =>
+  deleteImportJobRequest(id, options)
+export const getImportQueueStatus = () =>
+  getImportQueueStatusRequest()
+export const downloadImportJobErrors = jobId =>
+  downloadImportJobErrorsRequest(jobId)
+export const uploadImportJobCsv = payload =>
+  uploadImportJobCsvRequest(payload)
+export const uploadImportJobZip = payload =>
+  uploadImportJobZipRequest(payload)
+export const uploadImportJobImages = payload =>
+  uploadImportJobImagesRequest(payload)
 
 export async function getFiles(params = {}) {
   const q = buildQueryString(params)

@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-01T05:32:39.232Z
+Generated: 2026-06-01T05:49:23.717Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 588
+- Files scanned: 589
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-01T05:32:39.232Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 389 |
+| .ts | 390 |
 | .tsx | 107 |
 | .md | 45 |
 | .json | 17 |
@@ -28,7 +28,7 @@ Generated: 2026-06-01T05:32:39.232Z
 
 | Area | Files |
 | --- | --- |
-| frontend/api | 32 |
+| frontend/api | 33 |
 | frontend/components/products | 32 |
 | frontend/utils | 32 |
 | ops/docs/reference | 32 |
@@ -63,15 +63,15 @@ Generated: 2026-06-01T05:32:39.232Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8743 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 8012 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7464 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6303 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8761 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 8030 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7486 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6322 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3400 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2916 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2926 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
@@ -82,15 +82,15 @@ Generated: 2026-06-01T05:32:39.232Z
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
 | frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
-| ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1878 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1804 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1805 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
-| frontend/src/api/methods.ts | 1721 | frontend/api |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |
+| frontend/src/api/methods.ts | 1651 | frontend/api |
 | backend/src/routes/sales.ts | 1573 | backend/routes |
 | frontend/src/App.tsx | 1572 | frontend/src/App.tsx |
 

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 684 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 685 in this file.
 
 ## Goal
 
@@ -6281,6 +6281,25 @@ Decision rule:
     suite, frontend production build, and focused Products desktop/mobile live
     control audit passed with 42/42 controls tested and zero findings; Phase
     29 and live hygiene checks are rerun after reference refresh.
+
+685. Extract typed import job transport from the large domain registry.
+    Done: `frontend/src/api/importJobsTransport.ts` now owns import job
+    create/list/status/review/action transport, canonical delete with legacy
+    POST fallback, queue status, error CSV download, and CSV/ZIP/image uploads
+    previously embedded in `frontend/src/api/methods.ts`. The helper keeps
+    last-list fallback caching, typed query building, device metadata form
+    fields, batched image upload progress, and remove-route compatibility in a
+    typed boundary, while `methods.ts` keeps public `window.api` wrapper names
+    for compatibility. The API guide documents the new import job split, and
+    focused API HTTP tests verify source placement, canonical remove fallback,
+    transient list fallback, batched upload ownership, and no direct import job
+    fetch calls in the large registry. The source guard parsed 219 frontend
+    files and the production build now reports the `app-api-methods` chunk
+    around 36.41 kB with no circular chunk warning. Proof: focused API HTTP
+    tests, frontend source guard, frontend typecheck, frontend utility suite,
+    frontend production build, and focused Products desktop/mobile live control
+    audit passed with 42/42 controls tested and zero findings; Phase 29 and
+    live hygiene checks are rerun after reference refresh.
 
 ## Safety Gates
 

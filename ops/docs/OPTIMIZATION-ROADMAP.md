@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 684.
+- Latest completed implementation move in this roadmap: Move 685.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8009,3 +8009,21 @@ Move 684 status:
   and the focused Products desktop/mobile live control audit passed with 42/42
   controls tested and zero findings; Phase 29 and live hygiene checks are
   rerun after reference refresh.
+
+Move 685 status:
+- Move 685 extracts import job transport from the large frontend API registry.
+  `frontend/src/api/importJobsTransport.ts` now owns import job create/list,
+  job status, review reads, decisions, preflight/start/approve/cancel/retry,
+  canonical delete with legacy POST fallback, queue status, error CSV download,
+  and CSV/ZIP/image upload helpers with typed query building and device
+  metadata form fields. `methods.ts` keeps public `window.api` wrapper names
+  for compatibility while no longer carrying direct import-job request calls,
+  last-list fallback caching, DOM error-download code, or batched image upload
+  loops. The API guide documents the new import job boundary, focused API HTTP
+  tests verify source placement, canonical remove fallback, transient list
+  fallback, batched upload ownership, and no direct import job fetch calls in
+  the large registry. The source guard parsed 219 frontend source files, the
+  production build shows the `app-api-methods` chunk at about 36.41 kB with no
+  circular chunk warning, and the focused Products desktop/mobile live control
+  audit passed with 42/42 controls tested and zero findings; Phase 29 and live
+  hygiene checks are rerun after reference refresh.
