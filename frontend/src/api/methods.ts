@@ -52,6 +52,13 @@ import {
   updateAiProvider as updateAiProviderRequest,
 } from './aiTransport.ts'
 import {
+  createActionHistory as createActionHistoryRequest,
+  getActionHistory as getActionHistoryRequest,
+  redoActionHistory as redoActionHistoryRequest,
+  undoActionHistory as undoActionHistoryRequest,
+  updateActionHistory as updateActionHistoryRequest,
+} from './actionHistoryTransport.ts'
+import {
   askPortalAi as askPortalAiRequest,
   createPortalSubmission as createPortalSubmissionRequest,
   getCatalogMeta as getCatalogMetaRequest,
@@ -1033,17 +1040,16 @@ export const transferInventoryStock = d        => route('inventory:transfer', ()
 export const moveStockRow          = d         => route('inventory:moveRow', () => apiFetch('POST', '/api/inventory/move-row', { ...getDeviceInfo(), ...d }), null, true)
 
 export const getActionHistory = (scope = 'global', limit = 10, params = {}) => {
-  const query = buildQueryString({ scope, limit, ...(params || {}) })
-  return route(`actionHistory:get:${query}`, () => apiFetch('GET', appendQuery('/api/action-history', query)), () => ({ items: [] }))
+  return getActionHistoryRequest(scope, limit, params)
 }
 export const createActionHistory = payload =>
-  route('actionHistory:create', () => apiFetch('POST', '/api/action-history', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+  createActionHistoryRequest(payload)
 export const updateActionHistory = (id, payload) =>
-  route('actionHistory:update', () => apiFetch('PATCH', `/api/action-history/${id}`, { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+  updateActionHistoryRequest(id, payload)
 export const undoActionHistory = id =>
-  route(`actionHistory:undo:${id}`, () => apiFetch('POST', `/api/action-history/${id}/undo`, getDeviceInfo()), null, true)
+  undoActionHistoryRequest(id)
 export const redoActionHistory = id =>
-  route(`actionHistory:redo:${id}`, () => apiFetch('POST', `/api/action-history/${id}/redo`, getDeviceInfo()), null, true)
+  redoActionHistoryRequest(id)
 export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
 export const getInventoryStats = (params = {}) => {
   const q = buildQueryString(params)

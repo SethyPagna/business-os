@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 677, typed portal transport extraction
+- Latest completed move: Move 678, typed action history transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `6517456519e8f078`
+  `158362acacc6eab6`
 
 Latest verified reports:
 
@@ -27,6 +27,8 @@ Latest verified reports:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-28-28-590Z/summary.json`
 - latest focused public catalog desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
+- latest focused Audit Log desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-00-11-876Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -44,6 +46,15 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend action history transport is now
+  `frontend/src/api/actionHistoryTransport.ts` with typed read/create/update,
+  undo, and redo transport plus shared device attribution payload shaping. The
+  large API registry keeps only public `window.api` compatibility wrappers for
+  history actions. The source guard now parses 212 frontend TypeScript files,
+  the production build reports the `app-api-methods` chunk around 45.34 kB,
+  and the focused Audit Log desktop/mobile live audit passed with zero
+  findings.
 
 - Frontend customer portal transport is now
   `frontend/src/api/portalTransport.ts` with typed catalog/config reads,

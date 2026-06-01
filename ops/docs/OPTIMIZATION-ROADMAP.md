@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 677.
+- Latest completed implementation move in this roadmap: Move 678.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7891,3 +7891,18 @@ Move 677 status:
   passed; Phase 29 audit and post-live hygiene passed; the focused public
   catalog desktop/mobile live control audit passed with 42/42 controls tested
   and zero findings.
+
+Move 678 status:
+- Move 678 extracts action history transport from the large frontend API
+  registry. `frontend/src/api/actionHistoryTransport.ts` now owns action
+  history reads, create/update mutations, and undo/redo calls with typed
+  query-building and shared device-attribution payload shaping. `methods.ts`
+  keeps the public wrapper names for compatibility while no longer carrying
+  direct `/api/action-history` request calls. The API guide documents the new
+  boundary, focused API HTTP tests verify source placement and query-builder
+  ownership, the source guard parsed 212 frontend source files, and the
+  production build shows the `app-api-methods` chunk at about 45.34 kB with no
+  circular chunk warning. Proof: focused API HTTP tests, frontend source guard,
+  frontend typecheck, frontend utility suite, frontend production build, and
+  focused Audit Log desktop/mobile live control audit passed with zero
+  findings; Phase 29 and live hygiene checks are rerun after reference refresh.
