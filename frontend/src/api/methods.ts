@@ -189,6 +189,14 @@ import {
   updateUserProfile as updateUserProfileRequest,
 } from './accessControlTransport.ts'
 import {
+  createCustomTable as createCustomTableRequest,
+  deleteCustomRow as deleteCustomRowRequest,
+  getCustomTableData as getCustomTableDataRequest,
+  getCustomTables as getCustomTablesRequest,
+  insertCustomRow as insertCustomRowRequest,
+  updateCustomRow as updateCustomRowRequest,
+} from './customTablesTransport.ts'
+import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
   getCurrentOrganization as getCurrentOrganizationRequest,
@@ -1150,12 +1158,12 @@ export const updateRole = (id, d)  => updateRoleRequest(id, d)
 export const deleteRole = (id, payload) => deleteRoleRequest(id, payload)
 
 // ─── Custom tables ────────────────────────────────────────────────────────────
-export const getCustomTables    = ()                      => route('customTables:get',       () => apiFetch('GET', '/api/custom-tables'),                                             () => dexieDb.custom_tables.toArray())
-export const createCustomTable  = d                       => route('customTables:create',    () => apiFetch('POST', '/api/custom-tables', d),                                         null, true)
-export const getCustomTableData = ({ tableName })         => route('customTables:data',      () => apiFetch('GET', `/api/custom-tables/${tableName}/data`),                           () => [])
-export const insertCustomRow    = ({ tableName, data })   => route('customTables:insertRow', () => apiFetch('POST', `/api/custom-tables/${tableName}/rows`, { data }),                null, true)
-export const updateCustomRow    = ({ tableName, id, data, expectedUpdatedAt }) => route('customTables:updateRow', () => apiFetch('PUT', `/api/custom-tables/${tableName}/rows/${id}`, { data, expectedUpdatedAt }),         null, true)
-export const deleteCustomRow    = ({ tableName, id, payload })     => route('customTables:deleteRow', () => apiFetch('DELETE', `/api/custom-tables/${tableName}/rows/${id}`, payload),                  null, true)
+export const getCustomTables    = ()                      => getCustomTablesRequest()
+export const createCustomTable  = d                       => createCustomTableRequest(d)
+export const getCustomTableData = ({ tableName })         => getCustomTableDataRequest({ tableName })
+export const insertCustomRow    = ({ tableName, data })   => insertCustomRowRequest({ tableName, data })
+export const updateCustomRow    = ({ tableName, id, data, expectedUpdatedAt }) => updateCustomRowRequest({ tableName, id, data, expectedUpdatedAt })
+export const deleteCustomRow    = ({ tableName, id, payload })     => deleteCustomRowRequest({ tableName, id, payload })
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
 export const getAuditLogs = (params = {}) => {

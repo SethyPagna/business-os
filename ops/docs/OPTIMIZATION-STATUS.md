@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 689, typed app bootstrap transport extraction
+- Latest completed move: Move 690, typed custom tables transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `55b95d75eaed078d`
+  `f0bd9c4c253b521e`
 
 Latest verified reports:
 
@@ -27,6 +27,8 @@ Latest verified reports:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-05-12-423Z/summary.json`
+- latest focused Settings desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T07-16-31-085Z/summary.json`
 - latest focused Library desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T06-14-04-097Z/summary.json`
 - latest focused Contacts desktop/mobile control audit:
@@ -58,6 +60,16 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend custom tables transport is now
+  `frontend/src/api/customTablesTransport.ts` with typed custom table
+  list/create and custom row read/create/update/delete transport. Encoded table
+  and row path segments plus the Dexie custom-table fallback now live outside
+  the large API registry. The source guard now parses 224 frontend TypeScript
+  files, the production build reports the `app-api-methods` chunk around
+  27.57 kB, and the focused Settings desktop/mobile live audit passed with
+  12/34 controls tested, 22 controls skipped by stable broad-audit guardrails,
+  and zero findings.
 
 - Frontend app bootstrap transport is now
   `frontend/src/api/appBootstrapTransport.ts` with typed local, invalid-session,

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 689.
+- Latest completed implementation move in this roadmap: Move 690.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8105,3 +8105,20 @@ Move 689 status:
   passed with 36/46 controls tested, 10 long-label controls skipped, and zero
   findings; Phase 29 and live hygiene checks are rerun after reference
   refresh.
+
+Move 690 status:
+- Move 690 extracts custom tables transport from the large frontend API
+  registry. `frontend/src/api/customTablesTransport.ts` now owns custom table
+  list/create transport plus custom row read/create/update/delete transport
+  with encoded table and row path segments and a typed Dexie custom-table
+  fallback. `methods.ts` keeps public `window.api` wrapper names for
+  compatibility while no longer carrying direct `/api/custom-tables` fetches or
+  custom row path construction. The API guide documents the new custom tables
+  boundary, and focused API HTTP tests verify source placement, encoded path
+  ownership, expected-updated-at row update payloads, and no direct custom
+  table fetch calls in the large registry. The source guard parsed 224
+  frontend source files, the production build shows the `app-api-methods`
+  chunk at about 27.57 kB with no circular chunk warning, and the focused
+  Settings desktop/mobile live control audit passed with 12/34 controls tested,
+  22 controls skipped by stable guardrails, and zero findings; Phase 29 and
+  live hygiene checks are rerun after reference refresh.

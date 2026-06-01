@@ -651,6 +651,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const contactsTransportSource = fs.readFileSync(new URL('../src/api/contactsTransport.ts', import.meta.url), 'utf8')
   const accessControlTransportSource = fs.readFileSync(new URL('../src/api/accessControlTransport.ts', import.meta.url), 'utf8')
   const appBootstrapTransportSource = fs.readFileSync(new URL('../src/api/appBootstrapTransport.ts', import.meta.url), 'utf8')
+  const customTablesTransportSource = fs.readFileSync(new URL('../src/api/customTablesTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
   const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
   const systemJobsSource = fs.readFileSync(new URL('../src/api/systemJobs.ts', import.meta.url), 'utf8')
@@ -674,6 +675,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /from '\.\/contactsTransport\.ts'/)
   assert.match(source, /from '\.\/accessControlTransport\.ts'/)
   assert.match(source, /from '\.\/appBootstrapTransport\.ts'/)
+  assert.match(source, /from '\.\/customTablesTransport\.ts'/)
   assert.match(source, /from '\.\/queryCache\.ts'/)
   assert.match(source, /import \{ withExpectedUpdatedAt, withSettingsExpectedUpdatedAt \} from '\.\/expectedUpdatedAt\.ts'/)
   assert.match(source, /import \{ mirrorTable, purgeSensitiveLiveServerMirrors, routeMirrored \} from '\.\/localMirrors\.ts'/)
@@ -769,6 +771,12 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(appBootstrapTransportSource, /getSyncServerUrl\(\)/)
   assert.match(appBootstrapTransportSource, /hasStoredUserSession\(\)/)
   assert.match(appBootstrapTransportSource, /isTransientGatewayError\(status\)/)
+  assert.match(customTablesTransportSource, /export function getCustomTables/)
+  assert.match(customTablesTransportSource, /dexieDb\.table\('custom_tables'\)\.toArray\(\)/)
+  assert.match(customTablesTransportSource, /encodeURIComponent\(String\(value\)\)/)
+  assert.match(customTablesTransportSource, /export function updateCustomRow/)
+  assert.match(customTablesTransportSource, /expectedUpdatedAt/)
+  assert.match(customTablesTransportSource, /export function deleteCustomRow/)
   assert.match(
     queryCacheSource,
     /export async function clearCachedQueryResults\(prefixes: string\[\] = \[\]\): Promise<void>[\s\S]*const keys: string\[\] = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys: string\[\] = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,
@@ -812,6 +820,9 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /change-password/)
   assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/auth\/bootstrap'\)/)
   assert.doesNotMatch(source, /sessionStorage\.getItem\(STORAGE_KEYS\.USER\)/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/custom-tables'\)/)
+  assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/custom-tables'/)
+  assert.doesNotMatch(source, /custom-tables\/\$\{tableName\}/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/otp\/setup'/)
   assert.doesNotMatch(source, /apiFetch\('GET', appendActorQuery\('\/api\/ai\/providers'\)/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/ai\/providers'/)
