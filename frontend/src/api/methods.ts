@@ -66,53 +66,20 @@ import {
 } from './queryCache.ts'
 import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from './expectedUpdatedAt.ts'
 import { mirrorReadResult, mirrorTable, purgeSensitiveLiveServerMirrors } from './localMirrors.ts'
+import {
+  DISCARD_SYNC_UPDATE_CHANNELS,
+  OFFLINE_SALE_SYNC_UPDATE_CHANNELS,
+  dispatchSyncUpdates,
+  emitSyncQueueChanged,
+  hasStoredUserSession,
+  registerOutboxBackgroundSync,
+} from './syncRuntime.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
 const OFFLINE_DEVICE_SNAPSHOT_META_KEY = 'offline_device_snapshot_meta'
 const OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
-const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
-const DISCARD_SYNC_UPDATE_CHANNELS = ['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard']
-const OFFLINE_SALE_SYNC_UPDATE_CHANNELS = ['sales', 'products', 'inventory', 'dashboard']
 let offlineDeviceSnapshotPromise = null
-
-function dispatchSyncUpdates(channels = [], reason = '') {
-  if (typeof window === 'undefined') return
-  const ts = Date.now()
-  for (const channel of channels) {
-    window.dispatchEvent(new CustomEvent('sync:update', {
-      detail: { channel, reason, ts },
-    }))
-  }
-}
-
-function registerOutboxBackgroundSync() {
-  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
-  navigator.serviceWorker.ready
-    .then((registration) => {
-      if (registration?.sync?.register) {
-        registration.sync.register(OUTBOX_SYNC_TAG).catch(() => {})
-      }
-      registration?.active?.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
-    })
-    .catch(() => {})
-}
-
-function hasStoredUserSession() {
-  if (typeof window === 'undefined') return false
-  try {
-    return !!(window.sessionStorage.getItem(STORAGE_KEYS.USER) || window.localStorage.getItem(STORAGE_KEYS.USER))
-  } catch (_) {
-    return false
-  }
-}
-
-function emitSyncQueueChanged(detail = {}) {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('sync:queue-changed', {
-    detail: { ts: Date.now(), ...detail },
-  }))
-}
 
 export async function discardPendingSyncQueue(reason = 'Offline changes were cleared.') {
   const existing = await dexieDb.sync_queue.toArray().catch(() => [])
@@ -407,7 +374,7 @@ export async function getAppBootstrap() {
   const hasStoredSession = hasStoredUserSession()
 
   if (!hasServer) {
-    sensitiveMirrorPurgePromise = null
+    await purgeSensitiveLiveServerMirrors().catch(() => {})
     return buildLocalBootstrap()
   }
 

@@ -16,6 +16,11 @@
 import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.ts'
 import { connectWS, disconnectWS, reconnectWS } from './api/websocket.ts'
 import { dexieDb }                 from './api/localDb.ts'
+import {
+  dispatchSyncUpdates,
+  emitSyncQueueChanged,
+  registerOutboxBackgroundSync,
+} from './api/syncRuntime.ts'
 import { STORAGE_KEYS }            from './constants.ts'
 import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.ts'
 import {
@@ -55,7 +60,6 @@ type OfflineOperation = AnyRecord & {
 type OfflineSyncOptions = { limit?: number; force?: boolean }
 type OfflineFileOwner = OfflineOperation & { upload_id?: string }
 
-const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 const OFFLINE_REFRESH_INTERVAL_MS = 5 * 60_000
 const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000
 const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000
@@ -267,9 +271,7 @@ async function queueBusinessOutboxOperation(operation: OfflineOperation = {}): P
     business_outbox_operation: true,
   })
   registerOutboxBackgroundSync()
-  window.dispatchEvent(new CustomEvent('sync:queue-changed', {
-    detail: { reason: 'business_outbox_operation', operation_id, ts: Date.now() },
-  }))
+  emitSyncQueueChanged({ reason: 'business_outbox_operation', operation_id })
   return { success: true, queued: true, id, payload_digest }
 }
 
@@ -521,21 +523,6 @@ async function syncUnlockedOfflineFileChunks(options: OfflineSyncOptions = {}): 
   return { success: failed === 0, completed, failed }
 }
 
-function registerOutboxBackgroundSync() {
-  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
-  navigator.serviceWorker.ready
-    .then((registration) => {
-      const syncRegistration = registration as ServiceWorkerRegistration & {
-        sync?: { register: (tag: string) => Promise<void> }
-      }
-      if (syncRegistration?.sync?.register) {
-        syncRegistration.sync.register(OUTBOX_SYNC_TAG).catch(() => {})
-      }
-      registration?.active?.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
-    })
-    .catch(() => {})
-}
-
 function refreshOfflineSnapshotSoon(force = false): void {
   if (typeof window === 'undefined') return
   if (offlineSnapshotTimer) {
@@ -609,11 +596,7 @@ function forwardServiceWorkerOutboxEvent(event: MessageEvent): void {
         ts: detail.ts || Date.now(),
       },
     }))
-    ;['sales', 'products', 'inventory', 'dashboard'].forEach((channel) => {
-      window.dispatchEvent(new CustomEvent('sync:update', {
-        detail: { channel, reason: 'offline-background-sale-synced', ts: Date.now() },
-      }))
-    })
+    dispatchSyncUpdates(['sales', 'products', 'inventory', 'dashboard'], 'offline-background-sale-synced')
     return
   }
 
@@ -629,13 +612,11 @@ function forwardServiceWorkerOutboxEvent(event: MessageEvent): void {
     return
   }
 
-  window.dispatchEvent(new CustomEvent('sync:queue-changed', {
-    detail: {
-      reason: detail.reason || 'background-sync-waiting',
-      error: detail.error || '',
-      ts: detail.ts || Date.now(),
-    },
-  }))
+  emitSyncQueueChanged({
+    reason: detail.reason || 'background-sync-waiting',
+    error: detail.error || '',
+    ts: detail.ts || Date.now(),
+  })
 }
 
 // ?€?€ Silence Capacitor/vendor bridge noise that fires in plain web context ?€?€?€?€?€?€

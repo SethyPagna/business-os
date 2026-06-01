@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 666 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 667 in this file.
 
 ## Goal
 
@@ -5984,6 +5984,23 @@ Decision rule:
     focused API HTTP tests, frontend source guard, frontend typecheck,
     frontend utility suite, frontend production build, Phase 29 audit, and
     focused Products desktop/mobile live control audit passed.
+
+667. Extract typed sync-runtime helpers shared by the API registry and browser
+    bootstrap.
+    Done: `frontend/src/api/syncRuntime.ts` now owns sync event fan-out,
+    queue-change events, stored-session detection, offline outbox
+    background-sync registration, and the shared outbox sync tag. This removes
+    duplicate event/service-worker plumbing from `frontend/src/api/methods.ts`
+    and `frontend/src/web-api.ts`, keeps `getAppBootstrap` on the moved local
+    mirror purge helper, and gives the offline queue path one typed boundary
+    before deeper API registry conversion. The API guide documents the split,
+    the focused API HTTP test covers compact event emission, and the
+    offline-sync architecture test verifies the secure background-sync
+    registration moved into the helper. The source guard parsed 203 frontend
+    files and the production build now reports the `app-api-methods` chunk
+    around 54.22 kB. Proof: focused API HTTP tests, offline-sync architecture
+    tests, frontend source guard, frontend typecheck, frontend utility suite,
+    and frontend production build passed.
 
 ## Safety Gates
 

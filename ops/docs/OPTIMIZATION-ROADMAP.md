@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 666.
+- Latest completed implementation move in this roadmap: Move 667.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7725,3 +7725,19 @@ Move 666 status:
   focused API HTTP tests, frontend source guard, frontend typecheck, frontend
   utility suite, frontend production build, Phase 29 audit, and focused
   Products desktop/mobile live control audit passed.
+
+Move 667 status:
+- Move 667 extracts shared sync-runtime helpers from the large frontend API
+  registry and browser bootstrap. `frontend/src/api/syncRuntime.ts` now owns
+  sync update event dispatch, queue-change signalling, stored-session checks,
+  offline outbox background-sync registration, and the shared outbox sync tag.
+  `methods.ts` and `web-api.ts` both use this typed boundary instead of carrying
+  duplicate service-worker registration and sync-event code, and `getAppBootstrap`
+  now calls the local mirror purge helper instead of referencing the old moved
+  purge promise state. The API guide documents the boundary, focused API HTTP
+  tests cover the event helpers, offline-sync architecture tests verify the
+  service-worker registration path, the source guard parsed 203 frontend source
+  files, and the production build shows the `app-api-methods` chunk at about
+  54.22 kB. Proof: focused API HTTP tests, offline-sync architecture tests,
+  frontend source guard, frontend typecheck, frontend utility suite, and
+  frontend production build passed.

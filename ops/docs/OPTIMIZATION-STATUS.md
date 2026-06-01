@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 666, typed local mirror helper extraction
+- Latest completed move: Move 667, typed sync-runtime helper extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `bc65f7c485d8e4d9`
+  `17ad39eae722a774`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T01-42-52-944Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T01-55-37-387Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -176,7 +176,10 @@ Recent route-level win:
   multipart import transport, notification/Drive cooldown fallbacks,
   read-query cache helpers, optimistic updated-at payload helpers, and local
   read-mirror helpers now live outside `frontend/src/api/methods.ts` with
-  direct focused coverage.
+  direct focused coverage. Shared sync event, queue-change, stored-session,
+  and service-worker outbox registration helpers now live in
+  `frontend/src/api/syncRuntime.ts` and are shared by both the API registry and
+  browser bootstrap.
 
 ## Recently Rejected Candidates
 

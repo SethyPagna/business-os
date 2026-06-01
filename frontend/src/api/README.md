@@ -26,6 +26,10 @@ This folder is the browser-side transport layer for Business OS.
   - local Dexie mirror write/purge helpers for server read fallbacks
   - keeps live-server mirror policy, sensitive table purge state, and mirror write fan-out outside the large domain registry
 
+- `syncRuntime.ts`
+  - sync event, service-worker outbox registration, and stored-session helpers
+  - keeps offline queue signalling shared between `methods.ts` and `web-api.ts`
+
 - `expectedUpdatedAt.ts`
   - optimistic-update payload helpers for row and settings writes
   - keeps updated-at conflict metadata lookup outside the large domain registry

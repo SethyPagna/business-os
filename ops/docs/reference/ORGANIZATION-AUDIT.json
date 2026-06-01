@@ -1,8 +1,8 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 572,
-  "largeFiles": 75,
+  "filesScanned": 573,
+  "largeFiles": 76,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
   "wrapperRemovalCandidates": 0,
@@ -51,12 +51,12 @@
       20
     ],
     [
-      "frontend/components/shared",
+      "frontend/api",
       17
     ],
     [
-      "frontend/api",
-      16
+      "frontend/components/shared",
+      17
     ],
     [
       "ops/docs",
@@ -205,6 +205,7 @@
     "frontend/src/utils/printReceipt.ts",
     "frontend/src/web-api.ts",
     "frontend/tests/actionStability.test.ts",
+    "frontend/tests/apiHttp.test.ts",
     "frontend/tests/performanceLoadingUx.test.ts",
     "ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md",
     "ops/docs/OPTIMIZATION-ROADMAP.md",

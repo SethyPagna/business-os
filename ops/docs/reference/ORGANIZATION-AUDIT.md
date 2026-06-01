@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-01T01:42:40.740Z
+Generated: 2026-06-01T01:55:24.492Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 572
+- Files scanned: 573
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-01T01:42:40.740Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 373 |
+| .ts | 374 |
 | .tsx | 107 |
 | .md | 45 |
 | .json | 17 |
@@ -33,8 +33,8 @@ Generated: 2026-06-01T01:42:40.740Z
 | ops/docs/reference | 32 |
 | backend/routes | 24 |
 | ops/scripts/runtime/live-checks | 20 |
+| frontend/api | 17 |
 | frontend/components/shared | 17 |
-| frontend/api | 16 |
 | ops/docs | 14 |
 | frontend/components/catalog | 13 |
 | backend/services | 12 |
@@ -63,10 +63,10 @@ Generated: 2026-06-01T01:42:40.740Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8455 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7728 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7233 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6006 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8469 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7744 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7238 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6023 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3399 | ops/docs/reference |
@@ -82,12 +82,12 @@ Generated: 2026-06-01T01:42:40.740Z
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
 | frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
-| frontend/src/api/methods.ts | 1981 | frontend/api |
+| frontend/src/api/methods.ts | 1948 | frontend/api |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1878 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
 | frontend/src/AppContext.tsx | 1826 | frontend/src/AppContext.tsx |
-| ops/docs/reference/FOLDER-COVERAGE.md | 1788 | ops/docs/reference |
+| ops/docs/reference/FOLDER-COVERAGE.md | 1789 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1732 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |
@@ -101,10 +101,10 @@ Generated: 2026-06-01T01:42:40.740Z
 | frontend/src/components/products/Products.tsx | 41 | frontend/components/products |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/inventory/Inventory.tsx | 29 | frontend/components/inventory |
+| frontend/src/api/methods.ts | 21 | frontend/api |
 | frontend/src/components/dashboard/Dashboard.tsx | 21 | frontend/components/dashboard |
 | frontend/src/components/sales/Sales.tsx | 21 | frontend/components/sales |
 | backend/src/routes/system/index.ts | 20 | backend/routes |
-| frontend/src/api/methods.ts | 20 | frontend/api |
 | frontend/src/components/pos/POS.tsx | 20 | frontend/components/pos |
 | frontend/src/components/catalog/CatalogPage.tsx | 19 | frontend/components/catalog |
 | frontend/src/components/contacts/CustomersTab.tsx | 18 | frontend/components/contacts |
@@ -118,9 +118,9 @@ Generated: 2026-06-01T01:42:40.740Z
 | backend/src/routes/auth.ts | 13 | backend/routes |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
+| frontend/tests/apiHttp.test.ts | 13 | frontend/tests/apiHttp.test.ts |
 | backend/src/routes/portal.ts | 12 | backend/routes |
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
-| frontend/tests/apiHttp.test.ts | 12 | frontend/tests/apiHttp.test.ts |
 | backend/src/routes/inventory.ts | 11 | backend/routes |
 | frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |
 | frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |

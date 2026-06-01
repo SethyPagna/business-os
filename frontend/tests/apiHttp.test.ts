@@ -34,6 +34,7 @@ import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 import { buildQueryCacheStorageKey } from '../src/api/queryCache.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
+import { dispatchSyncUpdates, emitSyncQueueChanged } from '../src/api/syncRuntime.ts'
 import { PENDING_SYNC_PREVIEW_LIMIT, serializePendingSyncPreview } from '../src/api/syncPreview.ts'
 
 type TestCallback = () => void | Promise<void>
@@ -573,6 +574,40 @@ await runTest('local mirror helper returns server data while mirroring asynchron
   assert.equal(mirrored, result)
 })
 
+await runTest('sync runtime helpers emit compact window events with timestamps', () => {
+  const originalWindow = globalThis.window
+  const originalCustomEvent = globalThis.CustomEvent
+  const events: Event[] = []
+  if (typeof globalThis.CustomEvent === 'undefined') {
+    globalThis.CustomEvent = class TestCustomEvent extends Event {
+      detail: unknown
+
+      constructor(type: string, init: CustomEventInit = {}) {
+        super(type)
+        this.detail = init.detail
+      }
+    } as unknown as typeof CustomEvent
+  }
+  globalThis.window = {
+    dispatchEvent: (event: Event) => events.push(event),
+  } as unknown as Window & typeof globalThis
+
+  try {
+    dispatchSyncUpdates(['products', 'dashboard'], 'unit-test')
+    emitSyncQueueChanged({ reason: 'unit-test-queue', queued: 1 })
+    assert.equal(events.length, 3)
+    assert.equal(events[0].type, 'sync:update')
+    assert.equal((events[0] as CustomEvent).detail.channel, 'products')
+    assert.equal((events[1] as CustomEvent).detail.channel, 'dashboard')
+    assert.equal(events[2].type, 'sync:queue-changed')
+    assert.equal((events[2] as CustomEvent).detail.queued, 1)
+    assert.equal(typeof (events[2] as CustomEvent).detail.ts, 'number')
+  } finally {
+    globalThis.window = originalWindow
+    globalThis.CustomEvent = originalCustomEvent
+  }
+})
+
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
@@ -581,6 +616,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
   const importTransportSource = fs.readFileSync(new URL('../src/api/importTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
+  const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
   assert.equal(buildQueryCacheStorageKey(' products:search:x '), 'read_cache:products:search:x')
   assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
   assert.match(source, /import \{ fetchJsonWithTimeout, getPortalBaseUrl \} from '\.\/portalHttp\.ts'/)
@@ -588,6 +624,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /from '\.\/queryCache\.ts'/)
   assert.match(source, /import \{ withExpectedUpdatedAt, withSettingsExpectedUpdatedAt \} from '\.\/expectedUpdatedAt\.ts'/)
   assert.match(source, /import \{ mirrorReadResult, mirrorTable, purgeSensitiveLiveServerMirrors \} from '\.\/localMirrors\.ts'/)
+  assert.match(source, /from '\.\/syncRuntime\.ts'/)
   assert.match(expectedUpdatedAtSource, /export async function withExpectedUpdatedAt\([\s\S]*body\.expectedUpdatedAt = body\.updated_at[\s\S]*table\?\.get\?\.\(id\)/)
   assert.match(localMirrorsSource, /export function mirrorReadResult[\s\S]*return result/)
   assert.match(localMirrorsSource, /export function mirrorTable[\s\S]*for \(const row of Array\.isArray\(rows\) \? rows : \[\]\)[\s\S]*replaceTableContents/)
@@ -605,6 +642,11 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /\.map\(\(row\) => String\(row\?\.key \|\| ''\)\)\s*\.filter/)
   assert.doesNotMatch(source, /const QUERY_CACHE_PREFIX/)
   assert.doesNotMatch(source, /LIVE_SERVER_SENSITIVE_MIRROR_TABLES/)
+  assert.doesNotMatch(source, /function registerOutboxBackgroundSync/)
+  assert.doesNotMatch(source, /function hasStoredUserSession/)
+  assert.match(syncRuntimeSource, /export function registerOutboxBackgroundSync/)
+  assert.match(syncRuntimeSource, /export function dispatchSyncUpdates/)
+  assert.match(syncRuntimeSource, /export function emitSyncQueueChanged/)
 })
 
 await runTest('empty local mirrors are not treated as usable server read fallback data', () => {

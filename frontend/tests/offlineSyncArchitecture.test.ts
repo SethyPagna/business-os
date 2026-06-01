@@ -19,6 +19,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 const swSource = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
 
 await runTest('service worker replays the IndexedDB outbox through secure authenticated background sync', () => {
   assert.match(swSource, /const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'/)
@@ -41,9 +42,10 @@ await runTest('service worker preserves conflicts and auth failures instead of o
 })
 
 await runTest('browser registers background sync without sharing auth tokens with the worker', () => {
-  assert.match(webApiSource, /function registerOutboxBackgroundSync/)
-  assert.match(webApiSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
-  assert.match(webApiSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
+  assert.match(webApiSource, /registerOutboxBackgroundSync/)
+  assert.match(syncRuntimeSource, /function registerOutboxBackgroundSync/)
+  assert.match(syncRuntimeSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
+  assert.match(syncRuntimeSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
   assert.match(webApiSource, /queueBusinessOutboxOperation/)
   assert.match(webApiSource, /encrypted_payload/)
   assert.doesNotMatch(webApiSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
@@ -81,6 +83,7 @@ await runTest('online maintenance keeps the offline mirror and app shell fresh w
 
 await runTest('queued offline writes carry version metadata and do not disappear on server conflicts', () => {
   assert.match(methodsSource, /registerOutboxBackgroundSync/)
+  assert.match(methodsSource, /emitSyncQueueChanged/)
   assert.match(methodsSource, /queue_version/)
   assert.match(methodsSource, /base_updated_at/)
   assert.match(methodsSource, /isWriteConflictError/)
