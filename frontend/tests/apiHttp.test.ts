@@ -344,7 +344,9 @@ await runTest('client API query strings use one shared builder', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const querySource = fs.readFileSync(new URL('../src/api/query.ts', import.meta.url), 'utf8')
   const actionHistoryTransportSource = fs.readFileSync(new URL('../src/api/actionHistoryTransport.ts', import.meta.url), 'utf8')
-  assert.match(source, /import \{ appendQuery, buildQueryString, normalizePositiveUniqueIds \} from '\.\/query\.ts'/)
+  const productReadTransportSource = fs.readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
+  assert.match(source, /import \{ appendQuery, buildQueryString \} from '\.\/query\.ts'/)
+  assert.match(productReadTransportSource, /import \{ appendQuery, buildQueryString, normalizePositiveUniqueIds, type QueryParams \} from '\.\/query\.ts'/)
   assert.match(
     querySource,
     /export function buildQueryString\([\s\S]*for \(const key of Object\.keys\(params \|\| \{\}\)\)[\s\S]*appendQueryValue\(query, key, value, skipEmpty\)/,
@@ -357,6 +359,7 @@ await runTest('client API query strings use one shared builder', () => {
   assert.equal(appendQuery('/api/products', ''), '/api/products')
   assert.match(source, /const q = buildQueryString\(params\)/)
   assert.match(actionHistoryTransportSource, /const query = buildQueryString\(\{ scope, limit, \.\.\.\(params \|\| \{\}\) \}\)/)
+  assert.match(productReadTransportSource, /const query = buildQueryString\(params\)/)
   assert.match(source, /getSales\s*=\s*\(params\)[\s\S]*buildQueryString\(params, \{ skipEmpty: false \}\)/)
   assert.match(source, /getReturns\s*=\s*\(params\)[\s\S]*buildQueryString\(params, \{ skipEmpty: false \}\)/)
   assert.doesNotMatch(source, /new URLSearchParams\(Object\.entries/)
@@ -366,14 +369,16 @@ await runTest('client API query strings use one shared builder', () => {
 
 await runTest('product id lookup normalizes ids without intermediate map/filter arrays', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  const productReadTransportSource = fs.readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
   const querySource = fs.readFileSync(new URL('../src/api/query.ts', import.meta.url), 'utf8')
   assert.match(
     querySource,
     /export function normalizePositiveUniqueIds\(ids: unknown\[\] = \[\], limit = 100\): number\[\][\s\S]*const seen = new Set<number>\(\)[\s\S]*for \(const value of ids \|\| \[\]\)[\s\S]*uniqueIds\.push\(id\)[\s\S]*if \(uniqueIds\.length >= limit\) break/,
   )
-  assert.match(source, /const uniqueIds = normalizePositiveUniqueIds\(ids, 100\)/)
+  assert.match(productReadTransportSource, /const uniqueIds = normalizePositiveUniqueIds\(ids, 100\)/)
   assert.deepEqual(normalizePositiveUniqueIds([3, '3', '2', 0, -1, 'x', 4], 2), [3, 2])
   assert.doesNotMatch(source, /Array\.from\(new Set\(\(ids \|\| \[\]\)\.map/)
+  assert.doesNotMatch(productReadTransportSource, /Array\.from\(new Set\(\(ids \|\| \[\]\)\.map/)
 })
 
 await runTest('idempotency request payload helpers preserve existing ids and cap user-provided ids', () => {
@@ -626,6 +631,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const portalTransportSource = fs.readFileSync(new URL('../src/api/portalTransport.ts', import.meta.url), 'utf8')
   const lookupTransportSource = fs.readFileSync(new URL('../src/api/lookupTransport.ts', import.meta.url), 'utf8')
   const branchTransportSource = fs.readFileSync(new URL('../src/api/branchTransport.ts', import.meta.url), 'utf8')
+  const productReadTransportSource = fs.readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
   const actionHistoryTransportSource = fs.readFileSync(new URL('../src/api/actionHistoryTransport.ts', import.meta.url), 'utf8')
   const inventoryTransportSource = fs.readFileSync(new URL('../src/api/inventoryTransport.ts', import.meta.url), 'utf8')
   const rfidTransportSource = fs.readFileSync(new URL('../src/api/rfidTransport.ts', import.meta.url), 'utf8')
@@ -643,6 +649,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
   assert.match(source, /from '\.\/lookupTransport\.ts'/)
   assert.match(source, /from '\.\/branchTransport\.ts'/)
+  assert.match(source, /from '\.\/productReadTransport\.ts'/)
   assert.match(source, /from '\.\/aiTransport\.ts'/)
   assert.match(source, /from '\.\/actionHistoryTransport\.ts'/)
   assert.match(source, /from '\.\/inventoryTransport\.ts'/)
@@ -672,6 +679,11 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(branchTransportSource, /withExpectedUpdatedAt\('branches', id/)
   assert.match(branchTransportSource, /export function getBranchStockIntegrity/)
   assert.match(branchTransportSource, /encodeURIComponent\(String\(id\)\)/)
+  assert.match(productReadTransportSource, /export function searchProducts/)
+  assert.match(productReadTransportSource, /normalizePositiveUniqueIds\(ids, 100\)/)
+  assert.match(productReadTransportSource, /readCachedQueryResult\(cacheKey\)/)
+  assert.match(productReadTransportSource, /requireLiveServerWrite\('products:lookup:replace'\)/)
+  assert.doesNotMatch(productReadTransportSource, /requireLiveServerWrite\([^)]*,\s*apiFetch/)
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
@@ -711,6 +723,10 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/branches'/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/branches'/)
   assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/branches\/summary'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', appendQuery\('\/api\/products\/search'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', appendQuery\('\/api\/products\/filters'/)
+  assert.doesNotMatch(source, /apiFetch\('GET', '\/api\/products\/lookups\/usage'/)
+  assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/products\/lookups\/replace'/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/auth\/otp\/setup'/)
   assert.doesNotMatch(source, /apiFetch\('GET', appendActorQuery\('\/api\/ai\/providers'\)/)
   assert.doesNotMatch(source, /apiFetch\('POST', '\/api\/ai\/providers'/)
@@ -837,10 +853,12 @@ await runTest('health payload exposes data, storage, queue, cache, and analytics
 
 await runTest('large search methods do not use empty local fallbacks for required APIs', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  const productReadTransportSource = fs.readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
   const inventoryTransportSource = fs.readFileSync(new URL('../src/api/inventoryTransport.ts', import.meta.url), 'utf8')
-  assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', appendQuery\('\/api\/products\/search', q\)/)
+  assert.match(productReadTransportSource, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', appendQuery\('\/api\/products\/search', query\)/)
   assert.match(inventoryTransportSource, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', appendQuery\('\/api\/inventory\/products\/search', query\)/)
   assert.doesNotMatch(source, /products:search:\$\{q\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
+  assert.doesNotMatch(productReadTransportSource, /products:search:\$\{query\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
   assert.doesNotMatch(source, /inventory:products:search:\$\{q\}`,[\s\S]{0,260}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
 })
 

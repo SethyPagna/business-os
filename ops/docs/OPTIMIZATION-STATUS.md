@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 682, typed branch transport extraction
+- Latest completed move: Move 683, typed product read transport extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `06f55a3c5af78212`
+  `78ede2882315896c`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T04-45-30-017Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-16-14-883Z/summary.json`
 - latest focused public catalog desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
 - latest focused Audit Log desktop/mobile control audit:
@@ -50,6 +50,17 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend product read/lookup transport is now
+  `frontend/src/api/productReadTransport.ts` with typed product list/search,
+  id lookup, filter metadata, lookup usage, and lookup replacement transport.
+  Product query-cache keys, id normalization, mirrored product reads, and
+  live-server lookup replacement gating now live outside the large API
+  registry. Lookup replacement now gates before actually performing the write.
+  The source guard now parses 217 frontend TypeScript files, the production
+  build reports the `app-api-methods` chunk around 41.09 kB, and the focused
+  Products desktop/mobile live audit passed with 42/42 controls tested and
+  zero findings.
 
 - Frontend branch transport is now `frontend/src/api/branchTransport.ts` with
   typed branch list/summary/stock reads, create/update/delete writes, transfer

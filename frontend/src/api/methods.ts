@@ -28,7 +28,7 @@ import {
   isServerOnline,
   isTransientGatewayError,
 } from './http.ts'
-import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from './query.ts'
+import { appendQuery, buildQueryString } from './query.ts'
 import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate } from './localDb.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { STORAGE_KEYS, SYNC } from '../constants'
@@ -65,6 +65,14 @@ import {
   transferStock as transferStockRequest,
   updateBranch as updateBranchRequest,
 } from './branchTransport.ts'
+import {
+  getProductFilters as getProductFiltersRequest,
+  getProductLookupUsage as getProductLookupUsageRequest,
+  getProducts as getProductsRequest,
+  getProductsByIds as getProductsByIdsRequest,
+  replaceProductLookupValues as replaceProductLookupValuesRequest,
+  searchProducts as searchProductsRequest,
+} from './productReadTransport.ts'
 import {
   createAiProvider as createAiProviderRequest,
   deleteAiProvider as deleteAiProviderRequest,
@@ -605,59 +613,18 @@ export const repairBranchStockIntegrity = payload =>
   repairBranchStockIntegrityRequest(payload)
 
 // ─── Products ─────────────────────────────────────────────────────────────────
-export const getProducts        = ()       => routeMirrored('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray(), mirrorTable('products'))
-export const searchProducts = (params = {}) => {
-  const q = buildQueryString(params)
-  const cacheKey = `products:search:${q}`
-  return routeMirrored(
-    cacheKey,
-    () => apiFetch('GET', appendQuery('/api/products/search', q)),
-    () => readCachedQueryResult(cacheKey),
-    (result) => writeCachedQueryResult(cacheKey, result),
-  )
-}
-export const getProductsByIds = (ids = [], params = {}) => {
-  const uniqueIds = normalizePositiveUniqueIds(ids, 100)
-  if (!uniqueIds.length) return Promise.resolve({ items: [], total: 0, page: 1, pageSize: 0 })
-  return searchProducts({
-    page: 1,
-    pageSize: Math.min(Math.max(uniqueIds.length, 1), 100),
-    ids: uniqueIds.join(','),
-    include: 'branch_stock,images,batches',
-    ...params,
-  })
-}
-export const getProductFilters = (params = {}) => {
-  const q = buildQueryString(params)
-  const cacheKey = `products:filters:${q}`
-  return routeMirrored(
-    cacheKey,
-    () => apiFetch('GET', appendQuery('/api/products/filters', q)),
-    () => readCachedQueryResult(cacheKey),
-    (result) => writeCachedQueryResult(cacheKey, result),
-  )
-}
+export const getProducts = () =>
+  getProductsRequest()
+export const searchProducts = (params = {}) =>
+  searchProductsRequest(params)
+export const getProductsByIds = (ids = [], params = {}) =>
+  getProductsByIdsRequest(ids, params)
+export const getProductFilters = (params = {}) =>
+  getProductFiltersRequest(params)
 export const getProductLookupUsage = () =>
-  routeMirrored(
-    'products:lookups:usage',
-    () => apiFetch('GET', '/api/products/lookups/usage'),
-    () => readCachedQueryResult('products:lookups:usage'),
-    (result) => writeCachedQueryResult('products:lookups:usage', result),
-  )
-
-export const replaceProductLookupValues = async ({ type, from = [], to = null, userId = null, userName = '' } = {}) => {
-  const payload = {
-    type: String(type || '').trim(),
-    from: Array.isArray(from) ? from : [from],
-    to,
-    userId,
-    userName,
-  }
-  return requireLiveServerWrite(
-    'products:lookup:replace',
-    apiFetch('POST', '/api/products/lookups/replace', payload)
-  )
-}
+  getProductLookupUsageRequest()
+export const replaceProductLookupValues = (payload = {}) =>
+  replaceProductLookupValuesRequest(payload)
 export async function getCatalogMeta() {
   return getCatalogMetaRequest()
 }

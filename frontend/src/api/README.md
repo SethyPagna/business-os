@@ -66,6 +66,10 @@ This folder is the browser-side transport layer for Business OS.
   - branch list/summary/stock, stock transfers, and branch stock-integrity transport
   - keeps branch mirrored reads, device-attributed writes, and expected-updated-at branch mutations outside the large domain registry
 
+- `productReadTransport.ts`
+  - product list/search, id lookups, filter metadata, lookup usage, and lookup replacement transport
+  - keeps product query-cache keys, id normalization, mirrored reads, and live-server lookup replacement gating outside the large domain registry
+
 - `rfidTransport.ts`
   - RFID gateway status, tag search/create, session event/review/apply transport
   - keeps RFID route keys, id encoding, and device-attributed RFID writes outside the large domain registry

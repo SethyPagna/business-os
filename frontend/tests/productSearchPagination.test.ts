@@ -8,6 +8,7 @@ const productsSurface = readFileSync(new URL('../src/components/products/surface
 const posPage = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
 const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
 const apiMethods = readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+const productReadTransport = readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
 
 assert.ok(
   /productApi\.getProductsByIds|window\.api\.getProductsByIds/.test(productsPage),
@@ -22,7 +23,7 @@ assert.ok(
   'API layer should expose bounded product id lookup',
 )
 assert.ok(
-  apiMethods.includes('/api/products/search'),
+  productReadTransport.includes('/api/products/search'),
   'bounded product id lookup should reuse the paginated search API',
 )
 assert.match(

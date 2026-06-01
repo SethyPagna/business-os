@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 682.
+- Latest completed implementation move in this roadmap: Move 683.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7974,3 +7974,20 @@ Move 682 status:
   chunk at about 41.91 kB with no circular chunk warning, and the focused
   Branch desktop/mobile live control audit passed with zero findings; Phase 29
   and live hygiene checks are rerun after reference refresh.
+
+Move 683 status:
+- Move 683 extracts product read/lookup transport from the large frontend API
+  registry. `frontend/src/api/productReadTransport.ts` now owns product
+  list/search, bounded id lookup, filter metadata, lookup usage, and lookup
+  replacement transport with typed query-building, id normalization, mirrored
+  product reads, query-cache writes, and live-server write gating.
+  `methods.ts` keeps public `window.api` wrapper names for compatibility while
+  no longer carrying direct product search/filter/lookup request calls. The
+  API guide documents the new product read boundary, focused API HTTP tests
+  verify source placement, query-cache ownership, id normalization, and the
+  lookup replacement gate-before-fetch contract. The source guard parsed 217
+  frontend source files, the production build shows the `app-api-methods`
+  chunk at about 41.09 kB with no circular chunk warning, and the focused
+  Products desktop/mobile live control audit passed with 42/42 controls tested
+  and zero findings; Phase 29 and live hygiene checks are rerun after
+  reference refresh.
