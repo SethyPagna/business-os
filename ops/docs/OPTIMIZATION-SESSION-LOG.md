@@ -1258,3 +1258,42 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T16-00-02-450Z/report.json`.
   Exhaustive all-pages report:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T16-00-36-623Z/summary.json`.
+
+- change: shrink authenticated Dashboard startup network and chunk load
+- affected files:
+  `frontend/src/App.tsx`,
+  `frontend/src/api/appBootstrapTransport.ts`,
+  `frontend/src/components/dashboard/Dashboard.tsx`,
+  `frontend/src/components/shared/NotificationCenter.tsx`,
+  `frontend/src/web-api.ts`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: authenticated Dashboard startup, bootstrap fallback,
+  Dashboard summary and analytics reads, notification bell lazy mount,
+  background import tracker, pending-sync refresh, offline maintenance, and
+  Dashboard export helper loading
+- keeper or rollback: keeper; the change removes startup work rather than
+  hiding loading states, and every deferred path still has an interaction or
+  delayed background trigger
+- route-scoped result: real Docker-served authenticated Playwright trace
+  against `http://127.0.0.1:4000/` on frontend hash `0ac6c0dba02d6ba5`
+  reduced the first 12 seconds from the earlier 34 JavaScript chunks and 5 API
+  calls to 12 JavaScript chunks and 3 API calls. The final trace loaded only
+  entry/vendor/language, `app-api`, shell/shared/bootstrap, Dashboard,
+  DonutChart, and formatters chunks; it had zero product/POS/inventory/catalog/
+  file-picker/local-DB/import-tracker/notification-center requests, zero
+  failed responses, and zero relevant console messages.
+- warm whole-app result: focused performance loading guard, API HTTP guard,
+  frontend typecheck, source guard, frontend utility suite, backend utility
+  suite, production build, Docker live build sync, broad Phase 8.4 live suite,
+  public Cloudflare portal check, exhaustive all-pages control audit, and
+  exhaustive browser-action smoke passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T17-47-36-474Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T17-50-15-259Z/report.json`.
+  Exhaustive all-pages report:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`.

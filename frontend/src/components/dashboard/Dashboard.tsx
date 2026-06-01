@@ -6,9 +6,6 @@ import { useRef } from 'react'
 import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
 import { BarChart, LineChart, DonutChart } from './charts'
 import MiniStat from './MiniStat'
-import { buildCSV, downloadCSV, downloadZipFilesAsync } from '../../utils/csv'
-import { buildStandaloneReportHtml } from '../../utils/exportReports'
-import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage'
 import { fmtTime } from '../../utils/formatters'
 import { formatPriceNumber } from '../../utils/pricing.ts'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
@@ -17,6 +14,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
+import { getAnalytics, getDashboard } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 
 type TranslateFn = (key: string) => string
@@ -233,7 +231,7 @@ const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
 function getDashboardApi(): DashboardApi {
-  return (window as unknown as { api: DashboardApi }).api
+  return { getDashboard, getAnalytics }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -1184,7 +1182,7 @@ export default function Dashboard() {
       buildReportManifestRows,
       buildReportPackageFiles,
       buildStandaloneReportHtml,
-      downloadZipFiles,
+      downloadZipFilesAsync,
     } = await loadDashboardExportDeps()
     const salesRows = buildDashboardSalesRows()
     const topProductRows = buildDashboardTopProductRows()

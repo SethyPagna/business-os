@@ -65,8 +65,8 @@ type OfflineFileOwner = OfflineOperation & { upload_id?: string }
 const OFFLINE_REFRESH_INTERVAL_MS = 5 * 60_000
 const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000
 const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000
-const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 3500
-const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 10_000
+const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 45_000
+const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 60_000
 const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200
 const BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS = 9000
 const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000
@@ -823,17 +823,17 @@ const staticApi = {
     setSyncServerUrl(clean)
     if (clean) {
       if (syncServerChanged) {
-        getOfflineDb().then((db) => db.settings.put({ key: 'sync_server_url', value: clean })).catch(() => {})
+        scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: clean }))
         cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
       }
       connectWS()
       startHealthCheck()
       if (syncServerChanged) {
-        runOfflineMaintenance(true)
+        scheduleInitialOfflineMaintenance()
       }
     } else {
       if (syncServerChanged) {
-        getOfflineDb().then((db) => db.settings.delete('sync_server_url')).catch(() => {})
+        scheduleBootstrapOfflineDbWrite((db) => db.settings.delete('sync_server_url'))
         disconnectWS()
       }
     }

@@ -87,6 +87,7 @@ type SyncContextValue = {
 
 type NotificationCenterProps = {
   compact?: boolean
+  openRequestId?: number
   visibility?: VisibilityMode
 }
 
@@ -260,7 +261,7 @@ function NotificationSeverityIcon({ tone = 'info', label }: NotificationSeverity
   )
 }
 
-export default function NotificationCenter({ compact = false, visibility = 'always' }: NotificationCenterProps) {
+export default function NotificationCenter({ compact = false, openRequestId = 0, visibility = 'always' }: NotificationCenterProps) {
   const { navigateTo, notify, saveSettings, settings, t } = useApp()
   const { syncChannel } = useSync()
   const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
@@ -486,6 +487,12 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
 
   const activeAlertCount = Number(summary.unreadCount || 0)
   const badgeCount = open ? 0 : activeAlertCount
+
+  useEffect(() => {
+    if (!openRequestId || !visibilityActive) return
+    setOpen(true)
+    void loadSummary(true)
+  }, [loadSummary, openRequestId, visibilityActive])
 
   if (!visibilityActive) return null
 

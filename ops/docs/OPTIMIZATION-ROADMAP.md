@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 708.
+- Latest completed implementation move in this roadmap: Move 709.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8422,3 +8422,46 @@ Move 707 status:
   and no relevant console messages; public Cloudflare portal check passed with
   20 rendered products, zero failed responses, zero page errors, and enforced
   CSP; post-live hygiene passed.
+
+Move 708 status:
+- Move 708 splits logged-out sign-in and bootstrap startup away from the heavy
+  legacy API registry. `frontend/src/web-api.ts` now exposes login, logout,
+  OTP, Google OAuth, verification-capability, and organization
+  bootstrap/search calls through the narrow lazy `authTransport` boundary,
+  while `frontend/src/api/appBootstrapTransport.ts` returns an empty sign-in
+  bootstrap for invalid sessions instead of reading IndexedDB. `frontend/src/
+  `frontend/src/AppContext.tsx` waits for server bootstrap validation before treating a
+  stored user as authenticated for startup warmups. Proof: focused loading
+  guard, API HTTP guard, TypeScript check, source guard, frontend utility
+  suite, backend utility suite, production build hash `1a5804d05a4e008e`,
+  Docker live sync, built graph check, and a real Playwright first-12-seconds
+  trace with only `app-bootstrap-EfLFgo7i.js` and `app-auth-DD-QfBFn.js`
+  among auth startup lazy chunks and zero `app-api-methods`, `app-local-db`,
+  `vendor-dexie`, `vendor-zxing`, catalog, file-picker, or profile-modal
+  requests. Broad Phase 8.4 live suite, public Cloudflare portal check,
+  post-live hygiene, exhaustive all-pages control audit, Phase 29 audit,
+  generated references, and organization audit passed.
+
+Move 709 status:
+- Move 709 shrinks authenticated Dashboard startup with real live-browser
+  proof. `frontend/src/App.tsx` no longer warms unrelated page route chunks on
+  boot and delays pending-sync, notification-center, and import-tracker
+  background work beyond the first interaction window. The notification bell
+  still opens on the first click by passing an `openRequestId` into the lazy
+  `NotificationCenter`. `frontend/src/api/appBootstrapTransport.ts` builds the
+  local bootstrap fallback without local DB/local mirror imports, and
+  `frontend/src/web-api.ts` schedules offline maintenance instead of loading
+  IndexedDB during startup. `frontend/src/components/dashboard/Dashboard.tsx`
+  uses the narrow dashboard transport directly and loads CSV/report/ZIP export
+  helpers only when an export action runs. `frontend/vite.config.ts` keeps the
+  dashboard transport and query helper inside `app-api` so Dashboard reads do
+  not pull the full method registry. Proof: production build hash
+  `0ac6c0dba02d6ba5`, Docker live sync, authenticated Playwright first
+  12-seconds network trace reduced the startup from the earlier 34 JavaScript
+  chunks and 5 API calls to 12 JavaScript chunks and 3 API calls, with zero
+  product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
+  notification-center requests, zero failed responses, and zero relevant
+  console messages. Focused loading/API HTTP guards, frontend typecheck,
+  source guard, frontend utility suite, backend utility suite, broad Phase 8.4
+  live suite, public Cloudflare portal check, exhaustive all-pages control
+  audit, and exhaustive browser-action smoke passed.

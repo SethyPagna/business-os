@@ -5,6 +5,7 @@ import {
   isInvalidSessionError,
   isNetErr,
   isTransientGatewayError,
+  setSyncServerUrl,
 } from './http.ts'
 import { hasStoredUserSession } from './syncRuntime.ts'
 
@@ -21,24 +22,6 @@ type AppBootstrapPayload = {
   offline?: boolean
 }
 
-type LocalDbModule = typeof import('./localDb.ts')
-type LocalMirrorsModule = typeof import('./localMirrors.ts')
-
-const DEFERRED_MIRROR_PURGE_DELAY_MS = 45_000
-const DEFERRED_MIRROR_PURGE_IDLE_TIMEOUT_MS = 60_000
-let localDbModulePromise: Promise<LocalDbModule> | null = null
-let localMirrorsModulePromise: Promise<LocalMirrorsModule> | null = null
-
-function loadLocalDbModule(): Promise<LocalDbModule> {
-  if (!localDbModulePromise) localDbModulePromise = import('./localDb.ts')
-  return localDbModulePromise
-}
-
-function loadLocalMirrorsModule(): Promise<LocalMirrorsModule> {
-  if (!localMirrorsModulePromise) localMirrorsModulePromise = import('./localMirrors.ts')
-  return localMirrorsModulePromise
-}
-
 function emptyBootstrap(user: unknown = null): AppBootstrapPayload {
   return {
     user,
@@ -49,33 +32,6 @@ function emptyBootstrap(user: unknown = null): AppBootstrapPayload {
     storage: null,
     system: null,
   }
-}
-
-function scheduleDeferredSensitiveMirrorPurge(): void {
-  if (typeof window === 'undefined') {
-    loadLocalMirrorsModule().then((module) => module.purgeSensitiveLiveServerMirrors()).catch(() => {})
-    return
-  }
-
-  const run = () => {
-    window.setTimeout(() => {
-      const purge = () => {
-        if (document.visibilityState === 'hidden') return
-        loadLocalMirrorsModule().then((module) => module.purgeSensitiveLiveServerMirrors()).catch(() => {})
-      }
-      if (typeof window.requestIdleCallback === 'function') {
-        window.requestIdleCallback(purge, { timeout: DEFERRED_MIRROR_PURGE_IDLE_TIMEOUT_MS })
-        return
-      }
-      purge()
-    }, DEFERRED_MIRROR_PURGE_DELAY_MS)
-  }
-
-  if (document.readyState === 'complete') {
-    run()
-    return
-  }
-  window.addEventListener('load', run, { once: true })
 }
 
 function readStoredUser(): unknown {
@@ -93,11 +49,21 @@ function readErrorField(error: unknown, field: 'message' | 'status'): unknown {
   return (error as Record<string, unknown>)[field]
 }
 
-async function buildLocalBootstrap(): Promise<AppBootstrapPayload> {
-  const { localGetSettings } = await loadLocalDbModule()
+function ensureBootstrapServerUrl(): string {
+  const configured = getSyncServerUrl()
+  if (configured || typeof window === 'undefined') return configured
+  const location = window.location
+  const isViteDev = location.hostname === 'localhost' && (location.port === '5173' || location.port === '5174')
+  if (isViteDev) return ''
+  const origin = String(location.origin || '').replace(/\/$/, '')
+  if (origin) setSyncServerUrl(origin)
+  return origin
+}
+
+function buildLocalBootstrap(): AppBootstrapPayload {
   return {
     user: readStoredUser(),
-    settings: await localGetSettings(),
+    settings: {},
     organizationCreationEnabled: false,
     organization: null,
     group: null,
@@ -107,16 +73,12 @@ async function buildLocalBootstrap(): Promise<AppBootstrapPayload> {
 }
 
 export async function getAppBootstrap(): Promise<unknown> {
-  const hasServer = Boolean(getSyncServerUrl())
+  const hasServer = Boolean(ensureBootstrapServerUrl())
   const hasStoredSession = hasStoredUserSession()
 
   if (!hasServer) {
-    const { purgeSensitiveLiveServerMirrors } = await loadLocalMirrorsModule()
-    await purgeSensitiveLiveServerMirrors().catch(() => {})
-    return buildLocalBootstrap()
+    return { ...buildLocalBootstrap(), offline: true }
   }
-
-  scheduleDeferredSensitiveMirrorPurge()
 
   try {
     return await apiFetch('GET', '/api/auth/bootstrap')
@@ -137,7 +99,7 @@ export async function getAppBootstrap(): Promise<unknown> {
     }
     const status = readErrorField(error, 'status')
     if (isNetErr(error) || isTransientGatewayError(status)) {
-      const localBootstrap = await buildLocalBootstrap()
+      const localBootstrap = buildLocalBootstrap()
       return {
         ...localBootstrap,
         offline: true,

@@ -1072,4 +1072,14 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   backend source scan now reports no `map()`, `filter()`, `forEach()`,
   `reduce()`, `find()`, `some()`, `every()`, `flatMap()`, or `Array.from()`
   hits under `backend/src`.
+- Move 440 tightens authenticated Dashboard startup. Route warmups now wait
+  for user intent, pending-sync/notification/import-tracker/offline
+  maintenance work is delayed past the first interaction window, Dashboard
+  reads use the narrow dashboard transport, and export helper modules load
+  only on export commands. Real Docker-served authenticated Playwright proof on
+  hash `0ac6c0dba02d6ba5` reduced first-12-seconds startup from 34 JavaScript
+  chunks and 5 API calls to 12 JavaScript chunks and 3 API calls, with no
+  unrelated product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
+  notification-center requests and no relevant console or failed-response
+  noise.
 <!-- phase29-manual-notes:end -->

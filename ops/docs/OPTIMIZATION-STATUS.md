@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 
 ## Phase Board
 
@@ -8,27 +8,27 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 708, split login/auth bootstrap out of the heavy API registry
+- Latest completed move: Move 709, shrink authenticated Dashboard startup network and chunk load
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `1a5804d05a4e008e`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `0ac6c0dba02d6ba5`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `1a5804d05a4e008e`
+  `0ac6c0dba02d6ba5`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T16-00-36-623Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T15-57-09-334Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T17-47-36-474Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T16-00-02-450Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T17-50-15-259Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -45,10 +45,10 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed across
-  34 routes, with 518 visible controls discovered, 392 controls exercised, 126
+  34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `1a5804d05a4e008e`
+- broad Phase 8.4 UI live check passed on frontend hash `0ac6c0dba02d6ba5`
   with 72 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +57,31 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Frontend authenticated Dashboard startup now avoids speculative page chunks,
+  local IndexedDB bootstrap reads, notification/import-tracker work, and export
+  helper imports during the first screen. `frontend/src/App.tsx` leaves route
+  chunks cold until hover/touch/click intent and delays pending-sync,
+  notification-center, and import-tracker background work until well after the
+  Dashboard is interactive. `frontend/src/api/appBootstrapTransport.ts` now
+  builds the local bootstrap fallback without Dexie/local mirror imports, and
+  `frontend/src/web-api.ts` schedules offline maintenance instead of running it
+  while the app is booting. `frontend/src/components/dashboard/Dashboard.tsx`
+  uses the narrow dashboard transport directly and lazy-loads CSV/report/ZIP
+  export helpers only when an export command is used. Real Docker-served
+  authenticated Playwright proof against `http://127.0.0.1:4000/` on build
+  hash `0ac6c0dba02d6ba5` reduced the first 12 seconds from the earlier
+  baseline of 34 JavaScript chunks and 5 API calls to 12 JavaScript chunks and
+  3 API calls. The final trace loaded only entry/vendor/language, `app-api`,
+  shell/shared/bootstrap, Dashboard, DonutChart, and formatters chunks; it had
+  zero product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
+  notification-center requests, zero failed responses, and zero relevant
+  console messages. Verification: focused loading guard, API HTTP guard,
+  frontend typecheck, source guard, frontend utility suite, backend utility
+  suite, production build, Docker live sync, authenticated Playwright startup
+  trace, broad Phase 8.4 live suite, public Cloudflare portal check,
+  exhaustive all-pages control audit, and exhaustive browser-action smoke all
+  passed.
 
 - Frontend logged-out and invalid-session startup now avoids the heavy legacy
   API registry and offline database chunks during the first shell render. The

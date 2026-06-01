@@ -672,3 +672,13 @@ Move 179 closes the final self-referential SQL/DuckDB candidate in
 `ops/scripts/architecture/language-runtime-audit.mjs`. The script now records
 itself as a rejected data-path conversion candidate because it is the Phase 29
 meta-audit/report generator, not a runtime query/import hot path.
+
+Move 180 records the authenticated Dashboard startup optimization as the next
+Phase 29 performance slice. The accepted rewire keeps route chunks cold until
+intent, moves non-critical sync/notification/import/offline work behind
+delays, removes local DB/local mirror imports from bootstrap fallback, and
+keeps Dashboard on the narrow data transport plus on-demand export helpers.
+The Docker-served Playwright trace on hash `0ac6c0dba02d6ba5` is the proof
+gate: 12 JavaScript chunks and 3 API calls in the first 12 seconds, down from
+the earlier 34 chunks and 5 API calls, with no failed responses or relevant
+console messages.

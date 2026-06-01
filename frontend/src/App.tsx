@@ -235,14 +235,10 @@ const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
 const APP_FAVICON_PROCESSING_DELAY_MS = 1800
 const APP_FAVICON_IDLE_TIMEOUT_MS = 7000
 
-// Keep route chunks cold until the user asks for them. Background dynamic
-// imports were evaluating large bundles during real clicks, which showed up as
-// very high INP on Backup, Contacts, and mobile section changes.
-const WARMUP_PAGE_IDS: readonly PageId[] = [
-  'products',
-  'pos',
-  'inventory',
-] satisfies PageId[]
+// Keep route chunks cold until the user asks for them. Hover/touch intent still
+// preloads the exact target route, but Dashboard startup should not download
+// Products, POS, Inventory, catalog, scanner, or local DB bundles by itself.
+const WARMUP_PAGE_IDS: readonly PageId[] = [] satisfies PageId[]
 
 const ADMIN_PAGE_SEQUENCE: readonly PageId[] = [
   'sales',
@@ -283,12 +279,12 @@ const DELAYED_CHUNK_WARMUP_PAGE_IDS: ReadonlySet<PageId> = new Set([
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
 const INTENT_CHUNK_WARMUP_DELAY_MS = 80
-const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 2500
-const PENDING_SYNC_IDLE_TIMEOUT_MS = 8000
-const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 2200
-const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 10000
-const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 5000
-const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 15000
+const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 30000
+const PENDING_SYNC_IDLE_TIMEOUT_MS = 45000
+const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 30000
+const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000
+const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 45000
+const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 60000
 const STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 const PAGE_LOADER_STALL_WARNING_MS = 15000
@@ -843,14 +839,17 @@ function useDeferredImportTrackerMount(user: AppUser | null): boolean {
 }
 
 function useDeferredNotificationCenterMount(user: AppUser | null): {
+  notificationCenterOpenRequestId: number
   shouldMountNotificationCenter: boolean
   requestNotificationCenterMount: () => void
 } {
   const [enabled, setEnabled] = useState(false)
+  const [openRequestId, setOpenRequestId] = useState(0)
 
   useEffect(() => {
     if (!user || typeof window === 'undefined') {
       setEnabled(false)
+      setOpenRequestId(0)
       return undefined
     }
     if (enabled) return undefined
@@ -890,8 +889,12 @@ function useDeferredNotificationCenterMount(user: AppUser | null): {
   }, [enabled, user])
 
   return {
+    notificationCenterOpenRequestId: openRequestId,
     shouldMountNotificationCenter: !!user && enabled,
-    requestNotificationCenterMount: () => setEnabled(true),
+    requestNotificationCenterMount: () => {
+      setOpenRequestId((current) => current + 1)
+      setEnabled(true)
+    },
   }
 }
 
@@ -1522,19 +1525,20 @@ export default function App() {
   const mountedPages = useMountedPages(page)
   const shouldMountImportTracker = useDeferredImportTrackerMount(authReady ? user : null)
   const {
+    notificationCenterOpenRequestId,
     shouldMountNotificationCenter,
     requestNotificationCenterMount,
   } = useDeferredNotificationCenterMount(authReady ? user : null)
   const desktopNotificationSlot = shouldMountNotificationCenter ? (
     <Suspense fallback={<NotificationCenterFallback compact />}>
-      <NotificationCenter compact visibility="desktop" />
+      <NotificationCenter compact openRequestId={notificationCenterOpenRequestId} visibility="desktop" />
     </Suspense>
   ) : (
     <NotificationCenterFallback compact onClick={requestNotificationCenterMount} />
   )
   const mobileNotificationSlot = shouldMountNotificationCenter ? (
     <Suspense fallback={<NotificationCenterFallback compact />}>
-      <NotificationCenter compact visibility="mobile" />
+      <NotificationCenter compact openRequestId={notificationCenterOpenRequestId} visibility="mobile" />
     </Suspense>
   ) : (
     <NotificationCenterFallback compact onClick={requestNotificationCenterMount} />

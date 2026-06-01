@@ -187,6 +187,8 @@ function manualChunks(id: string): string | undefined {
       normalized.endsWith('/src/api/http.ts')
       || normalized.endsWith('/src/api/websocket.ts')
       || normalized.endsWith('/src/api/syncRuntime.ts')
+      || normalized.endsWith('/src/api/dashboardTransport.ts')
+      || normalized.endsWith('/src/api/query.ts')
     ) {
       return 'app-api'
     }

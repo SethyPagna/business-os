@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 707 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 709 in this file.
 
 ## Goal
 
@@ -6715,6 +6715,34 @@ Decision rule:
     routes with 518 visible controls, 392 exercised controls, 68 screenshots,
     zero failed controls, and zero findings; Phase 29 and organization audits
     passed after generated references were refreshed.
+
+709. Shrink authenticated Dashboard startup network and chunk load.
+    Done: `frontend/src/App.tsx` now keeps unrelated route chunks cold until
+    hover/touch/click intent and pushes pending-sync, notification-center, and
+    background import-tracker work past the first Dashboard interaction window.
+    `frontend/src/components/shared/NotificationCenter.tsx` accepts an
+    `openRequestId` so the first notification-bell click still opens the panel
+    after the lazy mount. `frontend/src/api/appBootstrapTransport.ts` no
+    longer imports local DB or local mirror modules for bootstrap fallback, and
+    `frontend/src/web-api.ts` schedules offline maintenance instead of loading
+    IndexedDB during startup. `frontend/src/components/dashboard/Dashboard.tsx`
+    now reads through the narrow dashboard transport and lazy-loads
+    CSV/report/ZIP export helpers only when an export action is used.
+    `frontend/vite.config.ts` keeps `dashboardTransport.ts` and `query.ts` in
+    `app-api`, so Dashboard reads avoid the full method registry. Proof:
+    performance loading UX guard, API HTTP guard, source check, typecheck,
+    frontend utility suite, backend utility suite, production build hash
+    `0ac6c0dba02d6ba5`, Docker live build sync, authenticated Playwright
+    first-12-seconds trace, broad Phase 8.4 live suite, public Cloudflare
+    portal check, exhaustive all-pages control audit, and exhaustive
+    browser-action smoke. The live trace reduced Dashboard startup from the
+    earlier 34 JavaScript chunks and 5 API calls to 12 JavaScript chunks and 3
+    API calls, with zero unrelated product/POS/inventory/catalog/file-picker/
+    local-DB/import-tracker/notification-center requests, zero failed
+    responses, and zero relevant console messages. The all-pages audit covered
+    34 desktop/mobile routes with 519 visible controls, 392 exercised controls,
+    68 screenshots, zero failed controls, and zero findings; browser-action
+    smoke covered 34 routes and 28 actions with zero findings.
 
 ## Safety Gates
 

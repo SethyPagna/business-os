@@ -325,8 +325,10 @@ await runTest('app bootstrap converts invalid sessions into an explicit unauthor
   assert.match(source, /unauthorized:\s*true/)
   assert.match(source, /authError:[\s\S]*'Please sign in again to continue\.'/)
   assert.match(source, /apiFetch\('GET', '\/api\/auth\/bootstrap'\)/)
-  assert.match(source, /purgeSensitiveLiveServerMirrors\(\)/)
-  assert.match(source, /localGetSettings\(\)/)
+  assert.match(source, /ensureBootstrapServerUrl\(\)/)
+  assert.match(source, /function buildLocalBootstrap\(\): AppBootstrapPayload[\s\S]*settings: \{\}/)
+  assert.doesNotMatch(source, /purgeSensitiveLiveServerMirrors\(\)/)
+  assert.doesNotMatch(source, /localGetSettings\(\)/)
 })
 
 await runTest('paged audit and user-attributed activity APIs expose user filters', () => {

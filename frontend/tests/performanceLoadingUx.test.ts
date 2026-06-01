@@ -60,7 +60,7 @@ const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', i
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 const apiMethods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 
-assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\s*'products',[\s\S]*'pos',[\s\S]*'inventory',[\s\S]*\]/, 'background chunk warmup should target the primary day-to-day pages only')
+assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\] satisfies PageId\[\]/, 'dashboard startup should not background-load route chunks before user intent')
 assert.match(app, /Page bundle is still loading/, 'page loader should explain stalled chunk loads')
 assert.match(app, /console\.warn\('\[PageLoader\]/, 'page loader should expose diagnostic breadcrumbs')
 assert.match(app, /const CHUNK_IMPORT_TIMEOUT_MS = 15000/, 'chunk timeout should allow slow mobile networks before showing stalled UI')
@@ -72,16 +72,16 @@ assert.match(app, /iconEl\.setAttribute\('href', iconSource\)[\s\S]*window\.requ
 assert.doesNotMatch(app, /import \{ createCircularFaviconDataUrl \} from '\.\/utils\/favicon\.ts'/, 'app shell should not statically import favicon canvas helpers during startup')
 assert.match(app, /const \{ createCircularFaviconDataUrl \} = await import\('\.\/utils\/favicon\.ts'\)/, 'app shell should load favicon canvas helpers only inside the delayed idle task')
 assert.doesNotMatch(app, /async function loadFavicon\(\)[\s\S]{0,700}\n\s*loadFavicon\(\)/, 'app should not process the custom favicon synchronously during shell startup')
-assert.match(app, /const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 2500/, 'initial pending-sync read should be deferred past first paint')
-assert.match(app, /const PENDING_SYNC_IDLE_TIMEOUT_MS = 8000/, 'deferred pending-sync read should still run even if idle time is scarce')
+assert.match(app, /const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 30000/, 'initial pending-sync read should stay out of the first-load network window')
+assert.match(app, /const PENDING_SYNC_IDLE_TIMEOUT_MS = 45000/, 'deferred pending-sync read should still run during a long-lived session')
 assert.match(app, /function useSyncErrorBanner\(user: AppUser \| null\)/, 'pending sync polling should know whether an authenticated user exists')
 assert.match(app, /if \(!user\) \{[\s\S]*setPendingSync\(null\)[\s\S]*return[\s\S]*getAppShellApi\(\)\.getPendingSyncState/, 'logged-out startup should not load the full API registry just to read local pending sync')
 assert.match(app, /const cancelInitialPendingSyncRefresh = user[\s\S]*scheduleInitialPendingSyncRefresh\(refreshPendingSync\)[\s\S]*const timer = user \? window\.setInterval\(refreshPendingSync, 20_000\) : 0/, 'pending sync timers should only run after authentication')
 assert.match(app, /\}, \[user\]\)/, 'pending sync listeners should re-evaluate when bootstrap validates or clears the stored user')
-assert.match(app, /const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 2200/, 'notification center chunk should not mount during the first shell render')
-assert.match(app, /const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 10000/, 'deferred notification center should still wake even if idle time is scarce')
-assert.match(app, /const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 5000/, 'global import tracker chunk should not mount during the first shell render')
-assert.match(app, /const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 15000/, 'deferred import tracker should still wake even if idle time is scarce')
+assert.match(app, /const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 30000/, 'notification center chunk should stay out of the first-load network window unless clicked')
+assert.match(app, /const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000/, 'deferred notification center should still wake during a long-lived session')
+assert.match(app, /const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 45000/, 'global import tracker chunk should stay out of the first-load network window unless sync activity wakes it')
+assert.match(app, /const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 60000/, 'deferred import tracker should still wake during a long-lived session')
 assert.match(app, /function scheduleInitialPendingSyncRefresh\(refresh: \(\) => void\): CancelWarmup/, 'pending-sync startup refresh should use a cancellable idle scheduler')
 assert.match(app, /window\.requestIdleCallback\(run, \{ timeout: PENDING_SYNC_IDLE_TIMEOUT_MS \}\)/, 'pending-sync startup refresh should prefer idle time')
 assert.match(app, /const cancelInitialPendingSyncRefresh = user[\s\S]*scheduleInitialPendingSyncRefresh\(refreshPendingSync\)/, 'sync banner should not import API methods during logged-out first shell render')
@@ -93,9 +93,11 @@ assert.match(app, /const shouldMountImportTracker = useDeferredImportTrackerMoun
 assert.match(app, /\{shouldMountImportTracker \? \(\s*<Suspense fallback=\{null\}>\s*<BackgroundImportTracker \/>/m, 'import tracker chunk should not render until the deferred gate opens')
 assert.match(app, /function useDeferredNotificationCenterMount\(user: AppUser \| null\): \{[\s\S]*shouldMountNotificationCenter: boolean[\s\S]*requestNotificationCenterMount: \(\) => void[\s\S]*\}/, 'notification center should mount through an explicit deferred hook')
 assert.match(app, /window\.requestIdleCallback\(enableWhenVisible, \{ timeout: NOTIFICATION_CENTER_IDLE_TIMEOUT_MS \}\)/, 'deferred notification center should prefer idle time before loading its chunk')
-assert.match(app, /const \{\s*shouldMountNotificationCenter,[\s\S]*requestNotificationCenterMount,[\s\S]*\} = useDeferredNotificationCenterMount\(authReady \? user : null\)/, 'app shell should gate notification center mounting behind the deferred hook')
-assert.match(app, /const desktopNotificationSlot = shouldMountNotificationCenter \? \(\s*<Suspense fallback=\{<NotificationCenterFallback compact \/>\}>\s*<NotificationCenter compact visibility="desktop" \/>/m, 'desktop notification center chunk should not render until the deferred gate opens')
-assert.match(app, /const mobileNotificationSlot = shouldMountNotificationCenter \? \(\s*<Suspense fallback=\{<NotificationCenterFallback compact \/>\}>\s*<NotificationCenter compact visibility="mobile" \/>/m, 'mobile notification center chunk should not render until the deferred gate opens')
+assert.match(app, /const \{\s*notificationCenterOpenRequestId,[\s\S]*shouldMountNotificationCenter,[\s\S]*requestNotificationCenterMount,[\s\S]*\} = useDeferredNotificationCenterMount\(authReady \? user : null\)/, 'app shell should gate notification center mounting behind the deferred hook')
+assert.match(app, /<NotificationCenter compact openRequestId=\{notificationCenterOpenRequestId\} visibility="desktop" \/>/, 'first click on the deferred desktop notification bell should open the mounted notification panel')
+assert.match(app, /<NotificationCenter compact openRequestId=\{notificationCenterOpenRequestId\} visibility="mobile" \/>/, 'first click on the deferred mobile notification bell should open the mounted notification panel')
+assert.match(app, /const desktopNotificationSlot = shouldMountNotificationCenter \? \(\s*<Suspense fallback=\{<NotificationCenterFallback compact \/>\}>\s*<NotificationCenter compact openRequestId=\{notificationCenterOpenRequestId\} visibility="desktop" \/>/m, 'desktop notification center chunk should not render until the deferred gate opens')
+assert.match(app, /const mobileNotificationSlot = shouldMountNotificationCenter \? \(\s*<Suspense fallback=\{<NotificationCenterFallback compact \/>\}>\s*<NotificationCenter compact openRequestId=\{notificationCenterOpenRequestId\} visibility="mobile" \/>/m, 'mobile notification center chunk should not render until the deferred gate opens')
 assert.match(app, /<NotificationCenterFallback compact onClick=\{requestNotificationCenterMount\} \/>/, 'notification fallback should still let the user load notifications immediately')
 assert.match(app, /\{writeConflict \? \(\s*<Suspense fallback=\{null\}>\s*<WriteConflictModal/m, 'write-conflict modal chunk should not load until a conflict exists')
 assert.doesNotMatch(app, /<Suspense fallback=\{null\}>\s*<WriteConflictModal[\s\S]*<\/Suspense>\s*<SyncErrorBanner/, 'write-conflict modal should not be rendered unconditionally during startup')
@@ -138,8 +140,8 @@ assert.match(index, /scheduleAfterLoadIdle\(\s*\(\) => \{ register\(\)\.catch\(\
 assert.match(index, /scheduleAfterLoadIdle\(\s*installFormFieldAccessibility,\s*FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS,\s*FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS,\s*\)/, 'form field accessibility scan should use the after-load idle scheduler')
 assert.match(index, /ReactDOM\.createRoot\(rootElement\)\.render\([\s\S]*\)\s*\n\s*registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)/, 'React should render before startup maintenance jobs are scheduled')
 assert.doesNotMatch(index, /registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)\s*\n\s*const publicCatalogMode/, 'startup maintenance jobs should not be scheduled before root render setup')
-assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 3500/, 'offline queue and snapshot maintenance should be delayed past first paint')
-assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 10_000/, 'initial offline maintenance should still run when idle time is scarce')
+assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 45_000/, 'offline queue and snapshot maintenance should stay out of the first-load network window')
+assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 60_000/, 'initial offline maintenance should still run during a long-lived authenticated session')
 assert.match(webApi, /const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200/, 'bootstrap storage cleanup and persistence should be delayed past first paint')
 assert.match(webApi, /const BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS = 9000/, 'bootstrap storage maintenance should still run when idle time is scarce')
 assert.match(webApi, /const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000/, 'bootstrap IndexedDB mirror writes should wait until the visible app has settled')
@@ -153,8 +155,12 @@ assert.match(webApi, /getVerificationCapabilities: getAuthTransportMethod\('getV
 assert.match(webApi, /async getAppBootstrap\(\) \{[\s\S]*const module = await loadAppBootstrapModule\(\)[\s\S]*return module\.getAppBootstrap\(\)/, 'window.api.getAppBootstrap should not go through app-api-methods during logged-out startup')
 assert.doesNotMatch(appBootstrapTransport, /import \{[^}]*localGetSettings[^}]*\} from '\.\/localDb\.ts'/, 'app bootstrap transport should not statically import local DB on unauthenticated startup')
 assert.doesNotMatch(appBootstrapTransport, /import \{[^}]*purgeSensitiveLiveServerMirrors[^}]*\} from '\.\/localMirrors\.ts'/, 'app bootstrap transport should not statically import mirror cleanup on unauthenticated startup')
-assert.match(appBootstrapTransport, /function loadLocalDbModule\(\): Promise<LocalDbModule> \{[\s\S]*import\('\.\/localDb\.ts'\)/, 'app bootstrap local settings fallback should load local DB only on demand')
-assert.match(appBootstrapTransport, /if \(!hasServer\) \{[\s\S]*return buildLocalBootstrap\(\)[\s\S]*\}\s*\n\s*scheduleDeferredSensitiveMirrorPurge\(\)/, 'live-server bootstrap should defer mirror cleanup until after startup instead of loading IndexedDB first')
+assert.doesNotMatch(appBootstrapTransport, /localDb\.ts/, 'app bootstrap should not reference local DB so Vite cannot preload Dexie during live startup')
+assert.doesNotMatch(appBootstrapTransport, /localMirrors\.ts|purgeSensitiveLiveServerMirrors/, 'app bootstrap should not reference mirror cleanup so Vite cannot preload app-api-methods during live startup')
+assert.match(appBootstrapTransport, /function buildLocalBootstrap\(\): AppBootstrapPayload \{[\s\S]*settings: \{\}/, 'offline bootstrap fallback should be lightweight and avoid IndexedDB during startup')
+assert.match(appBootstrapTransport, /function ensureBootstrapServerUrl\(\): string \{[\s\S]*setSyncServerUrl\(origin\)[\s\S]*return origin/, 'app bootstrap should self-heal backend-origin startup before taking the IndexedDB fallback path')
+assert.match(appBootstrapTransport, /const hasServer = Boolean\(ensureBootstrapServerUrl\(\)\)/, 'app bootstrap should decide live/offline mode after sync URL self-healing')
+assert.match(appBootstrapTransport, /if \(!hasServer\) \{[\s\S]*return \{ \.\.\.buildLocalBootstrap\(\), offline: true \}[\s\S]*\}/, 'offline bootstrap should return a lightweight fallback without loading IndexedDB')
 assert.match(appBootstrapTransport, /const localBootstrap = emptyBootstrap\(\)/, 'invalid-session bootstrap should not load IndexedDB just to render the sign-in page')
 assert.doesNotMatch(apiMethods, /import \{ getAppBootstrap as getAppBootstrapRequest \} from '\.\/appBootstrapTransport\.ts'/, 'legacy API registry should not pull app bootstrap into app-api-methods at module load')
 assert.match(apiMethods, /export const getAppBootstrap = async \(\) => \{[\s\S]*await import\('\.\/appBootstrapTransport\.ts'\)/, 'legacy getAppBootstrap should use the same direct lazy bootstrap boundary')
@@ -163,6 +169,7 @@ assert.match(clientRuntime, /const \{ resetLocalMirrorDb \} = await import\('\.\
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/localDb\.ts'\)\) return 'app-local-db'/, 'Vite should keep localDb out of the startup app-api chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/appBootstrapTransport\.ts'\)\) return 'app-bootstrap'/, 'Vite should keep unauthenticated bootstrap out of the full app-api-methods registry chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/authTransport\.ts'\)\) return 'app-auth'/, 'Vite should keep sign-in auth helpers out of the full app-api-methods registry chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)[\s\S]*return 'app-api'/, 'Vite should keep Dashboard summary transport in the startup API chunk instead of app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/http\.ts'\)[\s\S]*return 'app-api'[\s\S]*if \(normalized\.includes\('\/src\/api\/'\)\) return 'app-api-methods'/, 'Vite should keep only startup API files in app-api and move method transports behind the lazy methods chunk')
 assert.match(viteConfig, /'assets\/app-bootstrap-',[\s\S]*'assets\/app-auth-',/, 'bootstrap and auth chunks should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /'assets\/app-local-db-',[\s\S]*'assets\/vendor-dexie-',/, 'local DB and Dexie chunks should be excluded from eager modulepreload')
@@ -176,7 +183,8 @@ assert.match(webApi, /function scheduleBootstrapOfflineDbWrite\(task: \(db: any\
 assert.match(webApi, /scheduleBootstrapStorageMaintenance\(\(\) => \{[\s\S]*localStorage\.removeItem\('businessos_auth_token'\)[\s\S]*sessionStorage\.removeItem\('businessos_sync_token_session'\)[\s\S]*\}\)\s*\n\s*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.delete\('sync_token'\)\)/, 'retired token cleanup should keep synchronous storage cleanup separate from delayed Dexie work')
 assert.match(webApi, /scheduleBootstrapStorageMaintenance\(\(\) => \{[\s\S]*localStorage\.setItem\(STORAGE_KEYS\.SYNC_SERVER, url\)[\s\S]*\}\)\s*\n\s*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.put\(\{ key: 'sync_server_url', value: url \}\)\)/, 'backend-origin sync URL should persist immediately to localStorage while delaying the IndexedDB mirror')
 assert.match(webApi, /function runOfflineMaintenance\(force = false\): void \{[\s\S]*if \(!hasStoredUserSession\(\)\) return[\s\S]*getLazyApiMethod\('retryPendingSyncNow'\)/, 'logged-out startup should not load the full API registry for offline maintenance')
-assert.match(webApi, /const previousSyncServerUrl = getSyncServerUrl\(\)[\s\S]*const syncServerChanged = previousSyncServerUrl !== clean[\s\S]*if \(syncServerChanged\) \{[\s\S]*cacheClearAll\(\)[\s\S]*if \(syncServerChanged\) \{[\s\S]*runOfflineMaintenance\(true\)/, 'setSyncServerUrl should avoid duplicate cache clears and offline maintenance when the URL is unchanged')
+assert.match(webApi, /const previousSyncServerUrl = getSyncServerUrl\(\)[\s\S]*const syncServerChanged = previousSyncServerUrl !== clean[\s\S]*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.put\(\{ key: 'sync_server_url', value: clean \}\)\)[\s\S]*cacheClearAll\(\)[\s\S]*if \(syncServerChanged\) \{[\s\S]*scheduleInitialOfflineMaintenance\(\)/, 'setSyncServerUrl should avoid duplicate cache clears and defer IndexedDB/offline maintenance when the URL is unchanged')
+assert.doesNotMatch(webApi, /setSyncServerUrl\(url: unknown\)[\s\S]{0,900}getOfflineDb\(\)\.then/, 'setSyncServerUrl should not load IndexedDB during startup')
 assert.doesNotMatch(webApi, /try \{\s*await dexieDb\.settings\.(?:delete|put)/, 'web API bootstrap should not await Dexie maintenance before connecting')
 assert.doesNotMatch(webApi, /dexieDb\.settings/, 'web API should not call Dexie settings through a startup static import')
 assert.match(webApi, /async function unlockOfflineVault[\s\S]*const offlineDb = await getOfflineDb\(\)[\s\S]*offlineDb\.offline_vault/, 'offline vault should load local DB on demand')
@@ -471,6 +479,21 @@ assert.match(
   dashboard,
   /const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000/,
   'dashboard analytics should use an explicit timeout constant',
+)
+assert.match(
+  dashboard,
+  /import \{ getAnalytics, getDashboard \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
+  'dashboard should use its narrow transport instead of the full app-api-methods registry',
+)
+assert.doesNotMatch(
+  dashboard,
+  /import \{ buildCSV, downloadCSV, downloadZipFilesAsync \} from '\.\.\/\.\.\/utils\/csv'/,
+  'dashboard should lazy-load export helpers only when an export is requested',
+)
+assert.doesNotMatch(
+  dashboard,
+  /\(window as unknown as \{ api: DashboardApi \}\)\.api/,
+  'dashboard startup should not load the full legacy API registry just to read summary data',
 )
 assert.match(
   dashboard,
