@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 671 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 672 in this file.
 
 ## Goal
 
@@ -6058,6 +6058,22 @@ Decision rule:
     frontend source guard, frontend typecheck, frontend utility suite,
     frontend production build, Phase 29 audit, focused Products desktop/mobile
     live control audit, and post-live hygiene passed.
+
+672. Extract typed system runtime transport from the large domain registry.
+    Done: `frontend/src/api/systemRuntime.ts` now owns reset/factory-reset
+    transport, sync-server health checks, open-path/folder picker transport,
+    data-path reads and writes, browse-dir, and scale-migration transport
+    previously embedded in `frontend/src/api/methods.ts`. The public wrappers
+    remain in `methods.ts`, and runtime cache invalidation intentionally stays
+    there so reset/data-path mutations keep the original app-shared chunk edge
+    instead of adding a new one from the helper. The API guide documents the
+    split and focused API HTTP tests verify source placement. The source guard
+    parsed 208 frontend files and the production build now reports the
+    `app-api-methods` chunk around 49.90 kB with no circular chunk warning
+    after the final helper adjustment. Proof: focused API HTTP tests, frontend
+    source guard, frontend typecheck, frontend utility suite, frontend
+    production build, Phase 29 audit, focused Products desktop/mobile live
+    control audit, and post-live hygiene passed.
 
 ## Safety Gates
 

@@ -7799,3 +7799,19 @@ Move 671 status:
   typecheck, frontend utility suite, frontend production build, Phase 29 audit,
   focused Products desktop/mobile live control audit, and post-live hygiene
   passed.
+
+Move 672 status:
+- Move 672 extracts system runtime transport helpers from the large frontend
+  API registry. `frontend/src/api/systemRuntime.ts` now owns reset and
+  factory-reset transport, sync-server health testing, open-path/folder picker,
+  data-path reads/writes, browse-dir, and scale-migration transport. `methods.ts`
+  keeps the public wrapper names plus the existing runtime cache invalidation
+  wrapper so reset/data-path mutations still clear local runtime state without
+  introducing a new app-shared dependency edge from the helper chunk. The API
+  guide documents the boundary, focused API HTTP tests verify source placement,
+  the source guard parsed 208 frontend source files, and the production build
+  shows the `app-api-methods` chunk at about 49.90 kB with no circular chunk
+  warning after the final helper adjustment. Proof: focused API HTTP tests,
+  frontend source guard, frontend typecheck, frontend utility suite, frontend
+  production build, Phase 29 audit, focused Products desktop/mobile live
+  control audit, and post-live hygiene passed.

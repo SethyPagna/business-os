@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 671, typed notification summary helper extraction
+- Latest completed move: Move 672, typed system runtime transport extraction
 
 ## Current Baseline
 
@@ -17,14 +17,14 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `10f272955a02d2d6`
+  `b8ac9cc278164c96`
 
 Latest verified reports:
 
 - broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T02-35-15-692Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T02-49-03-545Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -42,6 +42,12 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend system runtime transport is now `frontend/src/api/systemRuntime.ts`
+  with typed reset/factory-reset, sync-server health test, open-path/folder,
+  data-path, browse-dir, and scale-migration transport. Runtime cache
+  invalidation remains in the large registry wrapper chunk to avoid adding a
+  new app-shared chunk edge.
 
 - Frontend notification summary transport is now
   `frontend/src/api/notificationSummary.ts` with typed transient fallback,

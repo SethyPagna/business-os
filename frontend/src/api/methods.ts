@@ -73,13 +73,26 @@ import {
   registerOutboxBackgroundSync,
 } from './syncRuntime.ts'
 import {
-  LONG_SYSTEM_ACTION_TIMEOUT_MS,
   cancelSystemJob as cancelSystemJobRequest,
   getSystemJob as getSystemJobRequest,
   pollSystemJob as pollSystemJobRequest,
   queueBackupFolderExport as queueBackupFolderExportRequest,
   queueBackupFolderRestore as queueBackupFolderRestoreRequest,
 } from './systemJobs.ts'
+import {
+  browseDir as browseDirRequest,
+  factoryReset as factoryResetRequest,
+  getDataPath as getDataPathRequest,
+  getScaleMigrationStatus as getScaleMigrationStatusRequest,
+  openFolderDialog as openFolderDialogRequest,
+  openPath as openPathRequest,
+  prepareScaleMigration as prepareScaleMigrationRequest,
+  resetData as resetDataRequest,
+  resetDataPath as resetDataPathRequest,
+  runScaleMigration as runScaleMigrationRequest,
+  setDataPath as setDataPathRequest,
+  testSyncServer as testSyncServerRequest,
+} from './systemRuntime.ts'
 export { getImageDataUrl, openCSVDialog, openImageDialog } from './browserDialogs.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
@@ -1613,14 +1626,14 @@ export const syncGoogleDriveNow = () =>
   syncGoogleDriveNowRequest()
 
 export async function resetData(mode = 'sales') {
-  const result = await route('data:reset', () => apiFetch('POST', '/api/system/reset-data', { mode }), null, true)
+  const result = await resetDataRequest(mode)
   await invalidateClientRuntimeState(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
   cacheClearAll()
   return result
 }
 
 export async function factoryReset() {
-  const result = await route('data:factoryReset', () => apiFetch('POST', '/api/system/factory-reset'), null, true)
+  const result = await factoryResetRequest()
   await invalidateClientRuntimeState('factory-reset')
   cacheClearAll()
   return result
@@ -1674,13 +1687,8 @@ export function downloadImportTemplate(type) {
 }
 
 // ─── No-ops for API compatibility ────────────────────────────────────────────
-export async function openPath(targetPath) {
-  try {
-    return await apiFetch('POST', '/api/system/open-path', { path: targetPath })
-  } catch (error) {
-    return { success: false, error: error?.message || 'Failed to open path' }
-  }
-}
+export const openPath = (targetPath) =>
+  openPathRequest(targetPath)
 
 // ─── Returns ──────────────────────────────────────────────────────────────────
 export const getReturns  = (params) => {
@@ -1772,46 +1780,32 @@ export const updateReturn = async (id, d) => {
 
 // ─── Sync server health test ──────────────────────────────────────────────────
 // Used by ServerPage to validate a URL before saving it.
-export async function testSyncServer(url) {
-  try {
-    const clean = (url || '').trim().replace(/\/$/, '')
-    const res = await fetch(`${clean}/health`, {
-      signal: AbortSignal.timeout?.(6000),
-      headers: { 'bypass-tunnel-reminder': 'true' },
-    })
-    if (!res.ok) return { ok: false, message: `Server returned ${res.status}` }
-    const json = await res.json().catch(() => ({}))
-    return { ok: true, clients: json?.clients ?? null }
-  } catch (e) {
-    return { ok: false, message: e?.message || 'Connection failed' }
-  }
-}
+export const testSyncServer = (url) =>
+  testSyncServerRequest(url)
 
 // ─── Folder dialog (optional — only available in Electron/Tauri contexts) ─────
 // In web mode this is a no-op; callers use optional chaining (?.) defensively.
-export async function openFolderDialog(initialPath = '') {
-  const result = await route(
-    'system:pickFolder',
-    () => apiFetch('POST', '/api/system/pick-folder', { initialPath }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
-    () => ({ selectedPath: null, cancelled: true })
-  )
-  if (result?.success === false) throw new Error(result.error || 'Failed to open folder picker')
-  return result?.selectedPath || null
-}
+export const openFolderDialog = (initialPath = '') =>
+  openFolderDialogRequest(initialPath)
 
 // ─── Data folder location ─────────────────────────────────────────────────────
-export const getDataPath   = ()    => route('system:dataPath',   () => apiFetch('GET',    '/api/system/data-path'),       () => ({}))
-export const getScaleMigrationStatus = () => route('system:scaleMigrationStatus', () => apiFetch('GET', '/api/system/scale-migration/status'), () => ({ item: null }))
-export const prepareScaleMigration = () => route('system:scaleMigrationPrepare', () => apiFetch('POST', '/api/system/scale-migration/prepare', {}, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
-export const runScaleMigration = (payload = {}) => route('system:scaleMigrationRun', () => apiFetch('POST', '/api/system/scale-migration/run', payload, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
+export const getDataPath = () =>
+  getDataPathRequest()
+export const getScaleMigrationStatus = () =>
+  getScaleMigrationStatusRequest()
+export const prepareScaleMigration = () =>
+  prepareScaleMigrationRequest()
+export const runScaleMigration = (payload = {}) =>
+  runScaleMigrationRequest(payload)
 export async function setDataPath(dir) {
-  const result = await route('system:setDataPath', () => apiFetch('POST', '/api/system/data-path', { dataDir: dir }, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
+  const result = await setDataPathRequest(dir)
   await invalidateClientRuntimeState('data-path-update')
   return result
 }
 export async function resetDataPath() {
-  const result = await route('system:resetDataPath', () => apiFetch('DELETE', '/api/system/data-path', undefined, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
+  const result = await resetDataPathRequest()
   await invalidateClientRuntimeState('data-path-reset')
   return result
 }
-export const browseDir     = (dir) => route('system:browseDir',  () => apiFetch('POST',   '/api/system/browse-dir', { dir }), () => ({ dirs: [] }))
+export const browseDir = (dir) =>
+  browseDirRequest(dir)
