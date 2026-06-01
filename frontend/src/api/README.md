@@ -30,6 +30,10 @@ This folder is the browser-side transport layer for Business OS.
   - sync event, service-worker outbox registration, and stored-session helpers
   - keeps offline queue signalling shared between `methods.ts` and `web-api.ts`
 
+- `browserDialogs.ts`
+  - browser CSV picker and image/data-url compatibility fallbacks
+  - keeps DOM file-input behavior and CSV decoding outside the large domain registry
+
 - `expectedUpdatedAt.ts`
   - optimistic-update payload helpers for row and settings writes
   - keeps updated-at conflict metadata lookup outside the large domain registry

@@ -34,7 +34,6 @@ import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from './que
 import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate } from './localDb.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { STORAGE_KEYS, SYNC } from '../constants'
-import { decodeTextBuffer } from '../utils/csvImport.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
 import {
@@ -74,6 +73,7 @@ import {
   hasStoredUserSession,
   registerOutboxBackgroundSync,
 } from './syncRuntime.ts'
+export { getImageDataUrl, openCSVDialog, openImageDialog } from './browserDialogs.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
@@ -1081,37 +1081,19 @@ export async function uploadUserAvatar({ filePath, fileName, file }) {
  * openCSVDialog — opens a file picker, reads the selected CSV, and returns
  * { content: string } — same shape as the Electron preload's openCSVDialog.
  */
-export function openCSVDialog() {
-  return new Promise((resolve) => {
-    const input  = document.createElement('input')
-    input.type   = 'file'
-    input.accept = '.csv,.tsv,text/csv,text/tab-separated-values'
-    input.onchange = async (e) => {
-      const file = e.target.files?.[0]
-      if (!file) { resolve(null); return }
-      const content = decodeTextBuffer(await file.arrayBuffer())
-      resolve({ content, name: file.name })
-    }
-    input.oncancel = () => resolve(null)
-    input.click()
-  })
-}
+
 
 /**
  * openImageDialog — in browser mode always returns null so Products.tsx
  * falls through to its own file-input fallback.
  */
-export function openImageDialog() {
-  return Promise.resolve(null)
-}
+
 
 /**
  * getImageDataUrl — not needed in browser (images served via /uploads/).
  * Returns null so callers fall back gracefully.
  */
-export function getImageDataUrl(_path) {
-  return Promise.resolve(null)
-}
+
 
 /** getSyncServerUrl — exposed on window.api for components that build URLs directly. */
 export { getSyncServerUrl }

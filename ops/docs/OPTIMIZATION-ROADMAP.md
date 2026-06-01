@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 667.
+- Latest completed implementation move in this roadmap: Move 668.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7741,3 +7741,16 @@ Move 667 status:
   54.22 kB. Proof: focused API HTTP tests, offline-sync architecture tests,
   frontend source guard, frontend typecheck, frontend utility suite, and
   frontend production build passed.
+
+Move 668 status:
+- Move 668 extracts browser dialog compatibility helpers from the large
+  frontend API registry. `frontend/src/api/browserDialogs.ts` now owns the
+  browser CSV file picker, CSV/TSV text decoding, and image/data-url null
+  fallbacks used by existing `window.api` callers. `methods.ts` re-exports the
+  same public API names while no longer importing CSV decoding or carrying DOM
+  file-input code inside the remaining `ts-nocheck` registry. The API guide
+  documents the boundary, focused API HTTP tests cover image/data-url fallback
+  behavior and source placement, the source guard parsed 204 frontend source
+  files, and the production build shows the `app-api-methods` chunk at about
+  53.85 kB. Proof: focused API HTTP tests, frontend source guard, frontend
+  typecheck, frontend utility suite, and frontend production build passed.

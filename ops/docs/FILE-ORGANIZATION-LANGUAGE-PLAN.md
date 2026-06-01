@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 667 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 668 in this file.
 
 ## Goal
 
@@ -6001,6 +6001,19 @@ Decision rule:
     around 54.22 kB. Proof: focused API HTTP tests, offline-sync architecture
     tests, frontend source guard, frontend typecheck, frontend utility suite,
     and frontend production build passed.
+
+668. Extract typed browser dialog helpers from the large domain registry.
+    Done: `frontend/src/api/browserDialogs.ts` now owns the browser CSV picker,
+    CSV/TSV text decoding, and image/data-url null fallbacks previously embedded
+    in `frontend/src/api/methods.ts`. The public `window.api` surface remains
+    stable because `methods.ts` re-exports `openCSVDialog`, `openImageDialog`,
+    and `getImageDataUrl`, while the large registry no longer imports
+    `decodeTextBuffer` or carries DOM file-input code. The API guide documents
+    the split and the focused API HTTP test covers image/data-url fallback
+    behavior plus source placement. The source guard parsed 204 frontend files
+    and the production build now reports the `app-api-methods` chunk around
+    53.85 kB. Proof: focused API HTTP tests, frontend source guard, frontend
+    typecheck, frontend utility suite, and frontend production build passed.
 
 ## Safety Gates
 

@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-01T01:55:24.492Z
+Generated: 2026-06-01T02:05:35.008Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 573
+- Files scanned: 574
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-01T01:55:24.492Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 374 |
+| .ts | 375 |
 | .tsx | 107 |
 | .md | 45 |
 | .json | 17 |
@@ -33,7 +33,7 @@ Generated: 2026-06-01T01:55:24.492Z
 | ops/docs/reference | 32 |
 | backend/routes | 24 |
 | ops/scripts/runtime/live-checks | 20 |
-| frontend/api | 17 |
+| frontend/api | 18 |
 | frontend/components/shared | 17 |
 | ops/docs | 14 |
 | frontend/components/catalog | 13 |
@@ -64,12 +64,12 @@ Generated: 2026-06-01T01:55:24.492Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8469 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7744 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7757 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7238 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6023 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6036 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| ops/docs/reference/PHASE29-AUDIT.json | 3399 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3400 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 2792 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
@@ -82,7 +82,7 @@ Generated: 2026-06-01T01:55:24.492Z
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
 | frontend/tests/performanceLoadingUx.test.ts | 2079 | frontend/tests/performanceLoadingUx.test.ts |
-| frontend/src/api/methods.ts | 1948 | frontend/api |
+| frontend/src/api/methods.ts | 1930 | frontend/api |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1878 | ops/docs/reference |
 | frontend/src/components/utils-settings/Settings.tsx | 1846 | frontend/components/utils-settings |
@@ -115,10 +115,10 @@ Generated: 2026-06-01T01:55:24.492Z
 | backend/test/routeContracts.test.ts | 15 | backend/test/routeContracts.test.ts |
 | backend/src/services/importJobs.ts | 14 | backend/services |
 | frontend/src/AppContext.tsx | 14 | frontend/src/AppContext.tsx |
+| frontend/tests/apiHttp.test.ts | 14 | frontend/tests/apiHttp.test.ts |
 | backend/src/routes/auth.ts | 13 | backend/routes |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
-| frontend/tests/apiHttp.test.ts | 13 | frontend/tests/apiHttp.test.ts |
 | backend/src/routes/portal.ts | 12 | backend/routes |
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
 | backend/src/routes/inventory.ts | 11 | backend/routes |

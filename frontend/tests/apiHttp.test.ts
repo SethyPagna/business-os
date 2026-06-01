@@ -16,6 +16,7 @@ import {
   setSyncToken,
 } from '../src/api/http.ts'
 import { appendActorQuery, getCurrentUserContext } from '../src/api/actorQuery.ts'
+import { getImageDataUrl, openImageDialog } from '../src/api/browserDialogs.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from '../src/api/conflicts.ts'
 import {
   clearDriveSyncStatusCooldown,
@@ -608,12 +609,18 @@ await runTest('sync runtime helpers emit compact window events with timestamps',
   }
 })
 
+await runTest('browser dialog image fallbacks stay null for browser-hosted media', async () => {
+  assert.equal(await openImageDialog(), null)
+  assert.equal(await getImageDataUrl('/uploads/product.jpg'), null)
+})
+
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
   const expectedUpdatedAtSource = fs.readFileSync(new URL('../src/api/expectedUpdatedAt.ts', import.meta.url), 'utf8')
   const localMirrorsSource = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
+  const browserDialogsSource = fs.readFileSync(new URL('../src/api/browserDialogs.ts', import.meta.url), 'utf8')
   const importTransportSource = fs.readFileSync(new URL('../src/api/importTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
   const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
@@ -625,6 +632,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /import \{ withExpectedUpdatedAt, withSettingsExpectedUpdatedAt \} from '\.\/expectedUpdatedAt\.ts'/)
   assert.match(source, /import \{ mirrorReadResult, mirrorTable, purgeSensitiveLiveServerMirrors \} from '\.\/localMirrors\.ts'/)
   assert.match(source, /from '\.\/syncRuntime\.ts'/)
+  assert.match(source, /export \{ getImageDataUrl, openCSVDialog, openImageDialog \} from '\.\/browserDialogs\.ts'/)
   assert.match(expectedUpdatedAtSource, /export async function withExpectedUpdatedAt\([\s\S]*body\.expectedUpdatedAt = body\.updated_at[\s\S]*table\?\.get\?\.\(id\)/)
   assert.match(localMirrorsSource, /export function mirrorReadResult[\s\S]*return result/)
   assert.match(localMirrorsSource, /export function mirrorTable[\s\S]*for \(const row of Array\.isArray\(rows\) \? rows : \[\]\)[\s\S]*replaceTableContents/)
@@ -644,9 +652,13 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /LIVE_SERVER_SENSITIVE_MIRROR_TABLES/)
   assert.doesNotMatch(source, /function registerOutboxBackgroundSync/)
   assert.doesNotMatch(source, /function hasStoredUserSession/)
+  assert.doesNotMatch(source, /document\.createElement\('input'\)/)
+  assert.doesNotMatch(source, /decodeTextBuffer/)
   assert.match(syncRuntimeSource, /export function registerOutboxBackgroundSync/)
   assert.match(syncRuntimeSource, /export function dispatchSyncUpdates/)
   assert.match(syncRuntimeSource, /export function emitSyncQueueChanged/)
+  assert.match(browserDialogsSource, /export function openCSVDialog/)
+  assert.match(browserDialogsSource, /decodeTextBuffer\(await file\.arrayBuffer\(\)\)/)
 })
 
 await runTest('empty local mirrors are not treated as usable server read fallback data', () => {
